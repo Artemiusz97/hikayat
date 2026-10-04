@@ -32,5 +32,10 @@ jobs:
           pip install pytest pytest-asyncio pytest-mock pytest-xdist httpx
 
       - name: Run test suite
+        env:
+          DISCORD_TOKEN: "mock_ci_discord_token"
+          LLM_API_KEY: "mock_ci_llm_api_key"
+          LLM_BASE_URL: "https://api.openai.com/v1"
+          LLM_MODEL: "gpt-4o-mini"
         run: |
           pytest -v

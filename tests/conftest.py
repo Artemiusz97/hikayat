@@ -1,4 +1,6 @@
 import os
+os.environ.setdefault("DISCORD_TOKEN", "mock_test_discord_token")
+os.environ.setdefault("LLM_API_KEY", "mock_test_llm_api_key")
 import shutil
 import random
 import pytest
