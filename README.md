@@ -9,48 +9,68 @@ Hikayat is a comprehensive, multi-genre LLM-driven Tabletop RPG engine powered b
 
 ---
 
-## 🌟 Key Features
+## 🛠️ Technical Architecture & Innovations
+*(What sets Hikayat apart from traditional LLM-powered text RPGs)*
 
-### 1. Dual-Model LLM Architecture & Fallback Cascade
-* **Primary Narration Engine**: Connects to any OpenAI-compatible API endpoint (OpenAI, OpenRouter, Google Gemini, local vLLM/Ollama).
-* **Dedicated Utility Model (`LLM_UTILITY_MODEL`)**: Offloads background computational tasks (quest tracking, item generation, clue merging, shop restocking) to fast models while reserving high-parameter models for rich prose.
-* **Dynamic NSFW Model Routing**: Automatically routes adult/unrated scenarios to dedicated uncensored models with isolated fallback chains.
-* **Fallback Cascade & Headroom Safeguards**: Automatic failover across candidate models on timeout or rate-limits, with minimum 3,500 token headroom enforcement to prevent reasoning model JSON truncation.
+### 1. Deterministic State Separation & Anti-Hallucination Pipeline
+* **True Game State vs. Hallucinated Prose**: Most LLM-based text RPGs rely on the language model to guess HP, invent inventory changes, and simulate dice rolls in prose, inevitably leading to narrative drift and broken rules.
+* **Code-Driven Truth Directives**: In Hikayat, every dice check, combat damage calculation, inventory capacity check, and status effect is deterministically computed in Python first. The LLM acts purely as a narrator, bounded by immutable truth directives that prevent hallucinations.
 
-### 2. Dual Platforms: Discord Bot & Modern React Web UI
+### 2. Dual-Model Architecture & Computational Offloading
+* **Decoupled Narration & Utility Work**: Separates high-latency, creative prose generation from mechanical background operations.
+* **Dedicated Utility Model (`LLM_UTILITY_MODEL`)**: Offloads background calculations (quest tracking, clue merging, shop restocking, item validation) to fast, lightweight models while reserving parameter-heavy models exclusively for rich prose.
+
+### 3. Dynamic Model Routing & Fallback Cascade
+* **Automated Provider Failover**: Multi-provider resilience automatically shifts across candidate models on timeouts or rate-limits without interrupting the player's turn.
+* **Context-Aware NSFW Routing**: Adult/unrated scenarios are dynamically channeled to dedicated uncensored models (`NSFW_LLM_MODEL`) with isolated fallback chains, keeping mainstream models clean.
+* **Reasoning Headroom Safeguards**: Enforces strict 3,500 token output headroom margins, completely preventing the JSON truncation errors common to modern reasoning models.
+
+### 4. Vector Memory Compaction & Context Token Budgeting
+* **Semantic Vector Retrieval**: Lorebook entries, historical character encounters, and location knowledge are indexed and retrieved via semantic embeddings (`mechanics/system/memory/`).
+* **Active Token Budgeting & Compaction**: Dynamically compacts older conversation turns into persistent contextual summaries, preserving long-term campaign continuity within strict token budgets.
+
+### 5. Headless Turn Service & Omnichannel Architecture
+* **Presentation-Decoupled Game Loop**: The turn engine (`services/turn_service.py`) operates as a completely headless core.
+* **100% Platform Parity**: Both the Discord bot (slash commands, button decks, modal sheets) and the React Web SPA (REST endpoints, WebSockets) consume the exact same underlying service, ensuring synchronized state across platforms.
+
+---
+
+## 🌟 Core Gameplay Systems
+
+### 1. Dual Platforms: Discord Bot & Modern React Web UI
 * **Discord Bot**: Interactive slash commands, button menus, modals, and dynamic embed dialogues.
 * **Modern React Web UI (`web/src/`)**: Single-page application featuring interactive Tactical Battle Decks, live Story Feed, in-game Smartphone modal, Party Widget, and Codex panels.
 * **FastAPI Modular Backend (`api/`, `services/`)**: High-performance REST endpoints and WebSockets for multiplayer synchronization and state streaming.
 
-### 3. Living World, Time Engine & In-Game Smartphone
+### 2. Living World, Time Engine & In-Game Smartphone
 * **Minute-by-Minute Time Progression**: Persistent in-game clock advancing across 8 distinct time-of-day phases (Dawn, Afternoon, Dusk, Night, etc.).
 * **Rest & Fatigue Mechanics**: Dynamic "Sleep / Rest" actions in hub locations with cumulative fatigue penalties for staying awake.
 * **In-Game Smartphone (`/phone`)**: Direct NPC texting, date scheduling, meetup waypoints, and cross-zone companion transit.
 * **Procedural Biomes & Location Hubs**: Tiered location tree architecture with dynamic discovery, area links, and contextual merchant hubs.
 
-### 4. Deep Social Dynamics, NPC Depth & Factions
+### 3. Deep Social Dynamics, NPC Depth & Factions
 * **Rich NPC Depth & Memory**: NPCs feature persistent backgrounds, unique mannerisms, emotional moods, evolving dispositions, and contextual memory of player history.
 * **Genealogy & Canonical Families**: Preserves consistent family lineages (parents, siblings, spouses) and personal histories across encounters.
 * **Unified Action Intent Engine**: Intelligently distinguishes diplomatic banter, peaceful exploration, romantic advances, gift giving, and commerce.
 * **Nuanced Relationship & Intimacy Progression**: Multi-stage relationship milestones with mutual preference tracking, emotional disclosure gating, and gradual intimacy evolution across physical and emotional dimensions.
 * **Living Factions System (`/factions`)**: Dynamic faction standings, territorial influence, rivalries, and faction headquarters with reputation perks.
 
-### 5. Procedural 10-Chapter Campaign System
-* **Long-Term Procedural Goals**: Story campaigns progress through 10 chapters driven by dynamically generated end goals and emergent narrative arcs.
-* **Dynamic Bounty Board & Quests**: Interactive `/quest` and `/bounty` views with sub-objectives, item loot rewards, and XP bonuses.
-
-### 6. Tactical Combat Engine & Battle Decks
+### 4. Tactical Combat Engine & Battle Decks
 * **Code-Driven Tactical Battle Decks**: 7-slot combat choices (*Attack, Defend, Magic, Item, Flee, Tactician Moves*) with active enemy target switching and success probability indicators.
 * **Telegraphed Enemy Moves & Counter-Play**: Enemies telegraph incoming intents (charging, casting, defending, swarming), enabling strategic defensive guards, interruptions, and counter-attacks.
 * **Companion Combat AI**: Friendly companions participate actively in battles with autonomous tactical support, vital tracking, and dedicated combat event logging.
 * **Scalable Threat Hierarchy**: Dynamic encounter scaling from skirmishers to champions and multi-phase bosses with distinctive combat affixes.
 * **Narrative Immersion Protocol**: Strict GM rules prevent raw HP numbers from leaking into prose, describing physical trauma and flow dynamically.
 
-### 7. Modular Equipment & Elemental Magic Systems
+### 5. Modular Equipment & Elemental Magic Systems
 * **Versatile Weapon Mechanics**: Weapons act as tactical multipliers and stat scalers, supporting diverse playstyles including dual-wielding and versatile grips.
 * **Layered Equipment & Armor**: Distinct slots for civilian attire, combat armor, headwear, shields, and accessories, with balanced damage mitigation formulas.
 * **Elemental Magic Taxonomy**: Dedicated magic package with elemental tags, spell taxonomy, class-specific spell kits, and dynamic MP cost scaling.
 * **Procedural Consumables & Items**: Scenario-appropriate potions, consumables, and gear dynamically seeded into world containers and merchant shops.
+
+### 6. Procedural 10-Chapter Campaign System
+* **Long-Term Procedural Goals**: Story campaigns progress through 10 chapters driven by dynamically generated end goals and emergent narrative arcs.
+* **Dynamic Bounty Board & Quests**: Interactive `/quest` and `/bounty` views with sub-objectives, item loot rewards, and XP bonuses.
 
 ---
 
