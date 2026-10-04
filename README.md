@@ -1,5 +1,10 @@
 # Hikayat (v2.1.0) — Living AI Tabletop RPG & Web Application
 
+[![Tests](https://github.com/Artemiusz97/hikayat/actions/workflows/tests.yml/badge.svg)](https://github.com/Artemiusz97/hikayat/actions/workflows/tests.yml)
+[![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)](releases/CHANGELOG-v2.1.0.md)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
+[![React 18](https://img.shields.io/badge/react-18.2-61dafb.svg)](web/)
+
 Hikayat is a comprehensive, multi-genre LLM-driven Tabletop RPG engine powered by an intelligent dual-model architecture. It features a full-featured **Discord Bot interface** and a modern **React Web Application**, bringing living worlds, tactical party combat, persistent lore, deep social simulation, and procedural campaigns to life.
 
 ---

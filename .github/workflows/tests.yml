@@ -1,0 +1,41 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Run Pytest Suite
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-mock pytest-xdist httpx
+
+      - name: Run test suite
+        env:
+          DISCORD_TOKEN: "mock_ci_discord_token"
+          LLM_API_KEY: "mock_ci_llm_api_key"
+          LLM_BASE_URL: "https://api.openai.com/v1"
+          LLM_MODEL: "gpt-4o-mini"
+        run: |
+          pytest -v
