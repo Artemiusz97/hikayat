@@ -17,39 +17,40 @@ Hikayat is a comprehensive, multi-genre LLM-driven Tabletop RPG engine powered b
 * **Dynamic NSFW Model Routing**: Automatically routes adult/unrated scenarios to dedicated uncensored models with isolated fallback chains.
 * **Fallback Cascade & Headroom Safeguards**: Automatic failover across candidate models on timeout or rate-limits, with minimum 3,500 token headroom enforcement to prevent reasoning model JSON truncation.
 
-### 2. Tactical Combat Engine & 5-Tier Enemy Hierarchy
-* **5-Tier Enemy Ladder**: Minions, Standard, Elite, Champions, and Multi-Phase Bosses with dynamic affixes (*Volatile, Phasing, Ethereal, Incorporeal*).
-* **Telegraphed Enemy Moves & Intents**: Enemies telegraph intents (charging, casting, defending, swarming), enabling tactical counter-play.
-* **Tactical Battle Decks**: 7-slot code-driven combat choices (*Attack, Defend, Magic, Item, Flee, Tactician Moves*) with active enemy target switching.
-* **Companion Combat AI**: Friendly companions participate actively in battles, complete with vitals tracking and dedicated combat logs.
-* **Narrative Immersion Protocol**: Strict GM rules prevent raw HP numbers from leaking into prose, describing physical trauma dynamically.
+### 2. Dual Platforms: Discord Bot & Modern React Web UI
+* **Discord Bot**: Interactive slash commands, button menus, modals, and dynamic embed dialogues.
+* **Modern React Web UI (`web/src/`)**: Single-page application featuring interactive Tactical Battle Decks, live Story Feed, in-game Smartphone modal, Party Widget, and Codex panels.
+* **FastAPI Modular Backend (`api/`, `services/`)**: High-performance REST endpoints and WebSockets for multiplayer synchronization and state streaming.
 
-### 3. Modular Equipment, FNV Armor DT & Magic Taxonomy
-* **Fallout: New Vegas Style Armor**: Armors and shields feature **Damage Threshold (DT)** and percentage **Damage Resistance (DR)** formulas.
-* **Weapons as Damage Multipliers**: Weapons function as tactical multipliers and stat scalers with dual-wielding and versatile grip support.
-* **Dedicated Clothing Slot & Armor Lockout**: Separates civilian clothing ("Top") from combat armor and headwear/accessories.
-* **Modular Items & Spells**: Dedicated packages (`mechanics/items/`, `mechanics/spells/`) with elemental taxonomy and procedural consumable generation.
-
-### 4. Living World, Time Engine & In-Game Smartphone
+### 3. Living World, Time Engine & In-Game Smartphone
 * **Minute-by-Minute Time Progression**: Persistent in-game clock advancing across 8 distinct time-of-day phases (Dawn, Afternoon, Dusk, Night, etc.).
 * **Rest & Fatigue Mechanics**: Dynamic "Sleep / Rest" actions in hub locations with cumulative fatigue penalties for staying awake.
 * **In-Game Smartphone (`/phone`)**: Direct NPC texting, date scheduling, meetup waypoints, and cross-zone companion transit.
 * **Procedural Biomes & Location Hubs**: Tiered location tree architecture with dynamic discovery, area links, and contextual merchant hubs.
 
-### 5. Social Dynamics, Factions & 3-Track Intimacy
-* **Unified Action Intent Engine**: Deterministic classification distinguishing combat, peaceful exploration, romance, gifts, and trade.
-* **3-Track Intimate Experience**: Separate progression tracks for Vaginal, Oral, and Manual intimacy with symmetrical act preferences and Disclosure Level 3 gating.
-* **Genealogy & Canonical Families**: Preserves consistent family lineages (parents, siblings, spouses) across encounters.
-* **Factions System (`/factions`)**: Dynamic faction standings, perks, rivalries, and faction headquarters.
+### 4. Deep Social Dynamics, NPC Depth & Factions
+* **Rich NPC Depth & Memory**: NPCs feature persistent backgrounds, unique mannerisms, emotional moods, evolving dispositions, and contextual memory of player history.
+* **Genealogy & Canonical Families**: Preserves consistent family lineages (parents, siblings, spouses) and personal histories across encounters.
+* **Unified Action Intent Engine**: Intelligently distinguishes diplomatic banter, peaceful exploration, romantic advances, gift giving, and commerce.
+* **Nuanced Relationship & Intimacy Progression**: Multi-stage relationship milestones with mutual preference tracking, emotional disclosure gating, and gradual intimacy evolution across physical and emotional dimensions.
+* **Living Factions System (`/factions`)**: Dynamic faction standings, territorial influence, rivalries, and faction headquarters with reputation perks.
 
-### 6. Procedural 10-Chapter Campaign System
-* **Long-Term Procedural Goals**: Story campaigns progress through 10 chapters driven by dynamically generated end goals.
+### 5. Procedural 10-Chapter Campaign System
+* **Long-Term Procedural Goals**: Story campaigns progress through 10 chapters driven by dynamically generated end goals and emergent narrative arcs.
 * **Dynamic Bounty Board & Quests**: Interactive `/quest` and `/bounty` views with sub-objectives, item loot rewards, and XP bonuses.
 
-### 7. Dual Platforms: Discord Bot & Modern React Web UI
-* **Discord Bot**: Interactive slash commands, button menus, modals, and embeds.
-* **React Web Frontend (`frontend/src/`)**: Single-page application featuring Tactical Battle Decks, live Story Feed, in-game Smartphone modal, Party Widget, and Codex panels.
-* **FastAPI Modular Backend (`api/`, `services/`)**: REST endpoints and WebSockets for multiplayer synchronization and state streaming.
+### 6. Tactical Combat Engine & Battle Decks
+* **Code-Driven Tactical Battle Decks**: 7-slot combat choices (*Attack, Defend, Magic, Item, Flee, Tactician Moves*) with active enemy target switching and success probability indicators.
+* **Telegraphed Enemy Moves & Counter-Play**: Enemies telegraph incoming intents (charging, casting, defending, swarming), enabling strategic defensive guards, interruptions, and counter-attacks.
+* **Companion Combat AI**: Friendly companions participate actively in battles with autonomous tactical support, vital tracking, and dedicated combat event logging.
+* **Scalable Threat Hierarchy**: Dynamic encounter scaling from skirmishers to champions and multi-phase bosses with distinctive combat affixes.
+* **Narrative Immersion Protocol**: Strict GM rules prevent raw HP numbers from leaking into prose, describing physical trauma and flow dynamically.
+
+### 7. Modular Equipment & Elemental Magic Systems
+* **Versatile Weapon Mechanics**: Weapons act as tactical multipliers and stat scalers, supporting diverse playstyles including dual-wielding and versatile grips.
+* **Layered Equipment & Armor**: Distinct slots for civilian attire, combat armor, headwear, shields, and accessories, with balanced damage mitigation formulas.
+* **Elemental Magic Taxonomy**: Dedicated magic package with elemental tags, spell taxonomy, class-specific spell kits, and dynamic MP cost scaling.
+* **Procedural Consumables & Items**: Scenario-appropriate potions, consumables, and gear dynamically seeded into world containers and merchant shops.
 
 ---
 
