@@ -1,0 +1,2858 @@
+{
+  "high_school_drama": {
+    "zones": [
+      {
+        "id": "zone_school_main",
+        "name": "Main Academy Campus",
+        "is_hub": true,
+        "theme": "Modern Multistory High School Academic Wing",
+        "features": "Polished linoleum corridors, multistory classroom wings, faculty staff room, comprehensive library, chemistry labs, high-altitude rooftop, and wide main entrance foyer with shoe lockers.",
+        "sensory": "Echoes of rhythmic school bells, muffled lectures from closed classroom doors, crisp scent of cedar chalkboards and textbook paper, and bright daylight streaming through tall windows.",
+        "primary_locations": [
+          {
+            "id": "loc_homeroom",
+            "name": "Homeroom Classroom",
+            "sub_locations": [
+              {
+                "id": "sub_player_desk",
+                "name": "Player's Desk"
+              },
+              {
+                "id": "sub_friend_desk",
+                "name": "Friend's Desk"
+              },
+              {
+                "id": "sub_teacher_podium",
+                "name": "Teacher's Podium"
+              },
+              {
+                "id": "sub_back_window",
+                "name": "Back Window"
+              }
+            ]
+          },
+          {
+            "id": "loc_empty_class",
+            "name": "Empty Classroom",
+            "sub_locations": [
+              {
+                "id": "sub_front_desks",
+                "name": "Front Row Desks"
+              },
+              {
+                "id": "sub_back_corner",
+                "name": "Back Corner"
+              }
+            ]
+          },
+          {
+            "id": "loc_school_hallway",
+            "name": "School Hallways",
+            "sub_locations": [
+              {
+                "id": "sub_stairwell_landing",
+                "name": "Behind the Stairwell"
+              },
+              {
+                "id": "sub_locker_row",
+                "name": "Locker Row"
+              },
+              {
+                "id": "sub_outside_classroom",
+                "name": "Outside the Classroom Door"
+              }
+            ]
+          },
+          {
+            "id": "loc_staff_room",
+            "name": "Teachers' Staff Room",
+            "sub_locations": [
+              {
+                "id": "sub_homeroom_teacher_desk",
+                "name": "Homeroom Teacher's Desk"
+              },
+              {
+                "id": "sub_print_room",
+                "name": "Print Room"
+              },
+              {
+                "id": "sub_guidance_corner",
+                "name": "Guidance Counselor Corner"
+              }
+            ]
+          },
+          {
+            "id": "loc_library",
+            "name": "School Library",
+            "sub_locations": [
+              {
+                "id": "sub_study_tables",
+                "name": "Study Tables"
+              },
+              {
+                "id": "sub_book_aisles",
+                "name": "Book Aisles"
+              },
+              {
+                "id": "sub_librarian_counter",
+                "name": "Librarian Counter"
+              }
+            ]
+          },
+          {
+            "id": "loc_science_lab",
+            "name": "Chemistry & Science Lab",
+            "sub_locations": [
+              {
+                "id": "sub_lab_workbenches",
+                "name": "Lab Workbenches"
+              },
+              {
+                "id": "sub_chemical_closet",
+                "name": "Chemical Storage Closet"
+              },
+              {
+                "id": "sub_fume_hood",
+                "name": "Fume Hood Station"
+              }
+            ]
+          },
+          {
+            "id": "loc_rooftop",
+            "name": "School Rooftop",
+            "sub_locations": [
+              {
+                "id": "sub_roof_benches",
+                "name": "Rooftop Benches"
+              },
+              {
+                "id": "sub_behind_water_tank",
+                "name": "Behind Water Tank"
+              },
+              {
+                "id": "sub_rooftop_fence",
+                "name": "Rooftop Fence Line"
+              }
+            ]
+          },
+          {
+            "id": "loc_entrance_foyer",
+            "name": "Entrance Foyer & Shoe Lockers",
+            "sub_locations": [
+              {
+                "id": "sub_getabako",
+                "name": "Shoe Lockers"
+              },
+              {
+                "id": "sub_main_lobby",
+                "name": "Main Entrance Lobby"
+              },
+              {
+                "id": "sub_courtyard_doors",
+                "name": "Campus Announcement Board"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_school_athletics",
+        "name": "School Grounds & Athletics",
+        "is_hub": true,
+        "theme": "Varsity Athletic Stadium & Physical Training Complex",
+        "features": "Full-size indoor gymnasium arena, 400-meter all-weather running track encircling an astroturf stadium field, competition aquatics pool facility, martial arts dojo, and equipment storage sheds.",
+        "sensory": "Shrill coach whistles, squeaking rubber sneakers on polished hardwood, smell of athletic chalk and sunscreen, and roar of spectators echoing off aluminum bleachers.",
+        "primary_locations": [
+          {
+            "id": "loc_gymnasium",
+            "name": "Main Gymnasium",
+            "sub_locations": [
+              {
+                "id": "sub_basketball_court",
+                "name": "Basketball Court"
+              },
+              {
+                "id": "sub_gym_storeroom",
+                "name": "Equipment & Gym Storeroom"
+              },
+              {
+                "id": "sub_shower_room",
+                "name": "Locker & Shower Room"
+              },
+              {
+                "id": "sub_gym_bleachers",
+                "name": "Upper Concourse Bleachers"
+              }
+            ]
+          },
+          {
+            "id": "loc_sports_field",
+            "name": "Athletic Field",
+            "sub_locations": [
+              {
+                "id": "sub_track",
+                "name": "Running Track"
+              },
+              {
+                "id": "sub_bleachers",
+                "name": "Field Bleachers"
+              },
+              {
+                "id": "sub_soccer_goal",
+                "name": "Soccer Goal Posts"
+              },
+              {
+                "id": "sub_under_bleachers",
+                "name": "Under the Bleachers"
+              }
+            ]
+          },
+          {
+            "id": "loc_pool",
+            "name": "Swimming Pool Facility",
+            "sub_locations": [
+              {
+                "id": "sub_poolside",
+                "name": "Poolside Deck"
+              },
+              {
+                "id": "sub_starting_blocks",
+                "name": "Starting Blocks"
+              },
+              {
+                "id": "sub_club_room",
+                "name": "Swim Club Room"
+              }
+            ]
+          },
+          {
+            "id": "loc_martial_arts_dojo",
+            "name": "Martial Arts Dojo",
+            "sub_locations": [
+              {
+                "id": "sub_tatami_mat",
+                "name": "Central Tatami Mat"
+              },
+              {
+                "id": "sub_weapon_rack",
+                "name": "Wooden Weapon Rack"
+              },
+              {
+                "id": "sub_meditation_altar",
+                "name": "Meditation Altar"
+              }
+            ]
+          },
+          {
+            "id": "loc_behind_gym_sheds",
+            "name": "Behind Gym Storage Sheds",
+            "sub_locations": [
+              {
+                "id": "sub_brawler_benches",
+                "name": "Brawler Hangout Benches"
+              },
+              {
+                "id": "sub_equipment_shed",
+                "name": "Behind Equipment Shed"
+              },
+              {
+                "id": "sub_graffiti_wall",
+                "name": "Graffiti Brick Wall"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_school_commons",
+        "name": "Student Commons & Central Plaza",
+        "is_hub": true,
+        "theme": "Vibrant Outdoor Social Commons & Campus Dining Hub",
+        "features": "Sunlit central brick promenade, campus dining hall with terrace balcony seating, century-old flowering cherry tree, vending machine pavilion, and botanical glasshouse.",
+        "sensory": "Chatter and laughter of friend groups sharing lunch, gentle hum of cold drink vending machines, sweet aroma of freshly brewed tea, curry, and cherry blossom petals drifting on the breeze.",
+        "primary_locations": [
+          {
+            "id": "loc_courtyard",
+            "name": "Central Courtyard",
+            "sub_locations": [
+              {
+                "id": "sub_fountain",
+                "name": "Courtyard Fountain"
+              },
+              {
+                "id": "sub_cherry_tree",
+                "name": "Old Cherry Tree"
+              },
+              {
+                "id": "sub_brick_steps",
+                "name": "Sunlit Brick Steps"
+              }
+            ]
+          },
+          {
+            "id": "loc_cafeteria",
+            "name": "Campus Dining Hall & Cafeteria",
+            "sub_locations": [
+              {
+                "id": "sub_meal_counter",
+                "name": "Hot Lunch Order Counter"
+              },
+              {
+                "id": "sub_terrace_balcony",
+                "name": "Sunroom Terrace Balcony"
+              },
+              {
+                "id": "sub_corner_booths",
+                "name": "Corner Booths"
+              }
+            ]
+          },
+          {
+            "id": "loc_vending_pavilion",
+            "name": "Vending Machine Pavilion",
+            "sub_locations": [
+              {
+                "id": "sub_vending_machines",
+                "name": "Vending Machines Area"
+              },
+              {
+                "id": "sub_shaded_benches",
+                "name": "Shaded Picnic Benches"
+              },
+              {
+                "id": "sub_recycle_alcove",
+                "name": "Recycle Can Alcove"
+              }
+            ]
+          },
+          {
+            "id": "loc_greenhouse",
+            "name": "Botanical Glasshouse",
+            "sub_locations": [
+              {
+                "id": "sub_orchid_nursery",
+                "name": "Orchid Nursery & Planter Beds"
+              },
+              {
+                "id": "sub_potting_bench",
+                "name": "Potting Bench & Tool Shed"
+              },
+              {
+                "id": "sub_greenhouse_path",
+                "name": "Interior Greenery Path"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_school_arts",
+        "name": "Cultural Arts & Student Union",
+        "is_hub": true,
+        "theme": "Eclectic Multi-Story Creative & Club Activities Annex",
+        "features": "Grand proscenium auditorium stage, labyrinthine hallway of student clubrooms plastered with colorful flyers, acoustic music rehearsal halls, fine arts studios, and student council headquarters.",
+        "sensory": "Overlapping sounds of brass trumpet scales, echoing stage dialogue rehearsals, the pungent scent of oil paints and acrylic markers, and enthusiastic debate from open clubroom doors.",
+        "primary_locations": [
+          {
+            "id": "loc_student_council",
+            "name": "Student Council Office",
+            "sub_locations": [
+              {
+                "id": "sub_pres_desk",
+                "name": "President's Desk"
+              },
+              {
+                "id": "sub_council_table",
+                "name": "Meeting Table"
+              },
+              {
+                "id": "sub_council_archives",
+                "name": "Archive Files & Safe"
+              }
+            ]
+          },
+          {
+            "id": "loc_auditorium_stage",
+            "name": "School Auditorium Stage",
+            "sub_locations": [
+              {
+                "id": "sub_auditorium_stage",
+                "name": "Auditorium Stage"
+              },
+              {
+                "id": "sub_dressing_room",
+                "name": "Backstage Dressing Area"
+              },
+              {
+                "id": "sub_prop_room",
+                "name": "Prop & Costume Storeroom"
+              }
+            ]
+          },
+          {
+            "id": "loc_old_east_music_room",
+            "name": "Old East Wing Music Room",
+            "sub_locations": [
+              {
+                "id": "sub_piano_alcove",
+                "name": "Upright Piano Alcove"
+              },
+              {
+                "id": "sub_velvet_couch",
+                "name": "Velvet Lounge Couch"
+              },
+              {
+                "id": "sub_soundproof_closet",
+                "name": "Soundproof Storage Closet"
+              }
+            ]
+          },
+          {
+            "id": "loc_fine_arts_studio",
+            "name": "Fine Arts Studio",
+            "sub_locations": [
+              {
+                "id": "sub_easels",
+                "name": "Easel & Drafting Desks"
+              },
+              {
+                "id": "sub_pottery_wheel",
+                "name": "Pottery Wheel Corner"
+              },
+              {
+                "id": "sub_gallery_wall",
+                "name": "Gallery Display Wall"
+              }
+            ]
+          },
+          {
+            "id": "loc_broadcasting_room",
+            "name": "Campus Media & Broadcasting Room",
+            "sub_locations": [
+              {
+                "id": "sub_pa_console",
+                "name": "PA Announcement Console"
+              },
+              {
+                "id": "sub_newspaper_desk",
+                "name": "Newspaper Layout Desk"
+              },
+              {
+                "id": "sub_interview_booth",
+                "name": "Interview Recording Booth"
+              }
+            ]
+          },
+          {
+            "id": "loc_clubroom_corridor",
+            "name": "Student Clubroom Corridor",
+            "sub_locations": [
+              {
+                "id": "sub_club_101",
+                "name": "Club Meeting Room 101"
+              },
+              {
+                "id": "sub_club_noticeboard",
+                "name": "Shared Club Noticeboard"
+              },
+              {
+                "id": "sub_esports_lounge",
+                "name": "AV & Esports Lounge"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_commercial",
+        "name": "Commercial District",
+        "is_hub": true,
+        "theme": "Bustling Suburban Commercial & Entertainment Strip",
+        "features": "Pedestrian shopping street lined with colorful storefronts, glowing arcade entrances, cozy café awnings, and 24/7 convenience stores.",
+        "sensory": "Upbeat chiptune melodies from arcades, aroma of roasted coffee and pastries from street vendors, and warm neon signs illuminating the sidewalk.",
+        "primary_locations": [
+          {
+            "id": "loc_cafe",
+            "name": "Local Café",
+            "sub_locations": [
+              {
+                "id": "sub_window_seat",
+                "name": "Window Seat Table"
+              },
+              {
+                "id": "sub_cafe_counter",
+                "name": "Ordering Counter"
+              },
+              {
+                "id": "sub_staff_breakroom",
+                "name": "Staff Breakroom"
+              }
+            ]
+          },
+          {
+            "id": "loc_arcade",
+            "name": "Game Arcade",
+            "sub_locations": [
+              {
+                "id": "sub_fighting_games",
+                "name": "Fighting Game Cabinets"
+              },
+              {
+                "id": "sub_crane_games",
+                "name": "Crane Game Corner"
+              },
+              {
+                "id": "sub_photo_booth",
+                "name": "Photo Sticker Booth"
+              }
+            ]
+          },
+          {
+            "id": "loc_karaoke",
+            "name": "Karaoke Lounge",
+            "sub_locations": [
+              {
+                "id": "sub_room_4",
+                "name": "Private Karaoke Room"
+              },
+              {
+                "id": "sub_karaoke_lobby",
+                "name": "Reception Lobby"
+              }
+            ]
+          },
+          {
+            "id": "loc_convenience_store",
+            "name": "Convenience Store",
+            "sub_locations": [
+              {
+                "id": "sub_magazine_rack",
+                "name": "Magazine Rack"
+              },
+              {
+                "id": "sub_cash_register",
+                "name": "Cash Register"
+              },
+              {
+                "id": "sub_store_front",
+                "name": "Front Entrance"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_residential",
+        "name": "Residential Neighborhood",
+        "is_hub": true,
+        "theme": "Quiet Leafy Suburban Neighborhood",
+        "features": "Narrow paved streets with walled residences, tranquil neighborhood playground parks, utility poles strung with wires, and tidy front gardens.",
+        "sensory": "Warm ambient sunlight casting soft shadows, gentle rustle of leaves in the breeze, distant chime of neighborhood clocks, and a calm, peaceful quiet.",
+        "primary_locations": [
+          {
+            "id": "loc_player_house",
+            "name": "Player's House",
+            "sub_locations": [
+              {
+                "id": "sub_player_bedroom",
+                "name": "Your Bedroom"
+              },
+              {
+                "id": "sub_living_room",
+                "name": "Living Room"
+              },
+              {
+                "id": "sub_kitchen",
+                "name": "Kitchen"
+              },
+              {
+                "id": "sub_front_porch",
+                "name": "Front Porch"
+              }
+            ]
+          },
+          {
+            "id": "loc_local_park",
+            "name": "Neighborhood Park",
+            "sub_locations": [
+              {
+                "id": "sub_park_swings",
+                "name": "Swing Set"
+              },
+              {
+                "id": "sub_park_bench",
+                "name": "Park Bench under the trees"
+              },
+              {
+                "id": "sub_sandbox",
+                "name": "Sandbox"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_seaside_bay",
+        "name": "Seaside & Coastal Bay",
+        "hazard": "coastal",
+        "theme": "Breezy Coastal Bay & Waterfront Promenade",
+        "features": "Expansive golden sand beach, wooden boardwalk pier, whitewashed coastal lighthouse, and breezy waterfront snack shacks.",
+        "sensory": "Rhythmic sound of crashing ocean waves, salty sea spray on the skin, wheeling seagulls calling overhead, and warm seaside sun.",
+        "primary_locations": [
+          {
+            "id": "loc_sandy_beach",
+            "name": "Sandy Beach & Coastline",
+            "sub_locations": [
+              {
+                "id": "sub_towel_spot",
+                "name": "Beach Towel Spot"
+              },
+              {
+                "id": "sub_shoreline_waves",
+                "name": "Shallow Surf Line"
+              },
+              {
+                "id": "sub_lifeguard_tower",
+                "name": "Lifeguard Tower"
+              }
+            ]
+          },
+          {
+            "id": "loc_coastal_pier",
+            "name": "Boardwalk Pier & Lighthouse",
+            "sub_locations": [
+              {
+                "id": "sub_pier_railings",
+                "name": "Pier Railing Lookout"
+              },
+              {
+                "id": "sub_lighthouse_base",
+                "name": "Lighthouse Base"
+              }
+            ]
+          },
+          {
+            "id": "loc_seaside_cafe",
+            "name": "Seaside Beach Shack",
+            "sub_locations": [
+              {
+                "id": "sub_patio_table",
+                "name": "Open-Air Patio Table"
+              },
+              {
+                "id": "sub_shave_ice_stand",
+                "name": "Shaved Ice Stand"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_mountain_park",
+        "name": "Recreational Mountain Park",
+        "theme": "Scenic Alpine Forest & Recreational Lake",
+        "features": "Dense pine woods with hiking trails, wooden campsite cabins, tranquil mountain lake, and a panoramic summit lookout deck.",
+        "sensory": "Crisp mountain air scented with pine needles, gentle lapping of lake water, chirping forest birds, and panoramic valley views.",
+        "primary_locations": [
+          {
+            "id": "loc_campsite",
+            "name": "Campsite & Cabin Grounds",
+            "sub_locations": [
+              {
+                "id": "sub_campfire_pit",
+                "name": "Campfire Circle"
+              },
+              {
+                "id": "sub_camp_cabin",
+                "name": "Log Cabin Porch"
+              }
+            ]
+          },
+          {
+            "id": "loc_mountain_lake",
+            "name": "Mountain Lake Pier",
+            "sub_locations": [
+              {
+                "id": "sub_boat_dock",
+                "name": "Rowboat Dock"
+              },
+              {
+                "id": "sub_lakeside_bench",
+                "name": "Shaded Lakeside Bench"
+              }
+            ]
+          },
+          {
+            "id": "loc_summit_lookout",
+            "name": "Mountain Summit Lookout",
+            "sub_locations": [
+              {
+                "id": "sub_lookout_telescope",
+                "name": "Viewfinder Telescope"
+              },
+              {
+                "id": "sub_ridge_trail",
+                "name": "Scenic Ridge Trail"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_abandoned_school",
+        "name": "Abandoned Old Campus Building",
+        "theme": "Decaying Showa-Era Heritage Wing & Clock Tower",
+        "features": "Crumbling concrete walls overgrown with creeping ivy, broken classroom windows, dust-covered hallways, mechanical clock tower with exposed gearworks, and abandoned gymnasium.",
+        "sensory": "Ominous creak of warped floorboards, whistling draft carrying cold dust and damp mildew, rhythmic deep mechanical clank of the clock tower gears, and eerie silence.",
+        "primary_locations": [
+          {
+            "id": "loc_old_storage_3b",
+            "name": "Old Storage Room 3-B",
+            "sub_locations": [
+              {
+                "id": "sub_club_table",
+                "name": "Club Meeting Table"
+              },
+              {
+                "id": "sub_tarot_corner",
+                "name": "Tarot & Divination Corner"
+              },
+              {
+                "id": "sub_archive_shelves",
+                "name": "Archive Bookshelves"
+              }
+            ]
+          },
+          {
+            "id": "loc_derelict_gym",
+            "name": "Derelict Old Gymnasium",
+            "sub_locations": [
+              {
+                "id": "sub_collapsed_stage",
+                "name": "Rotting Wooden Stage"
+              },
+              {
+                "id": "sub_dark_equipment_room",
+                "name": "Dark Storage Room"
+              },
+              {
+                "id": "sub_collapsed_balcony",
+                "name": "Collapsed Concourse Balcony"
+              }
+            ]
+          },
+          {
+            "id": "loc_clock_tower",
+            "name": "Decaying Clock Tower",
+            "sub_locations": [
+              {
+                "id": "sub_gearworks",
+                "name": "Attic Gearworks Chamber"
+              },
+              {
+                "id": "sub_spiral_stairs",
+                "name": "Spiral Wooden Stairwell"
+              },
+              {
+                "id": "sub_clockface_view",
+                "name": "Clockface Glass Overlook"
+              }
+            ]
+          },
+          {
+            "id": "loc_old_infirmary",
+            "name": "Boarded Old Infirmary",
+            "sub_locations": [
+              {
+                "id": "sub_rusted_gurney",
+                "name": "Rusted Gurney Beds"
+              },
+              {
+                "id": "sub_medicine_cabinet",
+                "name": "Dusty Medicine Cabinet"
+              },
+              {
+                "id": "sub_shadowed_exam",
+                "name": "Shadowed Examination Nook"
+              }
+            ]
+          },
+          {
+            "id": "loc_ruined_hallway",
+            "name": "Overgrown Hallway Wing",
+            "sub_locations": [
+              {
+                "id": "sub_broken_lockers",
+                "name": "Rusted Lockers"
+              },
+              {
+                "id": "sub_ivy_window",
+                "name": "Ivy-Choked Window Alcove"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_haunted_manor",
+        "name": "Rumored Haunted Hill Manor",
+        "theme": "Dilapidated Victorian Estate on the Hill",
+        "features": "Wrought-iron front gate, peeling dark wallpaper, dusty chandelier foyers, and overgrown overgrown weeping willow garden.",
+        "sensory": "Creaking floorboards underfoot, cold drafts sweeping through dark doorways, scent of antique wood, and faint unnatural whispers.",
+        "primary_locations": [
+          {
+            "id": "loc_manor_foyer",
+            "name": "Grand Dusty Foyer",
+            "sub_locations": [
+              {
+                "id": "sub_winding_staircase",
+                "name": "Winding Mahogany Staircase"
+              },
+              {
+                "id": "sub_fireplace_hearth",
+                "name": "Cold Stone Fireplace"
+              }
+            ]
+          },
+          {
+            "id": "loc_manor_garden",
+            "name": "Overgrown Manor Grounds",
+            "sub_locations": [
+              {
+                "id": "sub_weeping_willow",
+                "name": "Old Weeping Willow"
+              },
+              {
+                "id": "sub_iron_gate",
+                "name": "Rusted Front Gate"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "fantasy": {
+    "zones": [
+      {
+        "id": "zone_capital_city",
+        "name": "Capital City",
+        "is_hub": true,
+        "theme": "High-Medieval Walled Imperial Capital",
+        "features": "Towering white limestone ramparts, grand vaulted guild halls, cobblestone merchant plazas, and gilded imperial palace spires.",
+        "sensory": "The aroma of fresh hearth bread and roasting meats, clinking armor of passing town guards, ringing blacksmith anvils, and vibrant calls of merchant criers.",
+        "primary_locations": [
+          {
+            "id": "loc_guild_hall",
+            "name": "Adventurers' Guild Hall",
+            "sub_locations": [
+              {
+                "id": "sub_quest_board",
+                "name": "Quest Notice Board"
+              },
+              {
+                "id": "sub_guild_counter",
+                "name": "Reception Desk & Counter"
+              },
+              {
+                "id": "sub_guild_tavern",
+                "name": "Guild Underground Tavern"
+              }
+            ]
+          },
+          {
+            "id": "loc_market_district",
+            "name": "Cobblestone Market Plaza",
+            "sub_locations": [
+              {
+                "id": "sub_blacksmith",
+                "name": "Blacksmith Forge"
+              },
+              {
+                "id": "sub_alchemy_shop",
+                "name": "Alchemy & Potions Stall"
+              },
+              {
+                "id": "sub_general_store",
+                "name": "General Trading Post"
+              }
+            ]
+          },
+          {
+            "id": "loc_imperial_palace",
+            "name": "Imperial Palace Grounds",
+            "sub_locations": [
+              {
+                "id": "sub_throne_room",
+                "name": "Grand Throne Room"
+              },
+              {
+                "id": "sub_royal_armory",
+                "name": "Imperial Vault & Armory"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_woodlands_forest",
+        "name": "Woodlands & Forest",
+        "theme": "Dense Temperate Woodlands & Forester Trails",
+        "features": "Tall pine and oak canopy, winding hunter trails, logging timber yards, sunlit clearings, and roadside coaching wayposts.",
+        "sensory": "Crisp pine scent, chirping woodland birds, rustling ferns underfoot, and soft shafts of sunlight through the leafy branches.",
+        "primary_locations": [
+          {
+            "id": "loc_lumber_camp",
+            "name": "Lumbermill & Timber Camp",
+            "sub_locations": [
+              {
+                "id": "sub_sawmill_shed",
+                "name": "Sawmill Shed"
+              },
+              {
+                "id": "sub_log_staging",
+                "name": "Log Staging Yard"
+              },
+              {
+                "id": "sub_woodcutter_cabin",
+                "name": "Woodcutter's Cabin"
+              }
+            ]
+          },
+          {
+            "id": "loc_hunters_trail",
+            "name": "Hunter's Trail & Outpost",
+            "sub_locations": [
+              {
+                "id": "sub_trailhead_clearing",
+                "name": "Trailhead Clearing"
+              },
+              {
+                "id": "sub_lookout_blind",
+                "name": "Lookout Blind"
+              },
+              {
+                "id": "sub_hunter_campfire",
+                "name": "Hunter's Campfire"
+              }
+            ]
+          },
+          {
+            "id": "loc_forest_clearing",
+            "name": "Sunlit Forest Clearing",
+            "sub_locations": [
+              {
+                "id": "sub_grassy_meadow",
+                "name": "Grassy Meadow"
+              },
+              {
+                "id": "sub_berry_bushes",
+                "name": "Wild Berry Bushes"
+              },
+              {
+                "id": "sub_babbling_brook",
+                "name": "Babbling Brook"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_ancient_woods",
+        "name": "Ancient Woods",
+        "theme": "Primeval Enchanted Old-Growth Forest",
+        "features": "Massive ironwood trees with intertwined root bridges, moss-draped stone monoliths, glowing mushroom groves, and hidden bramble-choked pathways.",
+        "sensory": "Dappled emerald canopy light, the rustle of unseen wildlife in dense foliage, damp forest loam, and a faint ozone tingle of raw ambient mana.",
+        "primary_locations": [
+          {
+            "id": "loc_forest_outpost",
+            "name": "Druidic Tree Sanctuary",
+            "sub_locations": [
+              {
+                "id": "sub_moonwell",
+                "name": "Sacred Moonwell"
+              },
+              {
+                "id": "sub_elder_hollow",
+                "name": "Elder Druid Hollow"
+              }
+            ]
+          },
+          {
+            "id": "loc_gnarled_archway",
+            "name": "Gnarled Root Archway",
+            "sub_locations": [
+              {
+                "id": "sub_intertwined_arch",
+                "name": "Arch of Intertwined Roots"
+              },
+              {
+                "id": "sub_standing_stones",
+                "name": "Runed Standing Stones"
+              },
+              {
+                "id": "sub_western_root_bridge",
+                "name": "Western Root Bridge"
+              }
+            ]
+          },
+          {
+            "id": "loc_monster_lair",
+            "name": "Overgrown Den",
+            "sub_locations": [
+              {
+                "id": "sub_den_entrance",
+                "name": "Bramble-Choked Entrance"
+              },
+              {
+                "id": "sub_chieftain_tent",
+                "name": "Chieftain's Bone Tent"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_central_plains",
+        "name": "Central Farmlands & Plains",
+        "is_hub": true,
+        "theme": "Fertile Agrarian Valley & Country Roads",
+        "features": "Golden wheat fields stretching to the horizon, quaint windmills, thatched-roof farming hamlets, and busy roadside coaching inns.",
+        "sensory": "Warm golden sunlight, the scent of hay and sweet grass, the gentle clatter of horse carts, and singing field hands.",
+        "primary_locations": [
+          {
+            "id": "loc_farming_village",
+            "name": "Farming Village",
+            "sub_locations": [
+              {
+                "id": "sub_village_square",
+                "name": "Village Well Square"
+              },
+              {
+                "id": "sub_country_inn",
+                "name": "The Golden Sheaf Inn"
+              }
+            ]
+          },
+          {
+            "id": "loc_grain_windmills",
+            "name": "Highland Windmills",
+            "sub_locations": [
+              {
+                "id": "sub_mill_grindstone",
+                "name": "Great Grindstone"
+              },
+              {
+                "id": "sub_granary_silo",
+                "name": "Grain Silo Loft"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_coastal_harbor",
+        "name": "Coastal Harbor Town",
+        "is_hub": true,
+        "hazard": "coastal",
+        "theme": "Salty Maritime Trading Port",
+        "features": "Stone quays lined with wooden merchant galleons, fish markets, shipwright docks, and seaside taverns.",
+        "sensory": "The pungent smell of tar and fresh fish, creaking ship rigging in the breeze, calling seagulls, and rhythmic ocean surf.",
+        "primary_locations": [
+          {
+            "id": "loc_harbor_docks",
+            "name": "Harbor Docks & Quays",
+            "sub_locations": [
+              {
+                "id": "sub_pier_master",
+                "name": "Harbormaster's Office"
+              },
+              {
+                "id": "sub_merchant_galleon",
+                "name": "Moored Trading Galleon"
+              }
+            ]
+          },
+          {
+            "id": "loc_sailor_tavern",
+            "name": "Sailor's Haven Tavern",
+            "sub_locations": [
+              {
+                "id": "sub_rum_bar",
+                "name": "Spiced Rum Bar"
+              },
+              {
+                "id": "sub_gambling_table",
+                "name": "Dice Gambling Corner"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_mountain_range",
+        "name": "High Mountain Range",
+        "is_frontier": true,
+        "hazard": "cold",
+        "theme": "Rugged Alpine Peaks & Dwarven Strongholds",
+        "features": "Sheer granite cliffs, treacherous winding mountain passes, dwarven mining fortresses carved into rock faces, and soaring stone bridges.",
+        "sensory": "Biting mountain winds, the rhythmic clanging of heavy pickaxes echoing through stone shafts, crisp thin air, and echoes of tumbling gravel.",
+        "primary_locations": [
+          {
+            "id": "loc_mountain_outpost",
+            "name": "Dwarven Mining Stronghold",
+            "sub_locations": [
+              {
+                "id": "sub_great_gates",
+                "name": "Carved Granite Gates"
+              },
+              {
+                "id": "sub_deep_forge",
+                "name": "Deep Magma Forge"
+              }
+            ]
+          },
+          {
+            "id": "loc_windy_pass",
+            "name": "Treacherous Mountain Pass",
+            "sub_locations": [
+              {
+                "id": "sub_rope_bridge",
+                "name": "Chasm Rope Bridge"
+              },
+              {
+                "id": "sub_cliff_cave",
+                "name": "Windswept Cliff Alcove"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_swamp_marshes",
+        "name": "Swamp & Marshes",
+        "is_frontier": true,
+        "theme": "Mist-Choked Bog & Sunken Ruins",
+        "features": "Stagnant black waterways, twisted cypress trees dripping with moss, rickety wooden boardwalks, and sunken stone ruins.",
+        "sensory": "Damp clinging mist, the smell of decomposing vegetation and wet peat, distant eerie bubbling, and croaking marsh toads.",
+        "primary_locations": [
+          {
+            "id": "loc_stilt_village",
+            "name": "Stilt-Walker Settlement",
+            "sub_locations": [
+              {
+                "id": "sub_stilt_pier",
+                "name": "Canoe Pier"
+              },
+              {
+                "id": "sub_witch_hut",
+                "name": "Herbalist's Bog Hut"
+              }
+            ]
+          },
+          {
+            "id": "loc_sunken_ruins",
+            "name": "Sunken Temple Ruins",
+            "sub_locations": [
+              {
+                "id": "sub_submerged_altar",
+                "name": "Partially Submerged Altar"
+              },
+              {
+                "id": "sub_mossy_colonnade",
+                "name": "Drowned Colonnade"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_desert_dunes",
+        "name": "Desert Dunes & Oasis",
+        "is_frontier": true,
+        "hazard": "heat",
+        "theme": "Arid Sand Ocean & Verdant Oasis",
+        "features": "Towering shifting golden dunes, sandstone ruins half-buried in sand, and lush palm-shaded oasis pools.",
+        "sensory": "Blistering desert heat, howling sandstorms carrying dry grit, sweet scent of dates and fresh water at the oasis, and shimmering heat mirages.",
+        "primary_locations": [
+          {
+            "id": "loc_oasis_bazaar",
+            "name": "Palm Oasis Bazaar",
+            "sub_locations": [
+              {
+                "id": "sub_spring_pool",
+                "name": "Crystal Spring Pool"
+              },
+              {
+                "id": "sub_nomad_tents",
+                "name": "Nomad Silk Tents"
+              }
+            ]
+          },
+          {
+            "id": "loc_buried_pyramid",
+            "name": "Sandstone Tomb Ruins",
+            "sub_locations": [
+              {
+                "id": "sub_tomb_entrance",
+                "name": "Excavated Portal"
+              },
+              {
+                "id": "sub_hieroglyph_chamber",
+                "name": "Inscribed Crypt Chamber"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_frozen_tundra",
+        "name": "Frozen Snow & Tundra",
+        "is_frontier": true,
+        "hazard": "cold",
+        "theme": "Glacial Wasteland & Ice Caverns",
+        "features": "Vast snowdrifts, frozen glacial crevasses, mammoth bone shelters, and towering blue-ice pillars.",
+        "sensory": "Howling sub-zero blizzards, crunching snow under heavy boots, numbing frostbite, and shimmering auroras across starry night skies.",
+        "primary_locations": [
+          {
+            "id": "loc_tundra_camp",
+            "name": "Frontier Hunter Camp",
+            "sub_locations": [
+              {
+                "id": "sub_fur_yurt",
+                "name": "Heavy Fur Yurt"
+              },
+              {
+                "id": "sub_meat_rack",
+                "name": "Smoking Meat Rack"
+              }
+            ]
+          },
+          {
+            "id": "loc_ice_cavern",
+            "name": "Glacial Ice Caverns",
+            "sub_locations": [
+              {
+                "id": "sub_frozen_chasm",
+                "name": "Deep Frost Chasm"
+              },
+              {
+                "id": "sub_crystal_shrine",
+                "name": "Ancient Ice Crystal Shrine"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_volcanic_ashlands",
+        "name": "Volcanic Ashlands",
+        "is_frontier": true,
+        "hazard": "heat",
+        "theme": "Molten Caldera & Black Ash Wasteland",
+        "features": "Rivers of glowing orange magma, obsidian crags, billowing sulfur vents, and glowing basalt formations.",
+        "sensory": "Oppressive scorching heat, choking smell of sulfur and ash, rumbling tremors in the ground, and glowing red embers floating on the air.",
+        "primary_locations": [
+          {
+            "id": "loc_ash_outpost",
+            "name": "Obsidian Watchpost",
+            "sub_locations": [
+              {
+                "id": "sub_magma_overlook",
+                "name": "Magma River Overlook"
+              },
+              {
+                "id": "sub_reinforced_bunker",
+                "name": "Heat-Shielded Stone Bunker"
+              }
+            ]
+          },
+          {
+            "id": "loc_caldera_core",
+            "name": "Great Caldera Crater",
+            "sub_locations": [
+              {
+                "id": "sub_lava_lake",
+                "name": "Lava Lake Rim"
+              },
+              {
+                "id": "sub_fire_elemental_spire",
+                "name": "Igneous Spire"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_cursed_shadowlands",
+        "name": "Cursed Shadowlands",
+        "is_frontier": true,
+        "theme": "Necrotic Blight & Haunted Ruins",
+        "features": "Twisted dead black trees, purple necrotic mist, shattered gothic mausoleums, and ground littered with bleached bones.",
+        "sensory": "Unnatural bone-chilling cold, dead silence devoid of insect or animal life, smell of decay and grave dust, and unsettling ghostly whispers.",
+        "primary_locations": [
+          {
+            "id": "loc_blighted_keep",
+            "name": "Necromancer's Ruined Keep",
+            "sub_locations": [
+              {
+                "id": "sub_dark_altar",
+                "name": "Obsidian Altar of Souls"
+              },
+              {
+                "id": "sub_bone_crypt",
+                "name": "Shattered Crypt Vault"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_underworld_chasm",
+        "name": "Underworld Chasm",
+        "is_frontier": true,
+        "theme": "Bioluminescent Subterranean Abyssal Realm",
+        "features": "Vast subterranean caverns, glowing fungal forests, underground dark lakes, and ancient drow stone architecture.",
+        "sensory": "Echoing drips of water in massive hollows, soft cyan and violet glow of giant mushrooms, cool damp air, and the scurrying of chitinous beasts.",
+        "primary_locations": [
+          {
+            "id": "loc_subterranean_city",
+            "name": "Deep Underworld Enclave",
+            "sub_locations": [
+              {
+                "id": "sub_fungal_bazaar",
+                "name": "Luminescent Fungal Market"
+              },
+              {
+                "id": "sub_stalactite_haven",
+                "name": "Carved Stalactite Dwelling"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_ancient_dungeon",
+        "name": "Ancient Dungeon Complex",
+        "is_frontier": true,
+        "theme": "Multi-Level Stone Labyrinth & Trap Chambers",
+        "features": "Heavy iron-banded doors, stone-tiled corridors laced with ancient pressure plates, vaulted treasury vaults, and monster holding pens.",
+        "sensory": "Flickering wall torches casting long shadows, smell of stale air and old blood, the heavy scrape of moving stone traps, and distant monstrous growls.",
+        "primary_locations": [
+          {
+            "id": "loc_dungeon_antechamber",
+            "name": "Dungeon Grand Antechamber",
+            "sub_locations": [
+              {
+                "id": "sub_iron_gate_entrance",
+                "name": "Heavy Iron Portcullis"
+              },
+              {
+                "id": "sub_adventurer_camp",
+                "name": "Looted Explorer Camp"
+              }
+            ]
+          },
+          {
+            "id": "loc_boss_chamber",
+            "name": "Depths Boss Chamber",
+            "sub_locations": [
+              {
+                "id": "sub_treasury_chest",
+                "name": "Gilded Treasure Dais"
+              },
+              {
+                "id": "sub_boss_dais",
+                "name": "Guardian's Battle Platform"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_cave_network",
+        "name": "Deep Cave Network",
+        "is_frontier": true,
+        "theme": "Natural Crystal Caverns & Subterranean Tunnels",
+        "features": "Towering glittering crystal geodes, narrow crawlspaces, roaring underground waterfalls, and deep mineral veins.",
+        "sensory": "Roar of subterranean rivers, sparkling light refracting through raw gemstones, cold dripping dampness, and mineral-rich air.",
+        "primary_locations": [
+          {
+            "id": "loc_crystal_grotto",
+            "name": "Crystal Geode Grotto",
+            "sub_locations": [
+              {
+                "id": "sub_geode_cluster",
+                "name": "Giant Amethyst Cluster"
+              },
+              {
+                "id": "sub_subterranean_river",
+                "name": "Underground Riverbank"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "isekai_fantasy": {
+    "zones": [
+      {
+        "id": "zone_capital_city_isekai",
+        "name": "Capital City",
+        "is_hub": true,
+        "theme": "High-Medieval Walled Imperial Capital",
+        "features": "Towering white limestone ramparts, grand vaulted guild halls, mystical royal summoning chambers, and gilded imperial palace spires.",
+        "sensory": "The aroma of fresh hearth bread and roasted meats, clinking armor of passing patrols, humming arcane circle runes, and bustling market cries.",
+        "primary_locations": [
+          {
+            "id": "loc_guild_hall_isekai",
+            "name": "Adventurers' Guild Hall",
+            "sub_locations": [
+              {
+                "id": "sub_quest_board_isekai",
+                "name": "Quest Notice Board"
+              },
+              {
+                "id": "sub_guild_counter_isekai",
+                "name": "Reception Desk & Counter"
+              },
+              {
+                "id": "sub_guild_tavern_isekai",
+                "name": "Guild Underground Tavern"
+              }
+            ]
+          },
+          {
+            "id": "loc_summoning_chamber",
+            "name": "Royal Summoning Chamber",
+            "sub_locations": [
+              {
+                "id": "sub_summoning_circle",
+                "name": "Glowing Magic Circle"
+              },
+              {
+                "id": "sub_priestess_altar",
+                "name": "High Priestess Altar"
+              }
+            ]
+          },
+          {
+            "id": "loc_market_district_isekai",
+            "name": "Cobblestone Market Plaza",
+            "sub_locations": [
+              {
+                "id": "sub_blacksmith_isekai",
+                "name": "Blacksmith Forge"
+              },
+              {
+                "id": "sub_alchemy_shop_isekai",
+                "name": "Alchemy & Potions Stall"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_woodlands_forest_isekai",
+        "name": "Woodlands & Forest",
+        "theme": "Dense Temperate Woodlands & Forester Trails",
+        "features": "Tall pine and oak canopy, winding hunter trails, logging timber yards, sunlit clearings, and roadside coaching wayposts.",
+        "sensory": "Crisp pine scent, chirping woodland birds, rustling ferns underfoot, and soft shafts of sunlight through the leafy branches.",
+        "primary_locations": [
+          {
+            "id": "loc_lumber_camp_isekai",
+            "name": "Lumbermill & Timber Camp",
+            "sub_locations": [
+              {
+                "id": "sub_sawmill_shed_isekai",
+                "name": "Sawmill Shed"
+              },
+              {
+                "id": "sub_log_staging_isekai",
+                "name": "Log Staging Yard"
+              }
+            ]
+          },
+          {
+            "id": "loc_hunters_trail_isekai",
+            "name": "Hunter's Trail & Outpost",
+            "sub_locations": [
+              {
+                "id": "sub_trailhead_clearing_isekai",
+                "name": "Trailhead Clearing"
+              },
+              {
+                "id": "sub_hunter_campfire_isekai",
+                "name": "Hunter's Campfire"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_ancient_woods_isekai",
+        "name": "Ancient Woods",
+        "theme": "Primeval Enchanted Old-Growth Forest",
+        "features": "Massive ironwood trees with intertwined root bridges, sacred druidic moonwells, glowing mushroom hollows, and hidden bramble pathways.",
+        "sensory": "Dappled emerald canopy light, the rustle of unseen wildlife in dense foliage, damp forest earth, and the hum of ancient leyline magic.",
+        "primary_locations": [
+          {
+            "id": "loc_elven_sanctuary_isekai",
+            "name": "Elven Tree Sanctuary",
+            "sub_locations": [
+              {
+                "id": "sub_moonwell_isekai",
+                "name": "Sacred Moonwell"
+              },
+              {
+                "id": "sub_elder_hollow_isekai",
+                "name": "Elder Druid Hollow"
+              }
+            ]
+          },
+          {
+            "id": "loc_gnarled_archway_isekai",
+            "name": "Gnarled Root Archway",
+            "sub_locations": [
+              {
+                "id": "sub_intertwined_arch_isekai",
+                "name": "Arch of Intertwined Roots"
+              },
+              {
+                "id": "sub_western_root_bridge_isekai",
+                "name": "Western Root Bridge"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_central_plains_isekai",
+        "name": "Central Farmlands & Plains",
+        "is_hub": true,
+        "theme": "Fertile Agrarian Valley & Country Roads",
+        "features": "Golden wheat fields stretching to the horizon, quaint windmills, thatched-roof farming hamlets, and busy roadside coaching inns.",
+        "sensory": "Warm golden sunlight, the scent of hay and sweet grass, the gentle clatter of horse carts, and singing field hands.",
+        "primary_locations": [
+          {
+            "id": "loc_farming_village_isekai",
+            "name": "Farming Village",
+            "sub_locations": [
+              {
+                "id": "sub_village_square_isekai",
+                "name": "Village Well Square"
+              },
+              {
+                "id": "sub_country_inn_isekai",
+                "name": "The Golden Sheaf Inn"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_mountain_range_isekai",
+        "name": "High Mountain Range",
+        "is_frontier": true,
+        "hazard": "cold",
+        "theme": "Rugged Alpine Peaks & Dwarven Strongholds",
+        "features": "Sheer granite cliffs, treacherous winding mountain passes, dwarven mining fortresses carved into rock faces, and soaring stone bridges.",
+        "sensory": "Biting mountain winds, the rhythmic clanging of heavy pickaxes echoing through stone shafts, crisp thin air, and echoes of tumbling gravel.",
+        "primary_locations": [
+          {
+            "id": "loc_mountain_outpost_isekai",
+            "name": "Dwarven Mining Stronghold",
+            "sub_locations": [
+              {
+                "id": "sub_great_gates_isekai",
+                "name": "Carved Granite Gates"
+              },
+              {
+                "id": "sub_deep_forge_isekai",
+                "name": "Deep Magma Forge"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_desert_dunes_isekai",
+        "name": "Desert Dunes & Oasis",
+        "is_frontier": true,
+        "hazard": "heat",
+        "theme": "Arid Sand Ocean & Verdant Oasis",
+        "features": "Towering shifting golden dunes, sandstone ruins half-buried in sand, and lush palm-shaded oasis pools.",
+        "sensory": "Blistering desert heat, howling sandstorms carrying dry grit, sweet scent of dates and fresh water at the oasis, and shimmering heat mirages.",
+        "primary_locations": [
+          {
+            "id": "loc_oasis_bazaar_isekai",
+            "name": "Palm Oasis Bazaar",
+            "sub_locations": [
+              {
+                "id": "sub_spring_pool_isekai",
+                "name": "Crystal Spring Pool"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_cursed_shadowlands_isekai",
+        "name": "Cursed Shadowlands",
+        "is_frontier": true,
+        "theme": "Demon Realm Border & Dark Ruins",
+        "features": "Jagged purple rock formations, red lightning in the sky, shattered demonic battlefields, and blighted fortresses.",
+        "sensory": "Smell of brimstone and dark mana, howling ominous winds, crackle of demonic energy, and oppressive supernatural pressure.",
+        "primary_locations": [
+          {
+            "id": "loc_demon_outpost",
+            "name": "Demon Citadel Perimeter",
+            "sub_locations": [
+              {
+                "id": "sub_spiked_barricade",
+                "name": "Spiked Obsidian Barricade"
+              },
+              {
+                "id": "sub_blood_portal",
+                "name": "Pulsing Warp Portal"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_ancient_dungeon_isekai",
+        "name": "Tiered Labyrinth Dungeon",
+        "is_frontier": true,
+        "theme": "Multilevel Dungeon Labyrinth with Safe Zones",
+        "features": "Carved stone floors, magical teleportation circles, monster spawn chambers, and crystal-lit safe areas.",
+        "sensory": "Humming magical circles on stone floors, smell of potions and ozone, distant echoes of clashing swords, and faint monster cries.",
+        "primary_locations": [
+          {
+            "id": "loc_dungeon_safe_zone",
+            "name": "10th Floor Safe Zone",
+            "sub_locations": [
+              {
+                "id": "sub_teleport_crystal",
+                "name": "Warp Waypoint Crystal"
+              },
+              {
+                "id": "sub_safe_camp",
+                "name": "Explorer Respite Camp"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "dark_fantasy": {
+    "zones": [
+      {
+        "id": "zone_black_citadel",
+        "name": "Black-Iron Citadel",
+        "is_hub": true,
+        "theme": "Gothic Obsidian Fortress & Inquisitorial Dungeon",
+        "features": "Serrated black iron battlements piercing storm clouds, spiked portcullis gates, bottomless oubliettes, and vaulted naves with shattered stained glass.",
+        "sensory": "Howling mountain gale shrieking through narrow arrow slits, crackle of pitch-soaked torches casting jagged shadows, and the scent of cold stone, dried blood, and burning coal.",
+        "primary_locations": [
+          {
+            "id": "loc_dungeon_keep",
+            "name": "Torturer's Dungeon Keep",
+            "sub_locations": [
+              {
+                "id": "sub_iron_maiden_hall",
+                "name": "Iron Maiden Chamber"
+              },
+              {
+                "id": "sub_oubliette",
+                "name": "The Bottomless Oubliette"
+              }
+            ]
+          },
+          {
+            "id": "loc_stained_nave",
+            "name": "Shattered Stained-Glass Nave",
+            "sub_locations": [
+              {
+                "id": "sub_desecrated_pulpit",
+                "name": "Desecrated High Pulpit"
+              },
+              {
+                "id": "sub_relic_vault",
+                "name": "Sealed Crypt Vault"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_blighted_marshes",
+        "name": "Plague-Blighted Marshes",
+        "is_frontier": true,
+        "theme": "Sunken Necrotic Swamplands & Cursed Ruins",
+        "features": "Decaying stilt huts rising above stagnant black water, gallows hill execution grounds, sunken bone chapels, and twisted wicker effigy groves.",
+        "sensory": "Choking damp fog clinging to the skin, sickly sweet stench of rotting bogwood and wet earth, eerie silence broken only by croaking ravens, and distant guttering torchlight.",
+        "primary_locations": [
+          {
+            "id": "loc_bone_chapel",
+            "name": "Sunken Bone Chapel",
+            "sub_locations": [
+              {
+                "id": "sub_sacrifice_altar",
+                "name": "Blood-Stained Altar"
+              },
+              {
+                "id": "sub_catacombs",
+                "name": "Dark Catacombs"
+              }
+            ]
+          },
+          {
+            "id": "loc_witch_coven",
+            "name": "Witch-Tree Coven Hollow",
+            "sub_locations": [
+              {
+                "id": "sub_effigy_grove",
+                "name": "Wicker Effigy Grove"
+              },
+              {
+                "id": "sub_bog_hut",
+                "name": "Stilt-Walker's Bog Hut"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_gallows_settlement",
+        "name": "Gallows Hill Settlement",
+        "is_hub": true,
+        "theme": "Bleak Plague-Ridden Frontier Town",
+        "features": "Weathered timber homes fortified with iron stakes, town square gibbets, fortified watchtowers, and a somber tavern.",
+        "sensory": "The mournful creak of ropes swaying from gallows trees, pungent smell of pitch smoke, subdued fearful murmuring of townsfolk, and distant howling.",
+        "primary_locations": [
+          {
+            "id": "loc_grim_tavern",
+            "name": "The Weeping Hound Tavern",
+            "sub_locations": [
+              {
+                "id": "sub_dark_hearth",
+                "name": "Smoky Hearth"
+              },
+              {
+                "id": "sub_mercenary_corner",
+                "name": "Grave-Robber Corner"
+              }
+            ]
+          },
+          {
+            "id": "loc_town_square",
+            "name": "Hanging Tree Square",
+            "sub_locations": [
+              {
+                "id": "sub_gibbet_tree",
+                "name": "The Great Hanging Tree"
+              },
+              {
+                "id": "sub_plague_cart",
+                "name": "Plague Doctor's Cart"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_sunken_catacombs",
+        "name": "Sunken Bone Catacombs",
+        "is_frontier": true,
+        "theme": "Subterranean Necropolis & Crypt Labyrinth",
+        "features": "Walls stacked high with human skulls, ancient limestone sarcophagi, poisoned spike traps, and flooded burial chambers.",
+        "sensory": "Freezing subterranean draft, the smell of damp embalming fluids and rot, sound of crunching bone dust, and faint scratching behind stone walls.",
+        "primary_locations": [
+          {
+            "id": "loc_ossuary_hall",
+            "name": "Grand Ossuary Hall",
+            "sub_locations": [
+              {
+                "id": "sub_skull_pillar",
+                "name": "Monumental Skull Pillar"
+              },
+              {
+                "id": "sub_sealed_sarcophagus",
+                "name": "Inscribed Lord's Sarcophagus"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_blood_ash_crags",
+        "name": "Blood-Ash Crags",
+        "is_frontier": true,
+        "hazard": "cold",
+        "theme": "Serrated Jagged Highlands & Execution Peaks",
+        "features": "Razor-sharp black obsidian crags, iron gibbet cages hanging over chasms, ruined sentinel towers, and freezing ash-laden mists.",
+        "sensory": "Screaming freezing winds, the metallic clang of swinging iron cages, stinging cold ash, and barren desolation.",
+        "primary_locations": [
+          {
+            "id": "loc_crag_watchpost",
+            "name": "Ruined Sentinel Watchpost",
+            "sub_locations": [
+              {
+                "id": "sub_signal_beacon",
+                "name": "Extinguished Signal Brazier"
+              },
+              {
+                "id": "sub_gibbet_cliff",
+                "name": "Chasm Gibbet Cage"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_desecrated_cathedral",
+        "name": "Desecrated Cathedral Grounds",
+        "is_frontier": true,
+        "theme": "Shattered Monolithic Cathedral & Heretical Shrine",
+        "features": "Fallen stone pillars, desecrated golden statuary, shattered stained-glass windows depicting dying gods, and heretical ritual circles.",
+        "sensory": "Echoing footsteps in vast hollow stone halls, scent of incense mixed with old blood, flickering tallow candles, and deep dreadful silence.",
+        "primary_locations": [
+          {
+            "id": "loc_cathedral_ruins",
+            "name": "Cathedral Nave & Altar",
+            "sub_locations": [
+              {
+                "id": "sub_heretic_altar",
+                "name": "Desecrated Altar Dais"
+              },
+              {
+                "id": "sub_crypt_entrance",
+                "name": "Shattered Crypt Portal"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_withered_woods",
+        "name": "Withered Ancient Woods",
+        "is_frontier": true,
+        "theme": "Dead Twisted Forest & Beast Prowl Grounds",
+        "features": "Barkless pale white trees resembling grasping hands, thorny black briars, corrupted hunting trails, and cannibal hunter camps.",
+        "sensory": "Crackling dead branches underfoot, eerie dead silence broken by sudden savage shrieks, rotting mulch smell, and pitch-black canopy darkness.",
+        "primary_locations": [
+          {
+            "id": "loc_cannibal_camp",
+            "name": "Corrupted Hunter Encampment",
+            "sub_locations": [
+              {
+                "id": "sub_bone_totem",
+                "name": "Bleached Bone Totem"
+              },
+              {
+                "id": "sub_gutting_trough",
+                "name": "Stone Trough"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "nuclear_post_apocalypse": {
+    "zones": [
+      {
+        "id": "zone_underground_vault",
+        "name": "Underground Vault Shelter",
+        "is_hub": true,
+        "theme": "Subterranean Sealed Pre-War Concrete Bunker",
+        "features": "Heavy steel cog-shaped blast doors, yellow fluorescent-lit metal corridors, hydroponic food bays, and overseer command suites.",
+        "sensory": "Persistent hum of air filtration turbines, sterile recycled ozone, buzzing fluorescent lighting, and echoing metal grating underfoot.",
+        "primary_locations": [
+          {
+            "id": "loc_vault_airlock",
+            "name": "Heavy Gear Blast Airlock",
+            "sub_locations": [
+              {
+                "id": "sub_blast_door_console",
+                "name": "Airlock Control Console"
+              },
+              {
+                "id": "sub_decon_chamber",
+                "name": "Decontamination Chamber"
+              }
+            ]
+          },
+          {
+            "id": "loc_overseer_office",
+            "name": "Overseer's Command Office",
+            "sub_locations": [
+              {
+                "id": "sub_terminal_desk",
+                "name": "Mainframe Terminal Desk"
+              },
+              {
+                "id": "sub_security_lockbox",
+                "name": "Reinforced Armory Lockbox"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_scavenger_market",
+        "name": "Scrap-Town Settlement",
+        "is_hub": true,
+        "theme": "Fortified Wasteland Scavenger Bastion",
+        "features": "Corrugated iron shanties, perimeter walls made of rusted automobile shells, water purification windmill rigs, and lively barter stalls.",
+        "sensory": "The smell of roasting mystery meat over oil drums, clinking bottle caps and shell casings, shouting merchants, and churning water pumps.",
+        "primary_locations": [
+          {
+            "id": "loc_scavenger_bazaar",
+            "name": "Barter Market Plaza",
+            "sub_locations": [
+              {
+                "id": "sub_water_purifier",
+                "name": "Water Purifier Rig"
+              },
+              {
+                "id": "sub_barter_stand",
+                "name": "Scavenger's Barter Stand"
+              },
+              {
+                "id": "sub_weapon_tinkerer",
+                "name": "Gunsmith Workbench"
+              }
+            ]
+          },
+          {
+            "id": "loc_saloon",
+            "name": "Rusty Canteen Saloon",
+            "sub_locations": [
+              {
+                "id": "sub_oil_drum_bar",
+                "name": "Oil-Drum Counter"
+              },
+              {
+                "id": "sub_gambling_corner",
+                "name": "Dice & Poker Table"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_irradiated_crater",
+        "name": "Irradiated Crater Basin",
+        "is_frontier": true,
+        "hazard": "radiation",
+        "theme": "Glowing Green Radioactive Ground Zero",
+        "features": "Vitrified radioactive glass craters, glowing toxic slurry pools, warped skeletonized skyscrapers, and mutant beast nests.",
+        "sensory": "Frantic clicking of Geiger counters, eerie green phosphorescent glow in the gloom, ozone and burning rubber smell, and howling ash dust.",
+        "primary_locations": [
+          {
+            "id": "loc_ground_zero",
+            "name": "Ground Zero Crater Rim",
+            "sub_locations": [
+              {
+                "id": "sub_slurry_pool",
+                "name": "Glowing Toxic Slurry Pool"
+              },
+              {
+                "id": "sub_shattered_warhead",
+                "name": "Unexploded Warhead Casing"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_highway_badlands",
+        "name": "Highway Badlands & Scrapyards",
+        "is_frontier": true,
+        "theme": "Cracked Desert Asphalt & Wrecked Vehicle Graveyard",
+        "features": "Multi-lane cracked highway overpasses, miles of stripped car wrecks, roadside sniper towers, and billboard sniper perches.",
+        "sensory": "Blistering dry heat, the roar of motorized raider buggies in the distance, howling wind through rusted steel, and blowing sand.",
+        "primary_locations": [
+          {
+            "id": "loc_overpass_camp",
+            "name": "Highway Overpass Outpost",
+            "sub_locations": [
+              {
+                "id": "sub_sniper_nest",
+                "name": "Billboard Sniper Nest"
+              },
+              {
+                "id": "sub_wrecked_bus",
+                "name": "Hollowed Scrap Bus"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_megacity_ruins",
+        "name": "Ruined Megacity Ruins",
+        "is_frontier": true,
+        "theme": "Colossal Decaying Concrete & Rebar Monoliths",
+        "features": "Crumbling skyscraper canyons, collapsed subway tunnels, overgrown commercial plazas, and scavenged corporate towers.",
+        "sensory": "Eerie echoes through concrete canyons, sudden clatter of falling rubble, smell of wet dust and rust, and prowling feral beasts.",
+        "primary_locations": [
+          {
+            "id": "loc_subway_terminal",
+            "name": "Collapsed Subway Terminal",
+            "sub_locations": [
+              {
+                "id": "sub_subway_car",
+                "name": "Derailed Train Car"
+              },
+              {
+                "id": "sub_ticket_hall",
+                "name": "Dark Turnstile Hall"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_raider_fortress",
+        "name": "Iron Raider Stronghold",
+        "is_frontier": true,
+        "theme": "Fortified Industrial Scrap Citadel & Combat Pit",
+        "features": "Towering sheet-metal barricades topped with barbed wire, scrap-iron arena cages, heavy vehicle repair garages, and slave pens.",
+        "sensory": "Roaring diesel engines, screaming raider warbands, heavy metal music blaring from salvaged PA horns, and burning tire bonfires.",
+        "primary_locations": [
+          {
+            "id": "loc_gladiator_pit",
+            "name": "Scrap-Metal Gladiator Pit",
+            "sub_locations": [
+              {
+                "id": "sub_overboss_throne",
+                "name": "Overboss Scrap Throne"
+              },
+              {
+                "id": "sub_arena_cage",
+                "name": "Spiked Combat Arena"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_toxic_swamp",
+        "name": "Toxic Chemical Swamplands",
+        "is_frontier": true,
+        "hazard": "radiation",
+        "theme": "Flooded Industrial Chemical Basin & Mutant Marsh",
+        "features": "Corrosive chemical pools glowing dull amber, dead bleached tree trunks, rusted oil refinery pipes, and floating mutant carcasses.",
+        "sensory": "Acrid burning chemical fumes, hissing corrosive acid bubbles, suffocating oily smog, and the splash of heavy submerged mutant horrors.",
+        "primary_locations": [
+          {
+            "id": "loc_refinery_rig",
+            "name": "Submerged Refinery Rig",
+            "sub_locations": [
+              {
+                "id": "sub_pipe_walkway",
+                "name": "Rusted Catwalk"
+              },
+              {
+                "id": "sub_valve_station",
+                "name": "Chemical Siphon Valve"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "cyberpunk": {
+    "zones": [
+      {
+        "id": "zone_city_center",
+        "name": "City Center & Megacorp Plaza",
+        "is_hub": true,
+        "theme": "Hyper-Secured Megacorp Monolith Center",
+        "features": "Gleaming chrome-and-glass skyscrapers, elevated mag-train skybridges, biometric security scanner gates, and manicured rooftop helipads.",
+        "sensory": "Pristine filtered air, cold blue ambient LED strips, the quiet hum of automated surveillance drones, and the rhythmic hiss of pressurized pneumatic doors.",
+        "primary_locations": [
+          {
+            "id": "loc_corp_tower",
+            "name": "Corporate Monolith Tower",
+            "sub_locations": [
+              {
+                "id": "sub_lobby_security",
+                "name": "Lobby Security Checkpoint"
+              },
+              {
+                "id": "sub_exec_boardroom",
+                "name": "Executive Boardroom"
+              }
+            ]
+          },
+          {
+            "id": "loc_sky_lounge",
+            "name": "Sky High VIP Lounge",
+            "sub_locations": [
+              {
+                "id": "sub_bar_terrace",
+                "name": "Observation Terrace"
+              },
+              {
+                "id": "sub_helipad",
+                "name": "Rooftop Helipad"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_downtown",
+        "name": "Downtown Commercial Core",
+        "is_hub": true,
+        "theme": "High-Density Neon Commercial & Entertainment Hub",
+        "features": "Vibrant pedestrian malls, colossal 3D holographic advertisements, multi-tier skywalks, and high-end cyberware retail outlets.",
+        "sensory": "Pulsing electronic store jingles, neon lights washing over crowds in pink and cyan, smell of synthetic street coffee, and rushing air-car traffic.",
+        "primary_locations": [
+          {
+            "id": "loc_downtown_plaza",
+            "name": "Commercial Plaza Center",
+            "sub_locations": [
+              {
+                "id": "sub_holo_fountain",
+                "name": "Holographic Fountain"
+              },
+              {
+                "id": "sub_cyber_store",
+                "name": "Flagship Tech Store"
+              }
+            ]
+          },
+          {
+            "id": "loc_nightclub",
+            "name": "Neon Pulse Nightclub",
+            "sub_locations": [
+              {
+                "id": "sub_dance_floor",
+                "name": "Holo-Laser Dance Floor"
+              },
+              {
+                "id": "sub_vip_booth",
+                "name": "Soundproof VIP Booth"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_uptown_heights",
+        "name": "Uptown Heights & Penthouses",
+        "theme": "Luxurious High-Altitude Resident Enclave",
+        "features": "Private residential spires towering above the smog layer, private security checkpoints, glass-bottom sky pools, and automated luxury transit.",
+        "sensory": "Clean crisp high-altitude breeze, quiet luxury hum of private hover-limos, soft ambient lounge synth, and clear views of the stars above.",
+        "primary_locations": [
+          {
+            "id": "loc_luxury_penthouse",
+            "name": "Luxury Penthouse Suite",
+            "sub_locations": [
+              {
+                "id": "sub_penthouse_balcony",
+                "name": "Glass Balcony Lookout"
+              },
+              {
+                "id": "sub_private_bar",
+                "name": "Top-Shelf Bar Counter"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_slums_lower_wards",
+        "name": "Slums & Lower Wards",
+        "is_hub": true,
+        "theme": "Dystopian High-Density Lower Wards & Red-Light Alleyways",
+        "features": "Towering brutalist tenement stacks, tangled overhead power conduits, narrow rain-slicked backstreets, and neon-lit street food stalls.",
+        "sensory": "Flickering holographic billboards reflecting in oily puddles, heavy synthwave bass thumping through walls, sirens wailing in the smog, and the smell of ozone and synthetic street noodles.",
+        "primary_locations": [
+          {
+            "id": "loc_noodle_bar",
+            "name": "Street Noodle Bar",
+            "sub_locations": [
+              {
+                "id": "sub_bar_counter",
+                "name": "Neon Counter Stool"
+              },
+              {
+                "id": "sub_fixer_booth",
+                "name": "Fixer's VIP Back Booth"
+              }
+            ]
+          },
+          {
+            "id": "loc_ripperdoc_clinic",
+            "name": "Ripperdoc Clinic",
+            "sub_locations": [
+              {
+                "id": "sub_operating_chair",
+                "name": "Cybernetic Operating Chair"
+              },
+              {
+                "id": "sub_parts_storage",
+                "name": "Augmentation Parts Locker"
+              }
+            ]
+          },
+          {
+            "id": "loc_neon_alley",
+            "name": "Backstreet Neon Alley",
+            "sub_locations": [
+              {
+                "id": "sub_dumpster",
+                "name": "Behind the Dumpster"
+              },
+              {
+                "id": "sub_smuggler_van",
+                "name": "Smuggler's Hover-Van"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_industrial_docks",
+        "name": "Industrial Zone & Docks",
+        "is_frontier": true,
+        "theme": "Automated Heavy Manufacturing & Cargo Seaport",
+        "features": "Massive automated container cranes, heavy smelting foundries, toxic runoff canals, and fortified corporate logistics warehouses.",
+        "sensory": "Screech of heavy robotic gantry cranes, intense heat from blast furnaces, chemical runoff stench, and rhythmic thumping of cargo transports.",
+        "primary_locations": [
+          {
+            "id": "loc_cargo_dock",
+            "name": "Automated Cargo Terminal",
+            "sub_locations": [
+              {
+                "id": "sub_container_stack",
+                "name": "Shipping Container Maze"
+              },
+              {
+                "id": "sub_crane_control",
+                "name": "Crane Control Cabin"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_city_outskirts",
+        "name": "City Outskirts & Badlands",
+        "is_frontier": true,
+        "theme": "Arid Wasteland Beyond the City Walls",
+        "features": "Towering perimeter defense walls with auto-turrets, abandoned solar arrays, junked vehicle dumps, and nomad encampments.",
+        "sensory": "Howling hot winds carrying gritty dust, glaring desert sun, smell of burning fuel and rust, and the distant skyline of the city glowing on the horizon.",
+        "primary_locations": [
+          {
+            "id": "loc_nomad_camp",
+            "name": "Nomad Clan Encampment",
+            "sub_locations": [
+              {
+                "id": "sub_nomad_garage",
+                "name": "Vehicle Tuning Garage"
+              },
+              {
+                "id": "sub_comm_radio_tower",
+                "name": "Makeshift Radio Mast"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_rural_outpost",
+        "name": "Outlying Rural Town",
+        "theme": "Semi-Automated Agri-Town Beyond City Limits",
+        "features": "Massive bio-dome greenhouses, roadside motels, dusty gas stations, and small local diner bars.",
+        "sensory": "Hum of greenhouse climate controls, smell of synthetic fertilizer and dusty pavement, warm desert breeze, and quiet peace.",
+        "primary_locations": [
+          {
+            "id": "loc_rural_diner",
+            "name": "Highway Roadside Diner",
+            "sub_locations": [
+              {
+                "id": "sub_diner_booth",
+                "name": "Corner Diner Booth"
+              },
+              {
+                "id": "sub_jukebox",
+                "name": "Old Jukebox"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_nature_reserve",
+        "name": "Corporate Nature Reserve",
+        "theme": "Bio-Engineered Domed Forest Sanctuary",
+        "features": "Giant geodesic glass dome enclosing engineered redwood trees, artificial waterfalls, sensor-monitored wildlife, and VIP walking paths.",
+        "sensory": "Synthesized pine breeze, gentle rush of filtered waterfalls, soft chirping of cyber-birds, and pristine clean air.",
+        "primary_locations": [
+          {
+            "id": "loc_dome_pavilion",
+            "name": "Bio-Dome Central Pavilion",
+            "sub_locations": [
+              {
+                "id": "sub_waterfall_deck",
+                "name": "Artificial Waterfall Deck"
+              },
+              {
+                "id": "sub_research_kiosk",
+                "name": "Bio-Research Terminal"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "steampunk": {
+    "zones": [
+      {
+        "id": "zone_clocktower_center",
+        "name": "Grand Clockwork Aerodrome & City Center",
+        "is_hub": true,
+        "theme": "Victorian Industrial Clockwork Megacity",
+        "features": "Gargantuan wrought-iron clocktowers, elevated pneumatic airship docking gantries, labyrinthine copper pipe networks, and bustling brass streetcar plazas.",
+        "sensory": "Continuous hiss of high-pressure steam valves, rhythmic heavy thud of piston machinery, sulfurous coal smoke hanging in the air, and the clanking of giant brass cogs.",
+        "primary_locations": [
+          {
+            "id": "loc_aerodrome",
+            "name": "Airship Docking Terminal",
+            "sub_locations": [
+              {
+                "id": "sub_airship_dock",
+                "name": "Airship Docking Mast"
+              },
+              {
+                "id": "sub_ticket_booth",
+                "name": "Ticket & Manifest Booth"
+              }
+            ]
+          },
+          {
+            "id": "loc_alchemist_guild",
+            "name": "Alchemists' Guild Hall",
+            "sub_locations": [
+              {
+                "id": "sub_brewing_station",
+                "name": "Brewing Station"
+              },
+              {
+                "id": "sub_archive_library",
+                "name": "Archive Library"
+              }
+            ]
+          },
+          {
+            "id": "loc_mechanist_vaults",
+            "name": "Mechanists' Archive Vaults",
+            "sub_locations": [
+              {
+                "id": "sub_blueprint_hall",
+                "name": "Classified Blueprint Hall"
+              },
+              {
+                "id": "sub_pneumatic_tube_hub",
+                "name": "Pneumatic Dispatch Hub"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_airship_cruiser",
+        "name": "Grand Zeppelin Cruiser",
+        "is_hub": true,
+        "theme": "Luxurious Armored Passenger & Expedition Airship",
+        "features": "Colossal rigid gasbag envelope, polished mahogany decks, panoramic observation gondola, roaring steam turbine engines, and pressurized crew quarters.",
+        "sensory": "Gentle swaying through cloud banks, deep rhythmic thrum of propeller turbines, smell of polished brass and pipe tobacco, and breathtaking vistas of the world below.",
+        "primary_locations": [
+          {
+            "id": "loc_airship_bridge",
+            "name": "Command Bridge & Pilot Helm",
+            "sub_locations": [
+              {
+                "id": "sub_helm_wheel",
+                "name": "Brass Steering Helm"
+              },
+              {
+                "id": "sub_engine_telegraph",
+                "name": "Engine Telegraph Station"
+              },
+              {
+                "id": "sub_nav_table",
+                "name": "Cartographer's Navigation Desk"
+              }
+            ]
+          },
+          {
+            "id": "loc_observation_deck",
+            "name": "Panoramic Observation Deck",
+            "sub_locations": [
+              {
+                "id": "sub_glass_deck_railing",
+                "name": "Bow Observation Railing"
+              },
+              {
+                "id": "sub_lounge_armchairs",
+                "name": "Velvet Lounge Armchairs"
+              }
+            ]
+          },
+          {
+            "id": "loc_airship_engine_room",
+            "name": "Engine & Boiler Room",
+            "sub_locations": [
+              {
+                "id": "sub_steam_piston_core",
+                "name": "Twin Steam Turbines"
+              },
+              {
+                "id": "sub_pressure_valves",
+                "name": "Pressure Relief Station"
+              }
+            ]
+          },
+          {
+            "id": "loc_passenger_salon",
+            "name": "Grand Passenger Salon & Dining Hall",
+            "sub_locations": [
+              {
+                "id": "sub_dining_table",
+                "name": "Crystal Chandelier Banquet Table"
+              },
+              {
+                "id": "sub_airship_bar",
+                "name": "Mahogany Spirits Bar"
+              }
+            ]
+          },
+          {
+            "id": "loc_cargo_armory",
+            "name": "Cargo Bay & Armory Hold",
+            "sub_locations": [
+              {
+                "id": "sub_harpoon_cannon",
+                "name": "Pneumatic Harpoon Battery"
+              },
+              {
+                "id": "sub_cargo_crane",
+                "name": "Cargo Lift Platform"
+              }
+            ]
+          },
+          {
+            "id": "loc_bow_lookout",
+            "name": "Bow Lookout Platform",
+            "sub_locations": [
+              {
+                "id": "sub_spotlight_rig",
+                "name": "Heavy Arc Spotlight"
+              },
+              {
+                "id": "sub_windscreen_perch",
+                "name": "Windscreen Crow's Nest"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_upper_promenade",
+        "name": "Upper Brass Promenade",
+        "theme": "High Society Clockwork Boulevard & Salons",
+        "features": "Gilded gas-lamp lit streets, ornate brass opera houses, exclusive inventors' clubs, and pristine carriage avenues.",
+        "sensory": "Soft waltz music drifting from ballrooms, clinking champagne flutes, sweet pipe tobacco, and gentle hiss of ornamental gas fixtures.",
+        "primary_locations": [
+          {
+            "id": "loc_gentlemans_club",
+            "name": "Inventors' Society Club",
+            "sub_locations": [
+              {
+                "id": "sub_smoking_room",
+                "name": "Leather Smoking Room"
+              },
+              {
+                "id": "sub_exhibit_hall",
+                "name": "Clockwork Patent Exhibit"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_boiler_foundries",
+        "name": "Underbelly Boiler Foundries",
+        "is_hub": true,
+        "theme": "Subterranean Heavy Smelting & Forge Complex",
+        "features": "Roaring blast furnaces, rivers of molten brass and iron, labyrinthine steam pipes, and soot-stained catwalks.",
+        "sensory": "Intense radiant heat, deafening clang of hydraulic forging hammers, thick sulfur fumes, and showering sparks of molten metal.",
+        "primary_locations": [
+          {
+            "id": "loc_furnace_complex",
+            "name": "Great Blast Furnace",
+            "sub_locations": [
+              {
+                "id": "sub_lower_valve_basin",
+                "name": "Lower Valve Basin"
+              },
+              {
+                "id": "sub_furnace_core",
+                "name": "Blast Furnace Core"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_subterranean_canals",
+        "name": "Subterranean Canals & Alleys",
+        "theme": "Underground Waterways & Smuggler Siphons",
+        "features": "Arched brick sewers with flowing canal waters, hidden illicit gambling dens, steam-pipe conduits, and clandestine dock landings.",
+        "sensory": "Echoing drips in vaulted brick tunnels, smell of stagnant water and lamp oil, muffled shouts from secret dens, and low chugging steam launches.",
+        "primary_locations": [
+          {
+            "id": "loc_smuggler_dock",
+            "name": "Hidden Waterway Pier",
+            "sub_locations": [
+              {
+                "id": "sub_clandestine_dock",
+                "name": "Smuggler Canal Pier"
+              },
+              {
+                "id": "sub_contraband_depot",
+                "name": "Black-Market Siphon Stash"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_rust_outskirts",
+        "name": "Rust & Scrap Outskirts",
+        "is_frontier": true,
+        "theme": "Industrial Wasteland & Scavenger Graveyard",
+        "features": "Hulking skeletons of decommissioned steam-titans, acidic canal locks with wooden piers, scrap metal salvage dumps, and hidden smuggler depots.",
+        "sensory": "Heavy sulfuric fog rolling over brackish waterways, the metallic creak of corroded iron girders in the wind, damp rust scent, and the distant drip of condensation.",
+        "primary_locations": [
+          {
+            "id": "loc_scrap_graveyard",
+            "name": "Scrap-Titan Graveyard",
+            "sub_locations": [
+              {
+                "id": "sub_titan_cockpit",
+                "name": "Hollowed Titan Hull"
+              },
+              {
+                "id": "sub_salvager_camp",
+                "name": "Scrap Scavenger Encampment"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_smog_moors",
+        "name": "Outlying Smog Moors",
+        "is_frontier": true,
+        "theme": "Bleak Peat Moors Choked in Industrial Acid Smog",
+        "features": "Rolling heather hills smothered in heavy coal fog, abandoned railway viaducts, old coal mine entrances, and lone stone watchtowers.",
+        "sensory": "Muffled silence in dense yellow smog, distant mournful train whistles, damp peat earth smell, and howling cold winds.",
+        "primary_locations": [
+          {
+            "id": "loc_moor_mine",
+            "name": "Abandoned Coal Mine Colliery",
+            "sub_locations": [
+              {
+                "id": "sub_mine_shaft",
+                "name": "Dark Mine Shaft Entry"
+              },
+              {
+                "id": "sub_engine_shed",
+                "name": "Rusted Boiler Shed"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "sci_fi": {
+    "zones": [
+      {
+        "id": "zone_orbital_station",
+        "name": "Central Orbital Station",
+        "is_hub": true,
+        "theme": "Deep-Space Modular Orbital Station",
+        "features": "Multi-tiered circular promenade rings, reinforced titanium airlock bulkheads, busy commercial docking bays, and panoramic viewing cupolas overlooking the nebula.",
+        "sensory": "Low rhythmic vibration of life-support grav-plating, distant hum of sub-light thrusters, sanitized recycled air, and brilliant purple nebula glow streaming through transparent viewports.",
+        "primary_locations": [
+          {
+            "id": "loc_station_promenade",
+            "name": "Station Central Promenade",
+            "sub_locations": [
+              {
+                "id": "sub_trading_kiosk",
+                "name": "Galactic Trading Kiosks"
+              },
+              {
+                "id": "sub_security_checkpoint",
+                "name": "Station Security Checkpoint"
+              }
+            ]
+          },
+          {
+            "id": "loc_ship_dock",
+            "name": "Hangar Bay 4",
+            "sub_locations": [
+              {
+                "id": "sub_player_ship",
+                "name": "Your Starship Airlock"
+              },
+              {
+                "id": "sub_refueling_station",
+                "name": "Refueling Station"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_starship_vanguard",
+        "name": "The Vanguard Starship",
+        "is_hub": true,
+        "theme": "Long-Range Military Exploration Cruiser",
+        "features": "Armored command bridge decks, compact crew quarters, insulated hyperdrive reactor chambers, and heavy engineering work bays.",
+        "sensory": "Soft audio pings from tactical sensor consoles, the smell of warm electrical insulation and ozone, magnetic floor plate hum, and dim amber emergency light strips.",
+        "primary_locations": [
+          {
+            "id": "loc_bridge",
+            "name": "Command Bridge",
+            "sub_locations": [
+              {
+                "id": "sub_captains_chair",
+                "name": "Captain's Chair"
+              },
+              {
+                "id": "sub_helm_console",
+                "name": "Navigation Helm"
+              }
+            ]
+          },
+          {
+            "id": "loc_engineering",
+            "name": "Engineering Bay",
+            "sub_locations": [
+              {
+                "id": "sub_hyperdrive_core",
+                "name": "Hyperdrive Core"
+              },
+              {
+                "id": "sub_workbench",
+                "name": "Mechanic's Workbench"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_homeworld_capital",
+        "name": "Homeworld Capital Metropolis",
+        "is_hub": true,
+        "theme": "Utopian Planetary Megacity & Senate Spire",
+        "features": "Towering crystalline spires rising above cloud layers, anti-gravity traffic lanes, grand planetary senate plazas, and vast terraformed botanical domes.",
+        "sensory": "Hum of repulsorlift engines, clean oxygenated air, warm golden sunlight reflecting off solar-glass monoliths, and chiming transit announcements.",
+        "primary_locations": [
+          {
+            "id": "loc_senate_plaza",
+            "name": "Planetary Senate Plaza",
+            "sub_locations": [
+              {
+                "id": "sub_senate_chamber",
+                "name": "Grand Assembly Chamber"
+              },
+              {
+                "id": "sub_diplomatic_lounge",
+                "name": "Diplomatic Reception Hall"
+              }
+            ]
+          },
+          {
+            "id": "loc_spaceport_central",
+            "name": "Planetary Gateway Spaceport",
+            "sub_locations": [
+              {
+                "id": "sub_customs_terminal",
+                "name": "Interstellar Customs Terminal"
+              },
+              {
+                "id": "sub_freighter_pad",
+                "name": "Heavy Transport Landing Pad"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_desert_planet",
+        "name": "Desert Mining Planet",
+        "is_frontier": true,
+        "hazard": "heat",
+        "theme": "Arid Sand Dune World & Spice Mining Rigs",
+        "features": "Vast sand oceans with giant crawler mining rigs, rocky canyons, underground moisture farms, and trading outposts.",
+        "sensory": "Scorching twin-sun heat, howling grit-laden sandstorms, rhythmic clatter of heavy mineral extractors, and bone-dry air.",
+        "primary_locations": [
+          {
+            "id": "loc_mining_outpost",
+            "name": "Crawler Mining Outpost",
+            "sub_locations": [
+              {
+                "id": "sub_harvester_deck",
+                "name": "Crawler Extraction Deck"
+              },
+              {
+                "id": "sub_moisture_vault",
+                "name": "Underground Moisture Cistern"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_ice_planet",
+        "name": "Ice & Tundra Planet",
+        "is_frontier": true,
+        "hazard": "cold",
+        "theme": "Glacial Cryo World & Thermal Research Domes",
+        "features": "Vast frozen nitrogen plains, deep glacial crevasses, heated dome habitats, and ancient ice-covered alien ruins.",
+        "sensory": "Sub-zero blizzard winds howling outside thermal glass, crunch of frozen ground under exo-suits, and shimmering auroras across starry skies.",
+        "primary_locations": [
+          {
+            "id": "loc_research_base",
+            "name": "Cryo Research Station",
+            "sub_locations": [
+              {
+                "id": "sub_thermal_dome",
+                "name": "Headed Habitat Dome"
+              },
+              {
+                "id": "sub_ice_drill",
+                "name": "Sub-Glacial Deep Core Drill"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_jungle_planet",
+        "name": "Bioluminescent Jungle Planet",
+        "is_frontier": true,
+        "theme": "Lush Alien Rainforest with Bioluminescent Flora",
+        "features": "Gigantic alien canopy trees, glowing violet spore groves, predatory alien fauna, and canopy research platforms.",
+        "sensory": "Humming ambient bio-resonance, neon cyan and magenta glow in the perpetual twilight, rich humid air, and alien beast calls echoing through trees.",
+        "primary_locations": [
+          {
+            "id": "loc_canopy_platform",
+            "name": "Canopy Research Platform",
+            "sub_locations": [
+              {
+                "id": "sub_observation_kiosk",
+                "name": "Bio-Scanner Station"
+              },
+              {
+                "id": "sub_ropeway_gondola",
+                "name": "Canopy Transit Cable"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_volcanic_planet",
+        "name": "Volcanic Foundry Planet",
+        "is_frontier": true,
+        "hazard": "heat",
+        "theme": "Molten Igneous World & Deep Core Refineries",
+        "features": "Rivers of flowing molten rock, active volcanic calderas, heat-shielded geothermal siphons, and heavy industrial foundries.",
+        "sensory": "Intense furnace heat radiating through thermo-suits, deafening roar of lava fountains, acrid sulfur gas, and rumbling planetary quakes.",
+        "primary_locations": [
+          {
+            "id": "loc_core_refinery",
+            "name": "Geothermal Core Refinery",
+            "sub_locations": [
+              {
+                "id": "sub_lava_catwalk",
+                "name": "Shielded Catwalk"
+              },
+              {
+                "id": "sub_extraction_core",
+                "name": "Thermal Siphon Core"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_ocean_planet",
+        "name": "Ocean Planet",
+        "is_frontier": true,
+        "hazard": "coastal",
+        "theme": "Endless Water World & Floating Seafloor Rigs",
+        "features": "Endless blue oceans without natural landmasses, floating pontoon platform cities, and deep-sea submersible docking bays.",
+        "sensory": "Rhythmic ocean swell beneath floating decks, salty spray in the wind, humming submersible turbines, and brilliant blue skies.",
+        "primary_locations": [
+          {
+            "id": "loc_floating_platform",
+            "name": "Floating Platform City",
+            "sub_locations": [
+              {
+                "id": "sub_submersible_dock",
+                "name": "Deep-Sea Submersible Bay"
+              },
+              {
+                "id": "sub_open_deck",
+                "name": "Ocean Landing Deck"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_asteroid_belt",
+        "name": "Asteroid Belt Mining Colony",
+        "is_frontier": true,
+        "theme": "Hollowed Asteroid Base & Zero-G Mining Field",
+        "features": "Tunnels drilled deep into iron-rich asteroids, zero-gravity ore processing chutes, pressurized miner habitats, and docking clamps.",
+        "sensory": "Complete silent vacuum outside viewing ports, vibration of heavy rock crushers through the deck, smell of recycled air and metal dust.",
+        "primary_locations": [
+          {
+            "id": "loc_asteroid_colony",
+            "name": "Hollow Asteroid Hab",
+            "sub_locations": [
+              {
+                "id": "sub_zero_g_dock",
+                "name": "Magnetic Clamping Berth"
+              },
+              {
+                "id": "sub_miner_cantina",
+                "name": "The Drift-Lock Cantina"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

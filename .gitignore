@@ -1,0 +1,59 @@
+# Environment & Secrets
+.env
+*.env
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*.class
+*.so
+.Python
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Process & Runtime Locks
+.bot.pid
+.bot.lock
+
+# Archives & Backups
+archives/
+*.bak
+*.tmp
+*.zip
+
+# OS & Editor artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Databases & SQLite Runtime
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Scratch & Temporary Scripts
+scratch/
+
+# Dependencies & Executables
+node_modules/
+frontend/node_modules/
+*.exe
+bin/cloudflared.exe
+releases/*.zip
+!releases/*.md
+
+
+# Old db location
+hikayat.db

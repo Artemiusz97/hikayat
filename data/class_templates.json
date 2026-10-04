@@ -1,0 +1,2269 @@
+{
+  "fantasy": {
+    "Paladin": {
+      "description": "Holy warrior dedicated to protecting the innocent and vanquishing evil.",
+      "starting_items": [
+        [
+          "Holy Symbol",
+          "Quest",
+          "Focus for divine blessings.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Holy Knight's Greathelm",
+          "Steel helm inscribed with prayer runes.",
+          2
+        ],
+        "Weapon": [
+          "Radiant Longsword",
+          "Blade inscribed with holy glyphs.",
+          2
+        ],
+        "Armor": [
+          "Gilded Plate Cuirass",
+          "Shining armor imbued with holy warding.",
+          3
+        ],
+        "Top": [
+          "Linen Holy Vestment",
+          "Simple white linen robe worn under plate.",
+          1
+        ],
+        "Bottom": [
+          "Plate Legguards",
+          "Polished leg guards adorned with golden trim.",
+          2
+        ],
+        "Gloves": [
+          "Blessed Gauntlets",
+          "Finely crafted gauntlets that resist curses.",
+          1
+        ],
+        "Shoes": [
+          "Armored Sabatons",
+          "Polished steel boots.",
+          1
+        ],
+        "Shield": [
+          "Tower Shield",
+          "Large crest-bearing shield.",
+          2
+        ]
+      }
+    },
+    "Archmage": {
+      "description": "Master of arcane forces, elemental destruction, and spellcraft.",
+      "starting_items": [
+        [
+          "Grimoire of Arcana",
+          "Quest",
+          "Contains ancient high-magic incantations.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Arcane Circlet",
+          "Silver circlet humming with magical focus.",
+          2
+        ],
+        "Weapon": [
+          "Arcane Staff",
+          "Focus crystal staff that amplifies spells.",
+          1
+        ],
+        "Top": [
+          "Silk Robes of Mysticism",
+          "Richly embroidered magical robes.",
+          2
+        ],
+        "Bottom": [
+          "Enchanted Robe Skirt / Enchanted Robe Trousers",
+          "Flowing lower robes woven with mana thread.",
+          1
+        ],
+        "Gloves": null,
+        "Shoes": [
+          "Rune-Stitched Boots",
+          "Light boots that hover slightly off the ground.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Ranger": {
+      "description": "Master marksman and wilderness scout attuned to nature's call.",
+      "starting_items": [
+        [
+          "Quiver of Wayfinding",
+          "Quest",
+          "Contains specialized arrows.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Forester's Camo Cowl",
+          "Hood dyed in deep forest greens.",
+          1
+        ],
+        "Weapon": [
+          "Elven Recurve Bow",
+          "Finely crafted bow with exceptional range.",
+          2
+        ],
+        "Top": [
+          "Forest Linen Shirt",
+          "Simple green linen shirt.",
+          1
+        ],
+        "Bottom": [
+          "Sturdy Leather Leggings",
+          "Flexible leggings for traversing wilderness.",
+          1
+        ],
+        "Gloves": [
+          "Archer's Bracers",
+          "Provides smooth string releases.",
+          1
+        ],
+        "Shoes": [
+          "Silent Tracker Boots",
+          "Boots that leave minimal tracks.",
+          1
+        ],
+        "Shield": null,
+        "Armor": [
+          "Forest Camo Gambeson",
+          "Light green and brown armor that blends with foliage.",
+          3
+        ]
+      }
+    },
+    "Bard": {
+      "description": "Charismatic performer whose tunes inspire allies and confound foes.",
+      "starting_items": [
+        [
+          "Ornate Lute",
+          "Quest",
+          "Musical instrument of fine resonance.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Plumed Cavalier Hat",
+          "Flamboyant velvet hat adorned with a peacock feather.",
+          1
+        ],
+        "Weapon": [
+          "Silver Rapier",
+          "Graceful rapier for elegant defense.",
+          1
+        ],
+        "Armor": [
+          "Feathered Vestments",
+          "Vibrant, stylish doublet with a grand cape.",
+          2
+        ],
+        "Top": [
+          "Linen Shirt",
+          "A simple comfortable shirt.",
+          1
+        ],
+        "Bottom": [
+          "Tailored Pants",
+          "Fine silk-lined trousers.",
+          1
+        ],
+        "Gloves": [
+          "Performer Gloves",
+          "Thin leather gloves allowing full dexterity.",
+          1
+        ],
+        "Shoes": [
+          "Dancing Shoes",
+          "Polished leather shoes built for agility.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Rogue": {
+      "description": "Stealthy infiltrator and shadow striker specializing in lockpicking, poisons, and precision criticals.",
+      "starting_items": [
+        [
+          "Thieves' Toolkit",
+          "Quest",
+          "Set of durable lockpicks and tension wrenches.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Shadow Silk Hood",
+          "Dark cowl that shrouds facial features.",
+          1
+        ],
+        "Weapon": [
+          "Twin Poisoned Daggers",
+          "Dual serrated daggers tipped with viper venom.",
+          2
+        ],
+        "Armor": [
+          "Shadow Silk Gambeson",
+          "Supple dark armor designed for silent movement.",
+          2
+        ],
+        "Top": [
+          "Dark Linen Undershirt",
+          "Simple dark undershirt.",
+          1
+        ],
+        "Bottom": [
+          "Leather Stealth Trousers",
+          "Fitted pants with sound-dampening leg wraps.",
+          1
+        ],
+        "Gloves": [
+          "Fingerless Rogue Grips",
+          "Soft gloves that preserve fine touch for lock manipulation.",
+          1
+        ],
+        "Shoes": [
+          "Muffled Stalker Boots",
+          "Soft-soled boots leaving no audible footsteps.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Druid": {
+      "description": "Guardian of the wild who channels primal nature magic, storm energy, and animal forms.",
+      "starting_items": [
+        [
+          "Totem of the Wild",
+          "Quest",
+          "Carved wooden effigy attuned to beast spirits.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Antler Headdress",
+          "Woven crown of living oak branches and stag horns.",
+          1
+        ],
+        "Weapon": [
+          "Oak Shaman Staff",
+          "Carved staff topped with an emerald focus gem.",
+          1
+        ],
+        "Top": [
+          "Living Bark Tunic",
+          "Woven hide and hardened living briar armor.",
+          2
+        ],
+        "Bottom": [
+          "Furred Bramble Leggings",
+          "Flexible hide leggings reinforced with vine weave.",
+          1
+        ],
+        "Gloves": [
+          "Root-Weave Wraps",
+          "Supple herbalist hand wraps.",
+          1
+        ],
+        "Shoes": [
+          "Moss-Trod Moccasins",
+          "Light footwear that glides over thorns and marshland.",
+          1
+        ],
+        "Shield": [
+          "Woven Briar Buckler",
+          "Light wooden shield ringed with thorny vines.",
+          1
+        ]
+      }
+    }
+  },
+  "sci_fi": {
+    "Marine": {
+      "description": "Hardened front-line soldier skilled in heavy combat and tactical assault.",
+      "starting_items": [
+        [
+          "Combat Armor",
+          "Armor",
+          "Plated ballistic suit.",
+          3
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Tactical Drop-Helmet",
+          "Hardened composite combat helmet with integrated comms.",
+          2
+        ],
+        "Weapon": [
+          "Pulse Rifle",
+          "Standard military-issue energy rifle.",
+          2
+        ],
+        "Armor": [
+          "Tactical Vest",
+          "Reinforced kevlar-composite chestguard.",
+          3
+        ],
+        "Top": [
+          "Military Undershirt",
+          "Standard issue military undershirt.",
+          1
+        ],
+        "Bottom": [
+          "Fatigue Pants",
+          "Durable combat trousers with utility pockets.",
+          2
+        ],
+        "Gloves": [
+          "Reinforced Gauntlets",
+          "Insulated combat gloves with knuckle plating.",
+          1
+        ],
+        "Shoes": [
+          "Magnetic Boots",
+          "Heavy tread boots built for zero-g and rough terrain.",
+          1
+        ],
+        "Shield": [
+          "Energy Shield Emitter",
+          "Compact deflector shield module.",
+          2
+        ]
+      }
+    },
+    "Hacker": {
+      "description": "Cybernetic infiltrator who overrides systems and controls tech.",
+      "starting_items": [
+        [
+          "Data Deck",
+          "Quest",
+          "Portable terminal for breaking firmware.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Neural Interface Visor",
+          "Lightweight HUD visor for cyber-warfare telemetry.",
+          1
+        ],
+        "Weapon": [
+          "Stun Pistol",
+          "Non-lethal defensive firearm.",
+          1
+        ],
+        "Top": [
+          "Hooded Windbreaker",
+          "Stealth jacket with wired sensor lining.",
+          1
+        ],
+        "Bottom": [
+          "Cargo Pants",
+          "Flexible pants storing cables and micro-tools.",
+          1
+        ],
+        "Gloves": [
+          "Haptic Interface Gloves",
+          "Sensory gloves for rapid code execution.",
+          1
+        ],
+        "Shoes": [
+          "Rubber-Soled Sneakers",
+          "Silent sneakers designed for stealth entries.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Engineer": {
+      "description": "Ship specialist capable of repairing critical systems and improvising gear.",
+      "starting_items": [
+        [
+          "Omni-Tool",
+          "Quest",
+          "Multipurpose diagnostic and welding apparatus.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Welder's HUD Visor",
+          "Protective optical visor with schematic display.",
+          1
+        ],
+        "Weapon": [
+          "Plasma Torch",
+          "Heavy industrial cutter turned secondary weapon.",
+          2
+        ],
+        "Top": [
+          "Work Jumpsuit",
+          "Heat-resistant heavy utility coat.",
+          2
+        ],
+        "Bottom": [
+          "Work Trousers",
+          "Reinforced canvas pants with knee pads.",
+          1
+        ],
+        "Gloves": [
+          "Insulated Work Gloves",
+          "Protects against electric shock and extreme heat.",
+          1
+        ],
+        "Shoes": [
+          "Steel-Toe Boots",
+          "Heavy industrial safety boots.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Smuggler": {
+      "description": "Resourceful outlaw who excels at evasion, trickery, and fast draw.",
+      "starting_items": [
+        [
+          "Fake ID Chip",
+          "Quest",
+          "Bypasses low-level security checkpoints.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Aviator Blast-Goggles",
+          "Polarized goggles worn by starfreighter runners.",
+          1
+        ],
+        "Weapon": [
+          "Blaster Pistol",
+          "Custom modified sidearm.",
+          1
+        ],
+        "Top": [
+          "Flight Jacket",
+          "Stylish leather jacket with concealed holsters.",
+          2
+        ],
+        "Bottom": [
+          "Denim Trousers",
+          "Comfortable, worn pilot pants.",
+          1
+        ],
+        "Gloves": [
+          "Pilot Gloves",
+          "Thin leather gloves for precise cockpit controls.",
+          1
+        ],
+        "Shoes": [
+          "Pilot Boots",
+          "Durable leather flight boots.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Bounty Hunter": {
+      "description": "Relentless tracker specializing in capturing high-value targets across the galactic fringe.",
+      "starting_items": [
+        [
+          "Tracking Beacon Holoprojector",
+          "Quest",
+          "Encrypted scanner holding live warrant data.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Target-Lock Full Helmet",
+          "Enclosed tracking helmet with thermal sensors.",
+          2
+        ],
+        "Weapon": [
+          "Thermal Carbine",
+          "Scoped energy rifle optimized for medium to long-range takedowns.",
+          2
+        ],
+        "Armor": [
+          "Hardened Plasteel Cuirass",
+          "Modular armored vest with tactical ammo bandoliers.",
+          3
+        ],
+        "Top": [
+          "Military Undershirt",
+          "Standard issue undershirt.",
+          1
+        ],
+        "Bottom": [
+          "Reinforced Flight Trousers",
+          "Durable ballistic pants with magnetic holster points.",
+          2
+        ],
+        "Gloves": [
+          "Targeting Sensor Gauntlets",
+          "Combat gloves with wrist-mounted HUD link.",
+          1
+        ],
+        "Shoes": [
+          "Grav-Anchor Boots",
+          "Heavy boots capable of locking onto ship hulls.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Psionic Operative": {
+      "description": "Genetically enhanced telepath who manifests kinetic barriers, mind probes, and psychic strikes.",
+      "starting_items": [
+        [
+          "Neural Focus Amp",
+          "Quest",
+          "Cranial implant amplifier regulating psionic strain.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Psionic Focus Diadem",
+          "Neural mesh headband amplifying psionic wave frequencies.",
+          2
+        ],
+        "Weapon": [
+          "Psionic Psi-Blade",
+          "Hilt focusing mental focus into a superheated plasma blade.",
+          1
+        ],
+        "Armor": [
+          "Bio-Weave Bodysuit",
+          "Form-fitting suit woven with synaptic conduits.",
+          2
+        ],
+        "Top": [
+          "Military Undershirt",
+          "Standard issue undershirt.",
+          1
+        ],
+        "Bottom": [
+          "Bio-Weave Slacks",
+          "Flexible conductive leggings.",
+          1
+        ],
+        "Gloves": [
+          "Synapse Interface Gloves",
+          "Gloves lined with bio-electric nodes.",
+          1
+        ],
+        "Shoes": [
+          "Low-Friction Striders",
+          "Lightweight ergonomic footwear.",
+          1
+        ],
+        "Shield": [
+          "Kinetic Barrier Core",
+          "Energy emitter projecting a telekinetic deflector shield.",
+          2
+        ]
+      }
+    }
+  },
+  "cyberpunk": {
+    "Street Samurai": {
+      "description": "Lethal front-line mercenary equipped with chrome augmentations and reflex boosters.",
+      "starting_items": [
+        [
+          "Subdermal Armor",
+          "Armor",
+          "Subterranean cybernetic skin weave.",
+          3
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Carbon-Fiber Tactical Half-Mask",
+          "Ballistic lower faceplate with air filter.",
+          1
+        ],
+        "Weapon": [
+          "Thermal Katana",
+          "High-frequency monomolecular blade.",
+          2
+        ],
+        "Armor": [
+          "Leather Duster",
+          "Reinforced Kevlar trench coat with neon accents.",
+          3
+        ],
+        "Top": [
+          "Synthetic T-Shirt",
+          "Breathable urban wear.",
+          1
+        ],
+        "Bottom": [
+          "Combat Leather Pants",
+          "Armored pants with holsters.",
+          2
+        ],
+        "Gloves": [
+          "Chrome Knuckle Gloves",
+          "Augmented grip gloves with reinforced knuckles.",
+          1
+        ],
+        "Shoes": [
+          "Combat High-Tops",
+          "Shock-absorbing urban boots.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Netrunner": {
+      "description": "Master hacker who dives into neural net space to breach ICE and override enemy implants.",
+      "starting_items": [
+        [
+          "Cyberdeck",
+          "Quest",
+          "Military-grade neural interface computer.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Kiroshi Neural HUD Visor",
+          "High-spec ocular visor with real-time ICE tracking.",
+          2
+        ],
+        "Weapon": [
+          "Smart Pistol",
+          "Target-seeking auto-aim pistol.",
+          1
+        ],
+        "Top": [
+          "Cyberware Jacket",
+          "Cooling-lined jacket designed for netdecking.",
+          1
+        ],
+        "Bottom": [
+          "Tech Pants",
+          "Utility pants loaded with cable ports.",
+          1
+        ],
+        "Gloves": [
+          "Interface Gloves",
+          "Neural wire interface gloves.",
+          1
+        ],
+        "Shoes": [
+          "Stealth Runners",
+          "Noise-canceling athletic shoes.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Techie": {
+      "description": "Hardware wizard and combat engineer specializing in drones and cyberware maintenance.",
+      "starting_items": [
+        [
+          "Drone Control Rig",
+          "Quest",
+          "Handheld controller for combat drones.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Magnifying Tech Goggles",
+          "Articulated multi-lens work spectacles.",
+          1
+        ],
+        "Weapon": [
+          "Shock Baton",
+          "High-voltage melee weapon.",
+          1
+        ],
+        "Armor": [
+          "Workshop Overalls",
+          "Grease-stained heavy utility vest.",
+          2
+        ],
+        "Top": [
+          "Synthetic T-Shirt",
+          "Breathable urban wear.",
+          1
+        ],
+        "Bottom": [
+          "Reinforced Cargo Pants",
+          "Multi-pocket work trousers.",
+          1
+        ],
+        "Gloves": [
+          "Insulated Tech Gloves",
+          "Electrical hazard protection gloves.",
+          1
+        ],
+        "Shoes": [
+          "Steel-Cap Boots",
+          "Heavy industrial safety footwear.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Fixer": {
+      "description": "Underground broker with street influence, corporate contacts, and black-market gear.",
+      "starting_items": [
+        [
+          "Encrypted Commlink",
+          "Quest",
+          "Secure phone connecting to underworld brokers.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "High-Roller Trilby",
+          "Bespoke designer hat with subtle neon piping.",
+          1
+        ],
+        "Weapon": [
+          "Heavy Handgun",
+          "High-calibre sidearm for self-defense.",
+          2
+        ],
+        "Top": [
+          "Tailored Suit Jacket",
+          "Silk-lined bulletproof suit jacket.",
+          2
+        ],
+        "Bottom": [
+          "Tailored Trousers",
+          "Sleek corporate trousers.",
+          1
+        ],
+        "Gloves": [
+          "Leather Driving Gloves",
+          "Custom driving gloves.",
+          1
+        ],
+        "Shoes": [
+          "Polished Oxford Shoes",
+          "Sleek footwear with hidden lockpicks.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Ripperdoc": {
+      "description": "Underground cyber-surgeon specializing in black-market bioware, combat stims, and emergency trauma care.",
+      "starting_items": [
+        [
+          "Trauma Care Med-Rig",
+          "Quest",
+          "Compact kit with synthetic blood, trauma clamps, and coagulants.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Surgical Optical Rig",
+          "Multi-spectrum surgical loupe and headlamp.",
+          1
+        ],
+        "Weapon": [
+          "Hydraulic Bone Saw",
+          "High-torque surgical saw adapted for lethal self-defense.",
+          2
+        ],
+        "Armor": [
+          "Antiseptic Kevlar Labcoat",
+          "Stain-resistant armored trench coat with medical pouches.",
+          2
+        ],
+        "Top": [
+          "Synthetic T-Shirt",
+          "Breathable urban wear.",
+          1
+        ],
+        "Bottom": [
+          "Reinforced Scrubs",
+          "Tough, sterile combat cargo pants.",
+          1
+        ],
+        "Gloves": [
+          "Precision Surgical Gauntlets",
+          "Micro-motorized gloves for delicate neural repairs.",
+          1
+        ],
+        "Shoes": [
+          "Sanitized Steel-Toes",
+          "Slip-resistant urban boots.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Nomad Outrider": {
+      "description": "Hardened badlands driver and scout skilled in vehicular combat, survival, and scavenging.",
+      "starting_items": [
+        [
+          "Vehicle Diagnostic Comm",
+          "Quest",
+          "Tuner console for overclocking vehicle engines and drones.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Sandstorm Biker Goggles",
+          "Tinted dust-resistant goggles with leather strap.",
+          1
+        ],
+        "Weapon": [
+          "Sawed-Off Street Shotgun",
+          "High-spread heavy kinetic firearm.",
+          2
+        ],
+        "Armor": [
+          "Dust-Worn Biker Leathers",
+          "Heavy road leathers studded with scrap plating.",
+          3
+        ],
+        "Top": [
+          "Synthetic T-Shirt",
+          "Breathable urban wear.",
+          1
+        ],
+        "Bottom": [
+          "Chaps & Armored Denim",
+          "Rugged wasteland motorcycle pants.",
+          2
+        ],
+        "Gloves": [
+          "Heavy Padded Biker Gloves",
+          "Reinforced gloves protecting hands from road rash and recoil.",
+          1
+        ],
+        "Shoes": [
+          "Steel-Heel Riding Boots",
+          "Heavy leather boots with reinforced ankle support.",
+          1
+        ],
+        "Shield": null
+      }
+    }
+  },
+  "steampunk": {
+    "Clockwork Artificer": {
+      "description": "Master craftsman who constructs automata and steam-powered contraptions.",
+      "starting_items": [
+        [
+          "Clockwork Toolkit",
+          "Quest",
+          "Brass tools for assembling steam devices.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Brass Multilens Goggles",
+          "Intricate goggles with telescoping aether lenses.",
+          2
+        ],
+        "Weapon": [
+          "Aether Musket",
+          "Steam-charged long-range rifle.",
+          2
+        ],
+        "Top": [
+          "Leather Apron",
+          "Heavy leather smithing apron with brass buckles.",
+          2
+        ],
+        "Bottom": [
+          "Pinstripe Trousers",
+          "Durable Victorian work trousers.",
+          1
+        ],
+        "Gloves": [
+          "Brass-Plated Gauntlets",
+          "Heavy mechanical gauntlets.",
+          1
+        ],
+        "Shoes": [
+          "Work Boots",
+          "Sturdy leather lace-up boots.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Airship Privateer": {
+      "description": "Daring aeronaut skilled in sky navigation, grappling, and aerial combat.",
+      "starting_items": [
+        [
+          "Brass Goggles",
+          "Quest",
+          "Aeronautical vision-enhancer.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Pilot Leather Cap & Goggles",
+          "Fleece-lined leather flight cap with brass goggles.",
+          1
+        ],
+        "Weapon": [
+          "Steam Revolver",
+          "High-pressure brass sidearm.",
+          2
+        ],
+        "Top": [
+          "Aeronaut Coat",
+          "Double-breasted leather flight coat.",
+          2
+        ],
+        "Bottom": [
+          "Riding Breeches",
+          "Tough canvas pilot pants.",
+          1
+        ],
+        "Gloves": [
+          "Flight Gauntlets",
+          "Insulated sheepskin gauntlets.",
+          1
+        ],
+        "Shoes": [
+          "Knee-High Boots",
+          "Polished leather aeronaut boots.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Steam Engineer": {
+      "description": "Stout mechanic who overcharges boilers and wields heavy mechanical tools.",
+      "starting_items": [
+        [
+          "Pressure Gauge",
+          "Quest",
+          "Monitors boiler output and steam reserves.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Boiler-Tender Hardhat",
+          "Heavy riveted brass safety helmet.",
+          1
+        ],
+        "Weapon": [
+          "Heavy Spanner",
+          "Massive iron wrench turned crushing weapon.",
+          2
+        ],
+        "Top": [
+          "Boiler Suit",
+          "Heavy canvas overalls with heat shielding.",
+          2
+        ],
+        "Bottom": [
+          "Thick Canvas Pants",
+          "Soot-stained work trousers.",
+          1
+        ],
+        "Gloves": [
+          "Asbestos Gloves",
+          "Heat-proof heavy gloves.",
+          1
+        ],
+        "Shoes": [
+          "Reinforced Boots",
+          "Heavy iron-toed work boots.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Aether Specialist": {
+      "description": "Scholar of alchemical energy and aetheric pressure conductors.",
+      "starting_items": [
+        [
+          "Aether Condenser",
+          "Quest",
+          "Glass flask channeling ambient aether.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Aether-Resonance Diadem",
+          "Tuned copper band glowing with faint blue charge.",
+          2
+        ],
+        "Weapon": [
+          "Clockwork Rapier",
+          "Spring-loaded mechanized blade.",
+          1
+        ],
+        "Top": [
+          "Scholar Waistcoat",
+          "Velvet waistcoat with brass pocketwatch chain.",
+          1
+        ],
+        "Bottom": [
+          "Formal Trousers",
+          "Tailored wool trousers.",
+          1
+        ],
+        "Gloves": [
+          "Velvet Gloves",
+          "Fine gloves for delicate alchemical handling.",
+          1
+        ],
+        "Shoes": [
+          "Button Boots",
+          "Classic Victorian dress boots.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Occult Investigator": {
+      "description": "Inquisitive detective navigating gaslit alleys to uncover forbidden conspiracies and eldritch anomalies.",
+      "starting_items": [
+        [
+          "Magnifying Casebook",
+          "Quest",
+          "Leather dossier packed with case notes, runes, and forensics powder.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Deerstalker Cap",
+          "Classic tweed wool cap with dual ear flaps.",
+          1
+        ],
+        "Weapon": [
+          "Concealed Derringer",
+          "Compact double-barrel brass pocket pistol.",
+          1
+        ],
+        "Top": [
+          "Tweed Infiltration Coat",
+          "Tailored woolen trench coat with hidden pockets.",
+          2
+        ],
+        "Bottom": [
+          "Pressed Woolen Trousers",
+          "Smart Victorian trousers.",
+          1
+        ],
+        "Gloves": [
+          "Kidskin Search Gloves",
+          "Thin leather gloves allowing sensitive tactile investigation.",
+          1
+        ],
+        "Shoes": [
+          "Cobblestone Brogues",
+          "Sturdy leather walking shoes with silent rubber soles.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Alchemical Gunslinger": {
+      "description": "Crack shot who loads custom alchemical cartridges filled with phosphorus, acid, and freezing agents.",
+      "starting_items": [
+        [
+          "Alchemical Bandolier",
+          "Quest",
+          "Vials of volatile reagents and specialty powder mixtures.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Officer Peaked Cap",
+          "Stiff wool peaked cap with gold wire insignia.",
+          1
+        ],
+        "Weapon": [
+          "Twin Brass Pistols",
+          "Matched pair of engraved, steam-assisted revolvers.",
+          2
+        ],
+        "Armor": [
+          "Reinforced Leather Duster",
+          "Long coat treated with fire-retardant alchemical wax.",
+          2
+        ],
+        "Top": [
+          "Linen Shirt",
+          "A simple comfortable shirt.",
+          1
+        ],
+        "Bottom": [
+          "Holstered Riding Breeches",
+          "Durable breeches fitted with dual thigh holsters.",
+          1
+        ],
+        "Gloves": [
+          "Shooter's Fingerless Gloves",
+          "Supple leather gloves with padded palms.",
+          1
+        ],
+        "Shoes": [
+          "Spurred Aeronaut Boots",
+          "High boots with polished brass buckles.",
+          1
+        ],
+        "Shield": null
+      }
+    }
+  },
+  "dark_fantasy": {
+    "Blood Hunter": {
+      "description": "Relentless monster slayer using blood rites and dark martial prowess.",
+      "starting_items": [
+        [
+          "Monster Scalp",
+          "Quest",
+          "Proof of a previous grim hunt.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Crimson Stalker Hood",
+          "Dark red leather cowl stained with beast blood.",
+          1
+        ],
+        "Weapon": [
+          "Silver Cleaver",
+          "Heavy blade etched with anti-curse runes.",
+          2
+        ],
+        "Armor": [
+          "Boiled Leather Cuirass",
+          "Hardened leather marked with protective wards.",
+          3
+        ],
+        "Top": [
+          "Linen Shirt",
+          "A simple comfortable shirt.",
+          1
+        ],
+        "Bottom": [
+          "Studded Greaves",
+          "Heavy leather leg armor reinforced with iron studs.",
+          2
+        ],
+        "Gloves": [
+          "Grip Gloves",
+          "Rough leather gloves stained with dried oil.",
+          1
+        ],
+        "Shoes": [
+          "Heavy Riding Boots",
+          "Thick leather boots built for treacherous bogs.",
+          1
+        ],
+        "Shield": [
+          "Iron Buckler",
+          "Small notched iron shield.",
+          2
+        ]
+      }
+    },
+    "Inquisitor": {
+      "description": "Fanatical seeker of corruption wielding divine flame and holy law.",
+      "starting_items": [
+        [
+          "Witchhunter Tome",
+          "Quest",
+          "Record of forbidden rites and heresy.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Inquisitor's Wide-Brimmed Hat",
+          "Stiff leather hat casting a severe shadow.",
+          1
+        ],
+        "Weapon": [
+          "Flanged Mace",
+          "Heavy blunt weapon built to crush bone.",
+          2
+        ],
+        "Armor": [
+          "Iron Breastplate",
+          "Polished iron chestplate bearing a holy symbol.",
+          3
+        ],
+        "Top": [
+          "Linen Shirt",
+          "A simple comfortable shirt.",
+          1
+        ],
+        "Bottom": [
+          "Chainmail Coif & Leggings",
+          "Layered mail over thick padded trousers.",
+          2
+        ],
+        "Gloves": [
+          "Iron-Riveted Gauntlets",
+          "Heavy gauntlets meant for harsh interrogation.",
+          1
+        ],
+        "Shoes": [
+          "Iron Boots",
+          "Heavy boots that tread loudly.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Grave Digger": {
+      "description": "Grim survivor familiar with death, crypts, and necrotic threats.",
+      "starting_items": [
+        [
+          "Lantern of Guiding",
+          "Quest",
+          "Casts a pale light that pierces supernatural darkness.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Tattered Burlap Cowl",
+          "Soil-stained hood worn in desolate crypts.",
+          1
+        ],
+        "Weapon": [
+          "Heavy Trench Shovel",
+          "Sharpened shovel useful in melee and excavation.",
+          2
+        ],
+        "Armor": [
+          "Canvas Duster",
+          "Heavy oiled coat to ward off rain and corpse damp.",
+          2
+        ],
+        "Top": [
+          "Linen Shirt",
+          "A simple comfortable shirt.",
+          1
+        ],
+        "Bottom": [
+          "Thick Trousers",
+          "Mud-caked canvas trousers.",
+          1
+        ],
+        "Gloves": [
+          "Rough Leather Gloves",
+          "Thick work gloves built for digging.",
+          1
+        ],
+        "Shoes": [
+          "Mud-Stained Sabatons",
+          "Sturdy waterproof boots.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Cursed Knight": {
+      "description": "Fallen champion bound to a dark oath or necrotic blight.",
+      "starting_items": [
+        [
+          "Broken Crest",
+          "Quest",
+          "Relic of a forgotten noble order.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Defiled Tomb Greathelm",
+          "Weathered black iron helmet bearing abyssal etchings.",
+          2
+        ],
+        "Weapon": [
+          "Blighted Greatsword",
+          "Heavy double-edged blade weeping dark residue.",
+          3
+        ],
+        "Armor": [
+          "Tarnished Plate",
+          "Dented and blackened chest armor.",
+          3
+        ],
+        "Top": [
+          "Linen Shirt",
+          "A simple comfortable shirt.",
+          1
+        ],
+        "Bottom": [
+          "Blackened Greaves",
+          "Tarnished plate leg guards.",
+          2
+        ],
+        "Gloves": [
+          "Plated Gauntlets",
+          "Heavy metal gauntlets with rusted joints.",
+          1
+        ],
+        "Shoes": [
+          "War Boots",
+          "Heavy steel war boots.",
+          1
+        ],
+        "Shield": [
+          "Rusted Kite Shield",
+          "Tall shield with chipped paint.",
+          2
+        ]
+      }
+    },
+    "Plague Doctor": {
+      "description": "Grim practitioner who uses aromatic herbs, caustic vapors, and dissection tools to fight corruption.",
+      "starting_items": [
+        [
+          "Beak Mask & Vials",
+          "Quest",
+          "Aromatic mask filtering miasma alongside volatile chemical vials.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Plague Doctor's Beaked Mask",
+          "Waxed leather beaked mask packed with dried herbs.",
+          2
+        ],
+        "Weapon": [
+          "Surgical Bone Lancet",
+          "Razor-sharp elongated scalpel.",
+          1
+        ],
+        "Top": [
+          "Waxed Leather Robes",
+          "Thick oiled coat sealed against disease, bile, and gore.",
+          3
+        ],
+        "Bottom": [
+          "Heavy Treated Slacks",
+          "Waterproof leggings tucked into gaiters.",
+          1
+        ],
+        "Gloves": [
+          "Oiled Gauntlets",
+          "Thick gloves treated with caustic repellent.",
+          1
+        ],
+        "Shoes": [
+          "Plague Treader Boots",
+          "Heavy boots sealed with tar and wax.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Hex Weaver": {
+      "description": "Forsaken occultist who communes with elder spirits, binding curses and bone totems to afflict enemies.",
+      "starting_items": [
+        [
+          "Effigy of Torment",
+          "Quest",
+          "Straw and bone doll used to channel debilitating hexes.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Crown of Bone Thorns",
+          "Ritual headpiece woven from crow skulls and thorns.",
+          2
+        ],
+        "Weapon": [
+          "Bone-Carved Wand",
+          "Twisted wand carved from a cursed beast's femur.",
+          1
+        ],
+        "Top": [
+          "Tattered Shroud of Agony",
+          "Ragged dark cloak lined with bone charms.",
+          2
+        ],
+        "Bottom": [
+          "Ashen Skirt / Ashen Trousers",
+          "Threadbare lower robes woven with graveyard twine.",
+          1
+        ],
+        "Gloves": [
+          "Runic Hand Wraps",
+          "Bandages inscribed with protective blood glyphs.",
+          1
+        ],
+        "Shoes": [
+          "Wraith-Hide Boots",
+          "Quiet boots crafted from shadowed pelt.",
+          1
+        ],
+        "Shield": null
+      }
+    }
+  },
+  "isekai_fantasy": {
+    "Reincarnated Hero": {
+      "description": "A transferred soul bestowed with cheat-like potential and high adaptability.",
+      "starting_items": [
+        [
+          "Status Card",
+          "Quest",
+          "Appraisal card revealing attributes and skills.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Gilded Hero's Circlet",
+          "Radiant gold circlet bestowed by the goddess.",
+          2
+        ],
+        "Weapon": [
+          "Cheat Sword",
+          "Unusually sharp blade gifted upon reincarnation.",
+          2
+        ],
+        "Top": [
+          "Adventurer Coat",
+          "Standard beginner adventurer tunic from the guild.",
+          2
+        ],
+        "Bottom": [
+          "Traveler Trousers",
+          "Comfortable pants suitable for long journeys.",
+          1
+        ],
+        "Gloves": [
+          "Leather Gloves",
+          "Basic adventurer gloves.",
+          1
+        ],
+        "Shoes": [
+          "Guild Boots",
+          "Standard leather boots issued to recruits.",
+          1
+        ],
+        "Shield": [
+          "Beginner Shield",
+          "Simple wooden shield.",
+          2
+        ]
+      }
+    },
+    "Cheat Spellcaster": {
+      "description": "An otherworldly individual with boundless mana reserves and fast chant casting.",
+      "starting_items": [
+        [
+          "Grimoire of Modern Knowledge",
+          "Quest",
+          "Notes applying Earth science to fantasy magic.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Witch's Star Hat",
+          "Wide-brimmed pointed hat adorned with celestial stars.",
+          2
+        ],
+        "Weapon": [
+          "Goddess Staff",
+          "Increases spell efficiency.",
+          1
+        ],
+        "Top": [
+          "Beginner Robe",
+          "Clean robe given by the summoning temple.",
+          2
+        ],
+        "Bottom": [
+          "Robe Bottoms",
+          "Simple cloth lower garments.",
+          1
+        ],
+        "Gloves": null,
+        "Shoes": [
+          "Cloth Shoes",
+          "Lightweight footwear.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Summoned Student": {
+      "description": "A former high schooler forced into a hero role, relying on quick thinking and modern knowledge.",
+      "starting_items": [
+        [
+          "Modern Smartphone (No Signal)",
+          "Quest",
+          "Useful for notes, flashlight, and calculator.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Student Uniform Cap",
+          "Familiar school cap from the world left behind.",
+          1
+        ],
+        "Weapon": [
+          "Iron Shortsword",
+          "Standard issue self-defense blade.",
+          1
+        ],
+        "Top": [
+          "School Blazer Over Tunic",
+          "Slightly altered school uniform jacket.",
+          1
+        ],
+        "Bottom": [
+          "Uniform Pants",
+          "Sturdy school pants.",
+          1
+        ],
+        "Gloves": [
+          "Fingerless Work Gloves",
+          "Bought at the starting town market.",
+          1
+        ],
+        "Shoes": [
+          "School Loafers",
+          "Slightly worn school shoes.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Beast Tamer": {
+      "description": "Specialist in bonding with magical beasts and monsters.",
+      "starting_items": [
+        [
+          "Beast Whistle",
+          "Quest",
+          "Attracts wild creatures.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Fur-Lined Beast Hood",
+          "Pelt hood crafted from mountain wolf fur.",
+          1
+        ],
+        "Weapon": [
+          "Tamer's Whip",
+          "Flexible leather whip used to guide beasts.",
+          1
+        ],
+        "Armor": [
+          "Fur-Trimmed Vest",
+          "Warm leather vest comfortable around animals.",
+          2
+        ],
+        "Top": [
+          "Linen Shirt",
+          "A simple comfortable shirt.",
+          1
+        ],
+        "Bottom": [
+          "Rugged Trousers",
+          "Tough pants built to withstand claws.",
+          1
+        ],
+        "Gloves": [
+          "Thick Beast Gloves",
+          "Heavy leather gloves preventing animal scratches.",
+          1
+        ],
+        "Shoes": [
+          "Wilderness Boots",
+          "Durable boots built for forest tracking.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Production Crafter": {
+      "description": "Transferred artisan who uses cheat-level crafting menus to forge legendary gear and items from scrap.",
+      "starting_items": [
+        [
+          "Infinite Blueprint Codex",
+          "Quest",
+          "Magical notebook that appraises and recipes unknown materials.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Artisan's Leather Cap",
+          "Sturdy work cap fitted with magnifying loupes.",
+          1
+        ],
+        "Weapon": [
+          "Divine Smithing Hammer",
+          "Enchanted lightweight warhammer that doubles as a forge tool.",
+          2
+        ],
+        "Armor": [
+          "Artisan's Guild Vest",
+          "Sturdy canvas vest equipped with endless utility pockets.",
+          2
+        ],
+        "Top": [
+          "Linen Shirt",
+          "A simple comfortable shirt.",
+          1
+        ],
+        "Bottom": [
+          "Work Apron Trousers",
+          "Heavy canvas work pants reinforced at the knees.",
+          1
+        ],
+        "Gloves": [
+          "Flame-Resistant Smithing Gloves",
+          "Enchanted gloves allowing the handling of molten ore.",
+          1
+        ],
+        "Shoes": [
+          "Reinforced Crafter Boots",
+          "Durable leather boots with iron-capped toes.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Shadow Assassin": {
+      "description": "Summoned covert operative with stealth blessing, instant concealment, and lethal critical strikes.",
+      "starting_items": [
+        [
+          "Cloak of Hidden Presence",
+          "Quest",
+          "Magical shroud completely masking sound and scent.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Night-Stalker Mask",
+          "Silk face wrap that conceals identity in darkness.",
+          1
+        ],
+        "Weapon": [
+          "Obsidian Kunai Set",
+          "Throwing blades forged from enchanted dark crystal.",
+          2
+        ],
+        "Armor": [
+          "Nightshade Bodysuit",
+          "Form-fitting black leather tunic dampening kinetic noise.",
+          2
+        ],
+        "Top": [
+          "Linen Shirt",
+          "A simple comfortable shirt.",
+          1
+        ],
+        "Bottom": [
+          "Ninja Shinobi Pants",
+          "Flexible dark pants with concealed sheath holsters.",
+          1
+        ],
+        "Gloves": [
+          "Shadow Grip Gloves",
+          "Leather gloves ensuring firm grip on climbable surfaces.",
+          1
+        ],
+        "Shoes": [
+          "Silent Tabi Boots",
+          "Split-toe stealth boots for silent roof running.",
+          1
+        ],
+        "Shield": null
+      }
+    }
+  },
+  "high_school_drama": {
+    "Delinquent": {
+      "description": "Rebellious student known for tough fights, intimidation, and fierce loyalty.",
+      "starting_items": [
+        [
+          "Biker Jacket",
+          "Armor",
+          "Tough leather jacket with customized badges.",
+          2
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Streetwear Beanie",
+          "Slightly slouchy black knit beanie.",
+          1
+        ],
+        "Weapon": [
+          "Wooden Kendo Sword",
+          "Modified practice sword kept under the desk.",
+          2
+        ],
+        "Top": [
+          "Unbuttoned Gakuran Jacket",
+          "Customized loose uniform jacket.",
+          2
+        ],
+        "Bottom": [
+          "Wide-Leg Uniform Trousers",
+          "Baggy pants favoured by troublemakers.",
+          1
+        ],
+        "Gloves": [
+          "Fingerless Grip Gloves",
+          "Leather gloves used for street fights.",
+          1
+        ],
+        "Shoes": [
+          "Modified Sneakers",
+          "High-top sneakers built for quick action.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Varsity Athlete": {
+      "description": "Energetic sports prodigy whose physical stamina, teamwork, and athletic reflexes dominate the field.",
+      "starting_items": [
+        [
+          "Championship Whistle",
+          "Quest",
+          "Loud sports whistle used to rally teammates and stun opponents.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Athletic Gym Sweatband",
+          "Breathable cotton sweatband embroidered with team logo.",
+          1
+        ],
+        "Weapon": [
+          "Aluminum Baseball Bat",
+          "Standard sports bat capable of delivering heavy impact swings.",
+          2
+        ],
+        "Top": [
+          "Letterman Varsity Jacket",
+          "Thick wool and leather jacket emblazoned with school crest.",
+          2
+        ],
+        "Bottom": [
+          "Tracksuit Athletic Pants",
+          "Comfortable, flexible sports training trousers.",
+          1
+        ],
+        "Gloves": [
+          "Athletic Batting Gloves",
+          "Padded grip gloves providing excellent shock absorption.",
+          1
+        ],
+        "Shoes": [
+          "High-Traction Cleats",
+          "High-performance sneakers built for rapid sprints.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Honor Student": {
+      "description": "Academic genius who excels at problem-solving, research, and test scores.",
+      "starting_items": [
+        [
+          "Scientific Calculator",
+          "Quest",
+          "Solves complex logical challenges.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Smart Reading Glasses",
+          "Tortoiseshell frames with blue-light filtering.",
+          1
+        ],
+        "Weapon": [
+          "Heavy Backpack",
+          "Full of dense textbooks, surprisingly effective weapon.",
+          1
+        ],
+        "Top": [
+          "Neat School Cardigan",
+          "Cozy knitted sweater over buttoned shirt.",
+          1
+        ],
+        "Bottom": [
+          "Standard Uniform Pants",
+          "Clean and orderly school trousers.",
+          1
+        ],
+        "Gloves": null,
+        "Shoes": [
+          "Standard School Loafers",
+          "Comfortable everyday school shoes.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Aspiring Actor": {
+      "description": "Expressive performer capable of intense emotions, dramatic flair, deception, and charm.",
+      "starting_items": [
+        [
+          "Script Notebook",
+          "Quest",
+          "Contains memorized lines and emotional cues.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Drama Club Beret",
+          "Chic black wool beret worn at a jaunty angle.",
+          1
+        ],
+        "Weapon": [
+          "Stage Prop Dagger",
+          "Realistic prop useful for bluffing or dramatic flares.",
+          1
+        ],
+        "Top": [
+          "Stylish Custom Uniform",
+          "Tailored uniform with subtle flair.",
+          2
+        ],
+        "Bottom": [
+          "Custom Fitted Pants",
+          "Fashionable trousers.",
+          1
+        ],
+        "Gloves": [
+          "Stage Gloves",
+          "Elegant gloves used for dramatic performances.",
+          1
+        ],
+        "Shoes": [
+          "Stage Boots",
+          "Stylish leather boots suitable for performance.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "School Journalist": {
+      "description": "Tenacious campus reporter investigating school scandals, uncovering rumors, and exposing secrets.",
+      "starting_items": [
+        [
+          "Press Badge & Voice Recorder",
+          "Quest",
+          "Official newspaper credential and dictaphone full of interviews.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Press Detective Cap",
+          "Newsboy tweed cap with press card tucked in band.",
+          1
+        ],
+        "Weapon": [
+          "Heavy Camera Monopod",
+          "Sturdy metal camera pole that doubles as a defensive staff.",
+          1
+        ],
+        "Top": [
+          "Reporter's Trench Blazer",
+          "Smart blazer over button-down shirt with pen slots.",
+          2
+        ],
+        "Bottom": [
+          "Pencil Skirt / Smart Slacks",
+          "Crisp school uniform bottoms.",
+          1
+        ],
+        "Gloves": [
+          "Fingerless Typing Gloves",
+          "Thin cotton gloves keeping hands warm while taking field notes.",
+          1
+        ],
+        "Shoes": [
+          "Pavement-Pounding Loafers",
+          "Comfortable leather shoes broken in from chasing scoops.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Occult Enthusiast": {
+      "description": "Eccentric student fascinated by urban legends, tarot readings, campus ghost stories, and strange rituals.",
+      "starting_items": [
+        [
+          "Forbidden Campus Mythos Grimoire",
+          "Quest",
+          "Handwritten binder detailing supernatural campus rumors.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Lucky Cat-Ears Hairband",
+          "Cute velvet headband with pointed cat ears.",
+          1
+        ],
+        "Weapon": [
+          "Spiked Candelabra",
+          "Heavy metal candle holder repurposed for self-defense.",
+          1
+        ],
+        "Top": [
+          "Goth-Altered School Blazer",
+          "Dark blazer adorned with occult pins, patches, and chains.",
+          2
+        ],
+        "Bottom": [
+          "Pleated Plaid Skirt / Dark Trousers",
+          "Alternative-style school uniform bottoms.",
+          1
+        ],
+        "Gloves": [
+          "Lace & Studded Wristbands",
+          "Dark wristwear and fingerless mesh gloves.",
+          1
+        ],
+        "Shoes": [
+          "Platform Creepers",
+          "Heavy chunky black platform shoes.",
+          1
+        ],
+        "Shield": null
+      }
+    }
+  },
+  "nuclear_post_apocalypse": {
+    "Wasteland Scavenger": {
+      "description": "Resourceful survivor skilled at foraging scrap, picking locks, and jury-rigging gear.",
+      "starting_items": [
+        [
+          "Geiger Counter",
+          "Quest",
+          "Detects radioactive hot-zones.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Cracked Aviator Goggles",
+          "Old-world goggles with taped lenses.",
+          1
+        ],
+        "Weapon": [
+          "Scrap Pipe Rifle",
+          "A makeshift rifle cobbled from plumbing parts.",
+          2
+        ],
+        "Armor": [
+          "Reinforced Duster",
+          "Heavy canvas coat patched with tire rubber.",
+          2
+        ],
+        "Top": [
+          "Linen Shirt",
+          "A simple comfortable shirt.",
+          1
+        ],
+        "Bottom": [
+          "Padded Cargo Trousers",
+          "Durable pants lined with lead mesh.",
+          1
+        ],
+        "Gloves": [
+          "Scrap-Plated Gauntlets",
+          "Work gloves reinforced with metal plates.",
+          1
+        ],
+        "Shoes": [
+          "Steel-Toed Work Boots",
+          "Heavy boots for treading through shattered glass and rubble.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Road Warrior": {
+      "description": "Tough melee combatant and veteran of brutal skirmishes over water and fuel.",
+      "starting_items": [
+        [
+          "Stolen Raider Badge",
+          "Quest",
+          "Trophy from a defeated warlord.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Spiked Welder's Mask",
+          "Intimidating steel mask adorned with rebar spikes.",
+          2
+        ],
+        "Weapon": [
+          "Spiked Baseball Bat",
+          "Heavy wooden bat studded with rusted nails.",
+          2
+        ],
+        "Armor": [
+          "Spiked Leather Vest",
+          "Tough leather armor studded with iron spikes.",
+          3
+        ],
+        "Top": [
+          "Linen Shirt",
+          "A simple comfortable shirt.",
+          1
+        ],
+        "Bottom": [
+          "Leather Chaps & Pants",
+          "Rugged riding pants.",
+          2
+        ],
+        "Gloves": [
+          "Reinforced Brawler Gloves",
+          "Thick leather gloves with leaded knuckles.",
+          1
+        ],
+        "Shoes": [
+          "Combat Boots",
+          "Sturdy military surplus boots.",
+          1
+        ],
+        "Shield": [
+          "Car Door Shield",
+          "Reconfigured car door with a welded handle.",
+          2
+        ]
+      }
+    },
+    "Mutant Survivalist": {
+      "description": "Hardened wanderer altered by fallout, possessing abnormal resilience and survival instincts.",
+      "starting_items": [
+        [
+          "Vial of Anti-Rad Serum",
+          "Quest",
+          "Experimental serum that tempers radiation decay.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Mutant-Hide Hood",
+          "Stitched pelt hood shielding from fallout winds.",
+          1
+        ],
+        "Weapon": [
+          "Crossbow",
+          "Silent hunting crossbow with re-usable bolts.",
+          2
+        ],
+        "Top": [
+          "Hooded Poncho",
+          "Weathered poncho concealing mutated features.",
+          1
+        ],
+        "Bottom": [
+          "Tattered Trousers",
+          "Worn pants patched with animal hide.",
+          1
+        ],
+        "Gloves": [
+          "Wrappings",
+          "Cloths tightly bound around mutated hands.",
+          1
+        ],
+        "Shoes": [
+          "Tire-Tread Sandals",
+          "Sturdy sandals fashioned from heavy radial tires.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Tech-Vault Medic": {
+      "description": "Former shelter scientist equipped with bio-scanners and medical supplies.",
+      "starting_items": [
+        [
+          "Injectable Med-Kit",
+          "Quest",
+          "Restores health and purges rads.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Dust-Filter Mask",
+          "Cloth particulate mask with lead foil lining.",
+          1
+        ],
+        "Weapon": [
+          "Laser Sidearm",
+          "Pre-war energy pistol.",
+          2
+        ],
+        "Top": [
+          "Hazmat Jumpsuit",
+          "Sealed rubberized suit providing radiation protection.",
+          2
+        ],
+        "Bottom": [
+          "Hazmat Trousers",
+          "Matching lead-lined lower jumpsuit.",
+          1
+        ],
+        "Gloves": [
+          "Sealed Rubber Gloves",
+          "Insulated gloves preventing chemical contact.",
+          1
+        ],
+        "Shoes": [
+          "Decon Boots",
+          "Heavy rubber boots.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Junk Gunslinger": {
+      "description": "Fast-drawing drifter carrying customized pre-war revolvers and precision ammunition across the ash wastes.",
+      "starting_items": [
+        [
+          "Speedloader & Rad-Purifier",
+          "Quest",
+          "Quick-reload cylinder and pocket water purification tablets.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Battered Cowboy Stetson",
+          "Sun-faded leather hat riddled with shrapnel nicks.",
+          1
+        ],
+        "Weapon": [
+          "Scrap Revolver",
+          "Refurbished heavy-calibre six-shooter with hair-trigger action.",
+          2
+        ],
+        "Armor": [
+          "Reinforced Wasteland Poncho",
+          "Layered ballistic cloth poncho shielding from acid dust.",
+          2
+        ],
+        "Top": [
+          "Linen Shirt",
+          "A simple comfortable shirt.",
+          1
+        ],
+        "Bottom": [
+          "Lead-Lined Chaps",
+          "Heavy leather pants reinforced against shrapnel.",
+          2
+        ],
+        "Gloves": [
+          "Quick-Draw Gloves",
+          "Worn deerskin gloves offering flawless trigger control.",
+          1
+        ],
+        "Shoes": [
+          "Steel-Plated Dust Boots",
+          "Hardened boots equipped with scrap metal spurs.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Cultist of the Atom": {
+      "description": "Zealous worshiper of atomic radiation who harnesses glowing fallout relics to purge non-believers.",
+      "starting_items": [
+        [
+          "Sacred Fuel Rod Relic",
+          "Quest",
+          "Enclosed fuel cell treated as a holy icon of the atom.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Military Canister Gas Mask",
+          "Rubber NBC gas mask with working charcoal filter.",
+          2
+        ],
+        "Weapon": [
+          "Irradiated Sledgehammer",
+          "Heavy construction hammer fused with a glowing isotope core.",
+          3
+        ],
+        "Armor": [
+          "Tattered Rad-Vestments",
+          "Rough burlap and rubberized robes marked with radioactive symbols.",
+          2
+        ],
+        "Top": [
+          "Linen Shirt",
+          "A simple comfortable shirt.",
+          1
+        ],
+        "Bottom": [
+          "Scrap-Iron Greaves",
+          "Armor fashioned from salvaged car fenders over canvas pants.",
+          2
+        ],
+        "Gloves": [
+          "Lead-Lined Smelting Gloves",
+          "Thick industrial gloves resistant to radiant heat.",
+          1
+        ],
+        "Shoes": [
+          "Glow-Stained Work Boots",
+          "Rubberized boots with thick treads.",
+          1
+        ],
+        "Shield": [
+          "Lead Radiation Shield",
+          "Heavy slab of lead-lined scrap metal with a viewport.",
+          2
+        ]
+      }
+    }
+  }
+}

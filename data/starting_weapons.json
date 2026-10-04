@@ -1,0 +1,66 @@
+{
+  "fantasy": [
+    "Steel Longsword",
+    "Apprentice Staff",
+    "Hunting Bow",
+    "Iron Dagger",
+    "Hunting Spear",
+    "Sturdy Mace"
+  ],
+  "sci_fi": [
+    "Pulse Pistol",
+    "Compact Carbine",
+    "Shock Baton",
+    "Plasma Torch",
+    "Utility Cutter",
+    "Stun Projector"
+  ],
+  "cyberpunk": [
+    "Street Katana",
+    "Service Pistol",
+    "Fleet Submachinegun",
+    "Mono-filament Whip",
+    "Heavy Wrench",
+    "Sawed-Off Shotgun"
+  ],
+  "steampunk": [
+    "Brass Revolver",
+    "Clockwork Rapier",
+    "Bayoneted Musket",
+    "Heavy Spanner",
+    "Pocket Derringer",
+    "Steam Harpoon"
+  ],
+  "dark_fantasy": [
+    "Rusty Cleaver",
+    "Ashwood Wand",
+    "Light Crossbow",
+    "Iron Mace",
+    "Bone Stiletto",
+    "Spiked Club"
+  ],
+  "isekai_fantasy": [
+    "Traveler's Sword",
+    "Novice Wand",
+    "Shortbow",
+    "Iron Dagger",
+    "Smithing Hammer",
+    "Iron Kunai Set"
+  ],
+  "high_school_drama": [
+    "Wooden Kendo Sword",
+    "Heavy Textbook",
+    "Baseball Bat",
+    "Pepper Spray",
+    "Heavy Camera Monopod",
+    "Brass Candelabra"
+  ],
+  "nuclear_post_apocalypse": [
+    "Scrap Pipe Rifle",
+    "Spiked Baseball Bat",
+    "Makeshift Crossbow",
+    "Scrap Revolver",
+    "Lead-Pipe Baton",
+    "Scrap Sledgehammer"
+  ]
+}

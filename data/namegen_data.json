@@ -1,0 +1,746 @@
+{
+  "fantasy": {
+    "person": {
+      "male": [
+        "Aurelius", "Elion", "Faelar", "Ignis", "Orion", "Solarius", "Valerius", "Aethelgard",
+        "Balthazar", "Dorian", "Fenris", "Galahad", "Hyperion", "Justinius", "Kaelen", "Mithrandir",
+        "Oberon", "Phoenix", "Xavier", "Zephyr", "Archambault", "Elessar", "Glorfindel", "Lindir",
+        "Nicanor", "Orpheus", "Aragorn", "Legolas", "Gimli", "Frodo", "Boromir", "Elrond", "Faramir",
+        "Thorin", "Celeborn", "Albus", "Severus", "Sirius", "Remus", "Neville", "Draco", "Godric",
+        "Jon", "Tyrion", "Jaime", "Daemon", "Aemond", "Viserys", "Rhaegar", "Geralt", "Vesemir",
+        "Jaskier", "Eskel", "Lambert", "Rand", "Matrim", "Perrin", "Lan", "Thom", "Drizzt",
+        "Elminster", "Volo", "Bruenor", "Minsc", "Jarlaxle", "Astarion", "Gale", "Thrall", "Arthas",
+        "Illidan", "Malfurion", "Khadgar", "Varian", "Dovahkiin", "Lucien", "Miraak", "Septim",
+        "Kvothe", "Elodin", "Kaladin", "Dalinar", "Adolin", "Szeth", "Kelsier", "Elend"
+      ],
+      "female": [
+        "Celestia", "Galadriel", "Luminara", "Pythia", "Zephyra", "Calliope", "Evangeline",
+        "Illyria", "Lyra", "Phoenix", "Seraphina", "Thalia", "Valeria", "Yvaine", "Calanthe",
+        "Fiorita", "Hesperia", "Isolda", "Melisandre", "Arwen", "Tauriel", "Eowyn", "Luthien",
+        "Morwen", "Tinuviel", "Hermione", "Minerva", "Luna", "Bellatrix", "Rowena", "Helga",
+        "Daenerys", "Arya", "Sansa", "Rhaenyra", "Lyanna", "Brienne", "Cersei", "Yennefer", "Ciri",
+        "Triss", "Keira", "Philippa", "Francesca", "Egwene", "Nynaeve", "Moiraine", "Aviendha",
+        "Elayne", "Jaheira", "Viconia", "Shadowheart", "Karlach", "Lae'zel", "Nine-Fingers", "Jaina",
+        "Sylvanas", "Tyrande", "Alleria", "Valeera", "Ysera", "Alexstrasza", "Azura", "Meridia",
+        "Serana", "Astrid", "Shallan", "Jasnah", "Vin", "Sarene", "Denna"
+      ],
+      "last": [
+        "Sunstrider", "Starweaver", "Goldbow", "Moonwhisper", "Lightbringer", "Silverflame",
+        "Crystalshaper", "Dawnfeather", "Everbright", "Skywatcher", "Arcaneheart", "Dragonheart",
+        "Spellbound", "Starfall", "Astralborn", "Celestial", "Divinewing", "Highgard", "Lumin",
+        "Phoenixclaw", "Sunfire", "Valiant", "Wyrmslayer", "Oakenshield", "Stormcrow", "Evenstar",
+        "Ironfoot", "Dumbledore", "Gryffindor", "Ravenclaw", "Slytherin", "Hufflepuff", "Malfoy",
+        "Targaryen", "Stark", "Lannister", "Baratheon", "Velaryon", "Dayne", "Rivia", "Vengerberg",
+        "Cintra", "Blaviken", "al'Thor", "Cauthon", "Aybara", "Mandragoran", "Do'Urden",
+        "Battlehammer", "Proudmoore", "Windrunner", "Menethil", "Stormrage", "Stormblessed",
+        "Kholin", "Venture", "Bloodhunter", "Shadowweaver", "Runecarver", "Ironwill", "Frostbeard",
+        "Voidwalker", "Spellweaver"
+      ],
+      "surname_chance": 0.75
+    },
+    "place": {
+      "prefixes": [
+        "Aether", "Arcane", "Celestial", "Crystal", "Dawn", "Dragon", "Gold", "High", "Light",
+        "Lumin", "Moon", "Opal", "Sun", "Star", "Silver", "Sky", "Prism"
+      ],
+      "suffixes": [
+        "spire", "citadel", "sanctuary", "haven", "peak", "crown", "sanctum", "palace", "bay",
+        "realm", "court", "tower", "garden", "vale", "crest"
+      ],
+      "adjectives": [
+        "Glowing", "Eternal", "Radiant", "Majestic", "Luminous", "Grand", "Golden", "Azure",
+        "Enchanted", "Heavenly", "Brilliant", "Sovereign"
+      ],
+      "nouns": [
+        "Citadel", "Academy", "Spire", "Cathedral", "Metropolis", "Palace", "Temple", "Nexus",
+        "Sanctuary", "Heights", "Gardens", "Court"
+      ],
+      "patterns": [
+        "{prefix}{suffix}", "{adjective} {noun}", "the {adjective} {noun}", "{prefix}'s {noun}"
+      ]
+    },
+    "roles": [
+      "Former Guildmate", "Apprentice Mage", "Traveling Mercenary", "Knight Squire",
+      "Noble House Heir", "Former Party Member", "Temple Initiate", "Tavern Keeper", "Town Guard",
+      "Blacksmith Apprentice", "Travelling Merchant", "Fellow Adventurer", "Alchemist",
+      "Guild Receptionist", "Royal Court Attendant", "Village Hunter", "Childhood Friend",
+      "City Watchman", "Caravan Guard", "Forest Ranger", "Archivist Scholar", "Herbalist",
+      "Harbor Dockmaster", "Academy Senior", "Mercenary Captain", "Wandering Minstrel",
+      "Paladin Initiate", "Stablemaster", "Royal Scout", "Innkeeper", "High Priest Assistant",
+      "Potion Brewer", "Cartographer", "Bounty Hunter", "Ex-partner"
+    ],
+    "factions": {
+      "order": [
+        "The Arcane Conclave", "Circle of High Archmages", "Order of the Silver Moon",
+        "Mages of the Aether Spire", "Mystic Athenaeum Guild", "Order of the Astral Dawn",
+        "Shadowweaver Coven", "High Alchemical Academy", "Eldritch Lore Keepers",
+        "Sunfire Spire Enchanters", "Order of the Celestial Rune", "The Prism Conclave",
+        "Order of the Silver Knights", "Radiant Templar Vanguard", "Knights of the Dawn",
+        "Order of the Sacred Aegis", "Paladins of the Iron Chalice", "Order of the White Griffon",
+        "Vanguard of the Sunlit Crown", "Knights of the Frost Citadel", "Order of the Golden Lion",
+        "Sentinels of the High Realm"
+      ],
+      "syndicate": [
+        "Shadow Guild of Assassins", "Nightshade Syndicate", "Black Raven Brotherhood",
+        "Whispering Coin League", "Underground Thieves Circle", "Silent Dagger Guild",
+        "Velvet Mask Syndicate"
+      ],
+      "guild": [
+        "Master Artisans Fellowship", "Merchant League of the Coast", "Deep Delver Miners League",
+        "Grand Alchemists Union"
+      ]
+    }
+  },
+  "dark_fantasy": {
+    "person": {
+      "male": [
+        "Malakor", "Morgrim", "Bram", "Lucian", "Vane", "Damion", "Evander", "Gethin", "Ignatius",
+        "Malachi", "Phineas", "Silas", "Tristan", "Victor", "Zephyrus", "Alistair", "Bartholomew",
+        "Gregor", "Thaddeus", "Azrael", "Cassiel", "Ebenezer", "Faustus", "Jethro", "Lazarus",
+        "Malthus", "Orpheus", "Percival", "Salem", "Thanatos", "Uriah", "Vlad", "Wulfric"
+      ],
+      "female": [
+        "Vespera", "Cynthia", "Carmilla", "Morwenna", "Hester", "Lilith", "Necola", "Ophelia",
+        "Ursula", "Wilhelmina", "Drusilla", "Morticia", "Raven", "Valerica", "Beatrice", "Desdemona",
+        "Griselda", "Hecate", "Isolda", "Nocturna", "Ruthless", "Salem"
+      ],
+      "last": [
+        "Bloodworth", "Gravemore", "Nightshade", "Corpsewood", "Gloomward", "Ironcoffin", "Ashgrave",
+        "Blackbleak", "Coldheart", "Deadmarsh", "Dreadbound", "Hollowbone", "Rotveil", "Skullguard",
+        "Sorrowfall", "Tombstone", "Wormwood", "Blackthorn", "Bleakwater", "Bonecarver", "Darkcress",
+        "Feargallows", "Grimsoul", "Maliceford", "Shadowsoul", "Soulwick", "Thornbleed",
+        "Voidbringer", "Gravebound", "Crowclaw"
+      ],
+      "surname_chance": 0.7
+    },
+    "place": {
+      "prefixes": [
+        "Bleak", "Blood", "Bone", "Corpse", "Dark", "Dread", "Gloom", "Grave", "Plague", "Rot",
+        "Shadow", "Skull", "Sorrow", "Tomb", "Venom", "Witch", "Ashen", "Blight", "Grim", "Iron"
+      ],
+      "suffixes": [
+        "cairn", "gallows", "tomb", "trench", "blight", "Crypt", "mire", "pit", "spire", "vale",
+        "ruin", "abyss", "sepulchre", "moor", "shade", "hollow"
+      ],
+      "adjectives": [
+        "Cursed", "Blighted", "Bloodsoaked", "Forsaken", "Haunting", "Malignant", "Pestilent",
+        "Ruined", "Shadowed", "Tormented", "Withered", "Weeping", "Desolate", "Festering", "Grim"
+      ],
+      "nouns": [
+        "Catacombs", "Chapel", "Mausoleum", "Ossuary", "Gallows", "Citadel", "Abyss", "Crypt", "Pit",
+        "Asylum", "Necropolis", "Vault", "Warren"
+      ],
+      "patterns": [
+        "{prefix}{suffix}", "{adjective} {noun}", "the {adjective} {noun}", "{prefix}'s {noun}"
+      ]
+    },
+    "roles": [
+      "Coven Initiate", "Former Sellsword", "Academy Scholar", "Fellow Wanderer", "Noble Ward",
+      "Former Crypt Explorer", "Childhood Friend", "Occult Researcher", "Gravekeeper",
+      "Tomb Watchman", "Inquisitor Squire", "Plague Doctor Assistant", "Heretic Hunter",
+      "Blood Mage Apprentice", "Crypt Sentinel", "Village Mourner", "Blacksmith of Bone",
+      "Wandering Exorcist", "Tavern Smuggler", "Fortress Guard", "Catacomb Guide",
+      "Cursed Relic Dealer", "Night Watchman", "Executioner Assistant", "Shadow Informant",
+      "Asylum Warden", "Graveyard Scavenger", "Corpse Collector", "Corrupted Knight",
+      "Dark Alchemist", "Unholy Acolyte", "Mercenary Cutthroat", "Gallows Keeper", "Ex-lover",
+      "Silent Monk"
+    ],
+    "factions": {
+      "order": [
+        "Order of the Blood Covenant", "Inquisition of the Ashen Dawn",
+        "Penitent Knights of the Thorn", "Ebon Spire Necromancers", "Coven of the Crimson Veil",
+        "Keepers of the Black Flame", "Order of the Bleeding Sun", "Vanguard of the Pale Moon"
+      ],
+      "delinquents": [
+        "Grave Digger Syndicate", "Carrion Crows Gang", "Bloodhound Marauders", "Dungeon Rats"
+      ],
+      "guild": [
+        "Witch Hunter Brotherhood", "Plague Alchemists Guild", "Black Iron Mercenary Union"
+      ]
+    }
+  },
+  "sci_fi": {
+    "person": {
+      "male": [
+        "Jax", "Dax", "Kaelen", "Orion", "Rylan", "Vance", "Zayne", "Bodhi", "Case", "Deckard",
+        "Helix", "Jett", "Mercer", "Pax", "Razor", "Sol", "Trik", "Vector", "Xander", "Zeke",
+        "Bishop", "Caleb", "Damon", "Flint", "Gideon", "Hal", "Isaac", "Jenson", "Kane", "Lars",
+        "Marcus", "Nero", "Stryker", "Echo", "Nix", "Quinn", "Val", "Wren"
+      ],
+      "female": [
+        "Nova", "Cyra", "Echo", "Lyra", "Tali", "Vex", "Astra", "Io", "Kira", "Nix", "Nyx", "Pax",
+        "Quinn", "Ripley", "Sol", "Trik", "Val", "Wren", "Eve"
+      ],
+      "last": [
+        "Vance", "Sterling", "Chen", "Cross", "Tyrell", "Mercer", "Vane", "Kross", "Kincaid",
+        "Zhang", "Kowalski", "Tanaka", "Stark", "Miller", "Hayes", "Zhao", "Novikov", "Fischer",
+        "Al-Mansoor", "O'Connell", "Ryder", "Syndicate", "Cyberne", "Dataford", "Hyperion", "Nexus",
+        "Obsidian", "Quantum", "Vector", "Vortex"
+      ],
+      "surname_chance": 0.85
+    },
+    "place": {
+      "prefixes": [
+        "Alpha", "Aegis", "Cyber", "Delta", "Echo", "Helix", "Neo", "Nova", "Orbital", "Sector",
+        "Tech", "Vector", "Zenith", "Zero", "Quantum", "Hyper"
+      ],
+      "suffixes": [
+        "station", "dock", "hub", "ring", "core", "array", "spire", "grid", "vault", "port",
+        "platform", "outpost", "bay", "prime"
+      ],
+      "adjectives": [
+        "Derelict", "Automated", "Neon", "Cybernetic", "Orbital", "Sub-zero", "Pressurized",
+        "Failing", "Synthetic", "Deep-space", "FTL", "Quantum"
+      ],
+      "nouns": [
+        "Station", "Sector", "Array", "Complex", "Airlock", "Terminal", "Platform", "Colony", "Grid",
+        "Nexus", "Spire", "Outpost"
+      ],
+      "patterns": [
+        "{prefix} {suffix}", "{prefix}-{suffix}", "{adjective} {noun}", "Sector {prefix}"
+      ]
+    },
+    "roles": [
+      "Fleet Cadet", "Orbital Station Colleague", "Recon Pilot", "Research Assistant",
+      "Colony Neighbor", "Former Squadmate", "Academy Senior", "Navigation Specialist",
+      "Docking Technician", "Hydroponics Engineer", "Security Contractor", "Black Market Broker",
+      "Communications Officer", "Deep-Space Miner", "Cargo Hauler", "Astro-Biologist",
+      "Orbital Guard", "Sub-light Navigator", "Quantum Physicist", "EVA Technician",
+      "Sector Marshal", "Synthetic Maintenance Tech", "Jump-Drive Mechanic", "Starport Merchant",
+      "Medical Officer", "Smuggler Contact", "Corporate Courier", "Planetary Surveyor",
+      "Bounty Tracker", "Colonial Police", "Drone Operator", "Shield Specialist",
+      "Reactor Core Tech", "Ex-partner", "Freelance Scout"
+    ],
+    "factions": {
+      "corpo": [
+        "Solar Federation Navy", "United Colonies Fleet Command", "AstroDyne Propulsion Corp",
+        "Helios Mining Conglomerate", "Starlight Stellar Command", "Nova Frontier Logistics",
+        "Titan Orbitals Corp", "Deep Space Research Directorate"
+      ],
+      "syndicate": [
+        "Astrominers Cooperative", "Belt Scavengers League", "Deep Space Explorers Society",
+        "Outer Rim Prospectors Union", "Orbital Engineers Coalition", "Stellar Pilots Guild"
+      ],
+      "delinquents": [
+        "Void Syndicate Corsairs", "Red Eclipse Pirates", "Nebula Marauders", "Star Wolf Raiders",
+        "Asteroid Belt Outlaws", "Solar Flare Corsairs", "Black Hole Syndicate"
+      ]
+    }
+  },
+  "cyberpunk": {
+    "person": {
+      "male": [
+        "V", "Johnny", "Jack", "Zero", "Chrome", "Spike", "Razor", "Gibson", "Case", "Murphy", "Jax",
+        "Nero", "Trey", "Renix", "Blade", "Kael", "Vector", "Silas"
+      ],
+      "female": [
+        "Judy", "Panam", "Rogue", "Misty", "Alt", "Vex", "Trinity", "Nyx", "Echo", "Katana",
+        "Cipher", "Sora", "Siren", "Wren", "Kira", "Byte", "Pixel"
+      ],
+      "last": [
+        "Silverhand", "Surova", "Kowalski", "Arasaka", "Militech", "Kang", "Chen", "Vance", "Kross",
+        "Takahashi", "Nakamura", "Black", "Steel", "Wire", "Glitch"
+      ],
+      "surname_chance": 0.7
+    },
+    "place": {
+      "prefixes": [
+        "Neo", "Cyber", "Grid", "Corporate", "Rain", "Neon", "Under", "Sub", "Holo", "Digital",
+        "Matrix", "Kuro", "Apex", "Overload"
+      ],
+      "suffixes": [
+        "city", "district", "plaza", "deck", "net", "tower", "spire", "alley", "slums", "market",
+        "concourse", "node", "core"
+      ],
+      "adjectives": [
+        "Rain-slicked", "Neon-lit", "Dystopian", "Chrome", "High-tech", "Sub-level", "Encrypted",
+        "Underground", "Corporate", "Corrupted", "Shadowed"
+      ],
+      "nouns": [
+        "District", "Plaza", "Alley", "Netdeck", "Megatower", "Underbelly", "Concourse", "Haven",
+        "Market", "Hub", "Node"
+      ],
+      "patterns": [
+        "{prefix}-{suffix}", "{adjective} {noun}", "{prefix} {noun}", "Sector {prefix}"
+      ]
+    },
+    "roles": [
+      "Netrunner Crewmate", "Former Academy Cadet", "Corporate Intern", "Deck Operator",
+      "Megatower Neighbor", "Fixer Contact", "Street Racer", "Cyberdoc Assistant", "Tech Specialist",
+      "Black Market Ripper", "Security Enforcer", "Corporate Bodyguard", "Nightclub Bartender",
+      "Data Courier", "Gutter Informant", "Cyberware Mechanic", "Braindance Editor",
+      "Underground Brawler", "Drone Pilot", "Street Mercenary", "Hacker Associate",
+      "Media Journalist", "Megacorp Scout", "Alley Lookout", "Neon Alley Dealer", "Combat Medic",
+      "Sub-level Scavenger", "Smuggler Specialist", "Cyber-Samurai", "Syndicate Enforcer",
+      "Nightclub Bouncer", "Street Techie", "Corporate Investigator", "Ex-partner",
+      "Rogue Drone Tuner"
+    ],
+    "factions": {
+      "corpo": [
+        "OmniCorp Security", "Biodyne Biotechnology", "Arasaka Defense Conglomerate",
+        "Hyperion Cybernetics", "Aether Dynamics", "Militech Defense Systems",
+        "Nexus AI Corporation", "Synthetix Bio-Industries", "Kurogane Heavy Industries",
+        "Vortex Neuro-Systems", "Orbital Horizon Corp", "Apex Nanotech", "Titan Security Systems",
+        "Zenith Bio-Pharma", "CerebroTech AI Matrix", "Cyberline Logistics",
+        "Vanguard Aerospace & Defense", "Helios Energy Conglomerate", "Starlight Neuro-Optics",
+        "ChronoTech Corp"
+      ],
+      "syndicate": [
+        "GhostNet Hacktivist Collective", "NullSector Data Syndicate", "BitShadows Netrunner Ring",
+        "Cipher Underground", "DarkGrid Alliance", "Zero-Day Syndicate", "Neon Core Hackers",
+        "Quantum Ghost Syndicate", "Glitch Syndicate", "Overclocked Collective",
+        "The Binary Underground", "SignalBreakers", "Black ICE Infiltrators",
+        "ShadowRoot Netrunners", "Subnet Syndicate"
+      ],
+      "delinquents": [
+        "Chrome Vipers Gang", "Neon Reapers", "Iron Claws", "Circuit Breakers", "Overdrive Brawlers",
+        "Gridlock Punks", "Wired Skulls", "Plasma Street Rats", "Slum City Dogs",
+        "Laserback Brawlers", "Night City Reclaimers", "Silicon Scavengers", "Turbocharged Rogues",
+        "DeadWire Syndicate", "Neon Fang Street Gang"
+      ]
+    }
+  },
+  "steampunk": {
+    "person": {
+      "male": [
+        "Arthur", "Gideon", "Jasper", "Barnaby", "Leopold", "Archibald", "Silas", "Percival",
+        "Victor", "Thaddeus", "Bartholomew", "Cedric", "Felix", "Cyrus"
+      ],
+      "female": [
+        "Evangeline", "Adelaide", "Beatrice", "Cora", "Florence", "Genevieve", "Isadora", "Matilda",
+        "Rosalind", "Violet", "Eleanor", "Clara", "Hazel"
+      ],
+      "last": [
+        "Cogsworth", "Brass", "Pendergast", "Ironwood", "Finch", "Sterling", "Blackwood",
+        "Copperfield", "Steamworth", "Lockhart", "Vane", "Gearhart"
+      ],
+      "surname_chance": 0.9
+    },
+    "place": {
+      "prefixes": [
+        "Iron", "Brass", "Steam", "Clockwork", "Aether", "Cobblestone", "Industrial", "Copper",
+        "Foundry", "Smog", "High-sky", "Victorian"
+      ],
+      "suffixes": [
+        "burg", "haven", "wharf", "foundry", "tower", "dock", "spire", "soot", "works", "quarters",
+        "hall", "concourse"
+      ],
+      "adjectives": [
+        "Soot-choked", "Brass-plated", "Steam-driven", "Clockwork", "Gaslit", "Industrial",
+        "Aetheric", "Smog-veiled", "Mechanized"
+      ],
+      "nouns": [
+        "Foundry", "Airship Dock", "Workshop", "Smog District", "Brass Tower", "Cobblestone Alley",
+        "Aether Works", "Clockwork Spire"
+      ],
+      "patterns": [
+        "{prefix} {suffix}", "{adjective} {noun}", "{prefix} {noun}"
+      ]
+    },
+    "roles": [
+      "Workshop Apprentice", "Airship Crewmate", "Clockwork Guild Junior", "Academy Senior",
+      "Foundry Worker", "Aristocratic Suitor", "Aether Researcher", "Steam Locomotive Engineer",
+      "Boiler Operator", "Gaslamp Lighter", "Cobblestone Courier", "Gogglescrafter",
+      "Clocktower Mechanist", "Airship Navigator", "Industrial Foreman", "Brass Foundryman",
+      "Gentleman Explorer", "Salon Socialite", "Steam Automaton Tuner", "Guild Inspector",
+      "Telegraph Operator", "Sky Pirate Contact", "Smog District Guard", "Aether Chemist",
+      "Harbor Crane Operator", "Watchmaker Journeyman", "Noble Chaperone", "Coal Feeder",
+      "Printing Press Worker", "Ex-partner", "Private Investigator", "Airship Rigging Hand",
+      "High Society Suitor", "Machinist", "Alchemical Distiller"
+    ],
+    "factions": {
+      "guild": [
+        "Royal Association of Aeronauts & Engineers", "Imperial Clockwork Guild",
+        "Grand Aetheric Research Society", "Mechanists & Alchemists Fellowship",
+        "High Steam Inventors League", "Dirigible Navigators Guild",
+        "Brass & Gear Scientific Society", "Pneumatic Innovators Guild", "Ironclad Sky Fleet Guild",
+        "Archimedes Steam Fellowship"
+      ],
+      "delinquents": [
+        "The Luddite Vanguard", "Smokeless Dawn Saboteurs", "Iron Breakers Movement",
+        "Cogtooth Rebels", "Anti-Steam Liberation Front", "Soot & Spark Saboteurs",
+        "The Free Artisans Guild", "Wrench & Hammer Insurgents", "Rustfire Brigade",
+        "The Unchained Handcrafts"
+      ],
+      "syndicate": [
+        "Brass Foundry Syndicalist Union", "Boilermakers & Steamfitters League",
+        "Locomotive Drivers Guild", "Dockside Coalminers Confederation",
+        "United Metalworkers League", "Steam Locomotive Brotherhood", "Aetherium Smelters Union",
+        "Clockwork Machinists Guild", "Portside Longshoremen Syndicate", "Foundrymen Collective"
+      ]
+    }
+  },
+  "isekai_fantasy": {
+    "person": {
+      "male": [
+        "Ren", "Kazuma", "Subaru", "Kirito", "Naofumi", "Rimuru", "Bell", "Rudeus", "Ainz", "Cid",
+        "Shin", "Loyd", "Sora", "Shadow", "Ryoma", "Seiya", "Aoto", "Daiki", "Hiro", "Issei",
+        "Kaito", "Kenji", "Minato", "Riku", "Shouta", "Takuya", "Yamato", "Yuuto", "Haruto", "Renji",
+        "Touma", "Souma", "Ryota", "Kazuya", "Hayato", "Itsuki", "Makoto", "Reo", "Shuntaro",
+        "Taiga", "Takumi", "Tatsuya", "Yuma", "Arata", "Hayate", "Kazuki", "Keita", "Reiji",
+        "Ryusei", "Shinji", "Syo", "Takeshi", "Toshiro", "Paul", "Ruijerd", "Cliff", "Zanoba", "Pax",
+        "Randolph", "Orsted", "Perugius", "Badigadi", "Alek", "Sieg"
+      ],
+      "female": [
+        "Shiro", "Yuna", "Aqua", "Megumin", "Emilia", "Rem", "Ram", "Asuna", "Raphtalia", "Roxy",
+        "Eris", "Alice", "Tanya", "Maple", "Katarina", "Fran", "Iris", "Cecelia", "Freya", "Chloe",
+        "Yuki", "Akari", "Hinata", "Yuuki", "Natsuki", "Aoi", "Hina", "Koharu", "Mei", "Mio",
+        "Misaki", "Nanami", "Riko", "Sakura", "Yui", "Yuka", "Akane", "Ayaka", "Chino", "Kiyo",
+        "Miku", "Ruka", "Sayaka", "Tomori", "Yoshino", "Izumi", "Sylphette", "Lilia", "Aisha",
+        "Zenith", "Ghislaine", "Elinalise", "Kishirika", "Lara", "Sharon", "Millis", "Lumial",
+        "Theresa", "Aines", "Lefiya"
+      ],
+      "last": [
+        "Greyrat", "Pendragon", "Von Elfrieden", "Von Rosenberg", "Von Silford", "Arlert", "Elstein",
+        "Von Mustang", "Silverheart", "Starling", "Von Baustall", "Kryuger", "Schneider",
+        "Heartfilia", "Blackrose", "Von Bernstein", "Sterling", "Forger", "Loid", "Briar", "Yeager",
+        "Ackerman", "Reiss", "Tybur", "Fritz", "Kirschtein", "Braus", "Hoover", "Leonhart",
+        "Galliard", "Finger", "Satou", "Tanaka", "Takahashi", "Suzuki", "Watanabe", "Ito",
+        "Yamamoto", "Nakamura", "Kobayashi", "Saito", "Yoshida", "Yamada", "Sasaki", "Yamaguchi",
+        "Matsumoto", "Inoue", "Kimura", "Hayashi", "Shimizu", "Yamazaki", "Mori", "Abe", "Ikeda",
+        "Hashimoto", "Yamashita", "Ishikawa", "Nakajima", "Maeda", "Fujita", "Ogawa", "Goto",
+        "Okada", "Hasegawa", "Murakami", "Kondo", "Ishii", "Sakamoto", "Endo", "Aoki", "Fujii",
+        "Nishimura"
+      ],
+      "surname_chance": 0.6
+    },
+    "place": {
+      "prefixes": [
+        "Royal", "Grand", "Great", "Holy", "Magic", "Guild", "Demon", "Dragon", "Imperial",
+        "Adventurer", "Labyrinth", "Dungeon", "Sacred", "Verdant", "Ainz", "Astraea", "Lugnica",
+        "Melromarc", "Orario", "Tempest", "Belzerg", "E-Rantel", "Roa", "Falmuth", "Elstead",
+        "Milishion", "Asura", "Central", "Divine", "Phantom", "Overlord", "Starfall", "Celes",
+        "Babel", "Yggdrasil", "Valhalla", "Demon King", "Brave", "Subaru", "Soren", "Eldritch",
+        "Titan", "World Tree"
+      ],
+      "suffixes": [
+        "Kingdom", "Capital", "Domain", "Empire", "Forest", "Floor", "Guild", "Town", "Fortress",
+        "Sanctuary", "Tower", "Realm", "Citadel", "Labyrinth", "Ruins", "Gate", "Heights", "Outpost",
+        "Waypoint", "Spire", "Haven", "District", "Frontier", "Bastion", "Cathedral", "Plaza",
+        "Floor B1", "Floor 50"
+      ],
+      "adjectives": [
+        "Ancient", "Enchanted", "Royal", "Divine", "Overlord", "Cursed", "Mythic", "Heavenly",
+        "Legendary", "Sealed", "Untamed", "Floating", "Astral", "Forbidden", "Radiant", "Phantom",
+        "Abyssal", "Celestial", "Mythical", "Uncharted", "Boundless", "Impenetrable"
+      ],
+      "nouns": [
+        "Kingdom", "Capital", "Guild", "Dungeon", "Floor", "Labyrinth", "Sanctuary", "Cathedral",
+        "Academy", "Palace", "Domain", "Citadel", "Ruins", "Gate", "Waypoint", "Spire", "Haven",
+        "Outpost", "District", "Plaza", "Sanctum", "Sovereignty", "Highland"
+      ],
+      "patterns": [
+        "The {adjective} {noun} of {prefix}", "The {prefix} {noun}", "{prefix} {suffix}",
+        "{prefix} {noun}", "{prefix}'s {adjective} {noun}", "{prefix} {adjective} {suffix}"
+      ]
+    },
+    "roles": [
+      "Adventurer Guildmate", "Noble Academy Senior", "Royal Knight Initiate", "Childhood Friend",
+      "Travelling Merchant", "Former Party Member", "High Mage Apprentice", "Magic Knight",
+      "Guild Receptionist", "Noble Scion", "Village Healer", "Tavern Maid", "Dungeon Scout",
+      "Holy Priestess", "Blacksmith Journeyman", "Royal Guard", "Beast-Tamer Apprentice",
+      "Alchemical Researcher", "Monster Slayer", "Paladin Squire", "Guild Rank B Adventurer",
+      "Magic Shopkeeper", "Royal Butler", "Maid Attendant", "Inn Hostess", "Caravan Escort",
+      "Dungeon Porter", "Village Elder", "High Elf Emissary", "Dwarven Forgehand", "Court Sorcerer",
+      "Travelling Bard", "Ex-lover", "Guild Questmaster", "Royal Court Scribe"
+    ],
+    "factions": {
+      "order": [
+        "Holy Church of the Goddess", "Royal Arcane Academy", "Order of the Sacred Hero",
+        "High Priestesses of Light"
+      ],
+      "guild": [
+        "Imperial Magic Knights Guild", "Grand Alchemists Association", "Monster Hunters League"
+      ],
+      "delinquents": [
+        "Rogue Bandit Alliance", "Shadowfang Brawlers", "Goblin Slayer Outcasts"
+      ]
+    }
+  },
+  "high_school_drama": {
+    "person": {
+      "male": [
+        "Ren", "Haruto", "Minato", "Yuma", "Riku", "Itsuki", "Yamato", "Kaito", "Asahi", "Koki",
+        "Ryota", "Kazuya", "Daiki", "Takumi", "Tatsuya", "Kento", "Souta", "Shota", "Hayato",
+        "Kazuki", "Ryusei", "Haruki", "Min-jun", "Seo-jun", "Do-yun", "Ye-jun", "Si-woo", "Ha-joon",
+        "Ji-ho", "Joo-won", "Min-jae", "Hyun-woo", "Min-ho", "Dong-hyun", "Ji-hoon", "Sung-min",
+        "Joon-ho", "Tae-hyun", "Woo-jin", "Jae-won", "Wei", "Chen", "Ming", "Hao", "Jun", "Bowen",
+        "Zihao", "Yifan", "Han", "Kai", "Tian", "Zixuan", "Haoran", "Ziheng", "Feng", "Lei", "Yang",
+        "Alex", "Liam", "Ethan", "Noah", "Lucas", "Mason", "James", "Benjamin", "Henry", "Alexander",
+        "Michael", "Daniel", "Logan", "Jackson", "Sebastian", "Jack", "Arthur", "Oliver", "George",
+        "Harry", "Charlie", "Archie", "Freddie", "Alfie", "Edward", "Rupert", "Antoine", "Julien",
+        "Adrien", "Maxime", "Raphaël", "Mathieu", "Thibault", "Louis", "Etienne", "Gabriel", "Lukas",
+        "Maximilian", "Florian", "Felix", "Niklas", "Jonas", "Moritz", "Tim", "Leon", "Tobias",
+        "Jakub", "Kacper", "Mateusz", "Szymon", "Filip", "Michał", "Jan", "Wiktor", "Piotr", "Adam",
+        "Dawid", "Kamil", "Maciej", "Igor", "Bartosz", "Marcel", "Tomasz", "Aleksander", "Paweł",
+        "Mikołaj", "Dmitry", "Mikhail", "Ivan", "Aleksandr", "Sergei", "Nikolai", "Artyom", "Maxim",
+        "Danil", "Kirill", "Mateo", "Alejandro", "Santiago", "Diego", "Carlos", "Javier", "Fernando",
+        "Gonzalo", "Rodrigo", "Tomas", "Lorenzo", "Leonardo", "Francesco", "Alessandro", "Andrea",
+        "Matteo", "Gabriele", "Riccardo", "Tommaso", "Edoardo", "Tyler", "Artem", "John", "David",
+        "Robert", "William", "Joseph", "Thomas", "Charles", "Matthew", "Anthony", "Mark", "Donald",
+        "Steven", "Paul", "Andrew", "Joshua", "Kenneth", "Kevin", "Brian", "Ronald", "Timothy",
+        "Jason", "Jeffrey", "Ryan", "Jacob", "Gary", "Nicholas", "Eric", "Jonathan", "Stephen",
+        "Larry", "Justin", "Scott", "Brandon", "Samuel", "Gregory", "Frank", "Raymond", "Patrick",
+        "Dennis", "Jerry", "Aaron", "Jose", "Nathan", "Douglas", "Zachary", "Peter", "Kyle",
+        "Walter", "Jeremy", "Harold", "Karl", "Eryndor"
+      ],
+      "female": [
+        "Yui", "Mei", "Aoi", "Hina", "Koharu", "Sakura", "Akari", "Mio", "Misaki", "Nanami", "Riko",
+        "Yuna", "Sora", "Hinata", "Yuka", "Kana", "Kayo", "Ayane", "Honoka", "Miku", "Suzuka",
+        "Seo-ah", "Ji-woo", "Ha-eun", "Seo-yeon", "Min-seo", "Ha-yoon", "Ji-yoo", "Chae-won",
+        "Soo-ah", "Eun-ji", "Yea-ji", "Ji-soo", "Da-eun", "Yu-jin", "Su-bin", "Hye-won", "So-hee",
+        "Ruoxi", "Yuting", "Zihan", "Yuhan", "Xinyi", "Jia", "Yihan", "Meng", "Xiaoyu", "Yanyan",
+        "Lin", "Yan", "Mei", "Ting", "Wen", "Xue", "Jing", "Qian", "Yue", "Fang", "Maya", "Chloe",
+        "Emma", "Olivia", "Sophia", "Ava", "Isabella", "Mia", "Amelia", "Harper", "Evelyn",
+        "Abigail", "Emily", "Elizabeth", "Mila", "Ella", "Charlotte", "Poppy", "Daisy", "Florence",
+        "Freya", "Imogen", "Gemma", "Harriet", "Eleanor", "Beatrice", "Camille", "Chloé", "Manon",
+        "Océane", "Juliette", "Inès", "Margaux", "Léa", "Amélie", "Céleste", "Hannah", "Mia", "Lena",
+        "Sophia", "Marie", "Emilia", "Laura", "Nele", "Luisa", "Johanna", "Zofia", "Julia", "Maja",
+        "Zuzanna", "Lena", "Natalia", "Oliwia", "Alicja", "Maria", "Aleksandra", "Wiktoria",
+        "Amelia", "Karolina", "Weronika", "Martyna", "Patrycja", "Kinga", "Dominika", "Paulina",
+        "Magda", "Anastasia", "Daria", "Polina", "Ekaterina", "Anna", "Maria", "Sofia", "Ksenia",
+        "Viktoria", "Alina", "Valentina", "Lucia", "Camila", "Maria", "Martina", "Alba", "Paula",
+        "Carmen", "Elena", "Ximena", "Giulia", "Aurora", "Alice", "Ginevra", "Beatrice", "Giorgia",
+        "Chiara", "Sara", "Francesca", "Ludovica", "Itsuki", "Li", "Sarah", "Jessica", "Ashley",
+        "Amanda", "Stephanie", "Melissa", "Nicole", "Helen", "Samantha", "Katherine", "Christine",
+        "Debra", "Rachel", "Carolyn", "Janet", "Catherine", "Heather", "Diane", "Virginia", "Julie",
+        "Joyce", "Victoria", "Kelly", "Christina", "Lauren", "Joan", "Jordan", "Judith", "Megan",
+        "Cheryl", "Andrea", "Jacqueline", "Martha", "Gloria", "Teresa", "Ann", "Madison", "Frances",
+        "Kathryn", "Janice", "Jean", "Judy", "Grace", "Denise", "Amber", "Doris", "Marilyn",
+        "Danielle", "Beverly", "Theresa", "Diana", "Natalie", "Brittany", "Kayla", "Alexis", "Lyra"
+      ],
+      "last": [
+        "Satou", "Tanaka", "Takahashi", "Suzuki", "Watanabe", "Ito", "Yamamoto", "Nakamura",
+        "Kobayashi", "Saito", "Yoshida", "Yamada", "Sasaki", "Yamaguchi", "Matsumoto", "Inoue",
+        "Kimura", "Hayashi", "Shimizu", "Yamazaki", "Mori", "Abe", "Ikeda", "Hashimoto", "Yamashita",
+        "Ishikawa", "Nakajima", "Maeda", "Kim", "Lee", "Park", "Choi", "Jeong", "Kang", "Cho",
+        "Yoon", "Jang", "Lim", "Han", "Shin", "Seo", "Kwon", "Son", "Hwang", "Song", "Yoo", "Hong",
+        "Go", "Moon", "Yang", "Bae", "Baek", "Huh", "Shim", "Noh", "Ha", "Wang", "Li", "Zhang",
+        "Liu", "Chen", "Yang", "Huang", "Zhao", "Wu", "Zhou", "Xu", "Sun", "Ma", "Zhu", "Hu", "Guo",
+        "He", "Gao", "Lin", "Luo", "Zheng", "Liang", "Xie", "Song", "Tang", "Xu", "Han", "Feng",
+        "Deng", "Cao", "Peng", "Zeng", "Xiao", "Smith", "Johnson", "Miller", "Davis", "Garcia",
+        "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson", "Thomas",
+        "Taylor", "Moore", "Jackson", "Martin", "Lee", "Perez", "Thompson", "White", "Harris",
+        "Kensington", "Sterling", "Montgomery", "Sinclair", "Harrington", "Dubois", "Dupont",
+        "Laurent", "Moreau", "Lefebvre", "Müller", "Schneider", "Fischer", "Weber", "Hoffmann",
+        "Nowak", "Kowalski", "Wiśniewski", "Wójcik", "Kowalczyk", "Kamiński", "Lewandowski",
+        "Zieliński", "Szymański", "Woźniak", "Ivanov", "Smirnov", "Kuznetsov", "Popov", "Sokolov",
+        "Fernandez", "Torres", "Vargas", "Navarro", "Mendoza", "Rossi", "Russo", "Ferrari",
+        "Esposito", "Bianchi"
+      ],
+      "surname_chance": 0.95
+    },
+    "place": {
+      "prefixes": [
+        "Sakura", "Shinjuku", "Shibuya", "Akihabara", "Kamakura", "Kyoto", "Roppongi", "Harajuku",
+        "Asakusa", "Yokohama", "Fujimi", "Seiyo", "Otonokizaka", "Hyotei", "Shuuchiin", "Teiko",
+        "Karasuno", "Aoba", "Inarizaki", "Nekoma", "Shiratorizawa", "Sakuragaoka", "Gangnam",
+        "Hongdae", "Itaewon", "Myeongdong", "Yeouido", "Han River", "Namsan", "Songpa", "Incheon",
+        "Busan", "Hanlim", "Sunhwa", "Seoul Central", "Beijing", "Shanghai", "Haidian", "Chaoyang",
+        "Shenzhen", "Guangzhou", "West Lake", "Tsinghua", "Peking", "Fudan", "Lotus", "Phoenix",
+        "Maple", "Oak", "West", "East", "North", "South", "Sun", "River", "Hill", "Pine", "Cedar",
+        "Spring", "Grand", "Crest", "Lake", "Brook", "Riverside", "St. Jude", "Fairview"
+      ],
+      "suffixes": [
+        "High School", "Academy", "Senior High", "International School", "Institute", "Campus",
+        "District", "Station", "Park", "Slope", "Bridge", "Rooftop", "Garden", "Cafeteria",
+        "Courtyard", "Gymnasium", "Library", "Dormitory", "Experimental School", "Prep", "Avenue",
+        "Plaza", "Quadrangle", "Student Center"
+      ],
+      "adjectives": [
+        "Central", "Main", "Old", "Senior", "Student", "Academic", "Rooftop", "Courtyard",
+        "Gymnasium", "Cafeteria", "Music", "Science", "Cultural", "Private", "Public", "National",
+        "Elite", "Preparatory"
+      ],
+      "nouns": [
+        "High School", "Academy", "Hall", "Room", "Court", "Field", "Library", "Auditorium", "Lab",
+        "Office", "Club", "Garden", "Campus", "Cafeteria", "Gymnasium", "Dormitory", "Rooftop",
+        "Plaza", "Building A", "Building B"
+      ],
+      "patterns": [
+        "{prefix} {noun}", "{prefix} {suffix}", "{prefix}{suffix} {noun}", "the {adjective} {noun}",
+        "Room {prefix}", "{prefix} Campus {noun}"
+      ]
+    },
+    "roles": [
+      "Former Classmate", "Academy Senior", "Upperclassman", "Underclassman", "Childhood Friend",
+      "Class Representative", "Student Council President", "Student Council Vice President",
+      "Student Council Treasurer", "Disciplinary Committee Member", "Track Team Captain",
+      "Drama Club Lead", "Art Club Member", "Library Assistant", "Varsity Athlete",
+      "Science Club President", "School Infirmary Assistant", "Cafeteria Worker", "Homeroom Tutor",
+      "Summer Camp Romance", "Study Partner", "Visiting Exchange Student", "Neighborhood Friend",
+      "Club Senior", "School Newspaper Editor", "Cheerleading Captain", "Debate Team Lead",
+      "Music Club Guitarist", "Swim Team Member", "Kendo Club Captain", "Archery Club Partner",
+      "Dormitory Prefect", "School Band Drummer", "Former Lab Partner",
+      "Ex-boyfriend / Ex-girlfriend"
+    ],
+    "factions": {
+      "delinquents": [
+        "East District Delinquents", "Red Dragon Brawlers", "Iron Skulls Crew",
+        "Black Viper Syndicate", "Shadow Street Gang", "North Gate Ruffians", "Phantom Street Crew",
+        "Crimson Fang Delinquents", "Thunderbolt Alley Brawlers", "Midnight Wolves",
+        "Rustbelt Brawlers", "Silver Talon Crew", "Karasu Street Syndicate", "Wildcat Rebels",
+        "Broken Chain Brotherhood", "Stormborn Delinquents", "Neon Blade Outcasts",
+        "Ashen Rook Rebels", "Spike & Leather Crew", "Underpass Brawlers"
+      ],
+      "nsfw": [
+        "Secret Romance Circle", "Midnight Whispers Society", "Velvet Rose Pact",
+        "After-Hours Rendezvous", "Aphrodite's Secret Club", "Forbidden Whispers Society",
+        "Twilight Allure Circle", "Siren's Embrace Society", "Secret Lovers Guild",
+        "Moonlit Desires Fellowship", "Pleasure & Secrets Pact", "Crimson Lace Circle",
+        "Eros Sanctuary", "Midnight Rendezvous Alliance", "Silk & Shadow Circle",
+        "Intimate Hearts Pact", "Sweet Temptations Guild", "Lover's Nocturne",
+        "Hidden Passion Society", "The Stolen Kiss Circle"
+      ]
+    }
+  },
+  "nuclear_post_apocalypse": {
+    "person": {
+      "male": [
+        "Rust", "Gasket", "Viper", "Slick", "Ash", "Diesel", "Flint", "Scar", "Brick", "Fang",
+        "Grip", "Junk", "Nitro", "Rivet", "Tank", "Wrecker", "Zeke", "Buzz", "Cody", "Fox", "Grits",
+        "Hawk", "Iggy", "Bolt", "Clutch", "Duster", "Anvil", "Blade", "Charcoal", "Dead-Eye",
+        "Friction", "Grease", "Hazard", "Iron", "Jag", "Knuckles", "Lead", "Machete", "Nuke",
+        "Outlaw", "Patch", "Quicksand", "Razor", "Scraps", "Voltage", "X-Ray", "Zero", "Cobalt",
+        "Strontium", "Fallout", "Geiger", "Fuse", "Spark", "Sparky", "Ratchet", "Trench", "Piston",
+        "Mud", "Slag", "Smog", "Casket", "Decon", "Strider", "Sledge", "Shrapnel", "Wrench", "Spoke",
+        "Copper", "Flintlock", "Gutter", "Bane", "Rattler"
+      ],
+      "female": [
+        "Cinder", "Kestrel", "Skadi", "Val", "Dyna", "Echo", "Fox", "Iggy", "Jinx", "Ash", "Patch",
+        "Razor", "Scraps", "Tinfoil", "Wildcat", "Spark", "Sparky", "Ratchet", "Copper", "Viper",
+        "Slick", "Friction", "Hazard"
+      ],
+      "last": [
+        "Ironclad", "Scrapworth", "Dustwalker", "Grimm", "Radford", "Steelclaw", "Wasteland",
+        "Barren", "Crater", "Muddog", "Rustchain", "Ashfall", "Deadland", "Fossil", "Overheat",
+        "Scavenger", "Bonecollector", "Blacksmoke", "Burnside", "Coldsteel", "Leadfoot", "Rotgut",
+        "Slabtown", "Torchbearer", "Wirecutter", "Lockjaw", "Nightprowler", "Grimwood", "Saltcreek",
+        "Trenchcoat", "Slagheap", "Scrapseller", "Bloodhound", "Crowclaw", "Skullsplitter",
+        "Deadwater", "Ridgeback", "Blightborne", "Gaskethead", "Chainwhip", "Wastehound",
+        "Leadbelly"
+      ],
+      "surname_chance": 0.7
+    },
+    "place": {
+      "prefixes": [
+        "New", "Dust", "Rust", "Ash", "Crater", "Iron", "Scrap", "Rad", "Bunker", "Vault", "Outpost",
+        "Silo", "Blight", "Radioactive", "Dead", "Salt", "Fallout", "Smog", "Lead", "Bone", "Slag",
+        "Tox", "Acid", "Charcoal", "Broken", "Ruin", "Scorched", "Black", "Nuclear", "Waste",
+        "Gutter", "Cinder"
+      ],
+      "suffixes": [
+        "town", "burg", "fort", "pit", "haven", "ridge", "flats", "falls", "crater", "city",
+        "hollow", "vault", "zone", "trench", "gap", "peak", "bend", "bridge", "sanctuary", "camp",
+        "dump", "market", "station", "ruins", "gulch"
+      ],
+      "adjectives": [
+        "Irradiated", "Scrap-built", "Sunken", "Rusted", "Desolate", "Barren", "Burning", "Toxic",
+        "Forgotten", "Shattered", "Scorched", "Bleached", "Mutated", "Radioactive", "Smoldering",
+        "Contaminated", "Abandoned", "Sun-Baked", "Poisoned"
+      ],
+      "nouns": [
+        "Settlement", "Junkyard", "Outpost", "Bunker", "Highway", "Refuge", "Crater", "Fortress",
+        "Silo", "Compound", "Wasteland", "Caravan", "Stronghold", "Scav-Market", "Dome", "Trench",
+        "Fallout-Shelter", "Decon-Bay", "Reactor", "Armory"
+      ],
+      "patterns": [
+        "{prefix}{suffix}", "{adjective} {noun}", "the {adjective} {noun}", "Sector {prefix}",
+        "{prefix} {noun}", "Camp {prefix}", "The {prefix} {suffix}"
+      ]
+    },
+    "roles": [
+      "Caravan Guard", "Scavenger Partner", "Settlement Scout", "Bunker Resident",
+      "Mechanic Apprentice", "Former Raider", "Childhood Friend", "Water Purifier Operator",
+      "Wasteland Doctor", "Barter Town Merchant", "Scrap Armorer", "Radiation Hazard Specialist",
+      "Bunker Maintenance Tech", "Caravan Driver", "Outpost Sentry", "Wreckage Diver",
+      "Fuel Refiner", "Bounty Hunter", "Scavenger Guide", "Rust Runner", "Vault Overseer Assistant",
+      "Mutant Hunter", "Radio Operator", "Tunnel Crawler", "Gunsmith Apprentice", "Tox-Zone Guide",
+      "Barter Trader", "Settlement Hunter", "Decontamination Tech", "Former Nomad",
+      "Scrap Collector", "Vehicle Tuner", "Solar Array Caretaker", "Ex-partner", "Wasteland Courier"
+    ],
+    "factions": {
+      "settlement": [
+        "Oasis Haven Council", "New Hope Bastion", "Sunfire Settlement", "Ironclad Sanctuary",
+        "Vault 404 Survivor Council", "Deep Well Settlement", "Highland Refuge Council",
+        "Scrap Haven Bastion", "Rustgate Town Council", "Verdant Dome Colony"
+      ],
+      "delinquents": [
+        "Rust Raider Syndicate", "Scrap Vultures Gang", "Wasteland Hounds", "Deathridge Marauders",
+        "Skull Engine Brawlers", "Ironfang Warband", "Highway Vipers", "Ashen Scavengers",
+        "Burnout Marauders", "Dust Devils Raider Clan"
+      ],
+      "guild": [
+        "Scrap Merchant Union", "Wasteland Barter League", "Caravan Brotherhood",
+        "Water Caravan Confederation", "Scavengers & Mechanics Guild", "Roadside Traders League",
+        "Highway Merchants Union"
+      ]
+    }
+  },
+  "default": {
+    "person": {
+      "male": [
+        "Aldric", "Corvin", "Eskil", "Garrick", "Alex", "Ren", "Jax", "Kael", "Rudeus", "Julian",
+        "Felix", "Gabriel", "Leo", "Arthur", "Nikolai", "Viktor", "Erik", "Matteo", "Lucas", "Kenji",
+        "Haruki", "Chen", "Min-jun", "Wei", "Sora", "Hiroshi", "Tariq", "Zain", "Aarav", "Omar",
+        "Rohan", "Idris", "Kwame", "Amari", "Malik", "Zuri", "Jabari", "Kofi", "Mateo", "Santiago",
+        "Diego", "Carlos", "Rafael", "Rowan", "Orion", "Silas", "Ezra", "Asher", "Kai", "Ziheng",
+        "Tyler", "Artem", "John", "David", "Michael", "James", "Robert", "William", "Joseph",
+        "Thomas", "Charles", "Daniel", "Matthew", "Anthony", "Mark", "Donald", "Steven", "Paul",
+        "Andrew", "Joshua", "Kenneth", "Kevin", "Brian", "George", "Edward", "Ronald", "Timothy",
+        "Jason", "Jeffrey", "Ryan", "Jacob", "Gary", "Nicholas", "Eric", "Jonathan", "Stephen",
+        "Larry", "Justin", "Scott", "Brandon", "Benjamin", "Samuel", "Gregory", "Frank", "Alexander",
+        "Raymond", "Patrick", "Jack", "Dennis", "Jerry", "Aaron", "Jose", "Adam", "Henry", "Nathan",
+        "Douglas", "Zachary", "Peter", "Kyle", "Walter", "Ethan", "Jeremy", "Harold", "Karl",
+        "Eryndor"
+      ],
+      "female": [
+        "Branwen", "Doria", "Fenna", "Hessa", "Alex", "Maya", "Nova", "Lira", "Vespera", "Elena",
+        "Astrid", "Chloe", "Freya", "Sophia", "Clara", "Genevieve", "Ines", "Nadia", "Sakura", "Mei",
+        "Ji-woo", "Lin", "Aoi", "Hana", "Zara", "Layla", "Ananya", "Amira", "Priya", "Farah", "Nia",
+        "Aaliyah", "Zuri", "Amina", "Keisha", "Sofia", "Isabella", "Camila", "Valentina", "Lucia",
+        "Iris", "Lyra", "Celeste", "Maeve", "Willow", "Harper", "Itsuki", "Evelyn", "Elizabeth",
+        "Emily", "Ha-yoon", "Ting", "Li", "Sarah", "Jessica", "Ashley", "Amanda", "Stephanie",
+        "Melissa", "Nicole", "Helen", "Samantha", "Katherine", "Christine", "Debra", "Rachel",
+        "Carolyn", "Janet", "Catherine", "Maria", "Heather", "Diane", "Virginia", "Julie", "Joyce",
+        "Victoria", "Olivia", "Kelly", "Christina", "Lauren", "Joan", "Jordan", "Judith", "Megan",
+        "Cheryl", "Andrea", "Hannah", "Jacqueline", "Martha", "Gloria", "Teresa", "Ann", "Sara",
+        "Madison", "Frances", "Kathryn", "Janice", "Jean", "Abigail", "Alice", "Julia", "Judy",
+        "Grace", "Denise", "Amber", "Doris", "Marilyn", "Danielle", "Beverly", "Theresa", "Diana",
+        "Natalie", "Brittany", "Charlotte", "Marie", "Kayla", "Alexis"
+      ],
+      "last": [
+        "Ashford", "Blackwood", "Sterling", "Vance", "Satou", "Smith", "Johnson", "Kim", "Suzuki",
+        "Zhang", "Patel", "Garcia", "Silva", "Okafor", "Al-Mansoor", "Hansen", "Rossi", "Dubois",
+        "Kowalski", "Ivanov", "O'Connor", "Nakamura", "Mercer", "Gomez", "Novak", "Tanaka",
+        "Lefevre"
+      ],
+      "surname_chance": 0.6
+    },
+    "place": {
+      "prefixes": [
+        "Ash", "Oak", "Silver", "Neo", "Royal", "Maple"
+      ],
+      "suffixes": [
+        "wood", "haven", "spire", "gate", "station", "high"
+      ],
+      "adjectives": [
+        "Silent", "Ancient", "Radiant", "Neon", "Central"
+      ],
+      "nouns": [
+        "Keep", "Station", "Academy", "Citadel", "Hall"
+      ],
+      "patterns": [
+        "{prefix}{suffix}", "{adjective} {noun}"
+      ]
+    },
+    "roles": [
+      "Former Classmate", "Childhood Friend", "Academy Senior", "Travelling Merchant", "Town Guard",
+      "Fellow Adventurer", "Study Partner", "Apprentice Specialist", "Neighborhood Acquaintance",
+      "Shopkeeper", "Community Leader", "Junior Colleague", "Research Assistant",
+      "Workshop Apprentice", "Caravan Guard", "Security Officer", "Local Artisan", "Tavern Keeper",
+      "Medic Assistant", "Field Scout", "Former Squadmate", "Ex-partner", "Club Member", "Archivist",
+      "Technician", "Courier", "Guide", "Navigator", "Observer", "Attendant"
+    ]
+  }
+}

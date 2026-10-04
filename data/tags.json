@@ -1,0 +1,431 @@
+{
+  "fantasy": {
+    "name": "Fantasy",
+    "prompt_instructions": [
+      "Incorporate magical phenomena, ancient ruins, and heroic stakes throughout the narrative.",
+      "Provide opportunities for spellcasting, dungeon crawling, and taking on quest board contracts.",
+      "Include environmental hazards, intense melee skirmishes, and epic boss raid challenges."
+    ],
+    "allowed_mechanics": [
+      "merchant_encounters",
+      "relationship_meter",
+      "contact_list",
+      "faction_reputation",
+      "tactical_combat"
+    ],
+    "starting_hooks": [
+      {
+        "archetype": "hub_launchpad",
+        "hook": "in a dimly lit, bustling tavern as mercenaries review contract notices and an informant flags your table",
+        "suggested_location": "{session_kingdom} ➔ The Boar's Tusk Tavern ➔ Hearthside Table",
+        "directive": "Open Hub Exploration: Establish ambient tavern atmosphere, 2-3 present patrons/NPCs with distinct rumors, notice board access, and open choices."
+      },
+      {
+        "archetype": "hub_launchpad",
+        "hook": "in a vibrant open-air grand bazaar surrounded by aromatic spice stalls, arcane trinket peddlers, and lively caravans",
+        "suggested_location": "{session_kingdom} ➔ Sunfire Grand Bazaar ➔ Silk Merchant Pavilion",
+        "directive": "Open Hub Exploration: Establish vibrant marketplace bustle, colorful merchants, local rumors, and trade opportunities."
+      },
+      {
+        "archetype": "hub_launchpad",
+        "hook": "in the grand registration hall of the Adventurers' Guild as scouts report new territorial anomalies and expedition leaders recruit companions",
+        "suggested_location": "{session_kingdom} ➔ Adventurers' Guild Headquarters ➔ Expedition Registry",
+        "directive": "Open Hub Exploration: Guild hall atmosphere, active bulletin ledger, seasoned adventurers, and mission opportunities."
+      },
+      {
+        "archetype": "hub_launchpad",
+        "hook": "at a high frontier watchtower garrison overlooking the vast wilderness as rangers warm their hands over a stone brazier",
+        "suggested_location": "{session_mountain} ➔ Highwatch Frontier Outpost ➔ Signal Tower Lookout",
+        "directive": "Open Hub Exploration: Frontier outpost atmosphere, vigilant rangers, wilderness scouting maps, and border contracts."
+      },
+      {
+        "archetype": "hub_launchpad",
+        "hook": "beneath the towering stained-glass dome of an arcane academy conservatory as scholar-mages debate fluctuating leylines",
+        "suggested_location": "{session_kingdom} ➔ Grand Arcanum Conservatory ➔ Star-Globe Balcony",
+        "directive": "Open Hub Exploration: Scholarly arcane sanctum, floating grimoires, curious mages, and magical inquiry choices."
+      },
+      {
+        "archetype": "in_media_res",
+        "hook": "along a rocky mountain pass under sudden attack by mountain raiders as your transport wagon overturns",
+        "suggested_location": "{session_mountain} ➔ Mountain Pass Crossing ➔ Overturned Wagon",
+        "directive": "In Media Res: Immediate crisis with weapons drawn, rolling debris, and urgent tactical choices (counter-attack, rescue companion, arcane shield, take cover)."
+      },
+      {
+        "archetype": "in_media_res",
+        "hook": "atop a wooden frontier palisade as a sudden beast horde charges out from the forest shadows against the outer gates",
+        "suggested_location": "{session_forest} ➔ Pineguard Palisade ➔ Breached Wooden Gate",
+        "directive": "In Media Res: Desperate outpost defense, crashing gate timbers, charging beasts, and decisive combat/barrier choices."
+      },
+      {
+        "archetype": "in_media_res",
+        "hook": "on a swaying stone bridge as a flash-flood river surge fractures the central arch beneath your boots",
+        "suggested_location": "{session_mountain} ➔ Ironbridge Crossing ➔ Fractured Stone Span",
+        "directive": "In Media Res: Environmental collapse crisis, roaring white-water rapids, cracking stone, and high-agility reflex choices."
+      },
+      {
+        "archetype": "in_media_res",
+        "hook": "outside the capital outer gates as an alarm bell clangs and a rogue magical construct shatters the iron portcullis",
+        "suggested_location": "{session_kingdom} ➔ Royal Capital Outer Gates ➔ Smoldering Portcullis",
+        "directive": "In Media Res: Rampaging construct crisis, scattered city guards, electrical sparks, and immediate tactical engagement choices."
+      },
+      {
+        "archetype": "in_media_res",
+        "hook": "deep in a subterranean cavern as an earthquake tremors through the stone, shattering luminescent crystals and opening a chasm",
+        "suggested_location": "{session_caves} ➔ Crystal Cavern Tunnel ➔ Fractured Chasm",
+        "directive": "In Media Res: Cavern tremor emergency, falling stalactites, glowing crystal shrapnel, and rapid escape/stabilization choices."
+      },
+      {
+        "archetype": "delve_threshold",
+        "hook": "before the ancient overgrown archway of a sunken ruin as a mystical seal hums and glowing runes flare to life",
+        "suggested_location": "{session_forest} ➔ Sunken Moonwell ➔ Ruined Archway",
+        "directive": "Delve Threshold: Stage the mystery of the ancient ruin threshold, survival/scouting choices, deciphering inscriptions, and preparing expedition gear."
+      },
+      {
+        "archetype": "delve_threshold",
+        "hook": "at the sealed iron ossuary gate of the mountain catacombs where cold subterranean air whispers through ancient carved gargoyles",
+        "suggested_location": "{session_mountain} ➔ Whispering Catacombs ➔ Sealed Ossuary Gate",
+        "directive": "Delve Threshold: Dark catacomb expedition threshold, ancient funerary wards, inspecting stone sarcophagi, and lighting torches."
+      },
+      {
+        "archetype": "delve_threshold",
+        "hook": "before the towering shattered vestibule of a ruined arcane spire jutting above the ancient tree canopy",
+        "suggested_location": "{session_ancient_forest} ➔ Spire of the Fallen Archmage ➔ Shattered Vestibule",
+        "directive": "Delve Threshold: High-magic ruin exploration, floating architectural remnants, deciphering arcane wards, and preparing ascent."
+      },
+      {
+        "archetype": "delve_threshold",
+        "hook": "behind a thunderous mountain waterfall where an ancient dwarven blast gate stands half-buried beneath mineral crust",
+        "suggested_location": "{session_caves} ➔ Deep Iron Under-Vault ➔ Runic Blast Gate",
+        "directive": "Delve Threshold: Subterranean industrial vault mystery, heavy dwarven cogs, analyzing runic locks, and gearing up for the delve."
+      },
+      {
+        "archetype": "delve_threshold",
+        "hook": "upon a fog-shrouded moorland ridge before a circle of standing megaliths marking the entrance to a primeval barrow",
+        "suggested_location": "{session_forest} ➔ Ashen Barrowmound ➔ Megalithic Threshold",
+        "directive": "Delve Threshold: Ancient earthen barrow exploration, reading faded ogham stones, checking ground traps, and entering the mound."
+      },
+      {
+        "archetype": "delve_threshold",
+        "hook": "at the tidal entrance of a drowned sea-grotto where luminescent barnacles illuminate a submerged pre-cataclysm archway",
+        "suggested_location": "{session_forest} ➔ Drowned Leviathan Sanctum ➔ Tidal Archway",
+        "directive": "Delve Threshold: Coastal grotto expedition, checking tidal currents, inspecting luminous sea-runes, and preparing aquatic gear."
+      }
+    ]
+  },
+  "space": {
+    "name": "Space",
+    "prompt_instructions": [
+      "Incorporate starship maneuvers, orbital stations, and encounters with uncharted star systems and alien species.",
+      "Emphasize cosmic faction dynamics, ancient cosmic artifacts, and zero-G environmental hazards.",
+      "Provide opportunities for planetary scans, xenobiological discoveries, and starship combat engagement."
+    ],
+    "allowed_mechanics": [
+      "merchant_encounters",
+      "relationship_meter",
+      "contact_list",
+      "faction_reputation",
+      "tactical_combat",
+      "smartphone_hub"
+    ],
+    "starting_hooks": [
+      {
+        "archetype": "hub_launchpad",
+        "hook": "in a crowded planetary spaceport concourse surrounded by alien traders, holographic flight boards, and cargo haulers",
+        "suggested_location": "{session_station} ➔ Concourse Promenade ➔ Observation Lounge",
+        "directive": "Open Hub Exploration: Establish vibrant starport atmosphere, alien merchants, job bulletin terminal, and open choices."
+      },
+      {
+        "archetype": "in_media_res",
+        "hook": "inside a starship cargo bay as a red-alert siren blares and an automated airlock seal begins decompression",
+        "suggested_location": "{session_station} ➔ Cargo Bay 3 ➔ Decompression Airlock",
+        "directive": "In Media Res: Immediate hull breach crisis, blinking emergency lights, and urgent tactical choices (override terminal, seal bulkhead, magnetic grapple, evacuate crew)."
+      },
+      {
+        "archetype": "delve_threshold",
+        "hook": "on the high-tech command bridge of a scout vessel entering the orbit of an uncharted world as anomalous energy spikes register",
+        "suggested_location": "{session_planet} ➔ Orbital Approach Vector ➔ Command Bridge",
+        "directive": "Delve Threshold: Stage the frontier orbital scan, planetary sensor telemetry, launch probe/shuttle choices, and crew preparation."
+      }
+    ]
+  },
+  "cyberpunk": {
+    "name": "Cyberpunk",
+    "prompt_instructions": [
+      "Emphasize cybernetic implants, corporate espionage, netrunning ice-breaker hacks, and street gang rivalries.",
+      "Highlight high-tech black market trade, chrome augmentations, and corporate security counter-measures.",
+      "Focus narrative options on stealth extraction, neural breach hacking, and high-intensity urban firefights."
+    ],
+    "allowed_mechanics": [
+      "merchant_encounters",
+      "relationship_meter",
+      "contact_list",
+      "faction_reputation",
+      "tactical_combat",
+      "smartphone_hub"
+    ],
+    "starting_hooks": [
+      {
+        "archetype": "hub_launchpad",
+        "hook": "in a crowded underground synth-wave lounge while waiting to meet a shady corporate fixer beneath flickering holographic signs",
+        "suggested_location": "{session_cyber_city} ➔ The Wiretap Lounge ➔ VIP Synth Booth",
+        "directive": "Open Hub Exploration: Establish gritty neon lounge atmosphere, fixer contacts, data-slate feeds, and open choices."
+      },
+      {
+        "archetype": "in_media_res",
+        "hook": "in a rain-slicked back-alley as corporate security drones sweep overhead with active spotlights and sirens blaring",
+        "suggested_location": "{session_cyber_city} ➔ Neon Alleyway Sector 4 ➔ Dumpster Barricade",
+        "directive": "In Media Res: Urgent extraction firefight/pursuit, blinding searchlights, and tactical choices (neural breach ICE, suppressing fire, parkour escape, EMP trap)."
+      },
+      {
+        "archetype": "delve_threshold",
+        "hook": "outside the heavy blast door of a derelict underground sub-level lab as your cyberdeck hooks into an encrypted data terminal",
+        "suggested_location": "{session_cyber_city} ➔ Sub-Level Research Vault ➔ Access Hatch",
+        "directive": "Delve Threshold: Deep-net infiltration threshold, power routing, security bypass, and scouting the dark corridor ahead."
+      }
+    ]
+  },
+  "steampunk": {
+    "name": "Steampunk",
+    "prompt_instructions": [
+      "Incorporate clockwork tinkering, steam-pressure gauge management, airship piloting, and alchemical reactions.",
+      "Highlight Victorian social etiquette, industrial guild rivalries, and clockwork automaton behavior.",
+      "Provide opportunities for aerial airship engagements, mechanical contraption crafting, and industrial sabotage."
+    ],
+    "allowed_mechanics": [
+      "merchant_encounters",
+      "relationship_meter",
+      "contact_list",
+      "faction_reputation",
+      "tactical_combat",
+      "smartphone_hub"
+    ],
+    "starting_hooks": [
+      {
+        "archetype": "hub_launchpad",
+        "hook": "in an aristocratic Victorian passenger airship lounge as brass-suited inventors demonstrate controversial clockwork contraptions",
+        "suggested_location": "{session_airship} ➔ Grand Passenger Salon ➔ Observation Balcony",
+        "directive": "Open Hub Exploration: Opulent airship salon, eccentric inventors, social factions, notice ledger, and open choices."
+      },
+      {
+        "archetype": "in_media_res",
+        "hook": "inside a roaring clockwork engine bay as a high-pressure steam valve ruptures and loose gears spin out of control",
+        "suggested_location": "{session_airship} ➔ Boiler Engine Bay ➔ Ruptured Pressure Valve",
+        "directive": "In Media Res: High-pressure industrial emergency, scalding steam, and urgent tactical choices (wrench pressure valve, vent steam chamber, emergency brake, rescue mechanic)."
+      },
+      {
+        "archetype": "delve_threshold",
+        "hook": "at the foggy threshold of an abandoned clockwork foundry as automated steam sentinels creak back to life",
+        "suggested_location": "{session_airship} ➔ Derelict Foundry Gates ➔ Iron Sluice Chamber",
+        "directive": "Delve Threshold: Victorian industrial ruin exploration, clockwork puzzle deciphering, oiling mechanisms, and gear preparation."
+      }
+    ]
+  },
+  "grimdark": {
+    "name": "Grimdark",
+    "prompt_instructions": [
+      "Maintain an oppressive, bleak atmosphere focused on brutal reality, dread, and high-risk consequences.",
+      "Highlight moral ambiguity, corrupting power, grim survival, and psychological pressure.",
+      "Ensure mercy is scarce, resources are costly, and visceral stakes carry heavy permanent weight."
+    ],
+    "allowed_mechanics": [
+      "merchant_encounters",
+      "relationship_meter",
+      "contact_list",
+      "faction_reputation",
+      "tactical_combat"
+    ],
+    "starting_hooks": [
+      {
+        "archetype": "hub_launchpad",
+        "hook": "within a bleak, fortified enclave where weary sentinels drink watered ale and murmur grim warnings about the encroaching dark",
+        "suggested_location": "{session_kingdom} ➔ The Iron Bastion ➔ Barracks Hearth",
+        "directive": "Open Hub Exploration: Tense military haven, scarred veterans, grim bounty ledger, and cautious social choices."
+      },
+      {
+        "archetype": "in_media_res",
+        "hook": "in the muddy aftermath of a brutal ambush surrounded by burning barricades as shadows stalk the treeline",
+        "suggested_location": "{session_ancient_forest} ➔ Ashen Battlefield ➔ Muddy Trench",
+        "directive": "In Media Res: Visceral blood-soaked crisis, enemy closing in, wounded allies, and desperate survival choices."
+      },
+      {
+        "archetype": "delve_threshold",
+        "hook": "before the yawning maw of a desecrated crypt as cold fog spills across mossy gravestones and crows scatter",
+        "suggested_location": "{session_caves} ➔ Desecrated Crypt ➔ Iron Sarcophagus Threshold",
+        "directive": "Delve Threshold: Dread expedition threshold, occult ward examination, lighting torches, and steeling resolve."
+      }
+    ]
+  },
+  "isekai": {
+    "name": "Isekai",
+    "prompt_instructions": [
+      "Blend modern-world knowledge and pop-culture sensibilities into an unfamiliar fantasy realm.",
+      "Incorporate status appraisals, affinity meter checks, and over-the-top cheat skill applications.",
+      "Maintain power progression and eccentric companion dynamics while adapting to a strange new world."
+    ],
+    "allowed_mechanics": [
+      "merchant_encounters",
+      "relationship_meter",
+      "contact_list",
+      "faction_reputation",
+      "tactical_combat"
+    ],
+    "starting_hooks": [
+      {
+        "archetype": "hub_launchpad",
+        "hook": "in the middle of a bustling fantasy capital marketplace as your glowing status window hovers before your eyes and merchants hawk strange fruits",
+        "suggested_location": "{session_kingdom} ➔ Central Market Square ➔ Fountain Plaza",
+        "directive": "Open Hub Exploration: Modern protagonist in a vibrant fantasy hub, evaluating status screen, talking to curious locals, checking guild boards, and exploring."
+      },
+      {
+        "archetype": "in_media_res",
+        "hook": "in a radiant summoning chamber as an unstable magic circle fractures and alarmed court mages scramble for protective wards",
+        "suggested_location": "{session_kingdom} ➔ Grand Summoning Chamber ➔ Fractured Runed Dais",
+        "directive": "In Media Res: Sudden summoning malfunction, glowing magical discharge, shocked royal guards, and tactical cheat-skill/reflex choices."
+      },
+      {
+        "archetype": "delve_threshold",
+        "hook": "at the edge of an enchanted primeval forest where giant glowing flora pulse and your newly unlocked cheat appraisal skill triggers",
+        "suggested_location": "{session_forest} ➔ Edge of Whispering Woods ➔ Mossy Clearing",
+        "directive": "Delve Threshold: First steps into an unknown fantasy wilderness, testing skills, harvesting strange materials, and scouting ahead."
+      }
+    ]
+  },
+  "slice_of_life": {
+    "name": "Slice of Life",
+    "prompt_instructions": [
+      "Focus narrative conflict on everyday life, personal drama, social status, and interpersonal relationships.",
+      "Incorporate opportunities for romance routes, casual banter, community gatherings, and heartwarming or bittersweet moments.",
+      "Emphasize character-driven interactions, daily routines, and relatable personal dilemmas."
+    ],
+    "allowed_mechanics": [
+      "merchant_encounters",
+      "relationship_meter",
+      "contact_list",
+      "faction_reputation",
+      "smartphone_hub"
+    ],
+    "starting_hooks": [
+      {
+        "archetype": "hub_launchpad",
+        "hook": "at a cozy neighborhood café as the aroma of roasted coffee fills the air and friends wave from a corner table",
+        "suggested_location": "{session_cafe} ➔ Sunny Corner Booth ➔ Table 4",
+        "directive": "Open Hub Exploration: Warm community hub, friendly regulars, bulletin board with town notices, menu choices, and relaxed social interactions."
+      },
+      {
+        "archetype": "in_media_res",
+        "hook": "in a bustling community festival kitchen during a sudden rush as orders pile up and the head organizer calls for help",
+        "suggested_location": "{session_recreation_park} ➔ Festival Plaza ➔ Food Stall Kitchen",
+        "directive": "In Media Res: Hectic slice-of-life comedy crisis, dropped supplies, ticking preparation timer, and cooperative problem-solving choices."
+      },
+      {
+        "archetype": "delve_threshold",
+        "hook": "along the scenic path of a newly reopened hilltop nature trail overlooking the entire sparkling town below",
+        "suggested_location": "{session_park} ➔ Hilltop Lookout ➔ Wooden Gazebo",
+        "directive": "Delve Threshold: Peaceful exploratory threshold, taking in panoramic views, discovering a local landmark, and planning the day's stroll."
+      }
+    ]
+  },
+  "high_school": {
+    "name": "High School",
+    "prompt_instructions": [
+      "Highlight modern high school tropes, youth emotional intensity, and personal growth dynamics.",
+      "Incorporate social faction dynamics: student clubs, student council, delinquent gangs, and social cliques operate as powerful factions with real campus influence.",
+      "Treat faction headquarters as distinct campus locations: clubrooms, student council chambers, rooftops, and gym hallways."
+    ],
+    "allowed_mechanics": [
+      "merchant_encounters",
+      "relationship_meter",
+      "contact_list",
+      "faction_reputation",
+      "smartphone_hub"
+    ],
+    "starting_hooks": [
+      {
+        "archetype": "hub_launchpad",
+        "hook": "in the lively campus courtyard beneath blooming cherry blossoms during the annual student club recruitment fair as flyers flutter",
+        "suggested_location": "{session_school} ➔ Central Courtyard ➔ Sakura Fountain",
+        "directive": "Open Hub Exploration: Bustling school grounds, club reps pitching memberships, student council presence, bulletin board, and open social choices."
+      },
+      {
+        "archetype": "in_media_res",
+        "hook": "in the 3F science wing hallway as an accidental chemical reaction triggers the fire alarm and students scramble past locked lab doors",
+        "suggested_location": "{session_school} ➔ 3F Science Wing ➔ Smoke-Filled Hallway",
+        "directive": "In Media Res: School commotion/crisis, teachers directing evacuation, trapped project or missing student, and quick tactical/social choices."
+      },
+      {
+        "archetype": "delve_threshold",
+        "hook": "on the quiet school rooftop in the crisp morning air before the first bell as rumors of an old campus mystery echo in the breeze",
+        "suggested_location": "{session_school} ➔ School Rooftop ➔ Rooftop Benches",
+        "directive": "Delve Threshold: Solitary reflective threshold before morning classes, uncovering a hidden message or key behind the water tank, and deciding which campus mystery to pursue."
+      }
+    ]
+  },
+  "post_apocalypse": {
+    "name": "Post-Apocalypse",
+    "prompt_instructions": [
+      "Emphasize wasteland survival challenges, radiation exposure hazards, and resource scavenging.",
+      "Incorporate encounters with mutated creatures, raider skirmishes, and wasteland environmental hazards.",
+      "Balance bleak survival reality with dark humor and bizarre wasteland encounters."
+    ],
+    "allowed_mechanics": [
+      "merchant_encounters",
+      "relationship_meter",
+      "contact_list",
+      "faction_reputation",
+      "tactical_combat"
+    ],
+    "starting_hooks": [
+      {
+        "archetype": "hub_launchpad",
+        "hook": "in a fortified wasteland trading post built from rusted shipping containers as scavengers barter scrap and clean water",
+        "suggested_location": "{session_desert} ➔ Rustfall Trading Post ➔ Container Bar",
+        "directive": "Open Hub Exploration: Rugged wasteland haven, mercenary barter posts, salvage bounty board, and cautious survivor interactions."
+      },
+      {
+        "archetype": "in_media_res",
+        "hook": "beside an overturned armored buggy in a dusty crater as raider buggy engines roar in the distance",
+        "suggested_location": "{session_desert} ➔ Crater Convoy Wreck ➔ Overturned Buggy",
+        "directive": "In Media Res: High-octane wasteland skirmish, approaching raiders, limited ammo, and urgent tactical defense/evasion choices."
+      },
+      {
+        "archetype": "delve_threshold",
+        "hook": "before the cracked blast doors of a sealed pre-war bunker as your Geiger counter clicks softly against the iron seal",
+        "suggested_location": "{session_desert} ➔ Vault 108 Blast Gate ➔ Decontamination Threshold",
+        "directive": "Delve Threshold: Bunker expedition threshold, checking radiation levels, battery power, prying rusted doors, and entering Chamber 1."
+      }
+    ]
+  },
+  "nsfw": {
+    "name": "NSFW",
+    "prompt_instructions": [
+      "Write explicit, unfiltered, and sensual sexual descriptions during lewd encounters and romantic situations.",
+      "Avoid euphemisms like 'length,' 'member,' or 'peak.' Use direct anatomical terms (e.g., dick, cock, pussy, tits, fuck) instead.",
+      "Use explicit sexual terms, sexual acts & vulgar words (eg: fuck, dick, pussy, cum, tits, etc).",
+      "Include sexually explicit and lewd gossips, rumors and quests."
+    ]
+  },
+  "furry": {
+    "name": "Furry",
+    "prompt_instructions": [
+      "Highlight distinct anthropomorphic physical features (fur, paws, muzzles, coat patterns, feathers, scales, twitching animal ears, swaying tails, claws) in vivid detail.",
+      "Emphasize unique animal instincts, species traits, sensory reactions (keen smell, sharp hearing, purring, tail wags, ear twitches, instinctual reflexes), and species-specific habits.",
+      "Incorporate rich anthropomorphic culture, species traditions, playful species rivalries (felines, canines, vulpines, ursines, etc.), and expressive social dynamics.",
+      "Focus on charming, highly expressive, and distinct anthro character interactions tailored to the active setting."
+    ]
+  },
+  "non_combat": {
+    "name": "Non-Combat",
+    "prompt_instructions": [
+      "This scenario is strictly non-combat, slice-of-life, and drama focused. All conflicts, challenges, and milestones are solved through social interactions, intellectual problem-solving, environmental investigation, and personal choices.",
+      "Do NOT generate lethal physical combat encounters, monster attacks, weapons skirmishes, or hostile enemy combat rounds.",
+      "Attire, accessories, stationery, and carried tools serve purely as cosmetics, personal style, and roleplay flavor for narrative descriptions, with zero combat attributes."
+    ],
+    "allowed_mechanics": [
+      "merchant_encounters",
+      "relationship_meter",
+      "contact_list",
+      "faction_reputation",
+      "smartphone_hub"
+    ]
+  }
+}

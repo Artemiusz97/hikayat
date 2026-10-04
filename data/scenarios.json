@@ -1,0 +1,118 @@
+{
+  "fantasy": {
+    "name": "Fantasy",
+    "tags": [
+      "fantasy"
+    ],
+    "description": "A vibrant world of abundant magic, diverse races, epic dungeons, and an ancient threat.",
+    "tone_guidelines": "Write epic, mythic prose focused on classic high fantasy heroism, political intrigue, and grand adventure."
+  },
+  "sci_fi": {
+    "name": "Space Frontier",
+    "tags": [
+      "space"
+    ],
+    "description": "An expansive galactic expanse of uncharted star systems, ancient alien ruins, interstellar trading hubs, and rogue spacefarers.",
+    "tone_guidelines": "Write clinical, awe-inspiring prose focused on technological wonder, interstellar politics, and exploration."
+  },
+  "cyberpunk": {
+    "name": "Cyberpunk",
+    "tags": [
+      "cyberpunk"
+    ],
+    "description": "A neon-soaked dystopian megacity ruled by ruthless megacorporations, cybernetic black markets, and rogue netrunners.",
+    "tone_guidelines": "Write gritty, cynical prose focused on neon-drenched urban decay, corporate oppression, and high-tech rebellion."
+  },
+  "steampunk": {
+    "name": "Steampunk",
+    "tags": [
+      "steampunk"
+    ],
+    "description": "A soot-choked Victorian metropolis of brass gears, steam-powered airships, clockwork automata, and alchemical mysteries.",
+    "tone_guidelines": "Write ornate, Victorian-styled prose focusing on industrial expansion, clockwork invention, and high society intrigue."
+  },
+  "dark_fantasy": {
+    "name": "Dark Fantasy",
+    "tags": [
+      "fantasy",
+      "grimdark"
+    ],
+    "description": "A cursed land where hope is thin, blood has currency, and every bargain exacts a price.",
+    "tone_guidelines": "Write oppressive, gothic prose where magic is corrupting, mercy is scarce, and the stakes are consistently lethal."
+  },
+  "isekai_fantasy": {
+    "name": "Isekai Fantasy",
+    "tags": [
+      "isekai",
+      "fantasy"
+    ],
+    "description": "A modern-world individual ripped from their ordinary life and abruptly thrust into a trope-filled fantasy realm full of magic, and monsters.",
+    "tone_guidelines": "Write energetic, lighthearted prose blending modern sensibilities with high-fantasy tropes and power progression."
+  },
+  "nsfw_isekai_fantasy": {
+    "name": "Isekai Fantasy (NSFW)",
+    "base_scenario": "isekai_fantasy",
+    "tags": [
+      "isekai",
+      "fantasy",
+      "nsfw"
+    ],
+    "description": "A modern-world individual ripped from their ordinary life and abruptly thrust into a trope-filled fantasy realm full of magic, and monsters.",
+    "tone_guidelines": "Write energetic, lighthearted prose blending modern sensibilities with high-fantasy tropes, power progression, and passionate, unfiltered romantic encounters."
+  },
+  "high_school_drama": {
+    "name": "High School Drama",
+    "tags": [
+      "high_school",
+      "slice_of_life",
+      "non_combat"
+    ],
+    "description": "A modern high school landscape where social status, academic pressure, and teenage romance collide.",
+    "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose that captures the emotional intensity of youth. Balance whimsical, comedic high school banter with genuinely serious moments of social drama, heartbreak, and personal growth. Lean heavily into classic high school tropes and archetype dynamics."
+  },
+  "nsfw_high_school_drama": {
+    "name": "High School Drama (NSFW)",
+    "base_scenario": "high_school_drama",
+    "tags": [
+      "high_school",
+      "slice_of_life",
+      "nsfw",
+      "non_combat"
+    ],
+    "description": "A modern high school landscape where social status, academic pressure, and explicit romance intertwine.",
+    "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose that captures the emotional intensity of youth. Balance whimsical, comedic high school banter with genuinely serious moments of social drama and personal growth. Lean heavily into classic high school tropes and archetype dynamics while including very explicit and unfiltered sensual sexual encounters."
+  },
+  "furry_high_school_drama": {
+    "name": "High School Drama (Furry)",
+    "base_scenario": "high_school_drama",
+    "tags": [
+      "high_school",
+      "slice_of_life",
+      "furry",
+      "non_combat"
+    ],
+    "description": "A vibrant modern high school landscape where social status, academic pressure, and teenage romance intertwine in a thriving anthropomorphic student body. Furry and beastfolk students (cat, fox, wolf, rabbit, and bear sub-races) navigate campus life, clubs, and heartwarming relationships.",
+    "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose focusing on emotional intensity, social drama, friendship, heartbreak, and personal growth in an academic setting."
+  },
+  "nsfw_furry_high_school_drama": {
+    "name": "High School Drama (NSFW Furry)",
+    "base_scenario": "nsfw_high_school_drama",
+    "tags": [
+      "high_school",
+      "slice_of_life",
+      "furry",
+      "nsfw",
+      "non_combat"
+    ],
+    "description": "A vibrant modern high school landscape where social status, academic pressure, and explicit romance intertwine in a thriving anthropomorphic student body. Furry and beastfolk students (cat, fox, wolf, rabbit, and bear sub-races) navigate campus life, clubs, and passionate relationships.",
+    "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose focusing on emotional intensity, social drama, personal growth, and passionate, explicit romantic encounters in an academic setting. Use explicit sexual terms, sexual acts & vulgar words. Avoid euphemisms like 'length,' 'member,' or 'peak.' Use direct anatomical terms (e.g., dick, cock, pussy, tits, cum) instead."
+  },
+  "nuclear_post_apocalypse": {
+    "name": "Nuclear Post-Apocalypse",
+    "tags": [
+      "post_apocalypse"
+    ],
+    "description": "A bleak, ash-choked wasteland set a few decades after atomic fire, where radiation, raiders, and mutated horrors stalk the ruins.",
+    "tone_guidelines": "Write bleak, gritty, and unforgiving prose where survival of the fittest governs the ruins, occasionally balanced by dark humor."
+  }
+}
