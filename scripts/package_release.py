@@ -29,7 +29,7 @@ EXCLUDE_DIRS = {
     'venv', 'env', 'ENV', '.venv',
     '__pycache__', '.pytest_cache',
     'node_modules', '.git', '.idea', '.vscode',
-    'bin', 'scratch', 'releases', 'icon', 'backups'
+    'bin', 'scratch', 'releases', 'icon', 'backups', 'tests'
 }
 
 EXCLUDE_EXTS = {
@@ -39,7 +39,8 @@ EXCLUDE_EXTS = {
 }
 
 EXCLUDE_EXACT_FILES = {
-    '.env', '.DS_Store', 'Thumbs.db'
+    '.env', '.DS_Store', 'Thumbs.db',
+    'pytest.ini', 'run_tests.bat', 'requirements-dev.txt'
 }
 
 
