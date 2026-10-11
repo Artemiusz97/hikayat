@@ -46,28 +46,28 @@ const PartyMemberCard = ({ member, isNpc = false, isSelf = false, isOnline = tru
   }
 
   return (
-    <div className={`p-3 rounded-lg border transition-all ${
+    <div className={`p-2.5 rounded-lg border transition-all ${
       isSelf 
         ? 'bg-fantasy-accent/5 border-fantasy-accent/40 shadow-sm' 
         : 'bg-black/40 border-fantasy-border/60 hover:border-fantasy-border'
     }`}>
       {/* Member Header */}
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-2">
           <div className="relative">
-            <div className={`w-7 h-7 rounded-full flex items-center justify-center border text-xs font-bold ${
+            <div className={`w-6 h-6 rounded-full flex items-center justify-center border text-xs font-bold ${
               isNpc 
                 ? 'bg-purple-950/40 border-purple-700/50 text-purple-300' 
                 : isSelf 
                   ? 'bg-fantasy-accent/20 border-fantasy-accent text-fantasy-accent' 
                   : 'bg-blue-950/40 border-blue-700/50 text-blue-300'
             }`}>
-              {isNpc ? <Sparkles size={13} /> : <UserCheck size={13} />}
+              {isNpc ? <Sparkles size={11} /> : <UserCheck size={11} />}
             </div>
             {!isNpc && (
               <span
                 title={isOnline ? 'Online' : 'Offline'}
-                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-black ${
+                className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-black ${
                   isOnline ? 'bg-emerald-400' : 'bg-gray-600'
                 }`}
               />
@@ -98,16 +98,16 @@ const PartyMemberCard = ({ member, isNpc = false, isSelf = false, isOnline = tru
             disabled={dismissing}
             onClick={() => onDismiss(name)}
             title={`Dismiss ${name} from party`}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-red-950/40 hover:bg-red-900/50 text-red-300 border border-red-800/50 transition-colors"
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-950/40 hover:bg-red-900/50 text-red-300 border border-red-800/50 transition-colors"
           >
-            <UserMinus size={11} />
+            <UserMinus size={10} />
             <span>{dismissing ? '...' : 'Dismiss'}</span>
           </button>
         )}
       </div>
 
       {/* Mini HP & MP Bars */}
-      <div className="space-y-1 bg-black/50 p-2 rounded border border-fantasy-border/30">
+      <div className="space-y-1 bg-black/50 p-1.5 rounded border border-fantasy-border/30">
         <MiniBar 
           label="HP" current={hp} max={maxHp} 
           icon={Heart} color={{ text: 'text-health', bg: 'bg-health' }} 
@@ -120,7 +120,7 @@ const PartyMemberCard = ({ member, isNpc = false, isSelf = false, isOnline = tru
 
       {/* Status Badges */}
       {statusList && statusList.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-2">
+        <div className="flex flex-wrap gap-1 mt-1.5">
           {statusList.map((eff, i) => {
             const effStr = typeof eff === 'string' ? eff : (eff.name || 'Condition');
             return (
@@ -134,25 +134,25 @@ const PartyMemberCard = ({ member, isNpc = false, isSelf = false, isOnline = tru
 
       {/* Companion Quick-Interaction Buttons */}
       {isNpc && onTriggerAction && (
-        <div className="grid grid-cols-3 gap-1.5 mt-2 pt-2 border-t border-fantasy-border/30">
+        <div className="grid grid-cols-3 gap-1 mt-1.5 pt-1.5 border-t border-fantasy-border/30">
           <button
             type="button"
             onClick={() => onTriggerAction({ custom_action_text: `I chat with ${name} about our current situation and tactics.` })}
-            className="px-1.5 py-1 rounded bg-black/60 hover:bg-purple-950/50 text-gray-300 hover:text-purple-200 border border-fantasy-border/60 hover:border-purple-700/60 text-[10px] font-semibold transition-colors truncate"
+            className="px-1 py-0.5 rounded bg-black/60 hover:bg-purple-950/50 text-gray-300 hover:text-purple-200 border border-fantasy-border/60 hover:border-purple-700/60 text-[9.5px] font-semibold transition-colors truncate"
           >
-            💬 Chat & Tactics
+            💬 Tactics
           </button>
           <button
             type="button"
             onClick={() => onTriggerAction({ custom_action_text: `I ask ${name} about their personal backstory and past memories.` })}
-            className="px-1.5 py-1 rounded bg-black/60 hover:bg-cyan-950/50 text-gray-300 hover:text-cyan-200 border border-fantasy-border/60 hover:border-cyan-700/60 text-[10px] font-semibold transition-colors truncate"
+            className="px-1 py-0.5 rounded bg-black/60 hover:bg-cyan-950/50 text-gray-300 hover:text-cyan-200 border border-fantasy-border/60 hover:border-cyan-700/60 text-[9.5px] font-semibold transition-colors truncate"
           >
-            📖 Backstory
+            📖 Lore
           </button>
           <button
             type="button"
             onClick={() => onTriggerAction({ custom_action_text: `I warmly compliment and flirt with ${name}.` })}
-            className="px-1.5 py-1 rounded bg-black/60 hover:bg-pink-950/50 text-gray-300 hover:text-pink-200 border border-fantasy-border/60 hover:border-pink-700/60 text-[10px] font-semibold transition-colors truncate"
+            className="px-1 py-0.5 rounded bg-black/60 hover:bg-pink-950/50 text-gray-300 hover:text-pink-200 border border-fantasy-border/60 hover:border-pink-700/60 text-[9.5px] font-semibold transition-colors truncate"
           >
             💕 Flirt
           </button>
@@ -236,13 +236,13 @@ const PartyWidget = ({
   };
 
   return (
-    <div className="bg-black/30 rounded-lg border border-fantasy-border p-4 space-y-4">
+    <div className="bg-black/30 rounded-lg border border-fantasy-border p-2.5 sm:p-3 space-y-2.5">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-fantasy-border pb-3">
+      <div className="flex items-center justify-between border-b border-fantasy-border pb-2">
         <div>
           <div className="flex items-center gap-2">
-            <Users size={16} className="text-fantasy-accent" />
-            <h3 className="font-rpg font-bold text-sm text-gray-100 uppercase tracking-wider">Party Roster</h3>
+            <Users size={15} className="text-fantasy-accent" />
+            <h3 className="font-rpg font-bold text-xs sm:text-sm text-gray-100 uppercase tracking-wider">Party Roster</h3>
           </div>
           {session.id && (
             <div className="flex items-center gap-2 mt-1">

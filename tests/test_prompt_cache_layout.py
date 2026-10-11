@@ -75,7 +75,7 @@ async def test_resolve_turn_system_prompt():
         user_prompt = args[0][1]
         
         assert isinstance(system_prompt, str)
-        assert "KNOWN WORLD:" in system_prompt
+        assert prompt_layout.SCENE_CONTEXT_HEADER in system_prompt
         assert "CHARACTER SHEET(S):" in system_prompt
         assert "OUTPUT SCHEMA" in system_prompt
         

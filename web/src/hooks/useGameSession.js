@@ -103,6 +103,9 @@ export const useGameSession = (user) => {
         setWaitingForParty(false);
         setProcessingTurn(false);
         setLastSyncTimestamp(data.sync_timestamp || Date.now());
+      } else if (data.type === 'UPDATE_SCENE') {
+        setSession(data.session);
+        setLastSyncTimestamp(data.sync_timestamp || Date.now());
       } else if (data.type === 'PICK_LOCKED') {
         setPartyStatus({
           lockedCount: data.locked_picks || 0,

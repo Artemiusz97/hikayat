@@ -160,7 +160,7 @@ class TestUndergarmentsAndMicrospatial(unittest.TestCase):
         prompt_block = physical_state.build_physical_prompt_block(session, party=[], is_nsfw=True)
         self.assertIn("None (Bra-less)", prompt_block)
         self.assertIn("Matching black lace thong", prompt_block)
-        self.assertIn("Strictly respect clothing removal states and worn undergarments", prompt_block)
+        self.assertIn("Strictly respect clothing removal states, worn undergarments", prompt_block)
         self.assertIn("NEVER describe unclasping, stripping, or removing a non-existent undergarment", prompt_block)
 
     def test_intimate_profile_embed_contains_undergarments_field(self):

@@ -33,7 +33,7 @@ SHIELD_ARCHETYPES: Dict[str, Dict[str, Any]] = {
     "energy_shield": {
         "mass": "light", "handedness": "1H", "block_chance": 35,
         "base_dt": 6, "dt_contribution": 6,
-        "type_dt": {"energy": 18, "energy_cell": 18, "magical": 14, "fire": 12, "shock": 12, "plasma": 14},
+        "type_dt": {"energy": 18, "energy_cell": 18, "magical": 14, "fire": 12, "shock": 12, "plasma": 14, "earth": 12, "water": 12, "wind": 12},
         "base_eva": 2
     }
 }
@@ -42,22 +42,22 @@ NON_COMBAT_SHIELD_ARCHETYPES: Dict[str, Dict[str, Any]] = {
     "school_satchel": {
         "mass": "light", "handedness": "1H", "block_chance": 0,
         "base_dt": 0, "dt_contribution": 0, "type_dt": {},
-        "base_eva": 1, "stat_modifiers": {"cha": 1, "bag_capacity": 5}
+        "base_eva": 1, "stat_modifiers": {"cha": 1}
     },
     "canvas_backpack": {
         "mass": "light", "handedness": "1H", "block_chance": 0,
         "base_dt": 0, "dt_contribution": 0, "type_dt": {},
-        "base_eva": 0, "stat_modifiers": {"cha": 1, "bag_capacity": 8}
+        "base_eva": 0, "stat_modifiers": {"cha": 1}
     },
     "tote_bag": {
         "mass": "light", "handedness": "1H", "block_chance": 0,
         "base_dt": 0, "dt_contribution": 0, "type_dt": {},
-        "base_eva": 1, "stat_modifiers": {"cha": 2}
+        "base_eva": 1, "stat_modifiers": {"cha": 1}
     },
     "binder_folder": {
         "mass": "light", "handedness": "1H", "block_chance": 0,
         "base_dt": 0, "dt_contribution": 0, "type_dt": {},
-        "base_eva": 0, "stat_modifiers": {"int": 1, "study": 2}
+        "base_eva": 0, "stat_modifiers": {"per": 1}
     }
 }
 
@@ -171,6 +171,24 @@ SCENARIO_SHIELD_AFFIXES: Dict[str, Dict[str, Any]] = {
         "prefixes_t1": ["Student Council President's", "Valedictorian's", "Championship", "Festival Champion's", "Campus Legend's"],
         "suffixes_t2": ["of the Study Group", "of Friendship", "of Style", "of Youth", "of the Honor Roll"],
         "suffixes_t1": ["of Everlasting Memories", "of the Grand Festival", "of Pure Dedication", "of the Campus Legend"]
+    },
+    "slice_of_life": {
+        "archetype_names": {
+            "buckler": ["Heavy Stainless Serving Tray", "Alloy Trash-Can Lid", "Padded Boxing Focus Mitt"],
+            "heater_shield": ["Reinforced Courier Messenger Bag", "Hardshell Acoustic Guitar Case", "Heavy Steel Street-Sign"],
+            "tower_shield": ["Heavy Rolling Café Menu Board", "Reinforced Delivery Hand-Truck", "Solid Oak Bar-Table Top"],
+            "riot_shield": ["Polycarbonate Bouncer's Guard", "Armored Security Briefcase", "Heavy Acrylic Display Guard"],
+            "energy_shield": ["High-Lumen Strobe Blinder Rig", "Ultrasonic Acoustic Deterrent", "Magnetic Deflection Vest-Pack"],
+            "school_satchel": ["Leather Crossbody Messenger Bag", "Vintage Detective Satchel", "Weatherproof Courier Bag"],
+            "canvas_backpack": ["Roll-Top Bike Courier Backpack", "Padded Camera Gear Rucksack", "Commuter Canvas Daypack"],
+            "tote_bag": ["Heavy Vinyl Record Tote", "Organic Market Canvas Tote", "Boutique Shopping Tote"],
+            "binder_folder": ["Leather-Bound Case File Dossier", "Freelancer's Client Portfolio", "Hardcover Press Clipboard"]
+        },
+        "prefixes_t3": ["Everyday", "Downtown", "Streetwise", "Vintage", "Sturdy", "Casual", "Commuter"],
+        "prefixes_t2": ["Custom", "Heavy-Duty", "Bespoke", "Nightlife", "Reinforced", "Weatherproof", "Prime"],
+        "prefixes_t1": ["Metropolitan", "Unstoppable", "Legendary", "Kingpin's", "Gold-Label", "Masterwork"],
+        "suffixes_t2": ["of the Night Shift", "of the Back Alley", "of Street Cred", "of the Hustle", "of Deflection"],
+        "suffixes_t1": ["of the City Legend", "of Untouchable Style", "of the Urban Dragon", "of the Sleepless City"]
     }
 }
 
@@ -186,7 +204,9 @@ def normalize_shield_scenario(scenario: str) -> str:
         return "sci_fi"
     if any(w in scen for w in ("dark_fantasy", "grim", "gothic", "eldritch", "curse", "blood", "horror", "grave")):
         return "dark_fantasy"
-    if any(w in scen for w in ("school", "drama", "modern", "slice", "academy", "non_combat")):
+    if any(w in scen for w in ("slice_of_life", "slice", "cozy", "cafe")):
+        return "slice_of_life"
+    if any(w in scen for w in ("school", "drama", "modern", "academy", "non_combat")):
         return "high_school"
     return "fantasy"
 

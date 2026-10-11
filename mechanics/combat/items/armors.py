@@ -13,7 +13,8 @@ ARMOR_ARCHETYPES: Dict[str, Dict[str, Any]] = {
         "type_dt": {
             # No meaningful physical DT; minimal magic shielding
             "magical": 1, "holy": 1, "dark": 0,
-            "fire": 0, "shock": 0, "ice": 0, "poison": 0
+            "fire": 0, "shock": 0, "ice": 0, "poison": 0,
+            "earth": 0, "water": 0, "wind": 0
         },
         "base_eva": 6
     },
@@ -26,6 +27,7 @@ ARMOR_ARCHETYPES: Dict[str, Dict[str, Any]] = {
             # Robes are woven with wards — excellent vs spells, weak vs blades
             "magical": 16, "holy": 14, "dark": 14,
             "fire": 12, "shock": 12, "ice": 12, "poison": 10, "acid": 10,
+            "earth": 12, "water": 12, "wind": 12,
             "energy": 14, "energy_cell": 14,
             "physical": 1
         },
@@ -41,7 +43,8 @@ ARMOR_ARCHETYPES: Dict[str, Dict[str, Any]] = {
             "arrow": 8, "pistol_round": 4, "rifle_round": 2,
             # Low magical protection
             "magical": 3, "fire": 2, "shock": 2, "ice": 3,
-            "poison": 2, "holy": 2, "dark": 2
+            "poison": 2, "holy": 2, "dark": 2,
+            "earth": 3, "water": 4, "wind": 2
         },
         "base_eva": 4
     },
@@ -54,7 +57,8 @@ ARMOR_ARCHETYPES: Dict[str, Dict[str, Any]] = {
             "ballistic": 22, "pistol_round": 24, "scatter_shot": 20,
             "slashing": 12, "rifle_round": 8, "arrow": 6, "fire": 2,
             # Kevlar offers minimal arcane protection
-            "magical": 2, "shock": 4, "ice": 2, "holy": 2, "dark": 2
+            "magical": 2, "shock": 4, "ice": 2, "holy": 2, "dark": 2,
+            "earth": 4, "water": 2, "wind": 2
         },
         "base_eva": 2
     },
@@ -68,7 +72,8 @@ ARMOR_ARCHETYPES: Dict[str, Dict[str, Any]] = {
             "arrow": 12, "bolt": 8, "pistol_round": 6, "rifle_round": 2,
             # Metal conducts — good vs physical magic, weak vs shock
             "magical": 6, "holy": 5, "dark": 5,
-            "fire": 4, "shock": 0, "ice": 6, "poison": 4
+            "fire": 4, "shock": 0, "ice": 6, "poison": 4,
+            "earth": 6, "water": 4, "wind": 6
         },
         "base_eva": 0,
         "stat_modifiers": {"shock_res": -15}
@@ -82,7 +87,8 @@ ARMOR_ARCHETYPES: Dict[str, Dict[str, Any]] = {
             "arrow": 16, "bolt": 10, "pistol_round": 8, "rifle_round": 4,
             # Lamellar plates are lacquered — moderate fire resistance
             "magical": 7, "holy": 6, "dark": 6,
-            "fire": 6, "shock": 0, "ice": 8, "poison": 5
+            "fire": 6, "shock": 0, "ice": 8, "poison": 5,
+            "earth": 8, "water": 6, "wind": 6
         },
         "base_eva": -2,
         "stat_modifiers": {"shock_res": -15}
@@ -98,7 +104,8 @@ ARMOR_ARCHETYPES: Dict[str, Dict[str, Any]] = {
             "energy": 20, "slashing": 14,
             # Ceramic inserts have some magical and fire resistance
             "magical": 8, "fire": 10, "shock": 8, "ice": 6,
-            "holy": 6, "dark": 6, "poison": 4
+            "holy": 6, "dark": 6, "poison": 4,
+            "earth": 10, "water": 8, "wind": 8
         },
         "base_eva": -2
     },
@@ -113,7 +120,8 @@ ARMOR_ARCHETYPES: Dict[str, Dict[str, Any]] = {
             "energy_cell": 4, "shock": 0,
             # Steel plate is heavy — poor elemental insulation
             "magical": 8, "holy": 10, "dark": 6,
-            "fire": 4, "ice": 12, "poison": 6, "acid": 2
+            "fire": 4, "ice": 12, "poison": 6, "acid": 2,
+            "earth": 16, "water": 8, "wind": 10
         },
         "base_eva": -6,
         "stat_modifiers": {"shock_res": -15}
@@ -129,7 +137,8 @@ ARMOR_ARCHETYPES: Dict[str, Dict[str, Any]] = {
             "explosive": 22, "shock": 0,
             # Composite layering adds moderate elemental resistance
             "magical": 10, "fire": 8, "shock": 0, "ice": 10,
-            "holy": 8, "dark": 8, "poison": 6, "energy": 12
+            "holy": 8, "dark": 8, "poison": 6, "energy": 12,
+            "earth": 14, "water": 12, "wind": 12
         },
         "base_eva": -6
     },
@@ -145,7 +154,8 @@ ARMOR_ARCHETYPES: Dict[str, Dict[str, Any]] = {
             "energy_cell": 30, "energy": 30, "explosive": 35,
             # Powered suits have integrated EM shielding and hazmat layers
             "magical": 16, "fire": 18, "shock": 10, "ice": 14,
-            "holy": 12, "dark": 12, "poison": 20, "acid": 16
+            "holy": 12, "dark": 12, "poison": 20, "acid": 16,
+            "earth": 18, "water": 18, "wind": 16
         },
         "base_eva": -8
     }
@@ -290,6 +300,25 @@ SCENARIO_ARMOR_AFFIXES: Dict[str, Dict[str, Any]] = {
         "prefixes_t1": ["Student Council President's", "Valedictorian's", "Championship", "Festival Champion's", "Campus Legend's"],
         "suffixes_t2": ["of the Study Group", "of Friendship", "of Style", "of Youth", "of the Varsity Team"],
         "suffixes_t1": ["of Everlasting Memories", "of the Championship", "of Pure Dedication", "of the Grand Festival"]
+    },
+    "slice_of_life": {
+        "archetype_names": {
+            "clothes": ["Tailored Trench Coat", "Designer Streetwear Hoodie", "Denim Trucker Jacket"],
+            "magic_robe": ["Silk Lounge Kimono", "Insulated Rain Poncho", "Vintage Velvet Overcoat"],
+            "leather": ["Heavy Biker Leather Jacket", "Vintage Cafe-Racer Jacket", "Reinforced Courier Vest"],
+            "kevlar": ["Concealed Undercover Vest", "Padded Courier Jacket", "Bouncer's Reinforced Waistcoat"],
+            "chainmail": ["Cut-Resistant Butcher's Mesh Vest", "Interlocked Steel-Ring Undershirt", "Studded Punk Vest"],
+            "lamellar": ["Padded Motocross Chest Guard", "Sparring Gym Body Protector", "Reinforced Skate-Armor Vest"],
+            "ceramic": ["Private Security Plate Carrier", "High-Impact Ceramic Moto-Vest", "Armored Cash-Transit Vest"],
+            "plate": ["Heavy Riot Control Chestplate", "Reinforced Steel Workshop Apron", "Armored Doorman Cuirass"],
+            "composite": ["Full-Body Stunt Double Rig", "Heavy Armored Touring Suit", "Tactical Bodyguard Carapace"],
+            "power_armor": ["Industrial Dock-Loader Exoskeleton", "Heavy Construction Lift-Frame", "Modified Warehouse Exo-Rig"]
+        },
+        "prefixes_t3": ["Everyday", "Downtown", "Streetwise", "Vintage", "Tailored", "Sturdy", "Casual"],
+        "prefixes_t2": ["Custom-Stitched", "Heavy-Duty", "Bespoke", "Nightlife", "Reinforced", "Undercover", "Prime"],
+        "prefixes_t1": ["Metropolitan", "Unstoppable", "Legendary", "Kingpin's", "Gold-Label", "Master-Tailored"],
+        "suffixes_t2": ["of the Night Shift", "of the Back Alley", "of Street Cred", "of the Hustle", "of Resilience"],
+        "suffixes_t1": ["of the City Legend", "of Untouchable Style", "of the Urban Dragon", "of the Sleepless City"]
     }
 }
 
@@ -305,7 +334,9 @@ def normalize_armor_scenario(scenario: str) -> str:
         return "sci_fi"
     if any(w in scen for w in ("dark_fantasy", "grim", "gothic", "eldritch", "curse", "blood", "horror", "grave")):
         return "dark_fantasy"
-    if any(w in scen for w in ("school", "drama", "modern", "slice", "academy", "non_combat")):
+    if any(w in scen for w in ("slice_of_life", "slice", "cozy", "cafe")):
+        return "slice_of_life"
+    if any(w in scen for w in ("school", "drama", "modern", "academy", "non_combat")):
         return "high_school"
     return "fantasy"
 

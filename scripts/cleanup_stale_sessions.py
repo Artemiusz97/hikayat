@@ -55,6 +55,14 @@ def main():
     print(f"Mode:          {'DRY-RUN (Preview Only - No Changes Made)' if dry_run else 'EXECUTE (Applying Deletions)'}")
     print("-" * 70)
 
+    # Create snapshot before any modifications
+    if not dry_run:
+        try:
+            snapshot_path = db.create_database_snapshot(tag="pre_maintenance")
+            print(f"📦 [Database Snapshot] Pre-maintenance snapshot saved to: {snapshot_path}")
+        except Exception as e:
+            print(f"⚠️ [Database Snapshot] Failed to take pre-maintenance snapshot: {e}")
+
     # Run pruning
     results = db.prune_orphaned_and_finished_sessions(dry_run=dry_run)
     identified = results["sessions_identified"]

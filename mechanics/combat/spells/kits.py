@@ -77,6 +77,24 @@ def get_starter_spells(
         theme_t2 = ["blizzard_storm_t2_aoe", "glacial_spike_t2_st", "diamond_shell_t2_st"]
         theme_t1 = ["absolute_zero_t1_st", "glacial_ruin_t1_aoe"]
 
+    # 5a. Geomancer / Earth / Terra / Stone
+    elif _matches_theme(("geomancer", "earth", "terra", "stone", "rock", "seismic", "tectonic"), cls_text):
+        theme_t3 = ["stone_spike_t3_st", "tremor_shock_t3_aoe", "aegis_ward_t3_st", "mend_t3_st", "slow_t3_st", "spark_jolt_t3_st"]
+        theme_t2 = ["boulder_crush_t2_st", "earthquake_t2_aoe", "diamond_shell_t2_st", "empower_surge_t2_st"]
+        theme_t1 = ["meteor_drop_t1_st", "continental_shatter_t1_aoe"]
+
+    # 5b. Hydromancer / Water / Ocean / Tide
+    elif _matches_theme(("hydromancer", "water", "aqua", "ocean", "tide", "marine", "torrent"), cls_text):
+        theme_t3 = ["water_jet_t3_st", "tidal_splash_t3_aoe", "mend_t3_st", "slow_t3_st", "aegis_ward_t3_st", "ice_shard_t3_st"]
+        theme_t2 = ["hydro_surge_t2_st", "tidal_wave_t2_aoe", "greater_heal_t2_st", "empower_surge_t2_st"]
+        theme_t1 = ["abyssal_torrent_t1_st", "leviathan_maelstrom_t1_aoe"]
+
+    # 5c. Aeromancer / Wind / Tempest / Sky / Gale
+    elif _matches_theme(("aeromancer", "wind", "tempest", "gale", "air", "sky", "cyclone", "zephyr"), cls_text):
+        theme_t3 = ["gale_blade_t3_st", "wind_gust_t3_aoe", "zephyr_step_t3_st", "spark_jolt_t3_st", "clarity_t3_st", "mend_t3_st"]
+        theme_t2 = ["sonic_blade_t2_st", "vortex_cyclone_t2_aoe", "haste_surge_t2_st", "empower_surge_t2_st"]
+        theme_t1 = ["razor_tempest_t1_st", "sky_ripping_hurricane_t1_aoe"]
+
     # 6. Steampunk / Clockwork / Aether / Alchemical
     elif _matches_theme(("steampunk", "clockwork", "victorian"), scen) or _matches_theme(("steam", "clockwork", "alchemist", "inventor", "mechanic", "machinist", "tinkerer", "artificer", "aether"), cls_text):
         theme_t3 = ["spark_jolt_t3_st", "chain_lightning_t3_chain", "corrode_armor_t3_st", "iron_shrapnel_t3_aoe", "deploy_micro_drones_t3_st", "aegis_ward_t3_st", "clarity_t3_st"]
@@ -100,6 +118,12 @@ def get_starter_spells(
         theme_t3 = ["venom_dart_t3_st", "iron_shrapnel_t3_aoe", "shadow_bolt_t3_st", "zephyr_step_t3_st", "corrode_armor_t3_st", "mend_t3_st", "arcane_dart_t3_st"]
         theme_t2 = ["nether_grasp_t2_aoe", "acid_nova_t2_aoe", "haste_surge_t2_st"]
         theme_t1 = ["total_debilitation_t1_st", "astral_beam_t1_st"]
+
+    # 9a. Urban Street / Slice of Life (Physical / Kinetic / Acoustic / Utility)
+    elif _matches_theme(("slice_of_life", "slice"), scen) or _matches_theme(("vlogger", "courier", "hustler", "boxer", "musician", "private eye", "detective", "brawler"), cls_text):
+        theme_t3 = ["zephyr_step_t3_st", "clarity_t3_st", "weaken_t3_st", "mend_t3_st", "spark_jolt_t3_st", "iron_shrapnel_t3_aoe", "wind_gust_t3_aoe"]
+        theme_t2 = ["sonic_blade_t2_st", "haste_surge_t2_st", "empower_surge_t2_st", "enfeeble_t2_st"]
+        theme_t1 = ["thousand_swords_t1_aoe", "total_debilitation_t1_st"]
 
     # 10. Standard Mage / Wizard / Sorcerer / Default
     else:

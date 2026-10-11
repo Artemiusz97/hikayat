@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -40,7 +40,7 @@ LLM_REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "300.0"))
 
 # Dynamic multi-pass turn engine settings
 ENABLE_DYNAMIC_MULTIPASS = os.getenv("ENABLE_DYNAMIC_MULTIPASS", "true").lower() in ("true", "1", "yes")
-LLM_PASS1_TIMEOUT = float(os.getenv("LLM_PASS1_TIMEOUT", "45.0"))
+LLM_PASS1_TIMEOUT = float(os.getenv("LLM_PASS1_TIMEOUT", "90.0"))
 LLM_PASS2_TIMEOUT = float(os.getenv("LLM_PASS2_TIMEOUT", str(LLM_REQUEST_TIMEOUT)))
 
 # Sampling temperatures

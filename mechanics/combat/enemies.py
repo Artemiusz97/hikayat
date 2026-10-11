@@ -74,10 +74,43 @@ SCENARIO_ENEMY_TEMPLATES = {
         {"name": "Wasteland Raider", "archetype": "Rad-Mutant", "category": ["humanoid"], "form": "corporeal", "essence": "chem_fueled"},
         {"name": "Toxic Abomination", "archetype": "Toxic Abomination", "category": ["mutant", "aberration"], "form": "corporeal", "essence": "irradiated"},
         {"name": "Mutated Bear", "archetype": "Rad-Mutant", "category": ["beast", "mutant"], "form": "corporeal", "essence": "irradiated"}
+    ],
+    "slice_of_life": [
+        {"name": "Back-Alley Street Thug", "archetype": "Brute", "category": ["humanoid"], "form": "corporeal", "essence": "mundane"},
+        {"name": "Syndicate Debt Collector", "archetype": "Stalker", "category": ["humanoid"], "form": "corporeal", "essence": "mundane"},
+        {"name": "Rowdy Nightclub Bouncer", "archetype": "Guardian", "category": ["humanoid"], "form": "corporeal", "essence": "mundane"},
+        {"name": "Underpass Moto Punk", "archetype": "Skirmisher", "category": ["humanoid"], "form": "corporeal", "essence": "mundane"},
+        {"name": "Billiards Hall Hustler", "archetype": "Skirmisher", "category": ["humanoid"], "form": "corporeal", "essence": "mundane"},
+        {"name": "Rival Gym Brawler", "archetype": "Brute", "category": ["humanoid"], "form": "corporeal", "essence": "mundane"},
+        {"name": "Stray Alley Hound", "archetype": "Feral Beast", "category": ["beast"], "form": "corporeal", "essence": "mundane"}
     ]
 }
 
 SCENARIO_ENEMIES = {k: [(t["name"], t["archetype"]) for t in v] for k, v in SCENARIO_ENEMY_TEMPLATES.items()}
+
+
+def _resolve_enemy_scenario_key(scenario: str) -> str:
+    """Normalizes scenario names, variants, and custom combinator strings to SCENARIO_ENEMY_TEMPLATES keys."""
+    scen = (scenario or "fantasy").lower().strip()
+    if scen in SCENARIO_ENEMY_TEMPLATES:
+        return scen
+    if "slice_of_life" in scen or "slice" in scen:
+        return "slice_of_life"
+    if "dark_fantasy" in scen:
+        return "dark_fantasy"
+    if "isekai" in scen:
+        return "isekai_fantasy"
+    if "steampunk" in scen or "clockwork" in scen:
+        return "steampunk"
+    if "cyberpunk" in scen or "cyber" in scen:
+        return "cyberpunk"
+    if any(w in scen for w in ("sci_fi", "scifi", "space")):
+        return "scifi"
+    if any(w in scen for w in ("postapoc", "apocalypse", "wasteland", "nuclear")):
+        return "postapoc"
+    if any(w in scen for w in ("high_school", "highschool", "school", "academy")):
+        return "highschool"
+    return "fantasy"
 
 # Scenario Archetype Stat Rules
 ARCHETYPE_RULES = {
@@ -112,7 +145,7 @@ GENERIC_ENEMY_KEYWORDS = {
     "pirate", "scavenger", "assassin", "operative", "parasite", "shade", "knight", "crawler",
     "fiend", "ghoul", "slime", "elemental", "abomination", "creature", "monster", "cyberhound",
     "debater", "bully", "monitor", "monger", "mutated", "feral", "automaton", "inquisitor", 
-    "penitent", "shaman"
+    "penitent", "shaman", "bouncer", "collector", "punk", "hustler", "brawler"
 }
 
 def is_generic_enemy_name(name: str) -> bool:
@@ -281,6 +314,29 @@ AFFIX_REGISTRY = {
         "allowed_essences": ["biological", "irradiated", "alchemical"],
         "grants_resistances": ["acid", "poison"],
         "grants_weaknesses": ["fire"]
+    },
+    "Grounded": {
+        "type": "prefix",
+        "allowed_categories": ["construct", "golem", "beast", "mutant"],
+        "allowed_forms": ["corporeal"],
+        "grants_resistances": ["earth", "shock"],
+        "grants_weaknesses": ["water"]
+    },
+    "Hydro-Shielded": {
+        "type": "prefix",
+        "allowed_categories": ["robot", "construct", "android"],
+        "allowed_forms": ["corporeal"],
+        "allowed_essences": ["alchemical", "steam_powered", "technological"],
+        "grants_resistances": ["fire", "water"],
+        "grants_weaknesses": ["shock", "ice"]
+    },
+    "Tempest-Wreathed": {
+        "type": "prefix",
+        "allowed_categories": ["beast", "humanoid", "demon"],
+        "allowed_forms": ["corporeal"],
+        "allowed_essences": ["arcane", "primal", "occult"],
+        "grants_resistances": ["wind", "ranged"],
+        "grants_weaknesses": ["earth"]
     }
 }
 
@@ -299,14 +355,21 @@ def derive_taxonomy_weaknesses(categories: list, form: str, essence: str) -> tup
     for cat in categories:
         if cat in ("construct", "robot", "golem", "android"):
             immunities.extend(["poison", "bleed", "mental"])
-            weaknesses.extend(["shock", "acid"])
-            resistances.extend(["slashing", "piercing", "stabbing"])
+            weaknesses.extend(["shock", "acid", "water"])
+            resistances.extend(["slashing", "piercing", "stabbing", "wind"])
         elif cat in ("undead", "demon"):
             immunities.extend(["poison", "dark"])
             weaknesses.extend(["holy", "fire"])
             resistances.extend(["cold"])
         elif cat in ("beast", "mutant"):
             weaknesses.extend(["fire"])
+            resistances.extend(["earth"])
+        elif cat in ("plant",):
+            weaknesses.extend(["fire", "slashing"])
+            resistances.extend(["water", "earth", "bludgeoning"])
+        elif cat in ("aquatic", "marine"):
+            weaknesses.extend(["shock", "ice"])
+            resistances.extend(["water", "fire"])
             
     if essence in ("technological", "cybernetic"):
         weaknesses.extend(["shock"])
@@ -410,7 +473,7 @@ def roll_enemy_intent(archetype: str) -> str:
 def generate_scenario_enemy(scenario: str, location: str, chapter: int, custom_name: str = None,
                             custom_archetype: str = None, custom_primary: list = None, custom_forbidden: list = None,
                             exact_tier: int = None, exact_extra_points: int = None) -> dict:
-    scenario_lower = scenario.lower() if scenario else "fantasy"
+    scenario_lower = _resolve_enemy_scenario_key(scenario)
     
     template = None
     if custom_name:
@@ -572,7 +635,7 @@ def generate_balanced_encounter(party_members: list, scenario: str, location: st
         p3 = max(1, rem - p1 - p2)
         stat_allocations = [leader_pts, p1, p2, p3]
 
-    scenario_lower = scenario.lower() if scenario else "fantasy"
+    scenario_lower = _resolve_enemy_scenario_key(scenario)
     pool = SCENARIO_ENEMY_TEMPLATES.get(scenario_lower, SCENARIO_ENEMY_TEMPLATES["fantasy"])
     enemies = []
 
@@ -638,7 +701,8 @@ def get_enemy_armor_profile(archetype: str) -> dict:
             "type_dt": {
                 "physical": 24, "slashing": 26, "stabbing": 18, "blunt": 14,
                 "ballistic": 24, "rifle_round": 16, "pistol_round": 22, "high_caliber_round": 10,
-                "arrow": 20, "bolt": 16, "magical": 8, "shock": 0, "fire": 6, "ice": 10
+                "arrow": 20, "bolt": 16, "magical": 8, "shock": 0, "fire": 6, "ice": 10,
+                "earth": 12, "water": 8, "wind": 10
             },
             "def_bonus": 18,
             "mdef_bonus": 8,
@@ -652,7 +716,8 @@ def get_enemy_armor_profile(archetype: str) -> dict:
             "type_dt": {
                 "physical": 14, "slashing": 16, "stabbing": 10, "blunt": 8,
                 "arrow": 12, "bolt": 8, "pistol_round": 6, "rifle_round": 4,
-                "magical": 6, "fire": 4, "shock": 0, "ice": 6, "poison": 4
+                "magical": 6, "fire": 4, "shock": 0, "ice": 6, "poison": 4,
+                "earth": 6, "water": 4, "wind": 4
             },
             "def_bonus": 12,
             "mdef_bonus": 4,
@@ -665,7 +730,8 @@ def get_enemy_armor_profile(archetype: str) -> dict:
             "base_dt": 2,
             "type_dt": {
                 "magical": 16, "holy": 14, "dark": 14, "fire": 12, "shock": 12, "ice": 12,
-                "poison": 10, "energy": 14, "energy_cell": 14, "physical": 1
+                "poison": 10, "energy": 14, "energy_cell": 14, "physical": 1,
+                "earth": 12, "water": 12, "wind": 12
             },
             "def_bonus": 4,
             "mdef_bonus": 24,
@@ -678,7 +744,8 @@ def get_enemy_armor_profile(archetype: str) -> dict:
             "base_dt": 10,
             "type_dt": {
                 "ballistic": 22, "pistol_round": 24, "scatter_shot": 20, "slashing": 12,
-                "rifle_round": 8, "arrow": 6, "fire": 2, "magical": 2, "shock": 4, "ice": 2
+                "rifle_round": 8, "arrow": 6, "fire": 2, "magical": 2, "shock": 4, "ice": 2,
+                "earth": 3, "water": 2, "wind": 2
             },
             "def_bonus": 14,
             "mdef_bonus": 8,
@@ -692,7 +759,8 @@ def get_enemy_armor_profile(archetype: str) -> dict:
             "type_dt": {
                 "slashing": 8, "stabbing": 6, "ballistic": 4,
                 "arrow": 8, "pistol_round": 4, "rifle_round": 2,
-                "magical": 3, "fire": 2, "shock": 2, "ice": 3
+                "magical": 3, "fire": 2, "shock": 2, "ice": 3,
+                "earth": 3, "water": 2, "wind": 3
             },
             "def_bonus": 6,
             "mdef_bonus": 6,
@@ -705,7 +773,8 @@ def get_enemy_armor_profile(archetype: str) -> dict:
         "base_dt": 8,
         "type_dt": {
             "physical": 10, "slashing": 10, "stabbing": 8,
-            "arrow": 8, "pistol_round": 4, "magical": 4
+            "arrow": 8, "pistol_round": 4, "magical": 4,
+            "earth": 4, "water": 4, "wind": 4
         },
         "def_bonus": 8,
         "mdef_bonus": 6,

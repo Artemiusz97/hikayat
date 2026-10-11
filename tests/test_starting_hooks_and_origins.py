@@ -27,12 +27,12 @@ class TestStartingHooksAndOrigins(unittest.TestCase):
             conn.commit()
 
     def test_all_setting_tags_have_three_structured_starting_archetypes(self):
-        """Verify that every primary setting tag in data/tags.json contains structured hooks covering all 3 archetypes."""
-        tags_data = scenario_data.load_tags(reload=True)
+        """Verify that every primary setting tag in data/genres.json contains structured hooks covering all 3 archetypes."""
+        genres_data = scenario_data.load_genres(reload=True)
         required_archetypes = {"hub_launchpad", "in_media_res", "delve_threshold"}
 
         for tag_key in scenario_data.PRIMARY_SETTING_TAGS:
-            tag_info = tags_data.get(tag_key, {})
+            tag_info = genres_data.get(tag_key, {})
             hooks = tag_info.get("starting_hooks", [])
             self.assertGreaterEqual(len(hooks), 3, f"Primary setting tag '{tag_key}' should have at least 3 starting hooks.")
             
@@ -136,6 +136,34 @@ class TestStartingHooksAndOrigins(unittest.TestCase):
         self.assertIn("OPENING INCITING INCIDENT", user_prompt_arg)
         self.assertIn("ARCHETYPE DIRECTIVE", user_prompt_arg)
         self.assertIn("OPENING CHOICE DIRECTIVE", user_prompt_arg)
+
+    @patch("game_engine.call_llm_json")
+    def test_generate_opening_scene_with_existing_lorebook_persons(self, mock_llm):
+        """Verify generate_opening_scene succeeds without TypeError when lorebook has persons."""
+        import asyncio
+        db.upsert_lorebook_entity(
+            session_id=self.test_session_id,
+            entity_type="person",
+            name="Archmage Elrond",
+            description="Elder wizard",
+        )
+        mock_llm.return_value = {
+            "title": "A New Journey",
+            "narrative": "You step into the academy.",
+            "location": "Aethelgard ➔ Academy",
+            "choices": [],
+        }
+        session = {
+            "id": self.test_session_id,
+            "scenario": "fantasy",
+            "history": []
+        }
+        party = [({"id": 1, "user_id": 12345, "name": "Alice", "class": "Mage"}, [])]
+        res = asyncio.run(game_engine.generate_opening_scene(session, party))
+        self.assertIsNotNone(res)
+        first_call = mock_llm.call_args_list[0]
+        user_prompt_arg = first_call[0][1]
+        self.assertIn("Archmage Elrond", user_prompt_arg)
 
 
 if __name__ == "__main__":

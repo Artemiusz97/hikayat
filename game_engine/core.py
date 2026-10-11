@@ -16,7 +16,7 @@ import namegen
 import scenario_data
 
 from config import ENABLE_DYNAMIC_MULTIPASS, LLM_PASS1_TIMEOUT, LLM_PASS2_TIMEOUT
-from scenario_data import is_nsfw_scenario
+from scenario_data import is_nsfw_scenario, uses_nsfw_model
 from character_data import STAT_EFFECTS, STAT_NAMES, inventory_capacity, sanitize_status_effects
 from llm_client import call_llm_json
 

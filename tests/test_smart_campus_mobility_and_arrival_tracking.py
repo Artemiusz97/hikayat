@@ -366,7 +366,93 @@ class TestSmartCampusMobilityAndArrivalTracking(unittest.TestCase):
         npc_names = [n["name"] if isinstance(n, dict) else n for n in npcs]
         self.assertIn("Sofia Anderson", npc_names)
 
+    def test_private_appointment_excludes_uninvited_campus_contacts_in_prose(self):
+        """Verify that an active private appointment at a rendezvous location excludes uninvited contacts even if mentioned in prose."""
+        import json
+        with db.get_conn() as conn:
+            conn.execute(
+                "INSERT INTO contacts (session_id, character_id, npc_id, name, relationship_score, basic_info_json, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (self.test_session_id, 0, "mia_yamada", "Mia Yamada", 20,
+                 json.dumps({"location": "Cultural Union & Performing Arts Annex ➔ Old East Wing Music Room ➔ Upright Piano Alcove", "role": "Gang Boss"}), 1000)
+            )
+            conn.execute(
+                "INSERT INTO contacts (session_id, character_id, npc_id, name, relationship_score, basic_info_json, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (self.test_session_id, 0, "yuki_kuroda", "Yuki Kuroda", 15,
+                 json.dumps({"location": "Sakuragaoka Academy ➔ Class 2-B (Homeroom) ➔ Main Area", "role": "Student"}), 1000)
+            )
+            conn.execute(
+                "INSERT INTO contacts (session_id, character_id, npc_id, name, relationship_score, basic_info_json, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (self.test_session_id, 0, "leon_schneider", "Leon Schneider", 10,
+                 json.dumps({"location": "Sakuragaoka Academy ➔ Class 2-B (Homeroom) ➔ Main Area", "role": "Club Member"}), 1000)
+            )
+            conn.commit()
+
+        # Active arrived appointment with Mia
+        db.save_phone_appointment(
+            session_id=self.test_session_id,
+            npc_id="mia_yamada",
+            npc_name="Mia Yamada",
+            rendezvous_location="Cultural Union & Performing Arts Annex ➔ Old East Wing Music Room ➔ Upright Piano Alcove"
+        )
+        db.update_phone_appointment_status(self.test_session_id, "mia_yamada", "arrived")
+
+        loc = "Cultural Union & Performing Arts Annex ➔ Old East Wing Music Room ➔ Upright Piano Alcove"
+        session = {
+            "id": self.test_session_id,
+            "scenario": "high_school_drama",
+            "current_location": loc,
+            "current_npcs": [{"name": "Mia Yamada"}, {"name": "Yuki Kuroda"}, {"name": "Leon Schneider"}],
+            "dialogue_partners": ["Mia Yamada"],
+            "history": []
+        }
+        # LLM mentions Yuki and Leon casually in next_narrative
+        result = {
+            "outcome_narrative": "You talk to Mia Yamada in the alcove.",
+            "next_narrative": "She glances at Yuki, who is leaning against the doorframe, and Leon, who is on his phone.",
+            "npcs_present": [{"name": "Mia Yamada"}],
+            "entity_audit": {
+                "present_named_characters": ["Mia Yamada", "Yuki Kuroda", "Leon Schneider"]
+            }
+        }
+
+        npcs = game_engine.process_scene_npcs(result, session, loc, loc, actions=[{"label": "Talk to Mia"}])
+        npc_names = [n["name"] if isinstance(n, dict) else n for n in npcs]
+        self.assertIn("Mia Yamada", npc_names)
+        self.assertNotIn("Yuki Kuroda", npc_names)
+        self.assertNotIn("Leon Schneider", npc_names)
+
+    def test_split_up_investigation_does_not_carry_partner_as_traveling_companion(self):
+        """When player and peer agree to split up tasks (e.g. 'meet in 10 mins'), the peer stays behind on travel."""
+        session = {
+            "id": self.test_session_id,
+            "scenario": "high_school_drama",
+            "current_location": "Sakuragaoka Academy ➔ Class 2-B (Homeroom) ➔ Artemiusz's Desk",
+            "current_npcs": [{"name": "Yuki Kuroda", "role": "Student"}],
+            "dialogue_partners": ["Yuki Kuroda"],
+            "history": [
+                {
+                    "narrative": "Agreed to split the investigation: Yuki takes archives, player takes locker search; meet at stairwell in 10 mins"
+                }
+            ]
+        }
+        travel_actions = [{"label": "Travel to Old East Wing Music Room"}]
+        traveling, left_behind = game_engine.classify_scene_npcs(
+            session,
+            actions=travel_actions,
+            old_primary="Class 2-B (Homeroom)",
+            dest_primary="Old East Wing Music Room"
+        )
+        traveling_names = [n["name"] for n in traveling]
+        left_behind_names = [n["name"] for n in left_behind]
+        self.assertNotIn("Yuki Kuroda", traveling_names)
+        self.assertIn("Yuki Kuroda", left_behind_names)
+
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

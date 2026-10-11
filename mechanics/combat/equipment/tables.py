@@ -104,6 +104,26 @@ RANDOM_AFFIX_POOL: Dict[str, Dict[str, Any]] = {
         "t3_range": (15, 20), "t2_range": (25, 35), "t1_range": (40, 50), "is_pct": True,
         "themes": ["dark"]
     },
+    "earth_convert": {
+        "type": "offensive", "stat": "earth_convert", "label": "Earth Conversion", "icon": "🪨",
+        "t3_range": (15, 20), "t2_range": (25, 35), "t1_range": (40, 50), "is_pct": True,
+        "themes": ["earth"]
+    },
+    "water_convert": {
+        "type": "offensive", "stat": "water_convert", "label": "Water Conversion", "icon": "🌊",
+        "t3_range": (15, 20), "t2_range": (25, 35), "t1_range": (40, 50), "is_pct": True,
+        "themes": ["water"]
+    },
+    "wind_convert": {
+        "type": "offensive", "stat": "wind_convert", "label": "Wind Conversion", "icon": "🌪️",
+        "t3_range": (15, 20), "t2_range": (25, 35), "t1_range": (40, 50), "is_pct": True,
+        "themes": ["wind"]
+    },
+    "energy_convert": {
+        "type": "offensive", "stat": "energy_convert", "label": "Energy Conversion", "icon": "⚡",
+        "t3_range": (15, 20), "t2_range": (25, 35), "t1_range": (40, 50), "is_pct": True,
+        "themes": ["arcane", "shock"]
+    },
 
     # Defensive & Damage Threshold (DT) Affixes
     "dt_bonus": {
@@ -177,6 +197,21 @@ RANDOM_AFFIX_POOL: Dict[str, Dict[str, Any]] = {
         "type": "resistance", "stat": "dark_res", "label": "Dark Res", "icon": "🌑",
         "t3_range": (10, 18), "t2_range": (18, 28), "t1_range": (28, 40), "is_pct": True,
         "themes": ["dark"]
+    },
+    "earth_res": {
+        "type": "resistance", "stat": "earth_res", "label": "Earth Res", "icon": "🪨",
+        "t3_range": (10, 18), "t2_range": (18, 28), "t1_range": (28, 40), "is_pct": True,
+        "themes": ["earth", "defense"]
+    },
+    "water_res": {
+        "type": "resistance", "stat": "water_res", "label": "Water Res", "icon": "🌊",
+        "t3_range": (10, 18), "t2_range": (18, 28), "t1_range": (28, 40), "is_pct": True,
+        "themes": ["water"]
+    },
+    "wind_res": {
+        "type": "resistance", "stat": "wind_res", "label": "Wind Res", "icon": "🌪️",
+        "t3_range": (10, 18), "t2_range": (18, 28), "t1_range": (28, 40), "is_pct": True,
+        "themes": ["wind", "agility"]
     },
     "omni_res": {
         "type": "resistance", "stat": "omni_res", "label": "Omni Res", "icon": "🌈",
@@ -292,6 +327,27 @@ THEME_VOCABULARY: Dict[str, Dict[str, List[str]]] = {
         "prefixes_t1": ["Astral", "Archmage's", "Cosmic", "Leyline-Master's", "Mythic"],
         "suffixes_t2": ["of Warding", "of Arcana", "of the Mystic", "of Focus"],
         "suffixes_t1": ["of Astral Ruin", "of the Archmage", "of Infinite Leylines", "of Immortality"]
+    },
+    "earth": {
+        "prefixes_t3": ["Stone", "Clay", "Granite", "Earth-Bound", "Crag"],
+        "prefixes_t2": ["Terra-Forged", "Brimstone", "Geomantic", "Obsidian-Vein", "Tectonic"],
+        "prefixes_t1": ["Continental-Core", "Pangaea", "Earthshaker", "Colossus-Hewn", "Titan-Terra"],
+        "suffixes_t2": ["of Stone", "of the Mountain", "of the Earth", "of Tremors"],
+        "suffixes_t1": ["of the Continental Colossus", "of Tectonic Ruin", "of the Deep Earth Lord", "of Pangaea's Core"]
+    },
+    "water": {
+        "prefixes_t3": ["Brook", "Rain", "Tide", "Wave-Touched", "Stream"],
+        "prefixes_t2": ["Tidal", "Ocean-Forged", "Torrential", "Riptide", "Aqua-Infused"],
+        "prefixes_t1": ["Abyssal-Tide", "Leviathan's", "Maelstrom-Born", "Tsunami-Forged", "Ocean-Sovereign's"],
+        "suffixes_t2": ["of the Tides", "of the Current", "of the Wave", "of the Torrent"],
+        "suffixes_t1": ["of the Leviathan Core", "of the Abyssal Sea", "of Cataclysmic Deluge", "of the Maelstrom Sovereign"]
+    },
+    "wind": {
+        "prefixes_t3": ["Breeze", "Gust", "Draft", "Wind-Blown", "Zephyr"],
+        "prefixes_t2": ["Zephyr-Forged", "Gale-Force", "Tempestuous", "Whirlwind", "Aero-Infused"],
+        "prefixes_t1": ["Hurricane-Core", "Sky-Sovereign's", "Typhoon-Born", "Cyclone", "Heavenly-Gale"],
+        "suffixes_t2": ["of the Zephyr", "of the Gale", "of Gusts", "of the Wind"],
+        "suffixes_t1": ["of the Tempest Sovereign", "of Endless Cyclones", "of the Sky Dominator", "of the Hurricane Eye"]
     }
 }
 
@@ -338,6 +394,20 @@ SCENARIO_AFFIXES: Dict[str, Dict[str, List[str]]] = {
         "suffixes_t2": ["of Cozy Days", "of the Neighborhood", "of Sunny Afternoons", "of Heartfelt Bonds"],
         "suffixes_t1": ["of Cherished Moments", "of Endless Spring", "of True Harmony"]
     },
+    "steampunk": {
+        "prefixes_t3": ["Brass-Plated", "Copper", "Clockwork", "Steam-Vented", "Rivet-Bound", "Machinist's", "Standard"],
+        "prefixes_t2": ["Pneumatic", "Galvanic", "Aether-Tuned", "Boiler-Forged", "Voltaic", "Pressurized", "Gilded-Gear"],
+        "prefixes_t1": ["Perpetual-Motion", "Grand Victorian", "Master Artificer's", "Aether-Sovereign's", "Dreadnought's", "Tesla's Masterwork"],
+        "suffixes_t2": ["of the Piston", "of Steam Exhaust", "of Galvanic Induction", "of Copper Coils", "of Valve Rupture"],
+        "suffixes_t1": ["of Clockwork Ruin", "of the Brass Core", "of Endless Pressure", "of the High Boiler", "of Aetheric Resonance"]
+    },
+    "dark_fantasy": {
+        "prefixes_t3": ["Weathered", "Blood-Stained", "Grim", "Jagged", "Ashen", "Roughspun", "Grave-Dug"],
+        "prefixes_t2": ["Hex-Forged", "Cursed", "Grave-Tainted", "Sanguine", "Blight-Edged", "Bone-Carved", "Shadow-Veiled"],
+        "prefixes_t1": ["Eldritch", "Abyssal-Vein", "Death-Lord's", "God-Slayer's", "Cataclysmic", "Blood-Pact", "Marrow-Forged"],
+        "suffixes_t2": ["of Torment", "of the Grave", "of the Pale Moon", "of Weeping Shadow", "of the Hex-Binder"],
+        "suffixes_t1": ["of Eternal Damnation", "of the Abyssal Void", "of Endless Agony", "of the Desolate Throne"]
+    },
     "non_combat": {
         "prefixes_t3": ["Standard", "Casual", "Everyday", "Neat", "Simple"],
         "prefixes_t2": ["Stylish", "Bespoke", "Polished", "Trendy", "Elegant"],
@@ -346,6 +416,31 @@ SCENARIO_AFFIXES: Dict[str, Dict[str, List[str]]] = {
         "suffixes_t1": ["of Perfection", "of Unforgettable Memories", "of Peerless Charm"]
     }
 }
+
+# Alias mappings for scenario keys
+SCENARIO_AFFIXES["sci_fi"] = SCENARIO_AFFIXES["scifi"]
+SCENARIO_AFFIXES["nuclear_post_apocalypse"] = SCENARIO_AFFIXES["postapoc"]
+
+def normalize_equipment_scenario(scenario: str) -> str:
+    """Normalizes scenario input string to canonical equipment affix key."""
+    scen = str(scenario or "fantasy").lower().strip()
+    if any(w in scen for w in ("steampunk", "clockwork", "victorian", "aether", "boiler")):
+        return "steampunk"
+    if any(w in scen for w in ("cyberpunk", "cyber", "hacker", "techie", "netrunner")):
+        return "cyberpunk"
+    if any(w in scen for w in ("apocalypse", "apocalyptic", "wasteland", "fallout", "rad", "nuclear", "postapoc")):
+        return "postapoc"
+    if any(w in scen for w in ("sci_fi", "scifi", "space", "future", "marine", "star")):
+        return "scifi"
+    if any(w in scen for w in ("dark_fantasy", "grim", "gothic", "eldritch", "curse", "blood", "horror", "grave")):
+        return "dark_fantasy"
+    if any(w in scen for w in ("high_school", "school", "academy", "campus", "student")):
+        return "high_school"
+    if any(w in scen for w in ("slice_of_life", "cozy", "cafe", "slice")):
+        return "slice_of_life"
+    if any(w in scen for w in ("non_combat",)):
+        return "non_combat"
+    return "fantasy"
 
 NON_COMBAT_WEAPON_ARCHETYPES: Dict[str, Dict[str, Any]] = {
     "fountain_pen": {"name": "Fountain Pen", "mass": "light", "handedness": "1H", "attack_types": ["utility"]},

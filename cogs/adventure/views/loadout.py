@@ -222,12 +222,17 @@ class LoadoutWeaponSelectView(discord.ui.View):
         for w in weapons[:24]:
             try:
                 from mechanics.combat.items.weapons import generate_random_equipment as gen_weapon
+                from mechanics.combat.items.tags import is_narrative_item
+                from scenario_data import is_non_combat_scenario
                 w_item = gen_weapon(scenario=scenario, slot="Weapon", tier=3, name=w)
                 w_meta = w_item.get("metadata", {})
                 arch = w_meta.get("archetype", "Weapon").replace("_", " ").title()
                 hand = w_meta.get("handedness", "1H")
-                mult = w_meta.get("multiplier", 1.0)
-                desc = f"{arch} • {hand} • {mult}x ATK"
+                if is_narrative_item(w_meta) or is_non_combat_scenario(scenario):
+                    desc = f"{arch} • {hand} • Narrative Item"
+                else:
+                    mult = w_meta.get("multiplier", 1.0)
+                    desc = f"{arch} • {hand} • {mult}x ATK"
             except Exception:
                 desc = None
             options.append(discord.SelectOption(label=w[:100], description=desc[:100] if desc else None))
@@ -297,18 +302,19 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
                 race=race,
                 weapon_name=self.weapon_name
             )
-        elif force_dynamic:
-            from mechanics.combat.items import generate_starter_equipment_loadout
-            gear_map = generate_starter_equipment_loadout(
-                scenario=scenario,
-                char_class=self.char_class,
-                gender=gender,
-                race=race,
-                weapon_name=self.weapon_name,
-                tier=3
-            )
         else:
-            gear_map = get_starter_gear_by_class(scenario, self.char_class, gender=gender, race=race)
+            from mechanics.combat.items import generate_starter_equipment_loadout
+            try:
+                gear_map = generate_starter_equipment_loadout(
+                    scenario=scenario,
+                    char_class=self.char_class,
+                    gender=gender,
+                    race=race,
+                    weapon_name=self.weapon_name,
+                    tier=3
+                )
+            except Exception:
+                gear_map = get_starter_gear_by_class(scenario, self.char_class, gender=gender, race=race)
 
         starting_items = get_starting_items(scenario, self.char_class)
 

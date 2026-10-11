@@ -142,5 +142,48 @@ class TestMultiCharacterDialogue(unittest.TestCase):
         self.assertIn("Thank everyone, excuse yourself, and look around the room", labels_3)
 
 
+    def test_chime_in_with_five_friendly_npcs_in_scene(self):
+        """Verify that with 5 friendly NPCs present in a council meeting, multiple members can chime in."""
+        from game_engine.npcs import can_chime_in_to_dialogue
+
+        five_npcs = [
+            {"name": "Yea-ji Kang", "role": "Student Council President"},
+            {"name": "Amélie Yamashita", "role": "Student Council Vice President"},
+            {"name": "Sophia", "role": "Council Secretary"},
+            {"name": "Harold Wójcik", "role": "Council Treasurer"},
+            {"name": "Denise Richards", "role": "Council Representative"}
+        ]
+
+        narrative = (
+            "Yea-ji Kang reviews the financial agenda with Artemiusz.\n"
+            "Amélie Yamashita interjects, noting the political implications across the factions.\n"
+            "Harold Wójcik explains that the reserve fund cannot cover the shortfall.\n"
+            "Denise Richards says, \"We have to ensure the student clubs don't suffer the consequences.\"\n"
+            "Sophia sits attentively taking notes."
+        )
+
+        retained = ["Yea-ji Kang"]
+        party = [({"name": "Artemiusz"}, [])]
+
+        # 1. Existing partner is naturally allowed
+        self.assertTrue(can_chime_in_to_dialogue("Yea-ji Kang", retained_partners=retained, narrative=narrative, npcs_present=five_npcs, party=party))
+
+        # 2. Amélie interjected -> allowed
+        self.assertTrue(can_chime_in_to_dialogue("Amélie Yamashita", retained_partners=retained, narrative=narrative, npcs_present=five_npcs, party=party))
+
+        # 3. Harold explained -> allowed
+        self.assertTrue(can_chime_in_to_dialogue("Harold Wójcik", retained_partners=retained, narrative=narrative, npcs_present=five_npcs, party=party))
+
+        # 4. Denise spoke with quoted dialogue in the group meeting -> allowed
+        self.assertTrue(can_chime_in_to_dialogue("Denise Richards", retained_partners=retained, narrative=narrative, npcs_present=five_npcs, party=party))
+
+        # 5. Sophia was purely passive (taking notes, didn't speak/interject) -> NOT automatically added to speech partners
+        self.assertFalse(can_chime_in_to_dialogue("Sophia", retained_partners=retained, narrative=narrative, npcs_present=five_npcs, party=party))
+
+        # 6. Ambient outsider (e.g. Coach Kai barking outside) is strictly isolated
+        coach_narrative = narrative + "\nOutside the office, Coach Kai Nakamura barked orders at the freshmen."
+        self.assertFalse(can_chime_in_to_dialogue("Coach Kai Nakamura", retained_partners=retained, narrative=coach_narrative, npcs_present=five_npcs + [{"name": "Coach Kai Nakamura"}], party=party))
+
+
 if __name__ == "__main__":
     unittest.main()

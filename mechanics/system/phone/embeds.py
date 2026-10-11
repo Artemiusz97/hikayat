@@ -24,6 +24,7 @@ PHONE_BRANDING = {
         "gallery_app_name": "Photo Vault",
         "gallery_emoji": "📸",
         "bounty_app_name": "Campus Requests",
+        "bounty_subtitle": "Student Bulletin",
         "shop_app_name": "SchoolMart Delivery",
         "emoji": "📱",
         "color": discord.Color.teal()
@@ -38,6 +39,7 @@ PHONE_BRANDING = {
         "gallery_app_name": "Holovault",
         "gallery_emoji": "💾",
         "bounty_app_name": "FixerNet Gigs",
+        "bounty_subtitle": "Client Gigs",
         "shop_app_name": "DarkNet Market",
         "emoji": "📟",
         "color": discord.Color.purple()
@@ -51,7 +53,8 @@ PHONE_BRANDING = {
         "contacts_app_name": "Personnel Log",
         "gallery_app_name": "Media Archive",
         "gallery_emoji": "🎞️",
-        "bounty_app_name": "Stellar Bounties",
+        "bounty_app_name": "Dispatch Net",
+        "bounty_subtitle": "Contract Missions",
         "shop_app_name": "Orbital Supplies",
         "emoji": "📡",
         "color": discord.Color.blue()
@@ -65,7 +68,8 @@ PHONE_BRANDING = {
         "contacts_app_name": "Address Ledger",
         "gallery_app_name": "Daguerreotype Album",
         "gallery_emoji": "📷",
-        "bounty_app_name": "Dispatch Board",
+        "bounty_app_name": "Dispatch Ledger",
+        "bounty_subtitle": "Errands & Gigs",
         "shop_app_name": "Mail-Order Ledger",
         "emoji": "⚙️",
         "color": discord.Color.dark_gold()
@@ -80,8 +84,24 @@ PHONE_BRANDING = {
         "gallery_app_name": "Gallery",
         "gallery_emoji": "🖼️",
         "bounty_app_name": "GigBoard",
+        "bounty_subtitle": "Local Tasks",
         "shop_app_name": "QuickDelivery Store",
         "emoji": "📱",
+        "color": discord.Color.teal()
+    },
+    "fantasy": {
+        "device_name": "🔮 Arcane Slate",
+        "os_name": "Aether RuneOS",
+        "feed_app_name": "Scrying Pool",
+        "feed_emoji": "🔮",
+        "dm_app_name": "Whisper Runes",
+        "contacts_app_name": "Tome Directory",
+        "gallery_app_name": "Memory Crystals",
+        "gallery_emoji": "💎",
+        "bounty_app_name": "Notice Board",
+        "bounty_subtitle": "Guild Postings",
+        "shop_app_name": "Courier Merchant",
+        "emoji": "🔮",
         "color": discord.Color.teal()
     }
 }
@@ -96,6 +116,8 @@ def scenario_has_smartphone(scen_key: str) -> bool:
 def get_phone_branding(scen_key: str) -> dict:
     """Returns scenario-specific UI titles, app names, and emojis for the phone."""
     scen = str(scen_key or "").lower()
+    if scen in PHONE_BRANDING:
+        return PHONE_BRANDING[scen]
     from scenario_data import has_tag
     if has_tag(scen_key, "high_school") or has_tag(scen_key, "high_school_drama") or "school" in scen:
         return PHONE_BRANDING["high_school_drama"]
@@ -105,6 +127,8 @@ def get_phone_branding(scen_key: str) -> dict:
         return PHONE_BRANDING["sci_fi"]
     if has_tag(scen_key, "steampunk") or "steam" in scen:
         return PHONE_BRANDING["steampunk"]
+    if has_tag(scen_key, "fantasy") or "fantasy" in scen:
+        return PHONE_BRANDING["fantasy"]
     return PHONE_BRANDING["general_modern"]
 
 def build_media_gallery_embed(session_id: int, user_id: int, filter_contact: str = None, filter_type: str = None, page: int = 0) -> discord.Embed:

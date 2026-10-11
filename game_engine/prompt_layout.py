@@ -5,8 +5,9 @@ first byte that differs, so nothing volatile may appear before something stable.
   Z0a  GM_SHARED_RULES                       (global, all modes)
   Z0b  mode rules + output rules + schema    (global per mode)
   Z1   scenario + style                      (per session)
-  Z2   world state + vitals + clock          (per turn)
-  Z3   user message                          (per turn)
+  Z1b  world canon: places, factions, rules  (changes only when the lorebook/roster changes)
+  Z2   sheets + scene context + clock        (per turn; clock is always last)
+  Z3   user message: quests, waypoints, caseboard, history, actions (per turn)
 """
 import functools, hashlib
 from typing import Literal
@@ -19,9 +20,11 @@ TURN_OUTPUT_RULES = """TURN OUTPUT REQUIREMENTS:
 - `perspective_awareness`: NEVER allow newly arrived NPCs to react to, mention, or intuit recent history events if their name is not in the `[Witnessed by: ...]` tag for that event. They are completely oblivious to what happened before they walked in.
 - `entity_audit`: In `present_named_characters`, list EVERY named individual who is physically in the immediate room right now. In `speaking_characters`, list any NPCs who speak aloud in this scene.
 - `npcs_present`: MUST include all active friendly/neutral characters present in the room right now. NEVER omit named characters who appear, watch, or speak in your narrative prose.
+- STRICT PHYSICAL PRESENCE ISOLATION: Characters listed under 'Contacts elsewhere in the world (NOT present in this scene)' or any characters stationed in other locations MUST NOT physically appear, perform actions, stand nearby, react, or be in the immediate room. NEVER write sentences depicting an absent character standing, watching, holding items, or speaking in the scene unless the player explicitly travels to them or summons them. Spoken in-character dialogue referring to or asking about an absent person is allowed, but their physical presence or direct action is strictly prohibited.
 - `relationship_updates`: When conversing, cooperating, or interacting with eligible peer NPCs (classmates/students in high school drama, allies/contacts in combat genres), output `relationship_updates` with `npc_name`, `delta_score` (+1 to +6 on success/insight, -1 to -6 on offense/fail), and any discovered traits/preferences. In high school scenarios, faculty, parents, and store clerks must NEVER receive relationship updates.
 - STRICT TRANSACTION CONSISTENCY: If your narrative prose mentions a specific gold amount gained or spent, an item handed to or found by a character, or a specific damage figure taken - that SAME value MUST appear in `character_outcomes` (gold_change, items_gained, or hp_change respectively). NEVER describe a transaction in prose that you did not also record in character_outcomes. Omissions will be caught and auto-corrected by the engine.
-- `next_choices`: Generate 2-5 dynamic, relevant contextual choices reacting strictly to the room, all present NPCs, and active waypoints. If the local puzzle or objective is resolved, do NOT generate redundant micro-checks on the completed obstacle; focus choices on onward travel/departure, talking to present NPCs, or resting. If characters are talking with NPCs, ALWAYS include 1 conversational exit choice (stat: 'NONE', requirement: 0, e.g. 'Excuse yourself and look around the room')."""
+- ITEM POSSESSION GROUNDING: Personal items, snacks, food, drinks, and belongings held by or associated with NPCs remain strictly NPC property and cannot transfer to the player without an explicit narrative handoff. In `next_choices`, NEVER generate choices offering, giving, or sharing an item ('your [item]', 'half your [item]') unless that item is explicitly in the player's carried inventory. If an NPC holds or eats an item/prop, choices may only comment on or ask about their item.
+- `next_choices`: Generate 2-5 dynamic, relevant contextual choices reacting strictly to the room, all present NPCs, and active waypoints. In active dialogue, every conversational choice MUST require a skill check (DC 5-8 with appropriate stat: CHA, INT, PER, AGI), EXCEPT the 1 dedicated conversational exit choice (stat: 'NONE', requirement: 0, e.g. 'Excuse yourself and look around the room'). In free exploration, quest-related actions MUST require a skill check (DC 5-8); only routine non-quest exploration (starting dialogue, travel, inspecting props, observing surroundings, sleep, merchants, notice boards) are Free Actions (stat: 'NONE', requirement: 0). If the local puzzle or objective is resolved, do NOT generate redundant micro-checks on the completed obstacle; focus choices on onward travel/departure, talking to present NPCs, or resting."""
 
 QUEST_REQ = {
     "narrative": "- `quest_updates`: For EVERY active quest listed under PRIMARY STORY QUEST / SECONDARY SIDE BOUNTIES, include one entry. Set status=Completed if the objective was achieved, Failed if it failed, or Active if ongoing. Update `objective` and `current_clues` to reflect what happened this turn.",
@@ -57,6 +60,26 @@ def build_session_zone(session: dict) -> str:
             session.get("verbosity", "vivid"), session.get("dialogue_mode", "balanced")),
         merchant_prompt_note(scen_key=session.get("scenario")),
     ] if p and p.strip())
+
+#: Fixed size cap for Z1b. Deliberately NOT tied to DynamicTokenBudget's scene mode:
+#: a mode switch (combat <-> exploration) must never change these bytes.
+WORLD_CANON_MAX_CHARS = 2400
+WORLD_CANON_HEADER = "KNOWN WORLD - CANON (stable reference: established places, factions & canon rules):"
+SCENE_CONTEXT_HEADER = "KNOWN WORLD - CURRENT SCENE (location, people present, live standings):"
+
+def _cap(text: str, limit: int) -> str:
+    """Deterministic tail cut at the last line / list boundary before `limit`."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    boundary = max(cut.rfind("\n"), cut.rfind("; "))
+    return (cut[:boundary] if boundary > limit // 2 else cut).rstrip(" ;\n") + " …"
+
+def build_world_canon_zone(session: dict, world: dict | None = None) -> str:
+    """Z1b: slow-changing world facts. Same bytes turn after turn until the lorebook changes."""
+    import game_engine
+    text = game_engine._world_canon_text(session["id"], world=world)
+    return f"{WORLD_CANON_HEADER}\n{_cap(text, WORLD_CANON_MAX_CHARS)}" if text.strip() else ""
 
 def assemble_system_prompt(*zones: str) -> str:
     return SEP.join(z for z in zones if z)

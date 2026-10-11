@@ -1,35 +1,220 @@
 import game_engine
 from .core import *
 
+def create_contextual_story_quest_data(
+    session_id: int,
+    session: dict,
+    chapter_num: int = 1,
+    starting_hook_context: dict = None,
+    previous_completed_title: str = None
+) -> dict:
+    """Deterministic, scenario-tailored Story Quest generator.
+    Guarantees a rich Story Quest with exactly 3 distinct sub-quests and 3-stage
+    progressive waypoints even if the LLM is completely unreachable or times out."""
+    scen_key = session.get("scenario", "fantasy")
+    loc = session.get("current_location") or "the central area"
+    from mechanics.world.locations import get_discovered_primary_locations, is_school_scenario, sanitize_location_target, process_llm_location_update
+    from mechanics.world.waypoints import ensure_multi_stage_waypoints
+
+    zones_dict = get_discovered_primary_locations(session_id, scen_key)
+    avail_locs_list = []
+    for z, prims in zones_dict.items():
+        for p in prims[:2]:
+            avail_locs_list.append(f"{z} -> {p}")
+
+    loc1 = avail_locs_list[0] if len(avail_locs_list) > 0 else loc
+    loc2 = avail_locs_list[1] if len(avail_locs_list) > 1 else loc
+    loc3 = avail_locs_list[2] if len(avail_locs_list) > 2 else loc
+
+    if is_school_scenario(scen_key):
+        from mechanics.social.school_roster import ensure_school_directory_exists
+        roster = ensure_school_directory_exists(session)
+        clean_loc = loc.split("➔")[-1].strip() or "the Academy"
+        title = f"Chapter #{chapter_num}: Whispers at {clean_loc}"
+        archetype = "Campus Investigation"
+        objective = (
+            f"Unsettling rumors and hidden rivalries are spreading through {loc}. "
+            f"Investigate the initial disturbance, gather vital testimonies from students across campus facilities, "
+            f"and uncover who is pulling the strings before the situation spirals out of control."
+        )
+        sub_objs = [
+            {
+                "id": 1,
+                "archetype": "Investigation",
+                "text": f"Search for physical evidence and inspect the disturbance site at {loc1}.",
+                "completed": False
+            },
+            {
+                "id": 2,
+                "archetype": "Infiltration",
+                "text": f"Infiltrate the restricted records or quiet corners of {loc2} to gather confidential intel.",
+                "completed": False
+            },
+            {
+                "id": 3,
+                "archetype": "Diplomacy",
+                "text": f"Interview key student leads and negotiate with club representatives at {loc3}.",
+                "completed": False
+            }
+        ]
+    elif starting_hook_context and chapter_num == 1:
+        arch_title = starting_hook_context.get("archetype_title") or starting_hook_context.get("archetype", "hub_launchpad").replace("_", " ").title()
+        title = f"Chapter #1: The {arch_title} Resolution"
+        archetype = "Inciting Incident"
+        objective = (
+            f"The repercussions of the {arch_title.lower()} incident have begun to unfold across {loc}. "
+            f"Investigate the physical trail left in the wake of the disturbance, secure the surrounding regional thresholds, "
+            f"and confront the rising threat before it spreads further."
+        )
+        sub_objs = [
+            {
+                "id": 1,
+                "archetype": "Investigation",
+                "text": f"Investigate the primary site of the {arch_title.lower()} incident and collect key leads.",
+                "completed": False
+            },
+            {
+                "id": 2,
+                "archetype": "Infiltration",
+                "text": f"Scout the perimeter and bypass security barriers around {loc2}.",
+                "completed": False
+            },
+            {
+                "id": 3,
+                "archetype": "Diplomacy",
+                "text": f"Confront the regional instigator or coordinate countermeasures with allies at {loc3}.",
+                "completed": False
+            }
+        ]
+    elif "cyber" in scen_key.lower():
+        title = f"Chapter #{chapter_num}: Encrypted Subnets"
+        archetype = "Corporate Espionage"
+        objective = (
+            f"Hostile corporate factions have initiated surveillance across the district of {loc}. "
+            f"Infiltrate protected networks, recover encrypted data chips, and establish counter-measures "
+            f"before your squad is tracked down by automated enforcement units."
+        )
+        sub_objs = [
+            {
+                "id": 1,
+                "archetype": "Investigation",
+                "text": f"Hack into the local comms hub at {loc1} and decrypt illicit network chatter.",
+                "completed": False
+            },
+            {
+                "id": 2,
+                "archetype": "Infiltration",
+                "text": f"Bypass automated firewalls and stealthily breach the mainframe sector at {loc2}.",
+                "completed": False
+            },
+            {
+                "id": 3,
+                "archetype": "Diplomacy",
+                "text": f"Deliver extracted intelligence to black-market contacts or extract assets at {loc3}.",
+                "completed": False
+            }
+        ]
+    else:
+        title = f"Chapter #{chapter_num}: Shadows Over {loc.split('➔')[-1].strip() or 'the Frontier'}"
+        archetype = "Frontier Delve"
+        objective = (
+            f"Dark forces and unexplained anomalies threaten the stability of {loc}. "
+            f"Explore uncharted reaches, collect critical relics of power, and coordinate with regional guardians "
+            f"to neutralize the gathering peril."
+        )
+        sub_objs = [
+            {
+                "id": 1,
+                "archetype": "Investigation",
+                "text": f"Examine the anomaly and recover physical evidence from the threshold of {loc1}.",
+                "completed": False
+            },
+            {
+                "id": 2,
+                "archetype": "Infiltration",
+                "text": f"Delve into hazardous ruins and bypass mystical barriers at {loc2}.",
+                "completed": False
+            },
+            {
+                "id": 3,
+                "archetype": "Diplomacy",
+                "text": f"Negotiate with faction scouts or confront the regional champion at {loc3}.",
+                "completed": False
+            }
+        ]
+
+    sub_waypoints = {}
+    for idx, so in enumerate(sub_objs, 1):
+        arch = so.get("archetype", "Investigation")
+        sub_waypoints[idx] = ensure_multi_stage_waypoints([], default_loc=loc, archetype=arch)
+
+    sub_waypoints = game_engine._distribute_fallback_locations(session_id, scen_key, sub_waypoints, sub_objs)
+
+    for so_id, wps in sub_waypoints.items():
+        for wp in wps:
+            t_loc = wp.get("target_location", "").strip()
+            if t_loc:
+                clean_t = sanitize_location_target(t_loc, session_id=session_id, scen_key=scen_key)
+                process_llm_location_update(session_id, clean_t, scen_key)
+
+    return {
+        "title": title,
+        "archetype": archetype,
+        "objective": objective,
+        "sub_objectives": sub_objs,
+        "sub_waypoints": sub_waypoints,
+    }
+
 def ensure_story_quest_exists(session: dict) -> dict | None:
-    """Fallback: returns the active Story Quest if one exists. Called during
-    regular turns to ensure a story quest is always present. If one is missing
-    (e.g. session started before this feature), creates a generic placeholder
-    that the LLM should overwrite on the next [QUEST_UPDATE]."""
+    """Returns the active Story Quest if one exists with valid objectives.
+    If an existing Story Quest is a generic placeholder with 0 sub-objectives,
+    or if no Story Quest exists at all, heals/creates it using the contextual
+    generator to guarantee 3 progressive sub-quests and waypoints are always present."""
     session_id = session["id"]
+    cur_ch = db.get_session_chapter(session_id) or 1
     sq = db.get_active_story_quest(session_id)
     if sq:
-        return sq
+        sub_objs = sq.get("sub_objectives") or []
+        is_generic = (
+            sq.get("title") == "Story Quest #1: A New Adventure Begins" or
+            sq.get("objective") == "Explore the area and uncover what dangers or mysteries await." or
+            len(sub_objs) == 0
+        )
+        if not is_generic and len(sub_objs) >= 1:
+            return sq
+        # Self-healing path: existing quest is missing objectives
+        sq_id = sq["quest_id"]
+    else:
+        import uuid
+        sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
 
-    # Only create a minimal placeholder so the system prompt has something to show;
-    # the LLM will immediately replace title/objective via [QUEST_UPDATE]
-    loc = session.get("current_location") or "the region"
-    import uuid
-    sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
-    return db.upsert_quest(
+    data = create_contextual_story_quest_data(session_id, session, chapter_num=cur_ch)
+    sub_objs = data.get("sub_objectives") or []
+    sub_waypoints = data.get("sub_waypoints") or {}
+
+    healed_quest = db.upsert_quest(
         session_id=session_id,
         quest_id=sq_id,
-        quest_type="Story Quest",
-        title="Story Quest #1: A New Adventure Begins",
-        objective="Explore the area and uncover what dangers or mysteries await.",
-        progress="Quest #1",
+        quest_type=data.get("archetype") or "Story Quest",
+        title=data.get("title") or f"Chapter #{cur_ch} Objective",
+        objective=data.get("objective") or "Explore the area and resolve regional mysteries.",
+        progress=f"0/{len(sub_objs)} Cleared" if sub_objs else f"Quest #{cur_ch}",
         current_clues="",
         status="Active",
-        reward_xp=250,
-        reward_gold=60,
+        reward_xp=250 + (cur_ch * 30),
+        reward_gold=60 + (cur_ch * 10),
         is_story_quest=1,
-        clues_required=3
+        clues_required=len(sub_objs),
+        sub_objectives=sub_objs
     )
+
+    for so in sub_objs:
+        so_id = so.get("id")
+        wps = sub_waypoints.get(so_id) or []
+        if wps:
+            db.save_quest_waypoints(session_id=session_id, quest_id=sq_id, waypoints=wps, sub_obj_id=so_id)
+
+    return healed_quest
 
 async def generate_story_quest(session_id: int, session: dict, chapter_num: int, previous_completed_title: str = None, starting_hook_context: dict = None) -> dict:
     """Dedicated LLM generator for Story Quests (Chapter 1, 2, 3...).
@@ -139,8 +324,49 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
         f"spanning across DIFFERENT locations from the regional list that players can pursue in any order."
     )
 
-    result = await game_engine.call_llm_json(system_prompt, user_prompt, temperature=0.9,
-                                 max_tokens=4096, retries=1, is_nsfw=is_nsfw_scenario(session.get("scenario")), use_utility=True)
+    result = None
+    # PASS 1: Rich Contextual Generation
+    try:
+        result = await game_engine.call_llm_json(
+            system_prompt, user_prompt, temperature=0.9,
+            max_tokens=4096, retries=2, is_nsfw=scenario_data.uses_nsfw_model(session.get("scenario")), use_utility=True
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("generate_story_quest Pass 1 failed for Session %s: %s. Initiating Emergency Pass 2.", session_id, e)
+
+    # PASS 2: Emergency Pass (Streamlined, low-latency prompt with standard model)
+    if not result or not isinstance(result, dict) or not (result.get("sub_quests") or result.get("sub_objectives")):
+        try:
+            emergency_system = (
+                f"You are a Game Master creating a Story Quest for Chapter #{chapter_num} of a text RPG.\n"
+                f"CRITICAL REQUIREMENT: Output a single valid JSON object ONLY matching this schema:\n"
+                f"{NEXT_STORY_QUEST_SCHEMA}"
+            )
+            emergency_user = (
+                f"Scenario: {scen_key}. Location: {loc}.\n"
+                f"{context_line}\n"
+                f"Available Regional Locations:\n{avail_locs_text}\n\n"
+                f"Generate Story Quest #{chapter_num} with a creative title, 2-sentence objective, and EXACTLY 3 distinct sub_quests across regional locations."
+            )
+            result = await game_engine.call_llm_json(
+                emergency_system, emergency_user, temperature=0.7,
+                max_tokens=2048, retries=1, is_nsfw=scenario_data.uses_nsfw_model(session.get("scenario")), use_utility=False
+            )
+        except Exception as e2:
+            import logging
+            logging.getLogger(__name__).warning("generate_story_quest Emergency Pass 2 failed for Session %s: %s. Using deterministic fallback.", session_id, e2)
+            result = None
+
+    # PASS 3: Deterministic Contextual Generator (Guarantees zero blank quests even offline)
+    if not result or not isinstance(result, dict):
+        return create_contextual_story_quest_data(
+            session_id=session_id,
+            session=session,
+            chapter_num=chapter_num,
+            starting_hook_context=starting_hook_context,
+            previous_completed_title=previous_completed_title
+        )
 
     raw_sub = result.get("sub_quests") or result.get("sub_objectives") or []
     sub_objs = []
@@ -559,12 +785,15 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
                 # Phase 2: All sub-objectives were already complete when the turn started.
                 # If the player overcame the climax (successful climax check) or LLM requested completion, mark Completed!
                 llm_requested_complete = (str(quest_update.get("status", "")).lower() == "completed")
+                from mechanics.social.intimate_excitement import is_intimate_action_label as _q_is_intimate_lbl
                 action_is_climax = any(
-                    bool(a.get("is_climax_action")) or
-                    str(a.get("contract_type", "")).lower() == "climax" or
-                    "[story climax]" in str(a.get("label", "")).lower() or
-                    "⚡" in str(a.get("label", "")) or
-                    "climax" in str(a.get("label", "")).lower()
+                    not _q_is_intimate_lbl(str(a.get("label", ""))) and (
+                        bool(a.get("is_climax_action")) or
+                        str(a.get("contract_type", "")).lower() == "climax" or
+                        "[story climax]" in str(a.get("label", "")).lower() or
+                        "⚡" in str(a.get("label", "")) or
+                        "climax" in str(a.get("label", "")).lower()
+                    )
                     for a in (actions or [])
                 )
                 action_succeeded = any(
@@ -654,26 +883,34 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
                         g["status"] = "Completed"
                 db.update_session_campaign_goals(session_id, goals)
 
-            # Write a minimal placeholder immediately so the DB is never empty,
+            # Write a contextual quest immediately so the DB is NEVER blank or generic,
             # then schedule the LLM call to replace it with a fully unique quest.
             session_obj = db.get_session(session_id)
             import uuid, asyncio
             next_sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
+            fallback_data = create_contextual_story_quest_data(session_id, session_obj, chapter_num=next_ch)
+            next_init_subs = fallback_data.get("sub_objectives") or []
+            next_init_wps = fallback_data.get("sub_waypoints") or {}
             db.upsert_quest(
                 session_id=session_id,
                 quest_id=next_sq_id,
-                quest_type="Story Quest",
-                title=f"Story Quest #{next_ch}",
-                objective="A new adventure is about to unfold...",
-                progress=f"Quest #{next_ch}",
+                quest_type=fallback_data.get("archetype") or "Story Quest",
+                title=fallback_data.get("title") or f"Story Quest #{next_ch}",
+                objective=fallback_data.get("objective") or "A new chapter is about to unfold...",
+                progress=f"0/{len(next_init_subs)} Cleared" if next_init_subs else f"Quest #{next_ch}",
                 current_clues="",
                 status="Active",
                 reward_xp=250 + (next_ch * 30),
                 reward_gold=60 + (next_ch * 10),
                 is_story_quest=1,
-                clues_required=3,
-                sub_objectives=[]
+                clues_required=len(next_init_subs),
+                sub_objectives=next_init_subs
             )
+            for so in next_init_subs:
+                so_id = so["id"]
+                wps = next_init_wps.get(so_id) or []
+                if wps:
+                    db.save_quest_waypoints(session_id=session_id, quest_id=next_sq_id, waypoints=wps, sub_obj_id=so_id)
 
             async def _fill_next_quest():
                 try:

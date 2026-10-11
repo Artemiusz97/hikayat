@@ -23,6 +23,7 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v2.2.0** | 2026-10-12 | Minor | Deterministic Affinity Engine, In-Game Smartphone Narrative Bridge, Engine Auditor, Equipment Expansion & Web UI Overhaul. |
 | **v2.1.0** | 2026-10-04 | Minor | Mechanics Domain Restructuring, Unified Web Frontend Architecture, Root Declutter, and Distribution Hardening. |
 | **v2.0.0** | 2026-09-30 | **MAJOR** | Modern Modular Architecture, React Web Application, Decoupled API & Services, 3-Track Intimacy Consolidation. |
 | **v1.8.1** | 2026-09-16 | Patch | Narrative Style Supremacy, Dynamic Paragraph Quotas, Equipment Slot Archetype Hardening & Loadout Isolation. |
@@ -40,6 +41,24 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 ---
 
 ## Release Details
+
+### [v2.2.0] - 2026-10-12
+
+#### Added & Enhanced
+- **Deterministic Affinity Engine (`mechanics/social/affinity_engine.py`)**:
+  - Algorithmic relationship tier progression, disposition shifts, and social consequence safeguards.
+- **In-Game Smartphone Narrative Bridge (`mechanics/system/phone/`)**:
+  - Narrative memory grounding for text messaging (`dm_grounding.py`), player-initiated DMs (`player_dm.py`), and media captions (`media_captions.py`).
+- **Engine Runtime Auditor & Matching Architecture (`game_engine/auditor.py`, `matching.py`)**:
+  - Automated state consistency audits, choice validation, fuzzy entity matching, and collective entity isolation.
+- **Arsenal & Apparel Expansion (`mechanics/combat/items/`)**:
+  - Over 2,000 lines of specialized weapons across genres (`weapons.py`), expanded clothing (`clothing.py`), and scenario consumables (`genres.json`).
+- **Nuanced Intimacy & Affection Dynamics (`mechanics/social/persona/intimacy/`)**:
+  - Dynamic excitement tracking (`intimate_excitement.py`), sensory narrative fidelity, and emotional boundary progression.
+- **Modern Web SPA Overhaul (`web/src/`)**:
+  - Turn outcome breakdown panel (`TurnOutcomePanel.jsx`), redesigned codex (`CodexPanel.jsx`), character sheet inspection, and bundled assets.
+- **Simulation Harness & Test Suites (`scripts/`, `tests/simulators/`)**:
+  - Automated gameplay simulators for combat, narrative, navigation, and social interactions with 20+ new contract tests.
 
 ### [v2.1.0] - 2026-10-04
 

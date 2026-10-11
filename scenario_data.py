@@ -15,33 +15,49 @@ log = logging.getLogger(__name__)
 
 DEFAULT_SCENARIO = "fantasy"
 SCENARIOS_PATH = Path(__file__).resolve().parent / "data" / "scenarios.json"
-TAGS_PATH = Path(__file__).resolve().parent / "data" / "tags.json"
+GENRES_PATH = Path(__file__).resolve().parent / "data" / "genres.json"
 
 _REQUIRED_FIELDS = ("name", "description", "tone_guidelines", "tags")
 
 _scenarios_cache: dict | None = None
-_tags_cache: dict | None = None
+_genres_cache: dict | None = None
 
 class ScenarioError(Exception):
     """Raised when scenario data is missing or invalid."""
 
 
-def load_tags(*, reload: bool = False) -> dict[str, dict]:
-    """Load tag definitions from disk. Cached after first call."""
-    global _tags_cache
-    if _tags_cache is not None and not reload:
-        return _tags_cache
+def load_genres(*, reload: bool = False) -> dict[str, dict]:
+    """Load genre and modifier definitions from disk. Cached after first call."""
+    global _genres_cache
+    if _genres_cache is not None and not reload:
+        return _genres_cache
 
-    if not TAGS_PATH.is_file():
-        raise ScenarioError(f"Tag file not found: {TAGS_PATH}")
+    if not GENRES_PATH.is_file():
+        raise ScenarioError(f"Genre file not found: {GENRES_PATH}")
 
     try:
-        raw = json.loads(TAGS_PATH.read_text(encoding="utf-8"))
+        raw = json.loads(GENRES_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ScenarioError(f"Invalid JSON in {TAGS_PATH}: {exc}") from exc
+        raise ScenarioError(f"Invalid JSON in {GENRES_PATH}: {exc}") from exc
 
-    _tags_cache = raw
-    return raw
+    parsed: dict[str, dict] = {}
+    if isinstance(raw, dict):
+        if "genres" in raw and isinstance(raw["genres"], dict):
+            for k, v in raw["genres"].items():
+                if not k.startswith("_") and isinstance(v, dict):
+                    parsed[k] = v
+            for sec_key in ("tone_and_modifiers", "modifiers"):
+                if sec_key in raw and isinstance(raw[sec_key], dict):
+                    for k, v in raw[sec_key].items():
+                        if not k.startswith("_") and isinstance(v, dict):
+                            parsed[k] = v
+        else:
+            for k, v in raw.items():
+                if not k.startswith("_") and isinstance(v, dict):
+                    parsed[k] = v
+
+    _genres_cache = parsed
+    return parsed
 
 
 def _validate_entry(key: str, entry: dict) -> dict:
@@ -109,12 +125,14 @@ TAG_ALIASES = {
     "nuclear_post_apocalypse": "post_apocalypse",
     "non-combat": "non_combat",
     "noncombat": "non_combat",
+    "violent": "gore",
+    "violence": "gore",
 }
 
 
 def resolve_tag_keys(raw_input: str | list[str] | None) -> list[str]:
     """Parses raw tag inputs (e.g. 'fantasy, + High School, + Slice of Life'
-    or 'custom_combinator_fantasy_+ high school') into valid tag keys defined in data/tags.json."""
+    or 'custom_combinator_fantasy_+ high school') into valid tag keys defined in data/genres.json."""
     if not raw_input:
         return [DEFAULT_SCENARIO]
 
@@ -125,8 +143,8 @@ def resolve_tag_keys(raw_input: str | list[str] | None) -> list[str]:
 
     import re
     cleaned_str = re.sub(r"\(.*?\)", "", raw_str).lower()
-    tags_data = load_tags()
-    all_lookup_keys = set(tags_data.keys()) | set(TAG_ALIASES.keys())
+    genres_data = load_genres()
+    all_lookup_keys = set(genres_data.keys()) | set(TAG_ALIASES.keys())
     all_sorted_keys = sorted(all_lookup_keys, key=lambda k: len(k), reverse=True)
 
     claimed_spans: list[tuple[int, int]] = []
@@ -144,7 +162,7 @@ def resolve_tag_keys(raw_input: str | list[str] | None) -> list[str]:
                 start, end = m.start(1), m.end(1)
                 if not any(cs <= start < ce or cs < end <= ce or (start <= cs and ce <= end) for cs, ce in claimed_spans):
                     canonical_key = TAG_ALIASES.get(key, key)
-                    if canonical_key in tags_data:
+                    if canonical_key in genres_data:
                         claimed_spans.append((start, end))
                         matches.append((start, canonical_key))
             # Also search direct pattern matches
@@ -152,7 +170,7 @@ def resolve_tag_keys(raw_input: str | list[str] | None) -> list[str]:
                 start, end = m.start(), m.end()
                 if not any(cs <= start < ce or cs < end <= ce or (start <= cs and ce <= end) for cs, ce in claimed_spans):
                     canonical_key = TAG_ALIASES.get(key, key)
-                    if canonical_key in tags_data:
+                    if canonical_key in genres_data:
                         claimed_spans.append((start, end))
                         matches.append((start, canonical_key))
 
@@ -196,10 +214,30 @@ def resolve_scenario_or_custom_key(raw_input: str | list[str] | None) -> str:
     return custom_key
 
 
+COMMON_SCENARIO_ALIASES = {
+    "scifi": "sci_fi",
+    "space": "sci_fi",
+    "school": "high_school_drama",
+    "highschool": "high_school_drama",
+    "high_school": "high_school_drama",
+    "academy": "magical_academy",
+    "furry_school": "nsfw_furry_high_school_drama",
+    "furry_high_school": "nsfw_furry_high_school_drama",
+    "postapoc": "nuclear_post_apocalypse",
+    "post_apoc": "nuclear_post_apocalypse",
+    "post_apocalypse": "nuclear_post_apocalypse",
+    "darkfantasy": "dark_fantasy",
+    "isekai": "isekai_fantasy",
+}
+
+
 def resolve_scenario_key(key: str | None) -> str:
     """Return a valid scenario key, falling back to DEFAULT_SCENARIO or dynamically building custom combinators."""
     if not key:
         return DEFAULT_SCENARIO
+    clean_k = str(key).strip().lower()
+    if clean_k in COMMON_SCENARIO_ALIASES:
+        key = COMMON_SCENARIO_ALIASES[clean_k]
     scenarios = load_scenarios()
     if key in scenarios:
         return key
@@ -264,13 +302,16 @@ def get_base_scenario_key(key: str | None) -> str:
 
 
 def is_mechanic_enabled(scenario_or_key: dict | str | None, mechanic_name: str) -> bool:
-    """Return True if `mechanic_name` is present in the scenario's allowed_mechanics list."""
-    tags_data = load_tags()
+    """Return True if `mechanic_name` is present in the scenario's genre allowed_mechanics list."""
+    if mechanic_name == "tactical_combat" and (has_tag(scenario_or_key, "non_combat") or has_tag(scenario_or_key, "non-combat")):
+        return False
+    genres_data = load_genres()
     tags = get_scenario_tags(scenario_or_key)
     allowed = []
     for tag in tags:
-        tag_data = tags_data.get(tag, {})
-        allowed.extend(tag_data.get("allowed_mechanics", []))
+        tag_data = genres_data.get(tag, {})
+        if tag_data.get("category") == "genre":
+            allowed.extend(tag_data.get("allowed_mechanics", []))
     return mechanic_name in set(allowed)
 
 
@@ -282,6 +323,16 @@ def is_nsfw_scenario(scenario_or_key: dict | str | None) -> bool:
     to guard against exceptions.
     """
     return has_tag(scenario_or_key, "nsfw")
+
+
+def is_gore_scenario(scenario_or_key: dict | str | None) -> bool:
+    """Return True if the scenario is tagged with gore."""
+    return has_tag(scenario_or_key, "gore")
+
+
+def uses_nsfw_model(scenario_or_key: dict | str | None) -> bool:
+    """Return True if LLM calls for this scenario should route to the NSFW/uncensored model chain."""
+    return has_tag(scenario_or_key, "nsfw") or has_tag(scenario_or_key, "gore")
 
 
 def is_non_combat_scenario(scenario_or_key: dict | str | None) -> bool:
@@ -298,12 +349,58 @@ def is_combat_enabled(scenario_or_key: dict | str | None) -> bool:
 
 def build_custom_scenario(tag_keys: list[str] | str, title: str = "") -> dict:
     valid_tags = resolve_tag_keys(tag_keys)
+    genres_data = load_genres()
+    tag_labels = [genres_data.get(t, {}).get("name", t.replace("_", " ").title()) for t in valid_tags]
+    clean_display = f"Custom: {' • '.join(tag_labels)}" if tag_labels else "Custom Scenario"
     return {
-        "name": title or f"Custom ({', '.join(valid_tags)})",
+        "name": title or clean_display,
+        "display_name": clean_display,
+        "emoji": "✨",
+        "dropdown_label": clean_display,
         "tags": valid_tags,
         "description": "A custom adventure synthesized from multiple genres.",
         "tone_guidelines": "Blend the themes, aesthetics, and tones of the active tags into a cohesive narrative. Keep the setting consistent based on the primary genre elements selected."
     }
+
+
+def get_scenario_display_name(scenario_or_key: dict | str | None) -> str:
+    """Returns the human-readable thematic display name for a scenario or custom combinator key."""
+    if not scenario_or_key:
+        return get_scenario(DEFAULT_SCENARIO).get("display_name", "Realms of Myth & Magic")
+    if isinstance(scenario_or_key, dict):
+        return scenario_or_key.get("display_name") or scenario_or_key.get("name") or "Realms of Myth & Magic"
+    key_str = str(scenario_or_key).strip()
+    if key_str.startswith("custom_combinator_"):
+        valid_tags = resolve_tag_keys(key_str[len("custom_combinator_"):])
+        preset_key = find_matching_preset_scenario(valid_tags)
+        if preset_key:
+            scen = get_scenario(preset_key)
+            return scen.get("display_name") or scen.get("name") or preset_key
+        genres_data = load_genres()
+        tag_labels = [genres_data.get(t, {}).get("name", t.replace("_", " ").title()) for t in valid_tags]
+        return f"Custom: {' • '.join(tag_labels)}" if tag_labels else "Custom Scenario"
+    try:
+        scen = get_scenario(key_str)
+        return scen.get("display_name") or scen.get("name") or key_str
+    except Exception:
+        return key_str.replace("_", " ").title()
+
+
+def get_scenario_dropdown_label(scenario_or_key: dict | str | None) -> str:
+    """Returns the dropdown label with genre/modifier hints (e.g., 'Realms of Myth & Magic [Fantasy]')."""
+    if isinstance(scenario_or_key, dict):
+        scen = scenario_or_key
+    else:
+        scen = get_scenario(scenario_or_key)
+    if scen.get("dropdown_label"):
+        return scen["dropdown_label"]
+    display = scen.get("display_name") or scen.get("name") or "Adventure"
+    genres_data = load_genres()
+    tags = [t for t in (scen.get("tags") or []) if t != "non_combat"]
+    tag_labels = [genres_data.get(t, {}).get("name", t.replace("_", " ").title()) for t in tags]
+    if tag_labels and not display.startswith("Custom:"):
+        return f"{display} [{' • '.join(tag_labels)}]"
+    return display
 
 
 def scenario_prompt_block(scenario: dict | str | None) -> str:
@@ -313,18 +410,21 @@ def scenario_prompt_block(scenario: dict | str | None) -> str:
 
     tags_str = f" [Tags: {', '.join(scenario.get('tags', []))}]" if scenario.get("tags") else ""
     
-    tags_data = load_tags()
+    genres_data = load_genres()
     tags = scenario.get("tags", [])
     
     instructions = []
     active_mechanics = []
     for tag in tags:
-        tag_data = tags_data.get(tag, {})
+        tag_data = genres_data.get(tag, {})
         instructions.extend(tag_data.get("prompt_instructions", []))
-        active_mechanics.extend(tag_data.get("allowed_mechanics", []))
+        if tag_data.get("category") == "genre":
+            active_mechanics.extend(tag_data.get("allowed_mechanics", []))
         
-    # Deduplicate mechanics
+    # Deduplicate mechanics and strip tactical_combat when non_combat modifier is active
     active_mechanics = list(dict.fromkeys(active_mechanics))
+    if "non_combat" in tags or "non-combat" in tags:
+        active_mechanics = [m for m in active_mechanics if m != "tactical_combat"]
     
     instructions_text = "\n".join(f"- {inst}" for inst in instructions) if instructions else "- None"
     mechanics_text = ", ".join(active_mechanics) or "none"
@@ -339,20 +439,27 @@ def scenario_prompt_block(scenario: dict | str | None) -> str:
     )
 
 
-PRIMARY_SETTING_TAGS = (
-    "high_school", "cyberpunk", "steampunk", "space", "post_apocalypse",
-    "isekai", "grimdark", "fantasy", "slice_of_life"
-)
+def get_genre_tags() -> tuple[str, ...]:
+    return tuple(k for k, v in load_genres().items() if v.get("category") == "genre")
 
-MODIFIER_TAGS = (
-    "furry", "nsfw", "non_combat"
-)
+
+def get_setting_tags() -> tuple[str, ...]:
+    return get_genre_tags()
+
+
+def get_modifier_tags() -> tuple[str, ...]:
+    return tuple(k for k, v in load_genres().items() if v.get("category") == "modifier")
+
+
+PRIMARY_SETTING_TAGS = get_genre_tags()
+
+MODIFIER_TAGS = get_modifier_tags()
 
 STARTING_ARCHETYPES = ("hub_launchpad", "in_media_res", "delve_threshold")
 
 
 def get_dynamic_starting_hook(scenario: dict | str | None, session_id: int = 0, char_name: str = "") -> dict:
-    """Selects a map-anchored starting hook from active scenario tags and randomly chooses one of 3 Starting Archetypes:
+    """Selects a map-anchored starting hook from active scenario or genre tags and randomly chooses one of 3 Starting Archetypes:
     - hub_launchpad: Open Hub Exploration (Social / Investigative / Notice Board / Present NPCs)
     - in_media_res: High-Tension Crisis (Combat / Ambush / Alarms / Tactical Survival)
     - delve_threshold: Frontier / Ruin Threshold (Expedition / Scouting / Multi-Chamber Delves)
@@ -376,20 +483,14 @@ def get_dynamic_starting_hook(scenario: dict | str | None, session_id: int = 0, 
         scen_key = resolve_scenario_key(scenario)
 
     tags = scen_dict.get("tags", [])
-    tags_data = load_tags()
+    genres_data = load_genres()
     
-    # Prioritize primary setting/genre tags so modifier tags (furry, nsfw, non_combat) do not override the setting environment
-    candidate_tags = [t for t in tags if t in PRIMARY_SETTING_TAGS]
-    if not candidate_tags:
-        candidate_tags = [t for t in tags if t not in MODIFIER_TAGS] or tags
-    
-    # Collect hooks by archetype across prioritized setting tags
+    # Collect hooks by archetype: prefer scenario-specific starting_hooks if defined (e.g. dark_fantasy), otherwise pool from genre tags
     archetype_pools = {"hub_launchpad": [], "in_media_res": [], "delve_threshold": []}
     
-    for tag in candidate_tags:
-        tag_data = tags_data.get(tag, {})
-        hooks = tag_data.get("starting_hooks", [])
-        for h in hooks:
+    scen_hooks = scen_dict.get("starting_hooks", [])
+    if scen_hooks:
+        for h in scen_hooks:
             if isinstance(h, dict):
                 arch = h.get("archetype", "hub_launchpad")
                 if arch in archetype_pools:
@@ -403,6 +504,29 @@ def get_dynamic_starting_hook(scenario: dict | str | None, session_id: int = 0, 
                     "suggested_location": "",
                     "directive": ""
                 })
+    else:
+        # Prioritize primary genre tags so modifier tags (grimdark, furry, nsfw, non_combat) do not override the setting environment
+        candidate_tags = [t for t in tags if t in PRIMARY_SETTING_TAGS]
+        if not candidate_tags:
+            candidate_tags = [t for t in tags if t not in MODIFIER_TAGS] or tags
+
+        for tag in candidate_tags:
+            tag_data = genres_data.get(tag, {})
+            hooks = tag_data.get("starting_hooks", [])
+            for h in hooks:
+                if isinstance(h, dict):
+                    arch = h.get("archetype", "hub_launchpad")
+                    if arch in archetype_pools:
+                        archetype_pools[arch].append(h)
+                    else:
+                        archetype_pools["hub_launchpad"].append(h)
+                elif isinstance(h, str):
+                    archetype_pools["hub_launchpad"].append({
+                        "archetype": "hub_launchpad",
+                        "hook": h,
+                        "suggested_location": "",
+                        "directive": ""
+                    })
                 
     available_archetypes = [arch for arch, pool in archetype_pools.items() if pool]
     

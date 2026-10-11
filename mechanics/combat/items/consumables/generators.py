@@ -279,7 +279,10 @@ def generate_food_name(genre: str, tier: int, taste_tags: List[str], effect_tags
             if tier == 1: return f"{adj} Omakase Wagyu Course"
             if tier == 2: return f"{adj} Special Tonkatsu Bento Box"
             return "Crispy Pork Cutlet Sandwich"
-        return f"{adj} Campus Bento Lunch"
+        raw_genre_low = str(genre or "").lower()
+        if any(k in raw_genre_low for k in ("school", "academy")):
+            return f"{adj} Campus Bento Lunch"
+        return f"{adj} Deluxe Bento Lunch"
 
     # 2. Cyberpunk / Sci-Fi
     elif scen == "cyberpunk":
@@ -410,6 +413,12 @@ def generate_drink_name(genre: str, tier: int, taste_tags: List[str], effect_tag
         t1_adjs = ["Grand Cru", "Vintage", "Celestial", "Master Blend", "Imperial", "Pristine"]
         adj = random.choice(t3_adjs if tier == 3 else (t2_adjs if tier == 2 else t1_adjs))
 
+        raw_genre_low = str(genre or "").lower()
+        is_school = any(k in raw_genre_low for k in ("school", "academy", "drama"))
+        if "alcohol" in taste_tags and not is_school:
+            if tier == 1: return f"{adj} Single-Malt Reserve Whisky"
+            if tier == 2: return f"{adj} Smoky Whiskey Highball"
+            return "Chilled Draft Craft Beer"
         if "boba" in taste_tags or ("tea" in taste_tags and "sweet" in taste_tags):
             if tier == 1: return f"{adj} Golden Supreme Milk Tea"
             if tier == 2: return f"{adj} Iced Brown Sugar Boba Latte"
@@ -564,6 +573,7 @@ def generate_procedural_potion(tier: int = 3, effect_tags: List[str] = None, gen
     Generates a structured, deterministic potion with explicit purpose tags,
     effect tags, numeric values, and genre-based name.
     """
+    tier = max(1, min(3, int(tier or 3)))
     if effect_tags is None:
         if tier == 3:
             effect_tags = random.choice([["healing"], ["mana_restore"], ["cure_poison"], ["attack_buff"], ["explosive_fire"]])
@@ -583,6 +593,8 @@ def generate_procedural_potion(tier: int = 3, effect_tags: List[str] = None, gen
                 ["mana_restore", "healing", "cleanse_all"],
                 ["explosive_fire"]
             ])
+    else:
+        effect_tags = ["mana_restore" if t in ("mana_restoration", "mana_recovery") else t for t in effect_tags]
 
     purpose_tags = []
     if any(k in effect_tags for k in ["healing", "cleanse_all", "cure_poison", "cure_bleed", "cure_burn"]):
@@ -716,6 +728,7 @@ def generate_procedural_food(tier: int = 3, taste_tags: List[str] = None, effect
     Generates a structured solid food item with explicit taste tags,
     purpose tags, numeric recovery, and genre-based name.
     """
+    tier = max(1, min(3, int(tier or 3)))
     if taste_tags is None:
         if tier == 3:
             taste_tags = random.choice([["sweet", "bakery"], ["savory", "comfort"], ["savory", "crispy"], ["savory", "street"]])
@@ -820,6 +833,7 @@ def generate_procedural_drink(tier: int = 3, taste_tags: List[str] = None, effec
     Generates a structured drink/beverage item with explicit beverage taste tags,
     purpose tags, numeric recovery (favors MP & focus), and genre-based name.
     """
+    tier = max(1, min(3, int(tier or 3)))
     if taste_tags is None:
         if tier == 3:
             taste_tags = random.choice([["caffeine", "coffee"], ["tea", "refreshing"], ["soda", "fizzy"], ["juice", "citrus"], ["chilled", "refreshing"]])
@@ -1127,7 +1141,7 @@ def classify_and_enrich_ad_hoc_item(item_name: str, scenario_key: str = "fantasy
 
     # Check Equipment (Weapons, Armors, Shields, Accessories)
     from mechanics.combat.equipment import parse_equipment_metadata, build_equipment_effect_str
-    weapon_kws = ("sword", "blade", "dagger", "knife", "axe", "mace", "bow", "crossbow", "staff", "wand", "spear", "halberd", "rapier", "hammer", "pistol", "revolver", "rifle", "shotgun", "katana", "shinai", "bokken", "baton", "club", "lance", "scythe", "greatsword")
+    weapon_kws = ("sword", "blade", "dagger", "knife", "axe", "mace", "bow", "crossbow", "staff", "wand", "spear", "halberd", "rapier", "hammer", "pistol", "revolver", "rifle", "shotgun", "katana", "shinai", "bokken", "baton", "club", "lance", "scythe", "greatsword", "bat", "baseball bat", "fountain pen", "pepper spray", "taser", "racket", "paddle")
     shield_kws = ("shield", "buckler", "aegis", "targe", "pavise")
     accessory_kws = ("ring", "amulet", "necklace", "charm", "earring", "bracelet", "pendant", "badge", "ribbon", "watch", "glasses", "pin", "scarf", "hairpin", "locket", "band", "brooch", "talisman")
     top_kws = ("armor", "tunic", "jacket", "coat", "robe", "shirt", "blazer", "uniform", "vest", "cloak", "hoodie", "cardigan", "hauberk", "cuirass", "mail")
@@ -1174,6 +1188,11 @@ def classify_and_enrich_ad_hoc_item(item_name: str, scenario_key: str = "fantasy
             for s_key in meta.get("stat_modifiers", {}):
                 meta["stat_modifiers"][s_key] = int(meta["stat_modifiers"][s_key] * 2.2) + 8
 
+        from scenario_data import is_non_combat_scenario
+        from mechanics.combat.items.tags import make_narrative_metadata
+        if is_non_combat_scenario(scenario_key):
+            meta = make_narrative_metadata(meta)
+
         effect_str = build_equipment_effect_str(meta)
         return {
             "name": raw_name,
@@ -1181,7 +1200,9 @@ def classify_and_enrich_ad_hoc_item(item_name: str, scenario_key: str = "fantasy
             "effect": effect_str,
             "slot": slot,
             "slot_cost": 1,
-            "tier": tier
+            "tier": tier,
+            "metadata": meta,
+            "is_narrative": meta.get("is_narrative", False),
         }
 
     # Fallback to general Item

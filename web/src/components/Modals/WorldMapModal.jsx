@@ -38,6 +38,8 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
   const [selectedZone, setSelectedZone] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [traveling, setTraveling] = useState(false);
+  const [travelError, setTravelError] = useState(null);
 
   const fetchLocations = async () => {
     if (!session?.id) return;
@@ -84,10 +86,22 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
     )
   );
 
-  const handleTravel = (destValue) => {
-    if (!destValue || !onTravel) return;
-    onTravel(destValue);
-    onClose();
+  const handleTravel = async (destValue) => {
+    if (!destValue || !onTravel || traveling) return;
+    setTraveling(true);
+    setTravelError(null);
+    try {
+      await onTravel(destValue);
+      onClose();
+    } catch (err) {
+      console.error('Fast travel failed:', err);
+      setTravelError(
+        err?.message ||
+        'Fast travel failed. The server or generative models may be temporarily unavailable.'
+      );
+    } finally {
+      setTraveling(false);
+    }
   };
 
   return (
@@ -135,6 +149,22 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
           </div>
         </div>
 
+        {/* Travel Error Notification Banner */}
+        {travelError && (
+          <div className="px-5 py-2.5 bg-red-950/90 border-b border-red-700/60 text-red-200 text-xs flex items-center justify-between gap-3 animate-fade-in">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-red-400 font-bold shrink-0">⚠️ Travel Error:</span>
+              <span className="truncate">{travelError}</span>
+            </div>
+            <button
+              onClick={() => setTravelError(null)}
+              className="text-red-300 hover:text-red-100 font-bold text-xs shrink-0 px-2 py-0.5 rounded bg-black/40 hover:bg-black/60 border border-red-800/40"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* High-Visibility Active Quest Destinations Quick-Jump Bar */}
         {activeQuestDestinations.length > 0 && (
           <div className="px-4 py-2.5 bg-gradient-to-r from-amber-950/50 via-black/70 to-amber-950/40 border-b border-amber-600/50 space-y-1.5">
@@ -172,13 +202,16 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                     ) : (
                       <button
                         type="button"
+                        disabled={traveling}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleTravel(qd.value);
                         }}
-                        className="px-2 py-1 rounded bg-amber-500/25 hover:bg-amber-500/40 text-amber-200 border border-amber-400/60 text-[10px] font-bold shrink-0 flex items-center gap-1 transition-colors"
+                        className={`px-2 py-1 rounded bg-amber-500/25 hover:bg-amber-500/40 text-amber-200 border border-amber-400/60 text-[10px] font-bold shrink-0 flex items-center gap-1 transition-colors ${
+                          traveling ? 'opacity-50 cursor-not-allowed' : ''
+                        }`}
                       >
-                        <span>Travel</span>
+                        <span>{traveling ? 'Traveling...' : 'Travel'}</span>
                         <ArrowRight size={10} />
                       </button>
                     )}
@@ -342,11 +375,14 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                           Main hub of <strong>{activeZoneObj.zone_name}</strong> is ready for exploration.
                         </p>
                         <button
+                          disabled={traveling}
                           onClick={() => handleTravel(`${activeZoneObj.zone_name} ➔ Main Area`)}
-                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-fantasy-accent/20 hover:bg-fantasy-accent/30 text-fantasy-accent border border-fantasy-accent/50 text-xs font-bold transition-all"
+                          className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-fantasy-accent/20 hover:bg-fantasy-accent/30 text-fantasy-accent border border-fantasy-accent/50 text-xs font-bold transition-all ${
+                            traveling ? 'opacity-50 cursor-not-allowed' : ''
+                          }`}
                         >
                           <Navigation size={13} />
-                          <span>Travel to {activeZoneObj.zone_name}</span>
+                          <span>{traveling ? 'Traveling...' : `Travel to ${activeZoneObj.zone_name}`}</span>
                         </button>
                       </div>
                     ) : (
@@ -418,14 +454,17 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                   </span>
                                 ) : (
                                   <button
+                                    disabled={traveling}
                                     onClick={() => handleTravel(destValue)}
                                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                                      traveling ? 'opacity-50 cursor-not-allowed' : ''
+                                    } ${
                                       hasQuest
                                         ? 'bg-amber-500/25 hover:bg-amber-500/40 text-amber-200 border-amber-400/70 shadow-sm'
                                         : 'bg-fantasy-accent/20 hover:bg-fantasy-accent/35 text-fantasy-accent border-fantasy-accent/50'
                                     }`}
                                   >
-                                    <span>Travel Here</span>
+                                    <span>{traveling ? 'Traveling...' : 'Travel Here'}</span>
                                     <ArrowRight size={13} />
                                   </button>
                                 )}
@@ -458,8 +497,11 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                     <button
                                       key={`${subName}-${sIdx}`}
                                       type="button"
+                                      disabled={traveling}
                                       onClick={() => handleTravel(`${activeZoneObj.zone_name} ➔ ${placeName} ➔ ${subName}`)}
-                                      className="px-2 py-0.5 rounded-full bg-black/60 hover:bg-fantasy-accent/25 text-gray-300 hover:text-fantasy-accent border border-fantasy-border/70 hover:border-fantasy-accent/50 text-[10px] font-medium transition-colors flex items-center gap-1"
+                                      className={`px-2 py-0.5 rounded-full bg-black/60 hover:bg-fantasy-accent/25 text-gray-300 hover:text-fantasy-accent border border-fantasy-border/70 hover:border-fantasy-accent/50 text-[10px] font-medium transition-colors flex items-center gap-1 ${
+                                        traveling ? 'opacity-50 cursor-not-allowed' : ''
+                                      }`}
                                     >
                                       <span>↳ {subName}</span>
                                     </button>

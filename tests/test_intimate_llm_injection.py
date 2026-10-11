@@ -73,7 +73,7 @@ class TestIntimateLLMInjection(unittest.IsolatedAsyncioTestCase):
             conn.execute("DELETE FROM contacts WHERE session_id = ?", (self.session_id,))
 
     async def test_llm_prompt_injects_undiscovered_intimate_info_at_level_1(self):
-        """Verify that at low affinity, intimate details are still injected to shape behavior."""
+        """Verify that at low affinity without unlocks, undiscovered intimate details do not leak into dialogue prompts."""
         session = db.get_session(self.session_id)
         actions = [{
             "char": self.char,
@@ -98,10 +98,10 @@ class TestIntimateLLMInjection(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Intimate Demeanor: Secretly Teasing", user_prompt)
             self.assertIn("Intimate Dynamic: Switch / Sensual", user_prompt)
 
-            # Undiscovered sensitive spots and turn-ons ARE now leaked to the LLM so it can shape behavior!
-            self.assertIn("Sensitive Spots: Base of tail, ear tips", user_prompt)
-            self.assertIn("Turn-Ons: Whispered praise, ear nibbling", user_prompt)
-            self.assertIn("Kinks: Sensory deprivation", user_prompt)
+            # Undiscovered sensitive spots, turn-ons, and kinks are NOT prematurely leaked
+            self.assertNotIn("Sensitive Spots: Base of tail, ear tips", user_prompt)
+            self.assertNotIn("Turn-Ons: Whispered praise, ear nibbling", user_prompt)
+            self.assertNotIn("Kinks: Sensory deprivation", user_prompt)
 
     async def test_llm_prompt_injects_specific_revealed_flag_at_level_1(self):
         """Verify that if a specific flag is revealed (e.g. sensitive_spots_revealed), it gets injected even at level 1."""
@@ -135,11 +135,10 @@ class TestIntimateLLMInjection(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(mock_call.called)
             user_prompt = mock_call.call_args_list[0][0][1]
 
-
             # Sensitive spots was revealed -> injected!
             self.assertIn("Sensitive Spots: Base of tail, ear tips", user_prompt)
-            # Turn-ons is now also injected unconditionally to shape personality
-            self.assertIn("Turn-Ons: Whispered praise, ear nibbling", user_prompt)
+            # Turn-ons was not revealed -> not leaked
+            self.assertNotIn("Turn-Ons: Whispered praise, ear nibbling", user_prompt)
 
 if __name__ == "__main__":
     unittest.main()

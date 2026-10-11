@@ -2,6 +2,14 @@
 Hikayat Web API & WebSocket Server Entrypoint.
 Routes are modularized into FastAPI APIRouter modules under `api/`.
 """
+import sys
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import logging
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -110,6 +118,11 @@ def _launch_tunnel_sync(port: int, provider: str):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
+    try:
+        snapshot_path = db.create_database_snapshot(tag="server_startup")
+        print(f"[Database Snapshot] Automatic backup created at: {snapshot_path}")
+    except Exception as e:
+        print(f"[Database Snapshot] Failed to create startup snapshot (non-fatal): {e}")
     if _is_share_requested():
         port = _get_port()
         provider = _get_share_provider()

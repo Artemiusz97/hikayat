@@ -16,6 +16,7 @@ from .deps import (
     RegenerateGearRequest,
     CharacterSwitchRequest,
     SpendStatPointRequest,
+    CharacterAppearanceUpdateRequest,
 )
 
 if not hasattr(db, "delete_character_by_id") and hasattr(db, "delete_character"):
@@ -272,7 +273,8 @@ async def auth_guest(req: GuestAuthRequest):
         else f"Guest-{str(guest_id)[-4:]}"
     )
     return {
-        "user_id": guest_id,
+        "user_id": int(guest_id),
+        "user_id_str": str(guest_id),
         "username": name,
         "display_name": name,
         "is_guest": True
@@ -285,16 +287,35 @@ async def auth_discord(req: DiscordAuthRequest):
     val = (req.user_id_or_name or req.discord_id or "").strip()
     if not val:
         raise HTTPException(status_code=400, detail="Discord User ID or username is required")
-    if val.isdigit():
-        user_id = int(val)
-    else:
-        user_id = abs(hash(val)) % (10**18)
 
+    clean_digits = "".join(ch for ch in val if ch.isdigit())
+    resolved_id = None
+    if val.isdigit() or (val.startswith("<@") and clean_digits and len(clean_digits) >= 15):
+        raw_num = int(clean_digits)
+        resolved_id = await adb(db.resolve_canonical_user_id, raw_num)
+    else:
+        resolved_id = await adb(db.find_user_id_by_name, val)
+        if not resolved_id and clean_digits and len(clean_digits) >= 15:
+            resolved_id = await adb(db.resolve_canonical_user_id, int(clean_digits))
+
+    if not resolved_id:
+        if clean_digits and len(clean_digits) >= 6:
+            resolved_id = int(clean_digits)
+        else:
+            resolved_id = abs(hash(val)) % (10**18)
+
+    user_id = resolved_id
     char = await adb(db.get_character, user_id)
+    discord_user = await adb(db.get_discord_user, user_id)
+
+    username = (discord_user.get("username") if discord_user else None) or (char["name"] if char else val)
+    display_name = (discord_user.get("display_name") if discord_user else None) or (char["name"] if char else val)
+
     return {
-        "user_id": user_id,
-        "username": val,
-        "display_name": val,
+        "user_id": int(user_id),
+        "user_id_str": str(user_id),
+        "username": username,
+        "display_name": display_name,
         "has_character": char is not None,
         "character_name": char["name"] if char else None,
         "is_guest": False
@@ -309,30 +330,37 @@ async def get_scenarios():
         scenario_list = [
             {
                 "key": k,
-                "name": v.get("name", k),
+                "name": v.get("display_name") or v.get("name", k),
+                "display_name": v.get("display_name") or v.get("name", k),
+                "dropdown_label": scenario_data.get_scenario_dropdown_label(v),
                 "emoji": v.get("emoji", "🗺️"),
+                "tags": v.get("tags", []),
                 "description": v.get("description", ""),
             }
             for k, v in (scenarios.items() if isinstance(scenarios, dict) else [])
+            if not k.startswith("custom_combinator_")
         ]
         return {"scenarios": scenarios, "scenario_list": scenario_list}
     except Exception as e:
         logger.error(f"Error loading scenarios: {e}")
         return {
-            "scenarios": {"fantasy": {"name": "Classic Fantasy", "description": "High fantasy realm"}},
-            "scenario_list": [{"key": "fantasy", "name": "Classic Fantasy", "emoji": "🏰", "description": "High fantasy realm"}],
+            "scenarios": {"fantasy": {"name": "Realms of Myth & Magic", "display_name": "Realms of Myth & Magic", "description": "High fantasy realm"}},
+            "scenario_list": [{"key": "fantasy", "name": "Realms of Myth & Magic", "display_name": "Realms of Myth & Magic", "dropdown_label": "Realms of Myth & Magic [Fantasy]", "emoji": "⚔️", "description": "High fantasy realm"}],
         }
 
 
-@router.get("/api/tags")
-async def get_tags():
-    """Returns available tags dictionary."""
+@router.get("/api/genres")
+async def get_genres():
+    """Returns available genres dictionary with separated core genres and modifiers."""
     try:
-        tags = scenario_data.load_tags()
-        return {"tags": tags}
+        genres = scenario_data.load_genres()
+        core_genres = [{"key": k, **v} for k, v in genres.items() if v.get("category") == "genre"]
+        modifiers = [{"key": k, **v} for k, v in genres.items() if v.get("category") == "modifier"]
+        genre_list = [{"key": k, **v} for k, v in genres.items()]
+        return {"genres": genres, "settings": core_genres, "modifiers": modifiers, "genre_list": genre_list}
     except Exception as e:
-        logger.error(f"Error loading tags: {e}")
-        return {"tags": {}}
+        logger.error(f"Error loading genres: {e}")
+        return {"genres": {}, "settings": [], "modifiers": [], "genre_list": []}
 
 
 @router.get("/api/class-templates")
@@ -470,50 +498,69 @@ async def preview_character_gear(req: PreviewGearRequest):
     }
 
 
+def _format_character_dict(char: dict | None) -> dict | None:
+    if not char:
+        return None
+    d = dict(char)
+    if "user_id" in d and d["user_id"] is not None:
+        d["user_id_str"] = str(d["user_id"])
+        try:
+            d["user_id"] = int(d["user_id"])
+        except (ValueError, TypeError):
+            pass
+    if d.get("scenario"):
+        d["scenario_display_name"] = scenario_data.get_scenario_display_name(d["scenario"])
+    return d
+
+
 @router.get("/api/characters/{user_id}")
 async def get_user_characters(user_id: int):
     """Fetches all characters for a given user (up to 6 maximum)."""
-    chars = await adb(db.get_user_characters, user_id)
-    return {"characters": chars, "max_limit": 6}
+    canonical_id = await adb(db.resolve_canonical_user_id, user_id)
+    chars = await adb(db.get_user_characters, canonical_id)
+    return {"characters": [_format_character_dict(c) for c in chars], "max_limit": 6}
 
 
 @router.post("/api/character/switch")
 async def switch_character(req: CharacterSwitchRequest):
     """Switches active character for a user by character_id."""
-    char = await adb(db.switch_character, req.user_id, req.character_id)
+    canonical_id = await adb(db.resolve_canonical_user_id, req.user_id)
+    char = await adb(db.switch_character, canonical_id, req.character_id)
     if not char:
         raise HTTPException(status_code=404, detail="Character not found")
-    return {"success": True, "active_character": dict(char)}
+    return {"success": True, "active_character": _format_character_dict(char)}
 
 
 @router.delete("/api/character/{user_id}/{character_id}")
 async def delete_character_endpoint(user_id: int, character_id: int):
     """Deletes a specific character by character_id and returns updated character roster."""
-    deleted = await adb(db.delete_character_by_id, user_id, character_id)
+    canonical_id = await adb(db.resolve_canonical_user_id, user_id)
+    deleted = await adb(db.delete_character_by_id, canonical_id, character_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Character not found")
-    chars = await adb(db.get_user_characters, user_id)
-    active = await adb(db.get_character, user_id)
+    chars = await adb(db.get_user_characters, canonical_id)
+    active = await adb(db.get_character, canonical_id)
     return {
         "success": True,
-        "characters": chars,
-        "active_character": dict(active) if active else None,
+        "characters": [_format_character_dict(c) for c in chars],
+        "active_character": _format_character_dict(active),
     }
 
 
 @router.get("/api/character/{user_id}")
 async def get_character(user_id: int):
     """Fetches full character sheet, stats, HP/MP, level, and unspent stat points."""
-    char = await adb(db.get_character, user_id)
+    canonical_id = await adb(db.resolve_canonical_user_id, user_id)
+    char = await adb(db.get_character, canonical_id)
     if not char:
         raise HTTPException(status_code=404, detail="Character not found")
 
-    char_dict = dict(char)
+    char_dict = _format_character_dict(char)
     capacity = cd.inventory_capacity(char_dict["str_"])
-    items = await adb(db.get_inventory, user_id)
+    items = await adb(db.get_inventory, canonical_id)
     used_slots = sum(i.get("slot_cost", 1) for i in items if not i.get("equipped"))
 
-    equipment = await adb(db.get_equipment, user_id)
+    equipment = await adb(db.get_equipment, canonical_id)
     equipped_list = [item for item in equipment.values() if item] if equipment else None
     from scenario_data import is_non_combat_scenario
     char_scen = char_dict.get("scenario", "fantasy")
@@ -521,7 +568,7 @@ async def get_character(user_id: int):
     combat_attrs = cd.calculate_combat_attributes(char_dict, equipped_list)
 
     from mechanics.combat.spells import get_spell
-    known_sids = await adb(db.get_learned_spells, user_id)
+    known_sids = await adb(db.get_learned_spells, canonical_id)
     known_spells = [get_spell(sid) for sid in known_sids if get_spell(sid)]
 
     return {
@@ -560,9 +607,18 @@ async def create_character(req: CharacterCreateRequest):
 
     leftover_points = max(0, 12 - total_stats)
     try:
+        user_id = await adb(db.resolve_canonical_user_id, req.user_id)
+        appearance_payload = dict(req.appearance or {})
+        if req.breast_size:
+            appearance_payload["breast_size"] = req.breast_size
+        if req.penis_size:
+            appearance_payload["penis_size"] = req.penis_size
+        if req.asset_texture:
+            appearance_payload["asset_texture"] = req.asset_texture
+
         await adb(
             db.create_character,
-            user_id=req.user_id,
+            user_id=user_id,
             name=req.name,
             char_class=chosen_class,
             class_description=req.class_description or "",
@@ -571,7 +627,8 @@ async def create_character(req: CharacterCreateRequest):
             gender=req.gender or "Male",
             scenario=scen_key,
             race=req.race or "Human",
-            race_description=req.race_description or ""
+            race_description=req.race_description or "",
+            appearance=appearance_payload if appearance_payload else None,
         )
 
         if isinstance(req.starter_loadout, dict) and len(req.starter_loadout) > 0:
@@ -586,7 +643,7 @@ async def create_character(req: CharacterCreateRequest):
                 force_dynamic=False,
             )
         await _equip_starter_loadout_dict(
-            req.user_id,
+            user_id,
             starter_loadout,
             skip_weapon=bool(req.starting_weapon),
         )
@@ -599,17 +656,17 @@ async def create_character(req: CharacterCreateRequest):
         )
         weapon_id = await adb(
             db.add_item,
-            req.user_id,
+            user_id,
             starting_weapon,
             item_type="Weapon",
             effect=weapon_effect,
             slot_cost=1,
             force=True,
         )
-        await adb(db.equip_item, req.user_id, weapon_id, "Weapon")
+        await adb(db.equip_item, user_id, weapon_id, "Weapon")
 
-        created = await adb(db.get_character, req.user_id)
-        return {"success": True, "character": dict(created), "resolved_scenario": scen_key}
+        created = await adb(db.get_character, user_id)
+        return {"success": True, "character": _format_character_dict(created), "resolved_scenario": scen_key}
     except Exception as e:
         logger.error(f"Error creating character: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -618,7 +675,8 @@ async def create_character(req: CharacterCreateRequest):
 @router.post("/api/character/regenerate-gear")
 async def regenerate_character_gear(req: RegenerateGearRequest):
     """Regenerates and equips a fresh class-tailored starter outfit for the active character."""
-    char = await adb(db.get_character, req.user_id)
+    canonical_id = await adb(db.resolve_canonical_user_id, req.user_id)
+    char = await adb(db.get_character, canonical_id)
     if not char:
         raise HTTPException(status_code=404, detail="Character not found")
 
@@ -645,13 +703,13 @@ async def regenerate_character_gear(req: RegenerateGearRequest):
         gender=gender,
         force_dynamic=True,
     )
-    await _equip_starter_loadout_dict(req.user_id, loadout, skip_weapon=False)
+    await _equip_starter_loadout_dict(canonical_id, loadout, skip_weapon=False)
 
-    updated_char = await adb(db.get_character, req.user_id)
-    updated_equipment = await adb(db.get_equipment, req.user_id)
+    updated_char = await adb(db.get_character, canonical_id)
+    updated_equipment = await adb(db.get_equipment, canonical_id)
     return {
         "success": True,
-        "character": dict(updated_char) if updated_char else char_dict,
+        "character": _format_character_dict(updated_char) if updated_char else _format_character_dict(char_dict),
         "equipment": updated_equipment,
     }
 
@@ -663,11 +721,40 @@ async def spend_stat_point(req: SpendStatPointRequest):
     if stat not in cd.STATS:
         raise HTTPException(status_code=400, detail="Invalid stat name")
 
-    res = await adb(db.spend_stat_point, req.user_id, stat)
+    canonical_id = await adb(db.resolve_canonical_user_id, req.user_id)
+    res = await adb(db.spend_stat_point, canonical_id, stat)
     if res == "no_points":
         raise HTTPException(status_code=400, detail="No unspent stat points available")
     elif res == "capped":
         raise HTTPException(status_code=400, detail=f"{stat} is already at maximum level")
 
-    char = await adb(db.get_character, req.user_id)
-    return {"success": True, "character": dict(char)}
+    char = await adb(db.get_character, canonical_id)
+    return {"success": True, "character": _format_character_dict(char)}
+
+
+@router.post("/api/character/appearance")
+async def update_character_appearance(req: CharacterAppearanceUpdateRequest):
+    """Updates appearance attributes (breast_size, penis_size, asset_texture, etc.) for the character."""
+    canonical_id = await adb(db.resolve_canonical_user_id, req.user_id)
+    char = await adb(db.get_character, canonical_id)
+    if not char:
+        raise HTTPException(status_code=404, detail="Character not found")
+
+    appearance_update = dict(req.appearance or {})
+    if req.breast_size is not None:
+        appearance_update["breast_size"] = req.breast_size
+    if req.penis_size is not None:
+        appearance_update["penis_size"] = req.penis_size
+    if req.asset_texture is not None:
+        appearance_update["asset_texture"] = req.asset_texture
+
+    target_char_id = req.character_id or char["id"]
+    updated = await adb(db.update_character_appearance, target_char_id, appearance_update)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Character not found or update failed")
+
+    return {
+        "success": True,
+        "character": _format_character_dict(updated),
+        "appearance": updated.get("appearance", {})
+    }

@@ -147,6 +147,19 @@ class PhysicalUpdate(BaseModel):
 
     combat_focus: Optional[str] = None
     dropped_items: List[str] = Field(default_factory=list)
+    player_climaxed: Optional[bool] = None
+    partner_climaxed: Optional[bool] = None
+
+    @field_validator("player_climaxed", "partner_climaxed", mode="before")
+    @classmethod
+    def coerce_climax_bool(cls, v: Any) -> Optional[bool]:
+        if v is None:
+            return None
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.strip().lower() in ("true", "1", "yes")
+        return bool(v)
 
     @field_validator("intimate_contact", mode="before")
     @classmethod
@@ -250,7 +263,7 @@ class DictAccessibleModel(BaseModel):
 
 
 class NarrationOutcome(DictAccessibleModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
     outcome_narrative: str = Field(default="")
     next_narrative: str = Field(default="")
     scene_title: str = Field(default="")
@@ -291,7 +304,32 @@ class TurnOutcome(DictAccessibleModel):
     faction_promotion_result: Optional[str] = None
     image_prompt: Optional[str] = None
 
-    @field_validator("outcome_narrative", "next_narrative", "scene_title", "location", mode="before")
+    @field_validator("location", mode="before")
+    @classmethod
+    def coerce_location(cls, v: Any) -> str:
+        if not v:
+            return ""
+        if isinstance(v, dict):
+            from mechanics.world.locations.hierarchy import parse_structured_location_dict, format_tiered_location_string
+            parsed = parse_structured_location_dict(v)
+            if parsed:
+                return format_tiered_location_string(*parsed)
+            return str(v.get("name") or v.get("location") or "")
+        v_str = str(v).strip()
+        if v_str.startswith("{") and ("tier" in v_str.lower() or "zone" in v_str.lower()):
+            try:
+                import json
+                d = json.loads(v_str)
+                if isinstance(d, dict):
+                    from mechanics.world.locations.hierarchy import parse_structured_location_dict, format_tiered_location_string
+                    parsed = parse_structured_location_dict(d)
+                    if parsed:
+                        return format_tiered_location_string(*parsed)
+            except Exception:
+                pass
+        return v_str
+
+    @field_validator("outcome_narrative", "next_narrative", "scene_title", mode="before")
     @classmethod
     def coerce_text_fields(cls, v: Any) -> str:
         if not v:

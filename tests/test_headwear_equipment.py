@@ -24,9 +24,11 @@ class TestHeadwearEquipment(unittest.TestCase):
         """Verify all 8 headwear archetypes generate valid [ITEM_JSON] items with proper slots and stats."""
         expected_archetypes = [
             "cloth_hood", "cap", "open_helm", "full_greathelm",
-            "tech_visor", "gas_mask", "circlet", "formal_hat"
+            "tech_visor", "gas_mask", "circlet", "formal_hat",
+            "top_hat", "bonnet", "bowler_hat", "fascinator",
+            "beanie", "beret", "bandana", "ar_glasses"
         ]
-        self.assertEqual(len(HEADWEAR_ARCHETYPES), 8)
+        self.assertEqual(len(HEADWEAR_ARCHETYPES), 16)
         for arch in expected_archetypes:
             self.assertIn(arch, HEADWEAR_ARCHETYPES)
             from mechanics.combat.items.headwear import generate_random_equipment as _gen_h

@@ -14,6 +14,16 @@ from .matching import check_location_matches_waypoint, get_story_quest_climax_lo
 
 def build_waypoint_prompt_block(session_id: int, current_location: str, destination_location: str = "") -> str:
     """Builds the [ACTIVE QUEST WAYPOINTS] block for the LLM system prompt."""
+    if session_id:
+        try:
+            from mechanics.social.physical_state import is_erotic_intimate_contact
+            phys_st = db.get_session_physical_state(session_id)
+            if isinstance(phys_st, dict):
+                ic_str = str(phys_st.get("intimate_contact", "") or "")
+                if is_erotic_intimate_contact(ic_str) or "aftercare" in ic_str.lower():
+                    return ""
+        except Exception:
+            pass
     active_wps = db.get_all_session_active_waypoints(session_id)
     story_quest, climax_loc = get_story_quest_climax_location(session_id)
 
@@ -210,13 +220,14 @@ def get_location_waypoint_markers(session_id: int) -> dict[str, list[str]]:
             if tag not in markers[k]:
                 markers[k].append(tag)
 
-    # 0. Phone Meetup Appointments — 💌 marker on rendezvous location
-    pending_appointments = db.get_phone_appointments(session_id, status="pending")
-    for appt in pending_appointments:
+    # 0. Phone Meetup Appointments — 💌 marker on rendezvous location (pending or arrived)
+    appointments = (db.get_phone_appointments(session_id, status="pending") or []) + (db.get_phone_appointments(session_id, status="arrived") or [])
+    for appt in appointments:
         appt_loc = appt.get("rendezvous_location", "")
         npc_name = appt.get("npc_name", "")
         if appt_loc and npc_name:
-            _register_location_marker(appt_loc, f"💌 [Meetup] {npc_name} is waiting here")
+            tag_label = f"💌 [Meetup] {npc_name} is here" if appt.get("status") == "arrived" else f"💌 [Meetup] {npc_name} is waiting here"
+            _register_location_marker(appt_loc, tag_label)
 
     # 1. Check for active Story Quest in Climax Ready state
     story_quest, climax_loc = get_story_quest_climax_location(session_id)

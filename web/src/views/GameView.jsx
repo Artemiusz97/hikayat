@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, LogOut, User, Package, Users, Compass, BookOpen, X, Smartphone, Sliders, Bookmark, Map, ArrowLeft, FlagOff, ScrollText, Share2, Check } from 'lucide-react';
+import { Menu, LogOut, User, Package, Users, Compass, BookOpen, X, Smartphone, Sliders, Bookmark, Map, ArrowLeft, FlagOff, ScrollText, Share2, Check, MoreVertical, Clock } from 'lucide-react';
 import { apiCall } from '../api/client';
 import CharacterSheet from '../components/Sidebar/CharacterSheet';
 import InventoryPanel from '../components/Sidebar/InventoryPanel';
@@ -42,9 +42,10 @@ const GameView = ({
   retryGeneration,
   leaveSession
 }) => {
-  const [activeSidebarTab, setActiveSidebarTab] = useState('hero'); // 'hero' | 'inventory' | 'party' | 'quests' | 'codex'
+  const [activeSidebarTab, setActiveSidebarTab] = useState('hero'); // 'hero' | 'inventory' | 'party' | 'quests' | 'codex' | 'outcomes'
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [mobileOutcomeOpen, setMobileOutcomeOpen] = useState(false);
+  const [threeDotsOpen, setThreeDotsOpen] = useState(false);
   const [phoneModalOpen, setPhoneModalOpen] = useState(false);
   const [merchantModalOpen, setMerchantModalOpen] = useState(false);
   const [savesModalOpen, setSavesModalOpen] = useState(false);
@@ -53,6 +54,14 @@ const GameView = ({
   const [worldMapTargetLocation, setWorldMapTargetLocation] = useState(null);
   const [selectedCombatTarget, setSelectedCombatTarget] = useState(null);
   const [headerCopied, setHeaderCopied] = useState(false);
+  const [targetContactName, setTargetContactName] = useState(null);
+
+  const handleSelectContact = (name) => {
+    setTargetContactName(name);
+    setActiveSidebarTab('codex');
+    setMobileOutcomeOpen(false);
+    setMobileDrawerOpen(true);
+  };
 
   const handleShareAdventure = async () => {
     try {
@@ -146,7 +155,8 @@ const GameView = ({
     { id: 'inventory', label: 'Pack', icon: Package, badge: inventory.items?.length || null },
     { id: 'party', label: 'Party', icon: Users, badge: (session.party_members?.length || 1) + (session.party_npcs?.length || 0) },
     { id: 'quests', label: 'Quests', icon: Compass, badge: activeQuestCount || null },
-    { id: 'codex', label: 'Codex', icon: BookOpen, badge: contactsCount }
+    { id: 'codex', label: 'Codex', icon: BookOpen, badge: contactsCount },
+    { id: 'outcomes', label: 'Outcomes', icon: ScrollText, badge: null }
   ];
 
   const renderSidebarContent = () => {
@@ -197,6 +207,20 @@ const GameView = ({
             onRefreshCharacter={refreshCharacter}
             onOpenMerchant={() => setMerchantModalOpen(true)}
             onTriggerAction={handleAction}
+            targetContactName={targetContactName}
+          />
+        );
+      case 'outcomes':
+        return (
+          <WorldOutcomeSidebar
+            session={session}
+            isMobileDrawer={true}
+            onOpenWorldMap={(targetLoc) => {
+              setWorldMapTargetLocation(typeof targetLoc === 'string' ? targetLoc : null);
+              setMobileDrawerOpen(false);
+              setWorldMapModalOpen(true);
+            }}
+            onSelectContact={handleSelectContact}
           />
         );
       case 'hero':
@@ -213,23 +237,26 @@ const GameView = ({
   };
 
   return (
-    <div className="flex h-screen bg-black overflow-hidden font-sans">
+    <div
+      style={{ height: 'var(--app-height, 100dvh)', maxHeight: 'var(--app-height, 100dvh)' }}
+      className="flex w-full bg-black overflow-hidden font-sans"
+    >
 
       {/* Sidebar (Desktop) */}
-      <aside className="hidden md:flex w-[440px] xl:w-[480px] flex-col bg-fantasy-panel border-r border-fantasy-border h-full shrink-0 transition-all duration-200">
+      <aside className="hidden md:flex w-[460px] xl:w-[500px] 2xl:w-[540px] flex-col bg-fantasy-panel border-r border-fantasy-border h-full shrink-0 transition-all duration-200">
 
         {/* Top Header */}
-        <div className="p-3.5 border-b border-fantasy-border flex justify-between items-center bg-black/40">
-          <div className="flex items-center gap-2">
-            <Compass size={18} className="text-fantasy-accent" />
+        <div className="p-4 border-b border-fantasy-border flex justify-between items-center bg-black/40">
+          <div className="flex items-center gap-2.5">
+            <Compass size={20} className="text-fantasy-accent" />
             <div>
-              <h1 className="font-rpg font-bold text-fantasy-accent text-base leading-tight">Hikayat</h1>
-              <p className="text-[11px] text-gray-500 capitalize">{session.scenario || 'Fantasy'} Realm</p>
+              <h1 className="font-rpg font-bold text-fantasy-accent text-lg leading-tight">Hikayat</h1>
+              <p className="text-xs text-gray-400 mt-0.5">{session.scenario_display_name || session.scenario || 'Realms of Myth & Magic'}</p>
             </div>
           </div>
 
           <div className="flex items-center gap-1">
-            {/* Contextual Phone OS Button */}
+            {/* Smartphone OS Button */}
             {phone.isSupported && (
               <button
                 onClick={() => setPhoneModalOpen(true)}
@@ -305,24 +332,24 @@ const GameView = ({
         </div>
 
         {/* Tab Navigation Switcher */}
-        <div className="flex border-b border-fantasy-border bg-black/60 p-1 gap-1">
-          {tabs.map(tab => {
+        <div className="flex border-b border-fantasy-border bg-black/60 p-1.5 gap-1.5">
+          {tabs.filter(t => t.id !== 'outcomes').map(tab => {
             const Icon = tab.icon;
             const isActive = activeSidebarTab === tab.id;
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveSidebarTab(tab.id)}
-                className={`flex-1 flex flex-col items-center justify-center py-1.5 px-0.5 rounded text-[10px] font-semibold uppercase tracking-wider transition-all relative ${
+                className={`flex-1 flex flex-col items-center justify-center py-2 px-1 rounded-lg text-xs font-bold uppercase tracking-wider transition-all relative ${
                   isActive
                     ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40 shadow-sm'
-                    : 'text-gray-400 hover:text-gray-200 hover:bg-black/30'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-black/40'
                 }`}
               >
-                <div className="flex items-center gap-1">
-                  <Icon size={13} />
+                <div className="flex items-center gap-1.5">
+                  <Icon size={15} />
                   {tab.badge && (
-                    <span className={`text-[8px] px-1 rounded-full font-bold leading-none ${
+                    <span className={`text-[9px] px-1 rounded-full font-bold leading-none ${
                       tab.badge === '!'
                         ? 'bg-amber-500 text-black animate-bounce'
                         : 'bg-black/80 text-gray-300 border border-fantasy-border'
@@ -331,97 +358,166 @@ const GameView = ({
                     </span>
                   )}
                 </div>
-                <span className="mt-0.5">{tab.label}</span>
+                <span className="mt-1">{tab.label}</span>
               </button>
             );
           })}
         </div>
 
         {/* Scrollable Tab Content */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-3">
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 flex flex-col">
           {renderSidebarContent()}
         </div>
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col h-full relative min-w-0">
+      <main className="flex-1 flex flex-col h-full min-h-0 relative min-w-0">
 
-        {/* Mobile Header */}
-        <header className="md:hidden flex justify-between items-center p-3 bg-fantasy-panel border-b border-fantasy-border z-10">
-          <div className="flex items-center gap-2">
-            <Compass size={18} className="text-fantasy-accent" />
-            <h1 className="font-rpg font-bold text-fantasy-accent text-sm">Hikayat</h1>
+        {/* Mobile Header: Left (Single Utility Button), Center (Game Title), Right (Clock + 3-Dots Menu) */}
+        <header className="md:hidden relative flex justify-between items-center px-2.5 py-1.5 bg-fantasy-panel border-b border-fantasy-border z-30 select-none">
+          {/* Top Left: Single Grouped Utility Button (Outcomes, Map, Phone, Hero, Pack, Party, Quests, Codex) */}
+          <button
+            type="button"
+            onClick={() => setMobileDrawerOpen(true)}
+            className="p-1.5 bg-black/50 border border-fantasy-border hover:border-fantasy-accent/60 rounded-lg text-fantasy-accent flex items-center justify-center transition-all relative shrink-0"
+            title="Open Journal & Utilities (Outcomes, Map, Phone, Character, Pack, Party, Quests, Codex)"
+            aria-label="Open utilities"
+          >
+            <Menu size={18} />
+            {(character?.pending_stat_points || activeQuestCount > 0 || (phone.appointments?.length > 0 || phone.mediaGallery?.length > 0)) && (
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse border-2 border-fantasy-panel" />
+            )}
+          </button>
+
+          {/* Top Center: Repositioned Game Name */}
+          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 pointer-events-none">
+            <Compass size={16} className="text-fantasy-accent animate-pulse" />
+            <h1 className="font-rpg font-bold text-fantasy-accent text-sm sm:text-base tracking-wider leading-none">
+              Hikayat
+            </h1>
           </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setWorldMapModalOpen(true)}
-              className="p-1.5 bg-black/40 border border-fantasy-border rounded text-fantasy-accent flex items-center text-xs"
-              title="World Atlas & Fast-Travel"
+
+          {/* Top Right: Clock + 3-Dots Button */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* In-Game Clock Pill */}
+            <div
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/60 border border-fantasy-border/80 text-[10px] sm:text-[11px] font-mono text-amber-300 shadow-sm"
+              title="Current In-Game Time & Day"
             >
-              <Map size={15} />
-            </button>
-            <button
-              onClick={() => setMobileOutcomeOpen(true)}
-              className="p-1.5 bg-black/40 border border-fantasy-border rounded text-amber-300 flex items-center text-xs"
-              title="World Context & Turn Outcomes"
-            >
-              <ScrollText size={15} />
-            </button>
-            {phone.isSupported && (
+              <Clock size={11} className="text-amber-400 shrink-0" />
+              <span className="truncate max-w-[110px] sm:max-w-[140px]">{session?.formatted_time || 'Day 1 • 08:00'}</span>
+            </div>
+
+            <div className="relative">
               <button
-                onClick={() => setPhoneModalOpen(true)}
-                className="p-1.5 bg-black/40 border border-neutral-700 rounded text-pink-400 flex items-center text-xs"
-                title="Phone OS"
+                type="button"
+                onClick={() => setThreeDotsOpen((prev) => !prev)}
+                className="p-1.5 bg-black/50 border border-fantasy-border hover:border-fantasy-accent rounded-lg text-gray-300 hover:text-fantasy-accent transition-colors flex items-center justify-center"
+                title="Adventure Options & Menu"
+                aria-label="Adventure options menu"
               >
-                <Smartphone size={15} />
+                <MoreVertical size={18} />
               </button>
+
+            {threeDotsOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40 bg-black/20"
+                  onClick={() => setThreeDotsOpen(false)}
+                />
+                <div className="absolute right-0 mt-2 w-56 rounded-xl bg-fantasy-panel border border-fantasy-border shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                  {/* Share Adventure Link */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleShareAdventure();
+                    }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium transition-colors text-left ${
+                      headerCopied
+                        ? 'text-green-400 bg-green-950/40'
+                        : 'text-gray-200 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    {headerCopied ? <Check size={15} className="text-green-400" /> : <Share2 size={15} className="text-gray-400" />}
+                    <span>{headerCopied ? 'Link Copied!' : 'Share Adventure'}</span>
+                  </button>
+
+                  {/* Save & Load Checkpoints */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setThreeDotsOpen(false);
+                      setSavesModalOpen(true);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-gray-200 hover:text-white hover:bg-white/5 transition-colors text-left"
+                  >
+                    <Bookmark size={15} className="text-gray-400" />
+                    <span>Save & Load Checkpoints</span>
+                  </button>
+
+                  {/* Settings & Chronicle */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setThreeDotsOpen(false);
+                      setSettingsModalOpen(true);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-gray-200 hover:text-white hover:bg-white/5 transition-colors text-left"
+                  >
+                    <Sliders size={15} className="text-gray-400" />
+                    <span>Settings & Chronicle</span>
+                  </button>
+
+                  <div className="my-1 border-t border-fantasy-border/60" />
+
+                  {/* Return to Dashboard */}
+                  {exitToDashboard && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setThreeDotsOpen(false);
+                        exitToDashboard();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-gray-200 hover:text-fantasy-accent hover:bg-white/5 transition-colors text-left"
+                    >
+                      <ArrowLeft size={15} className="text-gray-400" />
+                      <span>Return to Dashboard</span>
+                    </button>
+                  )}
+
+                  {/* End Adventure */}
+                  {endSession && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setThreeDotsOpen(false);
+                        endSession();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-amber-400 hover:text-amber-300 hover:bg-amber-950/30 transition-colors text-left"
+                    >
+                      <FlagOff size={15} className="text-amber-400" />
+                      <span>End Adventure</span>
+                    </button>
+                  )}
+
+                  {/* Log Out */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setThreeDotsOpen(false);
+                      leaveSession();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-red-400 hover:text-red-300 hover:bg-red-950/30 transition-colors text-left"
+                  >
+                    <LogOut size={15} className="text-red-400" />
+                    <span>Log Out</span>
+                  </button>
+                </div>
+              </>
             )}
-            <button
-              onClick={handleShareAdventure}
-              className={`p-1.5 bg-black/40 border rounded transition-colors ${
-                headerCopied
-                  ? 'text-green-400 border-green-500/40'
-                  : 'border-fantasy-border text-gray-300 hover:text-fantasy-accent'
-              }`}
-              title={headerCopied ? "Link Copied!" : "Share Adventure Link"}
-            >
-              {headerCopied ? <Check size={15} className="text-green-400" /> : <Share2 size={15} />}
-            </button>
-            <button
-              onClick={() => setSavesModalOpen(true)}
-              className="p-1.5 bg-black/40 border border-fantasy-border rounded text-gray-300 hover:text-fantasy-accent"
-              title="Checkpoints"
-            >
-              <Bookmark size={15} />
-            </button>
-            <button
-              onClick={() => setSettingsModalOpen(true)}
-              className="p-1.5 bg-black/40 border border-fantasy-border rounded text-gray-300 hover:text-fantasy-accent"
-              title="Settings & Streaming"
-            >
-              <Sliders size={15} />
-            </button>
-            <button
-              onClick={() => setMobileDrawerOpen(true)}
-              className="p-1.5 bg-black/40 border border-fantasy-border rounded text-gray-300 hover:text-fantasy-accent flex items-center gap-1 text-xs"
-            >
-              <Menu size={16} />
-            </button>
-            {exitToDashboard && (
-              <button onClick={exitToDashboard} className="text-gray-400 hover:text-fantasy-accent p-1" title="Exit to Dashboard">
-                <ArrowLeft size={16} />
-              </button>
-            )}
-            {endSession && (
-              <button onClick={endSession} className="text-amber-500 hover:text-red-400 p-1" title="End Adventure">
-                <FlagOff size={16} />
-              </button>
-            )}
-            <button onClick={leaveSession} className="text-gray-500 hover:text-red-400 p-1" title="Log Out">
-              <LogOut size={16}/>
-            </button>
           </div>
-        </header>
+        </div>
+      </header>
 
         {/* Narrative Feed */}
         <div className="flex-1 min-h-0 overflow-hidden relative">
@@ -446,62 +542,118 @@ const GameView = ({
           onAction={handleAction}
           onRetry={handleRetryGeneration}
           onOpenMerchant={() => setMerchantModalOpen(true)}
+          onOpenPhone={() => setPhoneModalOpen(true)}
+          onClosePhone={() => setPhoneModalOpen(false)}
+          phoneOpen={phoneModalOpen}
+          phoneHook={phone}
           showPercentages={(settings.settings?.show_percentages ?? 1) === 1}
           processing={processingTurn}
           isStreaming={isStreaming}
           waitingForParty={waitingForParty}
           partyStatus={partyStatus}
+          onSelectContact={handleSelectContact}
         />
       </main>
 
       {/* Right Sidebar: World Context (Map, Day/Time, Present NPCs) & Dedicated Outcomes/Changes Log */}
-      <aside className="hidden lg:flex w-[390px] xl:w-[440px] 2xl:w-[480px] flex-col bg-fantasy-panel border-l border-fantasy-border h-full shrink-0 transition-all duration-200">
+      <aside className="hidden lg:flex w-[420px] xl:w-[460px] 2xl:w-[500px] flex-col bg-fantasy-panel border-l border-fantasy-border h-full shrink-0 transition-all duration-200">
         <WorldOutcomeSidebar
           session={session}
           onOpenWorldMap={() => setWorldMapModalOpen(true)}
+          onSelectContact={handleSelectContact}
         />
       </aside>
 
-      {/* Mobile Drawer Backdrop & Left Drawer */}
+      {/* Mobile Utility Drawer (Outcomes, Map, Phone, Character, Pack, Party, Quests, Codex) */}
       {mobileDrawerOpen && (
         <div className="md:hidden fixed inset-0 z-50 flex">
           <div
             className="fixed inset-0 bg-black/80 backdrop-blur-sm"
             onClick={() => setMobileDrawerOpen(false)}
           />
-          <div className="relative w-80 max-w-[85vw] bg-fantasy-panel border-r border-fantasy-border h-full flex flex-col z-10">
-            <div className="p-3.5 border-b border-fantasy-border flex justify-between items-center bg-black/40">
-              <h2 className="font-rpg font-bold text-fantasy-accent text-sm">Journal & Systems</h2>
+          <div className="relative w-84 max-w-[88vw] bg-fantasy-panel border-r border-fantasy-border h-full flex flex-col z-10 shadow-2xl">
+            {/* Header */}
+            <div className="p-3.5 border-b border-fantasy-border flex justify-between items-center bg-black/60">
+              <div className="flex items-center gap-2">
+                <Compass size={18} className="text-fantasy-accent" />
+                <div>
+                  <h2 className="font-rpg font-bold text-fantasy-accent text-sm leading-tight">Journal & Utilities</h2>
+                  <p className="text-[10px] text-gray-400">{session.scenario_display_name || session.scenario || 'Realms of Myth & Magic'}</p>
+                </div>
+              </div>
               <button
                 onClick={() => setMobileDrawerOpen(false)}
-                className="p-1 text-gray-400 hover:text-gray-200"
+                className="p-1.5 text-gray-400 hover:text-gray-200 rounded-lg hover:bg-white/10"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <div className="flex border-b border-fantasy-border bg-black/60 p-1 gap-1">
-              {tabs.map(tab => {
+            {/* Quick Access Tools: World Map & Smartphone OS */}
+            <div className="grid grid-cols-2 gap-2 p-2 border-b border-fantasy-border/70 bg-black/40">
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileDrawerOpen(false);
+                  setWorldMapModalOpen(true);
+                }}
+                className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-black/60 hover:bg-black/90 border border-fantasy-border hover:border-fantasy-accent/60 text-xs font-semibold text-fantasy-accent transition-all active:scale-95 shadow-sm"
+              >
+                <Map size={14} />
+                <span>World Map</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileDrawerOpen(false);
+                  setPhoneModalOpen(true);
+                }}
+                className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-pink-950/40 hover:bg-pink-900/50 border border-pink-700/50 hover:border-pink-500 text-xs font-semibold text-pink-300 transition-all active:scale-95 shadow-sm"
+              >
+                <Smartphone size={14} />
+                <span>Smartphone</span>
+                {(phone.appointments?.length > 0 || phone.mediaGallery?.length > 0) && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-pulse" />
+                )}
+              </button>
+            </div>
+
+            {/* Utility Tabs Grid (Hero, Pack, Party, Quests, Codex, Outcomes) */}
+            <div className="grid grid-cols-3 border-b border-fantasy-border bg-black/60 p-1 gap-1">
+              {tabs.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeSidebarTab === tab.id;
                 return (
                   <button
                     key={tab.id}
                     onClick={() => setActiveSidebarTab(tab.id)}
-                    className={`flex-1 flex flex-col items-center justify-center py-1 rounded text-[10px] font-semibold uppercase tracking-wider transition-all ${
+                    className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all relative ${
                       isActive
-                        ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40'
-                        : 'text-gray-400'
+                        ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40 shadow-sm'
+                        : 'text-gray-400 hover:text-gray-200 hover:bg-black/40 border border-transparent'
                     }`}
                   >
-                    <Icon size={12} />
-                    <span>{tab.label}</span>
+                    <div className="flex items-center gap-1">
+                      <Icon size={13} />
+                      {tab.badge && (
+                        <span className={`text-[8px] px-1 rounded-full font-bold leading-none ${
+                          tab.badge === '!'
+                            ? 'bg-amber-500 text-black animate-bounce'
+                            : 'bg-black/80 text-gray-300 border border-fantasy-border'
+                        }`}>
+                          {tab.badge}
+                        </span>
+                      )}
+                    </div>
+                    <span className="mt-0.5 truncate">{tab.label}</span>
                   </button>
                 );
               })}
             </div>
 
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-3">
+            {/* Drawer Body */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-3 flex flex-col min-h-0">
               {renderSidebarContent()}
             </div>
           </div>
@@ -528,6 +680,7 @@ const GameView = ({
             <div className="flex-1 overflow-hidden">
               <WorldOutcomeSidebar
                 session={session}
+                onSelectContact={handleSelectContact}
                 onOpenWorldMap={() => {
                   setMobileOutcomeOpen(false);
                   setWorldMapModalOpen(true);

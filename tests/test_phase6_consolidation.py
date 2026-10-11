@@ -115,10 +115,10 @@ class TestPhase6Consolidation(unittest.TestCase):
         self.assertEqual(game_engine._get_npc_name("  Kana  "), "Kana")
         self.assertEqual(game_engine._get_npc_name(None), "")
 
-    def test_is_school_scenario_covers_slice_of_life_and_tags(self):
-        """Verify is_school_scenario recognizes high_school, slice_of_life, and rejects fantasy."""
+    def test_is_school_scenario_covers_high_school_and_decouples_slice_of_life(self):
+        """Verify is_school_scenario recognizes high_school/academy and rejects slice_of_life and fantasy."""
         self.assertTrue(is_school_scenario("high_school_drama"))
-        self.assertTrue(is_school_scenario("slice_of_life"))
+        self.assertFalse(is_school_scenario("slice_of_life"))
         self.assertTrue(is_school_scenario("academy_romance"))
         self.assertFalse(is_school_scenario("fantasy"))
 

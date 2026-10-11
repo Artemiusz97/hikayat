@@ -14,7 +14,7 @@ MAX_RELATIONSHIP = 100
 
 NON_PEER_HIGH_SCHOOL_ROLE_PATTERNS = [
     # Faculty / Administration / Honorifics
-    r"\b(mr|mrs|ms|miss|dr|prof)\.?\s+[a-z]+",
+    r"\b(mr|mrs|ms|miss|dr|prof|madame)\.?\s+[a-z]+",
     r"\b(teacher|professor|instructor|sensei|educator|faculty|tutor)\b",
     r"\b(principal|vice\s+principal|headmaster|headmistress|dean|curator|trustee|school\s+board|inspector|superintendent|administrator)\b",
     # School Support & Facility Staff
@@ -62,6 +62,10 @@ def is_contact_eligible(
       adult authority / service workers are STORY-ONLY figures (stored in Lorebook/narrative,
       but never registered as Phone contacts or given affinity meters).
     """
+    import namegen
+    if namegen.is_collective_entity_name(name) or namegen.is_generic_role_name(name):
+        return False
+
     import scenario_data
     is_hs = scenario_data.has_tag(scenario, "high_school")
     
@@ -91,6 +95,15 @@ def is_contact_eligible(
                     grade = grade or b_inf.get("grade", "")
                     club = club or b_inf.get("club", "")
                 if not role and not description:
+                    roster = db.get_school_roster(session_id)
+                    for r_entry in (roster or []):
+                        if str(r_entry.get("name", "")).strip().lower() == str(name).strip().lower():
+                            role = role or r_entry.get("role", "")
+                            description = description or r_entry.get("personality_summary", "")
+                            grade = grade or r_entry.get("grade", "")
+                            club = club or r_entry.get("club", "")
+                            break
+                if not role and not description:
                     lore = db.get_lorebook_entity(session_id, name)
                     if lore:
                         description = lore.get("description", "")
@@ -111,7 +124,7 @@ def is_contact_eligible(
                 return True
             if has_peer_signal:
                 # If adult authority keywords (teacher, principal, parent, clerk, nurse, janitor, mr./mrs.) are present, it's adult
-                if any(t in combined_text for t in ("teacher", "professor", "principal", "parent", "mother", "father", "dad", "mom", "clerk", "cashier", "nurse", "janitor", "headmaster", "dean", "mr.", "mrs.", "dr.")):
+                if any(t in combined_text for t in ("teacher", "professor", "principal", "parent", "mother", "father", "dad", "mom", "clerk", "cashier", "nurse", "janitor", "headmaster", "dean", "mr.", "mrs.", "dr.", "madame", "faculty")):
                     return False
                 return True
             return False

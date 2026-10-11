@@ -12,7 +12,7 @@ RELATIONSHIP_UPDATE_FIELD = """{"npc_name": "string", "delta_score": integer (-1
 
 FACTION_UPDATE_FIELD = """{"faction_name": "string", "delta_score": integer, "notes": "string"}"""
 
-PHYSICAL_UPDATE_FIELD = """{"actors": {"Character Name": {"posture": "standing|seated|kneeling|prone", "holding": "item name or empty", "clothing": {"top": "clothed|off|disheveled", "bottom": "clothed|off", "under_top": "worn|off", "under_bottom": "worn|off"}, "stance": "Guarded|Melee|Cover|Ready"}}, "props": [{"name": "string", "state": "string"}], "intimate_contact": "string or null", "combat_focus": "string or null"}"""
+PHYSICAL_UPDATE_FIELD = """{"actors": {"Character Name": {"posture": "standing|seated|kneeling|prone", "holding": "item name or empty", "clothing": {"top": "clothed|off|disheveled", "bottom": "clothed|off", "under_top": "worn|off", "under_bottom": "worn|off"}, "stance": "Guarded|Melee|Cover|Ready"}}, "props": [{"name": "string", "state": "string"}], "intimate_contact": "string or null", "combat_focus": "string or null", "player_climaxed": boolean, "partner_climaxed": boolean}"""
 
 ENTITY_AUDIT_FIELD = """{"present_named_characters": ["string, list of EVERY named individual physically present in the immediate room right now"], "speaking_characters": ["string, list of NPCs who speak aloud in this scene"], "departed_characters": ["string, list of NPCs who departed, exited, said goodbye, or left during this turn"]}"""
 
@@ -60,8 +60,8 @@ STATE_ARBITER_SCHEMA = """{
 OUTCOME_SCHEMA = f"""{{
   "scene_title": "string, 2-5 word atmospheric narrative chapter heading (e.g. 'Echoes in the Stacks')",
   "entity_audit": {ENTITY_AUDIT_FIELD},
-  "outcome_narrative": "string, paragraphs narrating: (1) how the action is executed with class/race flavor, (2) the immediate outcome and NPC reaction based on the check tier. FOLLOW THE ACTIVE STYLE DIRECTIVE for paragraph count and vocabulary tone. For 'Failure' or 'Critical Failure', enforce FAIL-FORWARD: narrate complications, escalations, or success-at-a-cost rather than static roadblocks. Do NOT contradict the check tier.",
-  "next_narrative": "string, paragraphs establishing scene aftermath, environmental shifts, NPC dialogue/reactions, and new tension leading into the upcoming choices. FOLLOW THE ACTIVE STYLE DIRECTIVE for paragraph count and vocabulary tone. FOLLOW THE ACTIVE DIALOGUE DIRECTIVE for how much spoken dialogue to include.",
+  "outcome_narrative": "string, paragraphs narrating exclusively the execution and immediate consequence of the NEW action: (1) how the player carries out their immediate choice with class/race flavor, (2) the immediate outcome and instant NPC reaction based on the check tier. Focus strictly on executing the player's immediate decision. NEVER repeat, recap, or re-quote past dialogue/events from RECENT HISTORY; start immediately from the new action and move forward. FOLLOW THE ACTIVE STYLE DIRECTIVE for paragraph count and vocabulary tone. For 'Failure' or 'Critical Failure', enforce FAIL-FORWARD: narrate complications, escalations, or success-at-a-cost rather than static roadblocks. Do NOT contradict the check tier.",
+  "next_narrative": "string, paragraphs establishing exclusively the subsequent scene aftermath: environmental shifts, physical atmosphere, what NPCs do or say next, and new tension leading into the upcoming choices. Do NOT re-narrate or re-hash the action execution from `outcome_narrative`. FOLLOW THE ACTIVE STYLE DIRECTIVE for paragraph count and vocabulary tone. FOLLOW THE ACTIVE DIALOGUE DIRECTIVE for how much spoken dialogue to include.",
   "next_choices": [
     {{"label": "string (concise, max 6-8 words)", "stat": "STR|PER|END|CHA|INT|AGI|LUK|ITEM|NONE", "requirement": 0-12, "mp_cost": 0}}
   ],

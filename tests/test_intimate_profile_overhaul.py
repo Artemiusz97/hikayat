@@ -71,10 +71,12 @@ class TestIntimateProfileOverhaul(unittest.TestCase):
         self.assertEqual(v_dir, "")
 
     def test_symmetrical_act_preferences(self):
-        """Verify that act preferences generate 1-3 disjoint Likes and 1-3 Dislikes from the 17-item registry."""
-        self.assertGreaterEqual(len(ACT_PREFERENCE_REGISTRY), 17)
+        """Verify that act preferences generate disjoint Likes and Dislikes from the registry."""
+        self.assertGreaterEqual(len(ACT_PREFERENCE_REGISTRY), 13)
         for i in range(100):
-            likes, dislikes = generate_dynamic_act_preferences(i * 31 + 13, openness="moderate")
+            acts = generate_dynamic_act_preferences(i * 31 + 13, openness="moderate")
+            likes = acts["likes"]
+            dislikes = acts["dislikes"]
             l_set = {x.strip().lower() for x in likes.split(",") if x.strip()}
             d_set = {x.strip().lower() for x in dislikes.split(",") if x.strip()}
             
@@ -177,7 +179,7 @@ class TestIntimateProfileOverhaul(unittest.TestCase):
         
         self.assertIn("🔞 Anatomy & Experience", field_names)
         self.assertIn("🎭 Demeanor & Dynamic", field_names)
-        self.assertIn("🔥 Turn-Ons & Desires", field_names)
+        self.assertIn("🔥 Desires & Turn-Offs", field_names)
         self.assertIn("❤️ Act & Position Preferences", field_names)
         self.assertNotIn("💡 Active Intimate Synergy & Modifiers", field_names)
 

@@ -165,6 +165,33 @@ def tag_and_enrich_quest_choices(
     if not choices:
         choices = []
 
+    from mechanics.social.intimate_excitement import is_intimate_action_label
+    intimate_excl_words = (
+        "climax", "orgasm", "rhythm", "thrust", "tongue", "fingers",
+        "aftercare", "aftershocks", "tremors", "arousal", "pleasure", "lick",
+        "fuck", "fucking", "fucked", "pussy", "cock", "clit", "straddle",
+    )
+
+    if session_id:
+        try:
+            from mechanics.social.physical_state import is_erotic_intimate_contact
+            phys_st = db.get_session_physical_state(session_id)
+            if phys_st:
+                ic_str = str(phys_st.get("intimate_contact", "") or "")
+                if is_erotic_intimate_contact(ic_str) or "aftercare" in ic_str.lower():
+                    for c in choices:
+                        if isinstance(c, dict):
+                            c["is_quest_action"] = False
+                            c["is_story_quest"] = False
+                            c["is_climax_action"] = False
+                            c["quest_id"] = ""
+                            c["sub_obj_id"] = None
+                            c["stage_index"] = None
+                            c["contract_type"] = ""
+                    return choices
+        except Exception:
+            pass
+
     active_wps = db.get_all_session_active_waypoints(session_id)
     story_quest, climax_loc = get_story_quest_climax_location(session_id)
     climax_ready_at_loc = bool(story_quest and climax_loc and check_location_matches_waypoint(current_location, climax_loc))
@@ -217,7 +244,16 @@ def tag_and_enrich_quest_choices(
         if not c_label_clean or c_label_clean in seen_labels:
             continue
         seen_labels.add(c_label_clean)
-        result_choices.append(dict(c))
+        c_copy = dict(c)
+        if is_intimate_action_label(c_label_clean) or any(iw in c_label_clean for iw in intimate_excl_words):
+            c_copy["is_quest_action"] = False
+            c_copy["is_story_quest"] = False
+            c_copy["is_climax_action"] = False
+            c_copy["quest_id"] = ""
+            c_copy["sub_obj_id"] = None
+            c_copy["stage_index"] = None
+            c_copy["contract_type"] = ""
+        result_choices.append(c_copy)
 
     # 1. Check for Climax Ready Story Quest at current location
     if climax_ready_at_loc:
@@ -232,7 +268,7 @@ def tag_and_enrich_quest_choices(
             climax_keywords = {
                 "assert", "confront", "resolve", "implement", "plan", "order", "expose",
                 "execute", "authority", "evidence", "sabotage", "lead", "demand", "challenge",
-                "propose", "reorganization", "mandate", "climax", "showdown", "truth",
+                "propose", "reorganization", "mandate", "showdown", "truth",
                 "discuss", "negotiate", "convince", "persuade", "reassure", "address", "steps",
                 "take charge", "rally", "unite", "reorganize", "stabilize", "settle", "present",
                 "explain", "prove", "delegate", "action", "initiative", "next steps", "coordinate"
@@ -252,12 +288,14 @@ def tag_and_enrich_quest_choices(
                 if c.get("is_quest_action"):
                     continue
                 lbl = str(c.get("label", "")).lower()
+                if is_intimate_action_label(lbl) or any(iw in lbl for iw in intimate_excl_words):
+                    continue
                 # Don't tag purely passive exits as the climax
                 from mechanics.narrative.intent import is_conversational_exit
                 if c.get("stat") == "NONE" and c.get("requirement", 0) == 0 and (is_conversational_exit(lbl) or "look around" in lbl):
                     continue
                 score = sum(1 for kw in climax_keywords if kw in lbl)
-                if c.get("stat") not in ("NONE", None) and c.get("requirement", 0) > 0:
+                if score > 0 and c.get("stat") not in ("NONE", None) and c.get("requirement", 0) > 0:
                     score += 1
                 if score > best_climax_score:
                     best_climax_score = score
@@ -412,6 +450,8 @@ def tag_and_enrich_quest_choices(
             if c.get("is_quest_action"):
                 continue
             lbl = str(c.get("label", "")).lower()
+            if is_intimate_action_label(lbl) or any(iw in lbl for iw in intimate_excl_words):
+                continue
             # Don't tag conversational exit choices as the quest action
             from mechanics.narrative.intent import is_conversational_exit
             if c.get("stat") == "NONE" and c.get("requirement", 0) == 0 and (is_conversational_exit(lbl) or "look around" in lbl):
@@ -468,6 +508,19 @@ def tag_and_enrich_quest_choices(
             if not raw_label.startswith(f"{icon} [{prefix}]") and not raw_label.startswith(f"[{prefix}]"):
                 clean_lbl = re.sub(r"^\[.*?\]\s*", "", raw_label).strip()
                 best_choice["label"] = f"{icon} [{prefix}] {clean_lbl}"
+
+            # Enforce skill check requirement if choice had stat=NONE or requirement=0
+            lbl_low = str(best_choice.get("label", "")).lower()
+            from mechanics.narrative.intent import classify_action_intent, IntentCategory
+            is_travel_quest = classify_action_intent(lbl_low).category == IntentCategory.MOVEMENT
+            if not is_travel_quest:
+                if best_choice.get("stat") in ("NONE", "FREE", None, "") or best_choice.get("requirement", 0) <= 0:
+                    stat_val = "CHA" if any(w in lbl_low for w in ("talk", "speak", "convince", "persuade", "question", "ask", "confront", "interrogate")) else ("INT" if any(w in lbl_low for w in ("search", "investigate", "examine", "analyze", "read", "hack", "evidence", "clue", "study")) else "PER")
+                    best_choice["stat"] = stat_val
+                    req_val = 6
+                    if char and isinstance(char.get("stats"), dict):
+                        req_val = max(5, min(8, int(char["stats"].get(stat_val, 6))))
+                    best_choice["requirement"] = req_val
         elif allow_fallback and is_dp_match and is_npc_present:
             # Fallback: LLM generated no quest-relevant option and target NPC guard passed
             if not in_active_dialogue:

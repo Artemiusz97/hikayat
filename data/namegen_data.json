@@ -719,28 +719,48 @@
     },
     "place": {
       "prefixes": [
-        "Ash", "Oak", "Silver", "Neo", "Royal", "Maple"
+        "Maple", "Oak", "Silver", "Harbor", "Sunset", "Central", "Bayside", "Cedar", "River",
+        "westside", "Eastside", "Midtown", "South", "North", "Grand", "Starlight", "amber"
       ],
       "suffixes": [
-        "wood", "haven", "spire", "gate", "station", "high"
+        "Arcade", "Plaza", "District", "Station", "Avenue", "Boulevard", "Roastery", "Lounge",
+        "Pier", "Promenade", "Terrace", "Corner", "Heights", "Square", "Alley", "Market"
       ],
       "adjectives": [
-        "Silent", "Ancient", "Radiant", "Neon", "Central"
+        "Downtown", "Bayside", "Sunlit", "Neon", "Cozy", "Central", "Harbor", "Midtown",
+        "Riverside", "Evening", "Corner", "Covered"
       ],
       "nouns": [
-        "Keep", "Station", "Academy", "Citadel", "Hall"
+        "Arcade", "Station", "Plaza", "Roastery", "Bistro", "Boardwalk", "District", "Bookstore",
+        "Lounge", "Market", "Promenade", "Pier", "Terrace", "Park"
       ],
       "patterns": [
-        "{prefix}{suffix}", "{adjective} {noun}"
+        "{prefix} {suffix}", "{adjective} {noun}", "the {adjective} {noun}", "{prefix} {noun}"
       ]
     },
     "roles": [
-      "Former Classmate", "Childhood Friend", "Academy Senior", "Travelling Merchant", "Town Guard",
-      "Fellow Adventurer", "Study Partner", "Apprentice Specialist", "Neighborhood Acquaintance",
-      "Shopkeeper", "Community Leader", "Junior Colleague", "Research Assistant",
-      "Workshop Apprentice", "Caravan Guard", "Security Officer", "Local Artisan", "Tavern Keeper",
-      "Medic Assistant", "Field Scout", "Former Squadmate", "Ex-partner", "Club Member", "Archivist",
-      "Technician", "Courier", "Guide", "Navigator", "Observer", "Attendant"
-    ]
+      "Neighborhood Barista", "Freelance Photographer", "Cocktail Bartender", "Convenience Store Clerk",
+      "Local Journalist", "Indie Musician", "Bike Courier", "Boutique Shopkeeper", "Street Artist",
+      "Secondhand Bookstore Clerk", "Boxing Gym Trainer", "Apartment Neighbor", "Childhood Friend",
+      "Ex-partner", "Nightclub Bouncer", "Private Investigator", "Ramen Chef", "Record Store Owner",
+      "Co-Working Designer", "Local Vlogger", "Harbor Dockworker", "Tattoo Artist", "Florist",
+      "Billiards Regular", "Street Food Vendor", "Former Roommate", "Radio DJ", "Fitness Coach",
+      "Gallery Curator", "Neighborhood Regular"
+    ],
+    "factions": {
+      "guild": [
+        "Downtown Shopping Arcade Association", "Harborfront Merchants Union",
+        "Artisanal Café & Roasters Collective", "Bayside Creative Co-Op",
+        "Night Market Vendors League", "City Courier & Riders Union"
+      ],
+      "delinquents": [
+        "Back-Alley Street Brawlers", "Neon District Syndicate", "Harbor Pier Enforcers",
+        "Midnight Billiards Crew", "Black Ledger Loan Sharks", "Underpass Moto Gang"
+      ],
+      "order": [
+        "Neighborhood Watch Coalition", "Civic Bayfront Preservation Society",
+        "Old Shrine Festival Committee", "Indie Live House Circuit"
+      ]
+    }
   }
 }

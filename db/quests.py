@@ -194,8 +194,9 @@ def get_active_story_quest(session_id: int) -> dict | None:
     with get_conn() as conn:
         row = conn.execute(
             """SELECT * FROM quests
-               WHERE session_id=? AND (is_story_quest=1 OR quest_type='Story Quest' OR quest_type='Main Quest')
-               AND status='Active' ORDER BY updated_at DESC""",
+               WHERE session_id=? AND (is_story_quest=1 OR LOWER(quest_type) IN ('story quest', 'main quest'))
+               AND LOWER(status)='active'
+               ORDER BY (CASE WHEN sub_objectives_json IS NOT NULL AND sub_objectives_json != '[]' AND sub_objectives_json != '' THEN 1 ELSE 0 END) DESC, updated_at DESC""",
             (session_id,)
         ).fetchone()
     return _enrich_quest_dict(row)

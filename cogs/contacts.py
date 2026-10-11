@@ -528,7 +528,8 @@ def build_romantic_memories_embed(contact: dict, scenario_key: str = "fantasy", 
         or reveal_debug
     )
 
-    shared_milestones = [m for m in memories if not str(m).startswith("Past History:")]
+    from mechanics.social.persona import is_romantic_milestone_str
+    shared_milestones = [m for m in memories if not str(m).startswith("Past History:") and is_romantic_milestone_str(str(m))]
     past_history = [m for m in memories if str(m).startswith("Past History:")]
 
     from mechanics.social.persona import generate_past_intimate_history, enforce_intimacy_safeguard_invariants
@@ -640,9 +641,9 @@ def build_intimate_profile_embed(contact: dict, scenario_key: str = "fantasy", u
     if isinstance(app_data, dict):
         for flag_k in (
             "intimate_revealed", "intercourse_revealed",
-            "oral_revealed", "manual_revealed", "demeanor_revealed",
+            "oral_revealed", "manual_revealed", "anal_revealed", "demeanor_revealed",
             "dynamic_revealed", "openness_revealed",
-            "sensitive_spots_revealed", "turn_ons_revealed", "fetishes_revealed",
+            "sensitive_spots_revealed", "turn_ons_revealed", "turn_offs_revealed", "fetishes_revealed",
             "act_preferences_revealed", "underwear_revealed", "mannerisms_revealed", "all_revealed"
         ):
             if app_data.get(flag_k):
@@ -657,11 +658,13 @@ def build_intimate_profile_embed(contact: dict, scenario_key: str = "fantasy", u
             "intercourse_revealed": True,
             "oral_revealed": True,
             "manual_revealed": True,
+            "anal_revealed": True,
             "demeanor_revealed": True,
             "dynamic_revealed": True,
             "openness_revealed": True,
             "sensitive_spots_revealed": True,
             "turn_ons_revealed": True,
+            "turn_offs_revealed": True,
             "fetishes_revealed": True,
             "underwear_revealed": True,
             "act_preferences_revealed": True
@@ -716,16 +719,25 @@ def build_intimate_profile_embed(contact: dict, scenario_key: str = "fantasy", u
         inline=False
     )
 
-    # 4. Turn-Ons & Desires (inline=False)
-    clean_sens = sections.get("sensitivities", [])
-    sens_val = "\n".join(clean_sens) if clean_sens else "*Unknown*"
+    # 4. Sensitive Spots (inline=False)
+    clean_spots = sections.get("sensitive_spots", [])
+    spots_val = "\n".join(clean_spots) if clean_spots else "*Unknown*"
     embed.add_field(
-        name="🔥 Turn-Ons & Desires",
-        value=sens_val,
+        name="🌸 Sensitive Spots",
+        value=spots_val,
         inline=False
     )
 
-    # 5. Act & Position Preferences (inline=False)
+    # 5. Desires & Turn-Offs (inline=False)
+    clean_desires = sections.get("desires_and_turn_offs", [])
+    desires_val = "\n".join(clean_desires) if clean_desires else "*Unknown*"
+    embed.add_field(
+        name="🔥 Desires & Turn-Offs",
+        value=desires_val,
+        inline=False
+    )
+
+    # 6. Act & Position Preferences (inline=False)
     act_val = "\n".join(sections["act_preferences"]) if sections.get("act_preferences") else "*Unknown*"
     embed.add_field(
         name="❤️ Act & Position Preferences",
@@ -807,7 +819,7 @@ def build_contact_detail_embed(contact: dict, scenario_key: str, user_id: int = 
     app_data = contact.get("appearance", {})
     if isinstance(app_data, dict):
         for flag_k in (
-            "intimate_revealed", "intercourse_revealed", "oral_revealed", "demeanor_revealed",
+            "intimate_revealed", "intercourse_revealed", "oral_revealed", "manual_revealed", "anal_revealed", "demeanor_revealed",
             "sensitive_spots_revealed", "turn_ons_revealed", "fetishes_revealed",
             "mannerisms_revealed", "all_revealed"
         ):
@@ -822,6 +834,8 @@ def build_contact_detail_embed(contact: dict, scenario_key: str, user_id: int = 
             "mannerisms_revealed": True,
             "intercourse_revealed": True,
             "oral_revealed": True,
+            "manual_revealed": True,
+            "anal_revealed": True,
             "demeanor_revealed": True,
             "sensitive_spots_revealed": True,
             "turn_ons_revealed": True,
@@ -868,10 +882,6 @@ def build_contact_detail_embed(contact: dict, scenario_key: str, user_id: int = 
             role_val = str(club_role).strip() if club_role and str(club_role).strip().lower() not in ("none", "unknown", "") else "Member"
 
         faction_display = faction_name
-        if club_role and str(club_role).strip().lower() not in ("none", "unknown", ""):
-            cr_str = str(club_role).strip()
-            if cr_str.lower() not in faction_name.lower():
-                faction_display = f"{faction_name} ({cr_str})"
     else:
         role_val = "None"
         faction_display = "None"
@@ -880,34 +890,25 @@ def build_contact_detail_embed(contact: dict, scenario_key: str, user_id: int = 
     grade_val = basic.get("grade") or basic.get("standing") or "None"
 
     if is_school:
-        if is_affiliated and grade_val != "None":
-            rank_label = "Club Member" if role_val.lower() in ("member", "club member", "none", "") else role_val
-            grade_standing_display = f"{grade_val}, {rank_label}"
-        else:
-            grade_standing_display = grade_val
+        grade_display = grade_val
+        info_lines.append(f"• **Grade**: {grade_display}")
     else:
         # Non-school genres (Fantasy, Sci-Fi, Cyberpunk, etc.):
-        # Reflect standing in the faction's established hierarchy
-        if is_affiliated:
-            standing_candidate = basic.get("standing")
-            if standing_candidate and str(standing_candidate).strip().lower() not in ("none", "unknown", ""):
-                grade_standing_display = str(standing_candidate).strip()
-            elif role_val != "None":
-                grade_standing_display = role_val
-            elif grade_val != "None":
-                grade_standing_display = grade_val
-            else:
-                grade_standing_display = "Member"
+        standing_candidate = basic.get("standing")
+        if standing_candidate and str(standing_candidate).strip().lower() not in ("none", "unknown", ""):
+            standing_display = str(standing_candidate).strip()
+        elif is_affiliated and role_val != "None":
+            standing_display = role_val
+        elif grade_val != "None":
+            standing_display = grade_val
         else:
-            grade_standing_display = basic.get("standing") or grade_val
+            standing_display = "Member" if is_affiliated else "None"
 
-    info_lines.append(f"• **Grade / Standing**: {grade_standing_display}")
+        info_lines.append(f"• **Standing**: {standing_display}")
 
-    if is_affiliated:
+    info_lines.append(f"• **Faction Affiliation**: {faction_display}")
+    if is_affiliated and role_val != "None":
         info_lines.append(f"• **Role**: {role_val}")
-        info_lines.append(f"• **Faction Affiliation**: {faction_display}")
-    else:
-        info_lines.append("• **Faction Affiliation**: None")
         # Unaffiliated: Role is dynamically hidden from profile
 
     desc_raw = basic.get("description", "")
@@ -993,6 +994,15 @@ def build_contact_detail_embed(contact: dict, scenario_key: str, user_id: int = 
         value="\n".join(dislike_lines) if dislike_lines else "*0/3 dislikes discovered*",
         inline=True
     )
+
+    recent_interactions = contact.get("recent_memories") or contact.get("rel_history") or (contact.get("appearance") or {}).get("recent_memories") or []
+    if recent_interactions:
+        rec_lines = [f"• {m}" for m in recent_interactions[-5:]]
+        embed.add_field(
+            name="📜 Recent Shared Interactions",
+            value="\n".join(rec_lines),
+            inline=False
+        )
 
     if reveal_debug:
         embed.set_footer(text=f"Information Disclosure Level: {info_level}/3 • [🛠️ DEBUG: Full Profile Revealed]")

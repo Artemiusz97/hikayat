@@ -188,6 +188,20 @@ class CharacterCreateRequest(BaseModel):
     int_val: int = Field(1, ge=1, le=10, alias="int")
     agi: int = Field(1, ge=1, le=10)
     luk: int = Field(1, ge=1, le=10)
+    appearance: Optional[dict] = None
+    breast_size: Optional[str] = None
+    penis_size: Optional[str] = None
+    asset_texture: Optional[str] = None
+
+
+class CharacterAppearanceUpdateRequest(BaseModel):
+    user_id: int
+    character_id: Optional[int] = None
+    appearance: Optional[dict] = None
+    breast_size: Optional[str] = None
+    penis_size: Optional[str] = None
+    asset_texture: Optional[str] = None
+
 
 
 class PreviewGearRequest(BaseModel):
@@ -264,6 +278,10 @@ class StartAdventureRequest(BaseModel):
     int_val: Optional[int] = Field(None, ge=1, le=10, alias="int")
     agi: Optional[int] = Field(None, ge=1, le=10)
     luk: Optional[int] = Field(None, ge=1, le=10)
+    breast_size: Optional[str] = None
+    penis_size: Optional[str] = None
+    asset_texture: Optional[str] = None
+    appearance: Optional[Dict[str, Any]] = None
 
 
 
@@ -383,6 +401,7 @@ class PeerPulseFriendRequest(BaseModel):
 class BountyGenerateRequest(BaseModel):
     user_id: Optional[int] = None
     force_refresh: bool = False
+    faction_id: Optional[str] = None
 
 
 class BountyActionRequest(BaseModel):

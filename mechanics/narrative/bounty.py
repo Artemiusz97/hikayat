@@ -6,6 +6,7 @@ Modular mechanic handling quest archetype taxonomies, icon mappings, bounty prom
 import logging
 import uuid
 import db
+import scenario_data
 from llm_client import call_llm_json
 
 log = logging.getLogger("hikayat.bounty")
@@ -420,8 +421,82 @@ async def generate_bounty_board(session: dict, force_refresh: bool = False) -> l
     )
 
     result = await call_llm_json(system_prompt, user_prompt, temperature=0.8,
-                                  is_nsfw=is_nsfw_scenario(scen_key), use_utility=True)
+                                  is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
     bounties_raw = result.get("bounties", []) or []
+
+    if not bounties_raw:
+        if is_school_scenario(scen_key):
+            bounties_raw = [
+                {
+                    "quest_type": "Academic Rescue",
+                    "title": "Study Notes Delivery",
+                    "objective": "Deliver cram-session biology notes to a classmate before fifth period.",
+                    "reward_xp": 120,
+                    "reward_gold": 30,
+                    "reward_item": "Study Highlighter",
+                    "waypoints": [
+                        {"stage_index": 1, "stage_label": "Pick up notes from homeroom desk", "target_location": loc, "completion_trigger": "arrival"}
+                    ]
+                },
+                {
+                    "quest_type": "Campus Errand",
+                    "title": "Cafeteria Snack Courier",
+                    "objective": "Rush to grab seasonal matcha pastries and drinks for the student council.",
+                    "reward_xp": 100,
+                    "reward_gold": 25,
+                    "reward_item": "Matcha Snack Box",
+                    "waypoints": [
+                        {"stage_index": 1, "stage_label": "Secure order at the dining pavilion", "target_location": loc, "completion_trigger": "arrival"}
+                    ]
+                },
+                {
+                    "quest_type": "Gossip Control",
+                    "title": "Lost Archive Key",
+                    "objective": "Inquire quietly near the courtyard to recover a misplaced clubroom key.",
+                    "reward_xp": 140,
+                    "reward_gold": 40,
+                    "reward_item": "Club Token",
+                    "waypoints": [
+                        {"stage_index": 1, "stage_label": "Search the courtyard benches", "target_location": loc, "completion_trigger": "skill_check"}
+                    ]
+                }
+            ]
+        else:
+            bounties_raw = [
+                {
+                    "quest_type": "Courier Commission",
+                    "title": "Urgent Supply Courier",
+                    "objective": "Deliver essential medical supplies to the nearby outpost depot.",
+                    "reward_xp": 120,
+                    "reward_gold": 35,
+                    "reward_item": "Courier Canteen",
+                    "waypoints": [
+                        {"stage_index": 1, "stage_label": "Deliver package safely", "target_location": loc, "completion_trigger": "arrival"}
+                    ]
+                },
+                {
+                    "quest_type": "Perimeter Patrol",
+                    "title": "District Scout Task",
+                    "objective": "Survey the local sector boundaries for signs of anomalous interference.",
+                    "reward_xp": 130,
+                    "reward_gold": 40,
+                    "reward_item": "Scout Scope",
+                    "waypoints": [
+                        {"stage_index": 1, "stage_label": "Patrol checkpoint", "target_location": loc, "completion_trigger": "skill_check"}
+                    ]
+                },
+                {
+                    "quest_type": "Contract Gig",
+                    "title": "Discreet Information Drop",
+                    "objective": "Leave an encoded tracking slate at the designated dead-drop receptacle.",
+                    "reward_xp": 150,
+                    "reward_gold": 45,
+                    "reward_item": "",
+                    "waypoints": [
+                        {"stage_index": 1, "stage_label": "Deposit slate into container", "target_location": loc, "completion_trigger": "arrival"}
+                    ]
+                }
+            ]
 
     for b in bounties_raw:
         if not isinstance(b, dict) or not b.get("title"):
@@ -541,7 +616,7 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
     )
 
     result = await call_llm_json(FACTION_BOUNTY_SYSTEM_PROMPT, user_prompt, temperature=0.8,
-                                  is_nsfw=is_nsfw_scenario(scen_key), use_utility=True)
+                                  is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
     bounties_raw = result.get("bounties", []) or []
 
     for b in bounties_raw:

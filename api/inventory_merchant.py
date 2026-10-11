@@ -115,6 +115,8 @@ def _enrich_inventory_item(item: dict, char: dict, equipment: dict) -> dict:
     category_label = str(it.get("item_type") or "Item").title()
     stats_badges: list[str] = []
     arcane_compatible = True
+    from mechanics.combat.items.tags import is_narrative_item
+    item_is_narrative = is_narrative_item(it) or is_narrative_item(eq_meta)
 
     if key_flag:
         category_label = "Key Item / Narrative Artifact"
@@ -169,40 +171,52 @@ def _enrich_inventory_item(item: dict, char: dict, equipment: dict) -> dict:
             stats_badges.append(f"Cures {', '.join(parsed_eff['cure_status'])}")
         clean_effect = (cons_meta or {}).get("description") or (", ".join(stats_badges) if stats_badges else "Consumable item.")
     elif valid_slots:
-        category_label = f"Equipment ({target_slot})"
-        if "Weapon" in valid_slots:
-            mult = float(eq_meta.get("multiplier", 1.0) or 1.0)
-            crit = int(eq_meta.get("crit_bonus", 0) or 0)
-            hand = eq_meta.get("handedness", "1H")
-            stats_badges.append(f"{mult:.2f}x DMG")
-            if crit:
-                stats_badges.append(f"+{crit}% Crit")
-            stats_badges.append(str(hand))
-        if eq_meta.get("base_dt"):
-            stats_badges.append(f"+{int(eq_meta['base_dt'])} DT")
-        if eq_meta.get("block_chance"):
-            stats_badges.append(f"+{int(eq_meta['block_chance'])}% Block")
-        mods = dict(eq_meta.get("stat_modifiers") or {})
-        for sk, sv in (eq_meta.get("social_modifiers") or {}).items():
-            mods[sk] = mods.get(sk, 0) + sv
-        for mk, mv in mods.items():
-            if mv:
-                if mk.endswith("_pct"):
-                    stats_badges.append(f"{int(float(mv) * 100):+d}% {mk.replace('_pct', '').upper()}")
-                else:
+        if item_is_narrative:
+            category_label = f"Narrative Gear ({target_slot})"
+            stats_badges.append("Narrative Item")
+            mods = dict(eq_meta.get("stat_modifiers") or {})
+            for sk, sv in (eq_meta.get("social_modifiers") or {}).items():
+                mods[sk] = mods.get(sk, 0) + sv
+            for mk, mv in mods.items():
+                if mv:
                     stats_badges.append(f"{mv:+g} {mk.upper()}")
-        desc_from_meta = eq_meta.get("description") or ""
-        if desc_from_meta:
-            clean_effect = f"{desc_from_meta} ({', '.join(stats_badges)})" if stats_badges else desc_from_meta
+            desc_from_meta = eq_meta.get("description") or ""
+            clean_effect = desc_from_meta or "Cosmetic / narrative item for roleplay and social actions."
         else:
-            clean_effect = ", ".join(stats_badges) if stats_badges else "Standard equipment."
+            category_label = f"Equipment ({target_slot})"
+            if "Weapon" in valid_slots:
+                mult = float(eq_meta.get("multiplier", 1.0) or 1.0)
+                crit = int(eq_meta.get("crit_bonus", 0) or 0)
+                hand = eq_meta.get("handedness", "1H")
+                stats_badges.append(f"{mult:.2f}x DMG")
+                if crit:
+                    stats_badges.append(f"+{crit}% Crit")
+                stats_badges.append(str(hand))
+            if eq_meta.get("base_dt"):
+                stats_badges.append(f"+{int(eq_meta['base_dt'])} DT")
+            if eq_meta.get("block_chance"):
+                stats_badges.append(f"+{int(eq_meta['block_chance'])}% Block")
+            mods = dict(eq_meta.get("stat_modifiers") or {})
+            for sk, sv in (eq_meta.get("social_modifiers") or {}).items():
+                mods[sk] = mods.get(sk, 0) + sv
+            for mk, mv in mods.items():
+                if mv:
+                    if mk.endswith("_pct"):
+                        stats_badges.append(f"{int(float(mv) * 100):+d}% {mk.replace('_pct', '').upper()}")
+                    else:
+                        stats_badges.append(f"{mv:+g} {mk.upper()}")
+            desc_from_meta = eq_meta.get("description") or ""
+            if desc_from_meta:
+                clean_effect = f"{desc_from_meta} ({', '.join(stats_badges)})" if stats_badges else desc_from_meta
+            else:
+                clean_effect = ", ".join(stats_badges) if stats_badges else "Standard equipment."
     else:
         for prefix in ("[GEAR_JSON]", "[ITEM_JSON]", "[SPELLBOOK_JSON]", "[CONSUMABLE_JSON]", "[DIGITAL_JSON]"):
             if clean_effect.startswith(prefix):
                 clean_effect = eq_meta.get("description") or it.get("name") or "Item"
 
     vs_equipped: list[dict] = []
-    if target_slot and valid_slots:
+    if target_slot and valid_slots and not item_is_narrative:
         cur_item = (equipment or {}).get(target_slot)
         cur_meta = parse_equipment_metadata(cur_item) if isinstance(cur_item, dict) else {}
 
@@ -451,9 +465,23 @@ async def get_merchant_shop(
                 merchant_type=m_type
             )
         except Exception:
+            phone_fallback_stock = [
+                {"name": "Choco-Butter Croissant", "item_type": "Snack", "description": "Warm, flaky pastry perfect for late-night study sessions.", "price": 17, "quantity": 5, "tier": 1},
+                {"name": "Iced Vanilla Latte", "item_type": "Drink", "description": "Refreshing cold brew to keep your focus sharp during lectures.", "price": 10, "quantity": 5, "tier": 1},
+                {"name": "Matcha Spark Energy Drink", "item_type": "Drink", "description": "Crisp green tea energy blend restoring 15 HP and 15 MP.", "price": 22, "quantity": 4, "tier": 2},
+                {"name": "Deluxe Bento Box", "item_type": "Food", "description": "Balanced meal restoring stamina and well-being.", "price": 25, "quantity": 3, "tier": 2},
+                {"name": "Highlighter Pen (Neon Pink)", "item_type": "Stationery", "description": "Essential stationery for marking key points in textbooks.", "price": 15, "quantity": 5, "tier": 1},
+                {"name": "Notebook (A5 Ruled)", "item_type": "Stationery", "description": "Sturdy paper for jotting down lecture notes and doodles.", "price": 12, "quantity": 5, "tier": 1},
+                {"name": "Gourmet Truffle Chocolates", "item_type": "Gift", "description": "Artisan confectionery wrapped with a satin ribbon (+Affinity).", "price": 38, "quantity": 3, "tier": 2},
+                {"name": "Cute Mascot Phone Charm", "item_type": "Gift", "description": "Adorable acrylic charm loved by classmates (+Affinity).", "price": 28, "quantity": 3, "tier": 2},
+                {"name": "Portable Fast-Charger Power Bank", "item_type": "Gadget", "description": "Compact battery pack ensuring all digital devices stay powered.", "price": 45, "quantity": 2, "tier": 2},
+                {"name": "Scented Lavender Hand Cream", "item_type": "Gift", "description": "Calming floral lotion that makes a lovely thoughtful gift.", "price": 24, "quantity": 4, "tier": 1},
+                {"name": "Exam Cram Flashcards", "item_type": "Study Aid", "description": "Color-coded revision cards granting +1 INT during quizzes.", "price": 18, "quantity": 4, "tier": 2},
+                {"name": "Thermal Travel Tumbler", "item_type": "Accessory", "description": "Keeps beverages piping hot or icy cold through the school day.", "price": 32, "quantity": 3, "tier": 2},
+            ]
             shop_data = {
-                "intro_narrative": arch_meta.get("intro_template") or "Welcome! Browse our selection.",
-                "stock": [
+                "intro_narrative": arch_meta.get("intro_template") or "Order snacks, gifts, and gear for immediate delivery.",
+                "stock": phone_fallback_stock if is_phone_shop else [
                     {"name": "Express Energy Drink", "item_type": "Drink", "description": "Restores 10 HP and 10 MP.", "price": 20, "quantity": 3, "tier": 2},
                     {"name": "Artisan Gift Box", "item_type": "Gift", "description": "A thoughtful gift for a close friend.", "price": 35, "quantity": 2, "tier": 2},
                 ],
@@ -481,6 +509,27 @@ async def get_merchant_shop(
             merchant["discount_pct"] = catalogue.get("discount_pct", merchant.get("discount_pct", 0))
             if switched_store:
                 await adb(db.save_merchant_state, session_id, merchant)
+
+    # If phone shop stock has fewer than 6 items, supplement with diverse catalog items
+    if is_phone_shop:
+        existing_items = merchant.get(stock_field) or []
+        if len(existing_items) < 8:
+            supplement_items = [
+                {"name": "Matcha Spark Energy Drink", "item_type": "Drink", "description": "Crisp green tea energy blend restoring 15 HP and 15 MP.", "price": 22, "quantity": 4, "tier": 2},
+                {"name": "Deluxe Bento Box", "item_type": "Food", "description": "Balanced meal restoring stamina and well-being.", "price": 25, "quantity": 3, "tier": 2},
+                {"name": "Gourmet Truffle Chocolates", "item_type": "Gift", "description": "Artisan confectionery wrapped with a satin ribbon (+Affinity).", "price": 38, "quantity": 3, "tier": 2},
+                {"name": "Cute Mascot Phone Charm", "item_type": "Gift", "description": "Adorable acrylic charm loved by classmates (+Affinity).", "price": 28, "quantity": 3, "tier": 2},
+                {"name": "Portable Fast-Charger Power Bank", "item_type": "Gadget", "description": "Compact battery pack ensuring all digital devices stay powered.", "price": 45, "quantity": 2, "tier": 2},
+                {"name": "Scented Lavender Hand Cream", "item_type": "Gift", "description": "Calming floral lotion that makes a lovely thoughtful gift.", "price": 24, "quantity": 4, "tier": 1},
+                {"name": "Exam Cram Flashcards", "item_type": "Study Aid", "description": "Color-coded revision cards granting +1 INT during quizzes.", "price": 18, "quantity": 4, "tier": 2},
+                {"name": "Thermal Travel Tumbler", "item_type": "Accessory", "description": "Keeps beverages piping hot or icy cold through the school day.", "price": 32, "quantity": 3, "tier": 2},
+            ]
+            names_in_stock = {it.get("name") for it in existing_items}
+            for sup in supplement_items:
+                if sup["name"] not in names_in_stock:
+                    existing_items.append(sup)
+            merchant[stock_field] = existing_items
+            await adb(db.save_merchant_state, session_id, merchant)
 
     discount_pct = _compute_charisma_discount(char, merchant)
     raw_stock = merchant.get(stock_field) or (catalogue.get("stock", []) if catalogue else [])

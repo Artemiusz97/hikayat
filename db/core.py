@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Any, Optional, Union, Dict, List, Tuple
 import db
 """
 SQLite persistence layer.
@@ -50,6 +52,7 @@ CREATE TABLE IF NOT EXISTS characters (
     joined_faction_id   TEXT DEFAULT '',
     faction_rank        INTEGER DEFAULT 0,
     faction_title       TEXT DEFAULT '',
+    appearance_json     TEXT DEFAULT '{}',
     created_at          REAL
 );
 
@@ -83,6 +86,13 @@ CREATE TABLE IF NOT EXISTS user_settings (
     debug_stat_mode     TEXT DEFAULT 'off',  -- 'off' | 'max' | 'min'
     debug_check_mode    TEXT DEFAULT 'off',  -- 'off' | 'always_success' | 'always_fail' | 'always_crit_success' | 'always_crit_fail'
     debug_reveal_all_info INTEGER DEFAULT 0  -- 0 | 1 (reveal all predetermined info & history)
+);
+
+CREATE TABLE IF NOT EXISTS discord_users (
+    user_id             INTEGER PRIMARY KEY,
+    username            TEXT DEFAULT '',
+    display_name        TEXT DEFAULT '',
+    updated_at          REAL NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -304,11 +314,29 @@ CREATE TABLE IF NOT EXISTS phone_appointments (
     UNIQUE(session_id, npc_id)
 );
 
+CREATE TABLE IF NOT EXISTS phone_daily_interactions (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id          INTEGER NOT NULL,
+    npc_id              TEXT NOT NULL,
+    current_day         INTEGER NOT NULL,
+    intent              TEXT NOT NULL,         -- 'flirt', 'meetup', 'photo', 'spicy', 'rumor'
+    attempt_count       INTEGER DEFAULT 0,
+    success_count       INTEGER DEFAULT 0,
+    over_limit_count    INTEGER DEFAULT 0,     -- tracks repeated badgering after limit reached
+    last_outcome        TEXT DEFAULT '',       -- 'success', 'fail', 'crit_success', 'crit_fail', 'refused'
+    metadata_json       TEXT DEFAULT '{}',     -- tracks attempts history, relocations_used
+    updated_at          REAL NOT NULL,
+    UNIQUE(session_id, npc_id, current_day, intent)
+);
+CREATE INDEX IF NOT EXISTS idx_phone_daily_lookup ON phone_daily_interactions(session_id, npc_id, current_day);
+
 CREATE TABLE IF NOT EXISTS school_directory (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id          INTEGER NOT NULL,
     npc_id              TEXT NOT NULL,
     name                TEXT NOT NULL,
+    gender              TEXT DEFAULT '',         -- 'male', 'female', etc.
+    race                TEXT DEFAULT '',
     role                TEXT NOT NULL,
     grade               TEXT NOT NULL,           -- 'Faculty', 'Senior', 'Junior', 'Sophomore', 'Freshman'
     club                TEXT DEFAULT '',         -- 'Athletic Directorate', 'Student Council', etc.
@@ -569,6 +597,61 @@ SCHEMA_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (5, "add_sessions_faction_reinforcements_used", ["ALTER TABLE sessions ADD COLUMN faction_reinforcements_used INTEGER DEFAULT 0"]),
     (6, "add_sessions_show_percentages", ["ALTER TABLE sessions ADD COLUMN show_percentages INTEGER DEFAULT 1"]),
     (7, "add_sessions_last_turn_snapshot", ["ALTER TABLE sessions ADD COLUMN last_turn_snapshot_json TEXT DEFAULT '{}'"]),
+    (
+        8,
+        "add_school_directory_gender_and_race",
+        [
+            "ALTER TABLE school_directory ADD COLUMN gender TEXT DEFAULT ''",
+            "ALTER TABLE school_directory ADD COLUMN race TEXT DEFAULT ''",
+        ],
+    ),
+    (
+        9,
+        "add_discord_users_table",
+        [
+            """CREATE TABLE IF NOT EXISTS discord_users (
+                user_id             INTEGER PRIMARY KEY,
+                username            TEXT DEFAULT '',
+                display_name        TEXT DEFAULT '',
+                updated_at          REAL NOT NULL
+            )"""
+        ],
+    ),
+    (
+        10,
+        "add_contacts_rel_history_json",
+        [
+            "ALTER TABLE contacts ADD COLUMN rel_history_json TEXT DEFAULT '[]'"
+        ],
+    ),
+    (
+        11,
+        "add_phone_daily_interactions_table",
+        [
+            """CREATE TABLE IF NOT EXISTS phone_daily_interactions (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id          INTEGER NOT NULL,
+                npc_id              TEXT NOT NULL,
+                current_day         INTEGER NOT NULL,
+                intent              TEXT NOT NULL,
+                attempt_count       INTEGER DEFAULT 0,
+                success_count       INTEGER DEFAULT 0,
+                over_limit_count    INTEGER DEFAULT 0,
+                last_outcome        TEXT DEFAULT '',
+                metadata_json       TEXT DEFAULT '{}',
+                updated_at          REAL NOT NULL,
+                UNIQUE(session_id, npc_id, current_day, intent)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_phone_daily_lookup ON phone_daily_interactions(session_id, npc_id, current_day)",
+        ],
+    ),
+    (
+        12,
+        "add_characters_appearance_json",
+        [
+            "ALTER TABLE characters ADD COLUMN appearance_json TEXT DEFAULT '{}'"
+        ],
+    ),
 ]
 
 
@@ -632,6 +715,14 @@ def _to_str(val, default: str = "") -> str:
     if isinstance(val, str):
         return val
     if isinstance(val, dict):
+        if any("tier" in str(k).lower() for k in val.keys()):
+            try:
+                from mechanics.world.locations.hierarchy import parse_structured_location_dict, format_tiered_location_string
+                parsed = parse_structured_location_dict(val)
+                if parsed:
+                    return format_tiered_location_string(*parsed)
+            except Exception:
+                pass
         return str(val.get("name") or val.get("title") or val.get("location") or val.get("text") or json.dumps(val))
     if isinstance(val, (list, tuple)):
         return json.dumps(val)
@@ -679,14 +770,23 @@ def _sanitize_npcs_list(session_id: int, npcs: list) -> list:
     except Exception:
         pass
 
+    scen = "fantasy"
+    try:
+        with get_conn() as conn:
+            s_row = conn.execute("SELECT scenario FROM sessions WHERE id=?", (session_id,)).fetchone()
+            if s_row and s_row["scenario"]:
+                scen = s_row["scenario"]
+    except Exception:
+        pass
+
     for npc in npcs:
         if isinstance(npc, dict):
             raw_name = str(npc.get("name", "")).strip()
             if not raw_name or _is_suspicious_entity_text(raw_name):
                 continue
-            if namegen.is_generic_role_name(raw_name):
+            if namegen.is_generic_role_name(raw_name) or not namegen.is_valid_entity_name(raw_name):
                 matched = fac_map.get(raw_name.lower())
-                proper_name = matched or namegen.generate_person_name()
+                proper_name = matched or namegen.generate_person_name(scen)
                 role_val = str(npc.get("role") or raw_name)[:60]
             else:
                 proper_name = raw_name[:60]
@@ -709,9 +809,9 @@ def _sanitize_npcs_list(session_id: int, npcs: list) -> list:
             raw_str = str(npc).strip()
             if not raw_str or _is_suspicious_entity_text(raw_str):
                 continue
-            if namegen.is_generic_role_name(raw_str):
+            if namegen.is_generic_role_name(raw_str) or not namegen.is_valid_entity_name(raw_str):
                 matched = fac_map.get(raw_str.lower())
-                proper_name = matched or namegen.generate_person_name()
+                proper_name = matched or namegen.generate_person_name(scen)
                 clean_list.append({"name": proper_name, "role": raw_str[:60]})
             else:
                 clean_list.append({"name": raw_str[:60], "role": ""})
@@ -780,4 +880,168 @@ def release_distributed_lock(lock_key: str, owner_id: str):
     """Releases a database-backed distributed lock if we own it."""
     with get_conn() as conn:
         conn.execute("DELETE FROM session_locks WHERE lock_key=? AND locked_by=?", (lock_key, owner_id))
+
+
+DISCORD_SNOWFLAKE_MIN = 10_000_000_000_000_000  # 10^16 (covers all 17-19 digit Discord snowflakes, back to 2015)
+
+
+def is_discord_snowflake(user_id: Any) -> bool:
+    """Returns True if the ID falls in the 64-bit Discord snowflake range (17-19 digits)."""
+    try:
+        val = int(str(user_id).strip())
+        return val >= DISCORD_SNOWFLAKE_MIN
+    except (ValueError, TypeError):
+        return False
+
+
+def create_database_snapshot(tag: str = "auto", max_backups: int = 5, custom_dir: str = "backups") -> str:
+    """Creates a non-blocking SQLite online backup using SQLite's backup API.
+    Maintains a rolling window of the last `max_backups` snapshot files.
+    """
+    import os
+    import time
+
+    if not os.path.isabs(custom_dir):
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        custom_dir = os.path.join(project_root, custom_dir)
+
+    os.makedirs(custom_dir, exist_ok=True)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    backup_filename = f"hikayat_{tag}_{timestamp}.db"
+    backup_path = os.path.join(custom_dir, backup_filename)
+
+    with get_conn() as src:
+        dest = sqlite3.connect(backup_path)
+        try:
+            src.backup(dest)
+        finally:
+            dest.close()
+
+    # Rolling retention: purge oldest snapshots if exceeding max_backups
+    try:
+        existing = [
+            os.path.join(custom_dir, f)
+            for f in os.listdir(custom_dir)
+            if f.startswith("hikayat_") and f.endswith(".db")
+        ]
+        existing.sort(key=lambda p: os.path.getmtime(p))
+        if len(existing) > max_backups:
+            to_remove = existing[: len(existing) - max_backups]
+            for old_path in to_remove:
+                for ext in ["", "-wal", "-shm", "-journal"]:
+                    try:
+                        p = old_path + ext if ext else old_path
+                        if os.path.exists(p):
+                            os.remove(p)
+                    except OSError:
+                        pass
+    except Exception:
+        pass
+
+    return backup_path
+
+
+def safe_cleanup_test_records(min_user_id: int = 800_000, max_user_id: int = 999_999) -> dict[str, int]:
+    """Safely cleans up test users and inventory within a strictly bounded range.
+    Refuses to delete any ID matching Discord snowflakes (>= 10^16).
+    """
+    if min_user_id >= DISCORD_SNOWFLAKE_MIN or max_user_id >= DISCORD_SNOWFLAKE_MIN:
+        raise ValueError(
+            f"Safety guardrail triggered! Range [{min_user_id}, {max_user_id}] overlaps Discord snowflake range."
+        )
+    if min_user_id <= 0 or max_user_id < min_user_id:
+        raise ValueError(f"Invalid test cleanup range [{min_user_id}, {max_user_id}].")
+
+    deleted_counts = {}
+    with get_conn() as conn:
+        c1 = conn.execute(
+            "DELETE FROM inventory WHERE user_id BETWEEN ? AND ?",
+            (min_user_id, max_user_id)
+        ).rowcount
+        c2 = conn.execute(
+            "DELETE FROM user_settings WHERE user_id BETWEEN ? AND ?",
+            (min_user_id, max_user_id)
+        ).rowcount
+        c3 = conn.execute(
+            "DELETE FROM characters WHERE user_id BETWEEN ? AND ?",
+            (min_user_id, max_user_id)
+        ).rowcount
+        c4 = conn.execute(
+            "DELETE FROM adventure_saves WHERE user_id BETWEEN ? AND ?",
+            (min_user_id, max_user_id)
+        ).rowcount
+        c5 = conn.execute(
+            "DELETE FROM session_members WHERE user_id BETWEEN ? AND ?",
+            (min_user_id, max_user_id)
+        ).rowcount
+        deleted_counts["inventory"] = c1
+        deleted_counts["user_settings"] = c2
+        deleted_counts["characters"] = c3
+        deleted_counts["adventure_saves"] = c4
+        deleted_counts["session_members"] = c5
+    return deleted_counts
+
+
+def set_db_path(new_path: str):
+    """Dynamically switches the active SQLite database path and resets connection pools."""
+    import db
+    import config
+    close_all_connections()
+    db.DB_PATH = new_path
+    db.core.DB_PATH = new_path
+    config.DB_PATH = new_path
+
+
+def isolate_simulation_db(explicit_path: str | None = None, prefix: str = "hikayat_sim_") -> tuple[str, bool]:
+    """Switches the active database to an isolated database for simulation/testing.
+    Returns:
+        (db_path, is_temporary)
+    """
+    import tempfile
+
+    if explicit_path:
+        target_path = explicit_path
+        is_temp = False
+    else:
+        tf = tempfile.NamedTemporaryFile(prefix=prefix, suffix=".db", delete=False)
+        target_path = tf.name
+        tf.close()
+        is_temp = True
+
+    set_db_path(target_path)
+    init_db()
+    return target_path, is_temp
+
+
+def cleanup_simulation_db(target_path: str, keep: bool = False, is_temp: bool = True):
+    """Safely closes connections and cleans up temporary simulation database files on disk."""
+    import os
+    import gc
+    import time
+
+    close_all_connections()
+    if is_temp and not keep:
+        gc.collect()
+        for ext in ["", "-wal", "-shm", "-journal"]:
+            f_path = target_path + ext if ext else target_path
+            if os.path.exists(f_path):
+                for _ in range(5):
+                    try:
+                        os.unlink(f_path)
+                        break
+                    except (PermissionError, OSError):
+                        time.sleep(0.05)
+
+
+@contextmanager
+def use_temporary_db(custom_path: str | None = None, keep_on_exit: bool = False, prefix: str = "hikayat_sim_"):
+    """Context manager for running tests or simulations against an isolated SQLite database."""
+    import db
+    old_path = db.DB_PATH
+    target_path, is_temp = isolate_simulation_db(explicit_path=custom_path, prefix=prefix)
+    try:
+        yield target_path
+    finally:
+        set_db_path(old_path)
+        cleanup_simulation_db(target_path, keep=keep_on_exit, is_temp=is_temp)
 

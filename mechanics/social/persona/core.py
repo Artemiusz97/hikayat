@@ -606,7 +606,7 @@ PHYSIQUE_MALE_TEMPLATES = [
 
 UNDERGARMENT_COLOR_PALETTES = [
     "Black", "White", "Baby Pink", "Crimson", "Midnight Navy",
-    "Emerald Green", "Pastel Lavender", "Charcoal Grey", "Nude / Beige",
+    "Emerald Green", "Pastel Lavender", "Charcoal Grey", "Beige / Skin-Tone",
     "Royal Purple", "Wine Red", "Powder Blue"
 ]
 
@@ -853,26 +853,35 @@ def get_default_stature_for_race(race_str: str) -> str:
 def infer_contact_gender(contact: Dict[str, Any]) -> str:
     """Infers gender from explicit gender column, basic_info, appearance, description, or name/pronoun hints.
     Guarantees a concrete, immediately known gender string ('female' or 'male').
+    Includes self-healing safeguards for corrupted 'female' defaults on unambiguous male names.
     """
     if not isinstance(contact, dict):
         return "female"
-    g = str(contact.get("gender") or "").strip()
-    if g and g.lower() not in ("unknown", "none", "n/a", "null", ""):
-        return g
+    g = str(contact.get("gender") or "").strip().lower()
     basic = contact.get("basic_info") or {}
-    if isinstance(basic, dict):
-        bg = str(basic.get("gender") or "").strip()
-        if bg and bg.lower() not in ("unknown", "none", "n/a", "null", ""):
-            return bg
-
-    app = contact.get("appearance") or {}
-    if isinstance(app, dict):
-        if app.get("breast_size"):
-            return "female"
-        if app.get("penis_size"):
-            return "male"
+    bg = str(basic.get("gender") or "").strip().lower() if isinstance(basic, dict) else ""
 
     name_str = str(contact.get("name", "")).strip().lower()
+    first_name = name_str.split()[0] if name_str else ""
+
+    known_male = False
+    known_female = False
+    try:
+        from namegen import is_known_male_name, is_known_female_name
+        known_male = bool(is_known_male_name(first_name) or is_known_male_name(name_str))
+        known_female = bool(is_known_female_name(first_name) or is_known_female_name(name_str))
+    except Exception:
+        pass
+
+    app = contact.get("appearance") or {}
+    has_breast = False
+    has_penis = False
+    if isinstance(app, dict):
+        if app.get("breast_size") and str(app.get("breast_size")).lower() not in ("flat", "none", ""):
+            has_breast = True
+        if app.get("penis_size") and str(app.get("penis_size")).lower() not in ("none", ""):
+            has_penis = True
+
     raw_traits = contact.get("unlocked_traits", []) or []
     traits_text = " ".join(str(t.get("name") or t.get("trait") or t) if isinstance(t, dict) else str(t) for t in raw_traits if t)
     text = (
@@ -886,18 +895,30 @@ def infer_contact_gender(contact: Dict[str, Any]) -> str:
     female_kws = {"girl", "woman", "female", "lady", "she", "her", "hers", "daughter", "mother", "sister", "queen", "princess", "heroine", "mrs", "miss", "ms", "waifu"}
     male_kws = {"boy", "man", "male", "guy", "he", "him", "his", "son", "father", "brother", "king", "prince", "lord", "sir", "mr"}
 
-    first_name = name_str.split()[0] if name_str else ""
-    try:
-        from namegen import is_known_male_name, is_known_female_name
-        if is_known_male_name(first_name) or is_known_male_name(name_str):
-            return "male"
-        if is_known_female_name(first_name) or is_known_female_name(name_str):
-            return "female"
-    except Exception:
-        pass
+    has_f = bool(words.intersection(female_kws)) or has_breast
+    has_m = bool(words.intersection(male_kws)) or has_penis
 
-    has_f = bool(words.intersection(female_kws))
-    has_m = bool(words.intersection(male_kws))
+    # Self-healing: if an unambiguous male name (e.g. Ronald, Robert) was saved with gender 'female'
+    # due to the uninitialized fallback, but has no explicit female indicators in appearance or text:
+    if (g == "female" or bg == "female") and known_male and not known_female and not has_f:
+        return "male"
+    if (g == "male" or bg == "male") and known_female and not known_male and not has_m:
+        return "female"
+
+    if g and g not in ("unknown", "none", "n/a", "null", ""):
+        return g
+    if bg and bg not in ("unknown", "none", "n/a", "null", ""):
+        return bg
+
+    if has_breast:
+        return "female"
+    if has_penis:
+        return "male"
+
+    if known_male and not known_female:
+        return "male"
+    if known_female and not known_male:
+        return "female"
 
     if has_f and not has_m:
         return "female"
@@ -1270,12 +1291,15 @@ def categorize_likes_and_dislikes(
     return likes[:3], dislikes[:3]
 
 def sanitize_npc_description(description: str, appearance: dict = None) -> str:
-    """Strips raw physical adjective mashups and legacy sibling/lineage references
+    """Strips raw physical adjective mashups, internal prompt/psychological tags
+    (Drive, Flaw, Mannerism, Contradiction, Family), and legacy sibling/lineage references
     from an NPC's description field so it remains a clean 1-sentence narrative identity/role summary.
     """
     if not description or not isinstance(description, str):
         return ""
     s = description.strip()
+    # Strip internal prompt / psychological tags (Drive, Flaw, Mannerism, Contradiction, Family)
+    s = re.split(r'(?i)\b(?:Drive|Flaw|Mannerism|Contradiction|Family)\s*:', s)[0].strip(' .,-')
     # Strip sibling / family lineage sentences (these belong exclusively in Relations & Family)
     s = re.sub(r'(?i)\b(sibling|brother|sister|son|daughter)\s+of\s+[A-Za-z\s\'-]+[\.]?', '', s)
     s = re.sub(r'\s+', ' ', s).strip(' .,-')

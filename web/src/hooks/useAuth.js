@@ -13,9 +13,11 @@ export const useAuth = () => {
     if (storedUser) {
       try {
         const parsed = JSON.parse(storedUser);
-        const resolvedName = parsed.username || parsed.display_name || (parsed.user_id ? `User-${String(parsed.user_id).slice(-4)}` : 'Guest');
+        const resolvedId = parsed.user_id != null ? String(parsed.user_id) : null;
+        const resolvedName = parsed.username || parsed.display_name || (resolvedId ? `User-${resolvedId.slice(-4)}` : 'Guest');
         setUser({
           ...parsed,
+          user_id: resolvedId,
           username: resolvedName,
           display_name: resolvedName
         });
@@ -41,6 +43,7 @@ export const useAuth = () => {
     });
     const userObj = {
       ...data,
+      user_id: data.user_id_str || String(data.user_id),
       username: data.username || data.display_name || cleanName || 'Guest',
       display_name: data.display_name || data.username || cleanName || 'Guest'
     };
@@ -56,6 +59,7 @@ export const useAuth = () => {
     });
     const userObj = {
       ...data,
+      user_id: data.user_id_str || String(data.user_id),
       username: data.username || data.display_name || cleanId || 'Discord User',
       display_name: data.display_name || data.username || cleanId || 'Discord User'
     };
@@ -85,8 +89,15 @@ export const useAuth = () => {
     try {
       const data = await apiCall(`/api/character/${user.user_id}`);
       if (data && data.character) {
+        const canonicalId = data.character.user_id_str || String(data.character.user_id);
+        if (user && user.user_id !== canonicalId) {
+          const updatedUser = { ...user, user_id: canonicalId, user_id_str: canonicalId };
+          localStorage.setItem('cf_user', JSON.stringify(updatedUser));
+          setUser(updatedUser);
+        }
         setCharacter({
           ...data.character,
+          user_id: canonicalId,
           combat_attributes: data.combat_attributes,
           inventory_capacity: data.inventory_capacity,
           used_inventory_slots: data.used_inventory_slots,

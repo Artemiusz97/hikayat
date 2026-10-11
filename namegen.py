@@ -42,32 +42,78 @@ for s_val in _DATA.values():
                 _ALL_ROLE_NAMES.add(r.lower().strip())
 
 _GENERIC_ROLE_PATTERNS = [
-    r"^(student council|class|club|team|guild|order|gang|committee|department|faculty)\s+(president|vice president|treasurer|secretary|leader|captain|head|officer|member|lead|rep|representative|enforcer|brawler|scout|advisor|coordinator|director)$",
-    r"^(headmaster|principal|vice principal|teacher|professor|instructor|tutor|librarian|counselor|advisor|dean|sensei|dorm warden|curator)$",
-    r"^(guildmaster|shopkeeper|innkeeper|bartender|tavernkeeper|blacksmith|armorer|merchant|alchemist|apothecary|quartermaster|vendor|peddler|trader)$",
-    r"^(guard|town guard|city guard|guard captain|captain of the guard|sentinel|watchman|paladin commander|soldier|knight|grunt|patrol|enforcer)$",
-    r"^(president|vice president|chairman|chairwoman|director|ceo|executive|manager|boss|chief|commander|warlord|gang boss|secretary|treasurer|rep|representative)$",
-    r"^(class rep|class representative|hall monitor|discipline officer|prefect|student council member)$",
-    r"^(drunken|noisy|rowdy|weary|curious|hooded|elderly|young|local|fellow|ambient|suspicious|shady)?\s*(patron|bystander|customer|citizen|civilian|traveler|onlooker|wanderer|adventurer|villager|townsperson|student|bouncer|barkeep|waiter|waitress|maid|servant|minstrel|bard|drifter|dockworker|sailor|laborer|commoner|peasant)$",
+    r"^(student council|class|club|team|guild|order|gang|committee|department|faculty)\s+(president|vice president|treasurer|secretary|leader|captain|head|officer|member|lead|rep|representative|enforcer|brawler|scout|advisor|coordinator|director)(?:s|es)?$",
+    r"^(headmaster|principal|vice principal|teacher|professor|instructor|tutor|librarian|counselor|advisor|dean|sensei|dorm warden|curator)(?:s|es)?$",
+    r"^(guildmaster|shopkeeper|innkeeper|bartender|tavernkeeper|blacksmith|armorer|merchant|alchemist|apothecary|quartermaster|vendor|peddler|trader)(?:s|es)?$",
+    r"^(guard|town guard|city guard|guard captain|captain of the guard|sentinel|watchman|watchmen|paladin commander|soldier|knight|grunt|patrol|enforcer)(?:s|es)?$",
+    r"^(president|vice president|chairman|chairwoman|director|ceo|executive|manager|boss|chief|commander|warlord|gang boss|secretary|treasurer|rep|representative)(?:s|es)?$",
+    r"^(class rep|class representative|hall monitor|discipline officer|prefect|student council member)(?:s|es)?$",
+    r"^(drunken|noisy|rowdy|weary|curious|hooded|elderly|young|local|fellow|nearby|ambient|suspicious|shady|nervous|quiet|another)?\s*(patron|bystander|customer|citizen|civilian|traveler|onlooker|wanderer|adventurer|villager|townsperson|townspeople|townsfolk|student|classmate|bouncer|barkeep|waiter|waitress|maid|servant|minstrel|bard|drifter|dockworker|sailor|laborer|commoner|peasant)(?:s|es)?$",
+    r"^(townsfolk|townspeople|watchmen|patrols|guards|soldiers|merchants|students|classmates|patrons|bystanders|customers|citizens|civilians|travelers|onlookers|wanderers|adventurers|villagers|clerks|locals|regulars|pedestrians|passersby)$",
+    # Role word followed by descriptive participial or prepositional phrase:
+    # e.g. "classmate seated nearby", "student sitting at desk", "patron standing by the counter"
+    r"^(?:drunken|noisy|rowdy|weary|curious|hooded|elderly|young|local|fellow|nearby|ambient|suspicious|shady|nervous|quiet|another)?\s*(patron|bystander|customer|citizen|civilian|traveler|onlooker|wanderer|adventurer|villager|townsperson|townspeople|townsfolk|student|classmate|bouncer|barkeep|waiter|waitress|maid|servant|minstrel|bard|drifter|dockworker|sailor|laborer|commoner|peasant|guard|soldier|merchant|clerk|pedestrian|passerby)\s+(?:seated|sitting|standing|waiting|walking|passing|nearby|behind|at|in|across|by|on|listening|chatting|whispering|watching|looking|working)\b.*$",
+    # Generic role with class/room/section identifier, e.g. "Classmate 2-B", "Student from Class 1-A"
+    r"^(?:classmate|student|patron|guard|merchant)\s+(?:(?:from|in|of|seated in|at)\s+)?(?:(?:class|room|section|desk|table)\s+[\d\w\-_]+|\d+[\w\-_]*)$",
 ]
 _GENERIC_ROLE_RE = [re.compile(p, re.IGNORECASE) for p in _GENERIC_ROLE_PATTERNS]
 
+# Tokenized role / entity patterns like Classmate_2B, Student_1A, NPC_1, Person_2, Role_1, etc.
+_TOKENIZED_ROLE_RE = re.compile(
+    r"^(?:[a-z]+_\d+[a-z0-9_]*|(?:classmate|student|patron|npc|character|person|role|guard|bystander|merchant|villager)[\s_]+(?:[0-9]+[a-z0-9_\-]*|[a-z0-9_\-]+_[0-9]+[a-z0-9_\-]*))$",
+    re.IGNORECASE
+)
 
-def is_generic_role_name(name: str) -> bool:
-    """Checks if a string is a generic job title / role rather than a personal character name."""
+_COLLECTIVE_ENTITY_PATTERNS = [
+    r"^(?:the\s+|a\s+|an\s+)?(?:cluster|group|crowd|throng|gathering|pack|horde|mob|circle|bunch|party|roomful|flock|herd|swarm)\s+(?:of\s+)?(?:[a-z0-9_\-]+\s*)*$",
+    r"^(?:the\s+)?(?:students|classmates|patrons|customers|bystanders|citizens|civilians|townsfolk|townspeople|guards|soldiers|watchmen|crowd|audience|onlookers|passersby|pedestrians|locals|regulars|clerks|villagers|adventurers|wanderers|travelers|staff|faculty|merchants|shoppers|barkeeps|waiters|waitresses|guests|members|patrols|bandits|thugs|cultists|people|everyone|all of them|both of them)$",
+]
+_COLLECTIVE_ENTITY_RE = [re.compile(p, re.IGNORECASE) for p in _COLLECTIVE_ENTITY_PATTERNS]
+
+
+def is_collective_entity_name(name: str) -> bool:
+    """Checks if a string represents an ambient collective group, crowd, or plural entity rather than an individual person."""
     if not name:
         return False
     clean = str(name).strip().lower()
+    clean = re.sub(r"^(the|a|an)\s+", "", clean).strip()
+    clean = re.sub(r"[\(\[\{].*?[\)\]\}]", "", clean).strip()
+    if not clean:
+        return False
+    for rx in _COLLECTIVE_ENTITY_RE:
+        if rx.match(clean):
+            return True
+    return False
+
+
+def is_generic_role_name(name: str) -> bool:
+    """Checks if a string is a generic job title / role or descriptive role phrase rather than a personal character name."""
+    if not name:
+        return False
+    raw_str = str(name).strip()
+    if not raw_str:
+        return False
+    clean = raw_str.lower()
+    # Check tokenized role patterns before stripping
+    if _TOKENIZED_ROLE_RE.match(raw_str) or _TOKENIZED_ROLE_RE.match(clean):
+        return True
     # Strip leading articles and bracketed tags like [NPC] or (Neutral)
     clean = re.sub(r"^(the|a|an)\s+", "", clean).strip()
     clean = re.sub(r"[\(\[\{].*?[\)\]\}]", "", clean).strip()
     if not clean:
         return False
+    if is_collective_entity_name(clean):
+        return True
     if clean in _ALL_ROLE_NAMES:
+        return True
+    if _TOKENIZED_ROLE_RE.match(clean):
         return True
     for rx in _GENERIC_ROLE_RE:
         if rx.match(clean):
             return True
+    # Catch any descriptive phrase starting with indefinite article "a/an" followed by known role words
+    if re.match(r"^(?:a|an)\s+(?:fellow|another|nearby|curious|nervous|quiet)?\s*(?:classmate|student|patron|bystander|customer|guard|merchant|citizen|civilian)\b", raw_str, re.IGNORECASE):
+        return True
     return False
 
 
@@ -88,6 +134,12 @@ def is_valid_entity_name(name: str) -> bool:
         return False
     if "\n" in clean or "\r" in clean:
         return False
+    # Reject tokenized names like Classmate_2B, Student_1A, NPC_1, Person_2
+    if _TOKENIZED_ROLE_RE.match(clean):
+        return False
+    # Reject names starting with lowercase indefinite articles (e.g. "a classmate seated nearby", "an onlooker")
+    if re.match(r"^(?:a|an)\s+", clean, re.IGNORECASE):
+        return False
     # Reject known LLM meta-talk keywords and reasoning markers
     low = clean.lower()
     meta_keywords = (
@@ -95,7 +147,7 @@ def is_valid_entity_name(name: str) -> bool:
         "scene:", "scene_text", "outcome_narrative", "next_narrative",
         "turn summary", "action breakdown", "error:", "attributeerror",
         "undefined", "null", "none", "token", "person_", "role_", "placeholder",
-        "actually providing", "consistency with"
+        "actually providing", "consistency with", "classmate_", "student_", "npc_"
     )
     if any(kw in low for kw in meta_keywords):
         return False
@@ -131,7 +183,7 @@ def split_name_and_role(raw_text: str, scenario: str = "fantasy", gender: str = 
         if is_generic_role_name(part2):
             return part1, part2
 
-    if is_generic_role_name(text):
+    if is_generic_role_name(text) or not is_valid_entity_name(text):
         return generate_person_name(scenario, gender=gender), text
 
     return text, ""
@@ -172,12 +224,12 @@ def get_all_gendered_names() -> tuple[set, set]:
 TAG_TO_NAMEGEN_KEY = {
     "space": "sci_fi",
     "sci_fi": "sci_fi",
-    "grimdark": "dark_fantasy",
     "dark_fantasy": "dark_fantasy",
     "isekai": "isekai_fantasy",
     "isekai_fantasy": "isekai_fantasy",
     "high_school": "high_school_drama",
     "high_school_drama": "high_school_drama",
+    "slice_of_life": "default",
     "post_apocalypse": "nuclear_post_apocalypse",
     "nuclear_post_apocalypse": "nuclear_post_apocalypse",
     "cyberpunk": "cyberpunk",

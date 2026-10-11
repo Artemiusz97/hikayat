@@ -108,13 +108,13 @@ class TestLikesDislikesAndMannerisms(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Analytical tinkerer", cleaned)
 
     def test_basic_details_embed_formatting_and_fallback(self):
-        """Verify that Grade, Role, Faction Affiliation, and Details are always shown, and Sibling is removed."""
+        """Verify that Grade, Role, Faction Affiliation, and Details are properly shown, and Sibling is removed."""
         embed = build_contact_detail_embed(self.contact_sofia, "nsfw_high_school_drama", user_id=self.user_id)
         basic_field = next(f for f in embed.fields if f.name == "Basic Details")
 
-        self.assertIn("• **Grade / Standing**: Junior", basic_field.value)
+        self.assertIn("• **Grade**: Junior", basic_field.value)
+        self.assertIn("• **Faction Affiliation**: Science & Robotics Club", basic_field.value)
         self.assertIn("• **Role**: Robotics & Tech Apprentice", basic_field.value)
-        self.assertIn("• **Faction Affiliation**: Science & Robotics Club (Club Officer)", basic_field.value)
         self.assertIn("• **Details**:", basic_field.value)
         self.assertNotIn("Sibling", basic_field.value)
 
@@ -127,7 +127,7 @@ class TestLikesDislikesAndMannerisms(unittest.IsolatedAsyncioTestCase):
         }
         empty_embed = build_contact_detail_embed(empty_contact, "fantasy", user_id=self.user_id)
         empty_basic = next(f for f in empty_embed.fields if f.name == "Basic Details")
-        self.assertIn("• **Grade / Standing**: None", empty_basic.value)
+        self.assertIn("• **Standing**: None", empty_basic.value)
         self.assertNotIn("• **Role**:", empty_basic.value)
         self.assertIn("• **Faction Affiliation**: None", empty_basic.value)
         self.assertIn("• **Details**: None", empty_basic.value)

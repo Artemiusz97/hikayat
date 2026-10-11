@@ -14,7 +14,8 @@ class TestClassTemplates(unittest.TestCase):
     def test_scenario_counts_and_structure(self):
         expected_scenarios = [
             "fantasy", "sci_fi", "cyberpunk", "steampunk",
-            "dark_fantasy", "isekai_fantasy", "high_school_drama", "nuclear_post_apocalypse"
+            "dark_fantasy", "isekai_fantasy", "high_school_drama", "nuclear_post_apocalypse",
+            "slice_of_life"
         ]
         self.assertEqual(list(self.class_templates.keys()), expected_scenarios)
         self.assertEqual(list(self.starting_weapons.keys()), expected_scenarios)
@@ -49,7 +50,7 @@ class TestClassTemplates(unittest.TestCase):
 
     def test_character_data_helpers(self):
         all_classes = cd.get_all_class_templates()
-        self.assertEqual(len(all_classes), 48)
+        self.assertEqual(len(all_classes), 54)
 
         for scen, classes in self.class_templates.items():
             scen_classes = cd.get_class_templates(scen)

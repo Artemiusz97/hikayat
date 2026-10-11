@@ -220,7 +220,31 @@ def _extract_role_and_affiliation_from_text(
         for idx, sent in enumerate(sentences):
             if sent.startswith(('"', '“', "'")):
                 continue
-            if name_clean.lower() in sent.lower():
+            s_low = sent.lower()
+            name_low = name_clean.lower()
+            if name_low in s_low:
+                # Guard against stealing sentences where this entity is merely an object of perception/action
+                # (e.g. "Artemiusz steps past... spotting a cluster of students near the window seats")
+                is_object_of_action = any(
+                    re.search(rf"\b{verb}\s+(?:[a-z0-9_\-]+\s+){{0,3}}{re.escape(name_low)}\b", s_low)
+                    for verb in (
+                        "spotting", "spotted", "noticing", "noticed", "seeing", "sees", "saw",
+                        "greeting", "greeted", "greets", "approaching", "approached", "approaches",
+                        "looking at", "looks at", "looked at", "glancing at", "glances at", "glanced at",
+                        "cluster of", "group of", "crowd of", "walks toward", "walked toward",
+                        "talking to", "talks to", "talked to", "speaking with", "speaks with", "spoke with",
+                        "asking", "asks", "asked", "telling", "tells", "told"
+                    )
+                )
+                if is_object_of_action:
+                    continue
+                # If another named entity/subject is performing an action on this character, skip
+                if not sent.lower().startswith(name_low) and re.match(r"^[A-Z][a-z]+\s+[a-z]+(?:s|ed|ing)\b", sent):
+                    continue
+                # Also ensure the sentence actually centers on the character,
+                # rather than starting with a third-person pronoun (He/She) referring to a prior actor
+                if re.match(r"^(He|She|They)\b", sent) and not sent.lower().startswith(name_low):
+                    continue
                 desc_parts = [sent]
                 if idx + 1 < len(sentences):
                     next_s = sentences[idx + 1]
@@ -584,18 +608,27 @@ def _enrich_contact_basic_info(
 def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 0,
                    basic_info: dict = None, delta_score: int = 0, track: str = None,
                    new_traits: list = None, new_preferences: list = None, race: str = "", gender: str = "", appearance: dict = None,
-                   new_memory: str = None, narrative_text: str = "") -> dict:
+                   new_memory: str = None, new_general_memory: str = None, narrative_text: str = "") -> dict:
     import mechanics.social.persona as persona
     import namegen
 
-    # Reject invalid / corrupted entity names from LLM reasoning leaks
-    if not namegen.is_valid_entity_name(name) and not namegen.is_valid_entity_name(npc_id):
+    if isinstance(npc_id, (int, float)) and isinstance(character_id, str):
+        character_id, npc_id, name = int(npc_id), str(name or ""), character_id
+    elif isinstance(npc_id, (int, float)):
+        npc_id = str(npc_id)
+
+    # Reject invalid / corrupted entity names from LLM reasoning leaks or collective groups
+    if not namegen.is_valid_entity_name(name) and not namegen.is_valid_entity_name(npc_id) and \
+       not namegen.is_generic_role_name(name) and not namegen.is_generic_role_name(npc_id):
+        return {}
+    if namegen.is_collective_entity_name(name) or namegen.is_collective_entity_name(npc_id):
         return {}
 
     # Code-level guarantee: named characters/contacts must have a proper personal name
     raw_identifier = name or npc_id or ""
-    if namegen.is_generic_role_name(name) or namegen.is_generic_role_name(npc_id):
-        role_title = name if namegen.is_generic_role_name(name) else npc_id
+    if namegen.is_generic_role_name(name) or namegen.is_generic_role_name(npc_id) or \
+       not namegen.is_valid_entity_name(name) or not namegen.is_valid_entity_name(npc_id):
+        role_title = str(name if (namegen.is_generic_role_name(name) or not namegen.is_valid_entity_name(name)) else npc_id)
         matched_name = None
         with get_conn() as conn:
             fac_rows = conn.execute("SELECT leadership_roster_json FROM factions WHERE session_id=?", (session_id,)).fetchall()
@@ -713,6 +746,10 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
             cur_memories = json.loads(existing_dict.get("intimate_memories_json") or "[]")
             if not isinstance(cur_memories, list):
                 cur_memories = []
+            cur_recent_memories = json.loads(existing_dict.get("rel_history_json") or "[]")
+            if not isinstance(cur_recent_memories, list):
+                cur_recent_memories = []
+
             if existing_dict.get("appearance_json"):
                 try:
                     old_app = json.loads(existing_dict.get("appearance_json") or "{}")
@@ -721,14 +758,34 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                             m_str = str(m).strip() if m else ""
                             if m_str and m_str not in cur_memories:
                                 cur_memories.append(m_str)
+                    if isinstance(old_app.get("recent_memories"), list):
+                        for rm in old_app["recent_memories"]:
+                            rm_str = str(rm).strip() if rm else ""
+                            if rm_str and rm_str not in cur_recent_memories:
+                                cur_recent_memories.append(rm_str)
                 except Exception:
                     pass
 
-            if appearance and isinstance(appearance, dict) and isinstance(appearance.get("intimate_memories"), list):
-                for m in appearance["intimate_memories"]:
-                    m_str = str(m).strip() if m else ""
-                    if m_str and m_str not in cur_memories:
-                        cur_memories.append(m_str)
+            if appearance and isinstance(appearance, dict):
+                if isinstance(appearance.get("intimate_memories"), list):
+                    for m in appearance["intimate_memories"]:
+                        m_str = str(m).strip() if m else ""
+                        if m_str and m_str not in cur_memories:
+                            cur_memories.append(m_str)
+                if isinstance(appearance.get("recent_memories"), list):
+                    for rm in appearance["recent_memories"]:
+                        rm_str = str(rm).strip() if rm else ""
+                        if rm_str and rm_str not in cur_recent_memories:
+                            cur_recent_memories.append(rm_str)
+
+            # Ensure any non-romantic memories are also present in cur_recent_memories
+            from mechanics.social.persona import is_romantic_milestone_str
+            for m in cur_memories:
+                m_str = str(m).strip() if m else ""
+                if not m_str or m_str.startswith("Past History:") or is_romantic_milestone_str(m_str):
+                    continue
+                if m_str not in cur_recent_memories:
+                    cur_recent_memories.append(m_str)
 
             merged_traits_in = cur_raw_traits + (new_traits or [])
             merged_prefs_in = cur_raw_prefs + (new_preferences or [])
@@ -742,10 +799,23 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
             
             if new_memory and isinstance(new_memory, str) and new_memory.strip():
                 m_str = new_memory.strip()
-                if m_str not in cur_memories:
-                    cur_memories.append(m_str)
-                    if len(cur_memories) > 100:
-                        cur_memories = cur_memories[-100:]
+                if m_str.startswith("Past History:") or is_romantic_milestone_str(m_str):
+                    if m_str not in cur_memories:
+                        cur_memories.append(m_str)
+                        if len(cur_memories) > 100:
+                            cur_memories = cur_memories[-100:]
+                else:
+                    if m_str not in cur_recent_memories:
+                        cur_recent_memories.append(m_str)
+                        if len(cur_recent_memories) > 50:
+                            cur_recent_memories = cur_recent_memories[-50:]
+
+            if new_general_memory and isinstance(new_general_memory, str) and new_general_memory.strip():
+                gm_str = new_general_memory.strip()
+                if gm_str not in cur_recent_memories:
+                    cur_recent_memories.append(gm_str)
+                    if len(cur_recent_memories) > 50:
+                        cur_recent_memories = cur_recent_memories[-50:]
 
             existing_track = existing_dict.get("track") or "platonic"
             if track is not None and str(track).strip():
@@ -765,11 +835,14 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
             if extracted_app:
                 cur_app = persona.merge_appearance_safely(cur_app, extracted_app)
 
-            if cur_memories:
-                cur_app["intimate_memories"] = list(cur_memories)
+            cur_app["intimate_memories"] = list(cur_memories)
+            cur_app["recent_memories"] = list(cur_recent_memories)
+            cur_app["rel_history"] = list(cur_recent_memories)
             if appearance and isinstance(appearance, dict):
                 cur_app = persona.merge_appearance_safely(cur_app, appearance)
             cur_app["intimate_memories"] = list(cur_memories)
+            cur_app["recent_memories"] = list(cur_recent_memories)
+            cur_app["rel_history"] = list(cur_recent_memories)
             cur_app = persona.enforce_intimacy_safeguard_invariants(cur_app)
 
             if not cur_gender:
@@ -780,9 +853,9 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
 
             conn.execute(
                 """UPDATE contacts SET name=?, basic_info_json=?, relationship_score=?,
-                                       track=?, unlocked_traits_json=?, preferences_json=?, race=?, gender=?, appearance_json=?, intimate_memories_json=?, updated_at=?
+                                       track=?, unlocked_traits_json=?, preferences_json=?, race=?, gender=?, appearance_json=?, intimate_memories_json=?, rel_history_json=?, updated_at=?
                     WHERE id=?""",
-                (final_name, json.dumps(cur_info), current_score, cur_track, json.dumps(clean_traits), json.dumps(clean_prefs), cur_race, cur_gender, json.dumps(cur_app), json.dumps(cur_memories), now, existing["id"])
+                (final_name, json.dumps(cur_info), current_score, cur_track, json.dumps(clean_traits), json.dumps(clean_prefs), cur_race, cur_gender, json.dumps(cur_app), json.dumps(cur_memories), json.dumps(cur_recent_memories), now, existing["id"])
             )
             return {
                 "id": existing["id"],
@@ -799,6 +872,8 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 "gender": cur_gender,
                 "appearance": cur_app,
                 "intimate_memories": cur_memories,
+                "recent_memories": cur_recent_memories,
+                "rel_history": cur_recent_memories,
                 "updated_at": now
             }
         else:
@@ -829,24 +904,53 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
             cur_gender = gender or ""
             app_dict = dict(appearance) if isinstance(appearance, dict) else {}
             cur_memories = []
+            cur_recent_memories = []
             if isinstance(app_dict.get("intimate_memories"), list):
                 for m in app_dict["intimate_memories"]:
                     m_str = str(m).strip() if m else ""
                     if m_str and m_str not in cur_memories:
                         cur_memories.append(m_str)
+            if isinstance(app_dict.get("recent_memories"), list):
+                for rm in app_dict["recent_memories"]:
+                    rm_str = str(rm).strip() if rm else ""
+                    if rm_str and rm_str not in cur_recent_memories:
+                        cur_recent_memories.append(rm_str)
+
+            from mechanics.social.persona import is_romantic_milestone_str
+            for m in cur_memories:
+                m_str = str(m).strip() if m else ""
+                if not m_str or m_str.startswith("Past History:") or is_romantic_milestone_str(m_str):
+                    continue
+                if m_str not in cur_recent_memories:
+                    cur_recent_memories.append(m_str)
 
             if new_memory and isinstance(new_memory, str) and new_memory.strip():
                 m_str = new_memory.strip()
-                if m_str not in cur_memories:
-                    cur_memories.append(m_str)
-                    if len(cur_memories) > 100:
-                        cur_memories = cur_memories[-100:]
+                if m_str.startswith("Past History:") or is_romantic_milestone_str(m_str):
+                    if m_str not in cur_memories:
+                        cur_memories.append(m_str)
+                        if len(cur_memories) > 100:
+                            cur_memories = cur_memories[-100:]
+                else:
+                    if m_str not in cur_recent_memories:
+                        cur_recent_memories.append(m_str)
+                        if len(cur_recent_memories) > 50:
+                            cur_recent_memories = cur_recent_memories[-50:]
+
+            if new_general_memory and isinstance(new_general_memory, str) and new_general_memory.strip():
+                gm_str = new_general_memory.strip()
+                if gm_str not in cur_recent_memories:
+                    cur_recent_memories.append(gm_str)
+                    if len(cur_recent_memories) > 50:
+                        cur_recent_memories = cur_recent_memories[-50:]
 
             from mechanics.social.persona.intimacy.appearance import extract_appearance_from_text
             extracted_app = extract_appearance_from_text(f"{info.get('description', '')} {narrative_text}", name=name)
             if extracted_app:
                 app_dict = persona.merge_appearance_safely(app_dict, extracted_app)
             app_dict["intimate_memories"] = list(cur_memories)
+            app_dict["recent_memories"] = list(cur_recent_memories)
+            app_dict["rel_history"] = list(cur_recent_memories)
             app_dict = persona.enforce_intimacy_safeguard_invariants(app_dict)
             if not cur_gender:
                 try:
@@ -856,10 +960,10 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
 
             cursor = conn.execute(
                 """INSERT INTO contacts (session_id, character_id, npc_id, name, basic_info_json,
-                                          relationship_score, track, unlocked_traits_json, preferences_json, race, gender, appearance_json, intimate_memories_json, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                          relationship_score, track, unlocked_traits_json, preferences_json, race, gender, appearance_json, intimate_memories_json, rel_history_json, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (session_id, character_id, npc_id, name, json.dumps(info), initial_score,
-                 cur_track, json.dumps(clean_traits), json.dumps(clean_prefs), cur_race, cur_gender, json.dumps(app_dict), json.dumps(cur_memories), now, now)
+                 cur_track, json.dumps(clean_traits), json.dumps(clean_prefs), cur_race, cur_gender, json.dumps(app_dict), json.dumps(cur_memories), json.dumps(cur_recent_memories), now, now)
             )
             return {
                 "id": cursor.lastrowid,
@@ -876,6 +980,8 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 "gender": cur_gender,
                 "appearance": app_dict,
                 "intimate_memories": cur_memories,
+                "recent_memories": cur_recent_memories,
+                "rel_history": cur_recent_memories,
                 "created_at": now,
                 "updated_at": now
             }
@@ -1054,9 +1160,34 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
                 if m_clean and m_clean not in combined_mem:
                     combined_mem.append(m_clean)
 
+            try:
+                rel_hist = json.loads(d.get("rel_history_json") or "[]")
+                if not isinstance(rel_hist, list):
+                    rel_hist = []
+            except Exception:
+                rel_hist = []
+
+            # Auto-partition combined_mem into genuine romantic vs general interaction memories
+            clean_intimate = []
+            for m in combined_mem:
+                m_clean = str(m).strip() if m else ""
+                if not m_clean:
+                    continue
+                if m_clean.startswith("Past History:") or persona.is_romantic_milestone_str(m_clean):
+                    clean_intimate.append(m_clean)
+                else:
+                    if m_clean not in rel_hist:
+                        rel_hist.append(m_clean)
+
             d["intimate_memories"] = combined_mem
+            d["shared_romantic_milestones"] = clean_intimate
+            d["recent_memories"] = rel_hist
+            d["rel_history"] = rel_hist
             if isinstance(d.get("appearance"), dict):
                 d["appearance"]["intimate_memories"] = combined_mem
+                d["appearance"]["shared_romantic_milestones"] = clean_intimate
+                d["appearance"]["recent_memories"] = rel_hist
+                d["appearance"]["rel_history"] = rel_hist
 
             try:
                 d["relations"] = json.loads(d.get("relations_json") or "{}")
@@ -1235,9 +1366,33 @@ def get_contact(session_id: int, npc_id: str, character_id: int = 0) -> dict | N
         if m_clean and m_clean not in combined_mem:
             combined_mem.append(m_clean)
 
+    try:
+        rel_hist = json.loads(d.get("rel_history_json") or "[]")
+        if not isinstance(rel_hist, list):
+            rel_hist = []
+    except Exception:
+        rel_hist = []
+
+    clean_intimate = []
+    for m in combined_mem:
+        m_clean = str(m).strip() if m else ""
+        if not m_clean:
+            continue
+        if m_clean.startswith("Past History:") or persona.is_romantic_milestone_str(m_clean):
+            clean_intimate.append(m_clean)
+        else:
+            if m_clean not in rel_hist:
+                rel_hist.append(m_clean)
+
     d["intimate_memories"] = combined_mem
+    d["shared_romantic_milestones"] = clean_intimate
+    d["recent_memories"] = rel_hist
+    d["rel_history"] = rel_hist
     if isinstance(d.get("appearance"), dict):
         d["appearance"]["intimate_memories"] = combined_mem
+        d["appearance"]["shared_romantic_milestones"] = clean_intimate
+        d["appearance"]["recent_memories"] = rel_hist
+        d["appearance"]["rel_history"] = rel_hist
 
     if d.get("basic_info") and isinstance(d["basic_info"], dict) and d["basic_info"].get("description"):
         d["basic_info"]["description"] = persona.sanitize_npc_description(d["basic_info"]["description"], d.get("appearance"))
@@ -1486,6 +1641,36 @@ def get_phone_messages(session_id: int, contact_npc_id: str, limit: int = 15) ->
         ).fetchall()
         return [dict(r) for r in rows]
 
+def update_contact_in_person_timestamp(session_id: int, npc_name_or_id: str | dict, ts: float = None) -> None:
+    """Updates the last_in_person_ts timestamp in contact basic_info to mark recent phone messages as acknowledged in person."""
+    if not session_id or not npc_name_or_id:
+        return
+    if isinstance(npc_name_or_id, dict):
+        npc_name_or_id = npc_name_or_id.get("name") or npc_name_or_id.get("npc_id") or ""
+    npc_str = str(npc_name_or_id).strip()
+    if not npc_str:
+        return
+    if ts is None:
+        ts = time.time()
+    clean_id = npc_str.lower().replace(" ", "_")
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, basic_info_json FROM contacts WHERE session_id=? AND (npc_id=? OR lower(name)=?)",
+            (session_id, clean_id, npc_str.lower())
+        ).fetchone()
+        if row:
+            cid = row["id"]
+            try:
+                binfo = json.loads(row["basic_info_json"] or "{}")
+            except Exception:
+                binfo = {}
+            binfo["last_in_person_ts"] = ts
+            conn.execute(
+                "UPDATE contacts SET basic_info_json=? WHERE id=?",
+                (json.dumps(binfo), cid)
+            )
+
+
 def save_gossip_feed(session_id: int, posts: list[dict]):
     now = time.time()
     with get_conn() as conn:
@@ -1561,10 +1746,12 @@ def save_school_roster(session_id: int, roster: list[dict]) -> bool:
                 continue
             conn.execute(
                 """INSERT INTO school_directory
-                   (session_id, npc_id, name, role, grade, club, clique, primary_facility, secondary_facility, sibling_name, personality_summary, is_hydrated, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   (session_id, npc_id, name, gender, race, role, grade, club, clique, primary_facility, secondary_facility, sibling_name, personality_summary, is_hydrated, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(session_id, npc_id) DO UPDATE SET
                    name=excluded.name,
+                   gender=COALESCE(NULLIF(excluded.gender, ''), school_directory.gender),
+                   race=COALESCE(NULLIF(excluded.race, ''), school_directory.race),
                    role=excluded.role,
                    grade=excluded.grade,
                    club=excluded.club,
@@ -1577,6 +1764,8 @@ def save_school_roster(session_id: int, roster: list[dict]) -> bool:
                     session_id,
                     npc_id,
                     char.get("name", "").strip(),
+                    char.get("gender", "").strip(),
+                    char.get("race", "").strip(),
                     char.get("role", "").strip(),
                     char.get("grade", "Student").strip(),
                     char.get("club", "").strip(),
@@ -1703,4 +1892,196 @@ def mark_school_character_hydrated(session_id: int, npc_id: str) -> bool:
 
 
 _active_resolving_contacts = set()
+
+
+def get_phone_daily_limits(session_id: int, npc_id: str, current_day: int) -> dict:
+    """Returns structured daily action allowances, usage counts, and status for a contact on current_day."""
+    clean_npc_id = str(npc_id).strip().lower().replace(" ", "_")
+    limits = {
+        "flirt": {"used": 0, "max": 3, "locked": False, "history": [], "last_outcome": "", "over_limit_count": 0},
+        "meetup": {"used": 0, "max": 1, "locked": False, "status": "available", "relocations_left": 0, "relocations_used": 0, "last_outcome": "", "over_limit_count": 0},
+        "photo": {"used": 0, "max": 3, "locked": False, "over_limit_count": 0},
+        "spicy": {"used": 0, "max": 3, "locked": False, "over_limit_count": 0},
+        "rumor": {"used": 0, "max": 1, "locked": False, "over_limit_count": 0},
+    }
+    with get_conn() as conn:
+        # Check active appointments for this NPC
+        appt_row = conn.execute(
+            "SELECT rendezvous_location, status FROM phone_appointments WHERE session_id=? AND npc_id=?",
+            (session_id, clean_npc_id)
+        ).fetchone()
+        has_active_appt = bool(appt_row and appt_row["status"] == "pending")
+
+        try:
+            rows = conn.execute(
+                "SELECT intent, attempt_count, success_count, over_limit_count, last_outcome, metadata_json "
+                "FROM phone_daily_interactions WHERE session_id=? AND npc_id=? AND current_day=?",
+                (session_id, clean_npc_id, int(current_day))
+            ).fetchall()
+        except sqlite3.OperationalError as e:
+            if "no such table: phone_daily_interactions" in str(e).lower():
+                conn.execute("""CREATE TABLE IF NOT EXISTS phone_daily_interactions (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id          INTEGER NOT NULL,
+                    npc_id              TEXT NOT NULL,
+                    current_day         INTEGER NOT NULL,
+                    intent              TEXT NOT NULL,
+                    attempt_count       INTEGER DEFAULT 0,
+                    success_count       INTEGER DEFAULT 0,
+                    over_limit_count    INTEGER DEFAULT 0,
+                    last_outcome        TEXT DEFAULT '',
+                    metadata_json       TEXT DEFAULT '{}',
+                    updated_at          REAL NOT NULL,
+                    UNIQUE(session_id, npc_id, current_day, intent)
+                )""")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_phone_daily_lookup ON phone_daily_interactions(session_id, npc_id, current_day)")
+                rows = []
+            else:
+                raise
+
+        for r in rows:
+            intent = r["intent"]
+            used = int(r["attempt_count"] or 0)
+            over_limit = int(r["over_limit_count"] or 0)
+            outcome = r["last_outcome"] or ""
+            meta = {}
+            if r["metadata_json"]:
+                try:
+                    meta = json.loads(r["metadata_json"])
+                except Exception:
+                    meta = {}
+
+            if intent == "flirt":
+                limits["flirt"]["used"] = used
+                limits["flirt"]["locked"] = used >= 3
+                limits["flirt"]["history"] = meta.get("history", [])
+                limits["flirt"]["last_outcome"] = outcome
+                limits["flirt"]["over_limit_count"] = over_limit
+            elif intent == "meetup":
+                limits["meetup"]["used"] = used
+                relocations_used = meta.get("relocations_used", 0)
+                limits["meetup"]["relocations_used"] = relocations_used
+                if has_active_appt:
+                    limits["meetup"]["status"] = "accepted"
+                    limits["meetup"]["relocations_left"] = max(0, 2 - relocations_used)
+                    limits["meetup"]["locked"] = relocations_used >= 2
+                    limits["meetup"]["rendezvous_location"] = appt_row["rendezvous_location"]
+                else:
+                    limits["meetup"]["status"] = "failed" if used >= 1 else "available"
+                    limits["meetup"]["relocations_left"] = 0
+                    limits["meetup"]["locked"] = used >= 1
+                limits["meetup"]["last_outcome"] = outcome
+                limits["meetup"]["over_limit_count"] = over_limit
+            elif intent in ("photo", "photo_ask", "photo_send"):
+                limits["photo"]["used"] += used
+                limits["photo"]["over_limit_count"] = limits["photo"].get("over_limit_count", 0) + over_limit
+            elif intent in ("spicy", "spicy_ask", "spicy_send", "nsfw_photo", "nsfw_video"):
+                limits["spicy"]["used"] += used
+                limits["spicy"]["over_limit_count"] = limits["spicy"].get("over_limit_count", 0) + over_limit
+            elif intent in ("rumor", "intel_rumor", "intel"):
+                limits["rumor"]["used"] += used
+                limits["rumor"]["locked"] = limits["rumor"]["used"] >= 1
+                limits["rumor"]["over_limit_count"] += over_limit
+
+        limits["photo"]["locked"] = limits["photo"]["used"] >= 3
+        limits["spicy"]["locked"] = limits["spicy"]["used"] >= 3
+        limits["flirt"]["locked"] = limits["flirt"]["used"] >= 3
+        limits["rumor"]["locked"] = limits["rumor"]["used"] >= 1
+
+        if has_active_appt and limits["meetup"]["status"] != "accepted":
+            limits["meetup"]["status"] = "accepted"
+            relocations_used = limits["meetup"].get("relocations_used", 0)
+            limits["meetup"]["relocations_left"] = max(0, 2 - relocations_used)
+            limits["meetup"]["locked"] = relocations_used >= 2
+            limits["meetup"]["rendezvous_location"] = appt_row["rendezvous_location"]
+
+    return limits
+
+
+def record_phone_daily_interaction(session_id: int, npc_id: str, current_day: int, intent: str, outcome: str, metadata: dict = None, is_over_limit: bool = False) -> dict:
+    """Atomically records or updates a daily interaction attempt."""
+    clean_npc_id = str(npc_id).strip().lower().replace(" ", "_")
+    norm_intent = intent
+    if intent in ("photo_ask", "photo_send"):
+        norm_intent = "photo"
+    elif intent in ("spicy_ask", "spicy_send", "nsfw_photo", "nsfw_video"):
+        norm_intent = "spicy"
+    elif intent in ("intel_rumor", "intel"):
+        norm_intent = "rumor"
+
+    with get_conn() as conn:
+        try:
+            row = conn.execute(
+                "SELECT attempt_count, success_count, over_limit_count, metadata_json FROM phone_daily_interactions "
+                "WHERE session_id=? AND npc_id=? AND current_day=? AND intent=?",
+                (session_id, clean_npc_id, int(current_day), norm_intent)
+            ).fetchone()
+        except sqlite3.OperationalError as e:
+            if "no such table: phone_daily_interactions" in str(e).lower():
+                conn.execute("""CREATE TABLE IF NOT EXISTS phone_daily_interactions (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id          INTEGER NOT NULL,
+                    npc_id              TEXT NOT NULL,
+                    current_day         INTEGER NOT NULL,
+                    intent              TEXT NOT NULL,
+                    attempt_count       INTEGER DEFAULT 0,
+                    success_count       INTEGER DEFAULT 0,
+                    over_limit_count    INTEGER DEFAULT 0,
+                    last_outcome        TEXT DEFAULT '',
+                    metadata_json       TEXT DEFAULT '{}',
+                    updated_at          REAL NOT NULL,
+                    UNIQUE(session_id, npc_id, current_day, intent)
+                )""")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_phone_daily_lookup ON phone_daily_interactions(session_id, npc_id, current_day)")
+                row = None
+            else:
+                raise
+
+        now = time.time()
+        succeeded = outcome in ("success", "crit_success")
+
+        if row:
+            curr_attempts = int(row["attempt_count"] or 0)
+            curr_successes = int(row["success_count"] or 0)
+            curr_over = int(row["over_limit_count"] or 0)
+            existing_meta = {}
+            if row["metadata_json"]:
+                try:
+                    existing_meta = json.loads(row["metadata_json"])
+                except Exception:
+                    existing_meta = {}
+
+            if is_over_limit:
+                new_over = curr_over + 1
+                new_attempts = curr_attempts
+                new_successes = curr_successes
+            else:
+                new_over = curr_over
+                new_attempts = curr_attempts + 1
+                new_successes = curr_successes + (1 if succeeded else 0)
+
+            if metadata:
+                existing_meta.update(metadata)
+
+            conn.execute(
+                """UPDATE phone_daily_interactions
+                   SET attempt_count=?, success_count=?, over_limit_count=?, last_outcome=?, metadata_json=?, updated_at=?
+                   WHERE session_id=? AND npc_id=? AND current_day=? AND intent=?""",
+                (new_attempts, new_successes, new_over, outcome, json.dumps(existing_meta), now,
+                 session_id, clean_npc_id, int(current_day), norm_intent)
+            )
+        else:
+            new_attempts = 0 if is_over_limit else 1
+            new_successes = 1 if (succeeded and not is_over_limit) else 0
+            new_over = 1 if is_over_limit else 0
+            meta_json = json.dumps(metadata or {})
+            conn.execute(
+                """INSERT INTO phone_daily_interactions
+                   (session_id, npc_id, current_day, intent, attempt_count, success_count, over_limit_count, last_outcome, metadata_json, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (session_id, clean_npc_id, int(current_day), norm_intent, new_attempts, new_successes, new_over, outcome, meta_json, now)
+            )
+
+    return get_phone_daily_limits(session_id, clean_npc_id, current_day)
+
 

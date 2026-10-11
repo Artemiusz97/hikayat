@@ -36,7 +36,8 @@ def _build_quest_and_bounty_directives(session: dict, ctx) -> tuple[str, str]:
 
 
     game_engine.ensure_story_quest_exists(session)
-
+    if hasattr(ctx, "invalidate"):
+        ctx.invalidate("story_quest")
     story_quest = ctx.story_quest
 
     if story_quest:
@@ -182,7 +183,37 @@ def _build_quest_and_bounty_directives(session: dict, ctx) -> tuple[str, str]:
         side_bounties_context = "No active side bounties."
     return story_quest_context, side_bounties_context
 
-def _build_player_actions_text(actions: list) -> str:
+def _is_social_or_non_combat_action(a: dict, session: dict | None = None) -> bool:
+    """Evaluate whether an action is conversational, social, intimate, or set in a non-combat scenario."""
+    if session and scenario_data.is_non_combat_scenario(session.get("scenario")):
+        return True
+
+    cat = str(a.get("action_category") or "").lower()
+    if cat in ("dialogue", "disclosure_inquiry", "affection", "social_invite", "romantic_confession", "party_recruit", "social", "conversation", "chat", "flirt"):
+        return True
+
+    from mechanics.social.intimate_excitement import is_intimate_action_label, matches_boundary
+    from mechanics.social.physical_state import is_erotic_intimate_contact
+    lbl = str(a.get("label") or "").lower()
+    if is_intimate_action_label(lbl):
+        return True
+    if isinstance(session, dict):
+        phys = session.get("physical_state") or {}
+        if is_erotic_intimate_contact(str(phys.get("intimate_contact", ""))):
+            return True
+
+    from mechanics.world.mobility import get_session_dialogue_partners
+    dp = get_session_dialogue_partners(session) if isinstance(session, dict) else []
+    if dp and matches_boundary(lbl, ("talk", "speak", "ask", "tell", "say", "flirt", "tease", "confess", "whisper", "joke", "challenge", "inquire", "chat", "greet")):
+        return True
+
+    stat = str(a.get("stat") or "").upper()
+    if stat == "CHA" and not any(kw in lbl for kw in ("rally", "battle", "war", "intimidate monster", "roar", "provoke")):
+        return True
+
+    return False
+
+def _build_player_actions_text(actions: list, session: dict | None = None) -> str:
     """Extracted Phase 2A Builder for Player Actions."""
     action_lines = []
     for a in actions:
@@ -199,35 +230,51 @@ def _build_player_actions_text(actions: list) -> str:
 
         elif tier == "crit_fail":
 
-            from skill_check import calculate_hazard_damage
+            if _is_social_or_non_combat_action(a, session):
+                tier_directive = (
+                    f"Critical Failure (FAIL FORWARD: Severe social blunder, major embarrassment, or dramatic confrontation; flips social stakes). "
+                    f"[NON-COMBAT / SOCIAL RULE]: Do NOT inflict physical HP damage (hp_change MUST be 0)! "
+                    f"Express failure through relationship affinity loss in relationship_updates (delta_score: -3 to -6), "
+                    f"reputation loss in faction_updates, NPC walking away/cooling off, or intense emotional mood tags in status_effects (e.g. 'Humiliated', 'Mortified', 'Flustered')."
+                )
+            else:
+                from skill_check import calculate_hazard_damage
 
-            req = getattr(a["check"], "requirement", 10)
+                req = getattr(a["check"], "requirement", 10)
 
-            hazard_dmg = calculate_hazard_damage(req, tier, a["char"].get("max_hp", 100))
+                hazard_dmg = calculate_hazard_damage(req, tier, a["char"].get("max_hp", 100))
 
-            tier_directive = (
+                tier_directive = (
 
-                f"Critical Failure (FAIL FORWARD: Catastrophic disaster, major trap trigger, or sudden ambush that flips scene stakes). "
+                    f"Critical Failure (FAIL FORWARD: Catastrophic disaster, major trap trigger, or sudden ambush that flips scene stakes). "
 
-                f"[MANDATORY HAZARD MATH]: If a physical trap or hazard hits {a['char']['name']}, it MUST deal exactly {hazard_dmg} damage!"
+                    f"[MANDATORY HAZARD MATH]: If a physical trap or hazard hits {a['char']['name']}, it MUST deal exactly {hazard_dmg} damage!"
 
-            )
+                )
 
         elif tier == "fail":
 
-            from skill_check import calculate_hazard_damage
+            if _is_social_or_non_combat_action(a, session):
+                tier_directive = (
+                    f"Failure (FAIL FORWARD: Suffer a complication, escalation, or success-at-a-cost; keep momentum moving!). "
+                    f"[NON-COMBAT / SOCIAL RULE]: Do NOT inflict physical HP damage (hp_change MUST be 0)! "
+                    f"Express failure through relationship affinity penalties in relationship_updates (delta_score: -1 to -3), "
+                    f"conversational awkwardness, defensive NPC reactions, or emotional mood tags in status_effects (e.g. 'Flustered', 'Awkward', 'Embarrassed')."
+                )
+            else:
+                from skill_check import calculate_hazard_damage
 
-            req = getattr(a["check"], "requirement", 10)
+                req = getattr(a["check"], "requirement", 10)
 
-            hazard_dmg = calculate_hazard_damage(req, tier, a["char"].get("max_hp", 100))
+                hazard_dmg = calculate_hazard_damage(req, tier, a["char"].get("max_hp", 100))
 
-            tier_directive = (
+                tier_directive = (
 
-                f"Failure (FAIL FORWARD: Suffer a complication, escalation, or success-at-a-cost; keep momentum moving!). "
+                    f"Failure (FAIL FORWARD: Suffer a complication, escalation, or success-at-a-cost; keep momentum moving!). "
 
-                f"[MANDATORY HAZARD MATH]: If a physical trap or hazard hits {a['char']['name']}, it MUST deal exactly {hazard_dmg} damage!"
+                    f"[MANDATORY HAZARD MATH]: If a physical trap or hazard hits {a['char']['name']}, it MUST deal exactly {hazard_dmg} damage!"
 
-            )
+                )
 
         elif tier == "crit_success":
 

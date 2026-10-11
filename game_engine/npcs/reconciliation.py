@@ -25,6 +25,73 @@ from .presence import (
 )
 
 
+def _build_canonical_name_resolver(
+    session: dict | None,
+    old_npcs: list,
+    candidates: list,
+    known_contacts: list,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """
+    Builds mappings to canonicalize single-token/partial NPC names into their canonical full names.
+    Returns (first_name_to_canonical, full_name_canonical_case).
+    """
+    first_to_canon: dict[str, str] = {}
+    full_canon_case: dict[str, str] = {}
+    full_names: set[str] = set()
+
+    def _register_full_name(raw: any):
+        if not raw or not isinstance(raw, str):
+            return
+        name_clean = raw.strip()
+        parts = name_clean.split()
+        if len(parts) >= 2:
+            full_names.add(name_clean)
+            full_canon_case[name_clean.lower()] = name_clean
+
+    # 1. Collect from known contacts
+    for c in (known_contacts or []):
+        if isinstance(c, dict):
+            _register_full_name(c.get("name"))
+
+    # 2. Collect from school roster
+    if session and session.get("id"):
+        try:
+            roster = db.get_school_roster(session["id"])
+            for m in (roster or []):
+                if isinstance(m, dict):
+                    _register_full_name(m.get("name"))
+        except Exception:
+            pass
+
+    # 3. Collect from old_npcs
+    for on in (old_npcs or []):
+        nm = game_engine._get_npc_name(on) if on else ""
+        _register_full_name(nm)
+
+    # 4. Collect from candidates
+    for cand in (candidates or []):
+        nm = cand.get("name") if isinstance(cand, dict) else (cand if isinstance(cand, str) else "")
+        _register_full_name(nm)
+
+    # Map first names to unique full names
+    first_groups: dict[str, list[str]] = {}
+    for fn in full_names:
+        first = fn.split()[0].lower()
+        first_groups.setdefault(first, []).append(fn)
+
+    for first, group in first_groups.items():
+        if len(group) == 1:
+            first_to_canon[first] = group[0]
+        else:
+            contact_names = {c.get("name", "").strip().lower() for c in (known_contacts or []) if isinstance(c, dict)}
+            old_names = {game_engine._get_npc_name(on).strip().lower() for on in (old_npcs or []) if on}
+            preferred = [g for g in group if g.lower() in contact_names or g.lower() in old_names]
+            if len(preferred) == 1:
+                first_to_canon[first] = preferred[0]
+
+    return first_to_canon, full_canon_case
+
+
 def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, actions: list = None) -> list[dict]:
 
     """
@@ -201,108 +268,109 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
                 departure_names.add(d_first)
 
-
-
-    # Mark departing NPCs' phone appointments as completed
-
-    if sess_id and departure_names:
-
+    # Identify active rendezvous appointment targets at this location
+    appointment_targets = set()
+    if sess_id:
         try:
-
-            active_appts = db.get_phone_appointments(sess_id, status="arrived") + db.get_phone_appointments(sess_id, status="pending")
-
-            for appt in active_appts:
-
-                a_name = str(appt.get("npc_name", "")).strip().lower()
-
-                a_id = str(appt.get("npc_id", "")).strip().lower()
-
-                if a_name in departure_names or a_id in departure_names or any(d in a_name for d in departure_names):
-
-                    db.update_phone_appointment_status(sess_id, appt.get("npc_id", ""), "completed")
-
+            from mechanics.world.waypoints import check_location_matches_waypoint
+            appts = db.get_phone_appointments(sess_id, status="arrived") + db.get_phone_appointments(sess_id, status="pending")
+            for appt in appts:
+                appt_loc = appt.get("rendezvous_location") or ""
+                if not appt_loc or not new_loc or check_location_matches_waypoint(new_loc, appt_loc) or check_location_matches_waypoint(appt_loc, new_loc):
+                    a_name = str(appt.get("npc_name") or "").strip().lower()
+                    if a_name:
+                        appointment_targets.add(a_name)
+                        a_first = a_name.split()[0]
+                        if len(a_first) >= 3:
+                            appointment_targets.add(a_first)
         except Exception:
-
             pass
 
+    # When the player is in an active private appointment/rendezvous:
+    # Any old patrons who are not part of the appointment, formal party, or explicitly invited
+    # are treated as departed to maintain privacy and prevent companion bleed.
+    if appointment_targets:
+        for on in old_npcs:
+            on_name = game_engine._get_npc_name(on).strip().lower()
+            if on_name and on_name not in appointment_targets and on_name not in formal_party_names:
+                if not is_npc_invited_in_action(on_name, actions):
+                    departure_names.add(on_name)
+                    on_first = on_name.split()[0]
+                    if len(on_first) >= 3:
+                        departure_names.add(on_first)
 
+    # Mark departing NPCs' phone appointments as completed
+    if sess_id and departure_names:
+        try:
+            active_appts = db.get_phone_appointments(sess_id, status="arrived") + db.get_phone_appointments(sess_id, status="pending")
+            for appt in active_appts:
+                a_name = str(appt.get("npc_name", "")).strip().lower()
+                a_id = str(appt.get("npc_id", "")).strip().lower()
+                if a_name in departure_names or a_id in departure_names or any(d in a_name for d in departure_names):
+                    db.update_phone_appointment_status(sess_id, appt.get("npc_id", ""), "completed")
+        except Exception:
+            pass
 
     remote_npc_names = set()
-
     for c in known_contacts:
-
         c_name = str(c.get("name") or c.get("npc_id") or "").lower().strip()
-
         c_loc = c.get("location") or (c.get("basic_info") or {}).get("location") or ""
-
         if c_loc and c_name:
-
             c_zone = get_zone_location_name(c_loc)
-
             if c_zone and dest_zone and c_zone.lower() != dest_zone.lower():
-
                 # Check exemptions:
-
                 # 1. Is this NPC the intended target of travel or an active quest waypoint / appointment?
-
                 if is_rendezvous_target(c_name, actions=actions, session_id=sess_id, new_loc=new_loc):
-
                     continue
-
                 # 2. Campus Quad Mobility & Narrative Continuity for Mobile Characters
-
                 if is_character_mobile(c_name, c, scen_key):
-
                     has_bridge = is_campus_co_located(c_zone, dest_zone, scen_key) or has_narrative_continuity_bridge(c_name, session=session, actions=actions, new_loc=new_loc)
-
                     if has_bridge and has_active_physical_presence(c_name, result, full_narr):
-
                         continue
-
                 remote_npc_names.add(c_name)
 
-
-
     new_npcs = list(result.get("npcs_present") or [])
-
     if isinstance(new_npcs, str):
-
         new_npcs = [{"name": new_npcs}]
 
-
+    # In a private appointment/rendezvous, filter out hallucinated/ambient entities from initial new_npcs
+    if appointment_targets:
+        filtered_initial = []
+        for np in new_npcs:
+            np_name = game_engine._get_npc_name(np).strip().lower()
+            np_first = np_name.split()[0] if np_name else ""
+            if (np_name in appointment_targets or np_first in appointment_targets or
+                np_name in formal_party_names or is_npc_invited_in_action(np_name, actions)):
+                filtered_initial.append(np)
+            else:
+                departure_names.add(np_name)
+                if len(np_first) >= 3:
+                    departure_names.add(np_first)
+        new_npcs = filtered_initial
 
     # 1. Incorporate entity_audit present/speaking characters if provided by model
-
     entity_audit = result.get("entity_audit") or {}
-
     if isinstance(entity_audit, dict):
-
         audit_present = entity_audit.get("present_named_characters") or []
-
         if isinstance(audit_present, list):
-
             for a_name in audit_present:
-
                 if isinstance(a_name, str) and a_name.strip():
-
                     a_clean = a_name.strip().lower()
-
+                    a_first = a_clean.split()[0] if a_clean else ""
+                    if appointment_targets and a_clean not in appointment_targets and a_first not in appointment_targets and a_clean not in formal_party_names and not is_npc_invited_in_action(a_name, actions):
+                        continue
                     if a_clean not in player_names and a_clean not in departure_names:
-
                         new_npcs.append({"name": a_name.strip()})
 
         audit_speaking = entity_audit.get("speaking_characters") or []
-
         if isinstance(audit_speaking, list):
-
             for a_name in audit_speaking:
-
                 if isinstance(a_name, str) and a_name.strip():
-
                     a_clean = a_name.strip().lower()
-
+                    a_first = a_clean.split()[0] if a_clean else ""
+                    if appointment_targets and a_clean not in appointment_targets and a_first not in appointment_targets and a_clean not in formal_party_names and not is_npc_invited_in_action(a_name, actions):
+                        continue
                     if a_clean not in player_names and a_clean not in departure_names:
-
                         new_npcs.append({"name": a_name.strip()})
 
 
@@ -334,91 +402,60 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
                     m_lower = m_name.lower()
 
                     if m_lower in player_names or m_lower in departure_names:
-
                         continue
 
                     first_name = m_lower.split()[0] if len(m_lower.split()) > 1 else ""
-
                     if first_name and first_name in departure_names:
+                        continue
 
+                    if appointment_targets and m_lower not in appointment_targets and first_name not in appointment_targets and m_lower not in formal_party_names and not is_npc_invited_in_action(m_name, actions):
                         continue
 
                     # Check if mentioned only in absence/memory
-
                     if game_engine.is_mentioned_only_in_absence_or_memory(m_name, narr_prose):
-
                         continue
 
                     # Match full name or distinct first name (min 3 chars)
-
                     if m_lower in narr_prose or (first_name and len(first_name) >= 3 and (f" {first_name}" in narr_prose or f"—{first_name}" in narr_prose or f"-{first_name}" in narr_prose or narr_prose.startswith(first_name))):
-
                         from mechanics.world.mobility import is_mentioned_only_in_dialogue, has_active_physical_presence
-
                         if is_mentioned_only_in_dialogue(m_name, narr_prose):
-
                             continue
-
                         if not has_active_physical_presence(m_name, result, narrative_text=narr_prose):
-
                             continue
-
                         new_npcs.append({"name": m_name, "role": member.get("title", "")})
-
         except Exception:
-
             pass
 
-
-
-        # B. Local Contacts Scanner (only for contacts in the same zone, co-located campus realm, or rendezvous target)
-
+        # B. Local Contacts Scanner (only for contacts in the same zone, or rendezvous target)
         try:
-
             sess_contacts = db.get_contacts(session["id"])
-
             for c in sess_contacts:
-
                 c_name = str(c.get("name") or "").strip()
-
                 if not c_name:
-
                     continue
 
                 c_lower = c_name.lower()
-
                 if c_lower in player_names or c_lower in departure_names:
-
                     continue
 
                 first_name = c_lower.split()[0] if len(c_lower.split()) > 1 else ""
-
                 if first_name and first_name in departure_names:
+                    continue
 
+                if appointment_targets and c_lower not in appointment_targets and first_name not in appointment_targets and c_lower not in formal_party_names and not is_npc_invited_in_action(c_name, actions):
                     continue
 
                 # Check if mentioned only in absence/memory
-
                 if game_engine.is_mentioned_only_in_absence_or_memory(c_name, narr_prose):
-
                     continue
 
-
-
                 c_loc = c.get("location") or (c.get("basic_info") or {}).get("location") or ""
-
                 c_zone = get_zone_location_name(c_loc) if c_loc else ""
 
-
-
-                is_zone_match = bool(c_zone and dest_zone and (c_zone.lower() == dest_zone.lower() or is_campus_co_located(c_zone, dest_zone, scen_key)))
-
+                is_zone_match = bool(c_zone and dest_zone and c_zone.lower() == dest_zone.lower())
                 is_target = is_rendezvous_target(c_name, actions=actions, session_id=sess_id, new_loc=new_loc)
-
                 has_bridge = has_narrative_continuity_bridge(c_name, session=session, actions=actions, new_loc=new_loc)
-
                 if not is_zone_match and not is_target and not (has_bridge and is_character_mobile(c_name, c, scen_key)):
-
                     continue
 
                 if c_lower in narr_prose or (first_name and len(first_name) >= 4 and f" {first_name}" in narr_prose):
@@ -455,6 +492,51 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
         except Exception:
 
+            pass
+
+        # C. School Directory Roster Scanner (reconciles students/staff present in narrative or action targeting)
+        try:
+            if session.get("id"):
+                sess_roster = db.get_school_roster(session["id"])
+                for member in sess_roster:
+                    m_name = str(member.get("name") or "").strip()
+                    if not m_name:
+                        continue
+                    m_lower = m_name.lower()
+                    if m_lower in player_names or m_lower in departure_names:
+                        continue
+                    first_name = m_lower.split()[0] if len(m_lower.split()) > 1 else ""
+                    if first_name and first_name in departure_names:
+                        continue
+                    if appointment_targets and m_lower not in appointment_targets and first_name not in appointment_targets and m_lower not in formal_party_names and not is_npc_invited_in_action(m_name, actions):
+                        continue
+                    if game_engine.is_mentioned_only_in_absence_or_memory(m_name, narr_prose):
+                        continue
+
+                    was_already_present = any(game_engine._get_npc_name(old_n).lower() == m_lower for old_n in old_npcs)
+                    in_narrative = m_lower in narr_prose or (first_name and len(first_name) >= 3 and (f" {first_name}" in narr_prose or f"—{first_name}" in narr_prose or f"-{first_name}" in narr_prose or narr_prose.startswith(first_name)))
+                    in_action = was_already_present and actions and any(m_lower in str(a).lower() or (first_name and len(first_name) >= 3 and f" {first_name} " in f" {str(a).lower()} ") for a in actions)
+
+                    if in_narrative or in_action:
+                        from mechanics.world.mobility import is_mentioned_only_in_dialogue, has_active_physical_presence
+                        if is_mentioned_only_in_dialogue(m_name, narr_prose) and not in_action:
+                            continue
+                        if not has_active_physical_presence(m_name, result, narrative_text=narr_prose) and not in_action:
+                            continue
+
+                        if not any(game_engine._get_npc_name(n).lower() == m_lower for n in new_npcs):
+                            new_npcs.append({
+                                "name": m_name,
+                                "role": member.get("role", "") or member.get("grade", ""),
+                                "grade": member.get("grade", ""),
+                                "club": member.get("club", ""),
+                                "clique": member.get("clique", ""),
+                                "race": member.get("race", ""),
+                                "gender": member.get("gender", ""),
+                                "location": member.get("primary_facility", ""),
+                                "description": member.get("personality_summary", ""),
+                            })
+        except Exception:
             pass
 
 
@@ -525,6 +607,22 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
 
 
+    first_to_canon, full_canon_case = _build_canonical_name_resolver(
+        session, old_npcs, (new_npcs + new_entity_npcs), known_contacts
+    )
+
+    def _resolve_canonical_name(raw_name: any) -> str:
+        if not raw_name or not isinstance(raw_name, str):
+            return raw_name or ""
+        s = raw_name.strip()
+        low = s.lower()
+        if low in full_canon_case:
+            return full_canon_case[low]
+        parts = s.split()
+        if len(parts) == 1 and low in first_to_canon:
+            return first_to_canon[low]
+        return s
+
     seen_names: dict[str, dict] = {}
 
     combined_new_npcs = []
@@ -533,7 +631,11 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
         if isinstance(n, dict):
 
-            name_clean = str(n.get("name") or "").strip().lower()
+            raw_name = str(n.get("name") or "").strip()
+
+            canon_name = _resolve_canonical_name(raw_name)
+
+            name_clean = canon_name.strip().lower()
 
             is_comp = (name_clean in formal_party_names) or bool(n.get("is_permanent_party"))
 
@@ -549,9 +651,16 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
                 continue
 
+            import namegen
+            if not namegen.is_valid_entity_name(name_clean) or namegen.is_collective_entity_name(name_clean):
+
+                continue
+
             if name_clean not in seen_names:
 
                 n_copy = dict(n)
+
+                n_copy["name"] = canon_name
 
                 seen_names[name_clean] = n_copy
 
@@ -569,15 +678,24 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
         elif isinstance(n, str) and n.strip():
 
-            name_clean = n.strip().lower()
+            raw_name = n.strip()
+
+            canon_name = _resolve_canonical_name(raw_name)
+
+            name_clean = canon_name.strip().lower()
 
             if name_clean in player_names or name_clean in departure_names or name_clean in remote_npc_names or name_clean in enemy_names:
 
                 continue
 
+            import namegen
+            if not namegen.is_valid_entity_name(name_clean) or namegen.is_collective_entity_name(name_clean):
+
+                continue
+
             if name_clean and name_clean not in seen_names:
 
-                n_copy = {"name": n.strip()}
+                n_copy = {"name": canon_name}
 
                 seen_names[name_clean] = n_copy
 
@@ -745,12 +863,20 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
             for n in combined_new_npcs:
 
-                n_clean = game_engine._get_npc_name(n).lower()
+                n_clean = game_engine._get_npc_name(n).lower().strip()
+                n_first = (n_clean.split() or [""])[0]
 
-                if n_clean in left_behind_names and n_clean not in newly_recruited:
+                is_left_behind = (
+                    n_clean in left_behind_names
+                    or (len(n_first) >= 3 and any(
+                        lbn == n_clean or (len(lbn.split()[0]) >= 3 and lbn.split()[0] == n_first)
+                        for lbn in left_behind_names
+                    ))
+                )
+
+                if is_left_behind and n_clean not in newly_recruited:
 
                     # Defense-in-depth: Do not filter if the NPC has a narrative continuity bridge AND active physical presence at destination
-
                     if has_narrative_continuity_bridge(n_clean, session=session, actions=actions, new_loc=new_loc):
 
                         if has_active_physical_presence(n_clean, result, dest_narr or full_narr):
@@ -766,14 +892,31 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
             combined_new_npcs = filtered_combined_new
 
         else:
-
-            carried_old_npcs = [
-
-                npc for npc in old_npcs
-
-                if game_engine._get_npc_name(npc).lower() not in departure_names
-
-            ]
+            if old_loc and new_loc and old_loc.lower() != new_loc.lower():
+                # Sub-location / room transition within the same venue:
+                # Do NOT carry over ambient bystanders from old_loc (e.g. coach running drills in Main Area).
+                # Only carry over active dialogue partners, invited NPCs, party members, or NPCs with verified continuity/presence.
+                dest_narr = (
+                    str(result.get("next_narrative") or "") + " " +
+                    str(result.get("narrative") or "") + " " +
+                    str(result.get("scene_text") or "")
+                ).strip()
+                carried_old_npcs = []
+                for npc in old_npcs:
+                    n_nm = game_engine._get_npc_name(npc)
+                    if not n_nm or n_nm.lower() in departure_names:
+                        continue
+                    is_dp = is_dialogue_partner(n_nm, session=session)
+                    is_invited = is_npc_invited_in_action(n_nm, actions or [])
+                    is_party = any(n_nm.lower() == (p[0].get("name", "").lower() if isinstance(p, (tuple, list)) else "") for p in (session.get("party") or [])) if session else False
+                    has_bridge = has_narrative_continuity_bridge(n_nm, session=session, actions=actions, new_loc=new_loc)
+                    if is_dp or is_invited or is_party or (has_bridge and has_active_physical_presence(n_nm, result, dest_narr or full_narr)):
+                        carried_old_npcs.append(npc)
+            else:
+                carried_old_npcs = [
+                    npc for npc in old_npcs
+                    if game_engine._get_npc_name(npc).lower() not in departure_names
+                ]
 
 
 
@@ -819,13 +962,28 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
         for n in (carried_old_npcs + combined_new_npcs):
 
-            name_clean = game_engine._get_npc_name(n).lower()
+            raw_name = game_engine._get_npc_name(n)
 
-            if name_clean and name_clean != "none" and name_clean not in player_names and name_clean not in enemy_names and name_clean not in departure_names:
+            canon_name = _resolve_canonical_name(raw_name)
+
+            name_clean = canon_name.lower().strip()
+
+            import namegen
+            if (
+                name_clean
+                and name_clean != "none"
+                and name_clean not in player_names
+                and name_clean not in enemy_names
+                and name_clean not in departure_names
+                and namegen.is_valid_entity_name(name_clean)
+                and not namegen.is_collective_entity_name(name_clean)
+            ):
 
                 if name_clean not in final_by_name:
 
-                    n_dict = dict(n) if isinstance(n, dict) else {"name": game_engine._get_npc_name(n)}
+                    n_dict = dict(n) if isinstance(n, dict) else {"name": canon_name}
+
+                    n_dict["name"] = canon_name
 
                     final_by_name[name_clean] = n_dict
 
@@ -865,13 +1023,28 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
         for n in (retained_old + combined_new_npcs):
 
-            name_clean = game_engine._get_npc_name(n).lower()
+            raw_name = game_engine._get_npc_name(n)
 
-            if name_clean and name_clean != "none" and name_clean not in player_names and name_clean not in enemy_names and name_clean not in departure_names:
+            canon_name = _resolve_canonical_name(raw_name)
+
+            name_clean = canon_name.lower().strip()
+
+            import namegen
+            if (
+                name_clean
+                and name_clean != "none"
+                and name_clean not in player_names
+                and name_clean not in enemy_names
+                and name_clean not in departure_names
+                and namegen.is_valid_entity_name(name_clean)
+                and not namegen.is_collective_entity_name(name_clean)
+            ):
 
                 if name_clean not in final_by_name:
 
-                    n_dict = dict(n) if isinstance(n, dict) else {"name": game_engine._get_npc_name(n)}
+                    n_dict = dict(n) if isinstance(n, dict) else {"name": canon_name}
+
+                    n_dict["name"] = canon_name
 
                     final_by_name[name_clean] = n_dict
 
@@ -1075,7 +1248,7 @@ def _sanitize_outcome_person_names(outcome: dict, session_id: int, scen_key: str
 
     authentic canonical name (linking to matching faction leader if applicable)."""
 
-    from namegen import is_generic_role_name, generate_person_name
+    from namegen import is_generic_role_name, generate_person_name, is_valid_entity_name
 
     if not isinstance(outcome, dict):
 
@@ -1159,7 +1332,7 @@ def _sanitize_outcome_person_names(outcome: dict, session_id: int, scen_key: str
 
 
 
-        if is_generic_role_name(raw_name) or has_role_word:
+        if is_generic_role_name(raw_name) or has_role_word or not is_valid_entity_name(raw_name):
 
             # 1. Check if any token is a known name token
 
@@ -1203,9 +1376,9 @@ def _sanitize_outcome_person_names(outcome: dict, session_id: int, scen_key: str
 
                 return best_match
 
-            # Fallback: generate a fresh name if it was a generic role
+            # Fallback: generate a fresh name if it was a generic role or invalid entity name
 
-            if is_generic_role_name(raw_name):
+            if is_generic_role_name(raw_name) or not is_valid_entity_name(raw_name):
 
                 return generate_person_name(scen_key, gender=gender)
 

@@ -1,4 +1,11 @@
 from __future__ import annotations
+from .constants import (
+    ASSET_SIZE_TIERS,
+    FEMALE_ASSET_TEXTURE_TEMPLATES,
+    MALE_ASSET_TEXTURE_TEMPLATES,
+    SPECIES_TEXTURE_AFFINITIES,
+    TIER_INCOMPATIBLE_TEXTURES,
+)
 from .constants import *
 import json
 import hashlib
@@ -61,6 +68,158 @@ def extract_appearance_from_text(text: str, name: str = "") -> Dict[str, str]:
         extracted["hair_color"] = m_hair.group(1).lower()
 
     return extracted
+
+
+def classify_asset_size_tier(size_str: str, gender: str = "female") -> str:
+    """Classifies anatomy size string into one of 5 canonical tiers:
+    'flat', 'small', 'average', 'large', 'huge'.
+    """
+    if not size_str or not isinstance(size_str, str):
+        return "average"
+    s_low = size_str.lower().strip()
+
+    is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
+
+    if is_male:
+        if any(w in s_low for w in ("tiny", "micro", "very small", "puny")):
+            return "flat"
+        if any(w in s_low for w in ("small", "modest", "compact", "petite", "below average")):
+            return "small"
+        if any(w in s_low for w in ("huge", "massive", "enormous", "gigantic", "hyper")):
+            return "huge"
+        if any(w in s_low for w in ("large", "thick", "above average", "heavy", "big", "generous")):
+            return "large"
+        return "average"
+    else:
+        # Female / Breasts
+        if any(w in s_low for w in ("aa-cup", "aaa-cup", "flat", "tiny", "barely", "almost flat")):
+            return "flat"
+        if any(w in s_low for w in ("a-cup", "b-cup", "small", "petite", "modest b", "perky b", "soft a")):
+            return "small"
+        if any(w in s_low for w in ("e-cup", "f-cup", "g-cup", "h-cup", "huge", "massive", "hyper", "bountiful e", "bountiful")):
+            return "huge"
+        if any(w in s_low for w in ("d-cup", "dd-cup", "large", "heavy d", "voluptuous d", "generous dd", "full d")):
+            return "large"
+        if any(w in s_low for w in ("c-cup", "average", "medium", "moderate", "shapely c", "full c", "toned c")):
+            return "average"
+        if any(w in s_low for w in ("voluptuous", "stacked", "busty", "heavy")):
+            return "large"
+        if any(w in s_low for w in ("petite", "slender", "modest", "perky")):
+            return "small"
+        return "average"
+
+
+def extract_asset_texture(size_str: str, gender: str = "female") -> str:
+    """Extracts known tactile/shape trait from a compound size string (e.g. 'Soft A-Cup' -> 'Soft & Delicate')."""
+    if not size_str or not isinstance(size_str, str):
+        return ""
+    s_low = size_str.lower().strip()
+    is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
+    templates = MALE_ASSET_TEXTURE_TEMPLATES if is_male else FEMALE_ASSET_TEXTURE_TEMPLATES
+
+    for t in templates:
+        if t.lower() in s_low:
+            return t
+        t_first = t.split("&")[0].strip().lower()
+        if len(t_first.split()) >= 2 and t_first in s_low:
+            return t
+
+    if "perky" in s_low:
+        return "Perky & High-Set"
+    if "fluffy" in s_low or "fur" in s_low:
+        return "Soft & Downy Chest Fur"
+    if "firm" in s_low:
+        return "Firm & Toned"
+    if "pillowy" in s_low:
+        return "Pillowy Soft & Yielding"
+    if "soft" in s_low:
+        if not is_male:
+            tier = classify_asset_size_tier(size_str, gender="female")
+            return "Tender & Delicate" if tier in ("flat", "small") else "Pillowy Soft & Yielding"
+        return "Smooth & Supple"
+    if "veined" in s_low:
+        return "Veined & Firm"
+    if "scale" in s_low:
+        return "Silky Warm with Smooth Micro-Scales"
+    if "feather" in s_low:
+        return "Downy Feather-Lined"
+    if "bouncy" in s_low:
+        return "Bouncy & Sensitive"
+    if "heavy" in s_low:
+        return "Heavy & Plush" if not is_male else "Smooth & Heavy"
+    return ""
+
+
+def roll_dynamic_asset_texture(
+    seed_val: Any = 0,
+    gender: str = "female",
+    race: str = "human",
+    physique: str = "",
+    demeanor: str = "",
+    size_tier: str = "average",
+    seed: Any = None,
+) -> str:
+    """Rolls a tactile texture/shape trait from the open template pool with a +20% weighted
+    synergy boost for matching criteria, strictly filtering out tier-incompatible traits.
+    """
+    raw_seed = seed if seed is not None else seed_val
+    if isinstance(raw_seed, str):
+        try:
+            effective_seed = int(raw_seed)
+        except ValueError:
+            effective_seed = int(hashlib.md5(raw_seed.encode("utf-8")).hexdigest()[:8], 16)
+    else:
+        try:
+            effective_seed = int(raw_seed)
+        except (ValueError, TypeError):
+            effective_seed = 0
+
+    is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
+    pool = list(MALE_ASSET_TEXTURE_TEMPLATES if is_male else FEMALE_ASSET_TEXTURE_TEMPLATES)
+
+    # 1. Apply tier incompatibility exclusion filter
+    incompat = TIER_INCOMPATIBLE_TEXTURES.get(size_tier, set())
+    candidate_pool = [t for t in pool if t not in incompat]
+    if not candidate_pool:
+        candidate_pool = pool
+
+    # 2. Identify synergies for the 20% weight boost
+    r_low = str(race or "").lower()
+    p_low = str(physique or "").lower()
+    d_low = str(demeanor or "").lower()
+
+    synergy_candidates = set()
+    if any(k in r_low for k in ("fox", "cat", "wolf", "neko", "kitsune", "rabbit", "bunny", "tiger", "lion", "bear", "mouse", "beastfolk", "beast")):
+        synergy_candidates.update(SPECIES_TEXTURE_AFFINITIES.get("furred", []))
+    if any(k in r_low for k in ("reptile", "dragon", "snake", "lizard", "draconic", "scaly")):
+        synergy_candidates.update(SPECIES_TEXTURE_AFFINITIES.get("scaled", []))
+    if any(k in r_low for k in ("bird", "avian", "harpy", "feathered", "angel")):
+        synergy_candidates.update(SPECIES_TEXTURE_AFFINITIES.get("feathered", []))
+    if any(k in r_low for k in ("aquatic", "merfolk", "siren", "fish")):
+        synergy_candidates.update(SPECIES_TEXTURE_AFFINITIES.get("aquatic", []))
+
+    if any(k in p_low for k in ("toned", "athletic", "muscular", "lean", "fit")):
+        synergy_candidates.update(SPECIES_TEXTURE_AFFINITIES.get("athletic", []))
+    if any(k in p_low for k in ("voluptuous", "curvy", "busty", "full-figured", "stacked", "hourglass")):
+        synergy_candidates.update(SPECIES_TEXTURE_AFFINITIES.get("voluptuous", []))
+
+    # 3. Construct weights (Base = 10; Synergy = 12, a +20% boost)
+    weights = []
+    for item in candidate_pool:
+        w = 12 if item in synergy_candidates else 10
+        weights.append(w)
+
+    total_weight = sum(weights)
+    if total_weight <= 0:
+        return candidate_pool[abs(effective_seed) % len(candidate_pool)]
+
+    pick_val = abs(effective_seed) % total_weight
+    cumulative = 0
+    for item, w in zip(candidate_pool, weights):
+        cumulative += w
+        if pick_val < cumulative:
+            return item
+    return candidate_pool[0]
 
 
 def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "", race: str = "human", scen_key: str = "fantasy", desc: Any = "", traits: List[str] = None, role: str = "") -> Dict[str, Any]:
@@ -218,10 +377,11 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
     # Scenario-gated NSFW body attributes
     has_explicit_intimate = any(
         app_dict.get(k) for k in (
-            "breast_size", "penis_size", "turn_ons", "sensitive_spots",
+            "breast_size", "penis_size", "asset_texture", "turn_ons", "sensitive_spots",
             "fetishes", "intimate_demeanor", "intimate_dynamic",
             "act_likes", "act_dislikes", "undergarments", "bra", "underwear",
-            "predetermined_intercourse", "intercourse_experience", "intimate_revealed"
+            "predetermined_intercourse", "intercourse_experience", "intimate_revealed",
+            "turn_offs", "desires_and_kinks", "turn_offs_revealed"
         )
     )
     if is_nsfw_scenario(scen_key) or has_explicit_intimate:
@@ -276,6 +436,27 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
             open_val = openness_fallback
         result["erotic_openness"] = str(open_val).strip()
 
+        # Resolve tactile asset texture with coherence guardrail
+        curr_tier = classify_asset_size_tier(result.get("penis_size" if is_male else "breast_size", ""), "male" if is_male else "female")
+        incompat_set = TIER_INCOMPATIBLE_TEXTURES.get(curr_tier, set())
+
+        tex_val = app_dict.get("asset_texture")
+        if not tex_val or str(tex_val).lower() in ("none", "unknown", ""):
+            tex_val = extract_asset_texture(result.get("penis_size" if is_male else "breast_size", ""), "male" if is_male else "female")
+
+        # Incompatibility guard: if tex_val contradicts the size tier, re-roll a compatible texture
+        if not tex_val or str(tex_val).lower() in ("none", "unknown", "") or any(inc.lower() in str(tex_val).lower() for inc in incompat_set):
+            tex_val = roll_dynamic_asset_texture(
+                hash_val,
+                gender="male" if is_male else "female",
+                race=race,
+                physique=physique,
+                demeanor=result.get("intimate_demeanor", ""),
+                size_tier=curr_tier,
+            )
+        if tex_val:
+            result["asset_texture"] = str(tex_val).strip()
+
         # Dynamic procedural generator for fallback with dynamic synergy
         dyn_intimate = generate_dynamic_intimate_attributes(hash_val, race=race, gender=gender, dynamic=result["intimate_dynamic"], openness=result["erotic_openness"])
 
@@ -287,6 +468,8 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
         has_oral_rec = False
         has_manual_give = False
         has_manual_rec = False
+        has_anal_give = False
+        has_anal_rec = False
         has_intercourse_mem = False
 
         for m in mems:
@@ -299,6 +482,10 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
                 has_manual_give = True
             if any(k in m_l for k in MANUAL_RECEIVE_MEMORY_KEYWORDS):
                 has_manual_rec = True
+            if any(k in m_l for k in ANAL_GIVE_MEMORY_KEYWORDS):
+                has_anal_give = True
+            if any(k in m_l for k in ANAL_RECEIVE_MEMORY_KEYWORDS):
+                has_anal_rec = True
             if any(k in m_l for k in INTERCOURSE_MEMORY_KEYWORDS):
                 has_intercourse_mem = True
 
@@ -403,30 +590,65 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
             if has_manual_rec:
                 manual_val = merge_manual_states(manual_val, "has_received_manual")
 
+        # 5. Determine Active Anal State
+        anal_input = str(app_dict.get("anal_experience") or app_dict.get("anal") or "").strip().lower()
+        if pred_intercourse == "virgin":
+            if mems:
+                if has_anal_give and has_anal_rec:
+                    anal_val = "has_done_and_received_anal"
+                elif has_anal_give:
+                    anal_val = "has_done_anal"
+                elif has_anal_rec:
+                    anal_val = "has_received_anal"
+                elif anal_input in ANAL_INTIMACY_STATES and anal_input not in ("inexperienced", "unknown"):
+                    anal_val = anal_input
+                else:
+                    anal_val = anal_input if anal_input == "inexperienced" else dyn_intimate.get("anal", "inexperienced")
+            elif anal_input in ANAL_INTIMACY_STATES and anal_input not in ("unknown",):
+                anal_val = anal_input
+            else:
+                anal_val = dyn_intimate.get("anal", "inexperienced")
+        elif anal_input in ANAL_INTIMACY_STATES and anal_input != "unknown":
+            anal_val = anal_input
+        elif pred_intercourse == "non_virgin":
+            anal_val = dyn_intimate.get("anal", "inexperienced")
+        else:
+            anal_val = dyn_intimate.get("anal", "inexperienced")
+
+        if pred_intercourse != "virgin":
+            if has_anal_give:
+                anal_val = merge_anal_states(anal_val, "has_done_anal")
+            if has_anal_rec:
+                anal_val = merge_anal_states(anal_val, "has_received_anal")
+
         result["predetermined_intercourse"] = pred_intercourse
         result["intercourse_experience"] = intercourse_val
         result["oral_experience"] = oral_val
         result["manual_experience"] = manual_val
+        result["anal_experience"] = anal_val
 
-        # Turn-ons (Physical + Action)
+        # Turn-ons and Sensitive Spots
         custom_turns = clean_attribute_list_string(app_dict.get("turn_ons"))
-        if is_valid_persona_attribute_string(custom_turns):
-            sanitized_turns = sanitize_sensitive_spots_for_species(custom_turns, race=race, distinctive_features=result.get("distinctive_features", ""))
-            result["turn_ons"] = sanitized_turns
-        elif custom_turns and custom_turns.lower() == "none":
-            result["turn_ons"] = ""
-        else:
-            result["turn_ons"] = dyn_intimate["turn_ons"]
-
-        # Sensitive Spots (Erogenous Zones)
         custom_spots = clean_attribute_list_string(app_dict.get("sensitive_spots") or app_dict.get("erogenous_zones"))
-        if is_valid_persona_attribute_string(custom_spots):
-            sanitized_spots = sanitize_sensitive_spots_for_species(custom_spots, race=race, distinctive_features=result.get("distinctive_features", ""))
-            result["sensitive_spots"] = sanitized_spots
-        elif custom_spots and custom_spots.lower() == "none":
+
+        if custom_turns and custom_turns.lower() == "none" and custom_spots and custom_spots.lower() == "none":
+            result["turn_ons"] = ""
             result["sensitive_spots"] = ""
+        elif is_valid_persona_attribute_string(custom_spots) or is_valid_persona_attribute_string(custom_turns):
+            raw_s = custom_spots if is_valid_persona_attribute_string(custom_spots) else ""
+            raw_t = custom_turns if is_valid_persona_attribute_string(custom_turns) else ""
+            part_spots, part_turns = partition_sensitivities_and_turn_ons(raw_s, raw_t, race=race)
+
+            if not part_spots and not (custom_spots and custom_spots.lower() == "none"):
+                part_spots = dyn_intimate.get("sensitive_spots") or ""
+            if not part_turns and not (custom_turns and custom_turns.lower() == "none"):
+                part_turns = dyn_intimate.get("turn_ons") or ""
+
+            result["sensitive_spots"] = sanitize_sensitive_spots_for_species(part_spots, race=race, distinctive_features=result.get("distinctive_features", ""))
+            result["turn_ons"] = sanitize_sensitive_spots_for_species(part_turns, race=race, distinctive_features=result.get("distinctive_features", ""))
         else:
-            result["sensitive_spots"] = result["turn_ons"]
+            result["sensitive_spots"] = "" if (custom_spots and custom_spots.lower() == "none") else (dyn_intimate.get("sensitive_spots") or "")
+            result["turn_ons"] = "" if (custom_turns and custom_turns.lower() == "none") else (dyn_intimate.get("turn_ons") or "")
 
         # Fetishes & Kinks: store full cleaned value (no truncation after first comma)
         custom_fetishes = clean_attribute_list_string(app_dict.get("fetishes"))
@@ -437,37 +659,91 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
         else:
             result["fetishes"] = dyn_intimate["fetishes"]
 
+        # Turn-offs (Aversions / Mood-killers)
+        custom_offs = clean_attribute_list_string(app_dict.get("turn_offs") or app_dict.get("dislikes_intimate") or app_dict.get("aversions"))
+        if is_valid_persona_attribute_string(custom_offs):
+            result["turn_offs"] = custom_offs
+        elif custom_offs and custom_offs.lower() == "none":
+            result["turn_offs"] = ""
+        else:
+            result["turn_offs"] = dyn_intimate.get("turn_offs", "")
+
+        # Desires & Kinks alias (ensuring active kinks fold cleanly into desires)
+        result["desires_and_kinks"] = result["turn_ons"]
+        if result.get("fetishes") and result["fetishes"].lower() not in ("none", "none (vanilla)", "unknown", ""):
+            if result["fetishes"].lower() not in result["turn_ons"].lower():
+                combined = f"{result['turn_ons']}, {result['fetishes']}".strip(", ")
+                result["turn_ons"] = combined
+                result["desires_and_kinks"] = combined
+
         # Act & Position Preferences: Likes & Dislikes
         custom_likes = clean_attribute_list_string(app_dict.get("act_likes") or app_dict.get("preferred_acts"))
         custom_dislikes = clean_attribute_list_string(app_dict.get("act_dislikes") or app_dict.get("disliked_acts"))
+
+        legacy_kink_kws = ("mirror", "public thrill", "pinned down", "dirty talk", "restraint")
+        migrated_kinks = []
+        if custom_likes:
+            filtered_likes = []
+            for item in [x.strip() for x in custom_likes.split(",") if x.strip()]:
+                if any(kw in item.lower() for kw in legacy_kink_kws):
+                    migrated_kinks.append(item)
+                else:
+                    filtered_likes.append(item)
+            custom_likes = ", ".join(filtered_likes)
+
+        if migrated_kinks:
+            curr_desires = result.get("desires_and_kinks") or result.get("turn_ons") or ""
+            if not curr_desires:
+                result["desires_and_kinks"] = ", ".join(migrated_kinks)
+                result["turn_ons"] = result["desires_and_kinks"]
+            else:
+                for mk in migrated_kinks:
+                    if mk.lower() not in curr_desires.lower():
+                        curr_desires = f"{curr_desires}, {mk}".strip(", ")
+                result["desires_and_kinks"] = curr_desires
+                result["turn_ons"] = curr_desires
+
         result["act_likes"] = custom_likes if is_valid_persona_attribute_string(custom_likes) else dyn_intimate["act_likes"]
         result["act_dislikes"] = custom_dislikes if is_valid_persona_attribute_string(custom_dislikes) else dyn_intimate["act_dislikes"]
 
         # Undergarments (Bra & Underwear)
+        def _clean_under_color(text: Any) -> str:
+            if not text:
+                return ""
+            return re.sub(r'\bNude\s*/\s*Beige\b', 'Beige / Skin-Tone', str(text), flags=re.I)
+
         custom_under = app_dict.get("undergarments")
         if isinstance(custom_under, dict) and (custom_under.get("bra") or custom_under.get("underwear")):
             result["undergarments"] = {
-                "bra": str(custom_under.get("bra", "")).strip(),
-                "underwear": str(custom_under.get("underwear", "")).strip()
+                "bra": _clean_under_color(custom_under.get("bra", "")).strip(),
+                "underwear": _clean_under_color(custom_under.get("underwear", "")).strip()
             }
         elif isinstance(custom_under, str) and custom_under.strip() and custom_under.lower() not in ("unknown", "n/a", "none"):
+            cleaned_cu = _clean_under_color(custom_under.strip())
             if is_male:
-                result["undergarments"] = {"bra": "", "underwear": custom_under.strip()}
+                result["undergarments"] = {"bra": "", "underwear": cleaned_cu}
             else:
-                result["undergarments"] = {"bra": custom_under.strip(), "underwear": f"Matching {custom_under.strip()}"}
+                result["undergarments"] = {"bra": cleaned_cu, "underwear": f"Matching {cleaned_cu}"}
         elif app_dict.get("bra") or app_dict.get("underwear"):
             result["undergarments"] = {
-                "bra": str(app_dict.get("bra", "")).strip(),
-                "underwear": str(app_dict.get("underwear", "")).strip()
+                "bra": _clean_under_color(app_dict.get("bra", "")).strip(),
+                "underwear": _clean_under_color(app_dict.get("underwear", "")).strip()
             }
         else:
-            result["undergarments"] = dyn_intimate["undergarments"]
+            dyn_under = dyn_intimate.get("undergarments", {})
+            if isinstance(dyn_under, dict):
+                result["undergarments"] = {
+                    "bra": _clean_under_color(dyn_under.get("bra", "")),
+                    "underwear": _clean_under_color(dyn_under.get("underwear", ""))
+                }
+            else:
+                result["undergarments"] = dyn_under
 
     # Preserve all revealed flags and metadata state from input dictionary
     for flag_k in (
         "intimate_revealed", "intercourse_revealed", "oral_revealed", "manual_revealed",
         "demeanor_revealed", "dynamic_revealed", "openness_revealed",
-        "sensitive_spots_revealed", "turn_ons_revealed", "fetishes_revealed",
+        "sensitive_spots_revealed", "turn_ons_revealed", "turn_offs_revealed", "fetishes_revealed",
         "act_preferences_revealed", "mannerisms_revealed", "underwear_revealed", "all_revealed",
         "had_first_time_with_player", "intimate_memories", "past_intimate_history", "past_intimate_entries"
     ):
@@ -491,9 +767,9 @@ def merge_appearance_safely(existing_app: Dict[str, Any], incoming_app: Dict[str
 
     # 1. Snapshot one-way reveal flags BEFORE merging
     _one_way_true_flags = (
-        "intercourse_revealed", "oral_revealed", "manual_revealed",
+        "intercourse_revealed", "oral_revealed", "manual_revealed", "anal_revealed",
         "intimate_revealed", "demeanor_revealed", "dynamic_revealed", "openness_revealed",
-        "sensitive_spots_revealed", "turn_ons_revealed", "fetishes_revealed",
+        "sensitive_spots_revealed", "turn_ons_revealed", "turn_offs_revealed", "fetishes_revealed",
         "act_preferences_revealed", "underwear_revealed", "had_first_time_with_player", "all_revealed", "mannerisms_revealed"
     )
     prior_trues = {f for f in _one_way_true_flags if merged.get(f)}
@@ -505,6 +781,8 @@ def merge_appearance_safely(existing_app: Dict[str, Any], incoming_app: Dict[str
     incoming_oral = incoming_app.get("oral_experience")
     existing_manual = merged.get("manual_experience", "inexperienced")
     incoming_manual = incoming_app.get("manual_experience")
+    existing_anal = merged.get("anal_experience", "inexperienced")
+    incoming_anal = incoming_app.get("anal_experience")
 
     # 3. Apply incoming data
     for k, v in incoming_app.items():
@@ -524,6 +802,7 @@ def merge_appearance_safely(existing_app: Dict[str, Any], incoming_app: Dict[str
             "intimate_dynamic", "dynamic",
             "erotic_openness", "openness",
             "turn_ons", "sensitive_spots", "erogenous_zones",
+            "turn_offs", "aversions", "dislikes_intimate", "desires_and_kinks",
             "fetishes", "kinks",
             "act_likes", "favorite_acts", "preferred_acts",
             "act_dislikes", "disliked_acts"
@@ -553,7 +832,7 @@ def merge_appearance_safely(existing_app: Dict[str, Any], incoming_app: Dict[str
             if v and v != "[]" and v != []:
                 merged[k] = v
             continue
-        elif k in ("predetermined_intercourse", "intercourse_experience", "oral_experience", "manual_experience"):
+        elif k in ("predetermined_intercourse", "intercourse_experience", "oral_experience", "manual_experience", "anal_experience"):
             # Managed by experience ratchets below
             continue
         else:
@@ -566,6 +845,8 @@ def merge_appearance_safely(existing_app: Dict[str, Any], incoming_app: Dict[str
     has_oral_rec = any(any(k in str(m).lower() for k in ORAL_RECEIVE_MEMORY_KEYWORDS) for m in mems)
     has_manual_give = any(any(k in str(m).lower() for k in MANUAL_GIVE_MEMORY_KEYWORDS) for m in mems)
     has_manual_rec = any(any(k in str(m).lower() for k in MANUAL_RECEIVE_MEMORY_KEYWORDS) for m in mems)
+    has_anal_give = any(any(k in str(m).lower() for k in ANAL_GIVE_MEMORY_KEYWORDS) for m in mems)
+    has_anal_rec = any(any(k in str(m).lower() for k in ANAL_RECEIVE_MEMORY_KEYWORDS) for m in mems)
     had_first_time = bool(merged.get("had_first_time_with_player") or incoming_app.get("had_first_time_with_player"))
 
     existing_pred_i = str(existing_app.get("predetermined_intercourse") or "virgin").strip().lower()
@@ -583,6 +864,7 @@ def merge_appearance_safely(existing_app: Dict[str, Any], incoming_app: Dict[str
         merged["intercourse_experience"] = "virgin"
         merged["oral_experience"] = existing_oral if existing_oral in ORAL_INTIMACY_STATES else "inexperienced"
         merged["manual_experience"] = existing_manual if existing_manual in MANUAL_INTIMACY_STATES else "inexperienced"
+        merged["anal_experience"] = existing_anal if existing_anal in ANAL_INTIMACY_STATES else "inexperienced"
     else:
         # Live encounter or verified update
         if existing_pred_i == "virgin" and incoming_intercourse == "non_virgin":
@@ -590,8 +872,7 @@ def merge_appearance_safely(existing_app: Dict[str, Any], incoming_app: Dict[str
         merged["intercourse_experience"] = merge_intercourse_states(existing_intercourse, incoming_intercourse)
         merged["oral_experience"] = merge_oral_states(existing_oral, incoming_oral)
         merged["manual_experience"] = merge_manual_states(existing_manual, incoming_manual)
-
-
+        merged["anal_experience"] = merge_anal_states(existing_anal, incoming_anal)
 
     merged = enforce_intimacy_safeguard_invariants(merged)
 
@@ -604,8 +885,9 @@ def merge_appearance_safely(existing_app: Dict[str, Any], incoming_app: Dict[str
 
 from .logic import (
     infer_intimate_dynamic_from_traits, infer_erotic_openness_from_traits,
-    enforce_intimacy_safeguard_invariants, merge_manual_states,
+    enforce_intimacy_safeguard_invariants, merge_manual_states, merge_anal_states,
     infer_intimate_demeanor_from_traits, merge_intercourse_states,
-    merge_oral_states, sanitize_sensitive_spots_for_species
+    merge_oral_states, sanitize_sensitive_spots_for_species,
+    partition_sensitivities_and_turn_ons
 )
 from .generation import generate_dynamic_intimate_attributes

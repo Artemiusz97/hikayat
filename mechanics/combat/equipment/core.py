@@ -75,7 +75,8 @@ def generate_random_equipment(
             "archetype": arch_key,
             "stat_modifiers": {},
             "is_cosmetic": True,
-            "tags": ["Cosmetic", "Non-Combat"]
+            "is_narrative": True,
+            "tags": ["narrative", "Cosmetic", "Non-Combat"]
         }
         if item_type == "Armor":
             metadata["armor_type"] = base_data.get("armor_type", "clothing")
@@ -98,8 +99,8 @@ def generate_random_equipment(
             "slot_cost": 1
         }
 
-    scen_key = scenario.lower() if scenario.lower() in SCENARIO_AFFIXES else "fantasy"
-    scen_affixes = SCENARIO_AFFIXES[scen_key]
+    scen_key = normalize_equipment_scenario(scenario)
+    scen_affixes = SCENARIO_AFFIXES.get(scen_key, SCENARIO_AFFIXES["fantasy"])
 
     if slot == "Weapon":
         archetype = random.choice(list(WEAPON_ARCHETYPES.keys()))
@@ -189,7 +190,11 @@ def generate_random_equipment(
     dominant_theme = random.choice(rolled_themes) if rolled_themes else "arcane"
     theme_dict = THEME_VOCABULARY.get(dominant_theme, THEME_VOCABULARY["arcane"])
 
-    base_name = archetype.replace("_", " ").title()
+    genre_names = scen_affixes.get("archetype_names", {}).get(archetype)
+    if genre_names:
+        base_name = random.choice(genre_names)
+    else:
+        base_name = archetype.replace("_", " ").title()
     prefix_pool = theme_dict.get(f"prefixes_t{item_tier}") or scen_affixes.get(f"prefixes_t{item_tier}") or ["Fine"]
     suffix_pool = theme_dict.get(f"suffixes_t{item_tier}") or scen_affixes.get(f"suffixes_t{item_tier}") or ["of Power"]
 
@@ -320,6 +325,12 @@ def generate_random_equipment(
             prots.append("holy")
         if "dark_res" in stat_mods and "dark" not in prots:
             prots.append("dark")
+        if "earth_res" in stat_mods and "earth" not in prots:
+            prots.append("earth")
+        if "water_res" in stat_mods and "water" not in prots:
+            prots.append("water")
+        if "wind_res" in stat_mods and "wind" not in prots:
+            prots.append("wind")
         if "omni_res" in stat_mods and "all elements" not in prots:
             prots.append("all elements")
         metadata["protection_types"] = prots
@@ -425,14 +436,18 @@ def format_equipment_card(metadata: Dict[str, Any]) -> str:
         stat_parts.append(f"🌟 CRIT {sign}{stats['crit']}%")
 
     # Elemental Flat Attack Bonuses
-    elem_icons = {"fire": "🔥", "shock": "⚡", "ice": "❄️", "poison": "🧪", "holy": "✨", "dark": "🌑"}
+    elem_icons = {
+        "fire": "🔥", "shock": "⚡", "ice": "❄️", "poison": "🧪",
+        "holy": "✨", "dark": "🌑", "earth": "🪨", "water": "🌊",
+        "wind": "🌪️", "energy": "⚡"
+    }
     for elem, icon in elem_icons.items():
         atk_key = f"{elem}_atk"
         if atk_key in stats and stats[atk_key] > 0:
             stat_parts.append(f"{icon} {elem.title()} ATK +{stats[atk_key]}")
 
     # Elemental Conversion
-    for elem in ("fire", "shock", "ice", "poison", "holy", "dark"):
+    for elem in ("fire", "shock", "ice", "poison", "holy", "dark", "earth", "water", "wind", "energy"):
         conv_key = f"{elem}_convert"
         if conv_key in stats:
             stat_parts.append(f"✨ {elem.title()} Conversion +{int(round(stats[conv_key]*100))}%")
@@ -472,6 +487,12 @@ def format_equipment_card(metadata: Dict[str, Any]) -> str:
         stat_parts.append(f"✨ Holy Res +{stats['holy_res']}%")
     if "dark_res" in stats:
         stat_parts.append(f"🌑 Dark Res +{stats['dark_res']}%")
+    if "earth_res" in stats:
+        stat_parts.append(f"🪨 Earth Res +{stats['earth_res']}%")
+    if "water_res" in stats:
+        stat_parts.append(f"🌊 Water Res +{stats['water_res']}%")
+    if "wind_res" in stats:
+        stat_parts.append(f"🌪️ Wind Res +{stats['wind_res']}%")
     if "omni_res" in stats:
         stat_parts.append(f"🌈 Omni-Res +{stats['omni_res']}%")
 

@@ -385,12 +385,13 @@ def generate_procedural_leadership_roster(arg1: str, arg2: str = "",
     faction_name = ""
 
     known_templates = set(FACTION_HIERARCHIES.keys())
+    known_scenarios = set(scenario_data.load_scenarios().keys())
     args = [a for a in (arg1, arg2, arg3) if a]
 
     for a in args:
         if a in known_templates and not template:
             template = a
-        elif scenario_data.has_tag(a, "high_school") or scenario_data.has_tag(a, "cyberpunk") or a in scenario_data.load_scenarios():
+        elif a in known_scenarios:
             scen_key = a
         elif not faction_name:
             faction_name = a
@@ -878,7 +879,14 @@ class FactionHQView(discord.ui.View):
 # ---------------------------------------------------------------- LLM Context Formatting
 def format_llm_faction_context(factions: List[Dict[str, Any]], max_items: int = 6,
                                 player_faction_id: str = "", player_rank: int = 0,
-                                player_title: str = "") -> str:
+                                player_title: str = "", include_standing: bool = True) -> str:
+    """Compact FACTIONS block.
+
+    include_standing=False drops the reputation tier/score and membership tag so the
+    result is a stable roster (leaders / officers / rivals) suitable for the cached
+    WORLD CANON prompt zone; pair it with `format_llm_faction_standings` in the
+    volatile scene zone.
+    """
     if not factions:
         return ""
 
@@ -893,22 +901,25 @@ def format_llm_faction_context(factions: List[Dict[str, Any]], max_items: int = 
         fid = f.get("faction_id", "")
 
         membership_str = ""
-        if player_faction_id and fid == player_faction_id and player_rank > 0:
+        if include_standing and player_faction_id and fid == player_faction_id and player_rank > 0:
             title = player_title or get_rank_title(f.get("hierarchy_template", "default"), player_rank)
             membership_str = f"|MEMBER:{title}"
 
         # Embed Rank-4 (top leader) and key officers globally — prevents LLM hallucination of leaders
         leader_str = ""
         officers_str = ""
+        from mechanics.social.races import format_race_display
         roster = f.get("leadership_roster") or []
         rank4_members = [r for r in roster if r.get("rank") == 4 and r.get("name") and not r.get("is_player")]
         if rank4_members:
-            leader_str = f"|Leader:{rank4_members[0]['name']}"
-        sub_officers = [
-            f"{r['name']} ({r.get('title', 'Officer')})"
-            for r in roster
-            if r.get("rank") in (3, 2) and r.get("name") and not r.get("is_player") and not r.get("is_vacant")
-        ]
+            l_mem = rank4_members[0]
+            l_race = f" ({format_race_display(l_mem['race'])})" if l_mem.get("race") else ""
+            leader_str = f"|Leader:{l_mem['name']}{l_race}"
+        sub_officers = []
+        for r in roster:
+            if r.get("rank") in (3, 2) and r.get("name") and not r.get("is_player") and not r.get("is_vacant"):
+                r_race = f", {format_race_display(r['race'])}" if r.get("race") else ""
+                sub_officers.append(f"{r['name']} ({r.get('title', 'Officer')}{r_race})")
         if sub_officers:
             officers_str = "|Officers:" + ", ".join(sub_officers[:2])
 
@@ -917,9 +928,31 @@ def format_llm_faction_context(factions: List[Dict[str, Any]], max_items: int = 
         rival_names = [fac_name_map[r] for r in rival_ids[:2] if r in fac_name_map and fac_name_map[r]]
         rival_str = ("|Rivals:" + ",".join(rival_names)) if rival_names else ""
 
-        entries.append(f"{fname} [{tier['name']}|{score:+d}{membership_str}{leader_str}{officers_str}{rival_str}]")
+        if include_standing:
+            entries.append(f"{fname} [{tier['name']}|{score:+d}{membership_str}{leader_str}{officers_str}{rival_str}]")
+        else:
+            details = f"{leader_str}{officers_str}{rival_str}".lstrip("|")
+            entries.append(f"{fname} [{details}]" if details else fname)
 
     return "FACTIONS: " + "; ".join(entries)
+
+
+def format_llm_faction_standings(factions: List[Dict[str, Any]], max_items: int = 10,
+                                 player_faction_id: str = "", player_rank: int = 0,
+                                 player_title: str = "") -> str:
+    """Live reputation standings only (tier|score|membership) for the volatile scene zone."""
+    if not factions:
+        return ""
+    entries = []
+    for f in factions[:max_items]:
+        score = f.get("reputation_score", 0)
+        tier = get_faction_tier(score)
+        membership_str = ""
+        if player_faction_id and f.get("faction_id", "") == player_faction_id and player_rank > 0:
+            title = player_title or get_rank_title(f.get("hierarchy_template", "default"), player_rank)
+            membership_str = f"|MEMBER:{title}"
+        entries.append(f"{f.get('name', 'Unknown Faction')} [{tier['name']}|{score:+d}{membership_str}]")
+    return "FACTION STANDINGS: " + "; ".join(entries)
 
 
 def format_llm_player_faction_block(faction: Dict[str, Any], player_rank: int,
@@ -1050,6 +1083,7 @@ def _match_school_roster_to_faction(faction_name: str, school_roster: list[dict]
                 "rank": tier["rank"],
                 "title": tier["title"],
                 "name": char["name"],
+                "race": char.get("race", ""),
                 "is_player": False,
                 "is_vacant": False
             })
@@ -1061,6 +1095,7 @@ def _match_school_roster_to_faction(faction_name: str, school_roster: list[dict]
                 "rank": tier["rank"],
                 "title": tier["title"],
                 "name": gen_name,
+                "race": "",
                 "is_player": False,
                 "is_vacant": False
             })
@@ -1267,6 +1302,13 @@ def sync_faction_rosters_with_contacts(session_id: int) -> list[dict]:
             if not m_name or r_entry.get("is_vacant") or r_entry.get("is_player"):
                 continue
             m_low = m_name.lower()
+            if not r_entry.get("race"):
+                if m_low in dir_by_name and dir_by_name[m_low].get("race"):
+                    r_entry["race"] = dir_by_name[m_low]["race"]
+                else:
+                    c_match = next((c for c in contacts if c.get("name", "").strip().lower() == m_low), None)
+                    if c_match and c_match.get("race"):
+                        r_entry["race"] = c_match["race"]
             r_title = r_entry.get("title", "Member")
             generic_desc = f"{r_title} of {fac_name_orig}."
 

@@ -9,75 +9,51 @@ from .seeds import *
 from .seeds import _load_seeds, _slugify, _SEED_PATH
 
 def get_clean_leaf_location(location_str: str) -> str:
-
     """Returns the concise 3rd tier sub-location name from a tiered location string."""
-
     if not location_str:
-
         return "Local Area"
-
     loc = str(location_str).strip()
-
+    if loc.startswith("{"):
+        _, _, s = parse_tiered_location(loc)
+        return s
     if "➔" in loc:
-
         parts = [p.strip() for p in loc.split("➔") if p.strip()]
-
         return parts[-1] if parts else loc
-
     if "->" in loc:
-
         parts = [p.strip() for p in loc.split("->") if p.strip()]
-
         return parts[-1] if parts else loc
-
     return loc
 
 def get_zone_location_name(location_str: str) -> str:
-
     """Returns the Tier 1 Zone name from a tiered location string."""
-
     if not location_str:
-
         return "Local Area"
-
     loc = str(location_str).strip()
-
+    if loc.startswith("{"):
+        z, _, _ = parse_tiered_location(loc)
+        return z
     if "➔" in loc:
-
         parts = [p.strip() for p in loc.split("➔") if p.strip()]
-
         return parts[0] if parts else loc
-
     if "->" in loc:
-
         parts = [p.strip() for p in loc.split("->") if p.strip()]
-
         return parts[0] if parts else loc
-
     return loc
 
 def get_primary_location_name(location_str: str) -> str:
-
     """Returns the Tier 2 Primary Place name from a tiered location string."""
-
     if not location_str:
-
         return "Local Area"
-
     loc = str(location_str).strip()
-
+    if loc.startswith("{"):
+        _, p, _ = parse_tiered_location(loc)
+        return p
     if "➔" in loc:
-
         parts = [p.strip() for p in loc.split("➔") if p.strip()]
-
         return parts[1] if len(parts) >= 2 else (parts[0] if parts else loc)
-
     if "->" in loc:
-
         parts = [p.strip() for p in loc.split("->") if p.strip()]
-
         return parts[1] if len(parts) >= 2 else (parts[0] if parts else loc)
-
     return loc
 
 def get_clean_zone_short_name(zone_name: str) -> str:
@@ -102,7 +78,7 @@ def get_clean_zone_short_name(zone_name: str) -> str:
 
             break
 
-    for sfx in (" Forest", " Woodlands", " Mountain", " Mountains", " Plains", " Farmlands", " Harbor", " Capital", " Range"):
+    for sfx in (" Forest", " Woodlands", " Mountain", " Mountains", " Plains", " Farmlands", " Harbor", " Capital", " Range", " High School", " Academy", " University", " School", " Campus", " Institute"):
 
         if z.endswith(sfx) and len(z) > len(sfx):
 
@@ -266,7 +242,7 @@ def _build_session_zone_index(session_id: int = 0, scenario_key: str = "fantasy"
 
         if primaries:
 
-            foyer = next((p for p in primaries if "foyer" in p.get("name", "").lower() or "entrance" in p.get("name", "").lower()), None)
+            foyer = next((p for p in primaries if "gate" in p.get("name", "").lower() or "entrance" in p.get("name", "").lower() or "foyer" in p.get("name", "").lower()), None)
 
             gateway_p = foyer.get("name") if foyer else primaries[0].get("name", "Main Area")
 
@@ -285,6 +261,30 @@ def _build_session_zone_index(session_id: int = 0, scenario_key: str = "fantasy"
             if short and short != z_name.strip().lower():
 
                 zones[short] = (z_name, gateway_p, "Main Area")
+
+            if is_school_scenario(scenario_key) and (any(k in z_name.lower() for k in ("high school", "academy", "university")) or (school_name and z_name.lower() == school_name.lower())):
+                for alias in ("school", "the school", "campus", "the campus", "academy", "the academy", "high school"):
+                    if alias not in zones:
+                        zones[alias] = (z_name, gateway_p, "Main Area")
+
+    # Also incorporate registered zones from SQLite session_locations
+    if session_id:
+        try:
+            existing = db.get_session_locations(session_id)
+            for r in existing:
+                z = r.get("zone_name", "").strip()
+                p = r.get("primary_name", "").strip()
+                if z:
+                    z_low = z.lower()
+                    if any(k in z_low for k in ("board", "desk", "table", "chair", "bed", "closet", "shelf", "counter")):
+                        continue
+                    if z_low not in zones:
+                        zones[z_low] = (z, p or "Main Area", "Main Area")
+                        short = get_clean_zone_short_name(z).lower()
+                        if short and short not in zones:
+                            zones[short] = (z, p or "Main Area", "Main Area")
+        except Exception:
+            pass
 
     return zones
 
@@ -616,7 +616,7 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
 
         # If Part 1 is in subs:
         if p1_low in subs:
-            z_found, p_found = subs[p1_low]
+            z_found, p_found, s_found = subs[p1_low]
             chosen_z = p0 if p0 else z_found
             return (chosen_z, p_found, s_found)
 
@@ -637,6 +637,11 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
         if p1_low in zones_index:
             return zones_index[p1_low]
         if p2_low in zones_index:
+            z_name = zones_index[p2_low][0]
+            if p1_low in primaries:
+                return (z_name, primaries[p1_low][1], p0 if p0 else "Main Area")
+            elif p0_low in primaries:
+                return (z_name, primaries[p0_low][1], p1 if p1 else "Main Area")
             return zones_index[p2_low]
         if p1_low in primaries and p2_low in primaries:
             return (primaries[p2_low][0], primaries[p2_low][1], "Main Area")
@@ -776,45 +781,67 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
             if is_intermediate_wing and p0_low in (school_name.lower(), "westlake academy", "main academy campus"):
                 return (p0, p2, "Main Area")
 
+def parse_structured_location_dict(data: dict) -> Optional[Tuple[str, str, str]]:
+    """Extracts (zone, primary, sub) from a structured dictionary or LLM tiered location json."""
+    if not isinstance(data, dict):
         return None
 
-def parse_tiered_location(raw_location: str, scenario_key: str = "fantasy", session_id: int = 0, char_name: str = "") -> Tuple[str, str, str]:
+    def _unwrap_val(v):
+        if isinstance(v, (list, tuple)) and v:
+            return _unwrap_val(v[0])
+        if isinstance(v, str):
+            return v.strip()
+        return str(v).strip() if v is not None else ""
 
+    zone, primary, sub = "", "", ""
+    for k, v in data.items():
+        k_low = str(k).lower()
+        if "tier1" in k_low or k_low in ("zone", "zone_name", "biome"):
+            zone = _unwrap_val(v)
+        elif "tier2" in k_low or k_low in ("primary", "primary_name", "place", "structure", "building"):
+            primary = _unwrap_val(v)
+        elif "tier3" in k_low or k_low in ("sub", "sub_name", "sub_location", "room", "area"):
+            sub = _unwrap_val(v)
+
+    if zone or primary:
+        return (zone or "Unknown Zone", primary or "Main Area", sub or "Main Area")
+    return None
+
+def parse_tiered_location(raw_location: Any, scenario_key: str = "fantasy", session_id: int = 0, char_name: str = "") -> Tuple[str, str, str]:
     """
-
     Parses a location string into (Zone, Primary Place, Sub-Location).
-
-    Accepts formats separated by '➔', '>', '->', or '|'.
-
+    Accepts formats separated by '➔', '>', '->', or '|', or structured JSON/dicts.
     """
+    if isinstance(raw_location, dict):
+        struct = parse_structured_location_dict(raw_location)
+        if struct:
+            return struct
+
+    raw_str = str(raw_location or "").strip()
+    if raw_str.startswith("{") and ("tier" in raw_str.lower() or "zone" in raw_str.lower()):
+        try:
+            d = json.loads(raw_str)
+            if isinstance(d, dict):
+                struct = parse_structured_location_dict(d)
+                if struct:
+                    return struct
+        except Exception:
+            pass
 
     school_name = get_session_school_name(session_id, scenario_key) if (is_school_scenario(scenario_key) or "Main Academy Building" in str(raw_location or "")) else None
-
     classroom_name = get_session_classroom_name(session_id, scenario_key) if (is_school_scenario(scenario_key) or "Homeroom" in str(raw_location or "")) else None
-
     player_desk = get_session_player_desk_name(session_id, char_name)
-
     player_house = get_session_player_house_name(session_id, char_name, scenario_key)
-
     park_name = get_session_park_name(session_id, scenario_key)
 
-
-
     commercial_name = get_session_commercial_district_name(session_id, scenario_key) if is_school_scenario(scenario_key) else None
-
     residential_name = get_session_residential_neighborhood_name(session_id, scenario_key) if is_school_scenario(scenario_key) else None
 
-
-
     if not raw_location or not str(raw_location).strip():
-
         return get_default_tiered_location(scenario_key, session_id=session_id, char_name=char_name)
 
-
-
     delimiters = ["➔", "->", ">", "|"]
-
-    parts = [raw_location]
+    parts = [raw_str]
 
     for d in delimiters:
 
@@ -1094,10 +1121,15 @@ def parse_tiered_location(raw_location: str, scenario_key: str = "fantasy", sess
     return (z, p, s)
 
 def format_tiered_location_string(zone: str, primary: str, sub: str) -> str:
-
     """Returns a clean 3-tiered location string."""
-
-    return f"{zone} ➔ {primary} ➔ {sub}"
+    z = str(zone or "").strip()
+    p = str(primary or "").strip()
+    s = str(sub or "").strip()
+    if p.startswith("{"):
+        _, p, _ = parse_tiered_location(p)
+    if z.startswith("{"):
+        z, _, _ = parse_tiered_location(z)
+    return f"{z} ➔ {p} ➔ {s}"
 
 def parse_zone_environment_data(atm_data: Any) -> dict:
 
