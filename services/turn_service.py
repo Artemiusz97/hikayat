@@ -78,7 +78,9 @@ class TurnService:
                 "mp_spent": a.get("mp_spent", 0),
                 "check": check_dict,
                 "item_name": a.get("item_name"),
-                "target_name": a.get("target_name"),
+                "target_name": a.get("target_name") or a.get("target_npc") or a.get("combat_target"),
+                "target_npc": a.get("target_npc") or a.get("target_name") or a.get("combat_target"),
+                "combat_target": a.get("combat_target") or a.get("target_npc") or a.get("target_name"),
                 "spell_id": a.get("spell_id"),
                 "quest_id": a.get("quest_id"),
                 "sub_obj_id": a.get("sub_obj_id"),
@@ -128,8 +130,17 @@ class TurnService:
             log.warning("apply_quest_update failed (non-fatal): %s", e)
 
         # Re-tag quest choices now that arrival/skill_check waypoint progression has unlocked next stages
-        if isinstance(outcome, dict) and not (game_engine.get_active_enemies(session) or game_engine.get_active_enemies(outcome)):
+        from mechanics.social.physical_state import is_erotic_intimate_contact as _ts_is_erotic
+        _ts_phys = (outcome.get("_physical_state") if isinstance(outcome, dict) else None) or {}
+        _ts_ic_str = str(_ts_phys.get("intimate_contact", "") if isinstance(_ts_phys, dict) else "")
+        _ts_in_intimate = _ts_is_erotic(_ts_ic_str) or ("aftercare" in _ts_ic_str.lower())
+        if (
+            isinstance(outcome, dict)
+            and not _ts_in_intimate
+            and not (game_engine.get_active_enemies(session) or game_engine.get_active_enemies(outcome))
+        ):
             try:
+
                 from mechanics.world.waypoints import tag_and_enrich_quest_choices
                 lead_char = party[0][0] if party and party[0] else None
                 raw_c = outcome.get("next_choices") or outcome.get("choices") or []
@@ -255,6 +266,10 @@ class TurnService:
             history_entry["combat_log"] = combat_log
         if outcome.get("_enemy_attack_notice"):
             history_entry["enemy_attack_notice"] = outcome["_enemy_attack_notice"]
+        if outcome.get("intimate_update"):
+            history_entry["intimate_update"] = outcome["intimate_update"]
+        if outcome.get("_refractory_recovered_notice"):
+            history_entry["_refractory_recovered_notice"] = outcome["_refractory_recovered_notice"]
 
         raw_hist = list(session.get("history") or [])
         if not raw_hist and session.get("narrative"):
@@ -290,8 +305,14 @@ class TurnService:
             "time_info": outcome.get("_time_info", {}),
             "sleep_info": outcome.get("_sleep_info"),
             "quest_updates": outcome.get("quest_updates", []),
-            "relationship_updates": outcome.get("relationship_updates", [])
+            "relationship_updates": outcome.get("relationship_updates", []),
+            "dialogue_partner": outcome.get("dialogue_partner"),
+            "dialogue_partners": outcome.get("dialogue_partners", []),
+            "intimate_update": outcome.get("intimate_update"),
+            "_physical_state": outcome.get("_physical_state"),
+            "_refractory_recovered_notice": outcome.get("_refractory_recovered_notice"),
         }
+
         await adb(db.set_turn_snapshot, session_id, snapshot)
 
         base_response = TurnResponse(
@@ -346,11 +367,37 @@ class TurnService:
         raw_hist = list(session.get("history") or [])
         if raw_hist and isinstance(raw_hist[-1], dict) and raw_hist[-1].get("type") == "action":
             last_entry = dict(raw_hist[-1])
-            if new_outcome.get("outcome_narrative"):
-                last_entry["outcome_narrative"] = new_outcome["outcome_narrative"]
-                last_entry["narrative"] = new_outcome["outcome_narrative"]
-            if new_outcome.get("next_narrative"):
-                last_entry["next_narrative"] = new_outcome["next_narrative"]
+            new_outcome_narr = (new_outcome.get("outcome_narrative") or "").strip()
+            new_next_narr = (new_outcome.get("next_narrative") or "").strip()
+
+            # Check if previous outcome_narrative was an emergency fallback
+            prev_outcome = str(last_entry.get("outcome_narrative") or "")
+            is_prev_fallback = (
+                bool(last_entry.get("is_fallback") or last_entry.get("_is_fallback_narrative"))
+                or any(ph in prev_outcome.lower() for ph in (
+                    "deliberate intent",
+                    "carefully observe",
+                    "temporary fallback",
+                    "threads of fate shimmer",
+                    "fallback generation",
+                ))
+            )
+
+            if new_outcome_narr:
+                last_entry["outcome_narrative"] = new_outcome_narr
+                last_entry["narrative"] = new_outcome_narr
+                last_entry.pop("is_fallback", None)
+                last_entry.pop("_is_fallback_narrative", None)
+            elif is_prev_fallback:
+                # If retry did not provide a separate outcome_narrative, clear the emergency fallback text
+                # so the stale placeholder does not persist in the adventure history.
+                last_entry["outcome_narrative"] = ""
+                last_entry["narrative"] = new_next_narr or ""
+                last_entry.pop("is_fallback", None)
+                last_entry.pop("_is_fallback_narrative", None)
+
+            if new_next_narr:
+                last_entry["next_narrative"] = new_next_narr
             if new_outcome.get("scene_title"):
                 last_entry["scene_title"] = new_outcome["scene_title"]
             raw_hist[-1] = last_entry
@@ -369,9 +416,11 @@ class TurnService:
         new_char = await adb(db.get_character, user_id)
         
         # Merge new outcome with old applied mechanics so UI can display correctly if needed
-        # (Though Web API only shows prose for retries, Discord might show embeds)
+        # Narration pass only updates prose and choices; preserve frozen mechanical state (location, NPCs, enemies, vitals)
         merged_outcome = dict(snapshot.get("applied", {}))
-        merged_outcome.update(new_outcome)
+        for k in ("outcome_narrative", "next_narrative", "scene_title", "next_choices", "choices", "_is_fallback_narrative"):
+            if k in new_outcome:
+                merged_outcome[k] = new_outcome[k]
         
         # action is just the first action from snapshot for UI purposes
         action = snapshot.get("actions", [{}])[0]

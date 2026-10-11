@@ -132,8 +132,8 @@ class TestIntimateProfileReliability(unittest.TestCase):
         self.assertIn("• **Intercourse**: *Unknown*", intimate_field["value"])
         self.assertIn("• **Demeanor**: *Unknown*", intimate_field["value"])
         self.assertIn("• **Sensitive Spots**: *Unknown*", intimate_field["value"])
-        self.assertIn("• **Turn-Ons**: *Unknown*", intimate_field["value"])
-        self.assertIn("• **Fetishes & Kinks**: *Unknown*", intimate_field["value"])
+        self.assertIn("• **Desires & Kinks**: *Unknown*", intimate_field["value"])
+        self.assertIn("• **Turn-Offs**: *Unknown*", intimate_field["value"])
         self.assertNotIn("has_received_oral", intimate_field["value"])
         self.assertNotIn("C-cup", intimate_field["value"])
 

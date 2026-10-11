@@ -8,6 +8,8 @@ from .dialogue_tracking import (
     is_dialogue_partner,
     extract_speaking_npcs_from_narrative,
     is_npc_invited_in_action,
+    can_chime_in_to_dialogue,
+    DIALOGUE_TITLE_WORDS,
 )
 from .presence import (
     sync_hostile_entities,
@@ -24,6 +26,7 @@ from .reconciliation import (
 
 __all__ = [
     "DIALOGUE_STALL_VERBS",
+    "DIALOGUE_TITLE_WORDS",
     "count_dialogue_stall_turns",
     "format_dialogue_stall_directive",
     "build_scene_escalation_and_consequence_directives",
@@ -31,6 +34,7 @@ __all__ = [
     "is_dialogue_partner",
     "extract_speaking_npcs_from_narrative",
     "is_npc_invited_in_action",
+    "can_chime_in_to_dialogue",
     "sync_hostile_entities",
     "classify_scene_npcs",
     "extract_departed_npcs_from_narrative",

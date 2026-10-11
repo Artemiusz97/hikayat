@@ -18,6 +18,7 @@ ENV/
 .pytest_cache/
 .coverage
 htmlcov/
+.testmondata*
 
 # Process & Runtime Locks
 .bot.pid
@@ -42,6 +43,10 @@ Thumbs.db
 *.db-journal
 *.sqlite
 *.sqlite3
+*.db.bak
+backups/
+hikayat_sim_*.db
+*_hikayat_sim.db
 
 # Scratch & Temporary Scripts
 scratch/
@@ -54,6 +59,11 @@ bin/cloudflared.exe
 releases/*.zip
 !releases/*.md
 
+# Logs
+*.log
+
+# Icons & Branding Assets
+icon/
 
 # Old db location
 hikayat.db

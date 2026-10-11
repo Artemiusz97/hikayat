@@ -131,6 +131,15 @@ class TestNamegenRoles(unittest.TestCase):
         self.assertTrue(namegen.is_generic_role_name("Town Guard"))
         self.assertTrue(namegen.is_generic_role_name("Shopkeeper"))
         self.assertTrue(namegen.is_generic_role_name("Teacher"))
+        self.assertTrue(namegen.is_generic_role_name("student"))
+        self.assertTrue(namegen.is_generic_role_name("students"))
+        self.assertTrue(namegen.is_generic_role_name("patrons"))
+        self.assertTrue(namegen.is_generic_role_name("bystanders"))
+        self.assertTrue(namegen.is_generic_role_name("guards"))
+        self.assertTrue(namegen.is_collective_entity_name("students"))
+        self.assertTrue(namegen.is_collective_entity_name("cluster of students"))
+        self.assertTrue(namegen.is_collective_entity_name("crowd"))
+        self.assertFalse(namegen.is_collective_entity_name("student"))
 
         # Real personal names should NOT be detected as roles
         self.assertFalse(namegen.is_generic_role_name("Skye Anderson"))
@@ -138,6 +147,7 @@ class TestNamegenRoles(unittest.TestCase):
         self.assertFalse(namegen.is_generic_role_name("Yue Dubois"))
         self.assertFalse(namegen.is_generic_role_name("Artemiusz"))
         self.assertFalse(namegen.is_generic_role_name("Julian Vance"))
+        self.assertFalse(namegen.is_collective_entity_name("Mila Vance"))
 
         # Sanitization replaces role name with proper name
         sanitized = namegen.sanitize_person_name("Student Council President", scenario="high_school_drama")
@@ -221,6 +231,84 @@ class TestNamegenRoles(unittest.TestCase):
         c2 = db.get_contact(sess_id, char["id"], "Skye Anderson")
         self.assertIsNotNone(c2)
         self.assertEqual(c2["name"], "Skye Anderson")
+
+    def test_descriptive_and_tokenized_role_interception_and_auditing(self):
+        import db
+        import json
+        from game_engine.npcs.reconciliation import _sanitize_outcome_person_names
+        from tests.simulators.narrative.auditor import NarrativeInvariantAuditor
+
+        # 1. namegen checks
+        bad_names = ["a classmate seated nearby", "Classmate_2B", "Student_1A", "a student sitting in the back", "nearby classmate", "Student 1", "Classmate 2-B"]
+        for bad in bad_names:
+            self.assertTrue(namegen.is_generic_role_name(bad), f"{bad} should be recognized as generic role")
+
+        for bad in ["a classmate seated nearby", "Classmate_2B", "Student_1A", "Student 1", "Classmate 2-B"]:
+            self.assertFalse(namegen.is_valid_entity_name(bad), f"{bad} should NOT be a valid entity name")
+
+        # 2. split_name_and_role generates an authentic character name
+        for bad in ["a classmate seated nearby", "Classmate_2B"]:
+            proper, role = namegen.split_name_and_role(bad, scenario="high_school_drama")
+            self.assertNotEqual(proper, bad)
+            self.assertTrue(namegen.is_valid_entity_name(proper))
+            self.assertFalse(namegen.is_generic_role_name(proper))
+
+        # 3. db.save_session_scene sanitization
+        user_id = 999998
+        with db.get_conn() as conn:
+            conn.execute("DELETE FROM characters WHERE user_id=?", (user_id,))
+        db.create_character(user_id, "Tester2", "Warrior", "fantasy")
+        sess_id = db.create_session(user_id, "solo", 1, "vivid", "individual", False, scenario="high_school_drama")
+
+        db.save_session_scene(
+            session_id=sess_id,
+            scene_title="Homeroom",
+            narrative="Students are sitting at desks.",
+            choices=[],
+            history=[],
+            current_npcs=[
+                {"name": "a classmate seated nearby", "role": "student"},
+                {"name": "Classmate_2B", "role": "classmate"}
+            ]
+        )
+        saved_sess = db.get_session(sess_id)
+        saved_npcs = json.loads(saved_sess.get("current_npcs_json") or "[]")
+        for npc in saved_npcs:
+            self.assertNotIn("a classmate seated nearby", npc["name"])
+            self.assertNotIn("Classmate_2B", npc["name"])
+            self.assertTrue(namegen.is_valid_entity_name(npc["name"]))
+            self.assertFalse(namegen.is_generic_role_name(npc["name"]))
+
+        # 4. reconciliation._sanitize_outcome_person_names
+        outcome = {
+            "npcs_present": [{"name": "a classmate seated nearby"}, "Classmate_2B"],
+            "new_entities": [{"type": "person", "name": "Classmate_2B", "description": "Student in Class 2B"}],
+            "dialogue_partner": "a classmate seated nearby"
+        }
+        _sanitize_outcome_person_names(outcome, sess_id, "high_school_drama")
+        for npc in outcome["npcs_present"]:
+            npc_n = npc["name"] if isinstance(npc, dict) else npc
+            self.assertNotIn("a classmate seated nearby", npc_n)
+            self.assertNotIn("Classmate_2B", npc_n)
+            self.assertTrue(namegen.is_valid_entity_name(npc_n))
+            self.assertFalse(namegen.is_generic_role_name(npc_n))
+
+        # 5. NarrativeInvariantAuditor detects generic role violations
+        auditor = NarrativeInvariantAuditor()
+        sess_violating = {
+            "current_npcs_json": json.dumps([{"name": "a classmate seated nearby"}, {"name": "Classmate_2B"}]),
+            "dialogue_partner": "Classmate_2B",
+            "narrative": "A scene with classmates."
+        }
+        violations = auditor._audit_entities_and_contacts(
+            turn=1,
+            session=sess_violating,
+            player_char={"name": "Tester2"},
+            contacts=[{"npc_id": "Classmate_2B", "name": "Classmate_2B"}]
+        )
+        cat_targets = [(v.category, v.target_entity) for v in violations]
+        self.assertTrue(any(c == "INVALID_ENTITY_TYPE" and "a classmate seated nearby" in str(t) for c, t in cat_targets))
+        self.assertTrue(any(c == "INVALID_ENTITY_TYPE" and "Classmate_2B" in str(t) for c, t in cat_targets))
 
 
 if __name__ == "__main__":

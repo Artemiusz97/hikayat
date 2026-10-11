@@ -12,7 +12,7 @@ import re
 import logging
 import game_engine
 
-from game_engine.core import CONFESSION_KEYWORDS, NPC_ORAL_RECEIVE_KEYWORDS, NPC_ORAL_GIVE_KEYWORDS, NPC_MANUAL_RECEIVE_KEYWORDS, NPC_MANUAL_GIVE_KEYWORDS, INTERCOURSE_KEYWORDS, KISS_KEYWORDS, DATE_KEYWORDS, ROMANCE_KEYWORDS
+from game_engine.core import CONFESSION_KEYWORDS, NPC_ORAL_RECEIVE_KEYWORDS, NPC_ORAL_GIVE_KEYWORDS, NPC_MANUAL_RECEIVE_KEYWORDS, NPC_MANUAL_GIVE_KEYWORDS, NPC_ANAL_RECEIVE_KEYWORDS, NPC_ANAL_GIVE_KEYWORDS, ANAL_KEYWORDS, INTERCOURSE_KEYWORDS, KISS_KEYWORDS, DATE_KEYWORDS, ROMANCE_KEYWORDS
 def _evaluate_npc_milestones(
     npc_name: str,
     app_dict: dict,
@@ -46,6 +46,7 @@ def _evaluate_npc_milestones(
         transition_intercourse_experience,
         transition_oral_experience,
         transition_manual_experience,
+        transition_anal_experience,
         format_milestone_memory,
         VALID_MILESTONE_EVENTS,
     )
@@ -54,6 +55,7 @@ def _evaluate_npc_milestones(
     current_intercourse = intercourse_exp or app_dict.get("intercourse_experience") or "virgin"
     current_oral = oral_exp or app_dict.get("oral_experience") or "inexperienced"
     current_manual = app_dict.get("manual_experience", "inexperienced")
+    current_anal = app_dict.get("anal_experience", "inexperienced")
     is_intimate_act = False
     new_mem = None
     delta_boost = 0
@@ -61,16 +63,85 @@ def _evaluate_npc_milestones(
     npc_low = npc_name.lower().strip() if npc_name else ""
     npc_fst = npc_low.split()[0] if npc_low else ""
 
-    if combined_check_text is None:
-        combined_check_text = (
-            " ".join(str(a.get("label", "")) for a in actions) + " " + narrative_text
+    from mechanics.world.mobility import get_session_dialogue_partners
+    from mechanics.social.intimate_excitement import (
+        is_actively_targeted_in_action,
+        scope_text_to_partner,
+        _normalize_partner_pronouns,
+    )
+    from game_engine.core import (
+        PLAYER_ROMANTIC_ACTION_KEYWORDS,
+        PLAYER_INTIMATE_ACTION_KEYWORDS,
+        PLAYER_ORAL_ACTION_KEYWORDS,
+        PLAYER_INTERCOURSE_ACTION_KEYWORDS,
+        matches_keyword_boundary,
+    )
+
+    sess_dps = get_session_dialogue_partners(session) if isinstance(session, dict) else []
+    other_dp_names = [
+        dp for dp in sess_dps
+        if dp and dp.lower().strip() != npc_low and (dp.lower().split() or [""])[0] != npc_fst
+    ]
+    raw_actions_text = " ".join(str(a.get("label", "")) for a in (actions or []))
+    npc_active_in_act = is_actively_targeted_in_action(npc_name, raw_actions_text) if npc_name else False
+    other_active_in_act = any(is_actively_targeted_in_action(op, raw_actions_text) for op in other_dp_names)
+
+    if other_dp_names and other_active_in_act:
+        if npc_active_in_act:
+            scoped_act_raw = scope_text_to_partner(raw_actions_text, npc_name, other_dp_names).lower()
+            scoped_nar_raw = scope_text_to_partner(narrative_text or "", npc_name, other_dp_names).lower()
+            scoped_act_norm = _normalize_partner_pronouns(scoped_act_raw, npc_name, app_dict)
+            scoped_nar_norm = _normalize_partner_pronouns(scoped_nar_raw, npc_name, app_dict)
+            scoped_act_str = f"{scoped_act_raw} {scoped_act_norm}".strip() if scoped_act_norm and scoped_act_norm != scoped_act_raw else scoped_act_raw
+            scoped_nar_str = f"{scoped_nar_raw} {scoped_nar_norm}".strip() if scoped_nar_norm and scoped_nar_norm != scoped_nar_raw else scoped_nar_raw
+
+            is_oral_scoped = matches_keyword_boundary(scoped_act_str, PLAYER_ORAL_ACTION_KEYWORDS, allow_negated=False)
+            is_anal_scoped = matches_keyword_boundary(scoped_act_str, ("anal", "ass", "pegged", "pegging", "backdoor"), allow_negated=False)
+            has_exp_pen_scoped = matches_keyword_boundary(scoped_act_str, ("dick", "cock", "shaft", "penis", "have sex", "make love", "penetrate", "fuck", "creampie", "breed"), allow_negated=False)
+            is_intercourse_scoped = matches_keyword_boundary(scoped_act_str, PLAYER_INTERCOURSE_ACTION_KEYWORDS, allow_negated=False) and (
+                (not is_oral_scoped and not is_anal_scoped) or (has_exp_pen_scoped and not is_anal_scoped)
+            )
+            is_intimate_scoped = (
+                is_intercourse_scoped
+                or is_oral_scoped
+                or is_anal_scoped
+                or matches_keyword_boundary(scoped_act_str, PLAYER_INTIMATE_ACTION_KEYWORDS, allow_negated=False)
+            )
+            is_romantic_scoped = matches_keyword_boundary(scoped_act_str, PLAYER_ROMANTIC_ACTION_KEYWORDS, allow_negated=False)
+
+            is_player_intercourse_action = is_intercourse_scoped
+            is_player_oral_action = is_oral_scoped
+            is_player_intimate_action = is_intimate_scoped
+            is_player_romantic_action = is_romantic_scoped or is_player_confession_action
+
+            if not is_intimate_scoped and (
+                matches_keyword_boundary(raw_actions_text.lower(), PLAYER_INTERCOURSE_ACTION_KEYWORDS, allow_negated=False)
+                or matches_keyword_boundary(raw_actions_text.lower(), PLAYER_ORAL_ACTION_KEYWORDS, allow_negated=False)
+                or matches_keyword_boundary(raw_actions_text.lower(), PLAYER_INTIMATE_ACTION_KEYWORDS, allow_negated=False)
+            ):
+                combined_check_text = scoped_act_str
+            else:
+                combined_check_text = f"{scoped_act_str} {scoped_nar_str}".strip()
+        else:
+            is_player_intercourse_action = False
+            is_player_oral_action = False
+            is_player_intimate_action = False
+            is_player_romantic_action = False
+            combined_check_text = ""
+    elif combined_check_text is None:
+        raw_comb = (
+            raw_actions_text + " " + (narrative_text or "")
         ).lower()
+        norm_comb = _normalize_partner_pronouns(raw_comb, npc_name, app_dict) if npc_name else ""
+        combined_check_text = f"{raw_comb} {norm_comb}".strip() if norm_comb and norm_comb != raw_comb else raw_comb
 
     # Pre-evaluate cues once to avoid redundant scans across large keyword tuples
     has_rec_cues = False
     has_give_cues = False
     has_m_rec = False
     has_m_give = False
+    has_a_rec = False
+    has_a_give = False
     has_intercourse = False
     has_kiss = False
     has_date = False
@@ -81,6 +152,8 @@ def _evaluate_npc_milestones(
         has_give_cues = any(kw in combined_check_text for kw in NPC_ORAL_GIVE_KEYWORDS)
         has_m_rec = any(kw in combined_check_text for kw in NPC_MANUAL_RECEIVE_KEYWORDS)
         has_m_give = any(kw in combined_check_text for kw in NPC_MANUAL_GIVE_KEYWORDS)
+        has_a_rec = any(kw in combined_check_text for kw in NPC_ANAL_RECEIVE_KEYWORDS)
+        has_a_give = any(kw in combined_check_text for kw in NPC_ANAL_GIVE_KEYWORDS)
         has_intercourse = any(kw in combined_check_text for kw in INTERCOURSE_KEYWORDS)
         has_kiss = any(kw in combined_check_text for kw in KISS_KEYWORDS)
         has_date = any(kw in combined_check_text for kw in DATE_KEYWORDS)
@@ -100,6 +173,7 @@ def _evaluate_npc_milestones(
             
         # For actual physical intimacy, reveal sensitivities and general explicit unlock
         app_dict["turn_ons_revealed"] = True
+        app_dict["sensitive_spots_revealed"] = True
         app_dict["act_preferences_revealed"] = True
         app_dict["intimate_revealed"] = True
         
@@ -116,6 +190,27 @@ def _evaluate_npc_milestones(
             app_dict["underwear_revealed"] = True
         elif act_type in ("manual_give", "manual_receive"):
             app_dict["manual_revealed"] = True
+        elif act_type in ("anal_give", "anal_receive", "anal"):
+            app_dict["anal_revealed"] = True
+            app_dict["underwear_revealed"] = True
+
+    is_session_dp = bool(session and game_engine.is_dialogue_partner(npc_name, session=session))
+    explicit_confession_target_match = bool(
+        (confession_target_npc and (npc_low == confession_target_npc.lower().strip() or npc_fst == (confession_target_npc.lower().split() or [""])[0]))
+        or any(
+            (is_romantic_confession_intent(str(a.get("label", ""))) or any(kw in str(a.get("label", "")).lower() for kw in CONFESSION_KEYWORDS))
+            and (npc_low in str(a.get("label", "")).lower() or (len(npc_fst) >= 3 and bool(re.search(rf"\b{re.escape(npc_fst)}\b", str(a.get("label", "")).lower()))))
+            for a in actions
+        )
+    )
+    has_other_confession_target = bool(
+        confession_target_npc and not explicit_confession_target_match
+    )
+    is_npc_target_of_confession = (
+        explicit_confession_target_match
+        or (not has_other_confession_target and is_session_dp and is_player_confession_action)
+        or (not has_other_confession_target and session is None and is_player_confession_action)
+    )
 
     # Tier 1: Structured LLM Milestone Event Processing
     if overall_check_success and milestone_ev in VALID_MILESTONE_EVENTS and milestone_ev != "none":
@@ -129,12 +224,22 @@ def _evaluate_npc_milestones(
                 milestone_ev = "manual_receive"
             elif has_m_give and not has_m_rec:
                 milestone_ev = "manual_give"
+        elif milestone_ev in ("anal_give", "anal_receive"):
+            if has_a_rec and not has_a_give:
+                milestone_ev = "anal_receive"
+            elif has_a_give and not has_a_rec:
+                milestone_ev = "anal_give"
         elif milestone_ev == "intercourse":
             if (is_player_oral_action or has_rec_cues or has_give_cues) and not is_player_intercourse_action:
                 if has_give_cues and not has_rec_cues:
                     milestone_ev = "oral_give"
                 else:
                     milestone_ev = "oral_receive"
+            elif (has_a_rec or has_a_give) and not is_player_intercourse_action:
+                if has_a_give and not has_a_rec:
+                    milestone_ev = "anal_give"
+                else:
+                    milestone_ev = "anal_receive"
 
         if milestone_ev == "intercourse":
             current_intercourse = "non_virgin"
@@ -157,65 +262,92 @@ def _evaluate_npc_milestones(
             current_manual = transition_manual_experience(current_manual, "manual_receive")
             _reveal_intimacy("manual_receive")
             new_mem = format_milestone_memory("manual_receive", first_char_name, custom_summary)
+        elif milestone_ev == "anal_give":
+            current_anal = transition_anal_experience(current_anal, "anal_give")
+            _reveal_intimacy("anal_give")
+            new_mem = format_milestone_memory("anal_give", first_char_name, custom_summary)
+        elif milestone_ev == "anal_receive":
+            current_anal = transition_anal_experience(current_anal, "anal_receive")
+            _reveal_intimacy("anal_receive")
+            new_mem = format_milestone_memory("anal_receive", first_char_name, custom_summary)
+        elif milestone_ev == "anal":
+            current_anal = transition_anal_experience(current_anal, "anal_receive")
+            _reveal_intimacy("anal_receive")
+            new_mem = format_milestone_memory("anal", first_char_name, custom_summary)
         elif milestone_ev in ("first_kiss", "kiss"):
             _reveal_intimacy(milestone_ev)
             new_mem = format_milestone_memory(milestone_ev, first_char_name, custom_summary)
-        elif milestone_ev == "confession":
+        elif milestone_ev == "confession" and not has_other_confession_target:
             new_mem = format_milestone_memory("confession", first_char_name, custom_summary)
             _reveal_intimacy("confession")
             app_dict["demeanor_revealed"] = True
-            track = "romantic"
+            if is_npc_target_of_confession and overall_check_success:
+                track = "romantic"
         elif milestone_ev == "date":
             new_mem = format_milestone_memory("date", first_char_name, custom_summary)
-            track = "romantic"
+            if overall_check_success:
+                track = "romantic"
 
     # Tier 2: Secondary Engine Safety Net (Scoped to Target/Active Scene NPC)
-    is_session_dp = bool(session and game_engine.is_dialogue_partner(npc_name, session=session))
-    is_npc_target_of_action = any(
-        (npc_low in str(a.get("label", "")).lower() or (len(npc_fst) >= 3 and npc_fst in str(a.get("label", "")).lower()))
-        for a in actions
-    ) or is_session_dp or single_update
-
-    is_npc_target_of_confession = (
-        (confession_target_npc and (npc_low == confession_target_npc.lower().strip() or npc_fst == (confession_target_npc.lower().split() or [""])[0]))
-        or any((is_romantic_confession_intent(str(a.get("label", ""))) or any(kw in str(a.get("label", "")).lower() for kw in CONFESSION_KEYWORDS)) and (npc_low in str(a.get("label", "")).lower() or (len(npc_fst) >= 3 and npc_fst in str(a.get("label", "")).lower())) for a in actions)
-        or (is_session_dp and is_player_confession_action)
+    is_action_match = (
+        npc_active_in_act
+        if (other_dp_names and other_active_in_act)
+        else any(
+            (npc_low in str(a.get("label", "")).lower() or (len(npc_fst) >= 3 and npc_fst in str(a.get("label", "")).lower()))
+            for a in actions
+        )
+    )
+    is_npc_target_of_action = (
+        is_action_match
+        if (other_dp_names and other_active_in_act)
+        else (is_action_match or is_session_dp or (session is None) or single_update)
     )
 
     if not new_mem and overall_check_success:
         is_pure_oral = (is_player_oral_action or has_rec_cues or has_give_cues) and not is_player_intercourse_action
-        if is_player_intercourse_action or (has_intercourse and not is_pure_oral):
+        is_pure_anal = (has_a_rec or has_a_give) and not is_player_intercourse_action
+        if is_npc_target_of_action and (is_player_intercourse_action or (has_intercourse and not is_pure_oral and not is_pure_anal)):
             current_intercourse = "non_virgin"
             app_dict["had_first_time_with_player"] = True
             new_mem = format_milestone_memory("intercourse", first_char_name, custom_summary)
             _reveal_intimacy("intercourse")
-        elif (is_player_intimate_action or is_player_oral_action or has_rec_cues) and has_rec_cues:
+        elif is_npc_target_of_action and ((is_player_intimate_action or is_player_oral_action or has_rec_cues) and has_rec_cues):
             current_oral = transition_oral_experience(current_oral, "oral_receive")
             new_mem = format_milestone_memory("oral_receive", first_char_name, custom_summary)
             _reveal_intimacy("oral_receive")
-        elif (is_player_intimate_action or is_player_oral_action or has_give_cues) and has_give_cues:
+        elif is_npc_target_of_action and ((is_player_intimate_action or is_player_oral_action or has_give_cues) and has_give_cues):
             current_oral = transition_oral_experience(current_oral, "oral_give")
             new_mem = format_milestone_memory("oral_give", first_char_name, custom_summary)
             _reveal_intimacy("oral_give")
-        elif has_m_rec:
+        elif is_npc_target_of_action and has_a_rec:
+            current_anal = transition_anal_experience(current_anal, "anal_receive")
+            new_mem = format_milestone_memory("anal_receive", first_char_name, custom_summary)
+            _reveal_intimacy("anal_receive")
+        elif is_npc_target_of_action and has_a_give:
+            current_anal = transition_anal_experience(current_anal, "anal_give")
+            new_mem = format_milestone_memory("anal_give", first_char_name, custom_summary)
+            _reveal_intimacy("anal_give")
+        elif is_npc_target_of_action and has_m_rec:
             current_manual = transition_manual_experience(current_manual, "manual_receive")
             new_mem = format_milestone_memory("manual_receive", first_char_name, custom_summary)
             _reveal_intimacy("manual_receive")
-        elif has_m_give:
+        elif is_npc_target_of_action and has_m_give:
             current_manual = transition_manual_experience(current_manual, "manual_give")
             new_mem = format_milestone_memory("manual_give", first_char_name, custom_summary)
             _reveal_intimacy("manual_give")
         elif ((is_player_romantic_action and is_npc_target_of_action) or milestone_ev in ("first_kiss", "kiss")) and has_kiss:
             _reveal_intimacy(milestone_ev if milestone_ev in ("first_kiss", "kiss") else "kiss")
             new_mem = format_milestone_memory(milestone_ev if milestone_ev in ("first_kiss", "kiss") else "kiss", first_char_name, custom_summary)
-        elif is_npc_target_of_confession or milestone_ev == "confession":
+        elif is_npc_target_of_confession or (milestone_ev == "confession" and is_player_confession_action and not has_other_confession_target):
             new_mem = format_milestone_memory("confession", first_char_name, custom_summary)
             _reveal_intimacy("confession")
             app_dict["demeanor_revealed"] = True
-            track = "romantic"
+            if overall_check_success:
+                track = "romantic"
         elif ((is_player_romantic_action and is_npc_target_of_action) or milestone_ev == "date") and has_date:
             new_mem = format_milestone_memory("date", first_char_name, custom_summary)
-            track = "romantic"
+            if overall_check_success:
+                track = "romantic"
         elif is_player_affection_action and (affection_target_npc and (npc_low == affection_target_npc.lower().strip() or npc_fst == (affection_target_npc.lower().split() or [""])[0])):
             new_mem = format_milestone_memory("milestone", first_char_name, custom_summary) if custom_summary else f"Shared a tender, affectionate moment with {first_char_name}"
             delta_boost = 3
@@ -224,12 +356,13 @@ def _evaluate_npc_milestones(
             new_mem = format_milestone_memory("milestone", first_char_name, custom_summary) if custom_summary else f"Received {gift_label} as a thoughtful gift from {first_char_name}"
         elif custom_summary:
             new_mem = format_milestone_memory("milestone", first_char_name, custom_summary)
-        elif is_player_romantic_action and has_romance:
+        elif is_player_romantic_action and is_npc_target_of_action and has_romance:
             new_mem = f"Romantic milestone shared with {first_char_name}"
 
-        if is_npc_target_of_confession or milestone_ev == "confession":
+        if (is_npc_target_of_confession or (milestone_ev == "confession" and is_player_confession_action)) and overall_check_success:
             track = "romantic"
 
+    app_dict["anal_experience"] = current_anal
     return new_mem, current_intercourse, current_oral, current_manual, track, is_intimate_act, delta_boost
 
 def _reduce_quests_and_waypoints(session_id: int, session: dict, party_uids: list, outcome: dict, actions: list, items_gained_by_user: dict):
@@ -264,8 +397,9 @@ def _reduce_quests_and_waypoints(session_id: int, session: dict, party_uids: lis
             bool(a.get("is_climax_action")) or
             str(a.get("contract_type", "")).lower() == "climax" or
             "[story climax]" in str(a.get("label", "")).lower() or
-            "⚡" in str(a.get("label", "")) or
-            "climax" in str(a.get("label", "")).lower()
+            "[climax]" in str(a.get("label", "")).lower() or
+            "story climax" in str(a.get("label", "")).lower() or
+            "⚡" in str(a.get("label", ""))
             for a in (actions or [])
         )
         action_succeeded = any(
@@ -344,6 +478,13 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
       except (ValueError, TypeError):
           temp_hp_delta = 0
           
+      import scenario_data
+      if not is_combat and scenario_data.is_non_combat_scenario(scen_key):
+          if hp_delta < 0:
+              hp_delta = 0
+          if temp_hp_delta < 0:
+              temp_hp_delta = 0
+
       db.apply_hp_mp_delta(user_id, hp_delta, mp_delta, gold_delta, temp_hp_delta)
   
       gained = co.get("items_gained", []) or []
@@ -374,6 +515,27 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
           db.remove_item_by_name(user_id, item_name)
   
       status_raw = co.get("status_effects", []) or []
+      if not isinstance(status_raw, list):
+          status_raw = [status_raw] if status_raw else []
+
+      # Preserve active timed status effects on character (like Aroused [N turns]) already ticked
+      char_status = char.get("status_effects", []) if isinstance(char, dict) else []
+      if isinstance(char_status, str):
+          import json
+          try:
+              char_status = json.loads(char_status)
+          except Exception:
+              char_status = [char_status] if char_status else []
+      elif not isinstance(char_status, list):
+          char_status = []
+
+      for cs in char_status:
+          if isinstance(cs, str) and cs.strip():
+              if re.search(r"\[\d+\s*turns?\]", cs, re.IGNORECASE):
+                  base_name = re.sub(r"\s*\[\d+\s*turns?\]", "", cs).strip().lower()
+                  if not any(base_name in str(s).lower() for s in status_raw):
+                      status_raw.append(cs)
+
       from character_data import sanitize_status_effects
       cleaned_status = sanitize_status_effects(status_raw)
       if not is_combat:
@@ -381,7 +543,7 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
           cleaned_status = [
               s for s in cleaned_status
               if not any(k in s for k in ("Iron Skin", "Aegis Warding", "Combat Booster", "Quickstep", "DT]", "DR]", "% ATK]", "% EVA]"))
-              and not re.search(r"\[\d+\s*turns?\]", s, re.IGNORECASE)
+              and not (re.search(r"\[\d+\s*turns?\]", s, re.IGNORECASE) and "aroused" not in s.lower())
           ]
       if any(k in s.lower() for s in (status_raw or []) + (cleaned_status or []) for k in ("recovering", "exhausted")):
           # Character was revived or recovering from party defeat: purge trauma/combat debuffs and turn counters
@@ -860,65 +1022,594 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
     is_combat = bool(outcome and (outcome.get("_combat_log") or outcome.get("_enemy_attack_notice") or game_engine.get_active_enemies(outcome) or game_engine.get_active_enemies(session)))
     if is_combat:
         updated_phys["intimate_contact"] = "none"
+        updated_phys["climax_state"] = {"partner_climaxed": False, "player_climaxed": False}
     else:
         updated_phys["combat_focus"] = "none"
 
-    # 6. Automatic Intimate Contact inference & Disengagement Clearance
-    if not phys_updates.get("intimate_contact") and not is_combat:
-        is_disengagement = False
-        # Physical separation / disengagement intent clears ongoing contact
-        for a in (actions or []):
-            a_label = ((a.get("label") or "") if isinstance(a, dict) else str(a)).lower()
-            if any(k in a_label for k in (
-                "step back", "step away", "pull back", "pull away", "let go", "break contact",
-                "break the kiss", "break away", "excuse myself", "leave the room", "part ways",
-                "goodbye", "farewell", "walk away", "turn away", "head out", "disengage"
-            )):
-                updated_phys["intimate_contact"] = "none"
-                is_disengagement = True
-                break
-
-        # Dialogue partner switch clearance: if talking to a new NPC without referencing intimate partner, clear contact
+    # 6. Automatic Intimate Contact inference, Climax Primacy & Disengagement Clearance
+    if not is_combat:
+        from mechanics.social.physical_state import (
+            is_erotic_intimate_contact,
+            detect_partner_climax,
+            detect_player_climax,
+            detect_intimate_disengagement,
+            _match_actor_key,
+        )
         from mechanics.world.mobility import get_session_dialogue_partners
         dps = get_session_dialogue_partners(session)
+        if not dps and outcome.get("dialogue_partners"):
+            dps = [p for p in outcome["dialogue_partners"] if p]
         partner = dps[0] if dps else ""
+        if not partner and outcome.get("dialogue_partner"):
+            partner = outcome["dialogue_partner"]
+        if not partner:
+            for rel in (outcome.get("relationship_updates") or []):
+                if isinstance(rel, dict) and (rel.get("npc_name") or rel.get("name")):
+                    partner = str(rel.get("npc_name") or rel.get("name")).strip()
+                    break
+        if not partner and isinstance(current_phys, dict):
+            prev_ic_str = str(current_phys.get("intimate_contact") or "")
+            if " with " in prev_ic_str and prev_ic_str.lower() != "none":
+                raw_ic_p = prev_ic_str.split(" with ")[-1].split("(")[0].strip()
+                split_ic_p = [
+                    sp.strip()
+                    for chunk in raw_ic_p.split(",")
+                    for sp in chunk.split(" and ")
+                    if sp.strip() and sp.strip().lower() != "partner"
+                ]
+                if split_ic_p:
+                    partner = split_ic_p[0]
+                    if not dps and len(split_ic_p) >= 2:
+                        dps = split_ic_p
+                else:
+                    partner = raw_ic_p
+
+        player_name = "Hero"
+        if party and isinstance(party, list) and party[0]:
+            p_char = party[0][0] if isinstance(party[0], (tuple, list)) else party[0]
+            if isinstance(p_char, dict) and p_char.get("name"):
+                player_name = p_char["name"]
+
+        is_disengagement = detect_intimate_disengagement(actions)
+        act_text_raw = " ".join(((a.get("label") or "") if isinstance(a, dict) else str(a)).lower() for a in (actions or []))
+        is_explicit_withdrawal = any(
+            k in act_text_raw
+            for k in (
+                "withdraw", "pull away", "step back", "step away",
+                "break contact", "break away", "leave the bed", "leave the room", "get dressed",
+                "part ways", "goodbye", "farewell", "walk away", "turn away"
+            )
+        )
+        is_aftercare_act = any(
+            k in act_text_raw
+            for k in (
+                "aftercare", "post-climax warmth", "quiet post-climax",
+                "wrapped securely in your arms", "catch your breath against",
+                "promise to make it up to"
+            )
+        ) and not is_explicit_withdrawal
+        if is_disengagement and not is_aftercare_act:
+            updated_phys["intimate_contact"] = "none"
+            updated_phys["climax_state"] = {"partner_climaxed": False, "player_climaxed": False, "partner_climaxes": {}}
+            if "excitement" in updated_phys:
+                updated_phys["excitement"]["active"] = False
+                updated_phys["excitement"]["last_act"] = "none"
+                updated_phys["excitement"]["premature_finish"] = False
+                updated_phys["excitement"]["partner_demanded"] = False
+                updated_phys["excitement"]["unsatisfied_partner"] = ""
+                updated_phys["excitement"]["unsatisfied_partners"] = []
+                updated_phys["excitement"]["simultaneous_partner_climax"] = False
+                updated_phys["excitement"]["mutual_group_climax"] = False
+
+        # Dialogue partner switch clearance: if talking to a new NPC without referencing intimate partner, clear contact
+        if dps:
+            for dp in dps:
+                db.update_contact_in_person_timestamp(session_id, dp)
+        outcome_dps = outcome.get("dialogue_partners") or ([outcome["dialogue_partner"]] if outcome.get("dialogue_partner") else [])
+        for odp in outcome_dps:
+            if odp:
+                db.update_contact_in_person_timestamp(session_id, odp)
+        for rel in (outcome.get("relationship_updates", []) or []):
+            if isinstance(rel, dict) and rel.get("npc_name"):
+                db.update_contact_in_person_timestamp(session_id, rel["npc_name"])
+
+        partner_switched_clear = False
         if dps and updated_phys.get("intimate_contact") not in ("none", ""):
             curr_ic = updated_phys["intimate_contact"].lower()
             if " with " in curr_ic:
-                ic_target = curr_ic.split(" with ")[-1].strip().rstrip(")")
-                if ic_target and partner.lower() not in ic_target and ic_target not in partner.lower():
+                ic_target_raw = curr_ic.split(" with ")[-1].split("(")[0].strip().rstrip(")")
+                ic_targets = [x.strip() for x in re.split(r",|\band\b", ic_target_raw) if x.strip()] or ([ic_target_raw] if ic_target_raw else [])
+                dp_matches_ic = any(
+                    dp.lower() in ic_p or ic_p in dp.lower()
+                    or ((dp.lower().split() or [""])[0] == (ic_p.split() or [""])[0] and len((ic_p.split() or [""])[0]) >= 3)
+                    for dp in dps
+                    for ic_p in ic_targets
+                )
+                if ic_targets and not dp_matches_ic:
                     act_text = " ".join(((a.get("label") or "") if isinstance(a, dict) else str(a)).lower() for a in (actions or []))
-                    if ic_target not in act_text:
+                    if not any(ic_p in act_text or ((ic_p.split() or [""])[0] in act_text and len((ic_p.split() or [""])[0]) >= 3) for ic_p in ic_targets):
                         updated_phys["intimate_contact"] = "none"
+                        updated_phys["climax_state"] = {"partner_climaxed": False, "player_climaxed": False, "partner_climaxes": {}}
+                        if "excitement" in updated_phys and isinstance(updated_phys["excitement"], dict):
+                            updated_phys["excitement"]["active"] = False
+                            updated_phys["excitement"]["last_act"] = "none"
+                            updated_phys["excitement"]["premature_finish"] = False
+                            updated_phys["excitement"]["partner_demanded"] = False
+                            updated_phys["excitement"]["unsatisfied_partner"] = ""
+                            updated_phys["excitement"]["unsatisfied_partners"] = []
+                        partner_switched_clear = True
 
-        if not is_disengagement and updated_phys.get("intimate_contact") == "none":
-            for rel in outcome.get("relationship_updates", []) or []:
-                if isinstance(rel, dict) and rel.get("milestone_event"):
-                    m_ev = str(rel["milestone_event"]).lower().strip()
-                    npc_target = rel.get("npc_name", "partner")
-                    if m_ev in ("first_kiss", "kiss"):
-                        updated_phys["intimate_contact"] = f"Kissing / embrace with {npc_target}"
-                        break
-                    elif m_ev in ("oral_give", "oral_receive", "intercourse", "manual_give", "manual_receive"):
-                        updated_phys["intimate_contact"] = f"Intimate encounter with {npc_target} ({m_ev.replace('_', ' ')})"
-                        break
-                    elif m_ev in ("cuddle", "cuddling", "embrace", "embracing"):
-                        updated_phys["intimate_contact"] = f"Cuddling / embrace with {npc_target}"
+        # Climax detection & Player Climax Primacy
+        if not is_disengagement or is_aftercare_act:
+            act_text = " ".join(((a.get("label") or "") if isinstance(a, dict) else str(a)).lower() for a in (actions or []))
+            narrative_text = f"{outcome.get('outcome_narrative', '')} {outcome.get('next_narrative', '')}"
+            full_turn_text = f"{act_text} {narrative_text}"
+
+            prev_ic = "none" if partner_switched_clear else (current_phys.get("intimate_contact", "none") if isinstance(current_phys, dict) else "none")
+            curr_ic = updated_phys.get("intimate_contact", "none")
+            was_erotic = False if partner_switched_clear else is_erotic_intimate_contact(prev_ic)
+            is_erotic = is_erotic_intimate_contact(curr_ic)
+
+            phys_up_dict = outcome.get("physical_updates") or outcome.get("physical_state_updates") or {}
+            if hasattr(phys_up_dict, "model_dump"):
+                phys_up_dict = phys_up_dict.model_dump()
+            elif not isinstance(phys_up_dict, dict):
+                phys_up_dict = {}
+
+            # Excitement Meter Step calculation
+            from mechanics.social.intimate_excitement import (
+                compute_excitement_step, check_and_resolve_refractory_clock,
+                format_compact_discord_meter, classify_intimate_act
+            )
+
+            sess_dict = session or (db.get_session(session_id) if session_id else {}) or {}
+
+            from .core import is_check_success
+            action_succeeded = True
+            for a in (actions or []):
+                if isinstance(a, dict):
+                    if a.get("success") is False or not is_check_success(a.get("check"), default_if_none=True):
+                        action_succeeded = False
                         break
 
-            # Fallback: check actions for physical contact with dialogue partner
-            if updated_phys.get("intimate_contact") == "none" and partner:
+            # Start from verified prior climax_state and resolve refractory clock recovery BEFORE excitement step
+            prev_climax_st = ({} if partner_switched_clear else ((current_phys.get("climax_state") if isinstance(current_phys, dict) else None) or {}))
+            prev_p_climaxes = prev_climax_st.get("partner_climaxes") if isinstance(prev_climax_st, dict) else None
+            updated_phys["climax_state"] = {
+                "partner_climaxed": bool(prev_climax_st.get("partner_climaxed", False)),
+                "player_climaxed": bool(prev_climax_st.get("player_climaxed", False)),
+                "partner_climaxes": dict(prev_p_climaxes) if isinstance(prev_p_climaxes, dict) else {},
+            }
+            is_recovered, toast_notice = check_and_resolve_refractory_clock(sess_dict, updated_phys)
+            if is_recovered and toast_notice:
+                outcome["_refractory_recovered_notice"] = toast_notice
+
+            # Pre-infer intimate_contact from relationship_updates milestone_event if still "none"
+            if updated_phys.get("intimate_contact") in ("none", "", None) and action_succeeded:
+                rel_updates_list = outcome.get("relationship_updates", []) or []
+                rel_milestone_npcs = [
+                    str(r.get("npc_name")).strip()
+                    for r in rel_updates_list
+                    if isinstance(r, dict) and r.get("milestone_event") and r.get("npc_name")
+                ]
+                for rel in rel_updates_list:
+                    if isinstance(rel, dict) and rel.get("milestone_event"):
+                        m_ev = str(rel["milestone_event"]).lower().strip()
+                        if len(dps) >= 2 and (
+                            len(rel_milestone_npcs) >= 2
+                            or sum(1 for d in dps if d.lower() in act_text or (d.lower().split() or [""])[0] in act_text) >= 2
+                        ):
+                            npc_target = " and ".join(dps)
+                        else:
+                            npc_target = rel.get("npc_name") or partner or "partner"
+                        if not partner and npc_target != "partner":
+                            partner = dps[0] if dps else npc_target
+                        if m_ev in ("first_kiss", "kiss"):
+                            updated_phys["intimate_contact"] = f"Kissing / embrace with {npc_target}"
+                            break
+                        elif m_ev in ("oral_give", "oral_receive", "intercourse", "manual_give", "manual_receive", "anal_give", "anal_receive", "anal"):
+                            npc_to_player_act = {
+                                "oral_receive": "oral give",
+                                "oral_give": "oral receive",
+                                "manual_receive": "manual give",
+                                "manual_give": "manual receive",
+                                "anal_receive": "anal give",
+                                "anal_give": "anal receive",
+                                "anal": "anal give",
+                                "intercourse": "intercourse",
+                            }
+                            ic_act_label = npc_to_player_act.get(m_ev, m_ev.replace("_", " "))
+                            updated_phys["intimate_contact"] = f"Intimate encounter with {npc_target} ({ic_act_label})"
+                            break
+                        elif m_ev in ("cuddle", "cuddling", "embrace", "embracing"):
+                            updated_phys["intimate_contact"] = f"Cuddling / embrace with {npc_target}"
+                            break
+
+            curr_ic = updated_phys.get("intimate_contact", "none")
+            is_erotic = is_erotic_intimate_contact(curr_ic)
+
+            all_contacts = []
+            if session_id:
+                try:
+                    all_contacts = db.get_contacts(session_id) or []
+                except Exception:
+                    all_contacts = []
+
+            partner_contacts = []
+            for dp_name in (dps or ([partner] if partner else [])):
+                if not dp_name:
+                    continue
+                dp_low = dp_name.lower().strip()
+                dp_first = (dp_low.split() or [""])[0]
+                c_match = next((c for c in all_contacts if c.get("name", "").lower().strip() == dp_low), None)
+                if not c_match and len(dp_first) >= 3:
+                    c_match = next((c for c in all_contacts if (c.get("name", "").lower().strip().split() or [""])[0] == dp_first), None)
+                if not c_match:
+                    c_match = next((n for n in (sess_dict.get("current_npcs") or []) if isinstance(n, dict) and n.get("name", "").lower().strip() == dp_low), None)
+                if not c_match and len(dp_first) >= 3:
+                    c_match = next((n for n in (sess_dict.get("current_npcs") or []) if isinstance(n, dict) and (n.get("name", "").lower().strip().split() or [""])[0] == dp_first), None)
+                if c_match:
+                    if c_match.get("name", "").lower().strip() != dp_low:
+                        c_match = {**c_match, "name": dp_name}
+                else:
+                    c_match = {"name": dp_name}
+                partner_contacts.append(c_match)
+
+            partner_contact = partner_contacts[0] if partner_contacts else None
+            if not partner_contact and partner:
+                partner_contact = {"name": partner}
+
+            player_dict = p_char if isinstance(p_char, dict) else {"name": player_name}
+            p_gender = str(player_dict.get("gender", "Male")).lower()
+            is_female_player = "female" in p_gender or "woman" in p_gender
+
+            target_p = partner or "partner"
+            is_aftercare_transition = bool(
+                is_aftercare_act
+                or any(k in act_text for k in (
+                    "in sweet aftercare", "in tender aftercare", "in aftercare",
+                    "post-climax warmth", "quiet post-climax",
+                    "wrapped securely in your arms", "catch your breath against"
+                ))
+                or (action_succeeded and "promise to make it up to" in act_text)
+            )
+
+            if is_aftercare_transition:
+                if partner_contacts and len(partner_contacts) >= 2:
+                    p_names_list = [c.get("name", "") for c in partner_contacts if c.get("name")]
+                    p_names_str = " and ".join(p_names_list)
+                    hold_str = f"both {p_names_str}" if len(p_names_list) == 2 else f"all of {p_names_str}"
+                    updated_phys["intimate_contact"] = f"Cuddling / aftercare with {p_names_str}"
+                    actors = updated_phys.get("actors", {})
+                    c_matched = _match_actor_key(player_name, actors) if player_name else None
+                    if c_matched and c_matched in actors:
+                        actors[c_matched]["posture"] = f"Resting in aftercare, holding {hold_str}"
+                    for pc_item in partner_contacts:
+                        pn = pc_item.get("name", "")
+                        mk = _match_actor_key(pn, actors) if pn else None
+                        if mk and mk in actors:
+                            actors[mk]["posture"] = f"Resting against {player_name} in shared aftercare"
+                else:
+                    updated_phys["intimate_contact"] = f"Cuddling / aftercare with {target_p}"
+                if "excitement" in updated_phys and isinstance(updated_phys["excitement"], dict):
+                    updated_phys["excitement"]["active"] = False
+                    updated_phys["excitement"]["last_act"] = "none"
+                    updated_phys["excitement"]["premature_finish"] = False
+                    updated_phys["excitement"]["partner_demanded"] = False
+                    updated_phys["excitement"]["unsatisfied_partner"] = ""
+                    updated_phys["excitement"]["unsatisfied_partners"] = []
+            else:
+                act_class = classify_intimate_act(
+                    action_str=act_text if (was_erotic or is_erotic or action_succeeded) else "",
+                    intimate_contact_str=curr_ic,
+                    player_name=player_name,
+                    partner_name=partner,
+                    partner_contact=partner_contact,
+                    narrative_str=narrative_text
+                )
+                if partner_contacts and len(partner_contacts) >= 2 and act_class["act_type"] in ("none", "foreplay_nongenital"):
+                    for extra_pc in partner_contacts[1:]:
+                        extra_name = extra_pc.get("name") or ""
+                        if not extra_name:
+                            continue
+                        extra_class = classify_intimate_act(
+                            action_str=act_text if (was_erotic or is_erotic or action_succeeded) else "",
+                            intimate_contact_str=curr_ic,
+                            player_name=player_name,
+                            partner_name=extra_name,
+                            partner_contact=extra_pc,
+                            narrative_str=narrative_text,
+                        )
+                        if extra_class["act_type"] not in ("none", "foreplay_nongenital"):
+                            act_class = extra_class
+                            break
+                        elif act_class["act_type"] == "none" and extra_class["act_type"] != "none":
+                            act_class = extra_class
+
+                is_genital_act = (
+                    act_class["act_type"] not in ("none", "foreplay_nongenital")
+                    and (was_erotic or is_erotic or action_succeeded)
+                )
+                prev_exc_active = bool((updated_phys.get("excitement") or {}).get("active", False))
+                should_run_excitement = (was_erotic or is_erotic or is_genital_act or prev_exc_active) and partner_contact
+
+                act_label = "intercourse" if act_class["act_type"] == "penetrative" else act_class["act_type"].replace("_", " ")
+                prev_ic_low = str(prev_ic).lower()
+                if is_genital_act and (
+                    updated_phys.get("intimate_contact") in ("none", "", None)
+                    or any(k in str(updated_phys.get("intimate_contact", "")).lower() for k in ("kissing", "cuddling", "holding hands"))
+                    or (
+                        updated_phys.get("intimate_contact") == prev_ic
+                        and act_label not in prev_ic_low
+                        and "partner reached climax" not in prev_ic_low
+                        and any(
+                            old_act in prev_ic_low
+                            for old_act in (
+                                "oral give", "oral receive", "oral mutual", "mutual oral", "69",
+                                "manual give", "manual receive", "anal give", "anal receive", "intercourse",
+                            )
+                        )
+                    )
+                ):
+                    target_label = (" and ".join(c.get("name", "") for c in partner_contacts if c.get("name"))) if (partner_contacts and len(partner_contacts) >= 2) else (partner or "partner")
+                    updated_phys["intimate_contact"] = f"Intimate encounter with {target_label} ({act_label})"
+
+                excitement_res = None
+                if should_run_excitement:
+                    excitement_res = compute_excitement_step(
+                        physical_state=updated_phys,
+                        action_str=act_text,
+                        player_char=player_dict,
+                        partner_contact=partner_contact,
+                        session=sess_dict,
+                        narrative_str=narrative_text,
+                        partner_contacts=partner_contacts,
+                    )
+                    outcome["intimate_update"] = excitement_res
+                    if (
+                        excitement_res
+                        and excitement_res.get("act_type") not in ("", "none", "foreplay_nongenital", None)
+                        and act_class["act_type"] in ("none", "foreplay_nongenital")
+                        and (was_erotic or is_erotic or action_succeeded)
+                    ):
+                        act_class["act_type"] = excitement_res["act_type"]
+                        is_genital_act = True
+                        act_label = "intercourse" if act_class["act_type"] == "penetrative" else act_class["act_type"].replace("_", " ")
+                        if updated_phys.get("intimate_contact") in ("none", "", None) or any(
+                            k in str(updated_phys.get("intimate_contact", "")).lower() for k in ("kissing", "cuddling", "holding hands")
+                        ):
+                            target_label = (" and ".join(c.get("name", "") for c in partner_contacts if c.get("name"))) if (partner_contacts and len(partner_contacts) >= 2) else (partner or "partner")
+                            updated_phys["intimate_contact"] = f"Intimate encounter with {target_label} ({act_label})"
+
+                    if excitement_res and excitement_res.get("all_cooled_down"):
+                        updated_phys["intimate_contact"] = "none"
+                        if "excitement" in updated_phys and isinstance(updated_phys["excitement"], dict):
+                            updated_phys["excitement"]["active"] = False
+                            updated_phys["excitement"]["last_act"] = "none"
+
+                    # Synchronize Aroused [3 turns] status effect on player and partner when excitement is active or meter > 0
+                    if (
+                        excitement_res
+                        and (excitement_res.get("player_meter", 0) > 0 or excitement_res.get("partner_meter", 0) > 0 or is_genital_act)
+                        and not excitement_res.get("all_cooled_down")
+                    ):
+                        aroused_tag = "Aroused [3 turns]"
+                        party_list = party or []
+                        lead_entry = party_list[0] if party_list else None
+                        lead_c = lead_entry[0] if isinstance(lead_entry, (tuple, list)) else lead_entry
+                        u_id = lead_entry[1] if isinstance(lead_entry, (tuple, list)) and len(lead_entry) > 1 else ((lead_c.get("user_id") if isinstance(lead_c, dict) else None) or (sess_dict.get("turn_order", [None])[0] if sess_dict else None))
+                        if u_id:
+                            try:
+                                char_record = db.get_character(u_id)
+                                c_effs = char_record.get("status_effects") if char_record else []
+                                if isinstance(c_effs, str):
+                                    import json
+                                    try:
+                                        c_effs = json.loads(c_effs)
+                                    except Exception:
+                                        c_effs = [c_effs] if c_effs else []
+                                else:
+                                    c_effs = list(c_effs or [])
+                                if not any("aroused" in str(s).lower() for s in c_effs):
+                                    c_effs.append(aroused_tag)
+                                else:
+                                    c_effs = [aroused_tag if "aroused" in str(s).lower() else s for s in c_effs]
+                                db.set_status_effects(u_id, c_effs)
+                                if isinstance(lead_c, dict):
+                                    lead_c["status_effects"] = c_effs
+                            except Exception as e:
+                                log.debug("Could not synchronize player Aroused status: %s", e)
+
+                        p_name_low = player_name.lower().strip()
+                        for co_item in (outcome.get("character_outcomes") or []):
+                            if isinstance(co_item, dict) and str(co_item.get("name", "")).lower().strip() == p_name_low:
+                                co_effs = list(co_item.get("status_effects") or [])
+                                if not any("aroused" in str(s).lower() for s in co_effs):
+                                    co_effs.append(aroused_tag)
+                                else:
+                                    co_effs = [aroused_tag if "aroused" in str(s).lower() else s for s in co_effs]
+                                co_item["status_effects"] = co_effs
+
+                        for pc_item in (partner_contacts or ([partner_contact] if partner_contact else [])):
+                            if isinstance(pc_item, dict):
+                                npc_effs = pc_item.setdefault("status_effects", [])
+                                if not any("aroused" in str(s).lower() for s in npc_effs):
+                                    npc_effs.append(aroused_tag)
+                                else:
+                                    pc_item["status_effects"] = [aroused_tag if "aroused" in str(s).lower() else s for s in npc_effs]
+
+                if excitement_res:
+                    has_player_climax = bool(excitement_res.get("player_climaxed"))
+                    has_partner_climax = bool(excitement_res.get("partner_climaxed"))
+                else:
+                    has_player_climax = (phys_up_dict.get("player_climaxed") is True) or detect_player_climax(full_turn_text, player_name)
+                    has_partner_climax = (phys_up_dict.get("partner_climaxed") is True) or detect_partner_climax(full_turn_text, partner)
+
+                target_label = (" and ".join(c.get("name", "") for c in partner_contacts if c.get("name"))) if (partner_contacts and len(partner_contacts) >= 2) else target_p
+                _eff_act_type = act_class["act_type"]
+                if _eff_act_type in ("", "none", "foreplay_nongenital"):
+                    _exc_last = str((updated_phys.get("excitement") or {}).get("last_act") or "").strip().lower()
+                    if _exc_last not in ("", "none", "foreplay_nongenital"):
+                        _eff_act_type = _exc_last
+                _ongoing_act_label = (
+                    _eff_act_type.replace("_", " ")
+                    if _eff_act_type in (
+                        "oral_give", "oral_receive", "oral_mutual",
+                        "manual_give", "manual_receive",
+                        "anal_give", "anal_receive",
+                    )
+                    else "intercourse"
+                )
+
+                if has_player_climax:
+                    if is_female_player:
+                        # Female multi-climax: drops to 35% hypersensitive baseline; ongoing rhythm
+                        updated_phys["intimate_contact"] = f"Intimate encounter with {target_label} ({_ongoing_act_label} - player reached climax, hypersensitive ongoing)"
+                        updated_phys["climax_state"] = {"partner_climaxed": bool(has_partner_climax), "player_climaxed": True}
+                        if excitement_res and excitement_res.get("partner_climaxes"):
+                            updated_phys["climax_state"]["partner_climaxes"] = dict(excitement_res["partner_climaxes"])
+                        if excitement_res:
+                            outcome["intimate_update"]["female_multiorgasmic"] = True
+                    else:
+                        # Male anatomy climax: physical penetration ceases
+                        if excitement_res and excitement_res.get("premature_finish"):
+                            # Partner unsatisfied (< 100%)
+                            updated_phys["intimate_contact"] = f"Intimate encounter with {target_label} (player reached climax spent, partner unsatisfied)"
+                            updated_phys["climax_state"] = {"partner_climaxed": bool(has_partner_climax), "player_climaxed": True}
+                            if excitement_res and excitement_res.get("partner_climaxes"):
+                                updated_phys["climax_state"]["partner_climaxes"] = dict(excitement_res["partner_climaxes"])
+                            if has_partner_climax:
+                                actors = updated_phys.get("actors", {})
+                                partner_climaxes_map = excitement_res.get("partner_climaxes") or {}
+                                for pc_item in (partner_contacts or ([{"name": target_p}] if target_p else [])):
+                                    p_name_item = pc_item.get("name", "")
+                                    if not p_name_item:
+                                        continue
+                                    m_key = _match_actor_key(p_name_item, actors)
+                                    if m_key in actors:
+                                        posture_str = str(actors[m_key].get("posture", "")).lower()
+                                        p_clim_k = _match_actor_key(p_name_item, partner_climaxes_map) if partner_climaxes_map else ""
+                                        p_clim = bool(partner_climaxes_map.get(p_clim_k or p_name_item, False)) if partner_climaxes_map else has_partner_climax
+                                        other_names = [c.get("name", "") for c in partner_contacts if c.get("name") and c.get("name") != p_name_item]
+                                        other_names_str = " and ".join(other_names)
+                                        if p_clim and any(k in posture_str for k in ("sleeping", "asleep", "lying down spent", "resting side by side", "resting close beside", "post-coital", "standing", "")):
+                                            if other_names:
+                                                actors[m_key]["posture"] = f"Trembling from aftershocks beside {player_name} and {other_names_str}"
+                                            else:
+                                                actors[m_key]["posture"] = f"Trembling from aftershocks in {player_name}'s embrace"
+                        else:
+                            # Mutual climax or partner was already satisfied -> aftercare
+                            if partner_contacts and len(partner_contacts) >= 2:
+                                p_names_list = [c.get("name", "") for c in partner_contacts if c.get("name")]
+                                p_names_str = " and ".join(p_names_list)
+                                hold_str = f"both {p_names_str}" if len(p_names_list) == 2 else f"all of {p_names_str}"
+                                updated_phys["intimate_contact"] = f"Cuddling / aftercare with {p_names_str}"
+                                actors = updated_phys.get("actors", {})
+                                c_matched = _match_actor_key(player_name, actors) if player_name else None
+                                if c_matched and c_matched in actors:
+                                    actors[c_matched]["posture"] = f"Resting in aftercare, holding {hold_str}"
+                                for pc_item in partner_contacts:
+                                    pn = pc_item.get("name", "")
+                                    mk = _match_actor_key(pn, actors) if pn else None
+                                    if mk and mk in actors:
+                                        actors[mk]["posture"] = f"Resting against {player_name} in shared aftercare"
+                            else:
+                                updated_phys["intimate_contact"] = f"Cuddling / aftercare with {target_p}"
+                            updated_phys["climax_state"] = {"partner_climaxed": True, "player_climaxed": True}
+                            if excitement_res and excitement_res.get("partner_climaxes"):
+                                updated_phys["climax_state"]["partner_climaxes"] = dict(excitement_res["partner_climaxes"])
+                            if "excitement" in updated_phys:
+                                updated_phys["excitement"]["active"] = False
+                                updated_phys["excitement"]["last_act"] = "none"
+                                updated_phys["excitement"]["premature_finish"] = False
+                                updated_phys["excitement"]["partner_demanded"] = False
+                                updated_phys["excitement"]["unsatisfied_partner"] = ""
+                                updated_phys["excitement"]["unsatisfied_partners"] = []
+                elif (was_erotic or is_erotic or is_genital_act) and has_partner_climax and not has_player_climax:
+                    # Partner reached climax, but player is still going! (Player Climax Primacy)
+                    primacy_act = _ongoing_act_label
+                    updated_phys["intimate_contact"] = f"Intimate encounter with {target_label} ({primacy_act} - partner reached climax, ongoing for player)"
+                    updated_phys["climax_state"] = {"partner_climaxed": True, "player_climaxed": False}
+                    if excitement_res and excitement_res.get("partner_climaxes"):
+                        updated_phys["climax_state"]["partner_climaxes"] = dict(excitement_res["partner_climaxes"])
+                    actors = updated_phys.get("actors", {})
+                    c_matched = _match_actor_key(player_name, actors) if player_name else None
+                    partner_climaxes_map = (excitement_res.get("partner_climaxes") if excitement_res else None) or {}
+
+                    for pc_item in (partner_contacts or ([{"name": target_p}] if target_p else [])):
+                        p_name_item = pc_item.get("name", "")
+                        if not p_name_item:
+                            continue
+                        m_key = _match_actor_key(p_name_item, actors)
+                        if m_key in actors:
+                            posture_str = str(actors[m_key].get("posture", "")).lower()
+                            p_clim_k = _match_actor_key(p_name_item, partner_climaxes_map) if partner_climaxes_map else ""
+                            p_clim = bool(partner_climaxes_map.get(p_clim_k or p_name_item, False)) if partner_climaxes_map else has_partner_climax
+                            other_names = [c.get("name", "") for c in partner_contacts if c.get("name") and c.get("name") != p_name_item]
+                            other_names_str = " and ".join(other_names)
+                            if p_clim:
+                                if any(k in posture_str for k in ("sleeping", "asleep", "lying down spent", "resting side by side", "resting close beside", "post-coital", "standing", "")):
+                                    if other_names:
+                                        actors[m_key]["posture"] = f"Trembling from aftershocks beside {player_name} and {other_names_str}"
+                                    else:
+                                        actors[m_key]["posture"] = f"Trembling from aftershocks in {player_name}'s embrace"
+                            elif has_partner_climax or has_player_climax:
+                                if any(k in posture_str for k in ("sleeping", "asleep", "standing", "")):
+                                    actors[m_key]["posture"] = f"Resting close beside {player_name} with flushed warmth"
+                    if c_matched and c_matched in actors:
+                        c_posture_str = str(actors[c_matched].get("posture", "")).lower()
+                        if any(k in c_posture_str for k in ("sleeping", "asleep", "lying down spent", "resting side by side")):
+                            act_t = act_class.get("act_type", "")
+                            if act_t == "oral_give":
+                                actors[c_matched]["posture"] = f"Kneeling between {target_p}'s thighs, maintaining oral rhythm"
+                            elif act_t == "oral_receive":
+                                actors[c_matched]["posture"] = f"Leaning back, receiving oral pleasure from {target_p}"
+                            elif act_t == "oral_mutual":
+                                actors[c_matched]["posture"] = f"Engaged intimately with {target_p} in mutual oral rhythm"
+                            elif act_t == "manual_give":
+                                actors[c_matched]["posture"] = f"Maintaining manual rhythm with {target_p}"
+                            elif act_t == "manual_receive":
+                                actors[c_matched]["posture"] = f"Resting close, receiving manual pleasure from {target_p}"
+                            elif is_female_player and act_t in ("penetrative", "anal_give", "anal_receive"):
+                                actors[c_matched]["posture"] = f"Maintaining rhythm with {target_p}"
+                            else:
+                                actors[c_matched]["posture"] = f"Maintaining rhythm inside {target_p}"
+                elif was_erotic and not has_player_climax:
+                    # Ongoing intercourse where neither climaxed this turn
+                    if updated_phys.get("intimate_contact") in ("none", "", None) or any(k in str(updated_phys.get("intimate_contact", "")).lower() for k in ("cuddle", "cuddling", "sleeping", "aftercare", "lying down")):
+                        updated_phys["intimate_contact"] = prev_ic
+                        if isinstance(current_phys, dict) and current_phys.get("climax_state"):
+                            updated_phys["climax_state"] = dict(current_phys["climax_state"])
+
+            # Fallback: check actions for non-genital physical contact with dialogue partner
+            if updated_phys.get("intimate_contact") == "none" and partner and action_succeeded:
                 for a in (actions or []):
                     a_label = ((a.get("label") or "") if isinstance(a, dict) else str(a)).lower()
+                    fb_target = (
+                        " and ".join(dps)
+                        if (len(dps) >= 2 and (
+                            "both" in a_label
+                            or sum(1 for d in dps if d.lower() in a_label or (d.lower().split() or [""])[0] in a_label) >= 2
+                        ))
+                        else partner
+                    )
                     if any(k in a_label for k in ("kiss", "kissing", "peck on")):
-                        updated_phys["intimate_contact"] = f"Kissing with {partner}"
+                        updated_phys["intimate_contact"] = f"Kissing with {fb_target}"
                         break
                     elif any(k in a_label for k in ("hold hands", "holding hands", "take her hand", "take his hand", "clasps hands", "holding her hand", "holding his hand")):
-                        updated_phys["intimate_contact"] = f"Holding hands with {partner}"
+                        updated_phys["intimate_contact"] = f"Holding hands with {fb_target}"
                         break
                     elif any(k in a_label for k in ("cuddle", "cuddling", "embrace", "embracing", "hold close", "holding close")):
-                        updated_phys["intimate_contact"] = f"Cuddling / embrace with {partner}"
+                        updated_phys["intimate_contact"] = f"Cuddling / embrace with {fb_target}"
                         break
+        else:
+            # Check in-game clock refractory recovery even on disengagement turns
+            from mechanics.social.intimate_excitement import check_and_resolve_refractory_clock
+            sess_for_clock = session or (db.get_session(session_id) if session_id else {}) or {}
+            is_recovered, toast_notice = check_and_resolve_refractory_clock(sess_for_clock, updated_phys)
+            if is_recovered and toast_notice:
+                outcome["_refractory_recovered_notice"] = toast_notice
+
 
     # 7. Downed / 0 HP character posture synchronization
     from mechanics.social.physical_state import _match_actor_key
@@ -1025,6 +1716,256 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
 
     db.update_session_physical_state(session_id, updated_phys)
     outcome["_physical_state"] = updated_phys
+
+    # 12. Post-turn choice reconciliation against updated_phys
+    try:
+        from mechanics.social.physical_state import is_erotic_intimate_contact as _post_is_erotic
+        from mechanics.social.intimate_excitement import (
+            build_intimate_choice_blueprints,
+            has_state_contradiction_in_choice,
+        )
+        _upd_ic_str = str(updated_phys.get("intimate_contact", ""))
+        _post_erotic = _post_is_erotic(_upd_ic_str)
+        _pre_erotic = _post_is_erotic(str(current_phys.get("intimate_contact", "") if isinstance(current_phys, dict) else ""))
+        _is_aftercare_now = "aftercare" in _upd_ic_str.lower()
+
+        _ac_partners_list = []
+        if _is_aftercare_now:
+            _ac_partner = partner or ""
+            if not _ac_partner and " with " in _upd_ic_str:
+                _ac_partner = _upd_ic_str.split(" with ", 1)[1].split("(")[0].strip()
+
+            _raw_ac_list = list(dps) if dps else ([_ac_partner] if _ac_partner else [])
+            if len(_raw_ac_list) < 2 and " with " in _upd_ic_str:
+                _ic_part_raw = _upd_ic_str.split(" with ", 1)[1].split("(")[0].strip()
+                _ic_split = [
+                    sp.strip()
+                    for chunk in _ic_part_raw.split(",")
+                    for sp in chunk.split(" and ")
+                    if sp.strip() and sp.strip().lower() != "partner"
+                ]
+                if len(_ic_split) >= 2:
+                    _raw_ac_list = _ic_split
+                    _ac_partner = _ic_split[0]
+
+            for _dp_item in _raw_ac_list:
+                for _chunk in str(_dp_item).split(","):
+                    for _sp in _chunk.split(" and "):
+                        _clean_sp = _sp.strip()
+                        if _clean_sp and _clean_sp not in _ac_partners_list:
+                            _ac_partners_list.append(_clean_sp)
+            if _ac_partners_list and (" and " in _ac_partner or "," in _ac_partner):
+                _ac_partner = _ac_partners_list[0]
+
+            # Multi-partner episodic memory and participatory affinity distribution
+            if len(_ac_partners_list) >= 2:
+                if "npc_memories" not in outcome or not isinstance(outcome["npc_memories"], list):
+                    outcome["npc_memories"] = []
+                existing_mem_npcs = {
+                    str(m.get("npc_name", "")).lower()
+                    for m in outcome["npc_memories"]
+                    if isinstance(m, dict)
+                }
+                existing_ru_npcs = {
+                    str(ru.get("npc_name") or ru.get("name") or "").lower().strip()
+                    for ru in (outcome.get("relationship_updates") or [])
+                    if isinstance(ru, dict)
+                }
+                for _p_name in _ac_partners_list:
+                    if _p_name.lower() not in existing_mem_npcs:
+                        _other = [x for x in _ac_partners_list if x != _p_name]
+                        _other_str = " and ".join(_other)
+                        _fact = (
+                            f"Shared intimate encounter and sweet aftercare with {player_name} and {_other_str}."
+                            if _other
+                            else f"Shared intimate encounter and sweet aftercare with {player_name}."
+                        )
+                        outcome["npc_memories"].append({
+                            "npc_name": _p_name,
+                            "memory_fact": _fact,
+                            "sentiment_delta": 3,
+                            "importance": 2,
+                            "is_secret": False,
+                        })
+                        existing_mem_npcs.add(_p_name.lower())
+                    if _p_name.lower() not in existing_ru_npcs:
+                        if "relationship_updates" not in outcome or not isinstance(outcome["relationship_updates"], list):
+                            outcome["relationship_updates"] = []
+                        outcome["relationship_updates"].append({
+                            "npc_name": _p_name,
+                            "delta_score": 2,
+                            "track": "platonic",
+                            "reasons": ["Participated in intimate group encounter."],
+                        })
+                        existing_ru_npcs.add(_p_name.lower())
+
+        _existing_choices = outcome.get("choices") if outcome.get("choices") is not None else outcome.get("next_choices")
+        if isinstance(_existing_choices, list) and _existing_choices:
+            if _post_erotic:
+                from game_engine.choices_cleaner import clean_choices_impl
+                _dlg_p = (
+                    outcome.get("dialogue_partners")
+                    or outcome.get("dialogue_partner")
+                    or (session.get("dialogue_partners") if isinstance(session, dict) else None)
+                    or (session.get("dialogue_partner") if isinstance(session, dict) else None)
+                    or partner
+                )
+                _loc_now = (
+                    outcome.get("location")
+                    or outcome.get("location_update")
+                    or (session.get("current_location") if isinstance(session, dict) else "")
+                    or (session.get("location") if isinstance(session, dict) else "")
+                    or ""
+                )
+                _reconciled = clean_choices_impl(
+                    None,
+                    choices=[dict(c) if isinstance(c, dict) else c for c in _existing_choices],
+                    scenario=scen_key,
+                    location=_loc_now,
+                    char=lead_char,
+                    dialogue_partner=_dlg_p,
+                    session_id=session_id,
+                )
+                if _reconciled:
+                    if "choices" in outcome:
+                        outcome["choices"] = _reconciled
+                    if "next_choices" in outcome:
+                        outcome["next_choices"] = _reconciled
+            elif (_pre_erotic and not _post_erotic) or _is_aftercare_now:
+                # Transitioned out of active intimacy (e.g. mutual climax -> aftercare, or disengagement):
+                # Prune any leftover active climax/thrust/genital choices and offer aftercare + Redress if undressed.
+                _stale_cues = (
+                    "thrust", "drive deeper", "push over the edge", "push her over the edge",
+                    "push him over the edge", "push them over the edge",
+                    "through her tremors", "through his tremors", "through their tremors",
+                    "spilling deep", "finish inside", "cum inside", "guide him inside", "pull him deep",
+                    "quicken your pace", "relentless pace", "maintain a steady, deep rhythm",
+                    "slide inside", "penetrat", "oral pace", "pleasures you with her mouth",
+                    "pleasures you with his mouth", "pleasures you with their mouths",
+                    "use your tongue", "rhythm of your tongue", "use your fingers to stroke",
+                    "curl your fingers", "strokes you", "rhythm of her hand", "rhythm of his hand",
+                    "rhythm of their hands", "gently withdraw", "pull back to catch your breath",
+                    "push through exhaustion", "apologize breathlessly",
+                )
+                _climax_st_now = updated_phys.get("climax_state", {}) or {}
+                _partner_climaxes_now = _climax_st_now.get("partner_climaxes") if isinstance(_climax_st_now, dict) else None
+                _filtered = [
+                    c for c in _existing_choices
+                    if not (
+                        isinstance(c, dict)
+                        and (
+                            any(k in str(c.get("label", "")).lower() for k in _stale_cues)
+                            or has_state_contradiction_in_choice(
+                                str(c.get("label", "")),
+                                last_act="none",
+                                partner_climaxed=True,
+                                player_spent=True,
+                                partner_climaxes=_partner_climaxes_now,
+                                player_climaxed=True,
+                            )
+                        )
+                    )
+                ]
+                if _is_aftercare_now:
+                    _ac_partner_actors = []
+                    _contacts_pool = []
+                    if session_id:
+                        try:
+                            _contacts_pool = db.get_contacts(session_id) or []
+                        except Exception:
+                            _contacts_pool = []
+                    if len(_ac_partners_list) >= 2:
+                        _exc_act_map = (updated_phys.get("excitement", {}) or {}).get("actors", {}) or {}
+                        _phys_act_map = updated_phys.get("actors", {}) or {}
+                        for _p_name in _ac_partners_list:
+                            _p_low = _p_name.lower().strip()
+                            _p_first = (_p_low.split() or [""])[0]
+                            _c_match = next(
+                                (c for c in _contacts_pool if c.get("name", "").lower() == _p_low or (_p_first and len(_p_first) >= 3 and c.get("name", "").lower().startswith(_p_first))),
+                                None
+                            )
+                            _c_spots = None
+                            _c_gender = "Female"
+                            if _c_match:
+                                _c_gender = _c_match.get("gender") or (_c_match.get("appearance") or {}).get("gender") or "Female"
+                                _c_appr = _c_match.get("appearance") or {}
+                                if isinstance(_c_appr, dict) and (_c_appr.get("sensitive_spots_revealed") or _c_appr.get("turn_ons_revealed")):
+                                    _c_spots = _c_appr.get("sensitive_spots")
+                            _exc_k = _match_actor_key(_p_name, _exc_act_map) if _exc_act_map else ""
+                            _phys_k = _match_actor_key(_p_name, _phys_act_map) if _phys_act_map else ""
+                            _p_meter = int((_exc_act_map.get(_exc_k, {}) if _exc_k else {}).get("meter", 0) or 0)
+                            _p_posture = str((_phys_act_map.get(_phys_k, {}) if _phys_k else {}).get("posture", ""))
+                            _pc_k = _match_actor_key(_p_name, _partner_climaxes_now) if _partner_climaxes_now else ""
+                            _ac_partner_actors.append({
+                                "name": _p_name,
+                                "meter": _p_meter,
+                                "climaxed": bool(_partner_climaxes_now.get(_pc_k or _p_name, True)) if _partner_climaxes_now else True,
+                                "posture": _p_posture,
+                                "sensitive_spots": _c_spots,
+                                "gender": _c_gender,
+                            })
+
+                    _single_p_gender = "Female"
+                    if _ac_partner and _contacts_pool:
+                        _ac_low = _ac_partner.lower().strip()
+                        _ac_first = (_ac_low.split() or [""])[0]
+                        _cm = next(
+                            (c for c in _contacts_pool if c.get("name", "").lower() == _ac_low or (_ac_first and len(_ac_first) >= 3 and c.get("name", "").lower().startswith(_ac_first))),
+                            None
+                        )
+                        if _cm:
+                            _single_p_gender = _cm.get("gender") or (_cm.get("appearance") or {}).get("gender") or "Female"
+
+                    _ac_bp = build_intimate_choice_blueprints(
+                        partner_name=_ac_partner or "Partner",
+                        player_climaxed=True,
+                        premature_finish=False,
+                        partner_actors=_ac_partner_actors if len(_ac_partner_actors) >= 2 else None,
+                        partner_gender=_single_p_gender,
+                    )
+                    _existing_lbls = {
+                        str(c.get("label", "")).lower()
+                        for c in _filtered
+                        if isinstance(c, dict)
+                    }
+                    for _fb_c in _ac_bp.get("choices", []):
+                        if len(_filtered) >= 4:
+                            break
+                        if _fb_c["label"].lower() not in _existing_lbls:
+                            _filtered.append(dict(_fb_c))
+                            _existing_lbls.add(_fb_c["label"].lower())
+
+                _undressed_kws = ("removed", "none", "naked", "nude", "stripped", "disheveled", "undone", "unbuttoned", "pulled aside")
+                _actors_now = updated_phys.get("actors", {}) or {}
+                for _entry in (party or []):
+                    _ch = _entry[0] if isinstance(_entry, (tuple, list)) else _entry
+                    if not isinstance(_ch, dict) or not _ch.get("name"):
+                        continue
+                    _cn = _ch["name"]
+                    _mk = _match_actor_key(_cn, _actors_now)
+                    if _mk in _actors_now:
+                        _cl = _actors_now[_mk].get("clothing") or {}
+                        if isinstance(_cl, dict):
+                            _top_s = str(_cl.get("top", "")).lower()
+                            _bot_s = str(_cl.get("bottom", "")).lower()
+                            if any(u in _top_s or u in _bot_s for u in _undressed_kws):
+                                if not any(isinstance(c, dict) and ("redress" in str(c.get("label", "")).lower() or "get dressed" in str(c.get("label", "")).lower()) for c in _filtered):
+                                    _filtered.append({
+                                        "label": f"Redress / Get dressed ({_cn})",
+                                        "stat": "FREE",
+                                        "requirement": 0,
+                                        "category": "action",
+                                        "action_category": "general_action",
+                                    })
+                                break
+                if _filtered:
+                    if "choices" in outcome:
+                        outcome["choices"] = _filtered
+                    if "next_choices" in outcome:
+                        outcome["next_choices"] = _filtered
+    except Exception:
+        pass
+
   
     # ── Resolve Commitments from Arbiter ─────────────────────────────────────
     fulfilled_ids = outcome.get("fulfilled_commitments")
@@ -1113,6 +2054,9 @@ def _reduce_entities_and_gifts(session_id: int, session: dict, outcome: dict, pa
         ent_type = str(entity.get("type", "person") or "person")
         ent_name = str(entity.get("name", "") or "").strip()
         if not ent_name or ent_name.lower() == "none":
+            continue
+        import namegen
+        if not namegen.is_valid_entity_name(ent_name) or namegen.is_collective_entity_name(ent_name):
             continue
         raw_race = entity.get("race") or "" if ent_type.lower() == "person" else ""
         norm_race = normalize_race(raw_race, scen_key=scen_key) if raw_race else raw_race

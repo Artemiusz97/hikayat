@@ -163,6 +163,27 @@ class TestConsumableGenreFlavor(unittest.TestCase):
                 f"Item '{name}' should be classified as '{expected_type}', got '{enriched['item_type']}'"
             )
 
+    def test_slice_of_life_vs_high_school_food_and_drink_nuances(self):
+        """Slice of Life shares modern foods/drinks with High School, while avoiding 'Campus Bento' and allowing adult bar drinks."""
+        # Shared café & bakery items
+        self.assertEqual(generate_food_name("slice_of_life", 3, ["sweet", "bakery"], ["healing"]), "Matcha Melon Pan")
+        self.assertEqual(generate_drink_name("slice_of_life", 3, ["boba", "sweet"], ["mana_restore"]), "Classic Roasted Milk Tea")
+
+        # Fallback bento name avoids 'Campus' in slice_of_life
+        sol_bento = generate_food_name("slice_of_life", 3, [], ["healing"])
+        hs_bento = generate_food_name("high_school_drama", 3, [], ["healing"])
+        self.assertIn("Deluxe Bento Lunch", sol_bento)
+        self.assertNotIn("Campus", sol_bento)
+        self.assertIn("Campus Bento Lunch", hs_bento)
+
+        # Alcohol taste tag produces bar drinks in slice_of_life, but stays non-alcoholic in high_school_drama
+        sol_alc_t3 = generate_drink_name("slice_of_life", 3, ["alcohol"], ["attack_buff"])
+        sol_alc_t2 = generate_drink_name("slice_of_life", 2, ["alcohol"], ["attack_buff"])
+        hs_alc_t2 = generate_drink_name("high_school_drama", 2, ["alcohol"], ["attack_buff"])
+        self.assertEqual(sol_alc_t3, "Chilled Draft Craft Beer")
+        self.assertIn("Whiskey Highball", sol_alc_t2)
+        self.assertIn("Sport Electrolyte Drink", hs_alc_t2)
+
 
 if __name__ == "__main__":
     unittest.main()

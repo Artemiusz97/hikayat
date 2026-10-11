@@ -136,6 +136,28 @@
             ]
           },
           {
+            "id": "loc_school_gate",
+            "name": "School Main Gates",
+            "sub_locations": [
+              {
+                "id": "sub_entrance_path",
+                "name": "Entrance Path & Archway"
+              },
+              {
+                "id": "sub_gate_checkpoint",
+                "name": "Gate Checkpoint"
+              },
+              {
+                "id": "sub_notice_board",
+                "name": "Notice Board & Club Banners"
+              },
+              {
+                "id": "sub_bike_racks",
+                "name": "Front Bicycle Racks"
+              }
+            ]
+          },
+          {
             "id": "loc_entrance_foyer",
             "name": "Entrance Foyer & Shoe Lockers",
             "sub_locations": [
@@ -2848,6 +2870,282 @@
               {
                 "id": "sub_miner_cantina",
                 "name": "The Drift-Lock Cantina"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "slice_of_life": {
+    "zones": [
+      {
+        "id": "zone_sol_shopping_arcade",
+        "name": "Downtown Shopping Arcade & Café Row",
+        "is_hub": true,
+        "theme": "Vibrant Covered Shopping Street & Third-Wave Café Quarter",
+        "features": "Glass-roofed pedestrian arcade, artisanal coffee roasteries, secondhand vinyl and book shops, ramen counters, and shared creative co-working lofts.",
+        "sensory": "Rich aroma of freshly ground espresso and simmering tonkotsu broth, warm Edison bulb lighting, indie acoustic playlists drifting from shopfronts, and the patter of city footsteps.",
+        "primary_locations": [
+          {
+            "id": "loc_sol_roastery",
+            "name": "Roastery & Artisanal Café",
+            "sub_locations": [
+              {
+                "id": "sub_sol_window_booth",
+                "name": "Window Corner Booth"
+              },
+              {
+                "id": "sub_sol_espresso_bar",
+                "name": "Espresso Pour-Over Counter"
+              },
+              {
+                "id": "sub_sol_patio_terrace",
+                "name": "Awning Sidewalk Terrace"
+              }
+            ]
+          },
+          {
+            "id": "loc_sol_bookstore",
+            "name": "Secondhand Bookstore & Vinyl Shop",
+            "sub_locations": [
+              {
+                "id": "sub_sol_listening_station",
+                "name": "Turntable Listening Corner"
+              },
+              {
+                "id": "sub_sol_rare_stacks",
+                "name": "Floor-to-Ceiling Book Stacks"
+              }
+            ]
+          },
+          {
+            "id": "loc_sol_ramen_counter",
+            "name": "Late-Night Ramen & Izakaya Counter",
+            "sub_locations": [
+              {
+                "id": "sub_sol_chef_bar",
+                "name": "Steam-Filled Counter Stools"
+              },
+              {
+                "id": "sub_sol_back_tatami",
+                "name": "Curtained Back Booth"
+              }
+            ]
+          },
+          {
+            "id": "loc_sol_cowork_loft",
+            "name": "Creative Studio & Co-Working Loft",
+            "sub_locations": [
+              {
+                "id": "sub_sol_editing_desk",
+                "name": "Media & Photography Desk"
+              },
+              {
+                "id": "sub_sol_rooftop_lounge",
+                "name": "String-Lit Rooftop Deck"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_sol_residential",
+        "name": "Residential Neighborhood & Apartments",
+        "is_hub": true,
+        "theme": "Lived-In City Apartment Blocks, Quiet Side Streets & Hilltop Shrine",
+        "features": "Walk-up studio apartment buildings, 24-hour corner convenience store, humming coin laundry, leafy neighborhood park, and stone steps leading to a local hilltop shrine.",
+        "sensory": "Soft hum of vending machines at dusk, warm detergent steam from the laundromat, cicadas or evening breeze in the park trees, and distant commuter train chimes.",
+        "primary_locations": [
+          {
+            "id": "loc_sol_studio_apt",
+            "name": "Walk-Up Studio Apartments",
+            "sub_locations": [
+              {
+                "id": "sub_sol_player_studio",
+                "name": "Player's Studio Loft"
+              },
+              {
+                "id": "sub_sol_exterior_balcony",
+                "name": "Second-Floor Walkway & Mailboxes"
+              }
+            ]
+          },
+          {
+            "id": "loc_sol_konbini",
+            "name": "24-Hour Corner Convenience Store",
+            "sub_locations": [
+              {
+                "id": "sub_sol_magazine_rack",
+                "name": "Magazine & Snack Aisle"
+              },
+              {
+                "id": "sub_sol_parking_curb",
+                "name": "Neon Storefront Curb"
+              }
+            ]
+          },
+          {
+            "id": "loc_sol_coin_laundry",
+            "name": "Neighborhood Coin Laundry",
+            "sub_locations": [
+              {
+                "id": "sub_sol_dryer_row",
+                "name": "Spinning Dryer Row"
+              },
+              {
+                "id": "sub_sol_vending_bench",
+                "name": "Plastic Waiting Bench"
+              }
+            ]
+          },
+          {
+            "id": "loc_sol_hilltop_shrine",
+            "name": "Local Hilltop Shrine & Park",
+            "sub_locations": [
+              {
+                "id": "sub_sol_shrine_steps",
+                "name": "Lantern-Lit Stone Steps"
+              },
+              {
+                "id": "sub_sol_city_overlook",
+                "name": "Panoramic City Overlook Bench"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_sol_nightlife",
+        "name": "Nightlife & Entertainment District",
+        "is_frontier": true,
+        "theme": "Neon-Lit Nightlife Alleys, Live Music Venues & Boxing Gym",
+        "features": "Velvet-curtained basement jazz bars, underground indie live houses, 24-hour retro arcade and billiards halls, gritty neon back-alleys, and a neighborhood boxing gym.",
+        "sensory": "Muffled basslines vibrating through pavement, neon reflections in rain puddles, clack of billiard balls, leather hitting heavy canvas bags, and smoky night air.",
+        "primary_locations": [
+          {
+            "id": "loc_sol_jazz_bar",
+            "name": "Basement Jazz & Cocktail Bar",
+            "sub_locations": [
+              {
+                "id": "sub_sol_mahogany_bar",
+                "name": "Mahogany Bar Counter"
+              },
+              {
+                "id": "sub_sol_velvet_stage",
+                "name": "Low-Lit Quartet Stage"
+              }
+            ]
+          },
+          {
+            "id": "loc_sol_live_house",
+            "name": "Underground Indie Live House",
+            "sub_locations": [
+              {
+                "id": "sub_sol_crowd_floor",
+                "name": "Front Stage Floor"
+              },
+              {
+                "id": "sub_sol_green_room",
+                "name": "Sticker-Covered Backstage"
+              }
+            ]
+          },
+          {
+            "id": "loc_sol_billiards_arcade",
+            "name": "24-Hour Arcade & Billiards Hall",
+            "sub_locations": [
+              {
+                "id": "sub_sol_pool_tables",
+                "name": "Back-Room Pool Tables"
+              },
+              {
+                "id": "sub_sol_fighting_cabs",
+                "name": "Retro Arcade Cabinet Row"
+              }
+            ]
+          },
+          {
+            "id": "loc_sol_boxing_gym",
+            "name": "Neighborhood Boxing & Martial Arts Gym",
+            "sub_locations": [
+              {
+                "id": "sub_sol_sparring_ring",
+                "name": "Roped Sparring Ring"
+              },
+              {
+                "id": "sub_sol_heavy_bags",
+                "name": "Heavy Bag & Locker Corner"
+              }
+            ]
+          },
+          {
+            "id": "loc_sol_neon_alley",
+            "name": "Neon Back-Alley",
+            "sub_locations": [
+              {
+                "id": "sub_sol_dead_end",
+                "name": "Rain-Slicked Dead End"
+              },
+              {
+                "id": "sub_sol_fire_escape",
+                "name": "Rusted Fire Escape Stairs"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_sol_harbor_pier",
+        "name": "Harbor Pier & Civic Bayfront",
+        "is_frontier": true,
+        "theme": "Breezy Waterfront Boardwalk, Night Market & Industrial Container Pier",
+        "features": "Scenic bayfront promenade, open-air evening street food stalls, busy transit station plaza with buskers, and an after-hours shipping container warehouse lot.",
+        "sensory": "Briny sea breeze, sizzling street food grills, acoustic guitar chords echoing across the station plaza, and foghorns booming across the bay.",
+        "primary_locations": [
+          {
+            "id": "loc_sol_boardwalk",
+            "name": "Waterfront Boardwalk & Night Market",
+            "sub_locations": [
+              {
+                "id": "sub_sol_sea_railing",
+                "name": "Bayview Promenade Railing"
+              },
+              {
+                "id": "sub_sol_food_stalls",
+                "name": "Lantern-Lit Street Food Row"
+              }
+            ]
+          },
+          {
+            "id": "loc_sol_transit_plaza",
+            "name": "Central Transit Station Plaza",
+            "sub_locations": [
+              {
+                "id": "sub_sol_busker_fountain",
+                "name": "Busker's Clocktower Fountain"
+              },
+              {
+                "id": "sub_sol_ticket_concourse",
+                "name": "Station Turnstile Concourse"
+              }
+            ]
+          },
+          {
+            "id": "loc_sol_warehouse_pier",
+            "name": "Container Pier & Warehouse Lot",
+            "sub_locations": [
+              {
+                "id": "sub_sol_padlocked_gate",
+                "name": "Padlocked Chain-Link Gate"
+              },
+              {
+                "id": "sub_sol_shipping_containers",
+                "name": "Stacked Cargo Container Maze"
+              },
+              {
+                "id": "sub_sol_warehouse_interior",
+                "name": "Dimly Lit Pier Warehouse"
               }
             ]
           }

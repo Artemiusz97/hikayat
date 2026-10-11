@@ -6,7 +6,7 @@ import json
 import random
 import logging
 from config import LLM_PASS1_TIMEOUT
-from scenario_data import is_nsfw_scenario
+from scenario_data import is_nsfw_scenario, uses_nsfw_model
 from game_engine.core import STATE_ARBITER_SCHEMA
 import game_engine
 from db import adb
@@ -194,11 +194,27 @@ def reconcile_narrative_leakage(outcome: dict, party: list, actions: list | None
 
     # ---- 2. Non-Combat Damage Leakage Audit ----
     # Only patch when the action failed - successes don't cause hazard damage
+    # Suppress damage patching if the action is social/conversational or scenario is non-combat
     is_failed_action = any(
         getattr(a.get("check"), "tier", "") in ("fail", "crit_fail")
         for a in actions
     )
-    if is_failed_action and co.get("hp_change", 0) == 0:
+    import scenario_data
+    from mechanics.social.intimate_excitement import is_intimate_action_label
+    from mechanics.social.physical_state import is_erotic_intimate_contact
+    _phys_upd = (outcome.get("physical_updates") if isinstance(outcome, dict) else None) or {}
+    is_social_or_non_combat = (
+        any(
+            str(a.get("action_category") or "").lower() in (
+                "dialogue", "disclosure_inquiry", "affection", "social_invite", "romantic_confession", "party_recruit"
+            )
+            or is_intimate_action_label(str(a.get("label") or ""))
+            for a in actions
+        )
+        or is_erotic_intimate_contact(str(_phys_upd.get("intimate_contact", "")))
+        or (outcome.get("scenario") and scenario_data.is_non_combat_scenario(outcome.get("scenario")))
+    )
+    if is_failed_action and not is_social_or_non_combat and co.get("hp_change", 0) == 0:
         dmg_match = _DAMAGE_RE.search(narrative)
         if dmg_match:
             dmg = int(dmg_match.group(1))
@@ -286,7 +302,7 @@ async def execute_state_arbiter_pass(session: dict, party: list, actions: list, 
     arbiter_system_prompt = (
         "You are the State Arbiter for the Hikayat RPG engine. Your ONLY job is to evaluate the mechanical and dramatic state transitions for this turn.\n"
         "Be concise, logical, and strictly adhere to check tiers:\n"
-        "- 'Critical Failure' / 'Failure': Enforce FAIL-FORWARD complications (loss, traps, alarms, ambushes).\n"
+        "- 'Critical Failure' / 'Failure': Enforce FAIL-FORWARD complications (loss, traps, alarms, ambushes). In non-combat/social scenes, NEVER deduct HP (hp_change must be 0); enforce relationship loss, awkwardness, embarrassment, or NPC tension.\n"
         "- 'Success' / 'Critical Success': Enforce clean progress, discoveries, or advantages.\n"
         "- Track NPC departures: if an NPC leaves, walks away, or says goodbye, list them in departed_characters.\n"
         f"Respond with JSON matching this exact structure:\n{STATE_ARBITER_SCHEMA}"
@@ -310,7 +326,8 @@ async def execute_state_arbiter_pass(session: dict, party: list, actions: list, 
     phys_prompt = build_physical_prompt_block(
         session, party,
         is_combat=bool(game_engine.get_active_enemies(session)),
-        is_nsfw=is_nsfw_scenario(session.get("scenario"))
+        is_nsfw=is_nsfw_scenario(session.get("scenario")),
+        actions=actions
     )
 
     arbiter_user_prompt = (
@@ -331,7 +348,7 @@ async def execute_state_arbiter_pass(session: dict, party: list, actions: list, 
             temperature=0.2,
             max_tokens=512,
             retries=0,
-            is_nsfw=is_nsfw_scenario(session.get("scenario")),
+            is_nsfw=uses_nsfw_model(session.get("scenario")),
             use_utility=True,
             timeout=LLM_PASS1_TIMEOUT
         )
@@ -394,10 +411,39 @@ async def execute_social_arbiter_pass(session: dict, party: list, actions: list,
     cur_npcs = [game_engine._get_npc_name(n) for n in (pass2_result.get("npcs_present") or session.get("current_npcs") or []) if n]
     pass2_narrative = get_combined_narrative(pass2_result)
 
+    npc_profiles_lines = []
+    first_char = party[0][0] if (party and party[0] and isinstance(party[0], (list, tuple)) and isinstance(party[0][0], dict)) else (party[0] if (party and isinstance(party[0], dict)) else {})
+    first_char_id = first_char.get("id") or first_char.get("user_id") or 0
+    import db
+    session_id_val = session.get("id")
+    for n_name in cur_npcs:
+        c = db.get_contact(session_id_val, n_name, first_char_id) if session_id_val else None
+        if c:
+            traits_str = ", ".join(c.get("unlocked_traits") or c.get("traits") or [])
+            prefs_str = ", ".join(c.get("preferences") or [])
+            app = c.get("appearance") or {}
+            profile_parts = [f"- {n_name} (Track: {c.get('track', 'platonic')}, Score: {c.get('relationship_score', 0)})"]
+            if traits_str:
+                profile_parts.append(f"  Traits: {traits_str}")
+            if prefs_str:
+                profile_parts.append(f"  Preferences: {prefs_str}")
+            if app.get("intimate_demeanor"):
+                profile_parts.append(f"  Demeanor: {app.get('intimate_demeanor')}")
+            if app.get("intimate_dynamic"):
+                profile_parts.append(f"  Dynamic: {app.get('intimate_dynamic')}")
+            if app.get("turn_ons"):
+                profile_parts.append(f"  Turn-ons: {app.get('turn_ons')}")
+            if app.get("turn_offs"):
+                profile_parts.append(f"  Turn-offs: {app.get('turn_offs')}")
+            npc_profiles_lines.append("\n".join(profile_parts))
+
+    npc_profiles_block = "\n".join(npc_profiles_lines) if npc_profiles_lines else "None recorded"
+
     arbiter_user_prompt = (
         f"SCENARIO: {session.get('scenario', 'fantasy')}\n"
         f"PARTY:\n{game_engine._party_sheet_text(party)}\n"
         f"CURRENT NPCS IN ROOM: {cur_npcs}\n"
+        f"KNOWN SOCIAL PROFILES:\n{npc_profiles_block}\n"
         f"ACTIONS TAKEN:\n{actions_text}\n"
         f"NARRATIVE OUTCOME:\n{pass2_narrative}\n"
         "Extract the social and world state changes implied by the narrative and output ONLY the JSON object."
@@ -411,7 +457,7 @@ async def execute_social_arbiter_pass(session: dict, party: list, actions: list,
             temperature=0.2,
             max_tokens=2048,
             retries=0,
-            is_nsfw=is_nsfw_scenario(session.get("scenario")),
+            is_nsfw=uses_nsfw_model(session.get("scenario")),
             use_utility=True,
             timeout=20.0,
             response_model=SocialArbiterOutcome

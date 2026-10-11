@@ -139,9 +139,9 @@ class TestContactMetadataPersistence(unittest.TestCase):
 
         embed = build_contact_detail_embed(contact, "high_school_drama")
         basic_field = next(f for f in embed.fields if f.name == "Basic Details")
-        self.assertIn("• **Grade / Standing**: Senior", basic_field.value)
+        self.assertIn("• **Grade**: Senior", basic_field.value)
+        self.assertIn("• **Faction Affiliation**: Student Council", basic_field.value)
         self.assertIn("• **Role**: Student Council President", basic_field.value)
-        self.assertIn("• **Faction Affiliation**: Student Council (President)", basic_field.value)
 
     def test_process_scene_npcs_merges_entity_audit_and_new_entities_metadata(self):
         """Verify process_scene_npcs does not drop new_entities metadata when entity_audit lists the same NPC first."""

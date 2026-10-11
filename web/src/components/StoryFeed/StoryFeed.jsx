@@ -65,7 +65,7 @@ const StoryFeed = ({
   return (
     <div
       ref={scrollContainerRef}
-      className="h-full w-full overflow-y-auto custom-scrollbar px-4 md:px-8 pt-5 pb-4 scroll-smooth relative z-10"
+      className="h-full w-full overflow-y-auto custom-scrollbar px-3 md:px-8 pt-3 md:pt-5 pb-3 md:pb-4 scroll-smooth relative z-10"
     >
       <div className="max-w-4xl mx-auto relative">
 
@@ -88,20 +88,20 @@ const StoryFeed = ({
 
         {/* Render current active scene narrative if not already part of the last history entry (e.g. Opening Scene on Turn 0) */}
         {currentScene && currentNar && !isCurrentSceneAlreadyInHistory && (
-          <div className="mb-8">
-            <h2 className="font-rpg text-2xl text-fantasy-accent mb-4 border-b border-fantasy-accent/30 pb-2">
+          <div className="mb-6 md:mb-8">
+            <h2 className="font-rpg text-xl md:text-2xl text-fantasy-accent mb-3 md:mb-4 border-b border-fantasy-accent/30 pb-1.5 md:pb-2">
               {currentScene.scene_title || 'Adventure'}
             </h2>
             {currentScene.scene_image_url && (
-              <div className="mb-5 rounded-lg overflow-hidden border border-fantasy-border/80 shadow-lg bg-black/40">
+              <div className="mb-4 md:mb-5 rounded-lg overflow-hidden border border-fantasy-border/80 shadow-lg bg-black/40">
                 <img
                   src={currentScene.scene_image_url}
                   alt={currentScene.scene_title || 'Scene Illustration'}
-                  className="w-full max-h-96 object-cover"
+                  className="w-full max-h-80 md:max-h-96 object-cover"
                 />
               </div>
             )}
-            <div className="text-gray-100 font-serif md:text-lg tracking-wide">
+            <div className="text-gray-100 font-serif text-[13.5px] sm:text-sm md:text-lg tracking-wide">
               {formatNarrative(currentNar)}
             </div>
           </div>
@@ -109,7 +109,7 @@ const StoryFeed = ({
 
         {/* Seamless Real-Time Streaming Turn (shows action check badge + colored outcome_narrative + next_narrative live) */}
         {isStreaming && (
-          <div className="mb-8 animate-fadeIn">
+          <div className="mb-6 md:mb-8 animate-fadeIn">
             {/* Subtle Action & Skill Check Result Divider */}
             <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5 pt-2 border-t border-white/10">
               <div className="flex items-center gap-2 min-w-0 text-xs text-gray-400 italic">
@@ -133,7 +133,7 @@ const StoryFeed = ({
               <div>
                 {/* Live Result Narration (colored by outcome tier) */}
                 {(streamOutcomeText || (!streamNextText && streamingNarrative)) && (
-                  <div className={`border-l-2 ${streamTheme.accentBorderClass} pl-4 py-0.5 font-serif md:text-lg tracking-wide ${streamTheme.textClass}`}>
+                  <div className={`border-l-2 ${streamTheme.accentBorderClass} pl-3.5 md:pl-4 py-0.5 font-serif text-[13.5px] sm:text-sm md:text-lg tracking-wide ${streamTheme.textClass}`}>
                     {formatNarrative(streamOutcomeText || streamingNarrative)}
                     {!streamNextText && (
                       <span className="inline-block w-2 h-4 ml-1 bg-fantasy-accent animate-pulse align-middle" />
@@ -143,7 +143,7 @@ const StoryFeed = ({
 
                 {/* Live Main Scene Narration (seamless continuation) */}
                 {streamNextText && (
-                  <div className="mt-5 text-gray-100 font-serif md:text-lg tracking-wide">
+                  <div className="mt-4 md:mt-5 text-gray-100 font-serif text-[13.5px] sm:text-sm md:text-lg tracking-wide">
                     {formatNarrative(streamNextText)}
                     <span className="inline-block w-2 h-4 ml-1 bg-fantasy-accent animate-pulse align-middle" />
                   </div>

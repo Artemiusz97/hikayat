@@ -136,6 +136,24 @@ ORAL_GIVE_RE = re.compile(
     re.I
 )
 
+ANAL_RECEIVE_RE = re.compile(
+    r'\b(?:anal(?:\s+sex)?|fucked\s+(?:in\s+the\s+ass|her\s+ass|his\s+ass)|'
+    r'penetrate\s+(?:her|his)\s+ass|penetrated\s+(?:her|his)\s+ass|'
+    r'entered\s+(?:her|his)\s+ass|enter\s+(?:her|his)\s+ass|'
+    r'slide\s+into\s+(?:her|his)\s+ass|slid\s+into\s+(?:her|his)\s+ass|'
+    r'thrust\s+into\s+(?:her|his)\s+ass|thrusting\s+into\s+(?:her|his)\s+ass|'
+    r'anal\s+penetration|taking\s+him\s+in\s+(?:her|his)\s+ass|pegged|pegging|'
+    r'anal\s+creampie)\b',
+    re.I
+)
+
+ANAL_GIVE_RE = re.compile(
+    r'\b(?:fucked\s+(?:her|him)\s+in\s+the\s+ass|penetrated\s+(?:her|him)\s+anally|'
+    r'pegged\s+(?:him|her)|fucking\s+(?:her|his)\s+ass|gave\s+(?:her|him)\s+anal|'
+    r'slid\s+his\s+cock\s+into\s+her\s+ass|slid\s+into\s+her\s+backside)\b',
+    re.I
+)
+
 KISS_RE = re.compile(
     r'\b(?:kiss|kisses|kissed|kissing|shared\s+a\s+(?:tender|passionate|deep)?\s*kiss|'
     r'pull\s+(?:her|him)\s+into\s+a\s+kiss|pulled\s+(?:her|him)\s+into\s+a\s+kiss|'
@@ -154,7 +172,10 @@ DISCLOSURE_FETISHES_RE = re.compile(
     r'\b(?:fetish(?:es)?|kinks?|bedroom\s+fantas(?:y|ies)|roleplay\s+in\s+bed|bondage)\b', re.I
 )
 DISCLOSURE_VIRGINITY_RE = re.compile(
-    r'\b(?:virgin(?:ity)?|first\s+time|past\s+partners?|done\s+oral|received\s+oral)\b', re.I
+    r'\b(?:virgin(?:ity)?|first\s+time|past\s+partners?|done\s+oral|received\s+oral|(?:how\s+)?experienced|sexual\s+experience|intimate\s+experience|body\s+count)\b', re.I
+)
+DISCLOSURE_RELATIONSHIP_RE = re.compile(
+    r'\b(?:single|taken|dating(?:\s+anyone|\s+someone)?|relationship\s+status|(?:got|have|has)\s+a\s+boyfriend|(?:got|have|has)\s+a\s+girlfriend|current\s+partner|partner\s+status|her\s+boyfriend|his\s+boyfriend|her\s+girlfriend|his\s+girlfriend)\b', re.I
 )
 DISCLOSURE_DEMEANOR_RE = re.compile(
     r'\b(?:bedroom\s+demeanor|intimate\s+demeanor|in\s+private|in\s+bed)\b', re.I
@@ -220,6 +241,38 @@ PHONE_MEETUP_PATTERNS = (
     re.compile(r"\bmeet\s+me\b", re.I),
 )
 
+PHONE_FLIRT_PATTERNS = (
+    re.compile(r"\byou(?:'re| are)\s+(?:so\s+|really\s+|looking\s+)?(?:cute|hot|gorgeous|beautiful|handsome|sexy|pretty|stunning|adorable)\b", re.I),
+    re.compile(r"\b(?:thinking\s+(?:about|of)|can't\s+stop\s+thinking\s+about|dreaming\s+(?:about|of)|fall(?:ing)?\s+for|crush\s+on)\s+you\b", re.I),
+    re.compile(r"\b(?:miss\s+you|missed\s+you|teasing\s+you|flirt\s+with\s+you|blushing\s+over\s+you)\b", re.I),
+    re.compile(r"\b(?:you\s+look(?:ing)?\s+(?:amazing|great|stunning|cute|handsome|pretty|gorgeous))\b", re.I),
+    re.compile(r"(?:[😉😘😏❤️💕]\s*(?:you|babe|cutie|handsome)?|[😉😘😏])", re.I),
+    re.compile(r"\b(?:wish\s+you\s+were\s+here|date\s+me|be\s+my\s+(?:girlfriend|boyfriend|date))\b", re.I),
+)
+
+PHONE_MEDIA_SEND_PATTERNS = (
+    re.compile(r"\b(?:here(?:'s| is)|sending\s+you|sending|sent\s+you|sent|check\s+out|look\s+at|attached)\s+(?:a\s+|my\s+|this\s+)?(?:photo|pic|selfie|picture|video|snapshot|clip)\b", re.I),
+    re.compile(r"\[attached\s+(?:casual\s+|everyday\s+|intimate\s+|spicy\s+|nsfw\s+)?(?:photo|pic|video|snapshot)", re.I),
+    re.compile(r"\b(?:look\s+at\s+my|check\s+out\s+my)\s+(?:body|abs|chest|curves|outfit)\b", re.I),
+)
+
+PHONE_MEDIA_GUARD_PATTERNS = (
+    re.compile(r"\b(?:in\s+the\s+picture|picture\s+this|picture\s+of\s+the\s+(?:room|school|building|book|textbook)|profile\s+(?:picture|pic|photo)|movie|film\s+review)\b", re.I),
+    re.compile(r"\b(?:saw|seen|found|looked\s+at|noticed|bought|painted|drew)\s+(?:a|an|that|the|this)?\s*(?:[a-zA-Z_\-]+\s+){0,3}(?:picture|photo|painting|pic)\b", re.I),
+)
+
+PHONE_MEETUP_GUARD_PATTERNS = (
+    re.compile(r"\b(?:nice\s+to\s+meet|pleased\s+to\s+meet|met\s+(?:her|him|someone|them)|meet\s+(?:deadlines?|requirements?))\b", re.I),
+)
+
+PHONE_RUMOR_GUARD_PATTERNS = (
+    re.compile(r"\b(?:that\s+rumor|rumor\s+is\s+false|homework|assignment|class|test|exam|math|chemistry|physics)\b", re.I),
+)
+
+PHONE_FLIRT_GUARD_PATTERNS = (
+    re.compile(r"\b(?:good\s+job|thanks\s+for|helpful|you're\s+a\s+(?:good|great)\s+friend|appreciate\s+your\s+help)\b", re.I),
+)
+
 # --- DIALOGUE LOCK & EXITS ---
 DIALOGUE_EXIT_PHRASES = (
     "say goodbye", "take your leave", "part ways", "excuse your", "excuse yourself",
@@ -228,10 +281,22 @@ DIALOGUE_EXIT_PHRASES = (
     "walk away", "exit conversation", "farewell"
 )
 
+PARTING_REQUEST_RE = re.compile(
+    r"\b(?:thank\w*|thanks)\b.*?\b(?:keep (?:an eye out|in touch|me posted)|let (?:me|us) know if you (?:hear|see|find|spot)|take care)\b",
+    re.I
+)
+
+TAKE_CARE_FAREWELL_RE = re.compile(
+    r"\btake care\b(?!\s+(?:of|about|for)\b)",
+    re.I
+)
+
 DIALOGUE_INIT_PREFIXES = (
     "speak with ", "speak to ", "talk to ", "talk with ", "consult the ", "consult with ",
-    "address the ", "converse with ", "greet ", "question ", "chat with ",
-    "strike up a conversation with ", "approach and speak with ", "approach and talk to "
+    "address the ", "converse with ", "greet ", "chat with ",
+    "strike up a conversation with ", "approach and speak with ", "approach and talk to ",
+    "approach and greet ", "say hello to ", "say hi to ", "say hello", "say hi",
+    "wave to ", "wave at ", "wave towards ", "wave toward ", "call over "
 )
 
 # --- SPATIAL MOVEMENT & RESIDENCES ---
@@ -309,6 +374,11 @@ BOARD_INSPECT_RE = re.compile(
     re.I
 )
 
+BOARD_DIRECT_INSPECT_RE = re.compile(
+    r"\b(?:inspect|check|read|examine|look\s+(?:closely\s+)?at|study|browse|scan|view)\s+(?:the\s+|at\s+the\s+)?(?:contract|notice|bounty|bulletin|quest|public|town|inn|guild)\s+boards?\b",
+    re.I
+)
+
 # --- PHYSICAL AFFECTION & TENDER TOUCH ---
 AFFECTION_HANDHOLD_RE = re.compile(
     r'\b(?:hold|holds|holding|take|takes|taking|clasp|clasping|intertwine|intertwining)\s+(?:[A-Za-z0-9_\-\']+\s*(?:\'s)?\s+|each other\'s\s+)?(?:hands?|fingers?)\b|'
@@ -357,7 +427,9 @@ PHONE_COMM_RE = re.compile(
     re.I
 )
 PHONE_NEGATION_GUARD_RE = re.compile(
-    r'\b(?:call\s+(?:for\s+help|an\s+ambulance|the\s+police|him\s+a|her\s+a|them\s+a)|textbook|call\s+out|call\s+upon)\b',
+    r'\b(?:call\s+(?:for\s+help|an\s+ambulance|the\s+police|him\s+a|her\s+a|them\s+a)|textbook|call\s+out|call\s+upon|'
+    r'(?:silver|gold|iron|brass|magic|wedding|mood|signet|copper|ancient|metal|shiny|glowing)\s+ring|'
+    r'ring\s+(?:on|of|in|around|finger|box|slot))\b',
     re.I
 )
 
@@ -423,6 +495,7 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
 
     raw_text = str(action_text).strip()
     act_lower = raw_text.lower()
+    clean_lower = re.sub(r'^[\s"\'“”‘’\*\[\(]+', '', act_lower)
     ctx = context or IntentContext()
 
     try:
@@ -461,6 +534,26 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
                 sub_target="oral_give",
                 raw_text=raw_text,
                 metadata={"milestone_event": "oral_give"}
+            )
+
+        if ANAL_RECEIVE_RE.search(act_lower):
+            target = _extract_target_npc(raw_text, ctx)
+            return ActionIntent(
+                category=IntentCategory.INTIMATE_ACT,
+                target_entity=target,
+                sub_target="anal_receive",
+                raw_text=raw_text,
+                metadata={"milestone_event": "anal_receive"}
+            )
+
+        if ANAL_GIVE_RE.search(act_lower):
+            target = _extract_target_npc(raw_text, ctx)
+            return ActionIntent(
+                category=IntentCategory.INTIMATE_ACT,
+                target_entity=target,
+                sub_target="anal_give",
+                raw_text=raw_text,
+                metadata={"milestone_event": "anal_give"}
             )
 
         if INTIMATE_INTERCOURSE_RE.search(act_lower):
@@ -528,6 +621,10 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
         if DISCLOSURE_VIRGINITY_RE.search(act_lower):
             target = _extract_target_npc(raw_text, ctx)
             return ActionIntent(category=IntentCategory.DISCLOSURE_INQUIRY, target_entity=target, sub_target="intercourse_experience", raw_text=raw_text)
+
+        if DISCLOSURE_RELATIONSHIP_RE.search(act_lower):
+            target = _extract_target_npc(raw_text, ctx)
+            return ActionIntent(category=IntentCategory.DISCLOSURE_INQUIRY, target_entity=target, sub_target="relationship_status", raw_text=raw_text)
 
         if DISCLOSURE_DEMEANOR_RE.search(act_lower):
             target = _extract_target_npc(raw_text, ctx)
@@ -605,7 +702,13 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
         # ----------------------------------------------------------------------
         # Priority 4: Conversational Exits
         # ----------------------------------------------------------------------
-        if any(p in act_lower for p in DIALOGUE_EXIT_PHRASES):
+        has_active_partner = bool(ctx and (ctx.dialogue_partner or ctx.dialogue_partners))
+        is_direct_exit = any(p in act_lower for p in DIALOGUE_EXIT_PHRASES)
+        is_parting_request = bool(
+            PARTING_REQUEST_RE.search(act_lower)
+            or (has_active_partner and TAKE_CARE_FAREWELL_RE.search(act_lower))
+        )
+        if is_direct_exit or (has_active_partner and is_parting_request):
             return ActionIntent(category=IntentCategory.DIALOGUE_EXIT, raw_text=raw_text)
 
         # ----------------------------------------------------------------------
@@ -660,7 +763,10 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
         # ----------------------------------------------------------------------
         # Priority 6: Notice & Bounty Board Inspections
         # ----------------------------------------------------------------------
-        if BOARD_INSPECT_RE.search(act_lower) and not any(k in act_lower for k in ("steal", "vandalize", "destroy", "tear down")):
+        is_diag_start = any(clean_lower.startswith(v) or act_lower.startswith(v) for v in DIALOGUE_INIT_PREFIXES)
+        is_prep_phrase = bool(re.search(r'\b(?:near|by|next to|beside|behind|past|under|across from)\s+(?:the\s+)?(?:contract|notice|bounty|bulletin|quest|public|town|inn|guild)\s+boards?\b', act_lower))
+        is_prep_only = is_prep_phrase and not BOARD_DIRECT_INSPECT_RE.search(act_lower)
+        if BOARD_INSPECT_RE.search(act_lower) and not is_diag_start and not is_prep_only and not any(k in act_lower for k in ("steal", "vandalize", "destroy", "tear down")):
             return ActionIntent(category=IntentCategory.INSPECT_BOARD, raw_text=raw_text)
 
         # ----------------------------------------------------------------------
@@ -690,10 +796,24 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
         # ----------------------------------------------------------------------
         # Priority 7: Rest & Nighttime Sleep
         # ----------------------------------------------------------------------
-        if SLEEP_ACTION_RE.search(act_lower):
+        has_intimate_or_affection_cue = any(
+            k in act_lower
+            for k in (
+                "aftercare", "undress", "kiss", "embrace", "cuddle", "caress",
+                "make love", "intercourse", "rhythm", "pace", "climax", "hips",
+                "thighs", "collarbone", "neck", "breathless", "tremor",
+                "aftershock", "intimate", "pleasure", "arousal", "straddle",
+                "kneel", "stroke", "thrust", "inside", "warmth",
+            )
+        )
+        if SLEEP_ACTION_RE.search(act_lower) and not has_intimate_or_affection_cue:
             return ActionIntent(category=IntentCategory.REST_SLEEP, sub_target="sleep", raw_text=raw_text)
 
-        if REST_DOWNTIME_RE.search(act_lower) and not any(k in act_lower for k in ("resist", "endure", "withstand")):
+        if (
+            REST_DOWNTIME_RE.search(act_lower)
+            and not has_intimate_or_affection_cue
+            and not any(k in act_lower for k in ("resist", "endure", "withstand", "wave", "greet", "say hello", "say hi", "talk", "speak"))
+        ):
             return ActionIntent(category=IntentCategory.REST_SLEEP, sub_target="rest", raw_text=raw_text)
 
         # ----------------------------------------------------------------------
@@ -793,25 +913,58 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
                 metadata={"is_hallway": True, "is_room_exit": True}
             )
 
-        # Check general travel / movement prefixes
-        is_mv = any(act_lower.startswith(pfx) or f" {pfx}" in act_lower for pfx in MOVEMENT_PREFIXES)
-        if is_mv and not any(k in act_lower for k in ("speak", "talk", "greet", "address")):
+        # Check general travel / movement prefixes (excluding in-scene intimate posture/rhythm transitions)
+        is_mv = any(clean_lower.startswith(pfx) or act_lower.startswith(pfx) or f" {pfx}" in act_lower for pfx in MOVEMENT_PREFIXES)
+        if (
+            is_mv
+            and not has_intimate_or_affection_cue
+            and not any(k in act_lower for k in ("speak", "talk", "greet", "address", "say hello", "say hi", "wave", "position", "angle", "slowly", "deeply"))
+        ):
             # Extract destination string if present
             dest = _extract_movement_target(raw_text)
-            return ActionIntent(category=IntentCategory.MOVEMENT, target_entity=dest, raw_text=raw_text)
+            return ActionIntent(
+                category=IntentCategory.MOVEMENT,
+                target_entity=dest,
+                raw_text=raw_text,
+                metadata={"is_room_exit": True}
+            )
 
         # ----------------------------------------------------------------------
         # Priority 9: Dialogue Initiation
         # ----------------------------------------------------------------------
-        is_diag_init = any(act_lower.startswith(v) or f" {v}" in act_lower for v in DIALOGUE_INIT_PREFIXES)
-        if is_diag_init and not any(k in act_lower for k in ("intimidate", "threaten", "torture", "deceive", "bribe", "attack")):
+        is_diag_prefix = any(
+            clean_lower.startswith(v)
+            or act_lower.startswith(v)
+            or f" and {v}" in act_lower
+            or re.match(r'^(?:politely|warmly|softly|quietly|gently|nervously|confidently|casually)\s+' + re.escape(v), act_lower)
+            for v in DIALOGUE_INIT_PREFIXES
+        )
+        is_diag_init = is_diag_prefix and not clean_lower.startswith("ask around")
+
+        # Guard: In-dialogue interactions or sensitive/probing actions are never dialogue initiation
+        disqualify_init = any(k in act_lower for k in (
+            "intimidate", "threaten", "torture", "deceive", "bribe", "attack",
+            "suggestive", "flirt", "seduce", "tease", "experienced", "single",
+            "kiss", "touch", "caress", "persuade", "convince", "interrogate",
+            "turn-on", "fetish", "virgin", "boyfriend", "girlfriend"
+        ))
+        if is_diag_init and not disqualify_init:
             target = _extract_target_npc(raw_text, ctx)
-            return ActionIntent(category=IntentCategory.DIALOGUE_INIT, target_entity=target, raw_text=raw_text)
+            curr_partners = set()
+            if ctx:
+                if ctx.dialogue_partner:
+                    curr_partners.add(ctx.dialogue_partner.strip().lower())
+                if ctx.dialogue_partners:
+                    curr_partners.update(p.strip().lower() for p in ctx.dialogue_partners if p)
+            # If already in dialogue and not switching to a different known NPC, this is an in-dialogue interaction
+            if not curr_partners or (target and target.lower() not in curr_partners):
+                return ActionIntent(category=IntentCategory.DIALOGUE_INIT, target_entity=target, raw_text=raw_text)
 
         # ----------------------------------------------------------------------
         # Default Fallback: General Action
         # ----------------------------------------------------------------------
-        return ActionIntent(category=IntentCategory.GENERAL_ACTION, raw_text=raw_text)
+        target = _extract_target_npc(raw_text, ctx)
+        return ActionIntent(category=IntentCategory.GENERAL_ACTION, target_entity=target, raw_text=raw_text)
 
 
     except Exception as e:
@@ -822,6 +975,15 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
 # ==============================================================================
 # 4. ENTITY EXTRACTION HELPERS (PURE FUNCTIONAL)
 # ==============================================================================
+
+_NON_CHARACTER_NOUNS = {
+    "it", "that", "this", "them", "him", "her", "someone", "anyone", "everyone", "nobody", "one",
+    "the", "a", "an", "around", "directions", "help", "permission", "advice", "information",
+    "yesterday", "today", "tomorrow", "tonight", "morning", "afternoon", "evening", "night",
+    "week", "month", "year", "school", "room", "town", "city", "building", "class", "door", "window",
+    "table", "chair", "bed", "desk", "house", "home", "shop", "café", "cafe", "bar", "tavern", "world",
+    "god", "heaven", "hell", "earth", "nature", "life", "death"
+}
 
 def _extract_target_npc(action_text: str, context: IntentContext) -> str:
     """Extracts target NPC name from text or resolves from context."""
@@ -836,22 +998,66 @@ def _extract_target_npc(action_text: str, context: IntentContext) -> str:
             candidates.append(np)
 
     for cand in candidates:
+        if not cand:
+            continue
+        from namegen import is_collective_entity_name, is_generic_role_name, is_valid_entity_name
+        if is_collective_entity_name(cand) or is_generic_role_name(cand) or not is_valid_entity_name(cand):
+            continue
         c_low = cand.lower().strip()
         c_first = c_low.split()[0] if c_low else ""
-        if c_low in act_lower or (len(c_first) >= 3 and (f" {c_first} " in f" {act_lower} " or f" {c_first}'" in act_lower or f" {c_first}s" in act_lower or act_lower.startswith(f"{c_first} "))):
+        if c_first in _NON_CHARACTER_NOUNS:
+            if c_low in act_lower:
+                return cand
+            continue
+        if c_low in act_lower or (len(c_first) >= 3 and bool(re.search(rf"\b{re.escape(c_first)}\b", act_lower))):
             return cand
 
     # 2. Extract from possessive patterns (e.g. "enter Maya's home" -> "Maya")
-    poss_match = re.search(r"\b([A-Za-z0-9_\-]+)'s\b", action_text)
+    poss_match = re.search(r"\b([A-Z][a-zA-Z0-9_\-]+)'s\b", action_text)
     if poss_match:
         cand = poss_match.group(1).strip()
         for pfx in ("enter ", "visit ", "walk to ", "head to ", "go to "):
             if cand.lower().startswith(pfx):
                 cand = cand[len(pfx):].strip()
-        if cand and cand.lower() not in ("it", "that", "this"):
+        from namegen import is_collective_entity_name, is_generic_role_name, is_valid_entity_name
+        if cand and cand.lower() not in _NON_CHARACTER_NOUNS and not is_collective_entity_name(cand) and not is_generic_role_name(cand) and is_valid_entity_name(cand):
             return cand
 
-    # 3. Default to active dialogue partner if set
+    # 3. Extract named entities following dialogue verbs (e.g. "Ask Arthur for a quick briefing" -> "Arthur", "Ask Eldrin the Wise" -> "Eldrin the Wise")
+    diag_match = re.search(
+        r"(?i:\b(?:ask|speak with|speak to|talk with|talk to|consult with|consult|address|converse with|greet|question|chat with|inquire with|inquire of|say hello to|say hi to|wave to|wave at|wave towards|wave toward)\s+(?:the\s+)?)(?!(?:if|about|for|to|whether|how|why|what|where|when|her|him|them|someone|anyone|everyone)\b)([A-Z][a-zA-Z0-9_\-]+(?:\s+(?:the\s+)?[A-Z][a-zA-Z0-9_\-]+)*)",
+        action_text
+    )
+    if diag_match:
+        cand = diag_match.group(1).strip()
+        from namegen import is_collective_entity_name, is_generic_role_name, is_valid_entity_name
+        if cand and cand.lower() not in _NON_CHARACTER_NOUNS and not is_collective_entity_name(cand) and not is_generic_role_name(cand) and is_valid_entity_name(cand):
+            return cand
+
+    # Extract target from approach + greeting pattern (e.g. "Approach Maya Vance and say hello")
+    approach_match = re.search(
+        r"(?i:\bapproach\s+)([A-Z][a-zA-Z0-9_\-]+(?:\s+(?:the\s+)?[A-Z][a-zA-Z0-9_\-]+)*)(?=\s+and\s+(?:say|greet|speak|talk|wave))",
+        action_text
+    )
+    if approach_match:
+        cand = approach_match.group(1).strip()
+        from namegen import is_collective_entity_name, is_generic_role_name, is_valid_entity_name
+        if cand and cand.lower() not in _NON_CHARACTER_NOUNS and not is_collective_entity_name(cand) and not is_generic_role_name(cand) and is_valid_entity_name(cand):
+            return cand
+
+    # Lowercase regex fallback for user custom actions: "ask arthur for a quick briefing"
+    diag_match_lower = re.search(
+        r"(?i:\b(?:ask|speak with|speak to|talk with|talk to|consult with|consult|address|converse with|greet|question|chat with|inquire with|inquire of|say hello to|say hi to|wave to|wave at|wave towards|wave toward)\s+(?:the\s+)?)(?!(?:if|about|for|to|whether|how|why|what|where|when|her|him|them|someone|anyone|everyone)\b)([a-z0-9_\-]+(?:\s+(?:the\s+)?[a-z0-9_\-]+)*?)(?=\s+(?:about|for|regarding|to|if|how|why|what|where|when|whether|on|concerning|with|and|near|while|by|in|at|from|as|before|after|beside|behind)\b|[,\.\?!]|$)",
+        action_text,
+        re.I
+    )
+    if diag_match_lower:
+        cand = diag_match_lower.group(1).strip()
+        from namegen import is_collective_entity_name, is_generic_role_name, is_valid_entity_name
+        if cand and cand.lower() not in _NON_CHARACTER_NOUNS and not is_collective_entity_name(cand) and not is_generic_role_name(cand) and is_valid_entity_name(cand):
+            return cand
+
+    # 4. Default to active dialogue partner if set
     if context.dialogue_partner:
         return context.dialogue_partner
 
@@ -1077,32 +1283,52 @@ def is_conversational_action(text: str) -> bool:
 
 
 def classify_message_intent(user_message: str) -> str:
-    """Classifies user's freeform text message / phone DM into mechanical intents."""
+    """Classifies user's freeform text message / phone DM into mechanical intents with false-positive guarding."""
     msg = (user_message or "").lower().strip()
     if not msg:
         return "custom"
 
-    # Use regex to prevent "bra" matching "library"
+    # 1. Negative Disambiguation Guards for Casual Conversation
+    is_guarded_photo = any(p.search(msg) for p in PHONE_MEDIA_GUARD_PATTERNS)
+    is_guarded_meetup = any(p.search(msg) for p in PHONE_MEETUP_GUARD_PATTERNS)
+    is_guarded_rumor = any(p.search(msg) for p in PHONE_RUMOR_GUARD_PATTERNS)
+    is_guarded_flirt = any(p.search(msg) for p in PHONE_FLIRT_GUARD_PATTERNS)
+
+    # 2. Check for player sending photo / video vs asking
+    is_sending_media = any(p.search(msg) for p in PHONE_MEDIA_SEND_PATTERNS)
+
+    # Check intimate / NSFW keywords (regex word boundary to prevent false positives like 'bra' in 'library')
     nsfw_pattern = r'\b(?:' + '|'.join(map(re.escape, ["nude", "nudes", "naked"] + list(MEDIA_NSFW_KEYWORDS))) + r')\b'
     is_intimate = bool(re.search(nsfw_pattern, msg, re.IGNORECASE))
     
     is_video = any(w in msg for w in MEDIA_VIDEO_KEYWORDS)
-    is_photo = is_intimate or any(w in msg for w in MEDIA_PHOTO_KEYWORDS)
+    is_photo = (is_intimate or any(w in msg for w in MEDIA_PHOTO_KEYWORDS)) and not is_guarded_photo
 
-    if is_video and is_intimate:
-        return "nsfw_video"
-    if is_video:
-        return "video"
-    if is_photo and is_intimate:
-        return "nsfw_photo"
-    if is_photo:
-        return "photo"
+    if is_photo or is_video:
+        if is_sending_media:
+            if is_intimate:
+                return "spicy_send"
+            return "photo_send"
+        if is_video and is_intimate:
+            return "nsfw_video"
+        if is_video:
+            return "video"
+        if is_photo and is_intimate:
+            return "nsfw_photo"
+        if is_photo:
+            return "photo"
 
-    if any(pat.search(msg) for pat in PHONE_MEETUP_PATTERNS):
+    # 3. Meetup invitation check (with negative guards)
+    if not is_guarded_meetup and any(pat.search(msg) for pat in PHONE_MEETUP_PATTERNS):
         return "meetup"
 
-    if any(w in msg for w in INTEL_RUMOR_KEYWORDS):
+    # 4. Intel / Rumor check (with negative guards)
+    if not is_guarded_rumor and any(w in msg for w in INTEL_RUMOR_KEYWORDS):
         return "intel_rumor"
+
+    # 5. Flirt check (with negative guards)
+    if not is_guarded_flirt and any(p.search(msg) for p in PHONE_FLIRT_PATTERNS):
+        return "flirt"
 
     return "custom"
 

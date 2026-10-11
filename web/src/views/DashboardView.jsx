@@ -63,9 +63,9 @@ const DashboardView = ({
       })
       .catch(() => {});
       
-    apiCall('/api/tags')
+    apiCall('/api/genres')
       .then(data => {
-        const list = data.tag_list || (Array.isArray(data.tags) ? data.tags : Object.entries(data.tags || {}).map(([key, val]) => ({ key, ...val })));
+        const list = data.genre_list || data.tag_list || (Array.isArray(data.genres) ? data.genres : Object.entries(data.genres || {}).map(([key, val]) => ({ key, ...val })));
         if (list.length > 0) setAvailableTags(list);
       })
       .catch(() => {});
@@ -251,7 +251,7 @@ const DashboardView = ({
                                  </span>
                                  <span className="text-[10px] text-fantasy-accent font-mono uppercase">Live</span>
                                </div>
-                               <div className="font-bold text-gray-100 text-sm">{slot.data.scene_title || slot.data.scenario}</div>
+                               <div className="font-bold text-gray-100 text-sm">{slot.data.scene_title || slot.data.scenario_display_name || slot.data.scenario}</div>
                                <div className="text-xs text-gray-400 mt-1 line-clamp-2">{slot.data.narrative_snippet || 'Journey continues...'}</div>
                             </div>
                             <div className="mt-4 pt-3 border-t border-fantasy-accent/30 flex gap-2">
@@ -277,7 +277,7 @@ const DashboardView = ({
                                  </div>
                                </div>
                                <div className="font-bold text-gray-200 text-sm">{slot.data.slot_name}</div>
-                               <div className="text-xs text-gray-400 mt-1 line-clamp-2">{slot.data.scene_title}</div>
+                               <div className="text-xs text-gray-400 mt-1 line-clamp-2">{slot.data.scene_title || slot.data.scenario_display_name || slot.data.scenario}</div>
                             </div>
                             <div className="mt-4 pt-3 border-t border-fantasy-border/50">
                                <button onClick={() => handleLoadSave(slot.data.slot_name)} className="w-full py-1.5 bg-fantasy-dark border border-fantasy-border hover:bg-white/5 text-gray-200 text-xs rounded transition-colors">Load Checkpoint</button>

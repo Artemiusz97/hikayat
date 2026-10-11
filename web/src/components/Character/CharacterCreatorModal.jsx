@@ -24,6 +24,11 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
   const [customRace, setCustomRace] = useState('');
   const [raceDescription, setRaceDescription] = useState('');
 
+  const [showIntimate, setShowIntimate] = useState(false);
+  const [breastSize, setBreastSize] = useState('average');
+  const [penisSize, setPenisSize] = useState('average');
+  const [assetTexture, setAssetTexture] = useState('');
+
   const [stats, setStats] = useState({ ...DEFAULT_STATS });
   const [focusedStat, setFocusedStat] = useState('STR');
 
@@ -73,6 +78,14 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
         int: stats.int,
         agi: stats.agi,
         luk: stats.luk,
+        breast_size: breastSize,
+        penis_size: penisSize,
+        asset_texture: assetTexture,
+        appearance: {
+          breast_size: breastSize,
+          penis_size: penisSize,
+          asset_texture: assetTexture,
+        },
       });
 
       setName('');
@@ -256,6 +269,117 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                       <div className="text-sm font-bold font-mono text-amber-300 mt-0.5">{derivedCap}</div>
                     </div>
                   </div>
+                </div>
+
+                {/* Optional Intimate Anatomy Section */}
+                <div className="pt-2 border-t border-fantasy-border/40">
+                  <button
+                    type="button"
+                    onClick={() => setShowIntimate(!showIntimate)}
+                    className="w-full flex items-center justify-between p-2 rounded bg-black/40 hover:bg-black/60 border border-fantasy-border/60 text-xs text-gray-300 transition-colors"
+                  >
+                    <span className="flex items-center gap-1.5 font-bold text-[11px] uppercase tracking-wider text-pink-300">
+                      <span>🔞</span>
+                      <span>Intimate Anatomy (Optional)</span>
+                    </span>
+                    <span className="text-[10px] text-gray-400 font-mono">
+                      {showIntimate ? '▲ Hide' : '▼ Customize'}
+                    </span>
+                  </button>
+
+                  {showIntimate && (
+                    <div className="mt-2 p-3 bg-pink-950/20 border border-pink-900/50 rounded-lg space-y-2.5 text-xs">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold text-pink-300 mb-1">
+                            Breast Size Tier
+                          </label>
+                          <select
+                            value={breastSize}
+                            onChange={(e) => setBreastSize(e.target.value)}
+                            className="w-full bg-fantasy-dark border border-pink-900/60 p-1.5 rounded text-xs text-gray-200"
+                          >
+                            <option value="flat">Flat (AA-Cup)</option>
+                            <option value="small">Petite (A-B Cup)</option>
+                            <option value="average">Proportional (C)</option>
+                            <option value="large">Voluptuous (D-DD)</option>
+                            <option value="huge">Bountiful (E+)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold text-purple-300 mb-1">
+                            Penis Size Tier
+                          </label>
+                          <select
+                            value={penisSize}
+                            onChange={(e) => setPenisSize(e.target.value)}
+                            className="w-full bg-fantasy-dark border border-purple-900/60 p-1.5 rounded text-xs text-gray-200"
+                          >
+                            <option value="small">Petite (Compact)</option>
+                            <option value="average">Proportional (Avg)</option>
+                            <option value="large">Formidable (Large)</option>
+                            <option value="huge">Massive (Huge)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[10px] uppercase font-bold text-gray-400">
+                            Tactile Texture / Feature
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const femalePool = [
+                                'Perky & High-Set', 'Pillowy Soft & Yielding', 'Firm & Toned', 'Smooth & Supple',
+                                'Heavy & Plush', 'Bouncy & Sensitive', 'Tender & Delicate', 'Shapely Teardrop',
+                                'Compact & Dense', 'Soft & Downy Chest Fur', 'Silky Fur-Rimmed', 'Downy Feather-Lined',
+                                'Silky Warm with Smooth Micro-Scales'
+                              ];
+                              const malePool = [
+                                'Veined & Firm', 'Smooth & Heavy', 'Toned & Athletic', 'Warm & Pulsing',
+                                'Slender & Ultra-Sensitive', 'Dense & Formidable', 'Balanced & Firm',
+                                'Soft Fur-Ringed Base', 'Sleek Scaled Base & Firm', 'Sturdy Draconic Build'
+                              ];
+                              const egLower = effectiveGender.toLowerCase();
+                              const isM = ['male', 'man', 'boy'].some(kw => egLower.includes(kw)) && !['female', 'woman', 'girl'].some(kw => egLower.includes(kw));
+                              const pool = isM ? malePool : femalePool;
+                              setAssetTexture(pool[Math.floor(Math.random() * pool.length)]);
+                            }}
+                            className="text-[10px] text-pink-400 hover:text-pink-300 flex items-center gap-1 font-semibold"
+                          >
+                            <Sparkles size={10} /> Roll Feature
+                          </button>
+                        </div>
+                        <select
+                          value={assetTexture}
+                          onChange={(e) => setAssetTexture(e.target.value)}
+                          className="w-full bg-fantasy-dark border border-fantasy-border/70 p-1.5 rounded text-xs text-gray-200"
+                        >
+                          <option value="">Auto-Assign dynamically based on race</option>
+                          <option value="Perky & High-Set">Perky &amp; High-Set</option>
+                          <option value="Pillowy Soft & Yielding">Pillowy Soft &amp; Yielding</option>
+                          <option value="Firm & Toned">Firm &amp; Toned</option>
+                          <option value="Smooth & Supple">Smooth &amp; Supple</option>
+                          <option value="Heavy & Plush">Heavy &amp; Plush</option>
+                          <option value="Bouncy & Sensitive">Bouncy &amp; Sensitive</option>
+                          <option value="Tender & Delicate">Tender &amp; Delicate</option>
+                          <option value="Shapely Teardrop">Shapely Teardrop</option>
+                          <option value="Compact & Dense">Compact &amp; Dense</option>
+                          <option value="Soft & Downy Chest Fur">Soft &amp; Downy Chest Fur (Beastfolk)</option>
+                          <option value="Silky Fur-Rimmed">Silky Fur-Rimmed (Beastfolk)</option>
+                          <option value="Silky Warm with Smooth Micro-Scales">Silky Warm with Smooth Micro-Scales</option>
+                          <option value="Downy Feather-Lined">Downy Feather-Lined</option>
+                          <option value="Veined & Firm">Veined &amp; Firm (Male)</option>
+                          <option value="Smooth & Heavy">Smooth &amp; Heavy (Male)</option>
+                          <option value="Toned & Athletic">Toned &amp; Athletic (Male)</option>
+                          <option value="Warm & Pulsing">Warm &amp; Pulsing (Male)</option>
+                          <option value="Dense & Formidable">Dense &amp; Formidable (Male)</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

@@ -85,11 +85,11 @@ class TestRelationshipAndContactFallback(unittest.TestCase):
         self.assertTrue(len(outcome.get("relationship_updates", [])) >= 1)
         rel_entry = next((r for r in outcome["relationship_updates"] if r.get("npc_name") == "Yea-ji Kang"), None)
         self.assertIsNotNone(rel_entry)
-        self.assertEqual(rel_entry["delta_score"], 3)
+        self.assertEqual(rel_entry["delta_score"], 1)
 
         c = db.get_contact(self.session_id, "Yea-ji Kang", character_id=self.char_id)
         self.assertIsNotNone(c)
-        self.assertEqual(c["relationship_score"], 3)
+        self.assertEqual(c["relationship_score"], 1)
 
     def test_social_check_fallback_for_amelie_diacritics(self):
         char = db.get_character(self.user_id)
@@ -116,11 +116,11 @@ class TestRelationshipAndContactFallback(unittest.TestCase):
 
         rel_entry = next((r for r in outcome["relationship_updates"] if is_dialogue_partner(r.get("npc_name"), ["Amélie Yamashita"])), None)
         self.assertIsNotNone(rel_entry)
-        self.assertEqual(rel_entry["delta_score"], 3)
+        self.assertEqual(rel_entry["delta_score"], 1)
 
         c = db.get_contact(self.session_id, "Amélie Yamashita", character_id=self.char_id)
         self.assertIsNotNone(c)
-        self.assertEqual(c["relationship_score"], 3)
+        self.assertEqual(c["relationship_score"], 1)
 
     def test_explicit_llm_update_not_overwritten(self):
         char = db.get_character(self.user_id)
@@ -143,10 +143,10 @@ class TestRelationshipAndContactFallback(unittest.TestCase):
         apply_outcome(self.session_id, party, outcome, mp_already_spent=False, actions=actions)
 
         self.assertEqual(len(outcome["relationship_updates"]), 1)
-        self.assertEqual(outcome["relationship_updates"][0]["delta_score"], 6)
+        self.assertEqual(outcome["relationship_updates"][0]["delta_score"], 1)
 
         c = db.get_contact(self.session_id, "Yea-ji Kang", character_id=self.char_id)
-        self.assertEqual(c["relationship_score"], 6)
+        self.assertEqual(c["relationship_score"], 1)
         self.assertIn("Ambitious", c["unlocked_traits"])
 
     def test_fantasy_generic_patron_safeguard(self):

@@ -36,10 +36,22 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
   const [regeneratedLoadout, setRegeneratedLoadout] = useState(null);
   const [regeneratingGear, setRegeneratingGear] = useState(false);
   
+  const [breastSize, setBreastSize] = useState('average');
+  const [penisSize, setPenisSize] = useState('average');
+  const [assetTexture, setAssetTexture] = useState('');
+
   // Step 2 variables
   const [mode, setMode] = useState('solo'); // solo, turn, sync
   const [shareLink, setShareLink] = useState('');
   const [copied, setCopied] = useState(false);
+
+  const isNsfw = useMemo(() => {
+    if (scenario === 'nsfw_high_school_drama' || String(scenario).toLowerCase().includes('nsfw')) return true;
+    if (scenario === 'custom' && customTags.includes('nsfw')) return true;
+    const scenObj = scenarios.find(s => s.key === scenario);
+    if (scenObj?.tags?.includes('nsfw')) return true;
+    return false;
+  }, [scenario, customTags, scenarios]);
 
   useEffect(() => {
     if (isOpen && character) {
@@ -52,6 +64,10 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         agi: character.agi ?? 1,
         luk: character.luk ?? 1
       });
+      const appObj = character.appearance || {};
+      setBreastSize(appObj.breast_size || character.breast_size || 'average');
+      setPenisSize(appObj.penis_size || character.penis_size || 'average');
+      setAssetTexture(appObj.asset_texture || character.asset_texture || '');
       setStep(1);
       
       // Fetch share link in background
@@ -163,6 +179,23 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     setSubmitting(true);
     setError(null);
     try {
+      if (character?.user_id) {
+        try {
+          await apiCall('/api/character/appearance', {
+            method: 'POST',
+            body: JSON.stringify({
+              user_id: character.user_id,
+              character_id: character.id,
+              breast_size: breastSize,
+              penis_size: penisSize,
+              asset_texture: assetTexture,
+            }),
+          });
+        } catch (syncErr) {
+          console.warn('Character appearance background sync failed:', syncErr);
+        }
+      }
+
       await onEmbark({
         scenario,
         mode,
@@ -176,7 +209,10 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         cha: stats.cha,
         int_val: stats.int,
         agi: stats.agi,
-        luk: stats.luk
+        luk: stats.luk,
+        breast_size: breastSize,
+        penis_size: penisSize,
+        asset_texture: assetTexture,
       });
       onClose();
     } catch (err) {
@@ -221,22 +257,70 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                   onChange={(e) => setScenario(e.target.value)}
                   className="w-full bg-fantasy-dark border border-fantasy-border p-2.5 rounded text-sm text-gray-100"
                 >
-                  {scenarios.map(s => <option key={s.key} value={s.key}>{s.emoji} {s.name}</option>)}
+                  {scenarios.map(s => <option key={s.key} value={s.key}>{s.emoji} {s.dropdown_label || s.display_name || s.name}</option>)}
                   <option value="custom">✨ Custom Scenario (Multi-Tag Builder)</option>
                 </select>
 
                 {scenario === 'custom' && (
-                  <div className="flex flex-wrap gap-1.5 pt-2">
-                    {availableTags.map(tag => {
-                      const tKey = tag.key || tag.id;
-                      const active = customTags.includes(tKey);
-                      return (
-                        <button key={tKey} onClick={() => toggleCustomTag(tKey)}
-                          className={`px-2 py-1 rounded-full text-xs border ${active ? 'bg-fantasy-accent/25 border-fantasy-accent text-fantasy-accent' : 'bg-black/50 border-fantasy-border/60 text-gray-400'}`}>
-                          {tag.name || tKey}
-                        </button>
-                      );
-                    })}
+                  <div className="space-y-3 pt-2">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wider font-bold text-gray-300 mb-1.5 flex items-center gap-1.5">
+                        <span>Genres</span>
+                        <span className="text-[10px] text-gray-400 font-normal">(select one or more)</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {availableTags
+                          .filter(t => t.category === 'genre' || (!t.category && !['grimdark', 'furry', 'nsfw', 'gore', 'non_combat'].includes(t.key || t.id)))
+                          .map(tag => {
+                            const tKey = tag.key || tag.id;
+                            const active = customTags.includes(tKey);
+                            return (
+                              <button
+                                key={tKey}
+                                type="button"
+                                onClick={() => toggleCustomTag(tKey)}
+                                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                                  active
+                                    ? 'bg-fantasy-accent/25 border-fantasy-accent text-fantasy-accent shadow-sm'
+                                    : 'bg-black/50 border-fantasy-border/60 text-gray-400 hover:text-gray-200'
+                                }`}
+                              >
+                                {tag.name || tKey}
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="text-[11px] uppercase tracking-wider font-bold text-gray-300 mb-1.5 flex items-center gap-1.5">
+                        <span>Tone &amp; Modifiers</span>
+                        <span className="text-[10px] text-gray-400 font-normal">(optional tone &amp; rule toggles)</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {availableTags
+                          .filter(t => t.category === 'modifier' || ['grimdark', 'furry', 'nsfw', 'gore', 'non_combat'].includes(t.key || t.id))
+                          .map(tag => {
+                            const tKey = tag.key || tag.id;
+                            const active = customTags.includes(tKey);
+                            const icon = tKey === 'nsfw' ? '🔞 ' : (tKey === 'gore' ? '🩸 ' : (tKey === 'furry' ? '🐾 ' : (tKey === 'non_combat' ? '🕊️ ' : (tKey === 'grimdark' ? '💀 ' : '✨ '))));
+                            return (
+                              <button
+                                key={tKey}
+                                type="button"
+                                onClick={() => toggleCustomTag(tKey)}
+                                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                                  active
+                                    ? 'bg-amber-500/25 border-amber-500 text-amber-300 shadow-sm'
+                                    : 'bg-black/50 border-fantasy-border/60 text-gray-400 hover:text-gray-200'
+                                }`}
+                              >
+                                {icon}{tag.name || tKey}
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </div>
                   </div>
                 )}
               </section>
@@ -311,6 +395,122 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                   </div>
                 </div>
               </section>
+
+              {/* Optional / NSFW Intimate Physical Anatomy Customizer */}
+              {isNsfw && (
+                <section className="bg-pink-950/20 border border-pink-800/60 rounded-lg p-4 space-y-3">
+                  <div className="flex items-center justify-between border-b border-pink-900/50 pb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">🔞</span>
+                      <h3 className="text-xs uppercase tracking-wider font-bold text-pink-300">
+                        4. Intimate Anatomy &amp; Dynamic Flavor
+                      </h3>
+                    </div>
+                    <span className="text-[10px] text-pink-400 font-medium">
+                      Shapes Narrative Voice &amp; Reactions
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-300 leading-relaxed">
+                    Assets influence psychological vulnerability or confidence, tactile sensations, lingerie fit, and partner reactions across romantic encounters.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    {/* Breast Size Tier */}
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-wider font-bold text-pink-300 mb-1">
+                        Breast Size Tier
+                      </label>
+                      <select
+                        value={breastSize}
+                        onChange={(e) => setBreastSize(e.target.value)}
+                        className="w-full bg-fantasy-dark border border-pink-900/60 p-2 rounded text-xs text-gray-100 focus:outline-none focus:border-pink-500"
+                      >
+                        <option value="flat">Flat (AA-Cup / Barely There)</option>
+                        <option value="small">Petite / Modest (A-B Cup)</option>
+                        <option value="average">Proportional (C-Cup)</option>
+                        <option value="large">Voluptuous / Full (D-DD Cup)</option>
+                        <option value="huge">Bountiful / Massive (E+ Cup)</option>
+                      </select>
+                    </div>
+
+                    {/* Penis Size Tier */}
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-wider font-bold text-purple-300 mb-1">
+                        Penis Size Tier
+                      </label>
+                      <select
+                        value={penisSize}
+                        onChange={(e) => setPenisSize(e.target.value)}
+                        className="w-full bg-fantasy-dark border border-purple-900/60 p-2 rounded text-xs text-gray-100 focus:outline-none focus:border-purple-500"
+                      >
+                        <option value="small">Petite / Modest (Compact)</option>
+                        <option value="average">Proportional (Average)</option>
+                        <option value="large">Well-Endowed / Formidable (Large)</option>
+                        <option value="huge">Massive / Heavy (Huge)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Tactile Texture / Shape Feature */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-300">
+                        Tactile Feature &amp; Texture
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const femalePool = [
+                            'Perky & High-Set', 'Pillowy Soft & Yielding', 'Firm & Toned', 'Smooth & Supple',
+                            'Heavy & Plush', 'Bouncy & Sensitive', 'Tender & Delicate', 'Shapely Teardrop',
+                            'Compact & Dense', 'Soft & Downy Chest Fur', 'Silky Fur-Rimmed', 'Downy Feather-Lined',
+                            'Silky Warm with Smooth Micro-Scales'
+                          ];
+                          const malePool = [
+                            'Veined & Firm', 'Smooth & Heavy', 'Toned & Athletic', 'Warm & Pulsing',
+                            'Slender & Ultra-Sensitive', 'Dense & Formidable', 'Balanced & Firm',
+                            'Soft Fur-Ringed Base', 'Sleek Scaled Base & Firm', 'Sturdy Draconic Build'
+                          ];
+                          const charGen = String(character?.gender || '').toLowerCase();
+                          const isM = ['male', 'man', 'boy'].some(kw => charGen.includes(kw)) && !['female', 'woman', 'girl'].some(kw => charGen.includes(kw));
+                          const pool = isM ? malePool : femalePool;
+                          setAssetTexture(pool[Math.floor(Math.random() * pool.length)]);
+                        }}
+                        className="text-[10px] text-pink-400 hover:text-pink-300 flex items-center gap-1 font-semibold"
+                      >
+                        <Sparkles size={11} /> Roll Feature
+                      </button>
+                    </div>
+                    <select
+                      value={assetTexture}
+                      onChange={(e) => setAssetTexture(e.target.value)}
+                      className="w-full bg-fantasy-dark border border-fantasy-border/80 p-2 rounded text-xs text-gray-100"
+                    >
+                      <option value="">Auto-Assign from Race &amp; Build (Dynamic Roll)</option>
+                      <option value="Perky & High-Set">Perky &amp; High-Set</option>
+                      <option value="Pillowy Soft & Yielding">Pillowy Soft &amp; Yielding</option>
+                      <option value="Firm & Toned">Firm &amp; Toned</option>
+                      <option value="Smooth & Supple">Smooth &amp; Supple</option>
+                      <option value="Heavy & Plush">Heavy &amp; Plush</option>
+                      <option value="Bouncy & Sensitive">Bouncy &amp; Sensitive</option>
+                      <option value="Tender & Delicate">Tender &amp; Delicate</option>
+                      <option value="Shapely Teardrop">Shapely Teardrop</option>
+                      <option value="Compact & Dense">Compact &amp; Dense</option>
+                      <option value="Soft & Downy Chest Fur">Soft &amp; Downy Chest Fur (Beastfolk)</option>
+                      <option value="Silky Fur-Rimmed">Silky Fur-Rimmed (Beastfolk)</option>
+                      <option value="Silky Warm with Smooth Micro-Scales">Silky Warm with Smooth Micro-Scales (Scaly/Draconic)</option>
+                      <option value="Downy Feather-Lined">Downy Feather-Lined (Avian/Winged)</option>
+                      <option value="Veined & Firm">Veined &amp; Firm (Male)</option>
+                      <option value="Smooth & Heavy">Smooth &amp; Heavy (Male)</option>
+                      <option value="Toned & Athletic">Toned &amp; Athletic (Male)</option>
+                      <option value="Warm & Pulsing">Warm &amp; Pulsing (Male)</option>
+                      <option value="Dense & Formidable">Dense &amp; Formidable (Male)</option>
+                      <option value="Soft Fur-Ringed Base">Soft Fur-Ringed Base (Male Beastfolk)</option>
+                      <option value="Sturdy Draconic Build">Sturdy Draconic Build (Male Draconic)</option>
+                    </select>
+                  </div>
+                </section>
+              )}
             </>
           )}
 

@@ -3,7 +3,7 @@ import React from 'react';
 export const formatNarrative = (text) => {
   if (!text) return null;
   return text.split('\n').map((para, idx) => (
-    para.trim() ? <p key={idx} className="mb-3.5 last:mb-0 leading-relaxed">{para}</p> : null
+    para.trim() ? <p key={idx} className="mb-2.5 last:mb-0 leading-relaxed">{para}</p> : null
   ));
 };
 
@@ -81,7 +81,7 @@ const HistoryCard = ({ entry, prevSceneTitle = '', sceneImageUrl = null }) => {
 
   if (typeof entry === 'string') {
     return (
-      <div className="mb-6 text-gray-100 font-serif md:text-lg tracking-wide">
+      <div className="mb-5 text-gray-100 font-serif text-[13.5px] sm:text-sm md:text-[15px] tracking-wide">
         {formatNarrative(entry)}
       </div>
     );
@@ -93,22 +93,22 @@ const HistoryCard = ({ entry, prevSceneTitle = '', sceneImageUrl = null }) => {
     const title = entry.scene_title || '';
     const showTitle = Boolean(title && title !== prevSceneTitle);
     return (
-      <div className="mb-7">
+      <div className="mb-6">
         {showTitle && (
-          <h2 className="font-rpg text-2xl text-fantasy-accent mb-4 border-b border-fantasy-accent/30 pb-2">
+          <h2 className="font-rpg text-xl md:text-2xl text-fantasy-accent mb-3 border-b border-fantasy-accent/30 pb-1.5">
             {title}
           </h2>
         )}
         {sceneImageUrl && (
-          <div className="mb-5 rounded-lg overflow-hidden border border-fantasy-border/80 shadow-lg bg-black/40">
+          <div className="mb-4 rounded-lg overflow-hidden border border-fantasy-border/80 shadow-lg bg-black/40">
             <img
               src={sceneImageUrl}
               alt={title || 'Scene Illustration'}
-              className="w-full max-h-96 object-cover"
+              className="w-full max-h-80 object-cover"
             />
           </div>
         )}
-        <div className="text-gray-100 font-serif md:text-lg tracking-wide">
+        <div className="text-gray-100 font-serif text-[13.5px] sm:text-sm md:text-[15px] tracking-wide">
           {formatNarrative(sceneText)}
         </div>
       </div>
@@ -152,7 +152,7 @@ const HistoryCard = ({ entry, prevSceneTitle = '', sceneImageUrl = null }) => {
       : '';
 
   return (
-    <div className="mb-7">
+    <div className="mb-7 md:mb-8">
       {/* Subtle visual clue separating prior scene from the action's result narration */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5 pt-2 border-t border-white/5">
         <div className="flex items-center gap-2 min-w-0 text-xs text-gray-400/90 italic">
@@ -168,29 +168,29 @@ const HistoryCard = ({ entry, prevSceneTitle = '', sceneImageUrl = null }) => {
 
       {/* Result Narration (colored by check outcome tier, seamless typography) */}
       {outcomeNarrative && (
-        <div className={`border-l-2 ${theme.accentBorderClass} pl-4 py-0.5 font-serif md:text-lg tracking-wide ${theme.textClass}`}>
+        <div className={`border-l-2 ${theme.accentBorderClass} pl-3.5 md:pl-4 py-0.5 font-serif text-[13.5px] sm:text-sm md:text-lg tracking-wide ${theme.textClass}`}>
           {formatNarrative(outcomeNarrative)}
         </div>
       )}
 
       {/* Main Scene Narration (seamless continuation into the new scene state) */}
       {hasDistinctNextNarrative && (
-        <div className="mt-5">
+        <div className="mt-4 md:mt-5">
           {showSceneTitle && (
-            <h2 className="font-rpg text-xl md:text-2xl text-fantasy-accent mb-3.5 border-b border-fantasy-accent/25 pb-1.5">
+            <h2 className="font-rpg text-lg md:text-2xl text-fantasy-accent mb-3 md:mb-3.5 border-b border-fantasy-accent/25 pb-1 md:pb-1.5">
               {entrySceneTitle}
             </h2>
           )}
           {sceneImageUrl && (
-            <div className="mb-5 rounded-lg overflow-hidden border border-fantasy-border/80 shadow-lg bg-black/40">
+            <div className="mb-4 md:mb-5 rounded-lg overflow-hidden border border-fantasy-border/80 shadow-lg bg-black/40">
               <img
                 src={sceneImageUrl}
                 alt={entrySceneTitle || 'Scene Illustration'}
-                className="w-full max-h-96 object-cover"
+                className="w-full max-h-80 md:max-h-96 object-cover"
               />
             </div>
           )}
-          <div className="text-gray-100 font-serif md:text-lg tracking-wide">
+          <div className="text-gray-100 font-serif text-[13.5px] sm:text-sm md:text-lg tracking-wide">
             {formatNarrative(nextNarrative)}
           </div>
         </div>

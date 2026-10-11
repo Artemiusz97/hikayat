@@ -53,7 +53,7 @@ class TestSchoolRosterGenerationAndFacilityPresence(unittest.TestCase):
         # Homeroom count
         from mechanics.world.locations import get_session_classroom_name
         c_name = get_session_classroom_name(self.test_session_id, "high_school_drama")
-        homeroom = [c for c in roster if c_name in c["primary_facility"] or ("Homeroom" in c["primary_facility"] and c["grade"] == "Junior")]
+        homeroom = [c for c in roster if c["grade"] == "Junior" and (f"➔ {c_name} ➔" in c["primary_facility"] or "Homeroom" in c["primary_facility"])]
         self.assertEqual(len(homeroom), 12)
 
         # Upperclassmen & Underclassmen
@@ -180,6 +180,35 @@ class TestSchoolRosterGenerationAndFacilityPresence(unittest.TestCase):
         chem_b = next(c for c in roster_b if "Chemistry" in c["role"])
         self.assertIn("Contradiction:", chem_a["personality_summary"])
         self.assertNotEqual(chem_a["personality_summary"], chem_b["personality_summary"])
+
+    def test_deterministic_race_generation_and_sibling_parity(self):
+        """Verify that directory generation assigns persistent races and guarantees sibling parity."""
+        # Test in furry high school drama
+        roster_furry = school_roster.generate_campus_directory(session_id=self.test_session_id, scen_key="nsfw_furry_high_school_drama")
+        self.assertEqual(len(roster_furry), 50)
+
+        # Every character must have an assigned race
+        for c in roster_furry:
+            self.assertTrue(bool(c.get("race")), f"Character {c['name']} has empty race")
+
+        # Sibling pairs must have matching races
+        siblings = [c for c in roster_furry if c.get("sibling_name")]
+        self.assertGreaterEqual(len(siblings), 6)
+        for sib in siblings:
+            partner = next((c for c in roster_furry if c["name"] == sib["sibling_name"]), None)
+            self.assertIsNotNone(partner)
+            self.assertEqual(sib["race"], partner["race"], f"Sibling race mismatch between {sib['name']} and {partner['name']}")
+
+        # Determinism check across identical seeds
+        roster_furry_2 = school_roster.generate_campus_directory(session_id=self.test_session_id, scen_key="nsfw_furry_high_school_drama")
+        for c1, c2 in zip(roster_furry, roster_furry_2):
+            self.assertEqual(c1["name"], c2["name"])
+            self.assertEqual(c1["race"], c2["race"])
+
+        # Test in regular high school drama (all human)
+        roster_human = school_roster.generate_campus_directory(session_id=self.test_session_id, scen_key="high_school_drama")
+        for c in roster_human:
+            self.assertEqual(c["race"], "human")
 
 
 if __name__ == "__main__":

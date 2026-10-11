@@ -99,6 +99,14 @@ DAMAGE_TYPE_ALIASES: dict[str, set[str]] = {
     "holy": {"holy", "radiant", "divine", "sacred"},
     "dark": {"dark", "shadow", "necrotic", "void", "evil"},
     "energy": {"energy", "plasma", "laser"},
+    "water": {"water", "aqua", "hydro", "tidal", "ocean", "torrent", "rain"},
+    "aqua": {"water", "aqua", "hydro", "tidal", "ocean", "torrent", "rain"},
+    "earth": {"earth", "stone", "rock", "terra", "geomantic", "boulder", "ground"},
+    "stone": {"earth", "stone", "rock", "terra", "geomantic", "boulder", "ground"},
+    "terra": {"earth", "stone", "rock", "terra", "geomantic", "boulder", "ground"},
+    "wind": {"wind", "air", "gale", "tempest", "aero", "zephyr", "cyclone", "breeze"},
+    "air": {"wind", "air", "gale", "tempest", "aero", "zephyr", "cyclone", "breeze"},
+    "gale": {"wind", "air", "gale", "tempest", "aero", "zephyr", "cyclone", "breeze"},
     "physical": {"physical"},
     "magical": {"magical", "arcane", "sorcery"}
 }
@@ -260,7 +268,7 @@ def calculate_tactical_damage(
         profile_mult *= 1.25
         brawler_synergy_active = True
 
-    is_magical = chosen_dmg_type in ("magical", "energy", "fire", "shock", "ice", "holy", "dark", "poison", "acid")
+    is_magical = chosen_dmg_type in ("magical", "energy", "fire", "shock", "ice", "holy", "dark", "poison", "acid", "water", "earth", "wind")
     phys_mult = get_attack_type_multiplier([active_type], armor_meta)
     elem_mult = get_elemental_multiplier({chosen_dmg_type: 1.0}, armor_meta, defender_attrs)
 
@@ -295,7 +303,7 @@ def calculate_tactical_damage(
         Armor Penetration is strictly capped at 75% maximum (0.75).
         """
         # Step 1: Resolve total DR for this damage channel
-        is_elem = damage_type in ("magical", "fire", "shock", "ice", "poison", "holy", "dark", "energy", "acid")
+        is_elem = damage_type in ("magical", "fire", "shock", "ice", "poison", "holy", "dark", "energy", "acid", "water", "earth", "wind")
         if is_elem:
             ch_gear_dr = gear_dr.get(damage_type, 0.0)
             total_dr = max(-0.25, min(0.85, ch_gear_dr + innate_magic_dr))

@@ -33,6 +33,17 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
   const [showCompleted, setShowCompleted] = useState(false);
   const [busyAction, setBusyAction] = useState(null);
   const [feedback, setFeedback] = useState(null);
+  const [isStoryExpanded, setIsStoryExpanded] = useState(true);
+  const [expandedSideQuests, setExpandedSideQuests] = useState({});
+  const [expandedBounties, setExpandedBounties] = useState({});
+
+  const toggleSideQuest = (id) => {
+    setExpandedSideQuests(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const toggleBounty = (id) => {
+    setExpandedBounties(prev => ({ ...prev, [id]: !prev[id] }));
+  };
 
   // Caseboard states
   const [selectedSuspect, setSelectedSuspect] = useState('__all__');
@@ -155,26 +166,26 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
   };
 
   return (
-    <div className="bg-black/30 rounded-lg border border-fantasy-border p-4 space-y-4">
+    <div className="bg-black/30 rounded-lg border border-fantasy-border p-2.5 sm:p-3 space-y-3">
       
       {/* Header & Subtabs */}
-      <div className="space-y-3 border-b border-fantasy-border pb-3">
+      <div className="space-y-2.5 border-b border-fantasy-border pb-2.5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Compass size={17} className="text-fantasy-accent" />
-            <h3 className="font-rpg font-bold text-sm text-gray-100 uppercase tracking-wider">Quest Journal</h3>
+            <Compass size={16} className="text-fantasy-accent" />
+            <h3 className="font-rpg font-bold text-xs sm:text-sm text-gray-100 uppercase tracking-wider">Quest Journal</h3>
           </div>
-          <span className="text-[11px] font-mono font-bold text-fantasy-accent bg-black/60 px-2 py-0.5 rounded border border-fantasy-border">
+          <span className="text-[10px] font-mono font-bold text-fantasy-accent bg-black/60 px-2 py-0.5 rounded border border-fantasy-border">
             {(activeStoryQuest ? 1 : 0) + sideQuests.length} Active
           </span>
         </div>
 
         {/* 5-Tab Switcher: Active | Bounties | Caseboard | Campaign | History */}
-        <div className="flex bg-black/60 p-1 rounded-md border border-fantasy-border/60 gap-1 overflow-x-auto custom-scrollbar">
+        <div className="flex bg-black/70 p-1 rounded-lg border border-fantasy-border/60 gap-1.5 overflow-x-auto no-scrollbar scroll-smooth">
           <button
             type="button"
             onClick={() => { setSubTab('story'); setFeedback(null); }}
-            className={`flex-1 min-w-0 flex items-center justify-center gap-1 py-1.5 px-1.5 rounded text-[11px] font-semibold whitespace-nowrap transition-all ${
+            className={`shrink-0 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-md text-[11px] font-semibold whitespace-nowrap transition-all ${
               subTab === 'story'
                 ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40 shadow-sm'
                 : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-transparent'
@@ -187,7 +198,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
           <button
             type="button"
             onClick={() => { setSubTab('bounties'); setFeedback(null); }}
-            className={`flex-1 min-w-0 flex items-center justify-center gap-1 py-1.5 px-1.5 rounded text-[11px] font-semibold whitespace-nowrap transition-all ${
+            className={`shrink-0 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-md text-[11px] font-semibold whitespace-nowrap transition-all ${
               subTab === 'bounties'
                 ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40 shadow-sm'
                 : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-transparent'
@@ -196,7 +207,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
             <ShieldAlert size={12} className="shrink-0" />
             <span>Bounties</span>
             {availableBounties.length > 0 && (
-              <span className="text-[9px] px-1 rounded bg-amber-500/20 text-amber-300 font-mono shrink-0">
+              <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-mono shrink-0">
                 {availableBounties.length}
               </span>
             )}
@@ -205,7 +216,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
           <button
             type="button"
             onClick={() => { setSubTab('caseboard'); setFeedback(null); }}
-            className={`flex-1 min-w-0 flex items-center justify-center gap-1 py-1.5 px-1.5 rounded text-[11px] font-semibold whitespace-nowrap transition-all ${
+            className={`shrink-0 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-md text-[11px] font-semibold whitespace-nowrap transition-all ${
               subTab === 'caseboard'
                 ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40 shadow-sm'
                 : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-transparent'
@@ -214,7 +225,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
             <FileSearch size={12} className="shrink-0" />
             <span>Caseboard</span>
             {clues.length > 0 && (
-              <span className="text-[9px] px-1 rounded bg-cyan-500/20 text-cyan-300 font-mono shrink-0">
+              <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-cyan-500/20 text-cyan-300 font-mono shrink-0">
                 {clues.length}
               </span>
             )}
@@ -223,7 +234,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
           <button
             type="button"
             onClick={() => { setSubTab('campaign'); setFeedback(null); }}
-            className={`flex-1 min-w-0 flex items-center justify-center gap-1 py-1.5 px-1.5 rounded text-[11px] font-semibold whitespace-nowrap transition-all ${
+            className={`shrink-0 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-md text-[11px] font-semibold whitespace-nowrap transition-all ${
               subTab === 'campaign'
                 ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40 shadow-sm'
                 : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-transparent'
@@ -236,7 +247,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
           <button
             type="button"
             onClick={() => { setSubTab('history'); setFeedback(null); }}
-            className={`flex-1 min-w-0 flex items-center justify-center gap-1 py-1.5 px-1.5 rounded text-[11px] font-semibold whitespace-nowrap transition-all ${
+            className={`shrink-0 flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-md text-[11px] font-semibold whitespace-nowrap transition-all ${
               subTab === 'history'
                 ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40 shadow-sm'
                 : 'text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-transparent'
@@ -306,11 +317,16 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
             <>
               {/* Active Story Quest Card */}
               {activeStoryQuest ? (
-                <div className="bg-gradient-to-br from-fantasy-dark via-black/60 to-fantasy-panel border border-fantasy-accent/50 rounded-lg p-3.5 space-y-3 shadow-md relative overflow-hidden">
+                <div className="bg-gradient-to-br from-fantasy-dark via-black/60 to-fantasy-panel border border-fantasy-accent/50 rounded-lg p-3 space-y-2.5 shadow-md relative overflow-hidden transition-all">
                   <div className="absolute top-0 right-0 w-24 h-24 bg-fantasy-accent/5 rounded-full blur-xl pointer-events-none" />
 
-                  <div className="flex justify-between items-start gap-2">
-                    <div>
+                  {/* Tappable Card Header */}
+                  <div 
+                    onClick={() => setIsStoryExpanded(prev => !prev)}
+                    className="flex justify-between items-start gap-2 cursor-pointer select-none group"
+                    title={isStoryExpanded ? "Tap to collapse details" : "Tap to expand details"}
+                  >
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-[10px] px-1.5 py-0.2 bg-fantasy-accent/20 text-fantasy-accent font-bold uppercase rounded border border-fantasy-accent/30 tracking-wider">
                           Main Story
@@ -325,226 +341,251 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                             🔥 Climax Ready!
                           </span>
                         )}
+                        {subObjectives.length > 0 && (
+                          <span className="text-[10px] font-mono text-fantasy-accent bg-black/50 px-1.5 py-0.2 rounded border border-fantasy-border/40">
+                            {completedSubs}/{subObjectives.length} Completed
+                          </span>
+                        )}
                       </div>
-                      <h4 className="font-rpg font-bold text-sm text-gray-100 mt-1 leading-snug">
+                      <h4 className="font-rpg font-bold text-sm text-gray-100 mt-1 leading-snug group-hover:text-fantasy-accent transition-colors">
                         {activeStoryQuest.title || 'The Unfolding Journey'}
                       </h4>
                     </div>
+
+                    <div className="p-1 rounded-md text-gray-400 group-hover:text-fantasy-accent hover:bg-white/5 transition-colors shrink-0 mt-0.5">
+                      {isStoryExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    </div>
                   </div>
 
-                  {activeStoryQuest.objective && (
-                    <p className="text-xs text-gray-300 leading-relaxed bg-black/40 p-2.5 rounded border border-fantasy-border/50">
-                      {activeStoryQuest.objective}
-                    </p>
+                  {/* Collapsed Compact Preview */}
+                  {!isStoryExpanded && (
+                    <div 
+                      onClick={() => setIsStoryExpanded(true)}
+                      className="flex items-center justify-between text-[11px] text-gray-400 italic pt-1 border-t border-fantasy-border/20 cursor-pointer"
+                    >
+                      <span className="truncate">{activeStoryQuest.objective || 'Tap to view objectives, locations, and rewards.'}</span>
+                      <span className="text-[10px] text-fantasy-accent not-italic font-semibold shrink-0 ml-2">Expand ▾</span>
+                    </div>
                   )}
 
-                  {activeStoryQuest.climax_ready && (activeStoryQuest.climax_location || activeStoryQuest.target_location) && (
-                    <div className="flex items-center justify-between gap-2 text-[11px] text-rose-200 bg-rose-950/50 px-2.5 py-2 rounded border border-rose-600/60">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <MapPin size={13} className="shrink-0 text-rose-400" />
-                        <span className="truncate">⚡ Final Showdown Location: <strong>{activeStoryQuest.climax_location || activeStoryQuest.target_location}</strong></span>
-                      </div>
-                      {onOpenWorldMap && (
-                        <button
-                          type="button"
-                          onClick={() => onOpenWorldMap(activeStoryQuest.climax_location || activeStoryQuest.target_location)}
-                          className="px-2 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/35 text-rose-200 border border-rose-500/50 text-[10px] font-bold shrink-0 transition-colors"
-                        >
-                          Locate
-                        </button>
+                  {/* Expanded Full Details */}
+                  {isStoryExpanded && (
+                    <div className="space-y-2.5 pt-1 border-t border-fantasy-border/30">
+                      {activeStoryQuest.objective && (
+                        <p className="text-xs text-gray-300 leading-relaxed bg-black/40 p-2.5 rounded border border-fantasy-border/50">
+                          {activeStoryQuest.objective}
+                        </p>
                       )}
-                    </div>
-                  )}
 
-                  {!activeStoryQuest.climax_ready && subObjectives.length === 0 && activeStoryQuest.target_location && (
-                    <div className="flex items-center justify-between gap-2 text-[11px] text-amber-300 bg-amber-950/30 px-2.5 py-1.5 rounded border border-amber-700/40">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <MapPin size={12} className="shrink-0" />
-                        <span className="truncate">📍 Waypoint Lead: <strong>{activeStoryQuest.target_location}</strong></span>
-                      </div>
-                      {onOpenWorldMap && (
-                        <button
-                          type="button"
-                          onClick={() => onOpenWorldMap(activeStoryQuest.target_location)}
-                          className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 border border-amber-500/50 text-[10px] font-bold shrink-0 transition-colors"
-                        >
-                          Map
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  {activeStoryQuest.required_count > 0 && (
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-[10px] font-mono text-gray-400">
-                        <span>Progress</span>
-                        <span className="text-fantasy-accent">{activeStoryQuest.current_count || 0} / {activeStoryQuest.required_count}</span>
-                      </div>
-                      <div className="h-1.5 w-full bg-black/70 rounded-full overflow-hidden border border-fantasy-border/40">
-                        <div
-                          className="h-full bg-fantasy-accent transition-all duration-300"
-                          style={{ width: `${Math.min(100, ((activeStoryQuest.current_count || 0) / activeStoryQuest.required_count) * 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {subObjectives.length > 0 && (
-                    <div className="space-y-2 pt-1">
-                      <div className="flex justify-between items-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                        <span>Objectives & Waypoint Locations</span>
-                        <span className="font-mono text-fantasy-accent">{completedSubs} / {subObjectives.length} Completed</span>
-                      </div>
-                      <div className="space-y-2.5">
-                        {subObjectives.map((so, idx) => {
-                          const isDone = Boolean(so.completed || so.done);
-                          const isObj = typeof so === 'object' && so !== null;
-                          const soText = typeof so === 'string' ? so : (so.text || so.label || so.title || so.description);
-                          const soArch = isObj ? so.archetype : '';
-                          const soWps = isObj && Array.isArray(so.waypoints) ? so.waypoints : [];
-                          const activeWp = isObj ? so.active_waypoint : null;
-                          const targetLoc = isObj ? (so.target_location || activeWp?.target_location || '') : '';
-                          const targetNpc = isObj ? (so.target_npc || activeWp?.target_npc || '') : '';
-                          const stageLabel = isObj ? (so.stage_label || activeWp?.stage_label || '') : '';
-                          const stageIdx = isObj ? (so.stage_index || activeWp?.stage_index || 1) : 1;
-                          const totalStages = isObj ? (so.total_stages || soWps.length || 0) : 0;
-
-                          return (
-                            <div
-                              key={idx}
-                              className={`p-2.5 rounded-lg border space-y-2 transition-all ${
-                                isDone
-                                  ? 'bg-emerald-950/15 border-emerald-800/40'
-                                  : 'bg-black/45 border-fantasy-border/70'
-                              }`}
+                      {activeStoryQuest.climax_ready && (activeStoryQuest.climax_location || activeStoryQuest.target_location) && (
+                        <div className="flex items-center justify-between gap-2 text-[11px] text-rose-200 bg-rose-950/50 px-2.5 py-2 rounded border border-rose-600/60">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <MapPin size={13} className="shrink-0 text-rose-400" />
+                            <span className="truncate">⚡ Final Showdown Location: <strong>{activeStoryQuest.climax_location || activeStoryQuest.target_location}</strong></span>
+                          </div>
+                          {onOpenWorldMap && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenWorldMap(activeStoryQuest.climax_location || activeStoryQuest.target_location)}
+                              className="px-2 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/35 text-rose-200 border border-rose-500/50 text-[10px] font-bold shrink-0 transition-colors"
                             >
-                              {/* Sub-Objective Header & Text */}
-                              <div className="flex items-start gap-2 text-xs">
-                                {isDone ? (
-                                  <CheckCircle2 size={14} className="text-emerald-400 shrink-0 mt-0.5" />
-                                ) : (
-                                  <Circle size={14} className="text-amber-400 shrink-0 mt-0.5" />
-                                )}
-                                <div className="flex-1 min-w-0 space-y-1">
-                                  <div className="flex items-center justify-between gap-1.5 flex-wrap">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="text-[10px] font-mono font-bold text-fantasy-accent">
-                                        Objective #{isObj && so.id ? so.id : idx + 1}
-                                      </span>
-                                      {soArch && (
-                                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-white/5 text-gray-300 border border-fantasy-border/60 uppercase font-semibold">
-                                          {soArch}
-                                        </span>
-                                      )}
-                                    </div>
-                                    {totalStages > 0 && (
-                                      <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded border ${
-                                        isDone
-                                          ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/50'
-                                          : 'bg-amber-950/60 text-amber-300 border-amber-700/50 font-bold'
-                                      }`}>
-                                        {isDone ? `✓ ${totalStages}/${totalStages} Stages` : `Stage ${stageIdx}/${totalStages}`}
-                                      </span>
+                              Locate
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {!activeStoryQuest.climax_ready && subObjectives.length === 0 && activeStoryQuest.target_location && (
+                        <div className="flex items-center justify-between gap-2 text-[11px] text-amber-300 bg-amber-950/30 px-2.5 py-1.5 rounded border border-amber-700/40">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <MapPin size={12} className="shrink-0" />
+                            <span className="truncate">📍 Waypoint Lead: <strong>{activeStoryQuest.target_location}</strong></span>
+                          </div>
+                          {onOpenWorldMap && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenWorldMap(activeStoryQuest.target_location)}
+                              className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 border border-amber-500/50 text-[10px] font-bold shrink-0 transition-colors"
+                            >
+                              Map
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {activeStoryQuest.required_count > 0 && (
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[10px] font-mono text-gray-400">
+                            <span>Progress</span>
+                            <span className="text-fantasy-accent">{activeStoryQuest.current_count || 0} / {activeStoryQuest.required_count}</span>
+                          </div>
+                          <div className="h-1.5 w-full bg-black/70 rounded-full overflow-hidden border border-fantasy-border/40">
+                            <div
+                              className="h-full bg-fantasy-accent transition-all duration-300"
+                              style={{ width: `${Math.min(100, ((activeStoryQuest.current_count || 0) / activeStoryQuest.required_count) * 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {subObjectives.length > 0 && (
+                        <div className="space-y-2 pt-1">
+                          <div className="flex justify-between items-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                            <span>Objectives & Waypoint Locations</span>
+                            <span className="font-mono text-fantasy-accent">{completedSubs} / {subObjectives.length} Completed</span>
+                          </div>
+                          <div className="space-y-2">
+                            {subObjectives.map((so, idx) => {
+                              const isDone = Boolean(so.completed || so.done);
+                              const isObj = typeof so === 'object' && so !== null;
+                              const soText = typeof so === 'string' ? so : (so.text || so.label || so.title || so.description);
+                              const soArch = isObj ? so.archetype : '';
+                              const soWps = isObj && Array.isArray(so.waypoints) ? so.waypoints : [];
+                              const activeWp = isObj ? so.active_waypoint : null;
+                              const targetLoc = isObj ? (so.target_location || activeWp?.target_location || '') : '';
+                              const targetNpc = isObj ? (so.target_npc || activeWp?.target_npc || '') : '';
+                              const stageLabel = isObj ? (so.stage_label || activeWp?.stage_label || '') : '';
+                              const stageIdx = isObj ? (so.stage_index || activeWp?.stage_index || 1) : 1;
+                              const totalStages = isObj ? (so.total_stages || soWps.length || 0) : 0;
+
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`p-2 sm:p-2.5 rounded-lg border space-y-1.5 transition-all ${
+                                    isDone
+                                      ? 'bg-emerald-950/15 border-emerald-800/40'
+                                      : 'bg-black/45 border-fantasy-border/70'
+                                  }`}
+                                >
+                                  {/* Sub-Objective Header & Text */}
+                                  <div className="flex items-start gap-2 text-xs">
+                                    {isDone ? (
+                                      <CheckCircle2 size={13} className="text-emerald-400 shrink-0 mt-0.5" />
+                                    ) : (
+                                      <Circle size={13} className="text-amber-400 shrink-0 mt-0.5" />
                                     )}
-                                  </div>
-                                  <p className={`text-[11px] leading-snug ${
-                                    isDone ? 'text-gray-500 line-through' : 'text-gray-200 font-medium'
-                                  }`}>
-                                    {soText}
-                                  </p>
-                                </div>
-                              </div>
-
-                              {/* Active Waypoint Destination Callout */}
-                              {!isDone && (targetLoc || stageLabel || targetNpc) && (
-                                <div className="ml-5 bg-amber-950/35 border border-amber-600/50 rounded-md p-2 space-y-1">
-                                  {stageLabel && (
-                                    <div className="text-[11px] text-amber-100 font-semibold leading-snug flex items-start gap-1.5">
-                                      <span className="text-amber-400 shrink-0">🎯 Current Step:</span>
-                                      <span>{stageLabel}</span>
-                                    </div>
-                                  )}
-                                  {targetLoc && (
-                                    <div className="flex items-center justify-between gap-2 pt-0.5">
-                                      <div className="flex items-center gap-1 text-[11px] text-amber-300 min-w-0">
-                                        <MapPin size={12} className="text-amber-400 shrink-0" />
-                                        <span className="truncate">📍 <strong>{targetLoc}</strong></span>
-                                      </div>
-                                      {onOpenWorldMap && (
-                                        <button
-                                          type="button"
-                                          onClick={() => onOpenWorldMap(targetLoc)}
-                                          className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 border border-amber-500/50 text-[10px] font-bold shrink-0 transition-colors"
-                                          title="View on World Atlas"
-                                        >
-                                          View on Map
-                                        </button>
-                                      )}
-                                    </div>
-                                  )}
-                                  {targetNpc && (
-                                    <div className="text-[10px] text-cyan-300 flex items-center gap-1">
-                                      <span>👤 Key Contact: <strong>{targetNpc}</strong></span>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Multi-Stage Roadmap (All Stages & Locations) */}
-                              {soWps.length > 1 && !isDone && (
-                                <div className="ml-5 pt-1 border-t border-fantasy-border/30 space-y-1">
-                                  {soWps.map((wp, wIdx) => {
-                                    const wpStatus = wp.status || 'locked';
-                                    const wpDone = wpStatus === 'completed';
-                                    const wpActive = wpStatus === 'active';
-                                    return (
-                                      <div
-                                        key={wIdx}
-                                        className={`text-[10px] flex items-start gap-1.5 leading-tight ${
-                                          wpDone
-                                            ? 'text-emerald-400/70 line-through'
-                                            : wpActive
-                                              ? 'text-amber-200 font-semibold'
-                                              : 'text-gray-500'
-                                        }`}
-                                      >
-                                        <span className="shrink-0 mt-0.5">
-                                          {wpDone ? '☑️' : wpActive ? '📍' : '🔒'}
-                                        </span>
-                                        <div className="min-w-0 flex-1">
-                                          <span>Stage {wp.stage_index || wIdx + 1}: {wp.stage_label}</span>
-                                          {wp.target_location && (
-                                            <span className={`block text-[9px] font-mono ${wpActive ? 'text-amber-300' : 'text-gray-500'}`}>
-                                              ↳ 📍 {wp.target_location}{wp.target_npc ? ` • 👤 ${wp.target_npc}` : ''}
+                                    <div className="flex-1 min-w-0 space-y-1">
+                                      <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className="text-[10px] font-mono font-bold text-fantasy-accent">
+                                            Objective #{isObj && so.id ? so.id : idx + 1}
+                                          </span>
+                                          {soArch && (
+                                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-white/5 text-gray-300 border border-fantasy-border/60 uppercase font-semibold">
+                                              {soArch}
                                             </span>
                                           )}
                                         </div>
+                                        {totalStages > 0 && (
+                                          <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded border ${
+                                            isDone
+                                              ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/50'
+                                              : 'bg-amber-950/60 text-amber-300 border-amber-700/50 font-bold'
+                                          }`}>
+                                            {isDone ? `✓ ${totalStages}/${totalStages} Stages` : `Stage ${stageIdx}/${totalStages}`}
+                                          </span>
+                                        )}
                                       </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
+                                      <p className={`text-[11px] leading-snug ${
+                                        isDone ? 'text-gray-500 line-through' : 'text-gray-200 font-medium'
+                                      }`}>
+                                        {soText}
+                                      </p>
+                                    </div>
+                                  </div>
 
-                  {(activeStoryQuest.reward_xp || activeStoryQuest.reward_gold || activeStoryQuest.reward_item) && (
-                    <div className="flex items-center gap-3 pt-1 text-[11px] font-mono text-gray-400 border-t border-fantasy-border/30">
-                      <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Rewards:</span>
-                      {activeStoryQuest.reward_gold && (
-                        <span className="flex items-center gap-1 text-amber-300">
-                          <Coins size={12} className="text-amber-400" />
-                          +{activeStoryQuest.reward_gold} G
-                        </span>
+                                  {/* Active Waypoint Destination Callout */}
+                                  {!isDone && (targetLoc || stageLabel || targetNpc) && (
+                                    <div className="ml-5 bg-amber-950/35 border border-amber-600/50 rounded-md p-2 space-y-1">
+                                      {stageLabel && (
+                                        <div className="text-[11px] text-amber-100 font-semibold leading-snug flex items-start gap-1.5">
+                                          <span className="text-amber-400 shrink-0">🎯 Current Step:</span>
+                                          <span>{stageLabel}</span>
+                                        </div>
+                                      )}
+                                      {targetLoc && (
+                                        <div className="flex items-center justify-between gap-2 pt-0.5">
+                                          <div className="flex items-center gap-1 text-[11px] text-amber-300 min-w-0">
+                                            <MapPin size={12} className="text-amber-400 shrink-0" />
+                                            <span className="truncate">📍 <strong>{targetLoc}</strong></span>
+                                          </div>
+                                          {onOpenWorldMap && (
+                                            <button
+                                              type="button"
+                                              onClick={() => onOpenWorldMap(targetLoc)}
+                                              className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 border border-amber-500/50 text-[10px] font-bold shrink-0 transition-colors"
+                                              title="View on World Atlas"
+                                            >
+                                              View on Map
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
+                                      {targetNpc && (
+                                        <div className="text-[10px] text-cyan-300 flex items-center gap-1">
+                                          <span>👤 Key Contact: <strong>{targetNpc}</strong></span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* Multi-Stage Roadmap (All Stages & Locations) */}
+                                  {soWps.length > 1 && !isDone && (
+                                    <div className="ml-5 pt-1 border-t border-fantasy-border/30 space-y-1">
+                                      {soWps.map((wp, wIdx) => {
+                                        const wpStatus = wp.status || 'locked';
+                                        const wpDone = wpStatus === 'completed';
+                                        const wpActive = wpStatus === 'active';
+                                        return (
+                                          <div
+                                            key={wIdx}
+                                            className={`text-[10px] flex items-start gap-1.5 leading-tight ${
+                                              wpDone
+                                                ? 'text-emerald-400/70 line-through'
+                                                : wpActive
+                                                  ? 'text-amber-200 font-semibold'
+                                                  : 'text-gray-500'
+                                            }`}
+                                          >
+                                            <span className="shrink-0 mt-0.5">
+                                              {wpDone ? '☑️' : wpActive ? '📍' : '🔒'}
+                                            </span>
+                                            <div className="min-w-0 flex-1">
+                                              <span>Stage {wp.stage_index || wIdx + 1}: {wp.stage_label}</span>
+                                              {wp.target_location && (
+                                                <span className={`block text-[9px] font-mono ${wpActive ? 'text-amber-300' : 'text-gray-500'}`}>
+                                                  ↳ 📍 {wp.target_location}{wp.target_npc ? ` • 👤 ${wp.target_npc}` : ''}
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
                       )}
-                      {activeStoryQuest.reward_xp && (
-                        <span className="flex items-center gap-1 text-purple-300">
-                          <Sparkles size={12} className="text-purple-400" />
-                          +{activeStoryQuest.reward_xp} XP
-                        </span>
+
+                      {(activeStoryQuest.reward_xp || activeStoryQuest.reward_gold || activeStoryQuest.reward_item) && (
+                        <div className="flex items-center gap-3 pt-1 text-[11px] font-mono text-gray-400 border-t border-fantasy-border/30">
+                          <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Rewards:</span>
+                          {activeStoryQuest.reward_gold && (
+                            <span className="flex items-center gap-1 text-amber-300">
+                              <Coins size={12} className="text-amber-400" />
+                              +{activeStoryQuest.reward_gold} G
+                            </span>
+                          )}
+                          {activeStoryQuest.reward_xp && (
+                            <span className="flex items-center gap-1 text-purple-300">
+                              <Sparkles size={12} className="text-purple-400" />
+                              +{activeStoryQuest.reward_xp} XP
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
@@ -564,115 +605,137 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                   </div>
                   <div className="space-y-2">
                     {sideQuests.map((q, idx) => {
+                      const qId = q.quest_id || `side-${idx}`;
+                      const isExpanded = expandedSideQuests[qId] ?? false;
                       const qStages = q.stages || q.sub_objectives || [];
                       return (
                         <div 
-                          key={q.quest_id || idx}
-                          className="bg-black/50 border border-fantasy-border/60 hover:border-fantasy-border rounded-lg p-3 space-y-2"
+                          key={qId}
+                          className="bg-black/50 border border-fantasy-border/60 hover:border-fantasy-border rounded-lg p-2.5 space-y-2 transition-all"
                         >
-                          <div className="flex justify-between items-start gap-1">
-                            <h5 className="font-semibold text-xs text-gray-200 flex items-center gap-1.5 flex-wrap">
-                              <span>{q.title}</span>
-                              {q.climax_ready && (
-                                <span className="text-[9px] px-1.5 py-0.2 bg-rose-950/80 text-rose-300 rounded font-bold uppercase border border-rose-600/60">
-                                  🔥 Climax Ready!
-                                </span>
+                          <div 
+                            onClick={() => toggleSideQuest(qId)}
+                            className="flex justify-between items-start gap-1.5 cursor-pointer select-none group"
+                            title={isExpanded ? "Tap to collapse" : "Tap to expand details"}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <h5 className="font-semibold text-xs text-gray-200 flex items-center gap-1.5 flex-wrap group-hover:text-fantasy-accent transition-colors">
+                                <span>{q.title}</span>
+                                {q.climax_ready && (
+                                  <span className="text-[9px] px-1.5 py-0.2 bg-rose-950/80 text-rose-300 rounded font-bold uppercase border border-rose-600/60">
+                                    🔥 Climax Ready!
+                                  </span>
+                                )}
+                              </h5>
+                              {!isExpanded && (
+                                <p className="text-[10px] text-gray-400 truncate mt-0.5">
+                                  {q.stage_label || (q.target_location ? `📍 ${q.target_location}` : (q.objective || q.description || 'Tap to view details'))}
+                                </p>
                               )}
-                            </h5>
-                            <span className="text-[9px] px-1.5 py-0.2 bg-amber-950/60 text-amber-300 rounded font-bold uppercase border border-amber-800/40 shrink-0">
-                              {q.quest_type || 'Bounty'}
-                            </span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                              <span className="text-[9px] px-1.5 py-0.2 bg-amber-950/60 text-amber-300 rounded font-bold uppercase border border-amber-800/40">
+                                {q.quest_type || 'Bounty'}
+                              </span>
+                              <span className="text-gray-400 group-hover:text-fantasy-accent">
+                                {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                              </span>
+                            </div>
                           </div>
 
-                          {(q.objective || q.description) && (
-                            <p className="text-[11px] text-gray-400 leading-snug">{q.objective || q.description}</p>
-                          )}
-
-                          {(q.target_location || q.stage_label || q.target_npc) && (
-                            <div className="bg-amber-950/35 border border-amber-600/50 rounded-md p-2 space-y-1">
-                              {q.stage_label && (
-                                <div className="text-[11px] text-amber-100 font-semibold leading-snug">
-                                  🎯 Current Task: {q.stage_label}
-                                </div>
+                          {isExpanded && (
+                            <div className="space-y-2 pt-1 border-t border-fantasy-border/30">
+                              {(q.objective || q.description) && (
+                                <p className="text-[11px] text-gray-400 leading-snug">{q.objective || q.description}</p>
                               )}
-                              {q.target_location && (
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-1 text-[11px] text-amber-300 min-w-0">
-                                    <MapPin size={12} className="text-amber-400 shrink-0" />
-                                    <span className="truncate">📍 <strong>{q.target_location}</strong></span>
-                                  </div>
-                                  {onOpenWorldMap && (
-                                    <button
-                                      type="button"
-                                      onClick={() => onOpenWorldMap(q.target_location)}
-                                      className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 border border-amber-500/50 text-[10px] font-bold shrink-0 transition-colors"
-                                    >
-                                      View on Map
-                                    </button>
+
+                              {(q.target_location || q.stage_label || q.target_npc) && (
+                                <div className="bg-amber-950/35 border border-amber-600/50 rounded-md p-2 space-y-1">
+                                  {q.stage_label && (
+                                    <div className="text-[11px] text-amber-100 font-semibold leading-snug">
+                                      🎯 Current Task: {q.stage_label}
+                                    </div>
+                                  )}
+                                  {q.target_location && (
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-1 text-[11px] text-amber-300 min-w-0">
+                                        <MapPin size={12} className="text-amber-400 shrink-0" />
+                                        <span className="truncate">📍 <strong>{q.target_location}</strong></span>
+                                      </div>
+                                      {onOpenWorldMap && (
+                                        <button
+                                          type="button"
+                                          onClick={() => onOpenWorldMap(q.target_location)}
+                                          className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 border border-amber-500/50 text-[10px] font-bold shrink-0 transition-colors"
+                                        >
+                                          View on Map
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                  {q.target_npc && (
+                                    <div className="text-[10px] text-cyan-300">
+                                      👤 Contact: <strong>{q.target_npc}</strong>
+                                    </div>
                                   )}
                                 </div>
                               )}
-                              {q.target_npc && (
-                                <div className="text-[10px] text-cyan-300">
-                                  👤 Contact: <strong>{q.target_npc}</strong>
+
+                              {q.required_count > 0 && (
+                                <div className="flex items-center justify-between text-[10px] font-mono text-gray-400 bg-black/40 px-2 py-1 rounded border border-fantasy-border/30">
+                                  <span>Checklist Progress</span>
+                                  <span className="text-fantasy-accent font-bold">{q.current_count || 0} / {q.required_count}</span>
                                 </div>
                               )}
+
+                              {qStages.length > 0 && (
+                                <div className="space-y-1 bg-black/30 p-2 rounded border border-fantasy-border/30">
+                                  {qStages.map((st, sIdx) => {
+                                    const done = Boolean(st.completed || st.done || st.status === 'completed');
+                                    const isActive = st.status === 'active';
+                                    const stLoc = typeof st === 'object' ? st.target_location : '';
+                                    const stNpc = typeof st === 'object' ? st.target_npc : '';
+                                    return (
+                                      <div key={sIdx} className="flex items-start gap-1.5 text-[10px]">
+                                        {done ? (
+                                          <CheckCircle2 size={11} className="text-emerald-400 shrink-0 mt-0.5" />
+                                        ) : (
+                                          <Circle size={11} className={`${isActive ? 'text-amber-400' : 'text-gray-500'} shrink-0 mt-0.5`} />
+                                        )}
+                                        <div className="min-w-0 flex-1">
+                                          <span className={done ? 'text-gray-500 line-through' : isActive ? 'text-amber-200 font-semibold' : 'text-gray-400'}>
+                                            {typeof st === 'string' ? st : (st.text || st.stage_label || st.label || st.title)}
+                                          </span>
+                                          {stLoc && !done && (
+                                            <span className={`block text-[9px] font-mono ${isActive ? 'text-amber-300' : 'text-gray-500'}`}>
+                                              ↳ 📍 {stLoc}{stNpc ? ` • 👤 ${stNpc}` : ''}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              <div className="flex items-center justify-between pt-1.5 border-t border-fantasy-border/30">
+                                <div className="flex items-center gap-2.5 text-[10px] font-mono text-gray-400">
+                                  {q.reward_gold ? <span className="text-amber-300">+{q.reward_gold} G</span> : null}
+                                  {q.reward_xp ? <span className="text-purple-300">+{q.reward_xp} XP</span> : null}
+                                </div>
+                                {q.quest_id && (
+                                  <button
+                                    disabled={Boolean(busyAction)}
+                                    onClick={() => handleBountyContract(q.quest_id, 'abandon')}
+                                    className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-950/40 hover:bg-red-900/50 text-red-300 border border-red-800/50 text-[10px] font-bold transition-colors"
+                                  >
+                                    <Trash2 size={10} />
+                                    <span>Abandon</span>
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           )}
-
-                          {q.required_count > 0 && (
-                            <div className="flex items-center justify-between text-[10px] font-mono text-gray-400 bg-black/40 px-2 py-1 rounded border border-fantasy-border/30">
-                              <span>Checklist Progress</span>
-                              <span className="text-fantasy-accent font-bold">{q.current_count || 0} / {q.required_count}</span>
-                            </div>
-                          )}
-
-                          {qStages.length > 0 && (
-                            <div className="space-y-1 bg-black/30 p-2 rounded border border-fantasy-border/30">
-                              {qStages.map((st, sIdx) => {
-                                const done = Boolean(st.completed || st.done || st.status === 'completed');
-                                const isActive = st.status === 'active';
-                                const stLoc = typeof st === 'object' ? st.target_location : '';
-                                const stNpc = typeof st === 'object' ? st.target_npc : '';
-                                return (
-                                  <div key={sIdx} className="flex items-start gap-1.5 text-[10px]">
-                                    {done ? (
-                                      <CheckCircle2 size={11} className="text-emerald-400 shrink-0 mt-0.5" />
-                                    ) : (
-                                      <Circle size={11} className={`${isActive ? 'text-amber-400' : 'text-gray-500'} shrink-0 mt-0.5`} />
-                                    )}
-                                    <div className="min-w-0 flex-1">
-                                      <span className={done ? 'text-gray-500 line-through' : isActive ? 'text-amber-200 font-semibold' : 'text-gray-400'}>
-                                        {typeof st === 'string' ? st : (st.text || st.stage_label || st.label || st.title)}
-                                      </span>
-                                      {stLoc && !done && (
-                                        <span className={`block text-[9px] font-mono ${isActive ? 'text-amber-300' : 'text-gray-500'}`}>
-                                          ↳ 📍 {stLoc}{stNpc ? ` • 👤 ${stNpc}` : ''}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          <div className="flex items-center justify-between pt-1.5 border-t border-fantasy-border/30">
-                            <div className="flex items-center gap-2.5 text-[10px] font-mono text-gray-400">
-                              {q.reward_gold ? <span className="text-amber-300">+{q.reward_gold} G</span> : null}
-                              {q.reward_xp ? <span className="text-purple-300">+{q.reward_xp} XP</span> : null}
-                            </div>
-                            {q.quest_id && (
-                              <button
-                                disabled={Boolean(busyAction)}
-                                onClick={() => handleBountyContract(q.quest_id, 'abandon')}
-                                className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-950/40 hover:bg-red-900/50 text-red-300 border border-red-800/50 text-[10px] font-bold transition-colors"
-                              >
-                                <Trash2 size={10} />
-                                <span>Abandon</span>
-                              </button>
-                            )}
-                          </div>
                         </div>
                       );
                     })}
@@ -742,48 +805,74 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                   <p className="text-[11px]">Click "Post Bounties" above to generate fresh local contracts!</p>
                 </div>
               ) : (
-                <div className="space-y-2.5 max-h-96 overflow-y-auto custom-scrollbar pr-1">
-                  {availableBounties.map((b, idx) => (
-                    <div
-                      key={b.quest_id || idx}
-                      className="bg-black/50 border border-fantasy-border/60 hover:border-amber-600/50 rounded-lg p-3 space-y-2 transition-all"
-                    >
-                      <div className="flex justify-between items-start gap-2">
-                        <h5 className="font-bold text-xs text-gray-100">{b.title}</h5>
-                        <span className="text-[9px] px-1.5 py-0.5 bg-amber-950/60 text-amber-300 rounded font-bold uppercase border border-amber-800/50 shrink-0">
-                          {b.quest_type || 'Contract'}
-                        </span>
-                      </div>
-
-                      <p className="text-[11px] text-gray-300 leading-snug">{b.objective || b.description}</p>
-
-                      {b.target_location && (
-                        <div className="flex items-center justify-between gap-2 bg-amber-950/30 border border-amber-700/40 rounded px-2 py-1 text-[10px] text-amber-300">
-                          <div className="flex items-center gap-1 min-w-0">
-                            <MapPin size={11} className="text-amber-400 shrink-0" />
-                            <span className="truncate">📍 <strong>{b.target_location}</strong>{b.target_npc ? ` • 👤 ${b.target_npc}` : ''}</span>
+                <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar pr-1">
+                  {availableBounties.map((b, idx) => {
+                    const bId = b.quest_id || `bounty-${idx}`;
+                    const isExpanded = expandedBounties[bId] ?? false;
+                    return (
+                      <div
+                        key={bId}
+                        className="bg-black/50 border border-fantasy-border/60 hover:border-amber-600/50 rounded-lg p-2.5 space-y-2 transition-all"
+                      >
+                        <div 
+                          onClick={() => toggleBounty(bId)}
+                          className="flex justify-between items-start gap-2 cursor-pointer select-none group"
+                          title={isExpanded ? "Tap to collapse" : "Tap to view details & accept"}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <h5 className="font-bold text-xs text-gray-100 group-hover:text-amber-300 transition-colors">
+                              {b.title}
+                            </h5>
+                            {!isExpanded && (
+                              <p className="text-[10px] text-gray-400 truncate mt-0.5">
+                                {b.target_location ? `📍 ${b.target_location}` : (b.objective || b.description)}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                            <span className="text-[9px] px-1.5 py-0.5 bg-amber-950/60 text-amber-300 rounded font-bold uppercase border border-amber-800/50">
+                              {b.quest_type || 'Contract'}
+                            </span>
+                            <span className="text-gray-400 group-hover:text-amber-300">
+                              {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                            </span>
                           </div>
                         </div>
-                      )}
 
-                      <div className="flex items-center justify-between pt-1.5 border-t border-fantasy-border/30">
-                        <div className="flex items-center gap-2.5 text-[10px] font-mono">
-                          {b.reward_gold ? <span className="text-amber-300">+{b.reward_gold} G</span> : null}
-                          {b.reward_xp ? <span className="text-purple-300">+{b.reward_xp} XP</span> : null}
-                          {b.reward_item ? <span className="text-cyan-300">🎁 {b.reward_item}</span> : null}
-                        </div>
+                        {isExpanded && (
+                          <div className="space-y-2 pt-1 border-t border-fantasy-border/30">
+                            <p className="text-[11px] text-gray-300 leading-snug">{b.objective || b.description}</p>
 
-                        <button
-                          disabled={Boolean(busyAction)}
-                          onClick={() => handleBountyContract(b.quest_id, 'accept')}
-                          className="flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-300 border border-emerald-700/60 text-[11px] font-bold transition-colors"
-                        >
-                          <PlusCircle size={12} />
-                          <span>Accept</span>
-                        </button>
+                            {b.target_location && (
+                              <div className="flex items-center justify-between gap-2 bg-amber-950/30 border border-amber-700/40 rounded px-2 py-1 text-[10px] text-amber-300">
+                                <div className="flex items-center gap-1 min-w-0">
+                                  <MapPin size={11} className="text-amber-400 shrink-0" />
+                                  <span className="truncate">📍 <strong>{b.target_location}</strong>{b.target_npc ? ` • 👤 ${b.target_npc}` : ''}</span>
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="flex items-center justify-between pt-1.5 border-t border-fantasy-border/30">
+                              <div className="flex items-center gap-2.5 text-[10px] font-mono">
+                                {b.reward_gold ? <span className="text-amber-300">+{b.reward_gold} G</span> : null}
+                                {b.reward_xp ? <span className="text-purple-300">+{b.reward_xp} XP</span> : null}
+                                {b.reward_item ? <span className="text-cyan-300">🎁 {b.reward_item}</span> : null}
+                              </div>
+
+                              <button
+                                disabled={Boolean(busyAction)}
+                                onClick={() => handleBountyContract(b.quest_id, 'accept')}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-300 border border-emerald-700/60 text-[11px] font-bold transition-colors cursor-pointer"
+                              >
+                                <PlusCircle size={12} />
+                                <span>Accept</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

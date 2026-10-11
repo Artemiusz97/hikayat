@@ -160,7 +160,15 @@ def save_session_scene(session_id: int, scene_title: str, narrative: str, choice
     }
 
     if location is not None:
-        fields["current_location"] = _to_str(location)
+        clean_loc = _to_str(location)
+        if isinstance(location, dict) or (clean_loc.startswith("{") and ("tier" in clean_loc.lower() or "zone" in clean_loc.lower())):
+            try:
+                from mechanics.world.locations.hierarchy import parse_tiered_location, format_tiered_location_string
+                z, p, s = parse_tiered_location(location if isinstance(location, dict) else clean_loc)
+                clean_loc = format_tiered_location_string(z, p, s)
+            except Exception:
+                pass
+        fields["current_location"] = clean_loc
     if nearby_enemies is not None:
         json_str = json.dumps(nearby_enemies, default=str) if not isinstance(nearby_enemies, str) else nearby_enemies
         fields["nearby_enemies_json"] = json_str
@@ -227,7 +235,15 @@ def update_session(session_id: int, **kwargs):
         elif col.endswith("_json") and not isinstance(v, str):
             v = json.dumps(v, default=str)
         elif col in ("scene_title", "narrative", "current_location") and v is not None:
-            v = _to_str(v)
+            clean_v = _to_str(v)
+            if col == "current_location" and (isinstance(v, dict) or (clean_v.startswith("{") and ("tier" in clean_v.lower() or "zone" in clean_v.lower()))):
+                try:
+                    from mechanics.world.locations.hierarchy import parse_tiered_location, format_tiered_location_string
+                    z, p, s = parse_tiered_location(v if isinstance(v, dict) else clean_v)
+                    clean_v = format_tiered_location_string(z, p, s)
+                except Exception:
+                    pass
+            v = clean_v
         elif col == "dialogue_partner":
             if isinstance(v, list):
                 v = json.dumps(v, default=str) if v else None

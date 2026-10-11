@@ -31,7 +31,7 @@ class SettingsCog(commands.Cog):
         scen_name = "None"
         if session:
             scen_key = session.get("scenario")
-            is_nsfw = is_nsfw_scenario(scen_key)
+            is_nsfw = scenario_data.uses_nsfw_model(scen_key)
             try:
                 scen_dict = scenario_data.get_scenario(scen_key)
                 scen_name = scen_dict.get("name", scen_key)

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Send, Lock, Zap, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Send, Lock, Zap, RefreshCw, ChevronDown, ChevronUp, Smartphone, PenLine, X, Users } from 'lucide-react';
+import TurnOutcomePanel from './TurnOutcomePanel';
 
 const STAT_EMOJI = {
   STR: '💪',
@@ -255,16 +256,30 @@ const ActionPanel = ({
   onAction,
   onRetry,
   onOpenMerchant,
+  onOpenPhone,
+  onClosePhone,
+  phoneOpen,
+  phoneHook,
   showPercentages = true,
   processing,
   isStreaming,
   waitingForParty,
-  partyStatus
+  partyStatus,
+  onSelectContact
 }) => {
   const [customAction, setCustomAction] = useState('');
   const [combatTab, setCombatTab] = useState('attacks'); // 'attacks' | 'spells' | 'tactics' | 'choices'
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const isBusy = processing || isStreaming;
+  const [isChoicesCollapsed, setIsChoicesCollapsed] = useState(false);
+  const [isCustomCollapsed, setIsCustomCollapsed] = useState(false);
+  const isBusy = processing || isStreaming || Boolean(phoneOpen);
+
+  const npcs = Array.isArray(session?.current_npcs) ? session.current_npcs : [];
+  const dialoguePartners = new Set(
+    (Array.isArray(session?.dialogue_partners)
+      ? session.dialogue_partners
+      : (session?.dialogue_partner ? [session.dialogue_partner] : [])
+    ).map(n => String(n || '').toLowerCase().trim()).filter(Boolean)
+  );
 
   const livingEnemies = (session?.nearby_enemies || session?.monsters || []).filter(
     (e) => e && e.name && (e.hp ?? 1) > 0
@@ -335,10 +350,72 @@ const ActionPanel = ({
   const totalChoiceCount = (choices?.length || 0) + (!inCombat && merchantAvailable && onOpenMerchant ? 1 : 0);
 
   return (
-    <div className="shrink-0 w-full bg-fantasy-panel/95 backdrop-blur border-t border-fantasy-border px-3 md:px-5 py-2.5 shadow-2xl z-20">
-      <div className="w-full flex flex-col gap-2">
+    <div className="shrink-0 w-full bg-fantasy-panel/95 backdrop-blur border-t border-fantasy-border px-2.5 sm:px-4 md:px-5 py-1.5 sm:py-2 md:py-3 shadow-2xl z-20 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
+      <div className="w-full flex flex-col gap-1 sm:gap-1.5 md:gap-2.5">
 
-        {!isCollapsed && (
+        {/* Mobile-only Turn Outcome & Present in Scene (On Desktop lg+, these are displayed in the dedicated Right Sidebar) */}
+        <div className="lg:hidden flex flex-col gap-1 sm:gap-1.5">
+          {/* Turn Outcome & State Panel (Compact, Collapsible, with New-Turn Notification Badge) */}
+          <TurnOutcomePanel session={session} />
+
+          {/* Present in Scene Characters (Above action buttons, below turn outcome) */}
+          {npcs.length > 0 && (
+            <div className="flex items-center gap-1.5 py-0.5 px-2 rounded-lg bg-black/40 border border-fantasy-border/60 overflow-x-auto no-scrollbar">
+              <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-mono uppercase tracking-wider text-gray-400 shrink-0 font-medium">
+                <Users size={11} className="text-fantasy-accent/80" />
+                <span>Present ({npcs.length}):</span>
+              </span>
+              <div className="flex items-center gap-1 shrink-0">
+                {npcs.map((npc, idx) => {
+                  const name = typeof npc === 'string' ? npc : (npc?.name || 'Unknown');
+                  const isPartner = dialoguePartners.has(name.toLowerCase().trim());
+                  return (
+                    <button
+                      key={`${name}-${idx}`}
+                      type="button"
+                      onClick={() => onSelectContact && onSelectContact(name)}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium transition-all shrink-0 ${
+                        isPartner
+                          ? 'bg-purple-950/70 border-purple-500/70 text-purple-200 hover:border-purple-400 shadow-sm'
+                          : 'bg-black/60 border-neutral-800 text-gray-300 hover:border-fantasy-accent/60 hover:text-white'
+                      }`}
+                      title={onSelectContact ? `View ${name} in Codex` : name}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isPartner ? 'bg-purple-400 animate-pulse' : 'bg-emerald-400/80'}`} />
+                      <span className="truncate max-w-[110px] sm:max-w-[140px]">{name}</span>
+                      {isPartner && (
+                        <span className="text-[8.5px] font-mono uppercase px-1 rounded bg-purple-900/90 text-purple-300 font-bold leading-tight">
+                          Talking
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Smartphone Active Lockout Banner */}
+        {phoneOpen && (
+          <div className="flex items-center justify-between bg-pink-950/60 border border-pink-700/70 px-3 py-1.5 rounded-lg text-xs text-pink-200 shadow-md">
+            <span className="flex items-center gap-1.5 font-semibold">
+              <Smartphone size={14} className="text-pink-400 animate-pulse" />
+              <span>Smartphone active — action buttons are disabled while using phone</span>
+            </span>
+            {onClosePhone && (
+              <button
+                type="button"
+                onClick={onClosePhone}
+                className="px-2.5 py-0.5 rounded bg-pink-900/80 hover:bg-pink-800 text-pink-100 text-[11px] font-bold border border-pink-500/60 transition-colors shadow-sm"
+              >
+                Close Phone
+              </button>
+            )}
+          </div>
+        )}
+
+        {!isChoicesCollapsed && (
           <>
             {/* Tactical Battle Deck when in combat */}
             {inCombat ? (
@@ -383,14 +460,19 @@ const ActionPanel = ({
                   </div>
 
                   <div className="flex items-center gap-1.5">
-                    {session?.is_fallback_generation && onRetry && (
+                    {onRetry && (
                       <button
                         type="button"
                         disabled={isBusy}
                         onClick={onRetry}
-                        className="px-2 py-0.5 rounded bg-amber-950/70 hover:bg-amber-900 text-amber-200 border border-amber-600/60 text-[11px] font-bold flex items-center gap-1 transition-colors disabled:opacity-50"
+                        title="Re-generate this turn's narration & tactical choices"
+                        className={`px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 transition-colors disabled:opacity-50 ${
+                          session?.is_fallback_generation || session?.is_truncated_generation
+                            ? 'bg-amber-950/80 hover:bg-amber-900 text-amber-200 border border-amber-500/70 animate-pulse'
+                            : 'bg-black/60 hover:bg-black/90 text-gray-300 hover:text-amber-200 border border-fantasy-border hover:border-amber-500/50'
+                        }`}
                       >
-                        <RefreshCw size={11} />
+                        <RefreshCw size={11} className={isBusy ? "animate-spin" : ""} />
                         <span>Retry</span>
                       </button>
                     )}
@@ -405,9 +487,9 @@ const ActionPanel = ({
                   </div>
                 </div>
 
-                {/* Active Combat Deck Cards (Compact Horizontal Rows, No Scrollbar) */}
+                {/* Active Combat Deck Cards (Compact Horizontal Rows, Scrollable when needed) */}
                 {combatTab === 'choices' ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-1 sm:gap-1.5 md:gap-2 max-h-[35vh] sm:max-h-[42vh] md:max-h-[45vh] overflow-y-auto custom-scrollbar pr-0.5">
                     {(choices || []).map((choice, idx) => {
                       const pct = choice.success_pct !== undefined ? choice.success_pct : choice.chance;
                       const mpCost = choice.mp_cost || 0;
@@ -419,13 +501,13 @@ const ActionPanel = ({
                           key={idx}
                           onClick={() => onAction({ choice_index: idx, direct_choice: choice, combat_target: selectedTargetName })}
                           disabled={isBusy}
-                          className="group flex items-center justify-between gap-2.5 px-3 py-1.5 rounded-lg bg-black/50 border border-fantasy-border hover:border-fantasy-accent hover:bg-fantasy-accent/10 transition-all disabled:opacity-50 text-left"
+                          className="group flex items-center justify-between gap-1.5 md:gap-2 px-2.5 md:px-3 py-1 md:py-1.5 rounded-md md:rounded-lg bg-black/50 border border-fantasy-border hover:border-fantasy-accent hover:bg-fantasy-accent/10 transition-all disabled:opacity-50 text-left"
                         >
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] font-mono font-bold uppercase text-fantasy-accent shrink-0">
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[9.5px] md:text-[10px] font-mono font-bold uppercase text-fantasy-accent shrink-0">
                             <span className="text-xs leading-none">{choiceEmoji}</span>
                             <span>{displayStat}</span>
                           </span>
-                          <span className="flex-1 min-w-0 text-xs md:text-[13px] font-medium text-gray-100 group-hover:text-white leading-snug">
+                          <span className="flex-1 min-w-0 text-xs sm:text-[13px] md:text-sm font-medium text-gray-100 group-hover:text-white leading-snug">
                             {choice.label || choice.text}
                           </span>
                           <div className="flex items-center gap-1 shrink-0">
@@ -435,7 +517,7 @@ const ActionPanel = ({
                               </span>
                             )}
                             {showPercentages && pct !== undefined && pct !== null && (
-                              <span className={`px-1.5 py-0.5 rounded border font-mono text-[10px] font-bold ${getOddsBadgeClass(pct)}`}>
+                              <span className={`px-1.5 py-0.5 rounded border font-mono text-[9.5px] md:text-[10px] font-bold ${getOddsBadgeClass(pct)}`}>
                                 {pct}%
                               </span>
                             )}
@@ -445,7 +527,7 @@ const ActionPanel = ({
                     })}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-1 sm:gap-1.5 md:gap-2 max-h-[35vh] sm:max-h-[42vh] md:max-h-[45vh] overflow-y-auto custom-scrollbar pr-0.5">
                     {(combatTab === 'attacks' ? deckAttacks : combatTab === 'spells' ? deckSpells : deckTactics).length === 0 ? (
                       <div className="col-span-full text-center py-2 text-xs text-gray-500 italic">
                         No {combatTab} available right now. Study spellbooks or switch tabs!
@@ -463,14 +545,14 @@ const ActionPanel = ({
                             type="button"
                             disabled={isBusy || !canAfford}
                             onClick={() => onAction({ direct_choice: item, combat_target: selectedTargetName })}
-                            className="group flex items-center justify-between gap-2.5 px-3 py-1.5 rounded-lg bg-black/50 border border-red-900/60 hover:border-amber-400 hover:bg-red-950/30 transition-all disabled:opacity-40 text-left"
+                            className="group flex items-center justify-between gap-1.5 md:gap-2 px-2.5 md:px-3 py-1 md:py-1.5 rounded-md md:rounded-lg bg-black/50 border border-red-900/60 hover:border-amber-400 hover:bg-red-950/30 transition-all disabled:opacity-40 text-left"
                           >
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-950/50 border border-red-800/40 text-[10px] font-mono font-bold uppercase text-amber-300 shrink-0">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-950/50 border border-red-800/40 text-[9.5px] md:text-[10px] font-mono font-bold uppercase text-amber-300 shrink-0">
                               <span className="text-xs leading-none">{itemEmoji}</span>
                               <span>{itemStat}</span>
                             </span>
                             <div className="flex-1 min-w-0">
-                              <div className="text-xs md:text-[13px] font-semibold text-gray-100 group-hover:text-white leading-snug truncate">
+                              <div className="text-xs sm:text-[13px] md:text-sm font-semibold text-gray-100 group-hover:text-white leading-snug truncate">
                                 {item.label || item.name || item.text}
                               </div>
                               {item.description && (
@@ -484,7 +566,7 @@ const ActionPanel = ({
                                 </span>
                               )}
                               {showPercentages && pct !== undefined && pct !== null && (
-                                <span className={`px-1.5 py-0.5 rounded border font-mono text-[10px] font-bold ${getOddsBadgeClass(pct)}`}>
+                                <span className={`px-1.5 py-0.5 rounded border font-mono text-[9.5px] md:text-[10px] font-bold ${getOddsBadgeClass(pct)}`}>
                                   {pct}%
                                 </span>
                               )}
@@ -508,13 +590,28 @@ const ActionPanel = ({
                       onClick={onRetry}
                       className="px-2 py-0.5 rounded bg-amber-600/30 hover:bg-amber-600/50 text-amber-200 border border-amber-500/50 font-bold text-[11px] flex items-center gap-1 transition-colors"
                     >
-                      <RefreshCw size={11} />
+                      <RefreshCw size={11} className={isBusy ? "animate-spin" : ""} />
                       <span>🔄 Retry Generation</span>
                     </button>
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-1.5">
+                {session?.is_truncated_generation && !session?.is_fallback_generation && onRetry && (
+                  <div className="flex items-center justify-between bg-amber-950/40 border border-amber-600/50 px-3 py-1 rounded text-xs text-amber-200">
+                    <span>⚠️ Scene narration appears unusually brief or truncated.</span>
+                    <button
+                      type="button"
+                      disabled={isBusy}
+                      onClick={onRetry}
+                      className="px-2 py-0.5 rounded bg-amber-600/30 hover:bg-amber-600/50 text-amber-200 border border-amber-500/50 font-bold text-[11px] flex items-center gap-1 transition-colors"
+                    >
+                      <RefreshCw size={11} className={isBusy ? "animate-spin" : ""} />
+                      <span>🔄 Retry Scene</span>
+                    </button>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-1 sm:gap-1.5 md:gap-2 max-h-[35vh] sm:max-h-[42vh] md:max-h-[45vh] overflow-y-auto custom-scrollbar pr-0.5">
                   {(choices || []).map((choice, idx) => {
                     const pct = choice.success_pct !== undefined ? choice.success_pct : choice.chance;
                     const mpCost = choice.mp_cost || 0;
@@ -563,17 +660,17 @@ const ActionPanel = ({
                         key={idx}
                         onClick={() => onAction({ choice_index: idx, direct_choice: choice })}
                         disabled={isBusy}
-                        className={`group flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg text-left transition-all disabled:opacity-50 ${
+                        className={`group flex items-center justify-between gap-1.5 md:gap-2 px-2.5 md:px-3 py-1 md:py-1.5 rounded-md md:rounded-lg text-left transition-all disabled:opacity-50 ${
                           isQuestHighlighted
                             ? 'bg-amber-950/35 border border-amber-400/75 hover:border-amber-300 hover:bg-amber-900/45 shadow-[0_0_12px_rgba(245,158,11,0.16)]'
                             : 'bg-black/45 border border-fantasy-border hover:border-fantasy-accent hover:bg-fantasy-accent/10'
                         }`}
                       >
                         {/* Left: Quest Marker Badge + Stat Pill */}
-                        <div className="flex items-center gap-1.5 shrink-0">
+                        <div className="flex items-center gap-1 shrink-0">
                           {questBadge && (
                             <span
-                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-extrabold uppercase tracking-wider border ${questBadge.className}`}
+                              className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9.5px] md:text-[10px] font-mono font-extrabold uppercase tracking-wider border ${questBadge.className}`}
                             >
                               <span className="text-xs leading-none">{questBadge.icon}</span>
                               <span>{questBadge.label}</span>
@@ -581,7 +678,7 @@ const ActionPanel = ({
                           )}
                           {(!questBadge || !isFreeAction) && (
                             <span
-                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider border ${
+                              className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9.5px] md:text-[10px] font-mono font-bold uppercase tracking-wider border ${
                                 isQuestHighlighted
                                   ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
                                   : isFreeAction
@@ -597,7 +694,7 @@ const ActionPanel = ({
 
                         {/* Center: Choice Action Text */}
                         <span
-                          className={`flex-1 min-w-0 text-xs md:text-[13px] leading-snug ${
+                          className={`flex-1 min-w-0 text-xs sm:text-[13px] md:text-sm leading-snug ${
                             isQuestHighlighted
                               ? 'font-semibold text-amber-50 group-hover:text-white'
                               : 'font-medium text-gray-100 group-hover:text-white'
@@ -614,7 +711,7 @@ const ActionPanel = ({
                             </span>
                           )}
                           {showPercentages && pct !== undefined && pct !== null && !isFreeAction && (
-                            <span className={`px-1.5 py-0.5 rounded border font-mono text-[10px] font-bold ${getOddsBadgeClass(pct)}`}>
+                            <span className={`px-1.5 py-0.5 rounded border font-mono text-[9.5px] md:text-[10px] font-bold ${getOddsBadgeClass(pct)}`}>
                               {pct}%
                             </span>
                           )}
@@ -629,16 +726,16 @@ const ActionPanel = ({
                       type="button"
                       onClick={onOpenMerchant}
                       disabled={isBusy}
-                      className="group flex items-center justify-between gap-2.5 px-3 py-1.5 rounded-lg text-left bg-emerald-950/30 border border-emerald-500/50 hover:border-amber-400 hover:bg-emerald-900/40 transition-all disabled:opacity-50"
+                      className="group flex items-center justify-between gap-1.5 md:gap-2.5 px-2.5 md:px-3 py-1 md:py-1.5 rounded-md md:rounded-lg text-left bg-emerald-950/30 border border-emerald-500/50 hover:border-amber-400 hover:bg-emerald-900/40 transition-all disabled:opacity-50"
                     >
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-[10px] font-mono font-bold uppercase tracking-wider text-amber-300 shrink-0">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-[9.5px] md:text-[10px] font-mono font-bold uppercase tracking-wider text-amber-300 shrink-0">
                         <span className="text-xs leading-none">🛍️</span>
                         <span>SHOP</span>
                       </span>
-                      <span className="flex-1 min-w-0 text-xs md:text-[13px] font-semibold text-emerald-100 group-hover:text-white leading-snug">
+                      <span className="flex-1 min-w-0 text-xs sm:text-[13px] md:text-sm font-semibold text-emerald-100 group-hover:text-white leading-snug">
                         {merchantActionLabel}
                       </span>
-                      <span className="px-1.5 py-0.5 rounded bg-emerald-950/70 border border-emerald-600/40 font-mono font-semibold text-emerald-300 uppercase text-[10px] shrink-0">
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-950/70 border border-emerald-600/40 font-mono font-semibold text-emerald-300 uppercase text-[9.5px] md:text-[10px] shrink-0">
                         Browse
                       </span>
                     </button>
@@ -649,50 +746,116 @@ const ActionPanel = ({
           </>
         )}
 
-        {/* Compact Bottom Row: Collapse/Expand Choices Toggle + Custom Action Input */}
-        <div className="flex items-center gap-2">
+        {/* Compact Bottom Row: Collapse Choices Toggle + Re-roll Button + Custom Action Input */}
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Choices Collapsible Toggle */}
           <button
             type="button"
-            onClick={() => setIsCollapsed((prev) => !prev)}
-            title={isCollapsed ? 'Expand Action Choices' : 'Minimize Action Choices'}
-            className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-black/60 hover:bg-black/80 border border-fantasy-border hover:border-fantasy-accent/60 text-[11px] font-mono text-gray-300 hover:text-fantasy-accent transition-colors"
+            onClick={() => setIsChoicesCollapsed((prev) => !prev)}
+            title={isChoicesCollapsed ? 'Expand Action Choices' : 'Minimize Action Choices'}
+            className="shrink-0 inline-flex items-center gap-1 px-2 md:px-2.5 py-1 md:py-1.5 rounded-md md:rounded-lg bg-black/60 hover:bg-black/80 border border-fantasy-border hover:border-fantasy-accent/60 text-[10.5px] md:text-[11px] font-mono text-gray-300 hover:text-fantasy-accent transition-colors"
           >
-            {isCollapsed ? (
+            {isChoicesCollapsed ? (
               <>
-                <ChevronUp size={14} />
+                <ChevronUp size={13} />
                 <span>Choices ({totalChoiceCount})</span>
               </>
             ) : (
               <>
-                <ChevronDown size={14} />
-                <span className="hidden sm:inline">Hide</span>
+                <ChevronDown size={13} />
+                <span className="hidden xs:inline">Choices</span>
+                <span className="xs:hidden">Hide</span>
               </>
             )}
           </button>
 
-          <form onSubmit={handleCustomSubmit} className="relative flex-1 min-w-0">
-            <input
-              type="text"
-              value={customAction}
-              onChange={(e) => setCustomAction(e.target.value)}
-              disabled={isBusy}
-              placeholder={
-                isStreaming
-                  ? 'The Chronicler is speaking...'
-                  : processing
-                    ? 'Thinking...'
-                    : 'Or type a custom action...'
-              }
-              className="w-full bg-black/60 border border-fantasy-border rounded-lg py-1.5 pl-3.5 pr-10 text-xs md:text-sm text-gray-200 focus:outline-none focus:border-fantasy-accent transition-colors disabled:opacity-50"
-            />
+          {/* Re-roll / Retry Narration Button (Always Visible) */}
+          {onRetry && (
             <button
-              type="submit"
-              disabled={!customAction.trim() || isBusy}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md bg-fantasy-accent text-fantasy-dark hover:bg-fantasy-accent-hover transition-colors disabled:opacity-40 disabled:bg-gray-700"
+              type="button"
+              disabled={isBusy}
+              onClick={onRetry}
+              title="Re-roll / Re-generate this turn's narrative & choices"
+              className={`shrink-0 inline-flex items-center gap-1 px-2 md:px-2.5 py-1 md:py-1.5 rounded-md md:rounded-lg font-mono text-[10.5px] md:text-[11px] font-bold transition-all border disabled:opacity-40 ${
+                session?.is_fallback_generation || session?.is_truncated_generation
+                  ? 'bg-amber-950/80 border-amber-500 text-amber-200 hover:bg-amber-900 ring-1 ring-amber-500/50 animate-pulse'
+                  : 'bg-black/60 hover:bg-neutral-900 border-fantasy-border hover:border-amber-500/60 text-gray-300 hover:text-amber-300'
+              }`}
             >
-              <Send size={13} />
+              <RefreshCw size={11} className={isBusy ? "animate-spin text-amber-400" : "text-amber-400"} />
+              <span className="hidden xs:inline">Re-roll</span>
             </button>
-          </form>
+          )}
+
+          {/* Desktop Phone Launcher */}
+          {phoneHook?.isSupported && onOpenPhone && (
+            <button
+              type="button"
+              onClick={() => phoneOpen && onClosePhone ? onClosePhone() : onOpenPhone()}
+              title={phoneOpen ? "Close Smartphone Window" : `Open ${phoneHook?.branding?.device_name || 'Smartphone'}`}
+              className={`shrink-0 hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-mono text-xs font-bold transition-all shadow-sm ${
+                phoneOpen
+                  ? 'bg-pink-950/80 border border-pink-500 text-pink-100 ring-2 ring-pink-500/40'
+                  : 'bg-black/70 hover:bg-neutral-900 border border-neutral-700 hover:border-pink-500/70 text-gray-200 hover:text-pink-300'
+              }`}
+            >
+              <Smartphone size={13} className={phoneOpen ? "text-pink-300 animate-pulse" : "text-pink-400"} />
+              <span className="font-sans">Phone</span>
+              {(phoneHook?.appointments?.length > 0 || phoneHook?.mediaGallery?.length > 0) && (
+                <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-pulse" />
+              )}
+            </button>
+          )}
+
+          {/* Collapsible Custom Action Section */}
+          {isCustomCollapsed ? (
+            <button
+              type="button"
+              onClick={() => setIsCustomCollapsed(false)}
+              title="Open Custom Action Input"
+              className="shrink-0 inline-flex items-center gap-1 px-2 md:px-2.5 py-1 md:py-1.5 rounded-md md:rounded-lg bg-black/60 hover:bg-black/80 border border-fantasy-border hover:border-fantasy-accent/60 text-[10.5px] md:text-[11px] font-mono text-gray-300 hover:text-fantasy-accent transition-colors"
+            >
+              <PenLine size={12} />
+              <span>Custom</span>
+            </button>
+          ) : (
+            <div className="relative flex-1 min-w-0 flex items-center gap-1">
+              <form onSubmit={handleCustomSubmit} className="relative flex-1 min-w-0">
+                <input
+                  type="text"
+                  value={customAction}
+                  onChange={(e) => setCustomAction(e.target.value)}
+                  disabled={isBusy}
+                  placeholder={
+                    phoneOpen
+                      ? '📱 Smartphone open...'
+                      : isStreaming
+                        ? 'The Chronicler is speaking...'
+                        : processing
+                          ? 'Thinking...'
+                          : 'Or type custom action...'
+                  }
+                  className="w-full bg-black/60 border border-fantasy-border rounded-lg py-1 md:py-1.5 pl-2.5 md:pl-3.5 pr-7 md:pr-10 text-xs sm:text-[13px] md:text-sm text-gray-200 focus:outline-none focus:border-fantasy-accent transition-colors disabled:opacity-50"
+                />
+                <button
+                  type="submit"
+                  disabled={!customAction.trim() || isBusy}
+                  title="Submit Custom Action"
+                  className="absolute right-1 md:right-1.5 top-1/2 -translate-y-1/2 p-1 md:p-1.5 rounded-md bg-fantasy-accent text-fantasy-dark hover:bg-fantasy-accent-hover transition-colors disabled:opacity-40 disabled:bg-gray-700"
+                >
+                  <Send size={12} />
+                </button>
+              </form>
+              <button
+                type="button"
+                onClick={() => setIsCustomCollapsed(true)}
+                title="Minimize Custom Action Input"
+                className="p-1 text-gray-400 hover:text-gray-200 rounded hover:bg-black/40 text-[10px] shrink-0"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
         </div>
 
       </div>

@@ -69,9 +69,9 @@ class TestIntimateProfilePage(unittest.TestCase):
         self.assertIn("👎 Dislikes", field_names)
 
         basic_field = next(f for f in embed.fields if f.name == "Basic Details")
-        self.assertIn("• **Grade / Standing**: Freshman", basic_field.value)
-        self.assertIn("• **Role**: Member", basic_field.value)
+        self.assertIn("• **Grade**: Freshman", basic_field.value)
         self.assertIn("• **Faction Affiliation**: Student Council", basic_field.value)
+        self.assertIn("• **Role**: Member", basic_field.value)
         self.assertIn("• **Details**: None", basic_field.value)
         self.assertNotIn("Sibling", basic_field.value)
 
@@ -84,25 +84,28 @@ class TestIntimateProfilePage(unittest.TestCase):
         field_map = {f.name: f for f in embed.fields}
         self.assertIn("🔞 Anatomy & Experience", field_map)
         self.assertIn("🎭 Demeanor & Dynamic", field_map)
-        self.assertIn("🔥 Turn-Ons & Desires", field_map)
+        self.assertIn("🌸 Sensitive Spots", field_map)
+        self.assertIn("🔥 Desires & Turn-Offs", field_map)
         self.assertIn("❤️ Act & Position Preferences", field_map)
         self.assertNotIn("🔒 Intimate Synergy", field_map)
 
         # In-line side-by-side checks
         self.assertTrue(field_map["🔞 Anatomy & Experience"].inline)
         self.assertTrue(field_map["🎭 Demeanor & Dynamic"].inline)
-        self.assertFalse(field_map["🔥 Turn-Ons & Desires"].inline)
+        self.assertFalse(field_map["🌸 Sensitive Spots"].inline)
+        self.assertFalse(field_map["🔥 Desires & Turn-Offs"].inline)
         self.assertFalse(field_map["❤️ Act & Position Preferences"].inline)
 
-        # Values are masked
-        self.assertIn("• **Breast Size**: *Unknown*", field_map["🔞 Anatomy & Experience"].value)
+        # Intimate experience tracks and private attributes are masked, while externally visible breast size is shown
+        self.assertIn("• **Breast Size**: Plump", field_map["🔞 Anatomy & Experience"].value)
         self.assertIn("• **Intercourse**: *Unknown*", field_map["🔞 Anatomy & Experience"].value)
         self.assertIn("• **Oral Intimacy**: *Unknown*", field_map["🔞 Anatomy & Experience"].value)
         self.assertIn("• **Manual Intimacy**: *Unknown*", field_map["🔞 Anatomy & Experience"].value)
         self.assertIn("• **Demeanor**: *Unknown*", field_map["🎭 Demeanor & Dynamic"].value)
         self.assertIn("• **Dynamic**: *Unknown*", field_map["🎭 Demeanor & Dynamic"].value)
-        self.assertIn("• **Turn-Ons**: *Unknown*", field_map["🔥 Turn-Ons & Desires"].value)
-        self.assertIn("• **Fetishes & Kinks**: *Unknown*", field_map["🔥 Turn-Ons & Desires"].value)
+        self.assertIn("• **Sensitive Spots**: *Unknown*", field_map["🌸 Sensitive Spots"].value)
+        self.assertIn("• **Desires & Kinks**: *Unknown*", field_map["🔥 Desires & Turn-Offs"].value)
+        self.assertIn("• **Turn-Offs**: *Unknown*", field_map["🔥 Desires & Turn-Offs"].value)
         self.assertIn("• **Preferred / Likes**: *Unknown*", field_map["❤️ Act & Position Preferences"].value)
         self.assertIn("• **Aversions / Dislikes**: *Unknown*", field_map["❤️ Act & Position Preferences"].value)
 
@@ -119,7 +122,8 @@ class TestIntimateProfilePage(unittest.TestCase):
 
         self.assertIn("🔞 Anatomy & Experience", field_map)
         self.assertIn("🎭 Demeanor & Dynamic", field_map)
-        self.assertIn("🔥 Turn-Ons & Desires", field_map)
+        self.assertIn("🌸 Sensitive Spots", field_map)
+        self.assertIn("🔥 Desires & Turn-Offs", field_map)
         self.assertIn("❤️ Act & Position Preferences", field_map)
         self.assertNotIn("💡 Active Intimate Synergy & Modifiers", field_map)
 
@@ -129,9 +133,9 @@ class TestIntimateProfilePage(unittest.TestCase):
         self.assertIn("• **Manual Intimacy**: Inexperienced", field_map["🔞 Anatomy & Experience"].value)
         self.assertIn("• **Demeanor**: Secretly Teasing", field_map["🎭 Demeanor & Dynamic"].value)
         self.assertIn("• **Dynamic**: Switch / Sensual", field_map["🎭 Demeanor & Dynamic"].value)
-        self.assertIn("Tail grooming", field_map["🔥 Turn-Ons & Desires"].value)
-        self.assertIn("whispered praise", field_map["🔥 Turn-Ons & Desires"].value)
-        self.assertIn("• **Fetishes & Kinks**: Sensory deprivation", field_map["🔥 Turn-Ons & Desires"].value)
+        self.assertIn("Tail grooming", field_map["🌸 Sensitive Spots"].value)
+        self.assertIn("whispered praise", field_map["🔥 Desires & Turn-Offs"].value)
+        self.assertIn("Sensory deprivation", field_map["🔥 Desires & Turn-Offs"].value)
 
     def test_intimate_profile_view_has_back_button(self):
         """Verify IntimateProfileView has BackToProfileButton."""
@@ -181,6 +185,26 @@ class TestIntimateProfilePage(unittest.TestCase):
 
         # Row 2 should contain phone action buttons: Text, Contact List, Phone Home
         self.assertEqual(len(rows.get(2, [])), 3)
+
+    def test_web_api_contact_enrichment(self):
+        """Verify that _enrich_contact_record populates intimate_sections and disclosed_relations."""
+        from api.codex_phone import _enrich_contact_record
+        enriched = _enrich_contact_record(self.female_contact, session_id=12345, scen_key="nsfw_high_school_drama", debug_reveal_all=True)
+
+        self.assertIn("intimate_sections", enriched)
+        int_sec = enriched["intimate_sections"]
+        self.assertIn("anatomy", int_sec)
+        self.assertIn("dynamic", int_sec)
+        self.assertIn("undergarments", int_sec)
+        self.assertIn("sensitivities", int_sec)
+        self.assertIn("act_preferences", int_sec)
+
+        self.assertIn("disclosed_relations", enriched)
+        dis_rel = enriched["disclosed_relations"]
+        self.assertIn("romance", dis_rel)
+        self.assertIn("family", dis_rel)
+        self.assertIn("status", dis_rel["romance"])
+        self.assertEqual(dis_rel["romance"]["status"], "Single")
 
 if __name__ == "__main__":
     unittest.main()

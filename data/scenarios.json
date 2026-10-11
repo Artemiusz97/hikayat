@@ -1,6 +1,9 @@
 {
   "fantasy": {
-    "name": "Fantasy",
+    "name": "Realms of Myth & Magic",
+    "display_name": "Realms of Myth & Magic",
+    "emoji": "⚔️",
+    "dropdown_label": "Realms of Myth & Magic [Fantasy]",
     "tags": [
       "fantasy"
     ],
@@ -8,7 +11,10 @@
     "tone_guidelines": "Write epic, mythic prose focused on classic high fantasy heroism, political intrigue, and grand adventure."
   },
   "sci_fi": {
-    "name": "Space Frontier",
+    "name": "Beyond the Outer Rim",
+    "display_name": "Beyond the Outer Rim",
+    "emoji": "🚀",
+    "dropdown_label": "Beyond the Outer Rim [Space]",
     "tags": [
       "space"
     ],
@@ -16,7 +22,10 @@
     "tone_guidelines": "Write clinical, awe-inspiring prose focused on technological wonder, interstellar politics, and exploration."
   },
   "cyberpunk": {
-    "name": "Cyberpunk",
+    "name": "Neon Chrome & Mirrors",
+    "display_name": "Neon Chrome & Mirrors",
+    "emoji": "🦾",
+    "dropdown_label": "Neon Chrome & Mirrors [Cyberpunk]",
     "tags": [
       "cyberpunk"
     ],
@@ -24,7 +33,10 @@
     "tone_guidelines": "Write gritty, cynical prose focused on neon-drenched urban decay, corporate oppression, and high-tech rebellion."
   },
   "steampunk": {
-    "name": "Steampunk",
+    "name": "Brass, Steam & Aether",
+    "display_name": "Brass, Steam & Aether",
+    "emoji": "⚙️",
+    "dropdown_label": "Brass, Steam & Aether [Steampunk]",
     "tags": [
       "steampunk"
     ],
@@ -32,16 +44,42 @@
     "tone_guidelines": "Write ornate, Victorian-styled prose focusing on industrial expansion, clockwork invention, and high society intrigue."
   },
   "dark_fantasy": {
-    "name": "Dark Fantasy",
+    "name": "Cursed Blood & Ashen Crowns",
+    "display_name": "Cursed Blood & Ashen Crowns",
+    "emoji": "💀",
+    "dropdown_label": "Cursed Blood & Ashen Crowns [Fantasy • Grimdark]",
     "tags": [
       "fantasy",
       "grimdark"
     ],
     "description": "A cursed land where hope is thin, blood has currency, and every bargain exacts a price.",
-    "tone_guidelines": "Write oppressive, gothic prose where magic is corrupting, mercy is scarce, and the stakes are consistently lethal."
+    "tone_guidelines": "Write oppressive, gothic prose where magic is corrupting, mercy is scarce, and the stakes are consistently lethal.",
+    "starting_hooks": [
+      {
+        "archetype": "hub_launchpad",
+        "hook": "within a bleak, fortified enclave where weary sentinels drink watered ale and murmur grim warnings about the encroaching dark",
+        "suggested_location": "{session_kingdom} ➔ The Iron Bastion ➔ Barracks Hearth",
+        "directive": "Open Hub Exploration: Tense military haven, scarred veterans, grim bounty ledger, and cautious social choices."
+      },
+      {
+        "archetype": "in_media_res",
+        "hook": "in the muddy aftermath of a brutal ambush surrounded by burning barricades as shadows stalk the treeline",
+        "suggested_location": "{session_ancient_forest} ➔ Ashen Battlefield ➔ Muddy Trench",
+        "directive": "In Media Res: Visceral blood-soaked crisis, enemy closing in, wounded allies, and desperate survival choices."
+      },
+      {
+        "archetype": "delve_threshold",
+        "hook": "before the yawning maw of a desecrated crypt as cold fog spills across mossy gravestones and crows scatter",
+        "suggested_location": "{session_caves} ➔ Desecrated Crypt ➔ Iron Sarcophagus Threshold",
+        "directive": "Delve Threshold: Dread expedition threshold, occult ward examination, lighting torches, and steeling resolve."
+      }
+    ]
   },
   "isekai_fantasy": {
-    "name": "Isekai Fantasy",
+    "name": "Summoned to Another World",
+    "display_name": "Summoned to Another World",
+    "emoji": "✨",
+    "dropdown_label": "Summoned to Another World [Isekai • Fantasy]",
     "tags": [
       "isekai",
       "fantasy"
@@ -50,7 +88,10 @@
     "tone_guidelines": "Write energetic, lighthearted prose blending modern sensibilities with high-fantasy tropes and power progression."
   },
   "nsfw_isekai_fantasy": {
-    "name": "Isekai Fantasy (NSFW)",
+    "name": "Summoned: Desires of Another World",
+    "display_name": "Summoned: Desires of Another World",
+    "emoji": "🔞",
+    "dropdown_label": "Summoned: Desires of Another World [Isekai • NSFW]",
     "base_scenario": "isekai_fantasy",
     "tags": [
       "isekai",
@@ -61,21 +102,25 @@
     "tone_guidelines": "Write energetic, lighthearted prose blending modern sensibilities with high-fantasy tropes, power progression, and passionate, unfiltered romantic encounters."
   },
   "high_school_drama": {
-    "name": "High School Drama",
+    "name": "Youth, Bells & Rooftop Breezes",
+    "display_name": "Youth, Bells & Rooftop Breezes",
+    "emoji": "🏫",
+    "dropdown_label": "Youth, Bells & Rooftop Breezes [High School]",
     "tags": [
       "high_school",
-      "slice_of_life",
       "non_combat"
     ],
     "description": "A modern high school landscape where social status, academic pressure, and teenage romance collide.",
     "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose that captures the emotional intensity of youth. Balance whimsical, comedic high school banter with genuinely serious moments of social drama, heartbreak, and personal growth. Lean heavily into classic high school tropes and archetype dynamics."
   },
   "nsfw_high_school_drama": {
-    "name": "High School Drama (NSFW)",
+    "name": "After-School Desires & Secrets",
+    "display_name": "After-School Desires & Secrets",
+    "emoji": "🔞",
+    "dropdown_label": "After-School Desires & Secrets [High School • NSFW]",
     "base_scenario": "high_school_drama",
     "tags": [
       "high_school",
-      "slice_of_life",
       "nsfw",
       "non_combat"
     ],
@@ -83,11 +128,13 @@
     "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose that captures the emotional intensity of youth. Balance whimsical, comedic high school banter with genuinely serious moments of social drama and personal growth. Lean heavily into classic high school tropes and archetype dynamics while including very explicit and unfiltered sensual sexual encounters."
   },
   "furry_high_school_drama": {
-    "name": "High School Drama (Furry)",
+    "name": "Paws, Bells & Rooftop Breezes",
+    "display_name": "Paws, Bells & Rooftop Breezes",
+    "emoji": "🐾",
+    "dropdown_label": "Paws, Bells & Rooftop Breezes [High School • Furry]",
     "base_scenario": "high_school_drama",
     "tags": [
       "high_school",
-      "slice_of_life",
       "furry",
       "non_combat"
     ],
@@ -95,20 +142,36 @@
     "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose focusing on emotional intensity, social drama, friendship, heartbreak, and personal growth in an academic setting."
   },
   "nsfw_furry_high_school_drama": {
-    "name": "High School Drama (NSFW Furry)",
+    "name": "After-School Instincts & Desires",
+    "display_name": "After-School Instincts & Desires",
+    "emoji": "🔞🐾",
+    "dropdown_label": "After-School Instincts & Desires [High School • Furry • NSFW]",
     "base_scenario": "nsfw_high_school_drama",
     "tags": [
       "high_school",
-      "slice_of_life",
       "furry",
       "nsfw",
       "non_combat"
     ],
     "description": "A vibrant modern high school landscape where social status, academic pressure, and explicit romance intertwine in a thriving anthropomorphic student body. Furry and beastfolk students (cat, fox, wolf, rabbit, and bear sub-races) navigate campus life, clubs, and passionate relationships.",
-    "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose focusing on emotional intensity, social drama, personal growth, and passionate, explicit romantic encounters in an academic setting. Use explicit sexual terms, sexual acts & vulgar words. Avoid euphemisms like 'length,' 'member,' or 'peak.' Use direct anatomical terms (e.g., dick, cock, pussy, tits, cum) instead."
+    "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose focusing on emotional intensity, social drama, personal growth, and passionate, explicit romantic encounters in an academic setting. Use explicit sexual terms, sexual acts & vulgar words. Avoid euphemisms and coy phrasing like 'length,' 'member,' or 'grow', use direct and explicit anatomical and sexual terms instead (e.g., dick, cock, pussy, tits, ass, fuck, cum."
+  },
+  "slice_of_life": {
+    "name": "Downtown Lights & Lattes",
+    "display_name": "Downtown Lights & Lattes",
+    "emoji": "☕",
+    "dropdown_label": "Downtown Lights & Lattes [Slice of Life]",
+    "tags": [
+      "slice_of_life"
+    ],
+    "description": "A vibrant contemporary city district of cozy third-wave cafés, bustling shopping arcades, neon nightlife alleys, and tight-knit neighborhood characters.",
+    "tone_guidelines": "Write grounded, character-driven prose balancing warm everyday routines, neighborhood gossip, and personal relationships with street-level urban drama and late-night excitement."
   },
   "nuclear_post_apocalypse": {
-    "name": "Nuclear Post-Apocalypse",
+    "name": "Ashes of the Fallout",
+    "display_name": "Ashes of the Fallout",
+    "emoji": "☢️",
+    "dropdown_label": "Ashes of the Fallout [Post-Apocalypse]",
     "tags": [
       "post_apocalypse"
     ],

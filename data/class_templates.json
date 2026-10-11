@@ -2265,5 +2265,321 @@
         ]
       }
     }
+  },
+  "slice_of_life": {
+    "Lifestyle Vlogger": {
+      "description": "Charismatic local creator and trendspotter who roams cafés, boutiques, and nightlife alleys filming neighborhood culture and uncovering local drama.",
+      "starting_items": [
+        [
+          "Compact Gimbal Rig & Press Pass",
+          "Quest",
+          "Stabilized pocket camera rig and VIP pass to local venue openings.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Designer Snapback Cap",
+          "Streetwear cap paired with wireless studio earbuds.",
+          1
+        ],
+        "Weapon": [
+          "Heavy Camera Monopod",
+          "Telescoping aluminum camera monopod with a weighted ball-head mount.",
+          1
+        ],
+        "Armor": [
+          "Cropped Streetwear Bomber Jacket",
+          "Trendy padded nylon bomber jacket with custom neighborhood patches.",
+          2
+        ],
+        "Top": [
+          "Oversized Graphic Tee",
+          "Soft heavyweight cotton shirt from an indie downtown label.",
+          1
+        ],
+        "Bottom": [
+          "Tailored Cargo Joggers",
+          "Comfortable multi-pocket joggers built for all-day city roaming.",
+          1
+        ],
+        "Gloves": [
+          "Touchscreen Creator Gloves",
+          "Sleek knit gloves with conductive fingertips for operating cameras and phones.",
+          1
+        ],
+        "Shoes": [
+          "Limited-Drop High-Top Sneakers",
+          "Pristine cushioned sneakers that turn heads on the shopping arcade.",
+          1
+        ],
+        "Shield": [
+          "LED Ring-Light Diffuser Case",
+          "Hard-shell padded gear case strapped across the forearm.",
+          1
+        ]
+      }
+    },
+    "Bike Courier": {
+      "description": "High-stamina express rider who zips through back-alleys, shopping arcades, and harbor piers delivering urgent parcels and knowing every shortcut in town.",
+      "starting_items": [
+        [
+          "City Shortcut Map & Master U-Lock Key",
+          "Quest",
+          "Annotated courier route book with alley codes and heavy steel U-lock.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Aero Urban Cycling Helmet",
+          "Lightweight matte-black messenger helmet with flip-down tinted visor.",
+          2
+        ],
+        "Weapon": [
+          "Hardened Steel U-Lock",
+          "Solid hardened-shackle bicycle lock that doubles as a devastating blunt impact tool.",
+          2
+        ],
+        "Armor": [
+          "Abrasion-Resistant Windbreaker",
+          "Reflective weatherproof courier shell reinforced at the elbows and shoulders.",
+          2
+        ],
+        "Top": [
+          "Moisture-Wicking Compression Jersey",
+          "Breathable athletic base layer built for sprinting and pedaling.",
+          1
+        ],
+        "Bottom": [
+          "Reinforced Ripstop Messenger Pants",
+          "Tapered stretch canvas trousers that never snag in a bike chain.",
+          1
+        ],
+        "Gloves": [
+          "Padded Knuckle Cycling Gloves",
+          "Half-finger grip gloves with gel palms and carbon-fiber knuckle guards.",
+          1
+        ],
+        "Shoes": [
+          "Cleated Street Runner Shoes",
+          "High-traction urban running shoes built for asphalt and fire escapes.",
+          1
+        ],
+        "Shield": [
+          "Waterproof Sling Messenger Bag",
+          "Heavy tarpaulin courier bag worn tight across the chest.",
+          1
+        ]
+      }
+    },
+    "Freelance Hustler": {
+      "description": "Street-smart odd-jobber and neighborhood fixer hired by locals to track down rare items, settle discreet favors, and navigate the city's lively underbelly.",
+      "starting_items": [
+        [
+          "Black Book of Local Favors",
+          "Quest",
+          "Pocket ledger of shopkeepers, bartenders, and night-shift contacts who owe you one.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Tinted Aviator Sunglasses",
+          "Classic wire-frame shades that hide where you're looking.",
+          1
+        ],
+        "Weapon": [
+          "Heavy Steel Umbrella",
+          "Sleek windproof city umbrella built around an unbreakable steel shaft.",
+          1
+        ],
+        "Armor": [
+          "Lined Denim Trucker Jacket",
+          "Broken-in heavyweight denim jacket with concealed interior pockets.",
+          2
+        ],
+        "Top": [
+          "Unbuttoned Flannel Overshirt",
+          "Soft layered flannel over a clean ribbed tank.",
+          1
+        ],
+        "Bottom": [
+          "Selvedge Denim Jeans",
+          "Sturdy dark-wash jeans that hold up through any late-night scrape.",
+          1
+        ],
+        "Gloves": [
+          "Supple Leather Driving Gloves",
+          "Thin grip gloves that leave no fingerprints.",
+          1
+        ],
+        "Shoes": [
+          "Broken-In Chelsea Boots",
+          "Comfortable leather ankle boots with quiet crepe soles.",
+          1
+        ],
+        "Shield": [
+          "Reinforced Leather Briefcase",
+          "Hard-sided vintage attaché case capable of deflecting a swing in a pinch.",
+          1
+        ]
+      }
+    },
+    "Ex-Pro Boxer": {
+      "description": "Seasoned gym regular currently between sponsors who does roadwork through the city streets and steps in when neighborhood regulars get harassed by thugs.",
+      "starting_items": [
+        [
+          "Gym Locker Key & Cornerman's Towel",
+          "Quest",
+          "24-hour key to the neighborhood boxing gym and a clean sweat towel.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Fleece Roadwork Beanie",
+          "Snug athletic knit beanie worn during early-morning harbor runs.",
+          1
+        ],
+        "Weapon": [
+          "Taped Boxing Wraps",
+          "Tightly wound cotton hand-wraps that brace the wrists and knuckles for heavy hooks.",
+          1
+        ],
+        "Armor": [
+          "Heavyweight Satin Track Jacket",
+          "Embroidered boxing club warm-up jacket with thick quilted lining.",
+          2
+        ],
+        "Top": [
+          "Sleeveless Athletic Hoodie",
+          "Cut-off gym hoodie showing taped wrists and roadwork grit.",
+          1
+        ],
+        "Bottom": [
+          "Heavyweight Fleece Sweatpants",
+          "Loose-fitting athletic trousers allowing effortless footwork and pivots.",
+          1
+        ],
+        "Gloves": [
+          "Weighted Sparring Mitts",
+          "Compact bag gloves with dense foam padding over the knuckles.",
+          2
+        ],
+        "Shoes": [
+          "High-Top Canvas Boxing Shoes",
+          "Ultra-lightweight gum-sole shoes engineered for instant lateral pivots.",
+          1
+        ],
+        "Shield": [
+          "Heavy Gym Duffle Bag",
+          "Stuffed canvas gym bag slung over the lead shoulder to absorb impacts.",
+          1
+        ]
+      }
+    },
+    "Indie Musician": {
+      "description": "Free-spirited songwriter and busker who plays acoustic sets at the station plaza by day and underground live houses by night.",
+      "starting_items": [
+        [
+          "Live House Backstage Laminate & Capo",
+          "Quest",
+          "All-access pass to the district's underground music venues and a brass guitar capo.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Slouchy Knit Beret",
+          "Well-worn artist beret with a vintage enamel pin.",
+          1
+        ],
+        "Weapon": [
+          "Hardshell Guitar Case",
+          "Sticker-plastered wooden instrument case with heavy brass latches.",
+          2
+        ],
+        "Armor": [
+          "Vintage Distressed Leather Jacket",
+          "Scuffed moto jacket worn to every basement gig in the district.",
+          2
+        ],
+        "Top": [
+          "Faded Band Tour Shirt",
+          "Soft vintage tee from an obscure local indie band.",
+          1
+        ],
+        "Bottom": [
+          "Slim Black Corduroy Trousers",
+          "Comfortable stage trousers with a silver wallet chain.",
+          1
+        ],
+        "Gloves": [
+          "Fingerless Knit Busker Gloves",
+          "Warm wool gloves cut at the knuckles for clean chord changes in the evening breeze.",
+          1
+        ],
+        "Shoes": [
+          "Scuffed Lug-Sole Doc Boots",
+          "Classic eight-eyelet street boots broken in from miles of city walking.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Private Eye": {
+      "description": "Sharp-eyed local investigator and freelance reporter interviewing sources in coffee shops by day and tailing leads through neon alleys by night.",
+      "starting_items": [
+        [
+          "Micro-Recorder & Case File Notebook",
+          "Quest",
+          "Pocket voice recorder and dog-eared notebook filled with neighborhood leads.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Classic Wool Trilby Hat",
+          "Rain-shedding felt hat pulled low against the neon glare.",
+          1
+        ],
+        "Weapon": [
+          "High-Voltage Stun Flashlight",
+          "Heavy anodized aluminum flashlight with a concealed defensive arc-taser bezel.",
+          1
+        ],
+        "Armor": [
+          "Weatherproof Gabardine Trench Coat",
+          "Double-breasted city trench coat that shrugs off rain and conceals gear.",
+          2
+        ],
+        "Top": [
+          "Crisp Oxford Shirt & Loosened Tie",
+          "Wrinkle-resistant dress shirt with rolled-up sleeves.",
+          1
+        ],
+        "Bottom": [
+          "Charcoal Wool Slacks",
+          "Tailored trousers with deep pockets for notebooks and lockpicks.",
+          1
+        ],
+        "Gloves": [
+          "Latex-Lined Inspection Gloves",
+          "Discreet dark gloves for handling evidence without leaving smudges.",
+          1
+        ],
+        "Shoes": [
+          "Rubber-Soled Brogue Oxfords",
+          "Polished dress shoes resoled with quiet, high-grip rubber treads.",
+          1
+        ],
+        "Shield": [
+          "Hardbound Evidence Portfolio",
+          "Steel-clipped leather dossier folder held in the off-hand.",
+          1
+        ]
+      }
+    }
   }
 }

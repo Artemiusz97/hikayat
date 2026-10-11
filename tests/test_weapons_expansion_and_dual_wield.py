@@ -29,7 +29,7 @@ def test_normalize_weapon_scenario():
     assert normalize_weapon_scenario("postapoc") == "nuclear_post_apocalypse"
     assert normalize_weapon_scenario("dark_fantasy") == "dark_fantasy"
     assert normalize_weapon_scenario("high_school_drama") == "high_school"
-    assert normalize_weapon_scenario("slice_of_life") == "high_school"
+    assert normalize_weapon_scenario("slice_of_life") == "slice_of_life"
 
 
 def test_genre_weapon_generation_and_affixes():
@@ -114,7 +114,7 @@ def test_class_templates_all_have_starter_gear_weapons():
                     f"Class {scen}:{cname} still has weapon in starting_items: {s_item}"
                 )
 
-    assert total_classes == 48
+    assert total_classes == 54
 
 
 def test_spellcaster_starter_weapons():

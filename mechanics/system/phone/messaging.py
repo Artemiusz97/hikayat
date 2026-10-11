@@ -25,398 +25,21 @@ DM_REPLY_SCHEMA = """{
 }"""
 
 
-def get_dm_requirement(score: int, intent: str, track: str = "platonic", openness: str = "moderate") -> int:
-    """Calculates skill check DC requirement based on relationship affinity bracket, intent, track, and erotic openness."""
-    is_romantic = str(track or "platonic").lower() == "romantic"
+from .dm_grounding import (
+    get_dm_requirement,
+    detect_custom_message_intent,
+    is_meetup_reschedule_request,
+    is_meetup_confirmation_message,
+    resolve_rendezvous_location,
+)
+from .player_dm import generate_player_chat_message
 
-    # Affinity Brackets:
-    # Hostile: score < 0
-    # Stranger: 0 <= score < 15
-    # Acquaintance: 15 <= score < 35
-    # Friend: 35 <= score < 60
-    # Close Companion: 60 <= score < 80
-    # Confidant / Lover: score >= 80
-
-    if intent == "meetup":
-        if score < 0:
-            return 15
-        elif score < 15:
-            return 10
-        elif score < 35:
-            return 6 if is_romantic else 7
-        elif score < 60:
-            return 4 if is_romantic else 5
-        elif score < 80:
-            return 3
-        else:
-            return 2
-
-    elif intent in ("intel_rumor", "intel", "rumor"):
-        if score < 0:
-            return 11
-        elif score < 15:
-            return 8
-        elif score < 35:
-            return 6
-        elif score < 60:
-            return 4
-        elif score < 80:
-            return 3
-        else:
-            return 3
-
-    elif intent == "chat":
-        if score < 0:
-            return 8
-        elif score < 15:
-            return 6
-        elif score < 35:
-            return 5
-        elif score < 60:
-            return 4
-        else:
-            return 3
-
-    elif intent == "flirt":
-        if score < 0:
-            return 14
-        elif score < 15:
-            return 9
-        elif score < 35:
-            return 7
-        elif score < 60:
-            return 4 if is_romantic else 5
-        elif score < 80:
-            return 3 if is_romantic else 4
-        else:
-            return 2 if is_romantic else 3
-
-    elif intent in ("photo", "video"):
-        if score < 0:
-            return 12
-        elif score < 15:
-            return 8
-        elif score < 35:
-            return 6
-        elif score < 60:
-            return 4
-        else:
-            return 3
-
-    elif intent in ("nsfw_photo", "nsfw_video"):
-        if score < 0:
-            req = 18
-        elif score < 15:
-            req = 14
-        elif score < 35:
-            req = 11
-        elif score < 60:
-            req = 5 if is_romantic else 8
-        elif score < 80:
-            req = 3 if is_romantic else 5
-        else:
-            req = 2 if is_romantic else 4
-
-        op_clean = str(openness or "").lower()
-        if "prude" in op_clean or "modest" in op_clean:
-            req += 4
-        elif "shameless" in op_clean or "lewd" in op_clean:
-            req = max(1, req - 3)
-        elif "bold" in op_clean or "uninhibited" in op_clean:
-            req = max(1, req - 2)
-        return req
-
-    # Default / custom intent
-    if score < 0:
-        return 8
-    elif score < 15:
-        return 6
-    elif score < 35:
-        return 5
-    elif score < 60:
-        return 4
-    else:
-        return 3
-
-def detect_custom_message_intent(user_message: str) -> str:
-    """Classifies user's freeform text message into mechanical intents via central engine."""
-    from mechanics.narrative.intent import classify_message_intent
-    return classify_message_intent(user_message)
-
-def generate_npc_photo_caption(contact: dict, intent: str = "nsfw_photo", location: str = "") -> str:
-    """Fallback generator for NPC photo/video descriptions if LLM omitted the bracketed tag."""
-    import random
-    contact_name = contact.get("name", "Contact")
-    if intent in ("video", "nsfw_video"):
-        if "nsfw" in intent:
-            captions = [
-                f"A private, sultry 10-second video clip of {contact_name} lounging on soft bedsheets, smiling softly and running fingers through hair with a teasing glance",
-                f"A short video clip of {contact_name} in relaxed silk loungewear, posing playfully in warm ambient lighting and blowing a gentle kiss to the camera",
-                f"A candid video snapshot of {contact_name} catching golden hour light, spinning slowly with an alluring smile"
-            ]
-        else:
-            captions = [
-                f"A quick 5-second video clip showing {contact_name} waving cheerfully from {location or 'around town'}",
-                f"A short, high-energy video snippet of {contact_name} laughing and showing off the lively surroundings",
-                f"A warm video message from {contact_name} smiling brightly into the lens"
-            ]
-        return random.choice(captions)
-
-    if intent == "photo":
-        captions = [
-            f"A bright and sunny selfie of {contact_name} at {location or 'a quiet spot'}, smiling warmly with a refreshing drink in hand",
-            f"A casual over-the-shoulder snapshot of {contact_name} enjoying the fresh air and relaxed downtime",
-            f"A candid snapshot of {contact_name} looking directly into the lens with a happy, radiant smile"
-        ]
-        return random.choice(captions)
-
-    # nsfw_photo
-    captions = [
-        f"A sultry bedroom mirror selfie of {contact_name} in an oversized button-down shirt unbuttoned halfway and slipping off bare shoulders",
-        f"A candid bed snapshot of {contact_name} in a cropped baby tee pulled up playfully and relaxed loungewear slung low on the hips",
-        f"A steamy bathroom selfie of {contact_name} with damp hair wrapped in a soft towel, casting an alluring glance into the camera",
-        f"A warm-lit bedside photo of {contact_name} in an unzipped oversized hoodie teasing bare skin underneath, resting on one elbow",
-        f"A daring top-down bed selfie of {contact_name} reclining completely nude with white sheets pulled tantalizingly low along the hips",
-        f"A steamy mirror selfie of {contact_name} freshly stepped out of the shower, holding up a dropped towel with a flirtatious wink",
-        f"A playful photo of {contact_name} in an off-the-shoulder knit sweater falling over bare thighs, smiling with bedroom eyes",
-        f"An alluring silhouette snapshot of {contact_name} bathed in soft moonlight by the window, hands teasingly tracing bare collarbones",
-    ]
-    return random.choice(captions)
-
-def generate_player_photo_caption(char: dict, intent: str = "nsfw_photo", location: str = "") -> str:
-    """Generate dynamic, randomized, and descriptive photo captions for the player."""
-    import random
-    if intent == "photo":
-        activities = [
-            f"taking a break and relaxing at {location or 'a quiet spot'}, smiling warmly into the camera",
-            f"enjoying the fresh air around {location or 'town'}, catching natural golden lighting",
-            f"holding up a warm drink with a relaxed, happy expression",
-            f"a candid over-the-shoulder snapshot with a playful, easy grin",
-            f"sitting comfortably by a window enjoying peaceful downtime",
-            f"walking through {location or 'the area'}, looking directly into the lens with a soft smile",
-            f"leaning casually against a railing under the open sky, hair ruffled slightly by the breeze",
-        ]
-        return random.choice(activities)
-
-    # nsfw_photo
-    gender = (char.get("gender") or "neutral").lower() if char else "neutral"
-    if "f" in gender:
-        attire_poses = [
-            "A bedroom mirror selfie wearing an oversized button-down shirt unbuttoned halfway and slipping off bare shoulders",
-            "Lounging on the bed in a cropped tank top pulled up teasingly and unbuttoned low-rise denim shorts",
-            "Leaning against the doorframe in an off-the-shoulder oversized knit sweater draped over bare thighs",
-            "A candid bed selfie wearing an unzipped oversized hoodie with nothing underneath, teasing bare collarbones and hips",
-            "A steamy bathroom mirror selfie with wet hair wrapped in a towel and a teasing glimpse of bare collarbones and hips",
-            "Laying back across tangled bedsheets in an unbuttoned silk pajama top slipping open, biting lip playfully",
-            "A steamy vanity mirror selfie in a damp, form-fitting white tee clinging softly to skin with a playful wink",
-            "Laying face-down across plush pillows with bare back and hips arched gracefully, looking back with a sultry bedroom gaze",
-            "A daring high-angle bed selfie lying completely nude with tangled silk sheets pulled teasingly low across hips",
-            "Fresh out of the shower with towel dropped to the floor, posing by the steamy vanity with wet hair and a flirtatious smirk",
-            "Kneeling on the mattress in an unfastened satin robe falling open off bare shoulders and hips, blowing a gentle kiss",
-        ]
-    elif "m" in gender:
-        attire_poses = [
-            "A bold mirror selfie showing off a defined, toned physique in low-slung boxer-briefs, smiling playfully into the camera",
-            "Laying relaxed across the bed with an unbuttoned linen shirt exposing chest and abs, giving a teasing wink",
-            "Fresh out of the shower with damp hair, a dark towel slung dangerously low on the hips, smirking confidently at the camera",
-            "Leaning back against the headboard in relaxed sweatpants sitting low on the waist, giving a sultry look",
-            "A warm-lit mirror selfie highlighting broad shoulders and bare torso with a confident, flirtatious grin",
-            "A candid high-angle shot lounging on the couch in comfortable loungewear, gaze locked intensely with the lens",
-            "Unbuttoning a fitted dress shirt halfway in front of the mirror, glancing sideways with an alluring smirk",
-            "Resting on one elbow across the bed, bare shoulders and chest catching soft ambient bedroom lighting",
-            "A daring bed selfie reclining completely bare-chested with tangled sheets pulled low across the waist, giving an intense stare",
-            "Stepping out of the bathroom with damp hair and a towel slung over broad shoulders, offering a teasing, confident grin",
-            "Leaning against the vanity with unfastened sleep pants riding low, torso highlighted by dramatic ambient mood lighting",
-        ]
-    else:
-        attire_poses = [
-            "An alluring mirror selfie showing bare skin and a teasing, sultry glance under soft ambient lighting",
-            "Relaxing across tangled sheets in loosely tied silk loungewear, smirking playfully at the camera",
-            "A steamy post-shower mirror selfie wrapped in a plush towel, hair still damp, offering a flirtatious wink",
-            "Lounging comfortably in soft low-slung loungewear, collarbones and torso bathed in warm evening light",
-            "A sultry close-up selfie teasing curves and bare shoulders with an intense, captivating smile",
-            "Leaning against the vanity in an unbuttoned nightshirt, casting an alluring gaze into the camera",
-            "A daring high-angle bed selfie lounging across tangled sheets with bare skin bathed in soft golden ambient lighting",
-            "Fresh out of the shower with damp hair and a dropped towel, casting an alluring, flirtatious gaze into the mirror",
-            "Posing gracefully across plush velvet cushions in an unfastened silk robe falling open off the shoulders with a sultry smirk",
-        ]
-    return random.choice(attire_poses)
-
-async def generate_player_chat_message(session: dict, contact: dict, player_char: dict, intent: str = "chat") -> str:
-    """Generates a dynamic, in-character text message from the player to the NPC contact based on history and context."""
-    session_id = session["id"]
-    contact_name = contact.get("name", "Contact")
-    npc_id = contact.get("npc_id") or contact_name.lower().replace(" ", "_")
-    score = contact.get("relationship_score", 0)
-    track = contact.get("track", "platonic")
-    scen_key = session.get("scenario", "fantasy")
-    char_name = player_char.get("name", "Hero")
-
-    basic = contact.get("basic_info", {})
-    role = basic.get("role") or basic.get("occupation") or "Contact"
-    current_loc = session.get("current_location", "Local Area")
-
-    # Fetch recent message history (up to 8 messages)
-    history_rows = db.get_phone_messages(session_id, npc_id, limit=8)
-    history_text = "\n".join(f"{'Player' if r['sender'] == 'player' else contact_name}: {r['message']}" for r in history_rows)
-
-    # Active quest / situation context
-    active_sq = db.get_active_story_quest(session_id)
-    sq_hint = ""
-    if active_sq:
-        sq_title = active_sq.get("title", "")
-        sq_hint = f"- Active Quest Context: '{sq_title}'\n"
-
-    # Pending appointment hint
-    clean_npc_id = npc_id.strip().lower().replace(" ", "_")
-    pending_appts = [a for a in db.get_phone_appointments(session_id, status="pending") if a.get("npc_id") == clean_npc_id]
-    appt_hint = ""
-    if pending_appts:
-        appt_loc = pending_appts[0].get("rendezvous_location", "")
-        appt_hint = f"- Scheduled Meetup: You already have a confirmed plan to meet {contact_name} at: {appt_loc}.\n"
-
-    is_ongoing = bool(history_rows)
-
-    if is_ongoing:
-        last_m = history_rows[-1]
-        last_sender = "Player" if last_m.get("sender") == "player" else contact_name
-        last_content = last_m.get("message", "")
-
-        intent_directive = "Keep the casual conversation moving forward naturally. React to or answer what they just said."
-        if intent == "flirt":
-            intent_directive = "Tease, flirt playfully, or banter warmly in response to their previous message."
-        elif intent == "meetup":
-            if pending_appts:
-                intent_directive = f"Enthusiastically acknowledge and confirm looking forward to the scheduled meetup at {pending_appts[0].get('rendezvous_location')}."
-            else:
-                intent_directive = "Suggest hanging out or meeting up soon in a casual, charming way."
-
-        system_prompt = (
-            f"You are generating {char_name}'s next text message in an ongoing mobile instant-messaging thread (like Discord, WhatsApp, or iMessage) with {contact_name} in a {scen_key} story.\n"
-            f"Contact: {contact_name} (Role: {role}). Relationship: {track.capitalize()} track (Affinity: {score}).\n"
-            f"Current Location: {current_loc}.\n"
-            + sq_hint
-            + appt_hint +
-            f"Directive: {intent_directive}\n"
-            "STRICT MESSENGER CONVERSATION RULES:\n"
-            f"1. NO GREETINGS OR SALUTATIONS: NEVER begin with 'Hey', 'Hi', 'Hello', 'Yo', or '{contact_name}!'. In an ongoing chat, real people reply directly without re-greeting each other.\n"
-            f"2. DIRECT REPLY & FLOW: Directly respond to {contact_name}'s last message: \"{last_content}\".\n"
-            "   - If they asked a question (e.g. 'How about you?', 'What are you up to?'), you MUST answer the question directly from your perspective.\n"
-            "   - If they confirmed or proposed meeting up, acknowledge it enthusiastically or say you're on your way.\n"
-            "   - If they teased or bantered, tease or banter back in kind.\n"
-            "3. KEEP IT BRIEF & REALISTIC: 1-2 short sentences maximum. Use natural texting tone with 1-2 casual emojis (e.g. 😊, 😉, ✨, 👍, 💬).\n"
-            "4. NO DUPLICATION: Never repeat previous messages from the history.\n"
-            "Respond with ONLY a single valid JSON object matching:\n"
-            '{"message": "string"}'
-        )
-        user_prompt = (
-            f"Conversation History:\n{history_text}\n"
-            f"{contact_name}'s last text: \"{last_content}\"\n"
-            f"Generate {char_name}'s direct reply (NO greeting):"
-        )
-    else:
-        system_prompt = (
-            f"You are generating {char_name}'s opening text message to {contact_name} in a {scen_key} story.\n"
-            f"Contact: {contact_name} (Role: {role}). Relationship: {track.capitalize()} track (Affinity: {score}).\n"
-            f"Current Location: {current_loc}.\n"
-            + sq_hint
-            + appt_hint +
-            "Guidelines:\n"
-            "- Write a single short, natural opening text message (1-2 sentences) from the player's perspective.\n"
-            "- Friendly, in-character greeting suited to their role and relationship.\n"
-            "- Casual texting style with fitting emojis (e.g. 💬, 😊, 👋, ✨).\n"
-            "Respond with ONLY a single valid JSON object matching:\n"
-            '{"message": "string"}'
-        )
-        user_prompt = f"Generate {char_name}'s opening message to {contact_name}:"
-
-    try:
-        result = await mechanics.system.phone.call_llm_json(system_prompt, user_prompt, temperature=0.85, is_nsfw=scenario_data.is_nsfw_scenario(scen_key), use_utility=True)
-        player_msg = (result.get("message") or "").strip()
-        if player_msg:
-            if is_ongoing:
-                # Strip leading greeting if the model inadvertently included one
-                first_name = contact_name.split()[0] if contact_name.split() else contact_name
-                name_alt = rf"(?:{re.escape(contact_name)}|{re.escape(first_name)})"
-                clean_msg = re.sub(
-                    rf"^(?:hey(?:a)?|hi|hello|yo)\s*(?:{name_alt}|there)?\s*[,!.:-]*\s*",
-                    "",
-                    player_msg,
-                    flags=re.IGNORECASE
-                ).strip()
-                clean_msg = re.sub(
-                    rf"^{name_alt}\s*[,!.:-]+\s*",
-                    "",
-                    clean_msg,
-                    flags=re.IGNORECASE
-                ).strip()
-                if len(clean_msg) >= 4:
-                    player_msg = clean_msg[0].upper() + clean_msg[1:]
-            return player_msg
-    except Exception as e:
-        log.warning(f"[phone] Failed to generate dynamic player chat message: {e}")
-
-    # Contextual intelligent fallbacks
-    if is_ongoing:
-        last_m = history_rows[-1]
-        last_text = last_m.get("message", "")
-        last_sender = last_m.get("sender", "npc")
-
-        if last_sender == "npc":
-            last_lower = last_text.lower()
-            if any(q in last_lower for q in ["how about you", "what about you", "how are you", "how's your", "how is your", "and you?"]):
-                return random.choice([
-                    "Just wrapping up a few things myself! Glad you're catching a breath 😊",
-                    "Pretty good on my end, just taking it easy right now! ✨",
-                    "Not too bad at all! Just wanted to see what you were up to 😊",
-                    "Doing well! Was just hoping to hear from you ✨",
-                ])
-            if any(w in last_lower for w in ["meet at", "see you soon", "see you there", "why don't we meet", "office", "head over", "looking forward to seeing you"]):
-                return random.choice([
-                    "Sounds like a plan! I'll head over in a few minutes 😊",
-                    "Awesome, see you there in a bit! ✨",
-                    "Looking forward to it! On my way 👍",
-                    "Perfect! See you shortly 😊",
-                ])
-            if any(w in last_lower for w in ["sweet", "flatter", "tease", "distract", "hard to focus", "blushing", "flirt", "😉", "😘", "❤️"]):
-                return random.choice([
-                    "Haha, my bad! Guess I'll have to come distract you in person then 😉",
-                    "Just speaking the truth! You deserve a good distraction 😉",
-                    "Can't help it when it comes to you 😊",
-                    "Guilty as charged! Can't let you work too hard 😉",
-                ])
-            if "?" in last_text:
-                return random.choice([
-                    "Haha, good question! A bit of everything honestly, but I'm doing well 😊",
-                    "Just taking things one step at a time today, but staying busy! ✨",
-                    "Honestly, just thinking about what's coming up next 😊",
-                ])
-            return random.choice([
-                "Glad to hear that! Keep me posted on how it goes 😊",
-                "Haha, totally! Always fun chatting with you ✨",
-                "That makes a lot of sense. Hope the rest of your day goes smoothly!",
-                "Sounds like quite a day! Take it easy when you can 😊",
-            ])
-        else:
-            return random.choice([
-                "No rush on replying by the way, just wanted to check in! 😊",
-                "Take your time with whatever you're working on! ✨",
-                "Hope everything's going smoothly on your end 👍",
-            ])
-
-    if intent == "meetup":
-        is_romantic = str(contact.get("track", "platonic")).lower() == "romantic"
-        return "Are you free later? Would you like to go out on a date with me? 🌹" if is_romantic else "Are you free right now? Want to meet up somewhere quiet to talk? 📍"
-    elif intent == "flirt":
-        return "Thinking of you... hope you're having a good day 😉"
-
-    fallbacks = [
-        f"Hey {contact_name}! How are things going with you? 😊",
-        f"Hey, got a quick second to chat? 👋",
-        f"Hope you're having a good day, {contact_name}! ✨",
-        f"What are you up to right now? 💬",
-    ]
-    return random.choice(fallbacks)
+from .media_captions import (
+    generate_npc_photo_caption,
+    generate_player_photo_caption,
+    generate_player_casual_photo,
+    generate_player_spicy_photo
+)
 
 async def generate_contact_dm_reply(session: dict, contact: dict, player_char: dict, user_message: str, intent: str = "chat") -> dict:
     """Generates an in-character text message reply from an NPC contact resolved via skill check and fast LLM."""
@@ -431,7 +54,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
 
     basic = contact.get("basic_info", {})
     role = basic.get("role") or basic.get("occupation") or "Contact"
-    traits = ", ".join(contact.get("unlocked_traits") or basic.get("traits") or ["Observant"])
+    traits_list = contact.get("unlocked_traits") or basic.get("traits") or ["Observant"]
+    traits = ", ".join(traits_list)
     current_loc = session.get("current_location", "Local Area")
 
     msg_lower = (user_message or "").lower()
@@ -444,18 +68,193 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     pending_appts = [a for a in db.get_phone_appointments(session_id, status="pending") if a.get("npc_id") == clean_npc_id]
     existing_appointment = pending_appts[0] if pending_appts else None
 
+    # Retrieve current day & daily interaction limits
+    current_day, current_minute, _ = db.get_session_time(session_id)
+    daily_limits = db.get_phone_daily_limits(session_id, npc_id, current_day)
+
     # Auto-classify intent for custom or generic chat messages
     if intent in ("custom", "chat"):
-        detected = detect_custom_message_intent(user_message)
-        if detected != "custom":
-            # If an appointment is ALREADY pending and detected intent is "meetup",
-            # do not convert custom chat into a new meetup unless player explicitly asks to reschedule/change location!
-            if detected == "meetup" and existing_appointment:
-                is_reschedule = any(w in msg_lower for w in ["change location", "change place", "meet somewhere else", "different place", "different spot", "reschedule", "instead of"])
-                if not is_reschedule:
-                    detected = "custom"
+        if is_meetup_reschedule_request(user_message):
+            intent = "meetup"
+        else:
+            detected = detect_custom_message_intent(user_message)
             if detected != "custom":
-                intent = detected
+                # If an appointment is ALREADY pending and detected intent is "meetup",
+                # do not convert custom chat into a new meetup unless player explicitly asks to reschedule/change location!
+                if detected == "meetup" and existing_appointment:
+                    if not is_meetup_reschedule_request(user_message):
+                        detected = "custom"
+                if detected != "custom":
+                    intent = detected
+
+    def _get_intent_category(intnt: str) -> str | None:
+        if intnt == "flirt":
+            return "flirt"
+        if intnt == "meetup":
+            return "meetup"
+        if intnt in ("photo", "video", "photo_ask", "photo_send", "send_photo", "ask_photo"):
+            return "photo"
+        if intnt in ("nsfw_photo", "nsfw_video", "spicy_ask", "spicy_send", "send_spicy", "ask_spicy", "nsfw_send"):
+            return "spicy"
+        if intnt in ("intel_rumor", "intel", "rumor"):
+            return "rumor"
+        return None
+
+    intent_category = _get_intent_category(intent)
+    is_reschedule_request = is_meetup_reschedule_request(user_message)
+
+    # Check daily limits for capped intents
+    is_over_limit = False
+    if intent_category == "flirt":
+        if daily_limits["flirt"]["used"] >= 3:
+            is_over_limit = True
+    elif intent_category == "meetup":
+        if existing_appointment:
+            if is_reschedule_request and daily_limits["meetup"].get("relocations_used", 0) >= 2:
+                is_over_limit = True
+        elif daily_limits["meetup"]["status"] == "failed":
+            is_over_limit = True
+        elif daily_limits["meetup"]["used"] >= 1:
+            is_over_limit = True
+    elif intent_category == "photo":
+        if daily_limits["photo"]["used"] >= 3:
+            is_over_limit = True
+    elif intent_category == "spicy":
+        if daily_limits["spicy"]["used"] >= 3:
+            is_over_limit = True
+    elif intent_category == "rumor":
+        if daily_limits["rumor"]["used"] >= 1:
+            is_over_limit = True
+
+    # Handle Over-Limit Attempts: In-character refusal with escalating badgering penalty
+    if is_over_limit:
+        over_count = daily_limits[intent_category].get("over_limit_count", 0) + 1
+        if over_count == 1:
+            affinity_delta = -1 if intent in ("spicy_send", "send_spicy", "nsfw_send") else 0
+        elif over_count == 2:
+            affinity_delta = -2
+        elif over_count == 3:
+            affinity_delta = -4
+        else:
+            affinity_delta = -6
+
+        system_prompt = (
+            f"You are {contact_name}, an NPC contact in a {scen_key} story.\n"
+            f"Role: {role}. Traits: {traits}. Relationship Affinity: {score} ({track.capitalize()} track).\n"
+            f"SITUATION: The player is repeatedly attempting an action ({intent_category}) that has exceeded today's daily limit.\n"
+            f"This is over-limit attempt #{over_count} from the player today.\n"
+            f"Guidelines for Attempt #{over_count}:\n"
+        )
+        if over_count == 1:
+            system_prompt += (
+                "- ATTEMPT #1 (Boundary / Friendly Refusal): Respond in-character by politely or casually declining for today.\n"
+                "- Mention you've shared enough for today, have errands/classes to get to, or let's pick it up tomorrow.\n"
+            )
+        elif over_count == 2:
+            system_prompt += (
+                "- ATTEMPT #2 (Irritated / Annoyed): Express clear annoyance that they are asking or sending again after being declined.\n"
+                "- Remind them firmly to stop pushing it.\n"
+            )
+        else:
+            system_prompt += (
+                f"- ATTEMPT #{over_count} (Severe Badgering / Harassment): Express strong irritation, disgust, or cold disapproval.\n"
+                "- Call them out for relentlessly badgering you and crossing boundaries.\n"
+            )
+        system_prompt += (
+            "Write a short, realistic mobile text reply (1-2 sentences) in natural messaging style.\n"
+            "Respond with ONLY a single valid JSON object matching:\n"
+            '{"reply_text": "string"}'
+        )
+        user_prompt = f"Player ({player_char.get('name', 'Hero')}): {user_message}\nGenerate {contact_name}'s refusal text reply:"
+
+        reply_text = None
+        try:
+            res_json = await mechanics.system.phone.call_llm_json(
+                system_prompt, user_prompt, temperature=0.7,
+                is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True
+            )
+            reply_text = (res_json.get("reply_text") or "").strip()
+        except Exception as e:
+            log.warning(f"[phone] Failed to generate LLM over-limit refusal: {e}")
+
+        if not reply_text:
+            if intent_category == "flirt":
+                if over_count == 1:
+                    reply_text = "Haha, you're sweet, but let's give the charm a break for today! Let's talk about something else 😊"
+                elif over_count == 2:
+                    reply_text = "Okay, I told you to take it easy on the flirting. It's getting a bit much right now."
+                else:
+                    reply_text = "Are you listening to me at all? Stop trying to flirt with me, I'm seriously getting annoyed."
+            elif intent_category == "meetup":
+                if over_count == 1:
+                    if existing_appointment:
+                        reply_text = f"We already settled our plans for today at {existing_appointment.get('rendezvous_location')}! Let's stick with that for now."
+                    else:
+                        reply_text = "I already told you I can't meet up today! Let's catch up another time."
+                elif over_count == 2:
+                    reply_text = "I told you, I can't keep rearranging or meeting up again today. Stop bugging me about it."
+                else:
+                    reply_text = "Enough already. I'm not changing plans or meeting with you today, drop it."
+            elif intent_category == "photo":
+                if over_count == 1:
+                    reply_text = "That's enough photos for today! My camera is going away before my battery dies haha 📸"
+                elif over_count == 2:
+                    reply_text = "I already told you no more photos today. Please stop asking."
+                else:
+                    reply_text = "Seriously? Stop badgering me for photos. It's really obnoxious."
+            elif intent_category == "spicy":
+                if over_count == 1:
+                    reply_text = "Definitely not sending anything like that anymore today. Let's change the subject."
+                elif over_count == 2:
+                    reply_text = "I said no more spicy stuff today. Stop pushing it, seriously."
+                else:
+                    reply_text = "What is wrong with you? Stop sending or asking for that. You're being genuinely creepy now."
+            elif intent_category == "rumor":
+                if over_count == 1:
+                    reply_text = "That's all the gossip I've got for today! I'm not a 24/7 bulletin board haha 🤫"
+                elif over_count == 2:
+                    reply_text = "I told you I don't have any more rumors. Stop digging."
+                else:
+                    reply_text = "I'm not helping you spread or dig up any more gossip today. Drop it."
+            else:
+                reply_text = "Let's take a break for today."
+
+        db.save_phone_message(session_id, npc_id, sender="player", message=user_message, intent=intent)
+        db.save_phone_message(session_id, npc_id, sender="npc", message=reply_text, intent=intent)
+
+        if affinity_delta != 0:
+            from mechanics.social.relationships import is_contact_eligible
+            if is_contact_eligible(name=contact_name, role=role, scenario=scen_key):
+                new_score = max(-100, min(100, score + affinity_delta))
+                db.update_contact_score(session_id, npc_id, new_score, character_id=player_char.get("id", 0))
+
+        updated_limits = db.record_phone_daily_interaction(
+            session_id=session_id,
+            npc_id=npc_id,
+            current_day=current_day,
+            intent=intent_category,
+            outcome="over_limit",
+            is_over_limit=True
+        )
+
+        return {
+            "reply_text": reply_text,
+            "affinity_delta": affinity_delta,
+            "rendezvous_location": "",
+            "is_romantic": is_romantic,
+            "intent": intent,
+            "new_score": max(-100, min(100, score + affinity_delta)),
+            "digital_item_id": None,
+            "media_type_created": None,
+            "daily_limits": updated_limits,
+            "check_result": {
+                "stat": "CHA",
+                "chance": 0,
+                "tier": "fail",
+                "tier_label": "Over Limit",
+                "succeeded": False
+            }
+        }
 
     # Determine stat to check
     cha_val = player_char.get("cha", 5)
@@ -489,7 +288,22 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     intimate_dem = app_data.get("intimate_demeanor") or ""
     intimate_dyn = app_data.get("intimate_dynamic") or ""
 
-    req = get_dm_requirement(score, intent, track=track, openness=erotic_open)
+    flirt_attempt_num = (daily_limits["flirt"]["used"] + 1) if intent_category == "flirt" else 1
+    flirt_prev_succeeded = (daily_limits["flirt"].get("last_outcome") in ("success", "crit_success")) if intent_category == "flirt" else False
+    relocation_num = (daily_limits["meetup"].get("relocations_used", 0) + 1) if (intent_category == "meetup" and is_reschedule_request) else 0
+    is_player_sending = intent in ("photo_send", "send_photo", "spicy_send", "send_spicy", "nsfw_send")
+
+    req = get_dm_requirement(
+        score,
+        intent,
+        track=track,
+        openness=erotic_open,
+        traits=traits_list,
+        attempt_num=flirt_attempt_num,
+        prev_succeeded=flirt_prev_succeeded,
+        relocation_num=relocation_num,
+        is_player_sending=is_player_sending
+    )
     user_settings = db.get_settings(player_char.get("user_id", 0))
     check_mode = user_settings.get("debug_check_mode", "off") if user_settings else "off"
     check_result = resolve_check(stat_val, req, luck=player_char.get("luk", 3), check_mode=check_mode)
@@ -499,7 +313,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     is_bold = any(k in str(erotic_open).lower() for k in ("bold", "uninhibited"))
 
     # Strict prude barrier on NSFW media requests: requires 70+ affinity AND romantic track
-    if is_prude and intent in ("nsfw_photo", "nsfw_video") and (score < 70 or not is_romantic):
+    if is_prude and intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy") and (score < 70 or not is_romantic):
         check_result = CheckResult(
             chance=0,
             roll=1.0,
@@ -564,7 +378,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     # --- Meetup location grounding: build a list of known public locations ---
     known_locations: list[dict] = []
     meetup_location_hint = ""
-    is_reschedule_request = any(w in (user_message or "").lower() for w in ["change location", "change place", "meet somewhere else", "different place", "different spot", "reschedule", "instead of"])
+    is_reschedule_request = is_meetup_reschedule_request(user_message)
     if intent == "meetup":
         if existing_appointment and not is_reschedule_request:
             existing_loc = existing_appointment["rendezvous_location"]
@@ -617,12 +431,27 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
                         seen.add(label)
                         loc_lines.append(label)
                 meet_term = "Date" if is_romantic else "Meetup"
+                reschedule_header = ""
+                if is_reschedule_request and existing_appointment:
+                    old_loc = existing_appointment.get("rendezvous_location", "previous spot")
+                    reschedule_header = (
+                        f"- RESCHEDULING / LOCATION CHANGE REQUEST: The player is asking to change or relocate the meeting place (previously: '{old_loc}'). "
+                        f"Agree to change the location and pick a suitable new spot (e.g. private, quiet, or requested) from the list below!\n"
+                    )
                 meetup_location_hint = (
-                    f"- IMPORTANT — {meet_term} Location: You MUST suggest one of these REAL known locations from the world map. "
+                    reschedule_header
+                    + f"- IMPORTANT — {meet_term} Location: You MUST suggest one of these REAL known locations from the world map. "
                     f"Do NOT invent fictional place names. Choose one that fits your personality and relationship:\n"
                     + "\n".join(f"  • {l}" for l in loc_lines[:30])
                     + "\n- Set rendezvous_location to the EXACT primary name (or 'Primary (Sub)') from the list above.\n"
                 )
+
+    p_gender = str(player_char.get("gender") or player_char.get("sex") or "male").strip().lower()
+    n_gender = str(basic.get("gender") or basic.get("sex") or "female").strip().lower()
+    is_player_male = any(w in p_gender for w in ("male", "man", "boy")) and not any(w in p_gender for w in ("female", "woman"))
+    is_player_female = any(w in p_gender for w in ("female", "woman", "girl"))
+    is_npc_male = any(w in n_gender for w in ("male", "man", "boy")) and not any(w in n_gender for w in ("female", "woman"))
+    is_npc_female = any(w in n_gender for w in ("female", "woman", "girl"))
 
     # Dynamic Intent Specific Prompt Instructions
     if intent == "meetup":
@@ -632,6 +461,12 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
                 f"- Intent: Player is talking about or confirming your upcoming meetup.\n"
                 f"- If check Succeeded / Critical Success: Happy, warm confirmation that you'll see them at '{existing_loc}'.\n"
                 f"- If check Failed / Critical Failure: Mention you might be a little delayed or ask for a rain check.\n"
+            )
+        elif existing_appointment and is_reschedule_request:
+            intent_guidelines = (
+                f"- Intent: Player is asking to reschedule or relocate the meetup to a different/more private location.\n"
+                f"- If check Succeeded / Critical Success: Agree warmly, and suggest or confirm a new meeting spot from the known locations list.\n"
+                f"- If check Failed / Critical Failure: Mention you're on a tight schedule or prefer the original location.\n"
             )
         elif is_romantic:
             intent_guidelines = (
@@ -653,8 +488,18 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             "- If check Failed / Critical Failure: Brief, distracted, or neutral reply.\n"
         )
     elif intent == "flirt":
+        if flirt_attempt_num == 1:
+            prog_note = "This is Flirt Attempt #1 today. Keep it light, charming, and responsive."
+        elif flirt_attempt_num == 2:
+            prog_note = f"This is Flirt Attempt #2 today (Previous attempt was: {'a hit' if flirt_prev_succeeded else 'clumsy'}). " + (
+                "Escalate the banter with confident warmth or playful teasing." if flirt_prev_succeeded else "Let them recover playfully or tease them about their clumsy line."
+            )
+        else:
+            prog_note = f"This is Flirt Attempt #3 today (Previous attempt was: {'a hit' if flirt_prev_succeeded else 'clumsy'}). " + (
+                "Climax of today's flirting: share genuine sweet affection, blushing chemistry, or a memorable romantic spark." if flirt_prev_succeeded else "Set a firm but lighthearted boundary or tease them that they've reached their charm quota for today."
+            )
         intent_guidelines = (
-            "- Intent: Flirting and teasing banter.\n"
+            f"- Intent: Flirting and teasing banter. {prog_note}\n"
             "- If check Succeeded / Critical Success: Playful, charmed, blushing, or teasing back.\n"
             "- If check Failed: Mildly awkward, deflects, or changes subject.\n"
             "- If check Critical Failure: Disapproving, annoyed, or cringing.\n"
@@ -666,17 +511,61 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             "- If check Failed: You haven't heard much or keep details to yourself.\n"
             "- If check Critical Failure: Suspicious of prying or dismissive of gossip.\n"
         )
-    elif intent == "photo":
+    elif intent in ("photo_send", "send_photo"):
         intent_guidelines = (
-            "- Intent: Exchanging everyday photos / selfies.\n"
+            "- Intent: Player sent you a casual photo/selfie/picture of their day.\n"
+            "- If check Succeeded / Critical Success: React with warmth, humor, or compliments about what they sent (e.g. admiring the view, commenting on their expression or item).\n"
+            "- If check Failed / Critical Failure: Neutral, brief acknowledgment or distracted response.\n"
+            "- Do NOT attach a photo yourself in reply.\n"
+        )
+    elif intent in ("photo", "video", "photo_ask", "ask_photo"):
+        intent_guidelines = (
+            "- Intent: Exchanging everyday photos / selfies. Player asked you to send a photo.\n"
             "- CRITICAL CREATIVITY & VARIETY MANDATE:\n"
             "  * If check Succeeded / Critical Success: You MUST invent an entirely ORIGINAL, VIVID bracketed photo description: '[Attached Photo: ...]'.\n"
             "  * ANTI-REPETITION: Never repeat settings or activities from history. Vary the activity, outfit, lighting, and expressions (e.g. sipping a beverage at a sunlit cafe, holding up a cute find, sitting on bedroom floor with study notes, posing outdoors under trees, laughing candidly at something off-camera).\n"
             "  * If check Failed / Critical Failure: Say your camera is glitching, you look a mess, or politely decline.\n"
         )
-    elif intent == "nsfw_photo":
+    elif intent in ("spicy_send", "send_spicy", "nsfw_send"):
+        gender_tone = ""
+        if is_player_male and is_npc_female:
+            gender_tone = (
+                "- GENDER DYNAMIC (Male player sent intimate photo to Female contact):\n"
+                "  * If check Succeeded / Critical Success: Flattered, turned on, or boldly teases back.\n"
+                "  * If check Failed / Critical Failure: Deeply offended, creeped out, or angry at the unsolicited intimate picture! Scold them harshly."
+            )
+        elif is_player_female and is_npc_male:
+            gender_tone = (
+                "- GENDER DYNAMIC (Female player sent intimate photo to Male contact):\n"
+                "  * If check Succeeded / Critical Success: Highly enthusiastic, captivated, praising her looks with flustered eagerness.\n"
+                "  * If check Failed / Critical Failure: " + (
+                    "Scold her for indecency (modest/prude demeanor)." if is_prude else "Flustered awkwardness and confusion ('Whoa... wasn't expecting that right now 😳'), but not hateful."
+                )
+            )
         intent_guidelines = (
-            "- Intent: NSFW intimate photo swap. Player sent an intimate selfie.\n"
+            "- Intent: Player sent an unsolicited intimate/spicy photo of themselves.\n"
+            f"{gender_tone}\n"
+            "- Do NOT attach a photo yourself in reply.\n"
+        )
+    elif intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy"):
+        npc_b_size = app_data.get("breast_size") if is_npc_female else app_data.get("penis_size")
+        asset_photo_cue = ""
+        if npc_b_size:
+            from mechanics.social.persona import classify_asset_size_tier
+            tier_npc = classify_asset_size_tier(npc_b_size, gender="male" if is_npc_male else "female")
+            if tier_npc in ("flat", "small"):
+                if is_prude:
+                    asset_photo_cue = f"  * BODY ASSET FLAVOR (Small Assets: {npc_b_size} & Insecure): Cropped slightly higher or partially obscured by folded arms/blanket; includes a nervous, blushing text (*'I know there's not much to see... don't tease me, okay?'*).\n"
+                elif is_bold or is_shameless:
+                    asset_photo_cue = f"  * BODY ASSET FLAVOR (Small Assets: {npc_b_size} & Bold): Confident close-up showing cute perky contour or collarbones with a sassy caption (*'More than a handful is a waste anyway 😉'*).\n"
+            elif tier_npc in ("large", "huge"):
+                if is_prude:
+                    asset_photo_cue = f"  * BODY ASSET FLAVOR (Large Assets: {npc_b_size} & Proud Hesitation): Bashful angle hiding face behind phone while prominent curves and cleavage spill softly across the sheets (*'I felt so embarrassed taking this... you better like it...'*).\n"
+                elif is_bold or is_shameless:
+                    asset_photo_cue = f"  * BODY ASSET FLAVOR (Large Assets: {npc_b_size} & Boastful): Sultry, audacious angle proudly showcasing cleavage and curves (*'Drooling yet? Take a good look'*).\n"
+
+        intent_guidelines = (
+            "- Intent: NSFW intimate photo swap. Player asked you to send an intimate photo.\n"
             "- CRITICAL CREATIVITY & VARIETY MANDATE FOR INTIMATE PHOTOS:\n"
             "  * If check Succeeded / Critical Success: You MUST write a 100% UNIQUE, CUSTOM, and IMAGINATIVE bracketed description: '[Attached Intimate Photo: ...]'.\n"
             "  * ANTI-REPETITION MANDATE: Do NOT repeat previous outfits, poses, or tropes (avoid repeating 'sheer lace slip', 'hand on hip', or 'confident smirk')! Review Conversation History and invent something completely distinct and fresh.\n"
@@ -688,6 +577,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             "    - Poses: kneeling upright on the mattress with arched back and hands woven into hair, laying face-down looking back over bare hips with an alluring smirk, leaning forward close to the lens teasing collarbones and chest, reclining casually with one leg pulled up, or playfully tugging down the waistband/fabric.\n"
             "    - Angles: high-angle top-down bed shot, steamy mirror reflection with wet hair, close-up focused shot with heavy-lidded bedroom eyes, or full-length candid silhouette.\n"
             "    - Mood: shy blushing glance, sultry confident grin, teasing lip-bite with a wink, drowsy late-night bedroom intimacy, or daring seductive stare.\n"
+            f"{asset_photo_cue}"
             "  * PERSONALITY FIT: Make the outfit, pose, and attitude reflect your character's unique personality ({traits}) and relationship dynamic!\n"
             "  * If check Failed: You are flustered or embarrassed, telling them it's too fast or asking them to delete it. Do NOT send a photo.\n"
             "  * If check Critical Failure: You are deeply offended, disgusted, or furious at the unsolicited intimacy. Do NOT send a photo.\n"
@@ -765,6 +655,38 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
   "affinity_delta": integer -5 to 6
 }"""
 
+    # In-person shared memories grounding (Bidirectional recall)
+    in_person_hint = ""
+    def _coerce_mem_list(raw_val):
+        if not raw_val:
+            return []
+        if isinstance(raw_val, list):
+            return list(raw_val)
+        if isinstance(raw_val, str):
+            try:
+                parsed = json.loads(raw_val)
+                if isinstance(parsed, list):
+                    return parsed
+            except Exception:
+                pass
+            return [raw_val.strip()]
+        return []
+
+    recent_in_person_mems = _coerce_mem_list(contact.get("recent_memories") or contact.get("rel_history"))
+    intimate_in_person_mems = [m for m in _coerce_mem_list(contact.get("intimate_memories")) if not str(m).startswith("Past History:")]
+    in_person_snippets = []
+    for m in (recent_in_person_mems + intimate_in_person_mems)[-8:]:
+        m_str = str(m).strip()
+        if m_str and not m_str.startswith("Exchanged ") and not m_str.startswith("Agreed via DM"):
+            if m_str not in in_person_snippets:
+                in_person_snippets.append(m_str)
+    if in_person_snippets:
+        in_person_hint = (
+            "- RECENT IN-PERSON SHARED EXPERIENCES & MEMORIES:\n"
+            + "\n".join(f"  • {s}" for s in in_person_snippets[-4:]) + "\n"
+            + "- DIRECTIVE: You remember these real shared experiences from your time together in person with the player. If natural or relevant to the conversation topic, you may casually reminisce, reference, or tease them about these moments in your texts!\n"
+        )
+
     system_prompt = (
         f"You are roleplaying as {contact_name}, an NPC contact in a {scen_key} story.\n"
         f"Your Role: {role}. Personality Traits: {traits}. Relationship Affinity: {score} ({track.capitalize()} track).\n"
@@ -782,6 +704,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         + intent_guidelines
         + sq_hint
         + feed_hint
+        + in_person_hint
         + family_and_grade_hint
         + meetup_location_hint
         + f"Respond with ONLY a single valid JSON object matching the schema:\n{dm_schema}"
@@ -795,28 +718,28 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     )
 
     call_temp = 0.9 if intent in ("photo", "nsfw_photo", "video", "nsfw_video", "flirt") else 0.8
-    result = await mechanics.system.phone.call_llm_json(system_prompt, user_prompt, temperature=call_temp, is_nsfw=scenario_data.is_nsfw_scenario(scen_key), use_utility=True)
+    result = await mechanics.system.phone.call_llm_json(system_prompt, user_prompt, temperature=call_temp, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
     reply_text = result.get("reply_text") or f"Hey {player_char.get('name', 'there')}! Got your message, let's catch up soon."
 
-    # Safeguard: if check succeeded and intent is a photo/video intent, ensure bracketed media description is attached
-    if check_result.succeeded and intent in ("nsfw_photo", "nsfw_video", "photo", "video"):
+    # Safeguard: if check succeeded and intent is an ask for photo/video, ensure bracketed media description is attached
+    if check_result.succeeded and intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy", "photo", "video", "photo_ask", "ask_photo"):
         has_attachment = any(tag in reply_text for tag in [
             "[Attached Intimate Video:", "[Attached Video:",
             "[Attached Intimate Photo:", "[Attached Photo:"
         ])
         if not has_attachment:
             fallback_caption = generate_npc_photo_caption(contact, intent=intent, location=current_loc)
-            if intent == "nsfw_video":
+            if intent in ("nsfw_video",):
                 reply_text += f"\n[Attached Intimate Video: {fallback_caption}]"
-            elif intent == "video":
+            elif intent in ("video",):
                 reply_text += f"\n[Attached Video: {fallback_caption}]"
-            elif intent == "nsfw_photo":
+            elif intent in ("nsfw_photo", "spicy_ask", "ask_spicy"):
                 reply_text += f"\n[Attached Intimate Photo: {fallback_caption}]"
             else:
                 reply_text += f"\n[Attached Photo: {fallback_caption}]"
 
     # Shameless / Lewd bonus media drop (chance for second media attachment unprompted)
-    if check_result.succeeded and is_shameless and intent == "nsfw_photo":
+    if check_result.succeeded and is_shameless and intent in ("nsfw_photo", "spicy_ask", "ask_spicy"):
         if "[Attached Intimate Video:" not in reply_text and "[Attached Bonus Intimate Video:" not in reply_text:
             import hashlib
             seed_bonus = (contact_name + str(session_id) + str(int(time.time()))).encode("utf-8")
@@ -824,93 +747,86 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
                 bonus_caption = generate_npc_photo_caption(contact, intent="nsfw_video", location=current_loc)
                 reply_text += f"\n[Attached Bonus Intimate Video: {bonus_caption}]"
 
-    # Enforce deterministic bounds based on check tier and intent
-    if check_result.tier == "crit_success":
-        if intent == "nsfw_photo":
+    # Enforce deterministic bounds based on check tier, intent, and gender dynamics
+    if intent in ("spicy_send", "send_spicy", "nsfw_send"):
+        if check_result.succeeded:
+            affinity_delta = 4 if check_result.tier == "crit_success" else 2
+            if is_player_female and is_npc_male:
+                affinity_delta = min(5, affinity_delta + 1)
+        else:
+            if is_player_male and is_npc_female:
+                if is_shameless:
+                    affinity_delta = 0
+                elif check_result.tier == "crit_fail":
+                    affinity_delta = -6
+                else:
+                    affinity_delta = -4
+            elif is_player_female and is_npc_male:
+                if is_prude:
+                    affinity_delta = -3 if check_result.tier == "crit_fail" else -2
+                else:
+                    affinity_delta = -1 if check_result.tier == "crit_fail" else 0
+            else:
+                affinity_delta = -4 if check_result.tier == "crit_fail" else -2
+        rendezvous = ""
+    elif check_result.tier == "crit_success":
+        if intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy"):
             affinity_delta = max(4, min(6, int(result.get("affinity_delta", 4))))
+        elif intent == "flirt":
+            affinity_delta = max(3, min(4, int(result.get("affinity_delta", 3))))
+        elif intent in ("photo_send", "send_photo"):
+            affinity_delta = 2
         else:
             affinity_delta = max(3, min(5, int(result.get("affinity_delta", 3))))
         rendezvous = result.get("rendezvous_location", "") if intent == "meetup" else ""
     elif check_result.tier == "success":
-        if intent == "nsfw_photo":
+        if intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy"):
             affinity_delta = max(2, min(4, int(result.get("affinity_delta", 2))))
+        elif intent == "flirt":
+            affinity_delta = 2
+        elif intent in ("photo_send", "send_photo"):
+            affinity_delta = 1
         else:
             affinity_delta = max(1, min(3, int(result.get("affinity_delta", 1))))
         rendezvous = result.get("rendezvous_location", "") if intent == "meetup" else ""
     elif check_result.tier == "fail":
-        if intent == "nsfw_photo":
-            # Guaranteed negative consequence on failing intimate photo swap
+        if intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy"):
             raw_delta = int(result.get("affinity_delta", -1))
             affinity_delta = min(-1, max(-2, raw_delta if raw_delta < 0 else -1))
+        elif intent == "flirt":
+            affinity_delta = -1
+        elif intent in ("photo_send", "send_photo"):
+            affinity_delta = 0
         else:
             affinity_delta = 0
         rendezvous = ""
     else:  # crit_fail
-        if intent == "nsfw_photo":
-            # Guaranteed strong penalty on critical failure
+        if intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy"):
             raw_delta = int(result.get("affinity_delta", -3))
             affinity_delta = min(-3, max(-5, raw_delta if raw_delta < 0 else -3))
+        elif intent == "flirt":
+            affinity_delta = -2
+        elif intent in ("photo_send", "send_photo"):
+            affinity_delta = -1
         else:
             raw_delta = int(result.get("affinity_delta", -2))
             affinity_delta = min(-1, max(-3, raw_delta if raw_delta < 0 else -2))
         rendezvous = ""
 
-    # --- Rendezvous location validation & seeding (STRICTLY for meetup intent) ---
-    resolved_rendezvous = rendezvous if intent == "meetup" else ""
-    if intent == "meetup" and rendezvous:
-        if existing_appointment and not is_reschedule_request:
-            resolved_rendezvous = existing_appointment["rendezvous_location"]
-        elif known_locations:
-            rendezvous_lower = rendezvous.lower().strip()
-            best_match = None
-            best_score_val = 0
-            for loc in known_locations:
-                primary = loc.get("primary_name", "")
-                sub = loc.get("sub_name", "")
-                zone = loc.get("zone_name", "")
-                candidates = [primary.lower(), sub.lower(), f"{primary} {sub}".lower(), f"{zone} {primary}".lower()]
-                for cand in candidates:
-                    if not cand.strip():
-                        continue
-                    # Token overlap score
-                    r_tokens = set(rendezvous_lower.split())
-                    c_tokens = set(cand.split())
-                    overlap = len(r_tokens & c_tokens)
-                    # Also check substring containment
-                    sub_match = rendezvous_lower in cand or cand in rendezvous_lower
-                    score_val = overlap * 2 + (3 if sub_match else 0)
-                    if score_val > best_score_val:
-                        best_score_val = score_val
-                        best_match = loc
-
-            if best_match and best_score_val >= 2:
-                # Resolve to canonical full location path
-                primary = best_match.get("primary_name", "")
-                sub = best_match.get("sub_name", "")
-                zone = best_match.get("zone_name", "")
-                resolved_rendezvous = f"{zone} ➔ {primary}" + (f" ➔ {sub}" if sub else "")
-            else:
-                # No match — seed the invented location as a new dynamic discoverable location
-                # so the player can actually travel there via the world map
-                import re as _re
-                # Derive zone from current_loc if possible
-                seed_zone = current_loc.split("➔")[0].strip() if "➔" in current_loc else (
-                    known_locations[0].get("zone_name", "Local Area") if known_locations else "Local Area"
-                )
-                seed_primary = rendezvous.strip()
-                seed_sub = "Meeting Spot"
-                seed_loc_id = _re.sub(r"[^a-z0-9_]", "_", f"{seed_zone}_{seed_primary}_{seed_sub}".lower())[:80]
-                db.save_session_location(
-                    session_id=session_id,
-                    location_id=seed_loc_id,
-                    zone_name=seed_zone,
-                    primary_name=seed_primary,
-                    sub_name=seed_sub,
-                    atmosphere=f"A quiet meeting spot suggested by {contact_name}.",
-                    is_dynamic=1
-                )
-                resolved_rendezvous = f"{seed_zone} ➔ {seed_primary} ➔ {seed_sub}"
-                log.info(f"[phone] Seeded new dynamic meetup location: {resolved_rendezvous} for session {session_id}")
+    resolved_rendezvous, intent = resolve_rendezvous_location(
+        session_id=session_id,
+        contact_name=contact_name,
+        current_loc=current_loc,
+        rendezvous=rendezvous,
+        reply_text=reply_text,
+        known_locations=known_locations,
+        existing_appointment=existing_appointment,
+        is_reschedule_request=is_reschedule_request,
+        intent=intent,
+        check_succeeded=check_result.succeeded,
+        user_message=user_message,
+        history_rows=history_rows
+    )
 
     # Save messages to SQLite
     db.save_phone_message(session_id, npc_id, sender="player", message=user_message, intent=intent)
@@ -924,15 +840,30 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             # Update contact known location so spatial queries and world tracker recognize where they are situated
             existing_basic = dict(contact.get("basic_info") or {})
             existing_basic["location"] = resolved_rendezvous
+            meet_term = "a romantic date" if is_romantic else "a meetup"
+            meet_mem = f"Agreed via DM to meet for {meet_term} at {resolved_rendezvous}"
             db.upsert_contact(
                 session_id=session_id,
                 character_id=player_char.get("id", 0),
                 npc_id=npc_id,
                 name=contact_name,
                 basic_info=existing_basic,
-                track=track
+                track=track,
+                new_memory=meet_mem
             )
             log.info(f"[phone] Appointment saved: {contact_name} @ {resolved_rendezvous} for session {session_id}")
+
+    # Record memorable flirtation milestone
+    if intent == "flirt" and check_result.succeeded and affinity_delta >= 2:
+        flirt_mem = f"Shared playful, affectionate flirtation via DM with {contact_name}"
+        db.upsert_contact(
+            session_id=session_id,
+            character_id=player_char.get("id", 0),
+            npc_id=npc_id,
+            name=contact_name,
+            track=track,
+            new_memory=flirt_mem
+        )
 
     # Update affinity score — guard against ineligible NPCs (teachers, parents, store clerks) slipping through
     if affinity_delta != 0:
@@ -964,11 +895,11 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         elif "[Attached Photo:" in reply_text:
             media_type = "photo"
             media_caption = reply_text.partition("[Attached Photo:")[2].partition("]")[0].strip()
-        elif intent in ("nsfw_photo", "nsfw_video"):
-            media_type = intent
+        elif intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy"):
+            media_type = "nsfw_video" if "video" in intent else "nsfw_photo"
             media_caption = reply_text
-        elif intent in ("photo", "video"):
-            media_type = intent
+        elif intent in ("photo", "video", "photo_ask", "ask_photo"):
+            media_type = "video" if "video" in intent else "photo"
             media_caption = reply_text
 
         if media_type and media_caption:
@@ -983,6 +914,62 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
                 )
                 media_type_created = media_type
 
+            # Record caption-aware persistent milestone memory
+            clean_cap = media_caption.strip().lstrip("[").rstrip("]").strip()
+            for prefix in [
+                "Attached Intimate Video:", "Attached Video:",
+                "Attached Intimate Photo:", "Attached Photo:",
+                "Intimate Video:", "Video:", "Intimate Photo:", "Photo:"
+            ]:
+                if clean_cap.startswith(prefix):
+                    clean_cap = clean_cap[len(prefix):].strip()
+
+            if media_type in ("nsfw_video", "intimate_video"):
+                media_mem = f"Exchanged intimate video via DM: {contact_name} ({clean_cap})"
+            elif media_type in ("nsfw_photo", "intimate_photo"):
+                media_mem = f"Exchanged intimate photo via DM: {contact_name} ({clean_cap})"
+            elif media_type == "video":
+                media_mem = f"Exchanged video clip via DM: {contact_name} ({clean_cap})"
+            else:
+                media_mem = f"Exchanged casual photo via DM: {contact_name} ({clean_cap})"
+
+            db.upsert_contact(
+                session_id=session_id,
+                character_id=player_char.get("id", 0),
+                npc_id=npc_id,
+                name=contact_name,
+                track=track,
+                new_memory=media_mem
+            )
+
+    if intent_category:
+        meta = {}
+        if intent_category == "flirt":
+            existing_hist = list(daily_limits["flirt"].get("history", []))
+            existing_hist.append({
+                "attempt": flirt_attempt_num,
+                "outcome": check_result.tier,
+                "succeeded": check_result.succeeded,
+            })
+            meta["history"] = existing_hist
+        elif intent_category == "meetup":
+            if is_reschedule_request:
+                meta["relocations_used"] = relocation_num
+            else:
+                meta["relocations_used"] = 0
+
+        db.record_phone_daily_interaction(
+            session_id=session_id,
+            npc_id=npc_id,
+            current_day=current_day,
+            intent=intent_category,
+            outcome=check_result.tier,
+            metadata=meta,
+            is_over_limit=False
+        )
+
+    updated_limits = db.get_phone_daily_limits(session_id, npc_id, current_day)
+
     return {
         "reply_text": reply_text,
         "affinity_delta": affinity_delta,
@@ -992,6 +979,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         "new_score": max(-100, min(100, score + affinity_delta)),
         "digital_item_id": digital_item_id,
         "media_type_created": media_type_created,
+        "daily_limits": updated_limits,
         "check_result": {
             "stat": stat_name,
             "chance": check_result.chance,

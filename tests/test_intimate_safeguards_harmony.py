@@ -593,6 +593,69 @@ class TestIntimateSafeguardsHarmony(unittest.TestCase):
         self.assertIn("fingering", PLAYER_INTIMATE_ACTION_KEYWORDS)
         self.assertIn("manual stimulation", PLAYER_INTIMATE_ACTION_KEYWORDS)
 
+    def test_partition_sensitive_spots_and_turn_ons_no_duplication(self):
+        """Regression: sensitive spots and turn-ons must be partitioned without cross-duplication."""
+        from mechanics.social.persona.intimacy.logic import partition_sensitivities_and_turn_ons
+        from mechanics.social.persona.intimacy.formatting import format_intimate_profile_sections
+        from mechanics.social.persona.intimacy.appearance import normalize_appearance
+
+        # 1. Direct partitioning logic
+        combined = "Chest & sternum (Physical), Slow undressing (Action), Lower back & hips (Physical), Whispering in ear (Action)"
+        spots, turns = partition_sensitivities_and_turn_ons(combined, combined)
+        self.assertIn("Chest & sternum (Physical)", spots)
+        self.assertIn("Lower back & hips (Physical)", spots)
+        self.assertNotIn("Slow undressing", spots)
+        self.assertNotIn("Whispering in ear", spots)
+
+        self.assertIn("Slow undressing (Action)", turns)
+        self.assertIn("Whispering in ear (Action)", turns)
+        self.assertNotIn("Chest & sternum", turns)
+        self.assertNotIn("Lower back & hips", turns)
+
+        # 2. normalize_appearance partitioning
+        raw_app = {
+            "turn_ons": "Chest & sternum (Physical), Slow undressing (Action)",
+            "sensitive_spots": "Chest & sternum (Physical), Slow undressing (Action)"
+        }
+        norm = normalize_appearance(raw_app, gender="female", race="human")
+        self.assertIn("Chest & sternum (Physical)", norm["sensitive_spots"])
+        self.assertNotIn("Slow undressing", norm["sensitive_spots"])
+        self.assertIn("Slow undressing (Action)", norm["turn_ons"])
+        self.assertNotIn("Chest & sternum", norm["turn_ons"])
+
+        # 3. format_intimate_profile_sections output
+        sections = format_intimate_profile_sections(raw_app, gender="female", info_level=3)
+        sens_lines = "\n".join(sections["sensitivities"])
+        self.assertIn("• **Sensitive Spots**: Chest & sternum (Physical)", sens_lines)
+        self.assertIn("• **Desires & Kinks**: Slow undressing (Action)", sens_lines)
+        self.assertNotIn("Slow undressing", [l for l in sections["sensitivities"] if "Sensitive Spots" in l][0])
+        self.assertNotIn("Chest & sternum", [l for l in sections["sensitivities"] if "Desires & Kinks" in l][0])
+
+    def test_undergarments_nude_color_sanitized_to_beige_skin_tone(self):
+        """Regression: undergarment color must never be labeled 'Nude / Beige' to avoid player confusion with being naked."""
+        from mechanics.social.persona.intimacy.formatting import format_intimate_profile_sections
+        from mechanics.social.persona.intimacy.appearance import normalize_appearance
+
+        # Legacy data with "Nude / Beige"
+        raw_app = {
+            "undergarments": {
+                "bra": "Nude / Beige unpadded modal triangle bra",
+                "underwear": "Matching Nude / Beige cheeky briefs"
+            }
+        }
+        norm = normalize_appearance(raw_app, gender="female")
+        self.assertNotIn("Nude / Beige", norm["undergarments"]["bra"])
+        self.assertIn("Beige / Skin-Tone", norm["undergarments"]["bra"])
+        self.assertNotIn("Nude / Beige", norm["undergarments"]["underwear"])
+        self.assertIn("Beige / Skin-Tone", norm["undergarments"]["underwear"])
+
+        sections = format_intimate_profile_sections(raw_app, gender="female", info_level=3)
+        under_lines = "\n".join(sections["undergarments"])
+        self.assertNotIn("Nude / Beige", under_lines)
+        self.assertIn("Beige / Skin-Tone unpadded modal triangle bra", under_lines)
+        self.assertIn("Matching Beige / Skin-Tone cheeky briefs", under_lines)
+
 if __name__ == "__main__":
     unittest.main()
+
 

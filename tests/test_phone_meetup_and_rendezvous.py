@@ -254,6 +254,234 @@ class TestPhoneMeetupAndRendezvous(unittest.TestCase):
         self.assertTrue(any("Discuss a strategic plan" in l for l in labels))
         self.assertTrue(any("Thank Denise" in l for l in labels))
 
+    def test_meetup_reschedule_updates_appointment_and_marker(self):
+        """Verifies that rescheduling a meetup via phone DM updates the appointment and map marker."""
+        import asyncio
+        from unittest.mock import patch, AsyncMock
+        from skill_check import CheckResult
+        from mechanics.system.phone.messaging import (
+            is_meetup_reschedule_request,
+            is_meetup_confirmation_message,
+            generate_contact_dm_reply
+        )
+
+        # 1. Test reschedule & confirmation intent classification
+        self.assertTrue(is_meetup_reschedule_request("Can we meet somewhere more private?"))
+        self.assertTrue(is_meetup_reschedule_request("Let's meet at the music room instead."))
+        self.assertTrue(is_meetup_reschedule_request("Could we go somewhere quiet?"))
+        self.assertTrue(is_meetup_reschedule_request("How about the Old East Wing Music Room?"))
+        self.assertTrue(is_meetup_confirmation_message("Sounds nice"))
+        self.assertTrue(is_meetup_confirmation_message("Deal"))
+        self.assertTrue(is_meetup_confirmation_message("See you there"))
+
+        # 2. Set up initial appointment at School Main Gates
+        initial_loc = "Sakuragaoka Academy ➔ School Main Gates ➔ Entrance Steps"
+        new_loc_primary = "Old East Wing Music Room"
+        new_loc_full = "Cultural Union & Performing Arts Annex ➔ Old East Wing Music Room ➔ Upright Piano Alcove"
+
+        db.save_session_location(
+            session_id=self.session_id,
+            location_id="sakuragaoka_main_gates",
+            zone_name="Sakuragaoka Academy",
+            primary_name="School Main Gates",
+            sub_name="Entrance Steps",
+            atmosphere="School entrance."
+        )
+        db.save_session_location(
+            session_id=self.session_id,
+            location_id="old_east_wing_music_room",
+            zone_name="Cultural Union & Performing Arts Annex",
+            primary_name="Old East Wing Music Room",
+            sub_name="Upright Piano Alcove",
+            atmosphere="An empty, quiet music room."
+        )
+
+        db.upsert_contact(
+            session_id=self.session_id,
+            character_id=self.char["id"],
+            npc_id="mia_yamada",
+            name="Mia Yamada",
+            basic_info={"role": "Student"}
+        )
+        contact = db.get_contact(self.session_id, "mia_yamada", self.char["id"])
+
+        # Save initial appointment
+        db.save_phone_appointment(self.session_id, "mia_yamada", "Mia Yamada", initial_loc)
+        appts = db.get_phone_appointments(self.session_id, status="pending")
+        self.assertEqual(len(appts), 1)
+        self.assertEqual(appts[0]["rendezvous_location"], initial_loc)
+
+        # Initial markers check
+        markers_before = waypoints.get_location_waypoint_markers(self.session_id)
+        self.assertTrue(any("💌" in tag for tag in markers_before.get("School Main Gates", [])))
+        self.assertFalse(any("💌" in tag for tag in markers_before.get("Old East Wing Music Room", [])))
+
+        # 3. Simulate Player sending "Can we meet somewhere more private?"
+        mock_check = CheckResult(
+            chance=85,
+            roll=20.0,
+            tier="success",
+            tier_label="Success",
+            succeeded=True,
+            requirement=5
+        )
+        mock_llm_reply = {
+            "reply_text": "Sure, let's meet at the Old East Wing Music Room.",
+            "affinity_delta": 2,
+            "rendezvous_location": new_loc_primary
+        }
+
+        sess = db.get_session(self.session_id)
+        with patch("mechanics.system.phone.call_llm_json", new=AsyncMock(return_value=mock_llm_reply)), \
+             patch("llm_client.call_llm_json", new=AsyncMock(return_value=mock_llm_reply)), \
+             patch("mechanics.system.phone.messaging.resolve_check", return_value=mock_check):
+            result = asyncio.run(generate_contact_dm_reply(
+                session=sess,
+                contact=contact,
+                player_char=self.char,
+                user_message="Can we meet somewhere more private?",
+                intent="custom"
+            ))
+
+        # 4. Verify appointment in DB was updated to the new music room
+        appts_after = db.get_phone_appointments(self.session_id, status="pending")
+        self.assertEqual(len(appts_after), 1)
+        self.assertIn("Old East Wing Music Room", appts_after[0]["rendezvous_location"])
+        self.assertEqual(
+            appts_after[0]["rendezvous_location"],
+            "Cultural Union & Performing Arts Annex ➔ Old East Wing Music Room ➔ Upright Piano Alcove"
+        )
+
+        # 5. Verify waypoint markers update to the new location and no longer point to School Main Gates
+        markers_after = waypoints.get_location_waypoint_markers(self.session_id)
+        self.assertFalse(any("💌" in tag for tag in markers_after.get("School Main Gates", [])))
+        self.assertTrue(any("💌" in tag for tag in markers_after.get("Old East Wing Music Room", [])))
+
+    def test_private_phone_meetup_prevents_uninvited_bystanders_from_traveling(self):
+        """Verify that ambient classmates from homeroom stay behind when traveling to a private phone rendezvous."""
+        music_room = "Cultural Union & Performing Arts Annex ➔ Old East Wing Music Room ➔ Upright Piano Alcove"
+        hallway = "Sakuragaoka Academy ➔ School Hallways ➔ Main Area"
+
+        # Save active appointment with Mia Yamada in the music room
+        db.save_phone_appointment(self.session_id, "mia_yamada", "Mia Yamada", music_room)
+
+        session = {
+            "id": self.session_id,
+            "scenario": "high_school_drama",
+            "current_location": hallway,
+            "current_npcs": [
+                {"name": "Yuki Kuroda", "role": "Student"},
+                {"name": "Leon Schneider", "role": "Club Member"}
+            ],
+            "dialogue_partners": ["Yuki Kuroda"],
+            "history": ["Player talked briefly with Yuki in the hallway."]
+        }
+
+        # Player travels to music room
+        actions = [{"label": f"I travel to {music_room}"}]
+        llm_result = {
+            "location": music_room,
+            "npcs_present": [
+                {"name": "Mia Yamada", "role": "Student"},
+                {"name": "Yuki Kuroda"},
+                {"name": "Leon Schneider"}
+            ]
+        }
+
+        processed = game_engine.process_scene_npcs(
+            llm_result,
+            session,
+            new_loc=music_room,
+            old_loc=hallway,
+            actions=actions
+        )
+        names = [n["name"] for n in processed]
+
+        # Mia Yamada must be present for the rendezvous
+        self.assertIn("Mia Yamada", names)
+        # Yuki and Leon from the hallway must NOT travel to the private meetup
+        self.assertNotIn("Yuki Kuroda", names)
+        self.assertNotIn("Leon Schneider", names)
+
+    def test_first_name_and_full_name_deduplication_in_reconciliation(self):
+        """Verify that single-word first names (e.g. Yuki, Leon) are deduplicated into full canonical names."""
+        db.upsert_contact(
+            session_id=self.session_id,
+            character_id=self.char["id"],
+            npc_id="yuki_kuroda",
+            name="Yuki Kuroda",
+            basic_info={"role": "Student"},
+            track="platonic"
+        )
+        db.upsert_contact(
+            session_id=self.session_id,
+            character_id=self.char["id"],
+            npc_id="leon_schneider",
+            name="Leon Schneider",
+            basic_info={"role": "Club Member"},
+            track="platonic"
+        )
+
+        session = {
+            "id": self.session_id,
+            "scenario": "high_school_drama",
+            "current_location": "Cultural Union & Performing Arts Annex ➔ Old East Wing Music Room ➔ Upright Piano Alcove",
+            "current_npcs": [{"name": "Mia Yamada", "role": "Student"}],
+            "history": []
+        }
+
+        # Incoming entities contain both short names from entity audit and full names from contact scan
+        llm_result = {
+            "location": "Cultural Union & Performing Arts Annex ➔ Old East Wing Music Room ➔ Upright Piano Alcove",
+            "npcs_present": [
+                {"name": "Mia Yamada", "role": "Student"},
+                {"name": "Yuki", "role": ""},
+                {"name": "Leon", "role": ""},
+                {"name": "Yuki Kuroda", "role": "Student"},
+                {"name": "Leon Schneider", "role": "Club Member"}
+            ]
+        }
+
+        processed = game_engine.process_scene_npcs(
+            llm_result,
+            session,
+            new_loc=session["current_location"],
+            old_loc=session["current_location"]
+        )
+        names = [n["name"] for n in processed]
+
+        # Must contain only canonical full names, no duplicates
+        self.assertIn("Mia Yamada", names)
+        self.assertIn("Yuki Kuroda", names)
+        self.assertIn("Leon Schneider", names)
+        self.assertNotIn("Yuki", names)
+        self.assertNotIn("Leon", names)
+        self.assertEqual(len(names), 3)
+
+    def test_relationship_updates_does_not_trigger_meetup_history(self):
+        """Verify that 'updates' substring containing 'date' does not falsely trigger narrative continuity bridge."""
+        from mechanics.world.mobility import has_narrative_continuity_bridge
+
+        session = {
+            "id": self.session_id,
+            "scenario": "high_school_drama",
+            "current_location": "Sakuragaoka Academy ➔ School Hallways ➔ Main Area",
+            "history": [
+                {
+                    "relationship_updates": [{"npc_name": "Yuki Kuroda", "delta_score": 3}],
+                    "witnessed_by": ["Artemiusz", "Yuki Kuroda"],
+                    "narrative": "Artemiusz walks through the school hallway."
+                }
+            ]
+        }
+        has_bridge = has_narrative_continuity_bridge(
+            "Yuki Kuroda",
+            session=session,
+            actions=[{"label": "Travel to Music Room"}],
+            new_loc="Cultural Union & Performing Arts Annex ➔ Old East Wing Music Room ➔ Upright Piano Alcove"
+        )
+        self.assertFalse(has_bridge)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,5 @@
 import asyncio
+import re
 import time
 from fastapi import APIRouter, HTTPException
 
@@ -6,6 +7,7 @@ import db
 from db import adb
 import game_engine
 import skill_check
+from scenario_data import get_scenario_display_name
 from services.turn_service import TurnService
 from mechanics.system.concurrency import distributed_session_lock, distributed_user_lock
 from .deps import (
@@ -71,6 +73,10 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
     session["party_members"] = enrich_session_party_members(session)
 
     scen_key_check = session.get("scenario", "fantasy")
+    from scenario_data import is_nsfw_scenario, get_scenario_tags, get_scenario_display_name
+    session["is_nsfw"] = is_nsfw_scenario(scen_key_check)
+    session["scenario_tags"] = get_scenario_tags(scen_key_check)
+    session["scenario_display_name"] = get_scenario_display_name(scen_key_check)
     current_loc_check = session.get("current_location") or ""
     merchant_state = session.get("merchant") or {}
     is_school = is_school_scenario(scen_key_check)
@@ -130,18 +136,53 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
         isinstance(c, dict) and c.get("is_fallback")
         for c in (session.get("choices") or [])
     )
-    has_fallback_narrative = any(
-        phrase in narr_lower
-        for phrase in (
-            "threads of fate shimmer",
-            "temporary fallback",
-            "fallback generation",
-            "llm connection failed",
+
+    # Also inspect latest history entry for fallback markers
+    hist = session.get("history") or []
+    last_hist_narr = ""
+    last_hist_is_fallback = False
+    if hist and isinstance(hist[-1], dict):
+        last_hist_narr = str(
+            hist[-1].get("outcome_narrative")
+            or hist[-1].get("narrative")
+            or ""
+        ).lower()
+        last_hist_is_fallback = bool(
+            hist[-1].get("is_fallback")
+            or hist[-1].get("_is_fallback_narrative")
         )
+
+    fallback_keywords = (
+        "threads of fate shimmer",
+        "temporary fallback",
+        "fallback generation",
+        "llm connection failed",
+        "deliberate intent",
+        "carefully observe the surroundings",
+    )
+    has_fallback_narrative = any(
+        phrase in narr_lower or phrase in last_hist_narr
+        for phrase in fallback_keywords
     )
     session["is_fallback_generation"] = bool(
-        session.get("is_fallback_generation") or has_fallback_choice or has_fallback_narrative
+        session.get("is_fallback_generation")
+        or last_hist_is_fallback
+        or has_fallback_choice
+        or has_fallback_narrative
     )
+
+    # Heuristic truncation detection:
+    # Flag turns where prose is unusually brief (< 180 chars with <= 1 sentence)
+    # or ended abruptly without terminal punctuation, on turns with prior history.
+    narr_clean = str(session.get("narrative") or "").strip()
+    is_truncated = False
+    if narr_clean and len(hist) > 0 and not session["is_fallback_generation"]:
+        sentences = [s for s in re.split(r'[.!?]+', narr_clean) if s.strip()]
+        if len(narr_clean) < 180 and len(sentences) <= 1:
+            is_truncated = True
+        elif len(narr_clean) >= 20 and narr_clean[-1] not in ('.', '!', '?', '"', "'", '”', '’'):
+            is_truncated = True
+    session["is_truncated_generation"] = bool(session.get("is_truncated_generation") or is_truncated)
 
     if in_combat and uid:
         from mechanics.narrative.choice_generator import generate_categorized_combat_actions
@@ -276,7 +317,8 @@ def _fetch_open_lobbies() -> list[dict]:
                 "host_user_id": r["host_user_id"],
                 "host_name": host_char["name"] if host_char else f"User {r['host_user_id']}",
                 "scenario": r["scenario"],
-                "scene_title": r["scene_title"] or "New Adventure",
+                "scenario_display_name": get_scenario_display_name(r["scenario"]),
+                "scene_title": r["scene_title"] or get_scenario_display_name(r["scenario"]),
                 "current_location": r["current_location"] or "",
                 "status": r["status"],
             })
@@ -362,6 +404,16 @@ async def start_adventure(req: StartAdventureRequest):
             }
             if hasattr(db, 'update_character_stats'):
                 await adb(db.update_character_stats, req.user_id, stats)
+
+        app_update = dict(req.appearance or {})
+        if req.breast_size is not None:
+            app_update["breast_size"] = req.breast_size
+        if req.penis_size is not None:
+            app_update["penis_size"] = req.penis_size
+        if req.asset_texture is not None:
+            app_update["asset_texture"] = req.asset_texture
+        if app_update:
+            await adb(db.update_character_appearance, char["id"], app_update)
 
 
         default_cap = 1 if mode == "solo" else max(2, req.capacity or 4)
@@ -536,9 +588,13 @@ async def execute_action(req: ActionRequest):
 
             from mechanics.world.mobility import get_session_dialogue_partners
             sess_dp = get_session_dialogue_partners(session) if isinstance(session, dict) else []
-            target_candidates = list(sess_dp)
-            if chosen.get("target_npc") and str(chosen["target_npc"]).strip() and chosen["target_npc"] not in target_candidates:
-                target_candidates.append(chosen["target_npc"])
+            explicit_target = chosen.get("target_npc")
+            if not explicit_target:
+                act_lbl = (chosen.get("label") or chosen.get("text") or "").lower()
+                named_dps = [dp for dp in sess_dp if dp and (dp.lower() in act_lbl or (len(dp.split()[0]) >= 3 and dp.split()[0].lower() in act_lbl))]
+                if len(named_dps) == 1:
+                    explicit_target = named_dps[0]
+            target_candidates = [explicit_target] if explicit_target else list(sess_dp)
             if target_candidates and isinstance(session, dict) and session.get("id"):
                 from mechanics.combat.traits import get_combined_dc_modifiers
                 from mechanics.social.persona import calculate_intimate_action_dc_modifier
@@ -570,6 +626,18 @@ async def execute_action(req: ActionRequest):
                 res = skill_check.resolve_check(char[stat_col], req_val, char["luk"], check_mode=check_mode)
 
             label_text = chosen.get("label") or chosen.get("text") or "Action"
+            act_cat = chosen.get("action_category", "")
+            act_intent = intent or chosen.get("intent")
+            act_target = target_npc or chosen.get("target_npc")
+            if not act_cat or not act_intent:
+                from mechanics.narrative.intent import classify_action_intent
+                parsed_i = classify_action_intent(label_text)
+                if not act_cat:
+                    act_cat = parsed_i.category.value
+                if not act_intent:
+                    act_intent = parsed_i.category.value
+                if not act_target and parsed_i.target_entity:
+                    act_target = parsed_i.target_entity
             action = dict(chosen)
             action.update({
                 "user_id": req.user_id,
@@ -588,7 +656,7 @@ async def execute_action(req: ActionRequest):
                 "roll": res.roll,
                 "text": label_text,
                 "choice_type": chosen.get("choice_type", ""),
-                "action_category": chosen.get("action_category", ""),
+                "action_category": act_cat,
                 "spell_id": chosen.get("spell_id", ""),
                 "combat_target": combat_target or chosen.get("combat_target"),
                 "is_quest_action": bool(chosen.get("is_quest_action")),
@@ -600,8 +668,8 @@ async def execute_action(req: ActionRequest):
                 "item_name": chosen.get("item_name", ""),
                 "item": chosen.get("item"),
                 "item_consumed": chosen.get("item_consumed", False),
-                "intent": intent or chosen.get("intent"),
-                "target_npc": target_npc or chosen.get("target_npc"),
+                "intent": act_intent,
+                "target_npc": act_target,
             })
         elif choice_index is not None and 0 <= choice_index < len(choices):
             chosen = choices[choice_index]
@@ -627,9 +695,13 @@ async def execute_action(req: ActionRequest):
 
             from mechanics.world.mobility import get_session_dialogue_partners
             sess_dp = get_session_dialogue_partners(session) if isinstance(session, dict) else []
-            target_candidates = list(sess_dp)
-            if chosen.get("target_npc") and str(chosen["target_npc"]).strip() and chosen["target_npc"] not in target_candidates:
-                target_candidates.append(chosen["target_npc"])
+            explicit_target = chosen.get("target_npc")
+            if not explicit_target:
+                act_lbl = (chosen.get("label") or chosen.get("text") or "").lower()
+                named_dps = [dp for dp in sess_dp if dp and (dp.lower() in act_lbl or (len(dp.split()[0]) >= 3 and dp.split()[0].lower() in act_lbl))]
+                if len(named_dps) == 1:
+                    explicit_target = named_dps[0]
+            target_candidates = [explicit_target] if explicit_target else list(sess_dp)
             if target_candidates and isinstance(session, dict) and session.get("id"):
                 from mechanics.combat.traits import get_combined_dc_modifiers
                 from mechanics.social.persona import calculate_intimate_action_dc_modifier
@@ -654,11 +726,24 @@ async def execute_action(req: ActionRequest):
                 if roll < 10 and not succeeded: tier = "crit_fail"
                 res = skill_check.CheckResult(chance=rate, roll=roll, tier=tier, tier_label=tier.replace('_', ' ').title(), succeeded=succeeded, requirement=req_val)
             elif stat in ("NONE", "FREE") or req_val <= 0:
-                res = skill_check.CheckResult(chance=100, roll=100.0, tier="success", tier_label="Success", succeeded=True)
+                res = skill_check.CheckResult(chance=100, roll=100.0, tier="success", tier_label="Success", succeeded=True, requirement=req_val)
                 rate = 100
             else:
                 rate = skill_check.success_chance(char[stat_col], req_val, check_mode=check_mode)
                 res = skill_check.resolve_check(char[stat_col], req_val, char["luk"], check_mode=check_mode)
+
+            direct_cat = chosen.get("action_category", "")
+            direct_intent = intent or chosen.get("intent")
+            direct_target = target_npc or chosen.get("target_npc")
+            if not direct_cat or not direct_intent:
+                from mechanics.narrative.intent import classify_action_intent
+                parsed_d = classify_action_intent(chosen.get("label", ""))
+                if not direct_cat:
+                    direct_cat = parsed_d.category.value
+                if not direct_intent:
+                    direct_intent = parsed_d.category.value
+                if not direct_target and parsed_d.target_entity:
+                    direct_target = parsed_d.target_entity
 
             action = {
                 "user_id": req.user_id,
@@ -677,7 +762,7 @@ async def execute_action(req: ActionRequest):
                 "roll": res.roll,
                 "text": chosen.get("label", ""),
                 "choice_type": chosen.get("choice_type", ""),
-                "action_category": chosen.get("action_category", ""),
+                "action_category": direct_cat,
                 "spell_id": chosen.get("spell_id", ""),
                 "combat_target": combat_target or chosen.get("combat_target"),
                 "is_quest_action": bool(chosen.get("is_quest_action")),
@@ -689,8 +774,8 @@ async def execute_action(req: ActionRequest):
                 "item_name": chosen.get("item_name", ""),
                 "item": chosen.get("item"),
                 "item_consumed": chosen.get("item_consumed", False),
-                "intent": intent or chosen.get("intent"),
-                "target_npc": target_npc or chosen.get("target_npc"),
+                "intent": direct_intent,
+                "target_npc": direct_target,
             }
         elif custom_action_text:
             inventory = await adb(db.get_inventory, req.user_id)
@@ -708,12 +793,39 @@ async def execute_action(req: ActionRequest):
             check_mode = user_settings.get("debug_check_mode", "off")
             stat_col = db.STAT_COLUMN.get(stat, "str_")
             hit_chance = classification.get("hit_chance") if isinstance(classification, dict) else None
-            if isinstance(classification, dict) and classification.get("action_category") in ("dialogue", "romantic_confession", "social_invite", "party_recruit", "affection"):
+            if isinstance(classification, dict) and classification.get("action_category") in ("dialogue", "romantic_confession", "social_invite", "party_recruit", "affection", "disclosure_inquiry"):
                 dialogue_mode = user_settings.get("dialogue_mode", "balanced")
                 if dialogue_mode == "casual":
                     req_val = max(1, req_val - 2)
                 elif dialogue_mode == "challenging":
                     req_val += 2
+
+            from mechanics.world.mobility import get_session_dialogue_partners
+            sess_dp = get_session_dialogue_partners(session) if isinstance(session, dict) else []
+            explicit_target = (
+                combat_target
+                or (classification.get("target_npc") if isinstance(classification, dict) else None)
+            )
+            if not explicit_target:
+                act_lbl = str(custom_action_text or "").lower()
+                named_dps = [dp for dp in sess_dp if dp and (dp.lower() in act_lbl or (len(dp.split()[0]) >= 3 and dp.split()[0].lower() in act_lbl))]
+                if len(named_dps) == 1:
+                    explicit_target = named_dps[0]
+            target_candidates = [explicit_target] if explicit_target else list(sess_dp)
+            if target_candidates and isinstance(session, dict) and session.get("id"):
+                from mechanics.combat.traits import get_combined_dc_modifiers
+                from mechanics.social.persona import calculate_intimate_action_dc_modifier
+                for dp_name in target_candidates:
+                    if dp_name:
+                        c_rec = await adb(db.get_contact, session["id"], str(dp_name).lower().replace(" ", "_"), char.get("id", 0))
+                        if c_rec:
+                            c_traits = c_rec.get("unlocked_traits") or c_rec.get("traits") or []
+                            t_mods = get_combined_dc_modifiers(c_traits)
+                            req_val += t_mods.get(stat, 0)
+                            app_rec = c_rec.get("appearance", {})
+                            if isinstance(app_rec, dict):
+                                req_val += calculate_intimate_action_dc_modifier(custom_action_text, app_rec)
+            req_val = max(1, req_val)
             if hit_chance is not None:
                 import random
                 rate = hit_chance
@@ -724,7 +836,7 @@ async def execute_action(req: ActionRequest):
                 if roll < 10 and not succeeded: tier = "crit_fail"
                 res = skill_check.CheckResult(chance=rate, roll=roll, tier=tier, tier_label=tier.replace('_', ' ').title(), succeeded=succeeded, requirement=req_val)
             elif stat in ("NONE", "FREE") or req_val <= 0:
-                res = skill_check.CheckResult(chance=100, roll=100.0, tier="success", tier_label="Success", succeeded=True)
+                res = skill_check.CheckResult(chance=100, roll=100.0, tier="success", tier_label="Success", succeeded=True, requirement=req_val)
                 rate = 100
             else:
                 rate = skill_check.success_chance(char[stat_col], req_val, check_mode=check_mode)
@@ -749,6 +861,9 @@ async def execute_action(req: ActionRequest):
                 "type": "custom",
                 "combat_target": combat_target,
                 "active_recall": classification.get("_active_recall") if isinstance(classification, dict) else None,
+                "action_category": classification.get("action_category", "") if isinstance(classification, dict) else "",
+                "intent": classification.get("intent") if isinstance(classification, dict) else None,
+                "target_npc": target_npc or (classification.get("target_npc") if isinstance(classification, dict) else None),
                 "is_quest_action": False,
                 "is_climax_action": False,
                 "quest_id": "",
@@ -906,6 +1021,14 @@ async def execute_action(req: ActionRequest):
             "sync_timestamp": time.time()
         })
 
+        # Dispatch Auditor Pass (Pass 4)
+        if outcome and outcome.get("_llm_system_prompt_list") and outcome.get("_llm_user_prompt"):
+            from scenario_data import uses_nsfw_model
+            is_nsfw_flag = uses_nsfw_model(session.get("scenario"))
+            sys_prompts = outcome.get("_llm_system_prompt_list")
+            user_prompt = outcome.get("_llm_user_prompt")
+            asyncio.create_task(_run_auditor_pass(req.session_id, req.user_id, sys_prompts, user_prompt, outcome, is_nsfw=is_nsfw_flag))
+
         if fresh_session.get("image_gen_enabled"):
             asyncio.create_task(
                 _trigger_scene_image_broadcast(
@@ -1030,8 +1153,15 @@ async def retry_adventure_scene(req: RetryAdventureRequest):
 @router.get("/api/saves/{user_id}")
 async def list_saves(user_id: int):
     """Lists all adventure save slots for the user's active character."""
+    from scenario_data import get_scenario_display_name
     saves = await adb(db.list_adventure_saves, user_id)
-    return {"saves": [dict(s) for s in saves]}
+    enriched_saves = []
+    for s in saves:
+        sd = dict(s)
+        if sd.get("scenario"):
+            sd["scenario_display_name"] = get_scenario_display_name(sd["scenario"])
+        enriched_saves.append(sd)
+    return {"saves": enriched_saves}
 
 
 @router.post("/api/saves/save")
@@ -1100,6 +1230,15 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
         if target_loc:
             clean_target = sanitize_location_target(target_loc, session_id=session_id, scen_key=scen_key, char_name=char_name)
             process_llm_location_update(session_id, clean_target, scen_key, char_name=char_name)
+
+    # Seed any active phone appointment rendezvous destinations
+    appts = (db.get_phone_appointments(session_id, status="pending") or []) + (db.get_phone_appointments(session_id, status="arrived") or [])
+    for appt in appts:
+        appt_loc = (appt.get("rendezvous_location") or "").strip()
+        if appt_loc:
+            clean_appt_loc = sanitize_location_target(appt_loc, session_id=session_id, scen_key=scen_key, char_name=char_name)
+            process_llm_location_update(session_id, clean_appt_loc, scen_key, char_name=char_name)
+
     if current_loc:
         process_llm_location_update(session_id, current_loc, scen_key, char_name=char_name)
 
@@ -1178,3 +1317,60 @@ async def get_world_map_locations(session_id: int, user_id: int | None = None):
     payload = await adb(_build_locations_payload, session_id, scen_key, current_loc, char_name)
     return payload
 
+
+async def _run_auditor_pass(session_id: int, user_id: int, sys_prompts: list | str, user_prompt: str, draft_outcome: dict, is_nsfw: bool = False):
+    try:
+        from game_engine.auditor import AuditorEngine
+        from models.llm_schemas import TurnOutcome
+        import json
+        import time
+        from db import adb
+        import db
+        
+        draft_obj = TurnOutcome.model_validate(draft_outcome)
+        new_out, new_next, report = await AuditorEngine.audit_turn(sys_prompts, user_prompt, draft_obj, is_nsfw=is_nsfw)
+        
+        if report.get("prose_rewritten"):
+            logger.info(f"Auditor rewrote prose for session {session_id}. Broadcasting UPDATE_SCENE.")
+            async with distributed_session_lock(session_id):
+                session = await adb(db.get_session, session_id)
+                if not session:
+                    return
+
+                raw_hist = list(session.get("history") or [])
+                if raw_hist and isinstance(raw_hist[-1], dict) and raw_hist[-1].get("type") == "action":
+                    last_entry = dict(raw_hist[-1])
+                    
+                    # Staleness Guard: Ensure the user hasn't already advanced to another turn
+                    draft_out = str(draft_outcome.get("outcome_narrative") or "").strip()
+                    draft_nxt = str(draft_outcome.get("next_narrative") or draft_outcome.get("narrative") or "").strip()
+                    curr_out = str(last_entry.get("outcome_narrative") or "").strip()
+                    curr_nxt = str(last_entry.get("next_narrative") or "").strip()
+                    
+                    if curr_out != draft_out or curr_nxt != draft_nxt:
+                        logger.info(f"Auditor pass for session {session_id} skipped: session history has already advanced.")
+                        return
+
+                    last_entry["outcome_narrative"] = new_out
+                    last_entry["next_narrative"] = new_next
+                    last_entry["narrative"] = new_out or new_next
+                    raw_hist[-1] = last_entry
+
+                    await adb(
+                        db.update_session,
+                        session_id,
+                        history_json=json.dumps(raw_hist, default=str),
+                        narrative=new_next or new_out
+                    )
+
+                    fresh_session = await adb(db.get_session, session_id)
+                    fresh_session = await adb(_enrich_session_for_client, fresh_session, user_id)
+
+                    await manager.broadcast(session_id, {
+                        "type": "UPDATE_SCENE",
+                        "session": fresh_session,
+                        "sync_timestamp": time.time(),
+                        "auditor_report": report
+                    })
+    except Exception as e:
+        logger.error(f"Auditor background pass failed for session {session_id}: {e}")

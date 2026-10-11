@@ -1,6 +1,16 @@
 import asyncio
 import logging
+import sys
 import traceback
+
+if sys.platform == "win32":
+    try:
+        if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8")
+        if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 import discord
 from discord import app_commands
@@ -259,6 +269,11 @@ def acquire_single_instance_lock():
 
 async def main():
     db.init_db()
+    try:
+        snapshot_path = db.create_database_snapshot(tag="bot_startup")
+        print(f"📦 [Database Snapshot] Automatic backup created at: {snapshot_path}")
+    except Exception as e:
+        print(f"⚠️ [Database Snapshot] Failed to create startup snapshot (non-fatal): {e}")
     async with bot:
         for cog in COGS:
             await bot.load_extension(cog)

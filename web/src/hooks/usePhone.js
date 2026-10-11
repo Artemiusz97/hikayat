@@ -6,6 +6,7 @@ export const usePhone = (sessionId, user) => {
   const [loading, setLoading] = useState(true);
   const [activeChatNpc, setActiveChatNpc] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
+  const [dailyLimits, setDailyLimits] = useState(null);
   const [loadingChat, setLoadingChat] = useState(false);
   const [sendingChat, setSendingChat] = useState(false);
 
@@ -33,6 +34,9 @@ export const usePhone = (sessionId, user) => {
     try {
       const data = await apiCall(`/api/phone/${sessionId}/messages/${encodeURIComponent(npcId)}`);
       setChatMessages(data.messages || []);
+      if (data.daily_limits) {
+        setDailyLimits(data.daily_limits);
+      }
     } catch (err) {
       console.error("Failed to fetch NPC chat messages:", err);
       setChatMessages([]);
@@ -56,6 +60,11 @@ export const usePhone = (sessionId, user) => {
       });
       if (data?.messages) {
         setChatMessages(data.messages);
+      }
+      if (data?.daily_limits) {
+        setDailyLimits(data.daily_limits);
+      } else if (data?.reply?.daily_limits) {
+        setDailyLimits(data.reply.daily_limits);
       }
       await fetchPhoneState();
       return data;
@@ -94,10 +103,11 @@ export const usePhone = (sessionId, user) => {
         user_id: user.user_id,
       }),
     });
-    if (data?.social_state) {
+    if (data) {
       setPhoneData(prev => ({
         ...(prev || {}),
-        social_state: data.social_state,
+        social_state: data.social_state || prev?.social_state,
+        gossip_feed: data.gossip_feed || prev?.gossip_feed || [],
       }));
     }
     return data;
@@ -134,7 +144,7 @@ export const usePhone = (sessionId, user) => {
 
   return {
     phoneData,
-    isSupported: Boolean(phoneData?.isSupported || phoneData?.is_supported || phoneData?.media_gallery?.length > 0),
+    isSupported: true,
     branding: phoneData?.branding || {
       device_name: '📱 Smartphone',
       os_name: 'Mobile OS',
@@ -156,11 +166,12 @@ export const usePhone = (sessionId, user) => {
     sendFriendRequest,
     activeChatNpc,
     chatMessages,
+    dailyLimits,
     loadingChat,
     sendingChat,
     loadChatMessages,
     sendMessage,
-    closeChat: () => { setActiveChatNpc(null); setChatMessages([]); }
+    closeChat: () => { setActiveChatNpc(null); setChatMessages([]); setDailyLimits(null); }
   };
 };
 

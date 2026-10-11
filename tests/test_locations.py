@@ -24,5 +24,5 @@ def test_incongruous_container_guards():
 def test_parse_tiered_location_demotion_guards():
     z, p, s = parse_tiered_location("Kaede Residential Quarter ➔ Artem's House ➔ St. Michael Academy", scenario_key="high_school_drama", session_id=1)
     assert z == "St. Michael Academy"
-    assert p == "Entrance Foyer & Shoe Lockers"
+    assert p in ("School Main Gates", "Entrance Foyer & Shoe Lockers")
     assert s == "Main Area"

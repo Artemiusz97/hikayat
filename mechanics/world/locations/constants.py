@@ -1,6 +1,6 @@
 from pathlib import Path
 LOCATION_SCENARIOS = {'furry_high_school_drama', 'nsfw_high_school_drama', 'nsfw_furry_high_school_drama', 'high_school_drama'}
-TAG_TO_LOCATION_SEED_KEY = {'space': 'sci_fi', 'sci_fi': 'sci_fi', 'grimdark': 'dark_fantasy', 'dark_fantasy': 'dark_fantasy', 'isekai': 'isekai_fantasy', 'isekai_fantasy': 'isekai_fantasy', 'high_school': 'high_school_drama', 'high_school_drama': 'high_school_drama', 'post_apocalypse': 'nuclear_post_apocalypse', 'nuclear_post_apocalypse': 'nuclear_post_apocalypse', 'cyberpunk': 'cyberpunk', 'steampunk': 'steampunk', 'fantasy': 'fantasy'}
+TAG_TO_LOCATION_SEED_KEY = {'space': 'sci_fi', 'sci_fi': 'sci_fi', 'dark_fantasy': 'dark_fantasy', 'isekai': 'isekai_fantasy', 'isekai_fantasy': 'isekai_fantasy', 'high_school': 'high_school_drama', 'high_school_drama': 'high_school_drama', 'slice_of_life': 'slice_of_life', 'post_apocalypse': 'nuclear_post_apocalypse', 'nuclear_post_apocalypse': 'nuclear_post_apocalypse', 'cyberpunk': 'cyberpunk', 'steampunk': 'steampunk', 'fantasy': 'fantasy'}
 _SEED_PATH = Path(__file__).resolve().parent.parent.parent.parent / 'data' / 'locations_seed.json'
 
 ENCLOSED_ROOM_KEYWORDS = {'room', 'office', 'classroom', 'lab', 'clinic', 'library', 'hall', 'dorm', 'apartment', 'house', 'shop', 'store', 'inn', 'tavern', 'bedroom', 'kitchen', 'bathroom'}
@@ -15,7 +15,8 @@ CAMPUS_FACILITY_KEYWORDS = {
     'music wing', 'art studio', 'rehearsal hall', 'lecture hall', 'empty classroom',
     'dormitory', "principal's office", 'principal', 'vice principal', 'headmaster',
     'guidance counselor', 'counselor', 'broadcast', 'av room', 'audio-visual',
-    'bike shed', 'bicycle racks', 'locker room', 'equipment shed', 'prep room', 'science wing', 'academic wing'
+    'bike shed', 'bicycle racks', 'locker room', 'equipment shed', 'prep room', 'science wing', 'academic wing',
+    'school gate', 'main gate', 'entrance gate', 'school entrance', 'front gate', 'campus gate', 'school main gates', 'entrance path', 'gate checkpoint', 'main gates'
 }
 RESIDENTIAL_PLACE_KEYWORDS = {
     'residence', 'house', 'apartment', 'cottage', 'manor', 'villa', 'home',

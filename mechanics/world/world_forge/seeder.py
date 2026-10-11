@@ -183,6 +183,7 @@ async def generate_macro_world_state(session_id: int, session: dict, party: list
         f"Respond with JSON matching this schema:\n{_WORLD_FORGE_SCHEMA}"
     )
 
+    from scenario_data import uses_nsfw_model
     try:
         result = await game_engine.call_llm_json(
             system_prompt,
@@ -190,7 +191,7 @@ async def generate_macro_world_state(session_id: int, session: dict, party: list
             temperature=0.7,
             max_tokens=256,
             retries=1,
-            is_nsfw=is_nsfw_scenario(scen_key),
+            is_nsfw=uses_nsfw_model(scen_key),
             use_utility=True,
             timeout=15.0,
         )

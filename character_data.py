@@ -102,13 +102,17 @@ def load_starting_weapons(*, reload: bool = False) -> dict[str, list[str]]:
 
 TAG_TO_TEMPLATE_KEY = {
     "space": "sci_fi",
+    "scifi": "sci_fi",
     "sci_fi": "sci_fi",
-    "grimdark": "dark_fantasy",
     "dark_fantasy": "dark_fantasy",
     "isekai": "isekai_fantasy",
     "isekai_fantasy": "isekai_fantasy",
+    "highschool": "high_school_drama",
     "high_school": "high_school_drama",
     "high_school_drama": "high_school_drama",
+    "slice_of_life": "slice_of_life",
+    "postapoc": "nuclear_post_apocalypse",
+    "post_apoc": "nuclear_post_apocalypse",
     "post_apocalypse": "nuclear_post_apocalypse",
     "nuclear_post_apocalypse": "nuclear_post_apocalypse",
     "cyberpunk": "cyberpunk",
@@ -348,6 +352,8 @@ DEFAULT_EQUIP_SLOT_FOR_ITEM_TYPE = {
 
 
 def get_item_icon(name: str, item_type: str = "", effect: str = "", slot: str = "") -> str:
+    from game_engine.matching import matches_keyword
+
     name_lower = (name or "").lower()
     type_lower = (item_type or "").lower()
     effect_lower = (effect or "").lower()
@@ -358,65 +364,65 @@ def get_item_icon(name: str, item_type: str = "", effect: str = "", slot: str = 
         return "🔞"
     if "intimate photo" in name_lower or ("photo" in name_lower and ("nsfw" in name_lower or "intimate" in name_lower or "nsfw" in effect_lower or "intimate" in effect_lower)):
         return "🔞"
-    if any(w in name_lower for w in ["video", "clip", "recording"]) or "[digital_json]" in effect_lower and "video" in effect_lower:
+    if matches_keyword(name_lower, ["video", "clip", "recording"]) or ("[digital_json]" in effect_lower and "video" in effect_lower):
         return "📹"
-    if any(w in name_lower for w in ["photo", "snapshot", "selfie"]) or "[digital_json]" in effect_lower and "photo" in effect_lower:
+    if matches_keyword(name_lower, ["photo", "snapshot", "selfie"]) or ("[digital_json]" in effect_lower and "photo" in effect_lower):
         return "📸"
     if "digital" in type_lower or "[digital_json]" in effect_lower:
         return "💾"
 
     # 1. Accessories (Rings, Amulets, Bracelets, Necklaces, etc.)
-    if "accessory" in slot_str.lower() or "ring" in name_lower or "amulet" in name_lower or "bracelet" in name_lower or "necklace" in name_lower or "pendant" in name_lower or "accessory" in type_lower:
-        if any(w in name_lower for w in ["amulet", "necklace", "pendant", "rosary", "locket", "beads"]):
+    if "accessory" in slot_str.lower() or matches_keyword(name_lower, ["ring", "amulet", "bracelet", "necklace", "pendant"]) or "accessory" in type_lower:
+        if matches_keyword(name_lower, ["amulet", "necklace", "pendant", "rosary", "locket", "beads"]):
             return "📿"
         return "💍"
 
     # 2. Specific Name Keywords (Weapons, Tools, Gear)
-    if any(w in name_lower for w in ["phone", "smartphone", "cellphone"]):
+    if matches_keyword(name_lower, ["phone", "smartphone", "cellphone"]):
         return "📱"
-    if any(w in name_lower for w in ["backpack", "pack", "bag", "rucksack", "satchel"]):
+    if matches_keyword(name_lower, ["backpack", "pack", "bag", "rucksack", "satchel"]):
         return "🎒"
-    if any(w in name_lower for w in ["wand", "staff", "stave", "rod", "scepter", "sceptre"]):
+    if matches_keyword(name_lower, ["wand", "staff", "stave", "rod", "scepter", "sceptre"]):
         return "🪄"
-    if any(w in name_lower for w in ["grimoire", "tome", "spellbook"]):
+    if matches_keyword(name_lower, ["grimoire", "tome", "spellbook"]):
         return "📖"
-    if any(w in name_lower for w in ["bow", "crossbow"]):
+    if matches_keyword(name_lower, ["bow", "crossbow"]):
         return "🏹"
-    if any(w in name_lower for w in ["pistol", "rifle", "blaster", "gun", "revolver", "shotgun", "sniper"]):
+    if matches_keyword(name_lower, ["pistol", "rifle", "blaster", "gun", "revolver", "shotgun", "sniper"]):
         return "🔫"
-    if any(w in name_lower for w in ["dagger", "knife", "blade", "cleaver", "scalpel", "stiletto"]):
+    if matches_keyword(name_lower, ["dagger", "knife", "blade", "cleaver", "scalpel", "stiletto"]):
         return "🗡️"
-    if any(w in name_lower for w in ["axe", "hatchet"]):
+    if matches_keyword(name_lower, ["axe", "hatchet"]):
         return "🪓"
-    if any(w in name_lower for w in ["hammer", "mace", "warhammer", "club", "baton"]):
+    if matches_keyword(name_lower, ["hammer", "mace", "warhammer", "club", "baton"]):
         return "🔨"
-    if any(w in name_lower for w in ["spear", "halberd", "lance", "trident", "pike"]):
+    if matches_keyword(name_lower, ["spear", "halberd", "lance", "trident", "pike"]):
         return "🔱"
-    if any(w in name_lower for w in ["whip", "chain"]):
+    if matches_keyword(name_lower, ["whip", "chain"]):
         return "🦯"
-    if any(w in name_lower for w in ["sword", "greatsword", "rapier", "katana", "scimitar", "broadsword"]):
+    if matches_keyword(name_lower, ["sword", "greatsword", "rapier", "katana", "scimitar", "broadsword"]):
         return "⚔️"
 
     # 3. Clothing / Armor / Headwear Name Keywords
-    if any(w in name_lower for w in ["crown", "coronet", "diadem", "tiara"]):
+    if matches_keyword(name_lower, ["crown", "coronet", "diadem", "tiara"]):
         return "👑"
-    if any(w in name_lower for w in ["glasses", "spectacles", "monocle", "visor", "goggles", "hud"]):
+    if matches_keyword(name_lower, ["glasses", "spectacles", "monocle", "visor", "goggles", "hud"]):
         return "👓"
-    if any(w in name_lower for w in ["top hat", "fedora", "bowler hat", "trilby"]):
+    if matches_keyword(name_lower, ["top hat", "fedora", "bowler hat", "trilby"]):
         return "🎩"
-    if any(w in name_lower for w in ["cap", "beanie", "snapback", "beret"]):
+    if matches_keyword(name_lower, ["cap", "beanie", "snapback", "beret"]):
         return "🧢"
-    if any(w in name_lower for w in ["helm", "helmet", "cowl", "hood", "gas mask", "respirator", "sallet", "armet", "casque"]):
+    if matches_keyword(name_lower, ["helm", "helmet", "cowl", "hood", "gas mask", "respirator", "sallet", "armet", "casque"]):
         return "🪖"
-    if any(w in name_lower for w in ["boots", "shoes", "sneakers", "sandals", "loafers", "sabatons", "treads", "footwear", "greaves", "creepers", "sliders"]):
+    if matches_keyword(name_lower, ["boots", "shoes", "sneakers", "sandals", "loafers", "sabatons", "treads", "footwear", "greaves", "creepers", "sliders"]):
         return "👢"
-    if any(w in name_lower for w in ["gloves", "gauntlets", "bracers", "mittens", "cuff", "hand wraps"]):
+    if matches_keyword(name_lower, ["gloves", "gauntlets", "bracers", "mittens", "cuff", "hand wraps"]):
         return "🧤"
-    if any(w in name_lower for w in ["pants", "trousers", "leggings", "skirt", "slacks", "jeans", "shorts"]):
+    if matches_keyword(name_lower, ["pants", "trousers", "leggings", "skirt", "slacks", "jeans", "shorts"]):
         return "👖"
-    if any(w in name_lower for w in ["breastplate", "tunic", "robe", "chest", "cuirass", "mail", "shirt", "coat", "jacket", "suit", "vest", "blazer", "cardigan", "duster", "jumpsuit", "uniform", "windbreaker", "hoodie", "sweater", "parka", "cloak"]):
+    if matches_keyword(name_lower, ["breastplate", "tunic", "robe", "chest", "cuirass", "mail", "chainmail", "ringmail", "scalemail", "shirt", "coat", "jacket", "suit", "vest", "blazer", "cardigan", "duster", "jumpsuit", "uniform", "windbreaker", "hoodie", "sweater", "parka", "cloak"]):
         return "👕"
-    if any(w in name_lower for w in ["shield", "aegis", "buckler"]):
+    if matches_keyword(name_lower, ["shield", "aegis", "buckler"]):
         return "🛡️"
 
     # 4. Equipment Slot / Type Fallbacks
@@ -438,27 +444,27 @@ def get_item_icon(name: str, item_type: str = "", effect: str = "", slot: str = 
         return "👕"
 
     # 5. Consumables & Quest Items
-    if any(w in name_lower for w in ["boba", "bubble tea", "milk tea"]):
+    if matches_keyword(name_lower, ["boba", "bubble tea", "milk tea"]):
         return "🧋"
-    if any(w in name_lower for w in ["coffee", "latte", "espresso", "cappuccino", "cold brew"]):
+    if matches_keyword(name_lower, ["coffee", "latte", "espresso", "cappuccino", "cold brew"]):
         return "☕"
-    if any(w in name_lower for w in ["tea", "matcha", "oolong", "jasmine", "herbal infusion"]):
+    if matches_keyword(name_lower, ["tea", "matcha", "oolong", "jasmine", "herbal infusion"]):
         return "🍵"
-    if any(w in name_lower for w in ["wine", "chalice"]):
+    if matches_keyword(name_lower, ["wine", "chalice"]):
         return "🍷"
-    if any(w in name_lower for w in ["ale", "beer", "cider", "mead"]):
+    if matches_keyword(name_lower, ["ale", "beer", "cider", "mead"]):
         return "🍺"
-    if any(w in name_lower for w in ["soda", "fizz", "ramune", "smoothie", "juice", "drink", "cocktail", "water", "hydrator"]) or type_lower == "drink":
+    if matches_keyword(name_lower, ["soda", "fizz", "ramune", "smoothie", "juice", "drink", "cocktail", "water", "hydrator"]) or type_lower == "drink":
         return "🥤"
-    if any(w in name_lower for w in ["bento", "ramen", "roast", "stew", "bread", "cake", "cookie", "tart", "pie", "snack", "meal", "omakase", "wagyu", "sandwich", "melon pan", "ration", "food", "feast"]) or type_lower == "food":
+    if matches_keyword(name_lower, ["bento", "ramen", "roast", "stew", "bread", "cake", "cookie", "tart", "pie", "snack", "meal", "omakase", "wagyu", "sandwich", "melon pan", "ration", "food", "feast"]) or type_lower == "food":
         return "🍱"
-    if any(w in name_lower for w in ["health", "hp", "heal", "bandage", "salve", "stimpack"]) or "health" in effect_lower or "hp" in effect_lower:
+    if matches_keyword(name_lower, ["health", "hp", "heal", "bandage", "salve", "stimpack"]) or "health" in effect_lower or "hp" in effect_lower:
         return "❤️"
-    if any(w in name_lower for w in ["mana", "mp", "elixir", "ether"]) or "mana" in effect_lower or "mp" in effect_lower:
+    if matches_keyword(name_lower, ["mana", "mp", "elixir", "ether"]) or "mana" in effect_lower or "mp" in effect_lower:
         return "💙"
-    if "consumable" in type_lower or any(w in name_lower for w in ["potion", "draught", "phial"]):
+    if "consumable" in type_lower or matches_keyword(name_lower, ["potion", "draught", "phial"]):
         return "🧪"
-    if type_lower in ("quest", "key item") or any(w in name_lower for w in ["key", "map", "letter", "tome", "book", "scroll", "signet", "chip", "card", "deck", "terminal", "clipboard", "relic", "lantern"]):
+    if type_lower in ("quest", "key item") or matches_keyword(name_lower, ["key", "map", "letter", "tome", "book", "scroll", "signet", "chip", "card", "keycard", "deck", "terminal", "clipboard", "relic", "lantern"]):
         return "📜"
 
     return "📦"
@@ -599,7 +605,7 @@ def parse_equipment_metadata(item: dict) -> dict:
     return _parse(item)
 
 
-def reconcile_character_outcomes(char: dict, outcome: dict) -> dict:
+def reconcile_character_outcomes(char: dict, outcome: dict, is_non_combat: bool = False) -> dict:
     """Deterministically validates and bounds HP/MP/Gold deltas and status effects reported by LLM or engine."""
     max_hp = char.get("max_hp", derive_hp(char.get("end_", 1)))
     max_mp = char.get("max_mp", derive_mp(char.get("end_", 1)))
@@ -609,6 +615,8 @@ def reconcile_character_outcomes(char: dict, outcome: dict) -> dict:
     current_gold = char.get("gold", 0)
 
     hp_change = int(outcome.get("hp_change", 0) or 0)
+    if is_non_combat and hp_change < 0:
+        hp_change = 0
     mp_change = int(outcome.get("mp_change", 0) or 0)
     gold_change = int(outcome.get("gold_change", 0) or 0)
 

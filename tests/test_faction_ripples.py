@@ -31,6 +31,17 @@ class TestReputationRipples(unittest.TestCase):
     Tests the ripple logic inserted into apply_outcome() in game_engine/state.py.
     We test the logic at the `db.upsert_faction` call level.
     """
+    def setUp(self):
+        import db
+        db.init_db()
+
+    def tearDown(self):
+        import db
+        with db.get_conn() as conn:
+            conn.execute("DELETE FROM factions")
+            conn.execute("DELETE FROM lorebook")
+            conn.commit()
+
 
     def _collect_upsert_calls(self, outcome, session_id=1, session=None):
         """

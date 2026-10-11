@@ -20,9 +20,10 @@ class TestGlovesShoesAndEquipment(unittest.TestCase):
         """Verify all 8 glove archetypes generate valid [ITEM_JSON] items with proper slots and stats."""
         expected_archetypes = [
             "cloth_wraps", "fingerless_gloves", "leather_gloves", "precision_gloves",
-            "heavy_gauntlets", "insulated_gloves", "arcane_gloves", "formal_gloves"
+            "heavy_gauntlets", "insulated_gloves", "arcane_gloves", "formal_gloves",
+            "lace_mitts", "tactical_touch_gloves", "haptic_gloves"
         ]
-        self.assertEqual(len(GLOVE_ARCHETYPES), 8)
+        self.assertEqual(len(GLOVE_ARCHETYPES), 11)
         for arch in expected_archetypes:
             self.assertIn(arch, GLOVE_ARCHETYPES)
             item = generate_random_equipment(scenario="fantasy", slot="Gloves", tier=3)
@@ -38,12 +39,13 @@ class TestGlovesShoesAndEquipment(unittest.TestCase):
             self.assertFalse(arch_item["name"].startswith("Tier 3"))
 
     def test_all_shoe_archetypes_generation(self):
-        """Verify all 8 shoe archetypes generate valid [ITEM_JSON] items with proper slots and stats."""
+        """Verify all 13 shoe archetypes generate valid [ITEM_JSON] items with proper slots and stats."""
         expected_archetypes = [
             "light_sneakers", "sandals", "combat_boots", "heavy_greaves",
-            "stealth_boots", "riding_boots", "hazard_boots", "formal_shoes"
+            "stealth_boots", "riding_boots", "hazard_boots", "formal_shoes",
+            "oxfords", "spats_boots", "high_heels", "platform_boots", "mag_sneakers"
         ]
-        self.assertEqual(len(SHOE_ARCHETYPES), 8)
+        self.assertEqual(len(SHOE_ARCHETYPES), 13)
         for arch in expected_archetypes:
             self.assertIn(arch, SHOE_ARCHETYPES)
             from mechanics.combat.items.shoes import generate_random_equipment as _gen_s

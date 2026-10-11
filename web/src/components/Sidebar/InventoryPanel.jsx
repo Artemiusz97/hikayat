@@ -177,14 +177,14 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
   const isFull = encumbrancePct >= 100;
 
   return (
-    <div className="bg-black/30 rounded-lg border border-fantasy-border p-4 space-y-4">
+    <div className="bg-black/30 rounded-lg border border-fantasy-border p-2.5 sm:p-3 space-y-2.5">
 
       {/* Top Bar: Subtabs & Gold */}
-      <div className="flex items-center justify-between border-b border-fantasy-border pb-3">
-        <div className="flex items-center gap-1 bg-black/60 p-1 rounded-md border border-fantasy-border/60">
+      <div className="flex items-center justify-between border-b border-fantasy-border pb-2">
+        <div className="flex items-center gap-1 bg-black/60 p-0.5 rounded-md border border-fantasy-border/60">
           <button
             onClick={() => setActiveTab('backpack')}
-            className={`px-3 py-1 rounded text-xs font-semibold uppercase tracking-wider transition-colors ${
+            className={`px-2.5 py-1 rounded text-[11px] font-semibold uppercase tracking-wider transition-colors ${
               activeTab === 'backpack'
                 ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40'
                 : 'text-gray-400 hover:text-gray-200'
@@ -194,7 +194,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
           </button>
           <button
             onClick={() => setActiveTab('gear')}
-            className={`px-3 py-1 rounded text-xs font-semibold uppercase tracking-wider transition-colors ${
+            className={`px-2.5 py-1 rounded text-[11px] font-semibold uppercase tracking-wider transition-colors ${
               activeTab === 'gear'
                 ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40'
                 : 'text-gray-400 hover:text-gray-200'
@@ -204,8 +204,8 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
           </button>
         </div>
 
-        <div className="flex items-center gap-1.5 bg-black/50 border border-amber-900/40 px-2.5 py-1 rounded text-amber-300 font-mono text-xs">
-          <Coins size={13} className="text-amber-400" />
+        <div className="flex items-center gap-1 bg-black/50 border border-amber-900/40 px-2 py-0.5 rounded text-amber-300 font-mono text-xs">
+          <Coins size={12} className="text-amber-400" />
           <span className="font-bold">{gold}</span>
           <span className="text-[10px] text-amber-500/80">G</span>
         </div>
@@ -213,30 +213,30 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
 
       {/* Item Action Feedback Banner */}
       {useFeedback && (
-        <div className={`p-2.5 rounded border text-xs flex items-start justify-between gap-2 ${
+        <div className={`p-2 rounded border text-xs flex items-start justify-between gap-2 ${
           useFeedback.type === 'error'
             ? 'bg-red-950/60 border-red-800/70 text-red-200'
             : 'bg-emerald-950/60 border-emerald-700/70 text-emerald-200'
         }`}>
-          <span className="leading-relaxed whitespace-pre-line">{useFeedback.text}</span>
+          <span className="leading-relaxed whitespace-pre-line text-[11px]">{useFeedback.text}</span>
           <button onClick={() => setUseFeedback(null)} className="text-gray-400 hover:text-white shrink-0">
-            <X size={13} />
+            <X size={12} />
           </button>
         </div>
       )}
 
       {/* Backpack View */}
       {activeTab === 'backpack' && (
-        <div className="space-y-3">
+        <div className="space-y-2">
 
           {/* Encumbrance Bar */}
-          <div className="bg-black/40 p-2.5 rounded-md border border-fantasy-border/40">
+          <div className="bg-black/40 p-2 rounded-md border border-fantasy-border/40">
             <div className="flex justify-between items-center text-xs mb-1">
-              <span className="text-gray-400 font-medium flex items-center gap-1">
-                <Package size={13} className={isFull ? 'text-red-400' : 'text-fantasy-accent'} />
+              <span className="text-gray-400 font-medium flex items-center gap-1 text-[11px]">
+                <Package size={12} className={isFull ? 'text-red-400' : 'text-fantasy-accent'} />
                 <span>Inventory Slots</span>
               </span>
-              <span className={`font-mono font-bold text-xs ${isFull ? 'text-red-400' : isNearFull ? 'text-amber-400' : 'text-gray-300'}`}>
+              <span className={`font-mono font-bold text-[11px] ${isFull ? 'text-red-400' : isNearFull ? 'text-amber-400' : 'text-gray-300'}`}>
                 {usedSlots} / {capacity}
               </span>
             </div>
@@ -256,7 +256,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
               <button
                 key={cat}
                 onClick={() => setFilterCat(cat)}
-                className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition-colors ${
                   filterCat === cat
                     ? 'bg-fantasy-border text-fantasy-accent border border-fantasy-accent/50'
                     : 'bg-black/40 text-gray-400 hover:text-gray-200 border border-fantasy-border/30'

@@ -87,7 +87,8 @@ from mechanics.combat.items.consumables import (
 from mechanics.combat.items.tags import (
     item_has_tag, get_flat_tag_list, derive_weapon_tags,
     derive_armor_tags, derive_clothing_tags, derive_consumable_tags,
-    derive_spell_tags, HANDEDNESS, MASS, ATTACK_TYPES, DAMAGE_TYPES,
+    derive_spell_tags, is_narrative_item, make_narrative_metadata,
+    HANDEDNESS, MASS, ATTACK_TYPES, DAMAGE_TYPES,
     ARMOR_CLASSES, CLOTHING_STYLES
 )
 from mechanics.combat.items.envelope import (
@@ -99,21 +100,21 @@ def generate_random_equipment(scenario="fantasy", slot="Weapon", tier=None, arch
         return _gen_clothing(scenario, slot, tier)
     elif slot == "Weapon":
         return _gen_weapon(scenario, slot, tier, archetype=archetype, name=name)
-    elif slot == "Head":
-        return _gen_headwear(scenario, slot, tier, archetype=archetype)
-    elif slot == "Gloves":
-        return _gen_gloves(scenario, slot, tier, archetype=archetype)
-    elif slot == "Shoes":
-        return _gen_shoes(scenario, slot, tier, archetype=archetype)
-    elif slot == "Armor" or slot in ("Top", "Bottom"):
+    elif slot in ("Head", "Headwear", "Helmet"):
+        return _gen_headwear(scenario, "Head", tier, archetype=archetype)
+    elif slot in ("Gloves", "Glove", "Hands", "Gauntlets"):
+        return _gen_gloves(scenario, "Gloves", tier, archetype=archetype)
+    elif slot in ("Shoes", "Boots", "Feet", "Footwear"):
+        return _gen_shoes(scenario, "Shoes", tier, archetype=archetype)
+    elif slot == "Armor" or slot in ("Top", "Bottom", "Body", "Chest"):
         if not can_equip_armor_in_scenario(scenario):
             clothing_slot = slot if slot in ("Top", "Bottom") else "Top"
             return _gen_clothing(scenario, clothing_slot, tier)
-        return _gen_armor(scenario, slot, tier, archetype=archetype)
-    elif slot == "Shield":
-        return _gen_shield(scenario, slot, tier, archetype=archetype)
-    elif slot.startswith("Accessory"):
-        return _gen_acc(scenario, slot, tier)
+        return _gen_armor(scenario, slot if slot in ("Armor", "Top", "Bottom") else "Armor", tier, archetype=archetype)
+    elif slot in ("Shield", "Offhand", "Off-hand"):
+        return _gen_shield(scenario, "Shield", tier, archetype=archetype)
+    elif slot.startswith("Accessory") or slot in ("Accessory", "Ring", "Amulet", "Necklace", "Trinket"):
+        return _gen_acc(scenario, slot if slot.startswith("Accessory") else "Accessory 1", tier)
     else:
         return _gen_weapon(scenario, "Weapon", tier, archetype=archetype, name=name)
 
@@ -234,40 +235,40 @@ def _infer_class_archetype_profile(char_class: str, class_description: str = "",
     elif _has("merchant", "trader", "noble", "aristocrat", "diplomat", "clerk",
               "banker", "baron", "lord", "lady", "chancellor", "magistrate",
               "politician", "negotiator"):
-        profile["head"] = _rand.choice(["formal_hat", "cap"])
+        profile["head"] = _rand.choice(["formal_hat", "top_hat", "fascinator", "bonnet", "beret"])
         profile["armor"] = None
-        profile["top_archetype"] = _rand.choice(["blouse", "jacket"])
-        profile["bottom_archetype"] = _rand.choice(["trousers", "slacks"])
-        profile["gloves"] = "formal_gloves"
-        profile["shoes"] = "formal_shoes"
+        profile["top_archetype"] = _rand.choice(["tailcoat", "waistcoat", "blazer", "blouse"])
+        profile["bottom_archetype"] = _rand.choice(["slacks", "trousers", "breeches", "bustle_skirt"])
+        profile["gloves"] = _rand.choice(["formal_gloves", "lace_mitts"])
+        profile["shoes"] = _rand.choice(["oxfords", "high_heels", "formal_shoes"])
         profile["shield"] = None
-        profile["accessory"] = _rand.choice(["ring", "bracelet"])
+        profile["accessory"] = _rand.choice(["pocket_watch", "monocle", "cravat_pin", "choker", "ring"])
 
     # ── 9. Sci-Fi / Tech / Cyborg / Netrunner ────────────────────────────────
     elif _scen("cyber", "sci_fi", "scifi", "space") or _has(
             "engineer", "netrunner", "cyborg", "techie", "hacker", "pilot",
             "drone", "mechanist", "roboticist", "astro"):
-        profile["head"] = _rand.choice(["tech_visor", "gas_mask", "cap"])
+        profile["head"] = _rand.choice(["tech_visor", "ar_glasses", "gas_mask", "cap", "beanie"])
         profile["armor"] = _rand.choice(["kevlar", "ceramic", "leather"])
-        profile["top_archetype"] = _rand.choice(["jacket", "hoodie", "tunic"])
-        profile["bottom_archetype"] = "trousers"
-        profile["gloves"] = _rand.choice(["precision_gloves", "insulated_gloves"])
-        profile["shoes"] = _rand.choice(["combat_boots", "light_sneakers"])
+        profile["top_archetype"] = _rand.choice(["techwear_anorak", "holo_jacket", "bodysuit_top", "jacket", "hoodie"])
+        profile["bottom_archetype"] = _rand.choice(["techwear_joggers", "syn_leather_pants", "cargo_pants", "trousers"])
+        profile["gloves"] = _rand.choice(["tactical_touch_gloves", "haptic_gloves", "precision_gloves", "insulated_gloves"])
+        profile["shoes"] = _rand.choice(["mag_sneakers", "combat_boots", "light_sneakers"])
         profile["shield"] = None
-        profile["accessory"] = _rand.choice(["bracelet", "ring"])
+        profile["accessory"] = _rand.choice(["neural_jack_plug", "data_cuff", "holo_badge", "bracelet"])
 
     # ── 10. Alchemist / Artificer / Steampunk Inventor ───────────────────────
     elif _scen("steam", "steampunk") or _has(
             "alchemist", "artificer", "inventor", "tinkerer", "machinist",
             "clockwork", "aether", "chrono", "steam"):
-        profile["head"] = _rand.choice(["tech_visor", "cap"])
+        profile["head"] = _rand.choice(["tech_visor", "top_hat", "bowler_hat", "cap"])
         profile["armor"] = _rand.choice(["leather", "chainmail", "kevlar"])
-        profile["top_archetype"] = _rand.choice(["jacket", "tunic"])
-        profile["bottom_archetype"] = "trousers"
-        profile["gloves"] = _rand.choice(["insulated_gloves", "leather_gloves"])
-        profile["shoes"] = _rand.choice(["combat_boots", "hazard_boots"])
+        profile["top_archetype"] = _rand.choice(["waistcoat", "duster_coat", "jacket", "corset"])
+        profile["bottom_archetype"] = _rand.choice(["breeches", "bustle_skirt", "trousers", "culottes"])
+        profile["gloves"] = _rand.choice(["insulated_gloves", "leather_gloves", "lace_mitts"])
+        profile["shoes"] = _rand.choice(["oxfords", "spats_boots", "combat_boots"])
         profile["shield"] = None
-        profile["accessory"] = _rand.choice(["talisman", "ring"])
+        profile["accessory"] = _rand.choice(["pocket_watch", "chatelaine", "cravat_pin", "monocle"])
 
     # ── 11. Post-Apocalyptic / Scavenger / Wasteland ─────────────────────────
     elif _scen("nuclear_post_apocalypse", "apocalypse", "wasteland") or _has(
@@ -486,10 +487,43 @@ def generate_starter_equipment_loadout(
                     item["metadata"]["name"] = item["name"]
                 item["effect"] = serialize_item(item["metadata"])
 
+    from scenario_data import is_non_combat_scenario
+    if is_non_combat_scenario(scenario):
+        for slot, item in loadout.items():
+            if isinstance(item, dict) and "metadata" in item and isinstance(item["metadata"], dict):
+                item["metadata"] = make_narrative_metadata(item["metadata"])
+                item["effect"] = serialize_item(item["metadata"])
+
     return loadout
 
 
 def format_equipment_card(metadata: dict) -> str:
+    if is_narrative_item(metadata):
+        item_name = metadata.get("name", "Equipment")
+        item_type = metadata.get("item_type", "Equipment")
+        slot = metadata.get("slot", "")
+        tier = metadata.get("tier", 3)
+        arch = metadata.get("archetype", "").replace("_", " ").title()
+        hand = metadata.get("handedness", "1H")
+        lines = [
+            f"**{item_name}** (Tier {tier})",
+            f"**Slot:** {slot} • **Type:** {item_type} ({arch})",
+            f"🏷️ **Category:** Narrative Equipment (Cosmetic / Roleplay)",
+            f"📖 **Usage:** Flavor, Story & Social Actions (No Combat Stats)"
+        ]
+        if hand == "2H":
+            lines.append("⚠️ *Two-Handed: Held with both hands.*")
+        tags = get_flat_tag_list(metadata)
+        if tags:
+            tag_badges = " ".join(f"`#{t}`" for t in tags[:6])
+            lines.append(f"🏷️ **Tags:** {tag_badges}")
+        soc = metadata.get("social_modifiers", {})
+        if soc:
+            soc_parts = [f"`{val:+d} {stat.upper()}`" for stat, val in soc.items() if val]
+            if soc_parts:
+                lines.append(f"✨ **Social Presence:** {' '.join(soc_parts)}")
+        return "\n".join(lines)
+
     item_type = metadata.get("item_type", "")
     slot = metadata.get("slot", "")
     arch = metadata.get("archetype", "")

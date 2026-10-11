@@ -42,11 +42,11 @@ class TurnContext:
 
     @property
     def active_quests(self) -> list[dict]:
-        return [q for q in self.all_quests if q.get("status") == "active" and q.get("quest_type") != "bounty"]
+        return [q for q in self.all_quests if str(q.get("status", "")).lower() == "active" and str(q.get("quest_type", "")).lower() != "bounty"]
 
     @property
     def active_bounties(self) -> list[dict]:
-        return [q for q in self.all_quests if q.get("status") == "active" and q.get("quest_type") == "bounty"]
+        return [q for q in self.all_quests if str(q.get("status", "")).lower() == "active" and str(q.get("quest_type", "")).lower() == "bounty"]
 
     @property
     def story_quest(self) -> dict | None:
@@ -56,12 +56,7 @@ class TurnContext:
 
     @property
     def all_appointments(self) -> list[dict]:
-        if "all_appointments" not in self._cache:
-            # We fetch both pending and arrived together to minimize queries, or just rely on the DB.
-            # db.get_phone_appointments doesn't easily fetch all without status if we don't pass it, 
-            # let's just cache them separately to match the existing API.
-            pass
-        raise NotImplementedError("Use pending_appointments or arrived_appointments")
+        return self.pending_appointments + self.arrived_appointments
 
     @property
     def pending_appointments(self) -> list[dict]:

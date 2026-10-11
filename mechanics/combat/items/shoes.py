@@ -6,12 +6,13 @@ from mechanics.combat.items.tags import derive_armor_tags
 from mechanics.combat.items.envelope import serialize_item
 
 SHOE_ARCHETYPES: Dict[str, Dict[str, Any]] = {
+    # ── Civilian & Light Footwear (0 DT, Evasion / Minor DR / Utility) ────────
     "light_sneakers": {
         "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
         "base_dt": 0,
-        "type_dt": {"physical": 1},
+        "type_dt": {},
         "base_eva": 4,
-        "stat_modifiers": {"eva": 4, "speed": 2},
+        "stat_modifiers": {"eva": 4},
         "protection_types": ["physical"],
         "special_traits": ["high_mobility", "light"]
     },
@@ -20,10 +21,88 @@ SHOE_ARCHETYPES: Dict[str, Dict[str, Any]] = {
         "base_dt": 0,
         "type_dt": {},
         "base_eva": 3,
-        "stat_modifiers": {"eva": 3, "agility": 2, "heat_res": 10},
+        "stat_modifiers": {"eva": 3, "heat_res": 10},
         "protection_types": ["physical"],
         "special_traits": ["ultralight", "unarmed"]
     },
+    "stealth_boots": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "base_eva": 3,
+        "stat_modifiers": {"eva": 3},
+        "protection_types": ["physical"],
+        "special_traits": ["stealth", "silent_step", "light"]
+    },
+    "riding_boots": {
+        "mass": "medium", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "base_eva": 2,
+        "stat_modifiers": {"eva": 2, "acc": 1, "physical_res": 3},
+        "protection_types": ["physical"],
+        "special_traits": ["versatile", "sturdy", "leather"]
+    },
+    "hazard_boots": {
+        "mass": "medium", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "base_eva": 0,
+        "stat_modifiers": {"poison_res": 15, "acid_res": 15},
+        "protection_types": ["energy", "magical"],
+        "special_traits": ["hazmat", "environmental_isolation"]
+    },
+    "formal_shoes": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "base_cha": 1, "base_eva": 1,
+        "stat_modifiers": {"cha": 1, "eva": 1},
+        "protection_types": ["social"],
+        "special_traits": ["social", "civilian", "formal"]
+    },
+    "oxfords": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"cha": 1, "eva": 1},
+        "protection_types": ["social"],
+        "special_traits": ["social", "civilian", "period_formal", "dapper"]
+    },
+    "spats_boots": {
+        "mass": "medium", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"cha": 1, "physical_res": 3},
+        "protection_types": ["social"],
+        "special_traits": ["social", "civilian", "steampunk", "period"]
+    },
+    "high_heels": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"cha": 1, "eva": 1},
+        "protection_types": ["social"],
+        "special_traits": ["social", "civilian", "formal", "glamorous"]
+    },
+    "platform_boots": {
+        "mass": "medium", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"eva": 1, "physical_res": 4},
+        "protection_types": ["physical"],
+        "special_traits": ["streetwear", "rebel", "chunky"]
+    },
+    "mag_sneakers": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"eva": 3, "energy_res": 4, "acc": 1},
+        "protection_types": ["energy"],
+        "special_traits": ["futuristic", "high_mobility", "magnetic"]
+    },
+
+    # ── Dedicated Combat Footwear (Provides DT) ──────────────────────────────
     "combat_boots": {
         "mass": "medium", "handedness": "Versatile", "armor_type": "light",
         "base_dt": 3,
@@ -38,45 +117,9 @@ SHOE_ARCHETYPES: Dict[str, Dict[str, Any]] = {
         "base_dt": 7,
         "type_dt": {"physical": 10, "slashing": 10, "blunt": 8, "ballistic": 8},
         "base_eva": -3,
-        "stat_modifiers": {"eva": -3, "speed": -1, "stomp_dmg": 4, "knockdown_res": 25},
+        "stat_modifiers": {"eva": -3, "knockdown_res": 25},
         "protection_types": ["physical", "ballistic"],
-        "special_traits": ["heavy", "stomp", "defensive"]
-    },
-    "stealth_boots": {
-        "mass": "light", "handedness": "Versatile", "armor_type": "light",
-        "base_dt": 1,
-        "type_dt": {"slashing": 2, "physical": 1},
-        "base_eva": 3,
-        "stat_modifiers": {"eva": 3, "stealth": 4, "ambush_dmg": 10},
-        "protection_types": ["physical"],
-        "special_traits": ["stealth", "silent_step", "light"]
-    },
-    "riding_boots": {
-        "mass": "medium", "handedness": "Versatile", "armor_type": "light",
-        "base_dt": 2,
-        "type_dt": {"slashing": 3, "stabbing": 3, "physical": 2},
-        "base_eva": 2,
-        "stat_modifiers": {"eva": 2, "acc": 1, "mounted_bonus": 2},
-        "protection_types": ["physical"],
-        "special_traits": ["versatile", "sturdy", "leather"]
-    },
-    "hazard_boots": {
-        "mass": "medium", "handedness": "Versatile", "armor_type": "medium",
-        "base_dt": 2,
-        "type_dt": {"acid": 10, "shock": 10, "poison": 10, "fire": 8},
-        "base_eva": 0,
-        "stat_modifiers": {"hazard_res": 20, "trap_res": 15},
-        "protection_types": ["energy", "magical"],
-        "special_traits": ["hazmat", "environmental_isolation"]
-    },
-    "formal_shoes": {
-        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
-        "base_dt": 0,
-        "type_dt": {},
-        "base_cha": 3, "base_eva": 1,
-        "stat_modifiers": {"cha": 3, "luck": 1, "eva": 1},
-        "protection_types": ["social"],
-        "special_traits": ["social", "civilian", "formal"]
+        "special_traits": ["heavy", "defensive"]
     }
 }
 
@@ -86,7 +129,12 @@ NON_COMBAT_SHOE_ARCHETYPES: Dict[str, Dict[str, Any]] = {
     "stealth_boots": SHOE_ARCHETYPES["stealth_boots"],
     "riding_boots": SHOE_ARCHETYPES["riding_boots"],
     "hazard_boots": SHOE_ARCHETYPES["hazard_boots"],
-    "formal_shoes": SHOE_ARCHETYPES["formal_shoes"]
+    "formal_shoes": SHOE_ARCHETYPES["formal_shoes"],
+    "oxfords": SHOE_ARCHETYPES["oxfords"],
+    "spats_boots": SHOE_ARCHETYPES["spats_boots"],
+    "high_heels": SHOE_ARCHETYPES["high_heels"],
+    "platform_boots": SHOE_ARCHETYPES["platform_boots"],
+    "mag_sneakers": SHOE_ARCHETYPES["mag_sneakers"]
 }
 
 for arch, data in SHOE_ARCHETYPES.items():
@@ -106,7 +154,12 @@ SCENARIO_SHOES_AFFIXES: Dict[str, Dict[str, Any]] = {
             "stealth_boots": ["Shadow-Stitched Soft Moccasins", "Night-Stalker Slippers", "Rogue's Silent Boots"],
             "riding_boots": ["Cuffed Cavalier Boots", "High Huntsman Boots", "Noble Leather Riding Boots"],
             "hazard_boots": ["Salamander-Scale Mud Boots", "Dwarf-Forge Smelter Boots", "Caustic-Tread Boots"],
-            "formal_shoes": ["Embroidered Court Slippers", "Noble Velvet Slippers", "Gilded Court Shoes"]
+            "formal_shoes": ["Embroidered Court Slippers", "Noble Velvet Slippers", "Gilded Court Shoes"],
+            "oxfords": ["Noble Brogue Shoes", "Guildmaster's Stitched Oxfords", "Courtier's Buckled Shoes"],
+            "spats_boots": ["Fur-Trimmed Riding Boots", "High-Collar Leather Spats-Boots", "Cavalier Gaiters"],
+            "high_heels": ["Gilded Court Slippers", "Court Lady's High Pumps", "Princess Velvet Slippers"],
+            "platform_boots": ["Heavy Forest Stompers", "Mountain Climber Thick Soles", "Brawler's Cuffed Boots"],
+            "mag_sneakers": ["Wind-Step Enchanted Shoes", "Feather-Fall Soft Boots", "Zephyr Runners"]
         },
         "prefixes_t3": ["Sturdy", "Hardened", "Field", "Apprentice's", "Worn", "Reinforced", "Traveler's"],
         "prefixes_t2": ["Runic", "Gilded", "Mithril", "Moonlit", "Wind-Walker", "Drake-Hide", "Aegis-Forged"],
@@ -123,7 +176,12 @@ SCENARIO_SHOES_AFFIXES: Dict[str, Dict[str, Any]] = {
             "stealth_boots": ["Felt-Padded Nightstalker Boots", "Muffled Velvet Creepers", "Infiltrator Ankle Boots"],
             "riding_boots": ["Spurred Highwayman Boots", "Victorian Coachman Boots", "Long Leather Rider Boots"],
             "hazard_boots": ["Vulcanized Caustic Boots", "Acid-Proof Rubber Treads", "Boiler Hazmat Boots"],
-            "formal_shoes": ["Polished Spats & Oxford Brogues", "Victorian Patent Oxfords", "Gilded Gentleman Shoes"]
+            "formal_shoes": ["Polished Spats & Oxford Brogues", "Victorian Patent Oxfords", "Gilded Gentleman Shoes"],
+            "oxfords": ["Savile Row Wingtip Brogues", "Polished Victorian Oxfords", "Detective's Sturdy Brogues"],
+            "spats_boots": ["Buttoned Victorian Spats Boots", "Brass-Buckled Gaiter Boots", "Aeronaut Spats Treads"],
+            "high_heels": ["Victorian Lace-Up Court Heels", "Edwardian Satin Pumps", "Grand Dame Spats-Heels"],
+            "platform_boots": ["Clogger Platform Boots", "Boiler-Tender Heavy Sole Boots", "Gothic Spat Platforms"],
+            "mag_sneakers": ["Clockwork Spring Shoes", "Pneumatic Bellows Runners", "Voltaic Coil Creepers"]
         },
         "prefixes_t3": ["Brass-Rimmed", "Copper-Cleated", "Machinist's", "Steam-Vented", "Rivet-Bound", "Standard"],
         "prefixes_t2": ["Galvanic", "Aether-Tuned", "Pneumatic", "Boiler-Forged", "Voltaic", "Clockwork-Sprung"],
@@ -140,7 +198,12 @@ SCENARIO_SHOES_AFFIXES: Dict[str, Dict[str, Any]] = {
             "stealth_boots": ["Sound-Dampening Nanotech Soles", "Ghost-Step Cyber-Slippers", "Infiltration Stealth Kicks"],
             "riding_boots": ["Biker Carbon Riding Boots", "Highway Patrol Leather Treads", "Cyber-Drifter Boots"],
             "hazard_boots": ["Anti-Corrosive Hazmat Treads", "Thermal Grounding Boots", "Bio-Resistant Boots"],
-            "formal_shoes": ["Neon-Lined Corporate Loafers", "High-Gloss Executive Oxfords", "Cyber-Silk Dress Heels"]
+            "formal_shoes": ["Neon-Lined Corporate Loafers", "High-Gloss Executive Oxfords", "Cyber-Silk Dress Heels"],
+            "oxfords": ["Smart-Leather Executive Brogues", "Carbon-Sole Tuxedo Oxfords", "Corpo Minimalist Brogues"],
+            "spats_boots": ["Neo-Victorian Cyber Spats", "Chrome-Buckled Gaiter Boots", "Netrunner Spat-Kicks"],
+            "high_heels": ["Stiletto Carbon-Fiber Heels", "Holo-Heels with Neon Spike", "Executive Patent Stilettos"],
+            "platform_boots": ["Chunky Cyber-Goth Platforms", "Riot-Sole Street Platforms", "Industrial Creeper Boots"],
+            "mag_sneakers": ["Zero-G Hover-Sneakers", "Magnetic Friction Kicks", "Pneumatic Spring High-Tops"]
         },
         "prefixes_t3": ["Street-Grade", "Mil-Spec", "Carbon-Weave", "Chrome", "Reinforced", "Standard-Issue"],
         "prefixes_t2": ["Overclocked", "Smart-Linked", "High-Frequency", "Sub-Dermal", "Nanite-Laced", "Kinetic-Spring"],
@@ -157,7 +220,12 @@ SCENARIO_SHOES_AFFIXES: Dict[str, Dict[str, Any]] = {
             "stealth_boots": ["Muffled Burlap Footwraps", "Silent Scav Hide Slippers", "Padded Rag Boots"],
             "riding_boots": ["Duster Cowhide Boots", "Wasteland Drifter Boots", "Road-Warrior Riding Leather"],
             "hazard_boots": ["Lead-Lined Mud Boots", "Rad-Shielded Hazmat Treads", "Rubber Fallout Boots"],
-            "formal_shoes": ["Scuffed Pre-War Dress Oxfords", "Dusty Corporate Loafers", "Old World Shiny Shoes"]
+            "formal_shoes": ["Scuffed Pre-War Dress Oxfords", "Dusty Corporate Loafers", "Old World Shiny Shoes"],
+            "oxfords": ["Pre-War Scuffed Brogues", "Survivor's Patched Oxfords", "Bunker Formal Shoes"],
+            "spats_boots": ["Canvas Dust Gaiter Boots", "Scrap-Leather Spats Boots", "Highway Spats Treads"],
+            "high_heels": ["Pre-War Broken High Heels", "Scavenged Stiletto Pumps", "Vault Formal Heels"],
+            "platform_boots": ["Tire-Laminated Platform Stompers", "Heavy Scrap Platform Boots", "Raider Chunky Boots"],
+            "mag_sneakers": ["Salvaged Mag-Tread Shoes", "Pre-War Kinetic Jump Shoes", "Scav Hover-Kicks"]
         },
         "prefixes_t3": ["Scrap-Metal", "Rusty", "Jury-Rigged", "Weathered", "Makeshift", "Spiked", "Lead-Lined"],
         "prefixes_t2": ["Rad-Hardened", "Bio-Toxic", "Reinforced-Steel", "Wasteland-Master", "Gamma-Tuned", "Spike-Studded"],
@@ -174,41 +242,56 @@ SCENARIO_SHOES_AFFIXES: Dict[str, Dict[str, Any]] = {
             "stealth_boots": ["Optical-Camouflage Soft Soles", "Nanite Acoustic-Absorbers", "Infiltration Void Boots"],
             "riding_boots": ["Pilot's High Flight Boots", "Orbital Patrol Leather Treads", "Exo-Vehicle Boots"],
             "hazard_boots": ["Mag-Lock Void Boots", "Thermal Radiation Stompers", "Cryo-Insulated Deck Boots"],
-            "formal_shoes": ["Diplomatic Fleet Dress Shoes", "High-Gloss Officer Brogues", "Nano-Fabric Loafers"]
+            "formal_shoes": ["Diplomatic Fleet Dress Shoes", "High-Gloss Officer Brogues", "Nano-Fabric Loafers"],
+            "oxfords": ["Fleet Admiral Dress Brogues", "Command Bridge Oxfords", "Synthetic Dress Brogues"],
+            "spats_boots": ["Pressurized Space Gaiters", "Orbital Envoy Spats Boots", "Officer High Spats"],
+            "high_heels": ["Zero-G Magnetic Heels", "Diplomatic Reception Pumps", "Hard-Light Stiletto Heels"],
+            "platform_boots": ["Gravity-Compensated Platforms", "EVA Heavy Treads", "Station Industrial Platforms"],
+            "mag_sneakers": ["Magnetic Deck Shoes", "Zero-G Vector Hover-Kicks", "Inertia-Lock Sneakers"]
         },
         "prefixes_t3": ["Titanium", "Composite", "Field", "Standard-Issue", "Carbon-Alloy", "Ceramic"],
         "prefixes_t2": ["Overcharged", "Plasma-Infused", "Hyper-Coil", "Nanite-Lined", "Quantum-Phase", "Cryo-Cooled"],
         "prefixes_t1": ["Supernova", "Singularity", "Antimatter", "Chrono-Phase", "Omni-Core", "Dark-Energy"],
-        "suffixes_t2": ["of the Vanguard", "of Vector Acceleration", "of Phase-Shift", "of the Orbital Marine"],
-        "suffixes_t1": ["of Stellar Superiority", "of the Singularity Core", "of Warp-Drive Momentum", "of Absolute Zero"]
+        "suffixes_t2": ["of the Vanguard", "of Vector-Sync", "of Phase-Shift", "of the Orbital Marine"],
+        "suffixes_t1": ["of Stellar Superiority", "of the Singularity Core", "of Cosmic Annihilation", "of Absolute Zero"]
     },
     "dark_fantasy": {
         "archetype_names": {
-            "light_sneakers": ["Grave-Stalker Soft Slippers", "Prowler Soft-Shoes", "Carrion Soft-Moccasins"],
-            "sandals": ["Penitent's Thorn Sandals", "Pilgrim Strapped Linens", "Ash-Walker Sandals"],
-            "combat_boots": ["Inquisitor Knee-High Boots", "Iron-Plated Marsh Boots", "Torturer's Stiff Boots"],
-            "heavy_greaves": ["Defiled Tomb Greaves", "Grave-Knight Steel Sabatons", "Abyssal Bone Sabatons"],
-            "stealth_boots": ["Ghost-Leather Slippers", "Shadow-Stitched Assassin Boots", "Wraith-Sole Moccasins"],
-            "riding_boots": ["Black-Rider Knee Boots", "Inquisitor Riding Leather", "Executioner's Boots"],
-            "hazard_boots": ["Blight-Warder Peat Boots", "Corpse-Mud Stompers", "Mire-Crawl Boots"],
-            "formal_shoes": ["Aristocrat's Mourning Brogues", "Pale Courtier Slippers", "Velvet Funeral Shoes"]
+            "light_sneakers": ["Tomb-Stalker Slippers", "Soft-Step Ash Shoes", "Catacomb Runners"],
+            "sandals": ["Ascetic Rags & Straps", "Monastery Penitent Sandals", "Blighted Leather Sliders"],
+            "combat_boots": ["Grave-Watcher Stout Boots", "Inquisitor's Iron-Tipped Boots", "Executioner's Boots"],
+            "heavy_greaves": ["Defiled Black-Plate Greaves", "Torturer's Spiked Sabatons", "Abyssal Iron Greaves"],
+            "stealth_boots": ["Shadow-Stitched Funeral Slippers", "Night-Stalker Moccasins", "Ghost-Step Muffled Boots"],
+            "riding_boots": ["Highwayman Black Boots", "Inquisitor's Stiff Riding Boots", "Blood-Stained Cavalier Boots"],
+            "hazard_boots": ["Caustic Pyre-Warder Boots", "Corpse-Mire Boots", "Morgue Rubber Treads"],
+            "formal_shoes": ["Mourning Velvet Slippers", "Funeral Director Oxfords", "Aristocrat's Black Pumps"],
+            "oxfords": ["Mourning Black Brogues", "Inquisitor's Stitched Oxfords", "Catacomb Notary Shoes"],
+            "spats_boots": ["Gothic Funeral Spats Boots", "Black Leather Spat Gaiters", "Grave-Digger Spats"],
+            "high_heels": ["Vampiric Black Velvet Heels", "Mourning Veil Stilettos", "Blood-Stained Silk Pumps"],
+            "platform_boots": ["Catacomb Iron-Sole Platforms", "Gothic Chunky Funeral Boots", "Torturer's Thick Soles"],
+            "mag_sneakers": ["Shadow-Phase Soft Shoes", "Grave-Floating Slippers", "Wraith-Step Footwraps"]
         },
         "prefixes_t3": ["Blood-Stained", "Weathered", "Grim", "Jagged", "Ashen", "Roughspun", "Grave-Dug"],
         "prefixes_t2": ["Hex-Forged", "Cursed", "Grave-Tainted", "Sanguine", "Blight-Edged", "Bone-Carved", "Shadow-Veiled"],
         "prefixes_t1": ["Eldritch", "Abyssal-Vein", "Death-Lord's", "Cataclysmic", "Blood-Pact", "Marrow-Forged"],
-        "suffixes_t2": ["of Torment", "of the Pale Moon", "of the Grave", "of Weeping Shadow", "of the Hex-Step"],
+        "suffixes_t2": ["of Torment", "of the Pale Moon", "of the Grave", "of Weeping Shadow", "of Hex-Binding"],
         "suffixes_t1": ["of Eternal Damnation", "of the Abyssal Void", "of Endless Agony", "of the Desolate Throne"]
     },
     "high_school": {
         "archetype_names": {
-            "light_sneakers": ["Classic Canvas Sneakers", "Varsity Track Running Shoes", "Retro Low-Tops"],
-            "sandals": ["Summer Beach Slides", "Pool Shower Sandals", "Casual Cork Sandals"],
-            "combat_boots": ["Doc Marten Style Boots", "Heavy Combat-Style Ankle Boots", "Hiking Boots"],
-            "heavy_greaves": ["Kendo Protective Shin-Guards", "Hockey Goalie Leg Pads", "Catcher's Shin Protectors"],
-            "stealth_boots": ["Indoor Felt Slippers", "Soft Hallway Moccasins", "Silent Rubber-Soled Kicks"],
-            "riding_boots": ["Equestrian Riding Boots", "Fashionable Knee-High Leather Boots", "Rain Riding Boots"],
-            "hazard_boots": ["Yellow Rubber Rain Boots", "Heavy Gardening Mud Boots", "Industrial Shop Work Boots"],
-            "formal_shoes": ["Polished School Loafers", "Formal Uniform Oxford Shoes", "Black Patent Brogues"]
+            "light_sneakers": ["Canvas School Sneakers", "Varsity Running Shoes", "Retro High-Tops"],
+            "sandals": ["Beach Day Flip-Flops", "Fashion Buckled Sandals", "Poolside Slides"],
+            "combat_boots": ["Rebel Combat Boots", "Thrifted Leather Stompers", "Rainy Day Work Boots"],
+            "heavy_greaves": ["Hockey Protective Shin Guards", "Kendo Sune-Ate", "Catcher's Leg Guards"],
+            "stealth_boots": ["Indoor Felt Slippers", "Silent Gym Moccasins", "Track & Field Soft Soles"],
+            "riding_boots": ["Equestrian Club Riding Boots", "Winter Knee-High Leather Boots", "Rainy Riding Boots"],
+            "hazard_boots": ["Chemistry Lab Safety Boots", "Yellow Rubber Rain Boots", "Heavy Snow Cleats"],
+            "formal_shoes": ["Polished Uniform Penny Loafers", "Formal Ceremony Dress Shoes", "Academy Buckled Shoes"],
+            "oxfords": ["Classic School Penny Loafers", "Prep Wingtip Oxfords", "Uniform Black Brogues"],
+            "spats_boots": ["Retro Spats Ankle Boots", "Fashion Gaiter Boots", "Costume Drama Spats"],
+            "high_heels": ["School Dance Kitten Heels", "Prom Night Stiletto Pumps", "Chic Platform Heels"],
+            "platform_boots": ["Harajuku Platform Boots", "Goth Streetwear Platforms", "Chunky Skater Boots"],
+            "mag_sneakers": ["Light-Up LED Kicks", "Roller-Wheel Skate Sneakers", "Air-Cushioned Runners"]
         },
         "prefixes_t3": ["Standard", "Student", "Clean", "Campus", "Everyday", "Casual", "School"],
         "prefixes_t2": ["Varsity", "Tailored", "Customized", "Honors", "Trendy", "Preppy", "Club-Captain's"],
@@ -267,8 +350,9 @@ def generate_random_equipment(
     base_data = SHOE_ARCHETYPES[arch]
     tier_mult = 1.0 if item_tier == 3 else (1.20 if item_tier == 2 else 1.45)
     
-    base_dt = int(round(base_data["base_dt"] * tier_mult))
-    type_dt = {k: int(round(v * tier_mult)) for k, v in base_data.get("type_dt", {}).items()}
+    # Non-armor shoes strictly keep base_dt = 0
+    base_dt = int(round(base_data["base_dt"] * tier_mult)) if base_data["base_dt"] > 0 else 0
+    type_dt = {k: int(round(v * tier_mult)) for k, v in base_data.get("type_dt", {}).items()} if base_dt > 0 else {}
     
     stat_mods: Dict[str, Any] = {}
     for k, v in base_data.get("stat_modifiers", {}).items():
@@ -276,6 +360,9 @@ def generate_random_equipment(
             stat_mods[k] = round(v * tier_mult, 2)
         elif isinstance(v, int):
             scaled = int(round(v * tier_mult))
+            # SPECIAL stats strictly capped at +1 maximum
+            if k in ("cha", "per") and scaled > 1:
+                scaled = 1
             stat_mods[k] = scaled
         else:
             stat_mods[k] = v
@@ -288,7 +375,7 @@ def generate_random_equipment(
     base_name = random.choice(genre_names)
     
     prefix_pool = scen_affixes.get(f"prefixes_t{item_tier}", ["Fine"])
-    suffix_pool = scen_affixes.get(f"suffixes_t{item_tier}", ["of Stride"])
+    suffix_pool = scen_affixes.get(f"suffixes_t{item_tier}", ["of Swiftness"])
     
     prefix = random.choice(prefix_pool)
     if item_tier == 3:
@@ -337,13 +424,12 @@ def format_equipment_card(metadata: Dict[str, Any]) -> str:
         label = k.replace("_", " ").title()
         stat_parts.append(f"{label}: {prefix}{v}")
         
-    stat_line = " | ".join(stat_parts) if stat_parts else "Standard Mobility"
-    
+    stat_line = " | ".join(stat_parts) if stat_parts else "Standard Shoes"
     type_dt_str = ", ".join(f"{k.title()}: {v}" for k, v in type_dt.items() if v > 0) or "None"
     
     lines = [
         f"**{name}** (Tier {tier} Footwear — {arch})",
-        f"• **Mobility & Protection**: {stat_line}",
+        f"• **Utility & Mobility**: {stat_line}",
         f"• **Type Resistances**: {type_dt_str}"
     ]
     return "\n".join(lines)

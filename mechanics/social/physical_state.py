@@ -6,6 +6,7 @@ Maintains precise physical grounding (character postures, held items,
 garment layers, intimate contact, and room props) as an invisible cognitive anchor
 for LLM narration without adding UI clutter to Discord.
 """
+import re
 import json
 import logging
 from typing import Dict, Any, List, Optional
@@ -13,6 +14,241 @@ from typing import Dict, Any, List, Optional
 import db
 
 log = logging.getLogger(__name__)
+
+EROTIC_CONTACT_KEYWORDS = (
+    "kiss", "oral", "intercourse", "manual", "anal", "undress", "naked",
+    "straddle", "intimate encounter", "bedroom", "touching body", "groping",
+    "caress", "fondle", "strip", "breast", "groin", "penis", "vagina", "clit",
+    "making love", "sex", "foreplay", "thrusting", "riding", "penetrat"
+)
+
+PARTNER_CLIMAX_RE = re.compile(
+    r'\b(?:'
+    r'(?:her|his|their)\s+(?:shuddering\s+|shivering\s+|breathless\s+|intense\s+)?(?:climax|orgasm|peak|release)'
+    r'|reach(?:ed|ing)?\s+(?:her|his|their)\s+(?:shuddering\s+|intense\s+)?(?:climax|orgasm|peak)'
+    r'|spasms?\s+of\s+(?:her|his|their)\s+(?:climax|release|pleasure|orgasm)'
+    r'|sent\s+(?:her|him|them)\s+over\s+the\s+edge'
+    r'|carr(?:ied|ying)\s+(?:her|him|them)\s+over\s+the\s+edge'
+    r'|pushed\s+(?:her|him|them)\s+over\s+the\s+edge'
+    r'|walls?\s+(?:clench(?:ed|ing)?|tighten(?:ed|ing)?|spasm(?:ed|ing)?)\s+(?:around|tightly)'
+    r'|clenched\s+around\s+(?:him|you|his|your)'
+    r'|gripping\s+(?:him|you)\s+tightly\s+as\s+(?:she|he|they)\s+came'
+    r'|shudder(?:ed|ing)\s+as\s+(?:she|he|they)\s+came'
+    r'|crying\s+out\s+(?:in|through)\s+(?:her|his|their)?\s*(?:climax|orgasm|release|ecstasy)'
+    r'|cried\s+out\s+(?:in|through)\s+(?:her|his|their)?\s*(?:climax|orgasm|release|ecstasy)'
+    r'|arched\s+(?:her|his|their)\s+back\s+in\s+(?:climax|orgasm|release|ecstasy)'
+    r'|aftershocks?\s+of\s+(?:her|his|their)\s+(?:climax|orgasm|release)'
+    r'|trembl(?:ed|ing)\s+from\s+(?:her|his|their)\s+orgasm'
+    r')\b',
+    re.I
+)
+
+PLAYER_CLIMAX_RE = re.compile(
+    r'\b(?:'
+    r'spill(?:ed|ing)?\s+(?:deep\s+)?inside'
+    r'|c(?:a|u)m(?:ming)?\s+(?:deep\s+)?inside'
+    r'|finish(?:ed|ing)?\s+(?:deep\s+)?inside'
+    r'|releas(?:e|ed|ing)\s+(?:deep\s+inside|his\s+seed|his\s+release|your\s+release|inside\s+her|inside\s+him)'
+    r'|taking\s+(?:his|your)\s+release'
+    r'|fill(?:ed|ing)\s+(?:her|him|them)\s+(?:with\s+(?:his|your)\s+warmth|deeply|completely)'
+    r'|reach(?:ed|ing)?\s+(?:his|your|my)\s+(?:own\s+)?(?:climax|orgasm|peak|release)'
+    r'|his\s+own\s+climax'
+    r'|your\s+own\s+climax'
+    r'|push(?:ing)?\s+over\s+the\s+edge\s+to\s+finish'
+    r'|finish(?:ed|ing)?\s+together'
+    r'|climax(?:ed|ing)?\s+together'
+    r'|shared\s+(?:climax|release|orgasm)'
+    r'|mutual\s+(?:climax|release|orgasm)'
+    r'|pull(?:ed|ing)?\s+out\s+and\s+finish(?:ed|ing)?'
+    r')\b',
+    re.I
+)
+
+INTIMATE_DISENGAGEMENT_KEYWORDS = (
+    "step back", "step away", "pull back", "pull away", "let go", "break contact",
+    "break the kiss", "break away", "excuse myself", "excuse yourself", "leave the room", "part ways",
+    "goodbye", "farewell", "walk away", "turn away", "head out", "disengage",
+    "pull out", "pulled out", "withdraw", "withdrew", "stop", "slow down and rest",
+    "gently withdraw", "ease back", "pause to catch your breath", "pause to catch my breath",
+    "catch your breath", "catch my breath", "ease into aftercare", "ease into tender aftercare",
+    "settle into aftercare", "rest together", "help them get dressed", "help her get dressed",
+    "help him get dressed", "get dressed", "leave the bed", "conclude"
+)
+
+_NEGATED_STOP_RE = re.compile(
+    r"\b(?:don'?t|do\s+not|never|without|refuse\s+to|can'?t|cannot|won'?t)\s+stop(?:ping)?\b"
+    r"|\b(?:non-?stop|unstoppable)\b",
+    re.I,
+)
+
+_AMBIGUOUS_DISENGAGE_PHRASES = (
+    "pull back", "pull out", "pulled out", "withdraw", "withdrew", "ease back", "let go"
+)
+
+_ACTIVE_CONTINUATION_CUES = (
+    "finish", "cum", "spill", "release", "orgasm", "climax", "thrust", "drive",
+    "pound", "ride", "stroke", "hair", "hips", "tease", "tip", "deep inside",
+    "fuck", "fucking", "aftershocks", "harder", "from behind", "hands and knees",
+    "flip", "deeper", "pleasure", "shudder", "grind", "grinding", "slide", "sliding"
+)
+
+_EXPLICIT_DISENGAGE_CUES = (
+    "step back", "step away", "pull away", "break contact", "break the kiss", "break away",
+    "excuse myself", "excuse yourself", "leave the room", "part ways", "goodbye", "farewell",
+    "walk away", "turn away", "head out", "disengage", "slow down and rest", "gently withdraw",
+    "catch your breath", "catch my breath", "ease into aftercare", "ease into tender aftercare",
+    "settle into aftercare", "rest together", "get dressed", "leave the bed", "conclude"
+)
+
+
+def detect_intimate_disengagement(actions: list) -> bool:
+    """Detects if player choices indicate intent to withdraw, slow down, or conclude intimacy."""
+    if not actions:
+        return False
+    for a in actions:
+        lbl = ((a.get("label") or "") if isinstance(a, dict) else str(a)).lower()
+        if not lbl:
+            continue
+        if any(kw in lbl for kw in _EXPLICIT_DISENGAGE_CUES):
+            return True
+        clean_lbl = _NEGATED_STOP_RE.sub(" ", lbl)
+        if re.search(r"\bstop\b", clean_lbl):
+            return True
+        if any(kw in clean_lbl for kw in _AMBIGUOUS_DISENGAGE_PHRASES):
+            # Pulling out a physical item/prop is an inventory/investigative action, not intimate withdrawal
+            if re.search(r"\bpull(?:ed)?\s+out\s+(?:a|an|the|that|this|her|his|my|some|your)?\s*(?:paper|script|page|note|clue|item|weapon|coin|book|letter|phone|device|wallet|card|key|sheet)\b", clean_lbl):
+                continue
+            if not any(cue in clean_lbl for cue in _ACTIVE_CONTINUATION_CUES):
+                return True
+    return False
+
+
+def is_erotic_intimate_contact(intimate_contact: str) -> bool:
+    """Returns True if intimate_contact string indicates an active sensual/erotic encounter."""
+    if not intimate_contact or str(intimate_contact).strip().lower() in ("none", ""):
+        return False
+    ic_low = str(intimate_contact).lower()
+    if "aftercare" in ic_low:
+        return False
+    return any(kw in ic_low for kw in EROTIC_CONTACT_KEYWORDS)
+
+
+CLIMAX_NEGATION_TRIGGER = (
+    "brink of", "edge of", "verge of", "precipice of", "cusp of",
+    "close to", "near ", "nearing ", "approaching ", "building toward", "building to",
+    "nowhere near", "far from", "preventing", "prevented", "trying not to", "try not to",
+    "fought the urge", "fighting the urge", "resisting the urge",
+    "teasing ", "denying ", "denied ", "holding back", "held back", "staving off",
+    "fighting off", "suppressing ", "resisting ", "stopping short of", "before ",
+    "without ", "not yet", "hasn't ", "hadn't ", "haven't ", "didn't ", "never ",
+    "begging for", "pleading for", "aching for", "desperate for", "craving ",
+    "chasing ", "seeking ", "almost "
+)
+
+CLIMAX_NEGATION_RE = re.compile(
+    r'\b(?:'
+    r'(?:on\s+the\s+)?(?:brink|edge|verge|precipice|cusp)\s+of\s+(?:her\s+|his\s+|their\s+|your\s+|my\s+|a\s+|an\s+|shuddering\s+|intense\s+|shared\s+|mutual\s+)*(?:climax|orgasm|peak|release|finishing|cumming)'
+    r'|(?:nowhere\s+near|far\s+from|close|near|nearing|approaching|building\s+toward|building\s+to)\s+(?:reaching\s+)?(?:her\s+|his\s+|their\s+|your\s+|my\s+|own\s+|a\s+|an\s+|shuddering\s+|intense\s+|shared\s+|mutual\s+)*(?:climax|orgasm|peak|release|finishing)'
+    r'|(?:teas(?:e|ed|ing)|deny(?:ing)?|denied|hold(?:ing)?\s+back|held\s+back|prevent(?:ing|ed)?|try(?:ing)?\s+not\s+to|fought\s+the\s+urge|fight(?:ing)?\s+the\s+urge|stav(?:e|ed|ing)\s+off|fight(?:ing)?\s+off|suppress(?:ed|ing)?|resist(?:ed|ing)?|stop(?:ped|ping)?\s+short\s+of|before|without|not\s+yet|never|almost)\s+[^.!?;,\n]{0,45}?\b(?:climax(?:ed|ing)?|orgasm(?:ed|ing)?|peak(?:ed|ing)?|releas(?:e|ed|ing)|finish(?:ed|ing)?|spill(?:ed|ing)?|spasm(?:s|ed|ing)?|clench(?:ed|ing)?|over\s+the\s+edge|came|cumming)'
+    r'|(?:beg(?:ging|ged)?|plead(?:ing|ed)?|ach(?:ing|ed)?|desperate|crav(?:ing|ed)?|chas(?:ing|ed)?|seek(?:ing)?|wait(?:ing|ed)?)\s+(?:for|to)\s+[^.!?;,\n]{0,35}?\b(?:climax|orgasm|peak|release|finish|cum|spill)'
+    r')\b',
+    re.I
+)
+
+
+def strip_negated_climax(text: str) -> str:
+    """Strips brink/anticipation/negation clauses only if a trigger keyword is present."""
+    if not text:
+        return ""
+    t_low = text.lower()
+    if any(k in t_low for k in CLIMAX_NEGATION_TRIGGER):
+        return CLIMAX_NEGATION_RE.sub(" ", text)
+    return text
+
+
+def _named_partner_climax_match(cleaned: str, target_name: str, other_names: Optional[List[str]] = None) -> bool:
+    """Checks if `target_name` specifically reached climax in `cleaned` without crossing into another partner's clause."""
+    if not target_name or not target_name.strip():
+        return False
+    t_first_raw = target_name.strip().split()[0]
+    p_clean = re.escape(t_first_raw)
+    if not p_clean:
+        return False
+
+    other_firsts = [
+        re.escape(o.strip().split()[0])
+        for o in (other_names or [])
+        if o and o.strip() and o.strip().split()[0].lower() != t_first_raw.lower()
+    ]
+
+    # 1. Transitive verb before partner name ("sent Kana over the edge", "brought Elena to climax")
+    trans_pat = (
+        rf"\b(?:sent|send|sending|carried|carrying|pushed|pushing|drove|driving|brought|bringing)\s+"
+        rf"(?:both\s+)?(?:[a-z]+\s+and\s+)?{p_clean}\b[^.!?\n]{{0,35}}"
+        rf"\b(?:over\s+the\s+edge|to\s+(?:her|his|their)\s+(?:climax|orgasm|peak|release)|to\s+(?:climax|orgasm))\b"
+    )
+    if re.search(trans_pat, cleaned, re.I):
+        return True
+
+    # 2. Partner name before climax predicate ("Kana climaxes", "Kana shudders over the edge")
+    subj_pat = (
+        rf"\b{p_clean}\b(?P<mid>[^.!?\n]{{0,55}}?)"
+        rf"\b(?:climax(?:ed|es)?|orgasm(?:ed|s)?|came\s+hard|came\b|comes\s+hard|over\s+the\s+edge|"
+        rf"reaches?\s+(?:her|his|their)\s+(?:peak|climax|orgasm|release)|"
+        rf"crie[sd]\s+out\s+(?:in|through)\s+(?:her|his|their)?\s*(?:climax|orgasm|release|ecstasy)|"
+        rf"arched\s+(?:her|his|their)\s+back\s+in\s+(?:climax|orgasm|release|ecstasy)|"
+        rf"shudders?\s+(?:through|in)\s+(?:her|his|their)\s+(?:climax|orgasm|release))\b"
+    )
+    for m in re.finditer(subj_pat, cleaned, re.I):
+        mid = m.group("mid") or ""
+        if other_firsts:
+            crossed_other = False
+            for oth in other_firsts:
+                if re.search(rf"\b{oth}\b", mid, re.I):
+                    # Allow only coordinate subject ("Kana and Elena [both] ")
+                    if not re.match(rf"^\s*(?:,\s*)?and\s+{oth}\s*(?:both\s+|all\s+|together\s+)?$", mid, re.I):
+                        crossed_other = True
+                        break
+            if crossed_other:
+                continue
+        return True
+    return False
+
+
+def detect_partner_climax(text: str, partner_name: str = "", other_partner_names: Optional[List[str]] = None) -> bool:
+    """Detects whether the NPC partner actually reached climax in the given text."""
+    if not text:
+        return False
+    cleaned = strip_negated_climax(text)
+    if partner_name:
+        if _named_partner_climax_match(cleaned, partner_name, other_partner_names):
+            return True
+        if other_partner_names:
+            for oth in other_partner_names:
+                if not oth:
+                    continue
+                other_rest = [partner_name] + [x for x in other_partner_names if x != oth]
+                if _named_partner_climax_match(cleaned, oth, other_rest):
+                    return False
+    if PARTNER_CLIMAX_RE.search(cleaned):
+        return True
+    return False
+
+
+def detect_player_climax(text: str, player_name: str = "") -> bool:
+    """Detects whether the player character actually reached climax in the given text."""
+    if not text:
+        return False
+    cleaned = strip_negated_climax(text)
+    if PLAYER_CLIMAX_RE.search(cleaned):
+        return True
+    if player_name:
+        p_clean = re.escape(player_name.strip().split()[0])
+        if p_clean and re.search(rf"\b{p_clean}\b[^.!?\n]{{0,50}}\b(?:climax(?:ed|es)?|orgasm(?:ed|s)?|spills?\s+deep\s+inside|reaches?\s+(?:his|her|their|your)\s+(?:own\s+)?climax)\b", cleaned, re.I):
+            return True
+    return False
+
+
 
 
 def _infer_initial_undergarments_state(char_or_npc: dict, scen_key: str = "fantasy",
@@ -167,6 +403,7 @@ def init_default_physical_state(session_id: int, party: list, scen_key: str = "f
         "intimate_contact": "none",
         "combat_focus": "none",
         "dropped_items": [],
+        "climax_state": {"partner_climaxed": False, "player_climaxed": False},
     }
     # If opening scene specified physical_updates (e.g. in-media-res crisis postures/props), merge them
     if opening_scene and isinstance(opening_scene, dict):
@@ -180,7 +417,7 @@ def init_default_physical_state(session_id: int, party: list, scen_key: str = "f
 
 
 def build_physical_prompt_block(session: dict, party: list, is_combat: bool = False,
-                                 is_nsfw: bool = False) -> str:
+                                 is_nsfw: bool = False, actions: list = None) -> str:
     """Builds a compact ~30-75 token continuity anchor to inject into the LLM system/user prompt."""
     session_id = session.get("id", 0)
     state = (db.get_session_physical_state(session_id) if session_id else None) or session.get("physical_state") or {}
@@ -194,12 +431,14 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
     intimate_contact = state.get("intimate_contact", "none")
 
     party_names = set()
+    human_player_names = set()
     if party and isinstance(party, list):
         for entry in party:
             char = entry[0] if isinstance(entry, (tuple, list)) else entry
             if isinstance(char, dict) and char.get("name"):
                 c_name = char["name"].strip()
                 party_names.add(c_name.lower())
+                human_player_names.add(c_name.lower())
                 matched_key = _match_actor_key(c_name, actors)
                 if matched_key in actors:
                     inv = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else []
@@ -292,7 +531,43 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
     lines = []
 
     # 1. SENSUAL / NSFW INTIMATE MODE
-    if is_nsfw and intimate_contact != "none":
+    is_disengaging = detect_intimate_disengagement(actions) if actions else False
+    is_erotic_contact = is_erotic_intimate_contact(intimate_contact) and not is_disengaging
+    if is_nsfw and not is_erotic_contact and not is_disengaging and actions:
+        try:
+            from mechanics.social.intimate_excitement import classify_intimate_act
+            _act_ok = True
+            _act_strs = []
+            for _a in (actions if isinstance(actions, list) else [actions]):
+                if isinstance(_a, dict):
+                    _chk = _a.get("check")
+                    _tier = getattr(_chk, "tier", None) or (_chk.get("tier") if isinstance(_chk, dict) else None)
+                    if _a.get("success") is False or _tier in ("fail", "crit_fail"):
+                        _act_ok = False
+                        break
+                    _act_strs.append(str(_a.get("label", "")))
+                else:
+                    _act_strs.append(str(_a))
+            if _act_ok and _act_strs:
+                _cand_p_names = []
+                if isinstance(session, dict):
+                    try:
+                        from mechanics.world.mobility import get_session_dialogue_partners
+                        _cand_p_names.extend(get_session_dialogue_partners(session))
+                    except Exception:
+                        pass
+                for _an, _ in sorted_actors:
+                    if _an.strip().lower() not in human_player_names and _an not in _cand_p_names:
+                        _cand_p_names.append(_an)
+                _joined_acts = " ".join(_act_strs)
+                for _cp_name in (_cand_p_names or ["Partner"]):
+                    _act_cl = classify_intimate_act(_joined_acts, intimate_contact_str=str(intimate_contact), partner_name=_cp_name)
+                    if _act_cl.get("act_type", "none") not in ("none", "foreplay_nongenital"):
+                        is_erotic_contact = True
+                        break
+        except Exception:
+            pass
+    if is_nsfw and is_erotic_contact:
         lines.append("### 💋 INTIMATE & PHYSICAL STATE (Internal Continuity Anchor):")
         lines.append("- Actors & Clothing:")
         for name, data in sorted_actors:
@@ -315,16 +590,265 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
             lines.append(f"  * {name}: [Posture: {posture}] [Clothing: {cloth_summary}] [Hands: {holding}]")
 
         lines.append(f"- Intimate Contact Stage: {intimate_contact}")
-        if props:
-            recent_props = list(props.items())[-3:]
-            prop_str = ", ".join(f"{k} ({v})" for k, v in recent_props)
-            lines.append(f"- Props in Vicinity: {prop_str}")
+        exc_info = state.get("excitement", {}) if isinstance(state, dict) else {}
+        if isinstance(exc_info, dict) and exc_info.get("active"):
+            last_act = str(exc_info.get("last_act") or "foreplay_nongenital").replace("_", " ")
+            exc_actors = exc_info.get("actors", {}) or {}
+            meter_parts = []
+            for a_name, a_val in exc_actors.items():
+                if isinstance(a_val, dict):
+                    m_pct = a_val.get("meter", 0)
+                    m_st = a_val.get("status", "Warming Up")
+                    meter_parts.append(f"{a_name}: {m_pct}% ({m_st})")
+            if meter_parts:
+                lines.append(f"- Active Intimate Act: {last_act.upper()} | Excitement Meters: {' | '.join(meter_parts)}")
         lines.append(
-            "- CONTINUITY DIRECTIVE: Strictly respect clothing removal states and worn undergarments. "
+            "- CONTINUITY DIRECTIVE: Strictly respect clothing removal states, worn undergarments, "
+            "and each actor's exact current posture (e.g. kneeling, seated, standing, lying down) and active intimate act "
+            "(e.g. non-genital foreplay, oral give/receive, manual give/receive, or penetrative intercourse). "
+            "In `next_choices`, generate dynamic, scene-specific choices that match the current physical posture, "
+            "the current act (do NOT assume penetration if currently in foreplay, oral, or manual intimacy), "
+            "and the characters' current Excitement Meter percentages (only offer climax/finishing choices when a character's meter is high >= 70%, "
+            "and allow natural transitions between acts/positions plus 1 natural pause/disengage option). "
+            "STRICTLY FORBIDDEN: Do NOT offer aftercare options or aftercare choices in `next_choices` until the player character reaches climax (excitement: 100%). "
+            "NEVER splice quest objectives, bounties, clues, documents, or room investigation props into intimate choices, "
+            "and NEVER prefix intimate choices with ⭐, 🎯, or ⚡. "
             "If an actor is not wearing a bra or underwear underneath (e.g. Bra-less or Commando), "
-            "NEVER describe unclasping, stripping, or removing a non-existent undergarment. "
-            "Maintain exact body postures, physical touch, and realistic garment layers."
+            "NEVER describe unclasping, stripping, or removing a non-existent undergarment."
         )
+
+        climax_info = state.get("climax_state", {}) if isinstance(state, dict) else {}
+        ic_low_str = str(intimate_contact).lower()
+        partner_peaked = climax_info.get("partner_climaxed", False) or "partner reached climax" in ic_low_str or "partner peaked" in ic_low_str
+        player_peaked = (climax_info.get("player_climaxed", False) or "player reached climax" in ic_low_str) and "hypersensitive ongoing" not in ic_low_str
+        premature_fin = (
+            (bool(exc_info.get("premature_finish", False)) if isinstance(exc_info, dict) else False)
+            or ("partner unsatisfied" in ic_low_str and "hypersensitive ongoing" not in ic_low_str)
+        )
+        partner_dem = bool(exc_info.get("partner_demanded", True)) if isinstance(exc_info, dict) else True
+        unsat_list = (exc_info.get("unsatisfied_partners") if isinstance(exc_info, dict) else None) or []
+        unsat_target_str = " and ".join(unsat_list) if unsat_list else "the partner"
+        p_clim_map = climax_info.get("partner_climaxes") if isinstance(climax_info, dict) else None
+        is_multi_partner_climax = isinstance(p_clim_map, dict) and len(p_clim_map) >= 2
+        if player_peaked and premature_fin:
+            if partner_dem:
+                lines.append(
+                    f"- POST-CLIMAX UNSATISFIED PARTNER (DEMAND ACTIVE): The player character finished first while {unsat_target_str} is still aroused and unsatisfied! "
+                    f"In `next_choices`, dynamically generate choices for the player to satisfy {unsat_target_str} using hands/fingers ([AGI]), mouth/tongue ([CHA]), "
+                    "pushing through exhaustion ([END]), or resting in aftercare."
+                )
+            else:
+                lines.append(
+                    f"- POST-CLIMAX UNSATISFIED PARTNER: The player character finished first while {unsat_target_str} has not yet climaxed. "
+                    f"In `next_choices`, dynamically offer options to tenderly please {unsat_target_str if unsat_list else 'her'} with hands/mouth or transition into warm aftercare."
+                )
+        elif partner_peaked and (not player_peaked or "hypersensitive ongoing" in ic_low_str):
+            primacy_lead = (
+                "At least one NPC partner reached climax in the previous beat, but the player character has NOT finished yet!"
+                if is_multi_partner_climax
+                else "The NPC partner reached climax in the previous beat, but the player character has NOT finished yet!"
+            )
+            lines.append(
+                f"- PLAYER CLIMAX PRIMACY ACTIVE: {primacy_lead} "
+                "DO NOT narrate collapsing together or ending the session until the player character reaches climax or explicitly chooses to stop. "
+                "STRICTLY FORBIDDEN: Do NOT offer aftercare options or aftercare choices in `next_choices` until the player character reaches climax! "
+                "In `next_choices`, provide dynamic continuation, position shift, or release choices matching the current act and posture!"
+            )
+        else:
+            lines.append(
+                "- PACING DIRECTIVE: Do NOT narrate either character reaching climax until their Excitement Meter reaches 100%, "
+                "and do NOT narrate collapsing into post-coital sleep/aftercare until the encounter concludes. "
+                "STRICTLY FORBIDDEN: Do NOT offer aftercare options or aftercare choices in `next_choices` until the player character reaches climax."
+            )
+
+        try:
+            from mechanics.social.intimate_excitement import (
+                build_intimate_choice_blueprints,
+                infer_last_act_from_state,
+            )
+            partners_list = []
+            if isinstance(session, dict):
+                try:
+                    from mechanics.world.mobility import get_session_dialogue_partners
+                    partners_list = get_session_dialogue_partners(session)
+                except Exception:
+                    dp_val = session.get("dialogue_partners") or session.get("dialogue_partner")
+                    if isinstance(dp_val, list):
+                        partners_list = [str(p).strip() for p in dp_val if str(p).strip()]
+                    elif isinstance(dp_val, str) and dp_val.strip():
+                        partners_list = [dp_val.strip()]
+
+            def _add_partner_if_missing(cand_p: str) -> None:
+                c_str = str(cand_p or "").strip()
+                if not c_str or c_str.lower() in ("partner", "none") or c_str.lower() in human_player_names:
+                    return
+                c_low = c_str.lower()
+                c_first = (c_low.split() or [""])[0]
+                for existing in partners_list:
+                    ex_low = existing.lower()
+                    ex_first = (ex_low.split() or [""])[0]
+                    if c_low == ex_low or (len(c_first) >= 3 and c_first == ex_first):
+                        return
+                partners_list.append(c_str)
+
+            if isinstance(exc_info, dict) and exc_info.get("active"):
+                for cp_item in (exc_info.get("current_partners") or []):
+                    _add_partner_if_missing(cp_item)
+            if " with " in str(intimate_contact):
+                rec_p = str(intimate_contact).split(" with ", 1)[1].split("(")[0].strip()
+                if rec_p and rec_p.lower() != "partner":
+                    for chunk in rec_p.split(","):
+                        for sp in chunk.split(" and "):
+                            _add_partner_if_missing(sp)
+            if not partners_list:
+                for a_name, _ in sorted_actors:
+                    if a_name.strip().lower() not in human_player_names:
+                        partners_list.append(a_name)
+                        break
+
+            partner_target = partners_list[0] if partners_list else "Partner"
+            matched_partner_actor = _match_actor_key(partner_target, actors) if partner_target else ""
+
+            player_posture_str = ""
+            partner_posture_str = ""
+            for a_name, a_data in sorted_actors:
+                if not isinstance(a_data, dict):
+                    continue
+                if matched_partner_actor and a_name == matched_partner_actor:
+                    if not partner_posture_str:
+                        partner_posture_str = str(a_data.get("posture", ""))
+                elif a_name.strip().lower() in human_player_names and not player_posture_str:
+                    player_posture_str = str(a_data.get("posture", ""))
+                elif not partner_posture_str:
+                    partner_posture_str = str(a_data.get("posture", ""))
+
+            exc_actors_map = (exc_info.get("actors", {}) if isinstance(exc_info, dict) else {}) or {}
+            matched_partner_exc = _match_actor_key(partner_target, exc_actors_map) if partner_target else ""
+            p_meter_val = 0
+            n_meter_val = 0
+            for k_act, v_act in exc_actors_map.items():
+                if not isinstance(v_act, dict):
+                    continue
+                if matched_partner_exc and k_act == matched_partner_exc:
+                    n_meter_val = int(v_act.get("meter", 0) or 0)
+                elif k_act.strip().lower() in human_player_names:
+                    p_meter_val = int(v_act.get("meter", 0) or 0)
+                elif not matched_partner_exc and not n_meter_val:
+                    n_meter_val = int(v_act.get("meter", 0) or 0)
+
+            contacts = []
+            if isinstance(session, dict) and session.get("id"):
+                try:
+                    contacts = db.get_contacts(session["id"]) or []
+                except Exception:
+                    contacts = []
+
+            spots_val = None
+            if partner_target and contacts:
+                pt_low = partner_target.lower()
+                pt_first = (pt_low.split() or [""])[0]
+                for c_rec in contacts:
+                    c_name_low = str(c_rec.get("name", "")).strip().lower()
+                    c_first = (c_name_low.split() or [""])[0]
+                    if c_name_low == pt_low or (pt_first and len(pt_first) >= 3 and c_first == pt_first):
+                        c_appr = c_rec.get("appearance") or {}
+                        if isinstance(c_appr, dict) and (c_appr.get("sensitive_spots_revealed") or c_appr.get("turn_ons_revealed")):
+                            spots_val = c_appr.get("sensitive_spots")
+                        break
+
+            # Multi-partner assembly
+            partner_climaxes_map = climax_info.get("partner_climaxes") if isinstance(climax_info, dict) else None
+            partner_actors_list = []
+            if len(partners_list) >= 2:
+                for p_cand in partners_list:
+                    p_cand_match = _match_actor_key(p_cand, exc_actors_map) if p_cand else ""
+                    p_cand_meter = 0
+                    if p_cand_match and p_cand_match in exc_actors_map:
+                        p_cand_meter = int(exc_actors_map[p_cand_match].get("meter", 0) or 0)
+                    else:
+                        for k_act, v_act in exc_actors_map.items():
+                            if isinstance(v_act, dict) and _match_actor_key(p_cand, {k_act: True}) == k_act:
+                                p_cand_meter = int(v_act.get("meter", 0) or 0)
+                                break
+
+                    p_pa_cand = _match_actor_key(p_cand, actors) if p_cand else ""
+                    p_cand_posture = ""
+                    if p_pa_cand and p_pa_cand in actors:
+                        p_cand_posture = str(actors[p_pa_cand].get("posture", ""))
+                    else:
+                        for k_pa, v_pa in actors.items():
+                            if isinstance(v_pa, dict) and _match_actor_key(p_cand, {k_pa: True}) == k_pa:
+                                p_cand_posture = str(v_pa.get("posture", ""))
+                                break
+
+                    p_cand_spots = None
+                    p_cand_gender = "Female"
+                    if contacts:
+                        p_low = p_cand.lower()
+                        p_first = (p_low.split() or [""])[0]
+                        for c_rec in contacts:
+                            c_name_low = str(c_rec.get("name", "")).strip().lower()
+                            c_first = (c_name_low.split() or [""])[0]
+                            if c_name_low == p_low or (p_first and len(p_first) >= 3 and c_first == p_first):
+                                p_cand_gender = c_rec.get("gender") or (c_rec.get("appearance") or {}).get("gender") or "Female"
+                                c_appr = c_rec.get("appearance") or {}
+                                if isinstance(c_appr, dict) and (c_appr.get("sensitive_spots_revealed") or c_appr.get("turn_ons_revealed")):
+                                    p_cand_spots = c_appr.get("sensitive_spots")
+                                break
+
+                    p_cand_clim = False
+                    if partner_climaxes_map and isinstance(partner_climaxes_map, dict):
+                        p_clim_k = _match_actor_key(p_cand, partner_climaxes_map)
+                        p_cand_clim = bool(partner_climaxes_map.get(p_clim_k or p_cand, False))
+                    else:
+                        p_cand_clim = bool(partner_peaked)
+
+                    partner_actors_list.append({
+                        "name": p_cand,
+                        "meter": p_cand_meter,
+                        "posture": p_cand_posture,
+                        "climaxed": p_cand_clim,
+                        "sensitive_spots": p_cand_spots,
+                        "gender": p_cand_gender,
+                    })
+
+            if partner_actors_list:
+                n_meter_val = max(int(p.get("meter", 0) or 0) for p in partner_actors_list)
+
+            _act_text = " ".join(
+                str(a.get("label", "") if isinstance(a, dict) else a)
+                for a in (actions or [])
+            )
+            primary_gender = "Female"
+            if contacts and partner_target:
+                p_low = partner_target.lower()
+                p_first = (p_low.split() or [""])[0]
+                for c_rec in contacts:
+                    c_name_low = str(c_rec.get("name", "")).strip().lower()
+                    c_first = (c_name_low.split() or [""])[0]
+                    if c_name_low == p_low or (p_first and len(p_first) >= 3 and c_first == p_first):
+                        primary_gender = c_rec.get("gender") or (c_rec.get("appearance") or {}).get("gender") or "Female"
+                        break
+
+            bp = build_intimate_choice_blueprints(
+                partner_name=partner_target,
+                last_act=infer_last_act_from_state(state, action_str=_act_text),
+                player_posture=player_posture_str,
+                partner_posture=partner_posture_str,
+                player_meter=p_meter_val,
+                partner_meter=n_meter_val,
+                partner_climaxed=bool(partner_peaked),
+                player_climaxed=bool(player_peaked),
+                premature_finish=bool(premature_fin),
+                partner_demanded=bool(partner_dem),
+                sensitive_spots=spots_val,
+                partner_actors=partner_actors_list if len(partner_actors_list) >= 2 else None,
+                partner_gender=primary_gender,
+            )
+            lines.extend(bp.get("guide_lines", []))
+        except Exception:
+            pass
+
 
     # 2. TACTICAL COMBAT MODE
     elif is_combat:
@@ -395,6 +919,8 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
 
         lines.append(
             "- CONTINUITY DIRECTIVE: Maintain physical consistency with these postures and held items. "
+            "Items, food, or props held by or associated with NPCs belong strictly to that NPC and NEVER transfer to the player's possession without an explicit narrative handoff/exchange. "
+            "In `next_choices`, NEVER generate choices offering or sharing items the player does not carry in their inventory. "
             "If an actor moves, stands, or puts down an object, narrate the transition naturally and output updated states."
         )
 
@@ -402,27 +928,27 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
 
 
 def _match_actor_key(name: str, actors: dict) -> str:
-    """Finds matching actor key in actors dict handling case, first names, and titles."""
-    n_clean = name.strip().lower()
+    """Finds matching actor key in actors dict handling case, first names, markdown decorations, and titles."""
+    n_clean = str(name).strip().strip("*_`\"' ").lower()
     if not n_clean:
         return name
     n_first = n_clean.split()[0] if n_clean else ""
 
-    # 1. Exact case-insensitive match
+    # 1. Exact case-insensitive match (stripping markdown decorations)
     for k in actors:
-        if k.strip().lower() == n_clean:
+        if str(k).strip().strip("*_`\"' ").lower() == n_clean:
             return k
 
     # 2. First-name match (if >= 3 chars)
     if len(n_first) >= 3:
         for k in actors:
-            k_first = (k.strip().lower().split() or [""])[0]
+            k_first = (str(k).strip().strip("*_`\"' ").lower().split() or [""])[0]
             if k_first == n_first:
                 return k
 
     # 3. Substring match (e.g. "Elena" in "Elena Vance" or "Marcus" in "Captain Marcus")
     for k in actors:
-        k_clean = k.strip().lower()
+        k_clean = str(k).strip().strip("*_`\"' ").lower()
         if (len(n_clean) >= 3 and n_clean in k_clean) or (len(k_clean) >= 3 and k_clean in n_clean):
             return k
 
@@ -474,12 +1000,19 @@ def merge_physical_state_updates(current_state: dict, updates: dict, party: list
     if hasattr(updates, "model_dump"):
         updates = updates.model_dump(exclude_unset=False)
     elif not isinstance(updates, dict):
-        return {
+        res = {
             "actors": actors,
             "props": props,
             "intimate_contact": intimate_contact,
             "combat_focus": combat_focus,
         }
+        if "dropped_items" in current_state:
+            res["dropped_items"] = current_state["dropped_items"]
+        if "climax_state" in current_state:
+            res["climax_state"] = current_state["climax_state"]
+        if "excitement" in current_state:
+            res["excitement"] = current_state["excitement"]
+        return res
 
     # 1. Update Actors
     raw_actors = updates.get("actors") or updates.get("characters") or {}
@@ -496,6 +1029,13 @@ def merge_physical_state_updates(current_state: dict, updates: dict, party: list
 
     if isinstance(raw_actors, dict):
         for name, u_data in raw_actors.items():
+            name_str = str(name).strip()
+            if not name_str or name_str.startswith("_") or len(name_str) > 60 or name_str.lower() in (
+                "props", "intimate_contact", "combat_focus", "location", "npcs_present",
+                "npc_departures", "nearby_enemies", "merchant_encounter", "faction_updates",
+                "faction_promotion_result", "image_prompt"
+            ):
+                continue
             if hasattr(u_data, "model_dump"):
                 u_data = u_data.model_dump()
             if not isinstance(u_data, dict):
@@ -603,66 +1143,104 @@ def merge_physical_state_updates(current_state: dict, updates: dict, party: list
             if d_item and str(d_item).strip() and str(d_item).strip() not in dropped_items:
                 dropped_items.append(str(d_item).strip())
 
-    return {
+    # 4. Update Intimate Climax State
+    climax_state = dict(current_state.get("climax_state") or {"partner_climaxed": False, "player_climaxed": False, "partner_climaxes": {}})
+    climax_state.setdefault("partner_climaxes", {})
+    if updates.get("player_climaxed") is not None:
+        climax_state["player_climaxed"] = bool(updates["player_climaxed"])
+    if updates.get("partner_climaxed") is not None:
+        climax_state["partner_climaxed"] = bool(updates["partner_climaxed"])
+    if "partner reached climax" in str(intimate_contact).lower() or "partner peaked" in str(intimate_contact).lower():
+        climax_state["partner_climaxed"] = True
+
+    res = {
         "actors": actors,
         "props": props,
         "intimate_contact": intimate_contact,
         "combat_focus": combat_focus,
         "dropped_items": dropped_items,
+        "climax_state": climax_state,
     }
+    if "excitement" in current_state:
+        res["excitement"] = current_state["excitement"]
+    if isinstance(updates, dict) and "excitement" in updates:
+        res["excitement"] = updates["excitement"]
+    return res
 
 
 def restore_equipped_outfit(current_state: dict, party: list, scen_key: str = "fantasy", session_id: int = 0) -> dict:
-    """Restores the equipped clothing layers for party members from their inventory."""
+    """Restores the equipped clothing layers for party members from their inventory and redresses conscious NPCs."""
     if not isinstance(current_state, dict):
         return current_state
     
     actors = current_state.get("actors") or {}
-    if not party or not isinstance(party, list):
-        return current_state
+    handled_keys = set()
 
-    for entry in party:
-        char = entry[0] if isinstance(entry, (tuple, list)) else entry
-        if not isinstance(char, dict) or not char.get("name"):
-            continue
-        c_name = char["name"]
-        matched_key = _match_actor_key(c_name, actors)
-        if matched_key not in actors:
-            continue
+    if party and isinstance(party, list):
+        for entry in party:
+            char = entry[0] if isinstance(entry, (tuple, list)) else entry
+            if not isinstance(char, dict) or not char.get("name"):
+                continue
+            c_name = char["name"]
+            matched_key = _match_actor_key(c_name, actors)
+            if matched_key not in actors:
+                continue
+            handled_keys.add(matched_key)
+                
+            a_data = actors[matched_key]
+            if not isinstance(a_data, dict):
+                continue
+                
+            stance = str(a_data.get("stance", "")).lower()
+            if stance == "dead" or "deceased" in str(a_data.get("posture", "")).lower():
+                continue
+                
+            inv = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else []
+            equipped_top = "Clothed"
+            equipped_bottom = "Clothed"
+            if isinstance(inv, list):
+                for item in inv:
+                    if not isinstance(item, dict):
+                        continue
+                    s = item.get("slot")
+                    n = item.get("name")
+                    if s in ("Top", "Armor") and n:
+                        equipped_top = n
+                    elif s == "Bottom" and n:
+                        equipped_bottom = n
+                        
+            u_top, u_bot = _infer_initial_undergarments_state(char, scen_key, session_id)
             
-        a_data = actors[matched_key]
-        if not isinstance(a_data, dict):
+            # Only redress if they are currently missing top/bottom layers that they should have equipped
+            cloth = a_data.get("clothing") or {}
+            if isinstance(cloth, dict):
+                cloth["top"] = equipped_top
+                cloth["bottom"] = equipped_bottom
+                # We also ensure undergarments match the baseline, in case they were stripped
+                cloth["under_top"] = u_top
+                cloth["under_bottom"] = u_bot
+                actors[matched_key]["clothing"] = cloth
+
+    # Also redress any conscious non-party NPC actors whose clothing was removed/undone during intimacy
+    _undressed_tokens = ("removed", "none", "stripped", "pulled", "unbuttoned", "open", "disheveled", "undone", "naked", "bare")
+    for a_key, a_data in actors.items():
+        if a_key in handled_keys or not isinstance(a_data, dict):
             continue
-            
         stance = str(a_data.get("stance", "")).lower()
-        if stance == "dead" or "deceased" in str(a_data.get("posture", "")).lower():
+        posture_low = str(a_data.get("posture", "")).lower()
+        if stance in ("dead", "incapacitated") or any(w in posture_low for w in ("deceased", "downed", "unconscious")):
             continue
-            
-        inv = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else []
-        equipped_top = "Clothed"
-        equipped_bottom = "Clothed"
-        if isinstance(inv, list):
-            for item in inv:
-                if not isinstance(item, dict):
-                    continue
-                s = item.get("slot")
-                n = item.get("name")
-                if s in ("Top", "Armor") and n:
-                    equipped_top = n
-                elif s == "Bottom" and n:
-                    equipped_bottom = n
-                    
-        u_top, u_bot = _infer_initial_undergarments_state(char, scen_key, session_id)
-        
-        # Only redress if they are currently missing top/bottom layers that they should have equipped
-        cloth = a_data.get("clothing") or {}
+        cloth = a_data.get("clothing")
         if isinstance(cloth, dict):
-            cloth["top"] = equipped_top
-            cloth["bottom"] = equipped_bottom
-            # We also ensure undergarments match the baseline, in case they were stripped
-            cloth["under_top"] = u_top
-            cloth["under_bottom"] = u_bot
-            actors[matched_key]["clothing"] = cloth
+            if any(t in str(cloth.get("top", "")).lower() for t in _undressed_tokens):
+                cloth["top"] = "Clothed"
+            if any(t in str(cloth.get("bottom", "")).lower() for t in _undressed_tokens):
+                cloth["bottom"] = "Clothed"
+            if any(t in str(cloth.get("under_top", "")).lower() for t in ("removed", "stripped", "pulled", "unclasped", "undone")):
+                cloth["under_top"] = "Worn"
+            if any(t in str(cloth.get("under_bottom", "")).lower() for t in ("removed", "stripped", "pulled", "undone")):
+                cloth["under_bottom"] = "Worn"
+            actors[a_key]["clothing"] = cloth
             
     current_state["actors"] = actors
     return current_state
@@ -720,8 +1298,12 @@ def handle_location_transition(current_state: dict, party: list = None,
                 actors[name] = actor_copy
                 continue
 
-            # Conscious characters arriving: reset sitting / resting furniture postures to standing
-            if any(w in posture_lower for w in ("seated", "sitting", "chair", "sofa", "couch", "bed", "mattress", "floor", "desk", "reclining")):
+            # Conscious characters arriving: reset sitting / resting / intimate postures to standing
+            if any(w in posture_lower for w in (
+                "seated", "sitting", "chair", "sofa", "couch", "bed", "mattress", "floor", "desk", "reclining",
+                "kneeling", "lying", "aftercare", "aftershocks", "trembling", "cuddling", "embracing",
+                "straddling", "maintaining", "receiving", "leaning back", "resting",
+            )):
                 actor_copy["posture"] = "Standing / arriving in new area"
 
             # If actor was holding room furniture/prop from the old room, reset to Empty hands
@@ -745,7 +1327,19 @@ def handle_location_transition(current_state: dict, party: list = None,
         "intimate_contact": "none",
         "combat_focus": "none",
         "dropped_items": [],
+        "climax_state": {"partner_climaxed": False, "player_climaxed": False, "partner_climaxes": {}},
     }
+    if "excitement" in current_state and isinstance(current_state["excitement"], dict):
+        exc_copy = dict(current_state["excitement"])
+        exc_copy["active"] = False
+        exc_copy["last_act"] = "none"
+        exc_copy["premature_finish"] = False
+        exc_copy["partner_demanded"] = False
+        exc_copy["unsatisfied_partner"] = ""
+        exc_copy["unsatisfied_partners"] = []
+        exc_copy["simultaneous_partner_climax"] = False
+        exc_copy["mutual_group_climax"] = False
+        new_state["excitement"] = exc_copy
     
     # Auto-redress upon transitioning locations
     new_state = restore_equipped_outfit(new_state, party, session_id=session_id)

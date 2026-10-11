@@ -456,6 +456,64 @@ class TestGenealogy(unittest.TestCase):
             with db.get_conn() as conn:
                 db.core._delete_session_records(conn, sess_id)
 
+    def test_topic_aware_romance_context_includes_single_and_partner(self):
+        """Verify build_topic_aware_npc_context activates on 'single' inquiry and includes current partner."""
+        contact = {
+            "name": "Mia Yamada",
+            "track": "platonic",
+            "relations": {
+                "romance": {
+                    "status": "In a Relationship",
+                    "current_partner": {
+                        "name": "Stephen Hernandez",
+                        "role": "Former Lab Partner",
+                        "relationship_type": "Dating / Partner"
+                    },
+                    "ex_partners": [
+                        {"name": "Harry Ikeda", "role": "Dormitory Prefect"}
+                    ]
+                }
+            }
+        }
+        # Inquire if she is single
+        ctx = genealogy.build_topic_aware_npc_context(contact, actions="ask her if she's single")
+        self.assertIn("[CANON ROMANCE & DATING HISTORY - Mia Yamada]", ctx)
+        self.assertIn("Current Status: In a Relationship", ctx)
+        self.assertIn("Stephen Hernandez", ctx)
+        self.assertIn("Harry Ikeda", ctx)
+
+    def test_ensure_contact_relations_preserves_previous_partner_in_exes(self):
+        """Verify ensure_contact_relations preserves existing non-player partner in ex_partners when romantic track is activated."""
+        sess_id = 999911
+        try:
+            contact = {
+                "session_id": sess_id,
+                "character_id": 1,
+                "name": "Mia Yamada",
+                "track": "romantic",
+                "relationship_score": 60,
+                "relations": {
+                    "romance": {
+                        "status": "In a Relationship",
+                        "current_partner": {
+                            "name": "Stephen Hernandez",
+                            "role": "Former Lab Partner",
+                            "relationship_type": "Dating / Partner"
+                        },
+                        "ex_partners": []
+                    }
+                }
+            }
+            rel = genealogy.ensure_contact_relations(contact, session_id=sess_id, scenario="high_school_drama")
+            self.assertEqual(rel["romance"]["status"], "In a Relationship")
+            self.assertNotEqual(rel["romance"]["current_partner"]["name"], "Stephen Hernandez")
+            # Stephen Hernandez must have been moved to ex_partners
+            exes = rel["romance"]["ex_partners"]
+            self.assertTrue(any(e.get("name") == "Stephen Hernandez" for e in exes))
+        finally:
+            with db.get_conn() as conn:
+                db.core._delete_session_records(conn, sess_id)
+
 
 if __name__ == "__main__":
     unittest.main()

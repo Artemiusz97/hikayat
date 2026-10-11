@@ -246,7 +246,45 @@ class TestMultiNPCDialogueAndPresenceValidation(unittest.TestCase):
         self.assertTrue(any("Inspect the chemical spill" in l for l in labels))
         self.assertTrue(any("Proceed toward" in l for l in labels))
 
+    def test_sanitize_absent_npc_hallucinations_in_prose(self):
+        """Verify absent NPC hallucinations in prose are purged while dialogue/memory are preserved."""
+        import json
+        with db.get_conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO contacts (session_id, character_id, npc_id, name, relationship_score, basic_info_json, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (self.test_session_id, 0, "yuki", "Yuki", 15,
+                 json.dumps({"location": "Sakuragaoka Academy ➔ School Archives"}), 1000)
+            )
+            conn.commit()
+
+        session = {
+            "id": self.test_session_id,
+            "current_npcs": [{"name": "Mia Yamada"}],
+            "current_location": "Sakuragaoka Academy ➔ Old East Wing Music Room ➔ Piano Alcove",
+        }
+
+        hallucinated_prose = (
+            "The ambient sounds of the music room seem to fade as Mia waits for your move. "
+            "Yuki, standing nearby with empty hands, watches the interaction with a quiet curiosity. "
+            "The morning light catches the dust motes dancing around you both."
+        )
+
+        cleaned = game_engine.sanitize_absent_npc_hallucinations(hallucinated_prose, session)
+        self.assertNotIn("Yuki", cleaned)
+        self.assertIn("Mia", cleaned)
+        self.assertIn("ambient sounds", cleaned)
+
+        # Spoken dialogue about absent character must be preserved
+        dialogue_prose = (
+            'Mia sighs and crosses her arms. "Did Yuki say anything about where she found that note?" '
+            "You nod thoughtfully."
+        )
+        cleaned_dialogue = game_engine.sanitize_absent_npc_hallucinations(dialogue_prose, session)
+        self.assertIn("Did Yuki say anything", cleaned_dialogue)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

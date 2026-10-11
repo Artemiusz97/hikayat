@@ -81,13 +81,15 @@ def calculate_combat_attributes(
     # Elemental attack bonuses
     elem_atks = {
         "fire_atk": 0, "shock_atk": 0, "ice_atk": 0,
-        "poison_atk": 0, "holy_atk": 0, "dark_atk": 0
+        "poison_atk": 0, "holy_atk": 0, "dark_atk": 0,
+        "earth_atk": 0, "water_atk": 0, "wind_atk": 0
     }
     # Elemental and damage resistance affixes (DR%)
     elem_res = {
         "fire_res": 0, "shock_res": 0, "ice_res": 0,
         "poison_res": 0, "holy_res": 0, "dark_res": 0, "omni_res": 0,
-        "physical_res": 0, "energy_res": 0
+        "physical_res": 0, "energy_res": 0,
+        "earth_res": 0, "water_res": 0, "wind_res": 0
     }
     # Vitals & regeneration
     bonus_max_hp, bonus_max_mp = 0, 0
@@ -98,6 +100,8 @@ def calculate_combat_attributes(
     clothing_suppressed = False
     if equipped_items:
         from mechanics.combat.equipment import parse_equipment_metadata
+        from mechanics.combat.items.clothing import CLOTHING_TOPS, CLOTHING_BOTTOMS
+        civilian_archs = set(CLOTHING_TOPS.keys()) | set(CLOTHING_BOTTOMS.keys()) | {"clothes"}
         for item in equipped_items:
             if not isinstance(item, dict):
                 continue
@@ -105,12 +109,14 @@ def calculate_combat_attributes(
             t = (item.get("item_type") or "").lower()
             m = parse_equipment_metadata(item)
             arch = (m.get("archetype") or "").lower()
-            if s == "Armor" or t == "armor" or (arch and arch not in ("clothes", "tunic", "casual_shirt", "blouse", "school_uniform_top", "jacket", "hoodie", "robe") and (m.get("base_dt", 0) > 2 or "armor" in t)):
+            if s == "Armor" or t == "armor" or (arch and arch not in civilian_archs and (m.get("base_dt", 0) > 2 or "armor" in t)):
                 has_combat_armor = True
                 break
 
     if equipped_items:
         from mechanics.combat.equipment import parse_equipment_metadata
+        from mechanics.combat.items.clothing import CLOTHING_TOPS, CLOTHING_BOTTOMS
+        civilian_archs = set(CLOTHING_TOPS.keys()) | set(CLOTHING_BOTTOMS.keys()) | {"clothes"}
         gear_tags = set()
         for item in equipped_items:
             if not isinstance(item, dict):
@@ -122,7 +128,7 @@ def calculate_combat_attributes(
             is_clothing_item = (
                 item_type_str == "clothing"
                 or slot_name in ("Top", "Bottom")
-                or arch_str in ("clothes", "casual_shirt", "blouse", "school_uniform_top", "jacket", "hoodie", "robe", "tunic", "trousers", "skirt", "shorts", "slacks", "jeans")
+                or arch_str in civilian_archs
             ) and slot_name != "Armor" and item_type_str != "armor"
 
             if has_combat_armor and is_clothing_item:
@@ -398,7 +404,7 @@ def calculate_combat_attributes(
             total_type_dt["energy"] = total_type_dt.get("energy", 0) + mods["ablative_coating"]
 
     # Collect gear-based DR% from *_res affixes and omni_res
-    _elem_channels = ("fire", "shock", "ice", "poison", "holy", "dark", "magical", "energy", "physical")
+    _elem_channels = ("fire", "shock", "ice", "poison", "holy", "dark", "magical", "energy", "physical", "earth", "water", "wind")
     omni = elem_res.get("omni_res", 0) / 100.0
     for ch in _elem_channels:
         res_key = f"{ch}_res"
@@ -417,7 +423,7 @@ def calculate_combat_attributes(
     total_base_dt = max(0, total_base_dt)
 
     if buff_dr > 0:
-        for ch in ("physical", "magical", "fire", "shock", "ice", "poison", "energy"):
+        for ch in ("physical", "magical", "fire", "shock", "ice", "poison", "energy", "earth", "water", "wind"):
             gear_dr[ch] = min(0.85, gear_dr.get(ch, 0.0) + buff_dr)
 
     # Add innate DT to the aggregated pool (keyed as "physical_innate" / "magical_innate")
@@ -505,6 +511,12 @@ def format_combat_attributes_text(attrs: Dict[str, Any]) -> str:
         res_parts.append(f"✨ {attrs['holy_res']}%")
     if attrs.get("dark_res", 0) > 0:
         res_parts.append(f"🌑 {attrs['dark_res']}%")
+    if attrs.get("earth_res", 0) > 0:
+        res_parts.append(f"🪨 {attrs['earth_res']}%")
+    if attrs.get("water_res", 0) > 0:
+        res_parts.append(f"🌊 {attrs['water_res']}%")
+    if attrs.get("wind_res", 0) > 0:
+        res_parts.append(f"🌪️ {attrs['wind_res']}%")
     if attrs.get("omni_res", 0) > 0:
         res_parts.append(f"🌈 {attrs['omni_res']}%")
 

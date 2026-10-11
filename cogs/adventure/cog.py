@@ -65,6 +65,14 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
         self.bot = bot
         self._last_picks: dict[int, tuple[int, dict]] = {}
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user:
+            try:
+                await adb(db.save_discord_user, interaction.user.id, interaction.user.name, interaction.user.display_name)
+            except Exception:
+                pass
+        return True
+
     @app_commands.command(name="resume", description="Resume your active adventure session")
     async def resume(self, interaction: discord.Interaction):
         await self._do_resume(interaction)
@@ -376,12 +384,12 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
 
     @start.autocomplete("tags")
     async def start_tags_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-        from scenario_data import load_tags
+        from scenario_data import load_genres
         import re
         try:
-            tags_dict = load_tags()
+            genres_dict = load_genres()
         except Exception:
-            tags_dict = {}
+            genres_dict = {}
 
         cleaned_current = re.sub(r"\(.*?\)", "", current or "")
         parts = [p.strip() for p in cleaned_current.split(",")]
@@ -396,13 +404,15 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
             already_selected = set(p.lower() for p in parts[:-1] if p)
 
         choices = []
-        for tag_key, tag_info in tags_dict.items():
+        for tag_key, tag_info in genres_dict.items():
             if tag_key.lower() in already_selected:
                 continue
             display_name = tag_info.get("name", tag_key)
+            cat = tag_info.get("category", "")
+            cat_badge = "[Genre] " if cat == "genre" else ("[Modifier] " if cat == "modifier" else "")
             if not last_part or last_part in tag_key.lower() or last_part in display_name.lower():
                 val = f"{prefix}{tag_key}"
-                label = f"{prefix}+ {display_name}" if prefix else f"{display_name} ({tag_key})"
+                label = f"{prefix}+ {cat_badge}{display_name}" if prefix else f"{cat_badge}{display_name} ({tag_key})"
                 if len(label) > 100:
                     label = label[:97] + "..."
                 if len(val) > 100:
@@ -718,9 +728,9 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
         return result if len(result) <= max_chars + 20 else result[:max_chars].rsplit(" ", 1)[0] + "…"
 
     @classmethod
-    def _clean_choices(cls, choices: list, scenario: str = "fantasy", location: str = "", char: dict = None, dialogue_partner: str = None, current_npcs: list = None, session_id: int = None) -> list:
+    def _clean_choices(cls, choices: list, scenario: str = "fantasy", location: str = "", char: dict = None, dialogue_partner: str = None, current_npcs: list = None, session_id: int = None, departed_npcs: list = None) -> list:
         from .choices_cleaner import clean_choices_impl
-        return clean_choices_impl(cls, choices, scenario, location, char, dialogue_partner, current_npcs, session_id)
+        return clean_choices_impl(cls, choices, scenario, location, char, dialogue_partner, current_npcs, session_id, departed_npcs)
     def _apply_xp(self, user_id: int, check: CheckResult):
         """Awards XP for this action's outcome tier. XP-driven leveling
         (db.add_xp) is the ONLY way a character gains stat points -- there is
@@ -740,8 +750,8 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
         try:
             return await interaction.followup.send(**kwargs)
         except (discord.HTTPException, discord.NotFound) as exc:
-            # 401 (50027) = Invalid/expired webhook token, 404 (10062) = Unknown interaction
-            if getattr(exc, "code", None) in (50027, 10062) or (hasattr(exc, "status") and exc.status in (401, 404)):
+            # 50027 = Invalid/expired webhook token, 10062 = Unknown interaction, 10015 = Unknown webhook
+            if getattr(exc, "code", None) in (50027, 10062, 10015) or (hasattr(exc, "status") and exc.status in (401, 404)):
                 logger.warning("Followup token expired or invalid (%s), falling back to channel.send", exc)
                 # Remove webhook-only arguments — channel.send does not support them
                 kwargs.pop("ephemeral", None)

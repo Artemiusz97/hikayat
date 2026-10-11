@@ -25,12 +25,15 @@ class TestProceduralSpells(unittest.TestCase):
         self.assertIn("Illusion", DND_SCHOOLS)
         self.assertIn("Divination", DND_SCHOOLS)
 
-        # 13 D&D Damage Types
-        self.assertEqual(len(DND_DAMAGE_TYPES), 13)
+        # 16 D&D Damage Types (13 classical/standard + Earth, Water, Wind)
+        self.assertEqual(len(DND_DAMAGE_TYPES), 16)
         self.assertIn("fire", DND_DAMAGE_TYPES)
         self.assertIn("cold", DND_DAMAGE_TYPES)
         self.assertIn("lightning", DND_DAMAGE_TYPES)
         self.assertIn("thunder", DND_DAMAGE_TYPES)
+        self.assertIn("earth", DND_DAMAGE_TYPES)
+        self.assertIn("water", DND_DAMAGE_TYPES)
+        self.assertIn("wind", DND_DAMAGE_TYPES)
         self.assertIn("radiant", DND_DAMAGE_TYPES)
         self.assertIn("necrotic", DND_DAMAGE_TYPES)
         self.assertIn("psychic", DND_DAMAGE_TYPES)

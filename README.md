@@ -1,7 +1,7 @@
-# Hikayat (v2.1.0) — Living AI Tabletop RPG & Web Application
+# Hikayat (v2.2.0) — Living AI Tabletop RPG & Web Application
 
 [![Tests](https://github.com/Artemiusz97/hikayat/actions/workflows/tests.yml/badge.svg)](https://github.com/Artemiusz97/hikayat/actions/workflows/tests.yml)
-[![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)](releases/CHANGELOG-v2.1.0.md)
+[![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)](releases/CHANGELOG-v2.2.0.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/react-18.2-61dafb.svg)](web/)
 
@@ -25,11 +25,15 @@ Hikayat is a comprehensive, multi-genre LLM-driven Tabletop RPG engine powered b
 * **Context-Aware NSFW Routing**: Adult/unrated scenarios are dynamically channeled to dedicated uncensored models (`NSFW_LLM_MODEL`) with isolated fallback chains, keeping mainstream models clean.
 * **Reasoning Headroom Safeguards**: Enforces strict 3,500 token output headroom margins, completely preventing the JSON truncation errors common to modern reasoning models.
 
-### 4. Vector Memory Compaction & Context Token Budgeting
+### 4. Deterministic Affinity Engine & Runtime Auditor
+* **Algorithmic Relationship Standing (`affinity_engine.py`)**: Computes interpersonal affinity, emotional thresholds, and disposition tiers mathematically, ensuring persistent social consequences across sessions.
+* **Turn Auditor & Matching Architecture (`auditor.py`, `matching.py`)**: Automatically verifies choice plausibility, entity references, and state transitions before outcomes are rendered, while isolating ambient collective crowds from persistent NPC profiles.
+
+### 5. Vector Memory Compaction & Context Token Budgeting
 * **Semantic Vector Retrieval**: Lorebook entries, historical character encounters, and location knowledge are indexed and retrieved via semantic embeddings (`mechanics/system/memory/`).
 * **Active Token Budgeting & Compaction**: Dynamically compacts older conversation turns into persistent contextual summaries, preserving long-term campaign continuity within strict token budgets.
 
-### 5. Headless Turn Service & Omnichannel Architecture
+### 6. Headless Turn Service & Omnichannel Architecture
 * **Presentation-Decoupled Game Loop**: The turn engine (`services/turn_service.py`) operates as a completely headless core.
 * **100% Platform Parity**: Both the Discord bot (slash commands, button decks, modal sheets) and the React Web SPA (REST endpoints, WebSockets) consume the exact same underlying service, ensuring synchronized state across platforms.
 
@@ -39,20 +43,20 @@ Hikayat is a comprehensive, multi-genre LLM-driven Tabletop RPG engine powered b
 
 ### 1. Dual Platforms: Discord Bot & Modern React Web UI
 * **Discord Bot**: Interactive slash commands, button menus, modals, and dynamic embed dialogues.
-* **Modern React Web UI (`web/src/`)**: Single-page application featuring interactive Tactical Battle Decks, live Story Feed, in-game Smartphone modal, Party Widget, and Codex panels.
+* **Modern React Web UI (`web/src/`)**: Single-page application featuring interactive Tactical Battle Decks, live Story Feed, in-game Smartphone modal, Turn Outcome panel (`TurnOutcomePanel.jsx`), Party Widget, and redesigned Codex panels.
 * **FastAPI Modular Backend (`api/`, `services/`)**: High-performance REST endpoints and WebSockets for multiplayer synchronization and state streaming.
 
 ### 2. Living World, Time Engine & In-Game Smartphone
 * **Minute-by-Minute Time Progression**: Persistent in-game clock advancing across 8 distinct time-of-day phases (Dawn, Afternoon, Dusk, Night, etc.).
 * **Rest & Fatigue Mechanics**: Dynamic "Sleep / Rest" actions in hub locations with cumulative fatigue penalties for staying awake.
-* **In-Game Smartphone (`/phone`)**: Direct NPC texting, date scheduling, meetup waypoints, and cross-zone companion transit.
+* **In-Game Smartphone (`/phone`)**: Contextually grounded direct messaging (`dm_grounding.py`), player-initiated texting (`player_dm.py`), media vault captions, and date scheduling.
 * **Procedural Biomes & Location Hubs**: Tiered location tree architecture with dynamic discovery, area links, and contextual merchant hubs.
 
 ### 3. Deep Social Dynamics, NPC Depth & Factions
 * **Rich NPC Depth & Memory**: NPCs feature persistent backgrounds, unique mannerisms, emotional moods, evolving dispositions, and contextual memory of player history.
 * **Genealogy & Canonical Families**: Preserves consistent family lineages (parents, siblings, spouses) and personal histories across encounters.
 * **Unified Action Intent Engine**: Intelligently distinguishes diplomatic banter, peaceful exploration, romantic advances, gift giving, and commerce.
-* **Nuanced Relationship & Intimacy Progression**: Multi-stage relationship milestones with mutual preference tracking, emotional disclosure gating, and gradual intimacy evolution across physical and emotional dimensions.
+* **Nuanced Relationship & Intimacy Dynamics**: Multi-stage relationship milestones with mutual preference tracking, dynamic excitement meters, emotional disclosure gating, and gradual intimacy evolution across physical and emotional dimensions.
 * **Living Factions System (`/factions`)**: Dynamic faction standings, territorial influence, rivalries, and faction headquarters with reputation perks.
 
 ### 4. Tactical Combat Engine & Battle Decks
@@ -63,10 +67,10 @@ Hikayat is a comprehensive, multi-genre LLM-driven Tabletop RPG engine powered b
 * **Narrative Immersion Protocol**: Strict GM rules prevent raw HP numbers from leaking into prose, describing physical trauma and flow dynamically.
 
 ### 5. Modular Equipment & Elemental Magic Systems
-* **Versatile Weapon Mechanics**: Weapons act as tactical multipliers and stat scalers, supporting diverse playstyles including dual-wielding and versatile grips.
+* **Expansive Weapon Arsenal**: Over 2,000 lines of specialized weaponry across historical, fantasy, sci-fi, and modern archetypes, acting as tactical damage multipliers with dual-wielding support.
 * **Layered Equipment & Armor**: Distinct slots for civilian attire, combat armor, headwear, shields, and accessories, with balanced damage mitigation formulas.
 * **Elemental Magic Taxonomy**: Dedicated magic package with elemental tags, spell taxonomy, class-specific spell kits, and dynamic MP cost scaling.
-* **Procedural Consumables & Items**: Scenario-appropriate potions, consumables, and gear dynamically seeded into world containers and merchant shops.
+* **Procedural Consumables & Scenario Gear**: Dynamic loot tables, restorative items, and consumables tailored to specific world scenarios (`genres.json`).
 
 ### 6. Procedural 10-Chapter Campaign System
 * **Long-Term Procedural Goals**: Story campaigns progress through 10 chapters driven by dynamically generated end goals and emergent narrative arcs.
@@ -121,24 +125,26 @@ hikayat/
 │   ├── social.py               # Relationships, intimacy & phone messages
 │   └── world.py                # Locations, lorebook & factions
 ├── game_engine/                # Core simulation & LLM orchestration
+│   ├── auditor.py              # Runtime state consistency & choice auditor
+│   ├── matching.py             # Fuzzy entity matching & collective crowd guard
 │   ├── state/                  # State reducers & state machines
 │   ├── turn/                   # Turn loop generation & outcome handling
 │   ├── context.py              # Known-world prompt assembly & token budget
 │   └── core.py                 # Narrative rules & schema constraints
 ├── mechanics/                  # Domain-specific gameplay subsystems
-│   ├── combat/                 # 5-tier enemies, tactical decks, equipment, spells, items & tags
+│   ├── combat/                 # Tactical decks, 2000+ line weapons arsenal, armor & spells
 │   ├── narrative/              # Anti-cliche filters, paragraph quotas & style supremacy
-│   ├── social/                 # 3-track intimacy, genealogy, intent classification & persona
-│   ├── system/                 # Minute-by-minute time engine, in-game smartphone & memory budgeting
+│   ├── social/                 # Deterministic affinity engine, intimacy excitement & genealogy
+│   ├── system/                 # Time engine, grounded smartphone messaging & memory compaction
 │   └── world/                  # Location tree, spatial waypoints, mobility & World Forge seeder
 ├── models/                     # Centralized Pydantic schemas & entity trackers
 ├── releases/                   # Version changelogs & clean release archives
-├── scripts/                    # Maintenance & release packaging utilities
+├── scripts/                    # Maintenance, release packaging & gameplay simulation harnesses
 ├── services/                   # Decoupled turn execution service
-├── tests/                      # Automated unit, integration & contract test suites
+├── tests/                      # Automated unit, integration, simulator & contract test suites
 ├── web/                        # Unified modern React Single-Page Application
 │   ├── dist/                   # Production compiled assets (pre-built, served natively by FastAPI)
-│   ├── src/                    # ActionPanel, StoryFeed, PhoneModal, CodexPanel, PartyWidget
+│   ├── src/                    # ActionPanel, TurnOutcomePanel, StoryFeed, PhoneModal, CodexPanel
 │   ├── package.json
 │   └── vite.config.js
 ├── config.py                   # Environment configuration loader

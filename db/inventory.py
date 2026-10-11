@@ -203,13 +203,19 @@ def equip_item(user_id: int, item_id: int, slot: str) -> dict | None:
         item_type = str(item_dict.get("item_type") or item_meta.get("item_type") or "").strip().title()
         archetype = str(item_meta.get("archetype") or "").strip().lower()
 
+        from mechanics.combat.items.clothing import CLOTHING_TOPS, CLOTHING_BOTTOMS
+        from mechanics.combat.items.headwear import HEADWEAR_ARCHETYPES
+        from mechanics.combat.items.gloves import GLOVE_ARCHETYPES
+        from mechanics.combat.items.shoes import SHOE_ARCHETYPES
+        from mechanics.combat.items.accessories import ACCESSORY_ARCHETYPES
+
         # Check combat body armor vs civilian clothing vs headwear vs weapon vs shield
-        is_civilian_clothing = (item_type == "Clothing") or (archetype in ("casual_shirt", "blouse", "school_uniform_top", "jacket", "hoodie", "robe", "tunic", "trousers", "skirt", "shorts", "slacks", "jeans"))
-        is_headwear = (item_type in ("Headwear", "Helmet", "Head")) or (archetype in ("cloth_hood", "cap", "open_helm", "full_greathelm", "tech_visor", "gas_mask", "circlet", "formal_hat"))
+        is_civilian_clothing = (item_type == "Clothing") or (archetype in CLOTHING_TOPS or archetype in CLOTHING_BOTTOMS)
+        is_headwear = (item_type in ("Headwear", "Helmet", "Head")) or (archetype in HEADWEAR_ARCHETYPES)
         is_shield = (item_type == "Shield") or (archetype in ("buckler", "heater_shield", "tower_shield", "riot_shield", "energy_shield"))
-        is_accessory = (item_type == "Accessory") or (archetype in ("ring", "amulet", "belt", "necklace", "charm", "cloak", "bracelet", "earring", "talisman"))
-        is_gloves = (item_type in ("Gloves", "Handwear")) or (archetype in ("gloves", "heavy_gauntlets", "cloth_wraps", "fingerless_gloves", "precision_gloves", "insulated_gloves", "arcane_gloves", "leather_gloves", "formal_gloves", "gauntlets", "mitts"))
-        is_shoes = (item_type in ("Shoes", "Footwear", "Boots")) or (archetype in ("boots", "shoes", "sandals", "greaves", "heavy_greaves", "light_sneakers", "stealth_boots", "riding_boots", "hazard_boots", "formal_shoes", "combat_boots"))
+        is_accessory = (item_type == "Accessory") or (archetype in ACCESSORY_ARCHETYPES or archetype in ("ring", "amulet", "belt", "necklace", "charm", "cloak", "bracelet", "earring", "talisman"))
+        is_gloves = (item_type in ("Gloves", "Handwear")) or (archetype in GLOVE_ARCHETYPES or "glove" in archetype or "gauntlet" in archetype or "mitt" in archetype)
+        is_shoes = (item_type in ("Shoes", "Footwear", "Boots")) or (archetype in SHOE_ARCHETYPES or "shoe" in archetype or "boot" in archetype or "greave" in archetype)
 
         non_armor_types = ("Clothing", "Headwear", "Helmet", "Head", "Gloves", "Handwear", "Shoes", "Footwear", "Boots", "Accessory", "Shield", "Weapon")
         non_armor_slots = ("Top", "Bottom", "Head", "Gloves", "Shoes", "Shield", "Weapon", "Accessory 1", "Accessory 2", "Accessory 3", "Accessory 4")

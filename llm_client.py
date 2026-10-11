@@ -28,17 +28,18 @@ import json_repair
 
 log = logging.getLogger(__name__)
 
-_http_client = httpx.AsyncClient(verify=LLM_VERIFY_SSL, timeout=LLM_REQUEST_TIMEOUT)
-_client = AsyncOpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL, max_retries=2, http_client=_http_client)
+_llm_timeout = httpx.Timeout(LLM_REQUEST_TIMEOUT, connect=60.0, read=LLM_REQUEST_TIMEOUT, write=60.0, pool=60.0)
+_http_client = httpx.AsyncClient(verify=LLM_VERIFY_SSL, timeout=_llm_timeout)
+_client = AsyncOpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL, max_retries=0, http_client=_http_client, timeout=_llm_timeout)
 
 # Optional second client used exclusively for NSFW scenarios.
 # Falls back to _client / LLM_MODEL when NSFW credentials are not configured.
-_embed_http_client = httpx.AsyncClient(verify=LLM_VERIFY_SSL, timeout=LLM_REQUEST_TIMEOUT)
-_embed_client = AsyncOpenAI(api_key=EMBEDDING_API_KEY, base_url=EMBEDDING_BASE_URL, max_retries=2, http_client=_embed_http_client)
+_embed_http_client = httpx.AsyncClient(verify=LLM_VERIFY_SSL, timeout=_llm_timeout)
+_embed_client = AsyncOpenAI(api_key=EMBEDDING_API_KEY, base_url=EMBEDDING_BASE_URL, max_retries=0, http_client=_embed_http_client, timeout=_llm_timeout)
 
-_nsfw_http_client = httpx.AsyncClient(verify=LLM_VERIFY_SSL, timeout=LLM_REQUEST_TIMEOUT)
+_nsfw_http_client = httpx.AsyncClient(verify=LLM_VERIFY_SSL, timeout=_llm_timeout)
 _nsfw_client: AsyncOpenAI | None = (
-    AsyncOpenAI(api_key=NSFW_LLM_API_KEY, base_url=NSFW_LLM_BASE_URL, max_retries=2, http_client=_nsfw_http_client)
+    AsyncOpenAI(api_key=NSFW_LLM_API_KEY, base_url=NSFW_LLM_BASE_URL, max_retries=0, http_client=_nsfw_http_client, timeout=_llm_timeout)
     if NSFW_LLM_API_KEY and NSFW_LLM_BASE_URL and NSFW_LLM_MODEL
     else None
 )
@@ -214,10 +215,11 @@ async def get_embedding(text: str) -> list[float]:
             return []
         # Replace newlines as recommended by OpenAI for embeddings
         clean_text = text.replace('\n', ' ')
-        response = await _embed_client.embeddings.create(
-            model=EMBEDDING_MODEL,
-            input=clean_text
-        )
+        async with _semaphore:
+            response = await _embed_client.embeddings.create(
+                model=EMBEDDING_MODEL,
+                input=clean_text
+            )
         return response.data[0].embedding
     except Exception as e:
         log.warning(f"Embedding failed for model {EMBEDDING_MODEL}: {e}")
@@ -484,9 +486,61 @@ def _is_non_retriable_error(e: Exception) -> bool:
     return False
 
 
-async def _backoff_sleep(attempt: int, base_delay: float = 1.0, max_delay: float = 5.0) -> None:
+def _is_model_overloaded_error(e: Exception) -> bool:
+    """Return True if a 429/API error indicates the upstream model is overloaded or out of quota and should fast-failover."""
+    err_msg = str(e).lower()
+    if any(marker in err_msg for marker in (
+        "model_overloaded",
+        "temporarily overloaded",
+        "choose another model",
+        "daily_rpd_limit_exceeded",
+        "insufficient_quota",
+    )):
+        return True
+    body = getattr(e, "body", None)
+    if isinstance(body, dict):
+        err_dict = body.get("error") if isinstance(body.get("error"), dict) else body
+        code = str(err_dict.get("code") or "").lower()
+        if code in ("model_overloaded", "daily_rpd_limit_exceeded", "insufficient_quota"):
+            return True
+    return False
+
+
+def _extract_retry_after(error: Exception | None) -> float | None:
+    """Extract Retry-After delay (in seconds) from an HTTP error response if present and reasonable."""
+    if error is None:
+        return None
+    resp = getattr(error, "response", None)
+    headers = getattr(resp, "headers", None) if resp is not None else getattr(error, "headers", None)
+    if not headers or not hasattr(headers, "get"):
+        return None
+    raw = headers.get("retry-after") or headers.get("Retry-After") or headers.get("x-ratelimit-reset-requests")
+    if raw is None:
+        return None
+    try:
+        val = float(raw)
+        if 0.0 < val <= 30.0:
+            return val
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+async def _backoff_sleep(
+    attempt: int,
+    base_delay: float = 1.0,
+    max_delay: float = 5.0,
+    error: Exception | None = None,
+) -> None:
     """Sleep with exponential backoff and randomized jitter to prevent rate-limit contention."""
-    delay = min(max_delay, base_delay * (2 ** attempt) + random.uniform(0.1, 0.6))
+    if isinstance(error, RateLimitError):
+        base_delay = max(base_delay, 2.5)
+        max_delay = max(max_delay, 8.0)
+    retry_after = _extract_retry_after(error)
+    if retry_after is not None:
+        delay = min(max(max_delay, 15.0), retry_after + random.uniform(0.1, 0.5))
+    else:
+        delay = min(max_delay, base_delay * (2 ** attempt) + random.uniform(0.1, 0.6))
     log.info("LLM transient failure; backing off for %.2fs before retry (attempt %d)...", delay, attempt + 1)
     await asyncio.sleep(delay)
 
@@ -509,34 +563,36 @@ async def probe_model_capabilities(client: AsyncOpenAI, model_name: str) -> dict
         "status": "unknown",
         "error": None,
     }
-    try:
-        await client.chat.completions.create(
-            model=model_name,
-            messages=[{"role": "user", "content": "Return JSON: {\"status\": \"ok\"}"}],
-            response_format={"type": "json_object"},
-            max_tokens=60,
-            timeout=15.0,
-        )
-        info["json_mode"] = True
-        info["status"] = "ok"
-    except Exception as e:
-        err_msg = str(e).lower()
-        if "response_format" in err_msg or "response format" in err_msg:
-            info["json_mode"] = False
-            try:
-                await client.chat.completions.create(
-                    model=model_name,
-                    messages=[{"role": "user", "content": "Return JSON: {\"status\": \"ok\"}"}],
-                    max_tokens=60,
-                    timeout=15.0,
-                )
-                info["status"] = "ok"
-            except Exception as e2:
+    async with _semaphore:
+        try:
+            await client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": "Return JSON: {\"status\": \"ok\"}"}],
+                response_format={"type": "json_object"},
+                max_tokens=60,
+                timeout=15.0,
+            )
+            info["json_mode"] = True
+            info["status"] = "ok"
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "response_format" in err_msg or "response format" in err_msg:
+                info["json_mode"] = False
+                info["json_schema"] = False
+                try:
+                    await client.chat.completions.create(
+                        model=model_name,
+                        messages=[{"role": "user", "content": "Return JSON: {\"status\": \"ok\"}"}],
+                        max_tokens=60,
+                        timeout=15.0,
+                    )
+                    info["status"] = "ok"
+                except Exception as e2:
+                    info["status"] = "error"
+                    info["error"] = str(e2)
+            else:
                 info["status"] = "error"
-                info["error"] = str(e2)
-        else:
-            info["status"] = "error"
-            info["error"] = str(e)
+                info["error"] = str(e)
 
     if info.get("status") == "ok":
         _MODEL_CAPABILITIES[cache_key] = info
@@ -661,9 +717,9 @@ async def call_llm_json_stream(system_prompt: str | list, user_prompt: str,
         temperature = NSFW_LLM_TEMPERATURE if is_nsfw else LLM_TEMPERATURE
 
     req_timeout = timeout if timeout is not None else LLM_REQUEST_TIMEOUT
-    candidates = get_candidate_models(is_nsfw=is_nsfw, use_utility=use_utility)
 
     async with _semaphore:
+        candidates = get_candidate_models(is_nsfw=is_nsfw, use_utility=use_utility)
         for client, model_name in candidates:
             for attempt in range(retries + 1):
                 messages = _build_messages(system_prompt, user_prompt)
@@ -756,9 +812,17 @@ async def call_llm_json_stream(system_prompt: str | list, user_prompt: str,
                         record_llm_telemetry(model_name, (time.perf_counter() - t0) * 1000, accumulated_usage, success=False, error=str(val_e))
                         raise ValueError(f"LLM returned invalid or non-compliant JSON after stream:\nErr: {val_e}\n{full_text[:800]}")
                         
-                except (RateLimitError, APITimeoutError):
-                    raise
+                except (RateLimitError, APITimeoutError) as to_err:
+                    last_stream_err = to_err
+                    log.warning("Stream attempt %d with model %s hit %s: %s", attempt + 1, model_name, type(to_err).__name__, to_err)
+                    if _is_model_overloaded_error(to_err):
+                        trip_model_circuit(model_name, cooldown_sec=60.0)
+                        log.warning("Model '%s' is overloaded upstream. Cascading immediately to next fallback candidate...", model_name)
+                        break
+                    if attempt >= retries:
+                        trip_model_circuit(model_name, cooldown_sec=45.0)
                 except Exception as e:
+                    last_stream_err = e
                     if _is_non_retriable_error(e):
                         raise
                     
@@ -768,7 +832,7 @@ async def call_llm_json_stream(system_prompt: str | list, user_prompt: str,
                         _STREAM_USAGE_UNSUPPORTED.add(cache_key)
                     elif "response_format" in err_str or "response format" in err_str:
                         log.info("Model '%s' does not support response_format; bypassing.", model_name)
-                        cap_record = {"model": model_name, "json_mode": False, "status": "ok", "error": None}
+                        cap_record = {"model": model_name, "json_mode": False, "json_schema": False, "status": "ok", "error": None}
                         _MODEL_CAPABILITIES[cache_key] = cap_record
                         _MODEL_CAPABILITIES[model_name] = cap_record
                         supports_json_mode = False
@@ -777,7 +841,7 @@ async def call_llm_json_stream(system_prompt: str | list, user_prompt: str,
                         log.warning("Stream attempt %d with model %s failed: %s", attempt + 1, model_name, str(e))
                         
                 if attempt < retries:
-                    await _backoff_sleep(attempt)
+                    await _backoff_sleep(attempt, error=locals().get("last_stream_err"))
     
     # If we get here, stream attempts failed. 
     # Fallback completely to standard batch mode using the existing function.
@@ -804,10 +868,10 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
         temperature = NSFW_LLM_TEMPERATURE if is_nsfw else LLM_TEMPERATURE
 
     req_timeout = timeout if timeout is not None else LLM_REQUEST_TIMEOUT
-    candidates = get_candidate_models(is_nsfw=is_nsfw, use_utility=use_utility)
     last_err = None
 
     async with _semaphore:
+        candidates = get_candidate_models(is_nsfw=is_nsfw, use_utility=use_utility)
         for client, model_name in candidates:
             for attempt in range(retries + 1):
                 t0 = time.perf_counter()
@@ -829,9 +893,12 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
                     cache_key = (str(getattr(client, "base_url", "")), model_name)
                     known_cap = _MODEL_CAPABILITIES.get(cache_key) or _MODEL_CAPABILITIES.get(model_name)
                     supports_json_mode = known_cap.get("json_mode", True) if known_cap else True
+                    supports_json_schema = (
+                        known_cap.get("json_schema", True) if known_cap else True
+                    ) and supports_json_mode
                     response = None
 
-                    if response_model:
+                    if response_model and supports_json_schema:
                         try:
                             schema_kwargs = kwargs.copy()
                             schema_kwargs["response_format"] = {
@@ -843,8 +910,21 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
                                 }
                             }
                             response = await client.chat.completions.create(**schema_kwargs)
+                            cap_record = dict(known_cap) if known_cap else {"model": model_name, "json_mode": True, "status": "ok", "error": None}
+                            cap_record["json_schema"] = True
+                            _MODEL_CAPABILITIES[cache_key] = cap_record
+                            _MODEL_CAPABILITIES[model_name] = cap_record
+                        except (RateLimitError, APITimeoutError):
+                            raise
                         except Exception as e:
-                            log.warning("Model '%s' strict json_schema failed (%s), falling back to json_object...", model_name, type(e).__name__)
+                            if _is_non_retriable_error(e):
+                                raise
+                            log.warning("Model '%s' strict json_schema failed (%s), caching unsupported and falling back to json_object...", model_name, type(e).__name__)
+                            cap_record = dict(known_cap) if known_cap else {"model": model_name, "json_mode": supports_json_mode, "status": "ok", "error": None}
+                            cap_record["json_schema"] = False
+                            _MODEL_CAPABILITIES[cache_key] = cap_record
+                            _MODEL_CAPABILITIES[model_name] = cap_record
+                            supports_json_schema = False
                             response = None
 
                     if not response and supports_json_mode:
@@ -865,7 +945,7 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
                             err_str = str(e).lower()
                             if "response_format" in err_str or "response format" in err_str:
                                 log.info("Model '%s' does not support response_format={'type': 'json_object'}; bypassing in future calls.", model_name)
-                                cap_record = {"model": model_name, "json_mode": False, "status": "ok", "error": None}
+                                cap_record = {"model": model_name, "json_mode": False, "json_schema": False, "status": "ok", "error": None}
                                 _MODEL_CAPABILITIES[cache_key] = cap_record
                                 _MODEL_CAPABILITIES[model_name] = cap_record
                                 supports_json_mode = False
@@ -881,7 +961,7 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
                                     err_str2 = str(e2).lower()
                                     if "response_format" in err_str2 or "response format" in err_str2:
                                         log.info("Model '%s' does not support response_format; bypassing.", model_name)
-                                        cap_record = {"model": model_name, "json_mode": False, "status": "ok", "error": None}
+                                        cap_record = {"model": model_name, "json_mode": False, "json_schema": False, "status": "ok", "error": None}
                                         _MODEL_CAPABILITIES[cache_key] = cap_record
                                         _MODEL_CAPABILITIES[model_name] = cap_record
                                         supports_json_mode = False
@@ -970,11 +1050,11 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
                     elapsed_ms = (time.perf_counter() - t0) * 1000.0
                     record_llm_telemetry(model_name, elapsed_ms, usage=None, success=False, error=str(e))
                     log.warning("LLM model '%s' attempt %d/%d failed: %s", model_name, attempt + 1, retries + 1, e)
-                    if _is_non_retriable_error(e):
-                        log.warning("Encountered non-retriable error (%s). Cascading immediately to next candidate...", type(e).__name__)
+                    if _is_non_retriable_error(e) or _is_model_overloaded_error(e):
+                        log.warning("Encountered non-retriable or overloaded error (%s). Cascading immediately to next candidate...", type(e).__name__)
                         break
                     if attempt < retries:
-                        await _backoff_sleep(attempt)
+                        await _backoff_sleep(attempt, error=e)
 
             trip_model_circuit(model_name)
             log.warning("All attempts for model '%s' failed. Cascading to next fallback candidate...", model_name)
@@ -993,10 +1073,10 @@ async def call_llm_text(system_prompt: str, user_prompt: str,
         temperature = NSFW_LLM_TEMPERATURE if is_nsfw else LLM_TEMPERATURE
 
     req_timeout = timeout if timeout is not None else LLM_REQUEST_TIMEOUT
-    candidates = get_candidate_models(is_nsfw=is_nsfw, use_utility=use_utility)
     last_err = None
 
     async with _semaphore:
+        candidates = get_candidate_models(is_nsfw=is_nsfw, use_utility=use_utility)
         for client, model_name in candidates:
             for attempt in range(retries + 1):
                 t0 = time.perf_counter()
@@ -1024,11 +1104,11 @@ async def call_llm_text(system_prompt: str, user_prompt: str,
                     elapsed_ms = (time.perf_counter() - t0) * 1000.0
                     record_llm_telemetry(model_name, elapsed_ms, usage=None, success=False, error=str(e))
                     log.warning("LLM text model '%s' attempt %d/%d failed: %s", model_name, attempt + 1, retries + 1, e)
-                    if _is_non_retriable_error(e):
-                        log.warning("Encountered non-retriable error (%s). Cascading immediately to next candidate...", type(e).__name__)
+                    if _is_non_retriable_error(e) or _is_model_overloaded_error(e):
+                        log.warning("Encountered non-retriable or overloaded error (%s). Cascading immediately to next candidate...", type(e).__name__)
                         break
                     if attempt < retries:
-                        await _backoff_sleep(attempt)
+                        await _backoff_sleep(attempt, error=e)
 
             trip_model_circuit(model_name)
             log.warning("All attempts for text model '%s' failed. Cascading to next candidate...", model_name)
@@ -1069,7 +1149,9 @@ GM_SHARED_RULES = """You are the Game Master for Hikayat. The PRIMARY STORY QUES
    - Post-Apocalyptic: Signal Recovery, Radiation Zone Scavenge, Convoy Pursuit, Siege Defense.
    - NSFW / Adult Scenarios: Seduction, Domination, Courtesan Guild, Aphrodisiac Run, Paramour Courtship, Bondage Escape, Masquerade Revelry.
 5. WRITE RICH MULTI-SENTENCE OBJECTIVES. Main Chapter Objectives should clearly detail story goals, stakes, and motivation.
-6. FAIL-FORWARD & TRUE CONSEQUENCES: Failure never halts the story. When resolving a check failure, apply real consequences: deduct HP/MP in `character_outcomes` (e.g. -5 to -15 HP on failure, -15 to -30 HP on critical failure), apply tactical status effects (`Cornered`, `Exhausted`, `Bleeding`, `Exposed`), deduct faction reputation in `faction_updates` when witnessed, and escalate the scene (e.g. doors breach, traps spring). On Critical Failure, trigger a catastrophic dilemma, severe damage, or capture.
+6. FAIL-FORWARD & TRUE CONSEQUENCES: Failure never halts the story. When resolving a check failure, apply real consequences tailored strictly to the scene context:
+   - IN COMBAT & PHYSICAL HAZARDS (traps, collapses, athletic danger, hostile attacks): Apply physical consequences: deduct HP/MP in `character_outcomes` (e.g. -5 to -15 HP on failure, -15 to -30 HP on critical failure), apply tactical status effects (`Cornered`, `Exhausted`, `Bleeding`, `Exposed`), and escalate the scene.
+   - IN NON-COMBAT SCENARIOS & SOCIAL INTERACTIONS (dialogue, inquiries, flirting, banter, inspection, school drama): NEVER inflict physical HP damage (`hp_change` MUST be 0)! Failure must strictly be social or narrative: deduct affinity in `relationship_updates` (e.g. -1 to -3 on failure, -4 to -8 on critical failure), cause awkwardness, guarded NPC behavior, gossip, or apply emotional mood status effects (`Flustered`, `Awkward`, `Embarrassed`, `Guarded`). Physical HP loss without explicit physical danger or combat is strictly forbidden.
 7. STORY QUESTS ARE NOT FIXED LOCATIONS. Story quests represent overarching goals — characters are free to move between rooms, buildings, and new areas. Do not lock narration to a single room or ledge.
 8. TICKING CLOCKS & 3-TURN SCENE ESCALATION: High-tension scenes (e.g. guards pounding on doors, sounding alarms, collapsing rooms) have a strict 3-turn limit. On Turn 3, the threat MUST breach, trigger, or confront the party! NEVER leave them waiting outside or 'seconds away' for more than 2 turns.
 9. WHEN STORY QUEST CLIMAX IS READY: Stage a scenario-appropriate High-Stakes Climax Encounter (e.g. Big Bully confrontation, public debate, boss fight, or high-DC skill check). The Story Quest ONLY completes upon winning this climax!

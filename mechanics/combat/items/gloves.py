@@ -6,64 +6,56 @@ from mechanics.combat.items.tags import derive_armor_tags
 from mechanics.combat.items.envelope import serialize_item
 
 GLOVE_ARCHETYPES: Dict[str, Dict[str, Any]] = {
+    # ── Civilian & Light Gloves (0 DT, Minor DR / Evasion / Accuracy) ─────────
     "cloth_wraps": {
         "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
         "base_dt": 0,
-        "type_dt": {"physical": 1},
+        "type_dt": {},
         "base_eva": 2, "base_acc": 1,
-        "stat_modifiers": {"eva": 2, "acc": 1, "unarmed_dmg": 2},
+        "stat_modifiers": {"eva": 2, "acc": 1},
         "protection_types": ["physical"],
         "special_traits": ["brawler", "unarmed", "dexterity"]
     },
     "fingerless_gloves": {
-        "mass": "light", "handedness": "Versatile", "armor_type": "light",
-        "base_dt": 1,
-        "type_dt": {"slashing": 2, "physical": 1},
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
         "base_acc": 2, "base_eva": 1,
-        "stat_modifiers": {"acc": 2, "eva": 1, "sleight_of_hand": 3, "lockpicking": 3},
+        "stat_modifiers": {"acc": 2, "eva": 1},
         "protection_types": ["physical"],
         "special_traits": ["dexterity", "stealth", "street"]
     },
     "leather_gloves": {
-        "mass": "light", "handedness": "Versatile", "armor_type": "light",
-        "base_dt": 2,
-        "type_dt": {"slashing": 3, "stabbing": 2, "physical": 2},
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
         "base_acc": 2, "base_eva": 0,
-        "stat_modifiers": {"acc": 2, "crit_bonus": 2},
+        "stat_modifiers": {"acc": 2, "crit_bonus": 2, "physical_res": 3},
         "protection_types": ["physical"],
         "special_traits": ["balanced", "grip", "all_weather"]
     },
     "precision_gloves": {
-        "mass": "light", "handedness": "Versatile", "armor_type": "light",
-        "base_dt": 1,
-        "type_dt": {"physical": 1},
-        "base_acc": 5, "base_eva": 0,
-        "stat_modifiers": {"acc": 5, "crit_bonus": 4, "cast_speed": 1},
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "base_acc": 4, "base_eva": 0,
+        "stat_modifiers": {"acc": 4, "crit_bonus": 3},
         "protection_types": ["physical"],
         "special_traits": ["precision", "ranged", "somatic"]
     },
-    "heavy_gauntlets": {
-        "mass": "heavy", "handedness": "Versatile", "armor_type": "heavy",
-        "base_dt": 6,
-        "type_dt": {"physical": 8, "slashing": 8, "blunt": 6, "ballistic": 6},
-        "base_acc": -1, "base_eva": -2,
-        "stat_modifiers": {"acc": -1, "eva": -2, "unarmed_dmg": 4, "strike_dmg": 4},
-        "protection_types": ["physical", "ballistic"],
-        "special_traits": ["heavy", "blunt_punch", "defensive"]
-    },
     "insulated_gloves": {
-        "mass": "medium", "handedness": "Versatile", "armor_type": "medium",
-        "base_dt": 2,
-        "type_dt": {"shock": 10, "fire": 8, "acid": 10, "energy": 8},
+        "mass": "medium", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
         "base_eva": 0,
-        "stat_modifiers": {"hazard_res": 20, "shock_res": 15},
+        "stat_modifiers": {"shock_res": 15, "energy_res": 10},
         "protection_types": ["energy", "magical"],
         "special_traits": ["hazmat", "elemental_grounding"]
     },
     "arcane_gloves": {
-        "mass": "light", "handedness": "Versatile", "armor_type": "light",
-        "base_dt": 1,
-        "type_dt": {"magical": 8, "holy": 6, "dark": 6},
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
         "base_matk": 4, "base_eva": 0,
         "stat_modifiers": {"matk": 4, "spell_crit": 3},
         "protection_types": ["magical"],
@@ -73,10 +65,45 @@ GLOVE_ARCHETYPES: Dict[str, Dict[str, Any]] = {
         "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
         "base_dt": 0,
         "type_dt": {},
-        "base_cha": 3, "base_eva": 0,
-        "stat_modifiers": {"cha": 3, "etiquette": 2},
+        "base_cha": 1, "base_eva": 1,
+        "stat_modifiers": {"cha": 1, "eva": 1},
         "protection_types": ["social"],
         "special_traits": ["social", "civilian", "formal"]
+    },
+    "lace_mitts": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"cha": 1, "eva": 1},
+        "protection_types": ["social"],
+        "special_traits": ["social", "civilian", "period_formal", "victorian"]
+    },
+    "tactical_touch_gloves": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"acc": 3, "physical_res": 3},
+        "protection_types": ["physical"],
+        "special_traits": ["streetwear", "tech", "grip", "precision"]
+    },
+    "haptic_gloves": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"per": 1, "macc": 3},
+        "protection_types": ["energy"],
+        "special_traits": ["cyberware", "virtual", "precision", "smart"]
+    },
+
+    # ── Dedicated Combat Gloves (Provides DT) ────────────────────────────────
+    "heavy_gauntlets": {
+        "mass": "heavy", "handedness": "Versatile", "armor_type": "heavy",
+        "base_dt": 6,
+        "type_dt": {"physical": 8, "slashing": 8, "blunt": 6, "ballistic": 6},
+        "base_acc": -1, "base_eva": -2,
+        "stat_modifiers": {"acc": -1, "eva": -2},
+        "protection_types": ["physical", "ballistic"],
+        "special_traits": ["heavy", "defensive", "brawler"]
     }
 }
 
@@ -85,7 +112,10 @@ NON_COMBAT_GLOVE_ARCHETYPES: Dict[str, Dict[str, Any]] = {
     "fingerless_gloves": GLOVE_ARCHETYPES["fingerless_gloves"],
     "leather_gloves": GLOVE_ARCHETYPES["leather_gloves"],
     "precision_gloves": GLOVE_ARCHETYPES["precision_gloves"],
-    "formal_gloves": GLOVE_ARCHETYPES["formal_gloves"]
+    "formal_gloves": GLOVE_ARCHETYPES["formal_gloves"],
+    "lace_mitts": GLOVE_ARCHETYPES["lace_mitts"],
+    "tactical_touch_gloves": GLOVE_ARCHETYPES["tactical_touch_gloves"],
+    "haptic_gloves": GLOVE_ARCHETYPES["haptic_gloves"]
 }
 
 for arch, data in GLOVE_ARCHETYPES.items():
@@ -105,7 +135,10 @@ SCENARIO_GLOVES_AFFIXES: Dict[str, Dict[str, Any]] = {
             "heavy_gauntlets": ["Steel Plate Gauntlets", "Knight's Clenched Mitts", "Crusader's Iron Cestus"],
             "insulated_gloves": ["Runed Warding Gloves", "Alchemist's Asbestos Mitts", "Salamander-Hide Gloves"],
             "arcane_gloves": ["Silk Spellweaver Gloves", "Mage's Channeling Mitts", "Sorcerer's Weave Grips"],
-            "formal_gloves": ["Silk Opera Gloves", "Noble Courtier Gloves", "Velvet Diplomat Mitts"]
+            "formal_gloves": ["Silk Opera Gloves", "Noble Courtier Gloves", "Velvet Diplomat Mitts"],
+            "lace_mitts": ["Lace Courtier Mitts", "Elven Embroidered Mitts", "Maiden's Evening Wraps"],
+            "tactical_touch_gloves": ["Scout's Supple Leather Grips", "Wayfarer's Grip Gloves", "Ranger's Field Gloves"],
+            "haptic_gloves": ["Diviner's Resonance Gloves", "Spirit-Weaver's Touch Grips", "Runic Sensor Mitts"]
         },
         "prefixes_t3": ["Stout", "Hardened", "Apprentice's", "Worn", "Linen", "Honed", "Field"],
         "prefixes_t2": ["Runic", "Gilded", "Mithril", "Moonlit", "Spell-Forged", "Drake-Scale", "Aegis-Woven"],
@@ -122,7 +155,10 @@ SCENARIO_GLOVES_AFFIXES: Dict[str, Dict[str, Any]] = {
             "heavy_gauntlets": ["Brass-Piston Power Cestus", "Hydraulic Steam Gauntlets", "Iron-Clad Crushing Fists"],
             "insulated_gloves": ["Vulcanized Galvanic Mitts", "Rubberized Arc-Shield Gloves", "Copper-Mesh Mitts"],
             "arcane_gloves": ["Aether-Conductive Thread Gloves", "Voltaic Induction Mitts", "Resonance Grips"],
-            "formal_gloves": ["Velvet Victorian Gloves", "Gentleman's Kidskin Gloves", "High-Society Spats-Gloves"]
+            "formal_gloves": ["Velvet Victorian Gloves", "Gentleman's Kidskin Gloves", "High-Society Spats-Gloves"],
+            "lace_mitts": ["Victorian Lace Opera Mitts", "Edwardian Beaded Silk Mitts", "Grand Dame Fingerless Lace"],
+            "tactical_touch_gloves": ["Brass-Tipped Telegraph Gloves", "Machinist Precision Grips", "Artificer's Work Gloves"],
+            "haptic_gloves": ["Galvanic Sensory Feedback Mitts", "Clockwork Tension Gloves", "Pneumatic Sensor Grips"]
         },
         "prefixes_t3": ["Brass-Rimmed", "Copper-Wired", "Machinist's", "Steam-Vented", "Rivet-Bound", "Standard"],
         "prefixes_t2": ["Galvanic", "Aether-Tuned", "Pneumatic", "Boiler-Forged", "Voltaic", "Clockwork-Laced"],
@@ -139,7 +175,10 @@ SCENARIO_GLOVES_AFFIXES: Dict[str, Dict[str, Any]] = {
             "heavy_gauntlets": ["Hydraulic Cyber-Fists", "Titanium Exoskeleton Gauntlets", "Heavy Enforcer Crushing Mitts"],
             "insulated_gloves": ["Hazmat Grounding Mitts", "Anti-EMP Rubberized Gloves", "Thermal-Siphon Mitts"],
             "arcane_gloves": ["Cyberdeck Datajack Gloves", "Overclocked Neural-Interface Mitts", "Grid-Runner Gloves"],
-            "formal_gloves": ["Synthetic-Silk Corporate Gloves", "High-End Bio-Skin Mitts", "Executive Dress Gloves"]
+            "formal_gloves": ["Synthetic-Silk Corporate Gloves", "High-End Bio-Skin Mitts", "Executive Dress Gloves"],
+            "lace_mitts": ["Cyber-Goth Lace Fingerless Mitts", "Holo-Fringe Evening Mitts", "Neon-Mesh Wrist Wraps"],
+            "tactical_touch_gloves": ["Conductive Touchscreen Combat Gloves", "Smart-Grip Netrunner Gloves", "Silicone-Tipped Tech Gloves"],
+            "haptic_gloves": ["Sub-Dermal Haptic VR Gloves", "Tactile Matrix Cyber-Grips", "Neural-Feedback Data-Gloves"]
         },
         "prefixes_t3": ["Street-Grade", "Mil-Spec", "Reinforced", "Chrome", "Carbon-Weave", "Standard-Issue"],
         "prefixes_t2": ["Overclocked", "Smart-Linked", "High-Frequency", "Sub-Dermal", "Neuro-Wired", "Monofilament"],
@@ -156,7 +195,10 @@ SCENARIO_GLOVES_AFFIXES: Dict[str, Dict[str, Any]] = {
             "heavy_gauntlets": ["Rebar-Studded Iron Claws", "Welded Scrap-Metal Mitts", "Scrap-Plate Power Gauntlets"],
             "insulated_gloves": ["Lead-Lined Asbestos Mitts", "Rad-Shielded Rubber Gloves", "Hazmat Scrap Mitts"],
             "arcane_gloves": ["Glowing Rad-Touched Wraps", "Mutant-Bone Channeled Mitts", "Gamma-Siphon Grips"],
-            "formal_gloves": ["Faded Pre-War Dress Gloves", "Moth-Eaten Silk Gloves", "Governor's Old White Gloves"]
+            "formal_gloves": ["Faded Pre-War Dress Gloves", "Moth-Eaten Silk Gloves", "Governor's Old White Gloves"],
+            "lace_mitts": ["Torn Pre-War Lace Mitts", "Scavenged Funeral Lace", "Rad-Stained Silk Mitts"],
+            "tactical_touch_gloves": ["Cut-Finger Scavenger Grips", "Patched Rubber Work Gloves", "Tire-Tread Field Mitts"],
+            "haptic_gloves": ["Cracked Pip-Boy Sensory Gloves", "Wired Scrap-Sensor Mitts", "Jury-Rigged Matrix Gloves"]
         },
         "prefixes_t3": ["Scrap-Metal", "Rusty", "Jury-Rigged", "Weathered", "Makeshift", "Spiked", "Lead-Lined"],
         "prefixes_t2": ["Rad-Hardened", "Bio-Toxic", "Reinforced-Steel", "Wasteland-Master", "Gamma-Tuned", "Spike-Studded"],
@@ -173,7 +215,10 @@ SCENARIO_GLOVES_AFFIXES: Dict[str, Dict[str, Any]] = {
             "heavy_gauntlets": ["Kinetic Powered Exo-Gauntlets", "Hydraulic Servo-Fists", "Dreadnought Combat Grips"],
             "insulated_gloves": ["Thermal Dissipation Void Mitts", "Plasma-Shielded Hazmat Gloves", "Cryo-Insulated Mitts"],
             "arcane_gloves": ["Psionic Amplification Grips", "Tachyon Flux Gloves", "Quantum-Phase Emitter Mitts"],
-            "formal_gloves": ["Diplomatic Fleet-White Gloves", "High-Officer Dress Gloves", "Velvet Emissary Mitts"]
+            "formal_gloves": ["Diplomatic Fleet-White Gloves", "High-Officer Dress Gloves", "Velvet Emissary Mitts"],
+            "lace_mitts": ["Photonic-Lace Formal Mitts", "Diplomatic Gala Mesh", "Zero-G Ceremony Mitts"],
+            "tactical_touch_gloves": ["Cockpit Conductive Pilot Gloves", "Orbital Console Tech Gloves", "Mag-Grip Flight Gloves"],
+            "haptic_gloves": ["Zero-G Telemetry Haptic Gloves", "Sub-Space Virtual Rig Mitts", "Omni-Sensor Data Gloves"]
         },
         "prefixes_t3": ["Titanium", "Composite", "Field", "Standard-Issue", "Carbon-Alloy", "Ceramic"],
         "prefixes_t2": ["Overcharged", "Plasma-Infused", "Hyper-Coil", "Nanite-Lined", "Quantum-Phase", "Cryo-Cooled"],
@@ -190,7 +235,10 @@ SCENARIO_GLOVES_AFFIXES: Dict[str, Dict[str, Any]] = {
             "heavy_gauntlets": ["Defiled Iron Gauntlets", "Torturer's Spiked Iron Fists", "Abyssal Carapace Mitts"],
             "insulated_gloves": ["Asbestos Ash-Warder Gloves", "Corpse-Fat Insulated Mitts", "Pyre-Watcher Gloves"],
             "arcane_gloves": ["Bone-Runed Fingerless Grips", "Hex-Tied Ritual Gloves", "Sanguine Conduit Wraps"],
-            "formal_gloves": ["Funeral Silk Gloves", "Aristocrat's Mourning Gloves", "Pale Aristocrat Mitts"]
+            "formal_gloves": ["Funeral Silk Gloves", "Aristocrat's Mourning Gloves", "Pale Aristocrat Mitts"],
+            "lace_mitts": ["Black Funeral Lace Mitts", "Widow's Weeping Silk Mitts", "Catacomb Mourning Wraps"],
+            "tactical_touch_gloves": ["Dissector's Oiled Gloves", "Grave-Stalker Leather Gloves", "Inquisitor's Scalpel Grips"],
+            "haptic_gloves": ["Necromancer's Sense-Thread Gloves", "Soul-Feeling Spectral Mitts", "Corpse-Pulse Grips"]
         },
         "prefixes_t3": ["Blood-Stained", "Weathered", "Grim", "Jagged", "Ashen", "Roughspun", "Grave-Dug"],
         "prefixes_t2": ["Hex-Forged", "Cursed", "Grave-Tainted", "Sanguine", "Blight-Edged", "Bone-Carved", "Shadow-Veiled"],
@@ -207,7 +255,10 @@ SCENARIO_GLOVES_AFFIXES: Dict[str, Dict[str, Any]] = {
             "heavy_gauntlets": ["Kendo Protective Kote", "Heavy Hockey Goalie Gloves", "Baseball Catcher's Mitt"],
             "insulated_gloves": ["Heavy Duty Winter Mittens", "Rubber Cleaning Gloves", "Thick Snow Gloves"],
             "arcane_gloves": ["Anime Cosplay Finger-Guards", "Gaming Grip Gloves", "Stage Magician White Mitts"],
-            "formal_gloves": ["Marching Band White Gloves", "Student Council Ceremony Gloves", "Formal Uniform Dress Gloves"]
+            "formal_gloves": ["Marching Band White Gloves", "Student Council Ceremony Gloves", "Formal Uniform Dress Gloves"],
+            "lace_mitts": ["Lolita Frill Lace Mitts", "Prom Evening Lace Gloves", "Tea Party Silk Mitts"],
+            "tactical_touch_gloves": ["Smartphone Touchscreen Gloves", "Winter Knit Touch Gloves", "Bicycle Tech Grips"],
+            "haptic_gloves": ["VR Arcade Haptic Gloves", "eSports Sensor Mitts", "Gamer Feedback Gloves"]
         },
         "prefixes_t3": ["Standard", "Student", "Clean", "Campus", "Everyday", "Casual", "School"],
         "prefixes_t2": ["Varsity", "Tailored", "Customized", "Honors", "Trendy", "Preppy", "Club-Captain's"],
@@ -266,8 +317,9 @@ def generate_random_equipment(
     base_data = GLOVE_ARCHETYPES[arch]
     tier_mult = 1.0 if item_tier == 3 else (1.20 if item_tier == 2 else 1.45)
     
-    base_dt = int(round(base_data["base_dt"] * tier_mult))
-    type_dt = {k: int(round(v * tier_mult)) for k, v in base_data.get("type_dt", {}).items()}
+    # Non-armor gloves strictly keep base_dt = 0
+    base_dt = int(round(base_data["base_dt"] * tier_mult)) if base_data["base_dt"] > 0 else 0
+    type_dt = {k: int(round(v * tier_mult)) for k, v in base_data.get("type_dt", {}).items()} if base_dt > 0 else {}
     
     stat_mods: Dict[str, Any] = {}
     for k, v in base_data.get("stat_modifiers", {}).items():
@@ -275,6 +327,9 @@ def generate_random_equipment(
             stat_mods[k] = round(v * tier_mult, 2)
         elif isinstance(v, int):
             scaled = int(round(v * tier_mult))
+            # SPECIAL stats strictly capped at +1 maximum
+            if k in ("cha", "per") and scaled > 1:
+                scaled = 1
             stat_mods[k] = scaled
         else:
             stat_mods[k] = v
@@ -287,7 +342,7 @@ def generate_random_equipment(
     base_name = random.choice(genre_names)
     
     prefix_pool = scen_affixes.get(f"prefixes_t{item_tier}", ["Fine"])
-    suffix_pool = scen_affixes.get(f"suffixes_t{item_tier}", ["of Grip"])
+    suffix_pool = scen_affixes.get(f"suffixes_t{item_tier}", ["of Dexterity"])
     
     prefix = random.choice(prefix_pool)
     if item_tier == 3:
@@ -336,13 +391,12 @@ def format_equipment_card(metadata: Dict[str, Any]) -> str:
         label = k.replace("_", " ").title()
         stat_parts.append(f"{label}: {prefix}{v}")
         
-    stat_line = " | ".join(stat_parts) if stat_parts else "Standard Grip"
-    
+    stat_line = " | ".join(stat_parts) if stat_parts else "Standard Gloves"
     type_dt_str = ", ".join(f"{k.title()}: {v}" for k, v in type_dt.items() if v > 0) or "None"
     
     lines = [
         f"**{name}** (Tier {tier} Handwear — {arch})",
-        f"• **Protection**: {stat_line}",
+        f"• **Utility & Stats**: {stat_line}",
         f"• **Type Resistances**: {type_dt_str}"
     ]
     return "\n".join(lines)

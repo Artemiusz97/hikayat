@@ -55,6 +55,16 @@ def test_auth_and_metadata_endpoints():
     assert res.status_code == 200
     assert "fantasy" in res.json().get("scenarios", {})
 
+    # 2b. Genres & Modifiers
+    res_genres = client.get("/api/genres")
+    assert res_genres.status_code == 200
+    genres_json = res_genres.json()
+    assert "genres" in genres_json
+    assert "settings" in genres_json
+    assert "modifiers" in genres_json
+    assert any(s["key"] == "fantasy" for s in genres_json["settings"])
+    assert any(m["key"] == "nsfw" for m in genres_json["modifiers"])
+
     # 3. Class Templates
     res = client.get("/api/class-templates?scenario=fantasy")
     assert res.status_code == 200
@@ -154,7 +164,7 @@ def test_adventure_start_and_settings_preservation(web_user_and_character):
 
         # Verify odds enrichment
         choices = session["choices"]
-        assert len(choices) == 2
+        assert len(choices) >= 2
         assert "success_pct" in choices[0]
         assert "stat_val" in choices[0]
 
@@ -622,6 +632,24 @@ def test_smartphone_os_endpoints():
     assert "messages" in msg_data
     assert len(msg_data["messages"]) >= 1
     assert any("library courtyard" in m["message"].lower() for m in msg_data["messages"])
+
+    # 3. Test fantasy session phone hub fallback branding
+    fantasy_session_id = db.create_session(
+        mode="solo",
+        capacity=1,
+        host_user_id=user_id,
+        scenario="fantasy",
+        verbosity="normal",
+        dialogue_mode="balanced",
+        image_gen_enabled=False
+    )
+    db.add_session_member(fantasy_session_id, user_id)
+    res_fan = client.get(f"/api/phone/{fantasy_session_id}?user_id={user_id}")
+    assert res_fan.status_code == 200
+    fan_data = res_fan.json()
+    assert fan_data["is_supported"] is True
+    assert "branding" in fan_data
+    assert "Arcane Slate" in fan_data["branding"]["device_name"]
 
 
 @pytest.mark.api

@@ -1,6 +1,8 @@
 {
+  "_section_genres": "==================== GENRES ====================",
   "fantasy": {
     "name": "Fantasy",
+    "category": "genre",
     "prompt_instructions": [
       "Incorporate magical phenomena, ancient ruins, and heroic stakes throughout the narrative.",
       "Provide opportunities for spellcasting, dungeon crawling, and taking on quest board contracts.",
@@ -114,6 +116,7 @@
   },
   "space": {
     "name": "Space",
+    "category": "genre",
     "prompt_instructions": [
       "Incorporate starship maneuvers, orbital stations, and encounters with uncharted star systems and alien species.",
       "Emphasize cosmic faction dynamics, ancient cosmic artifacts, and zero-G environmental hazards.",
@@ -150,6 +153,7 @@
   },
   "cyberpunk": {
     "name": "Cyberpunk",
+    "category": "genre",
     "prompt_instructions": [
       "Emphasize cybernetic implants, corporate espionage, netrunning ice-breaker hacks, and street gang rivalries.",
       "Highlight high-tech black market trade, chrome augmentations, and corporate security counter-measures.",
@@ -186,6 +190,7 @@
   },
   "steampunk": {
     "name": "Steampunk",
+    "category": "genre",
     "prompt_instructions": [
       "Incorporate clockwork tinkering, steam-pressure gauge management, airship piloting, and alchemical reactions.",
       "Highlight Victorian social etiquette, industrial guild rivalries, and clockwork automaton behavior.",
@@ -220,43 +225,9 @@
       }
     ]
   },
-  "grimdark": {
-    "name": "Grimdark",
-    "prompt_instructions": [
-      "Maintain an oppressive, bleak atmosphere focused on brutal reality, dread, and high-risk consequences.",
-      "Highlight moral ambiguity, corrupting power, grim survival, and psychological pressure.",
-      "Ensure mercy is scarce, resources are costly, and visceral stakes carry heavy permanent weight."
-    ],
-    "allowed_mechanics": [
-      "merchant_encounters",
-      "relationship_meter",
-      "contact_list",
-      "faction_reputation",
-      "tactical_combat"
-    ],
-    "starting_hooks": [
-      {
-        "archetype": "hub_launchpad",
-        "hook": "within a bleak, fortified enclave where weary sentinels drink watered ale and murmur grim warnings about the encroaching dark",
-        "suggested_location": "{session_kingdom} ➔ The Iron Bastion ➔ Barracks Hearth",
-        "directive": "Open Hub Exploration: Tense military haven, scarred veterans, grim bounty ledger, and cautious social choices."
-      },
-      {
-        "archetype": "in_media_res",
-        "hook": "in the muddy aftermath of a brutal ambush surrounded by burning barricades as shadows stalk the treeline",
-        "suggested_location": "{session_ancient_forest} ➔ Ashen Battlefield ➔ Muddy Trench",
-        "directive": "In Media Res: Visceral blood-soaked crisis, enemy closing in, wounded allies, and desperate survival choices."
-      },
-      {
-        "archetype": "delve_threshold",
-        "hook": "before the yawning maw of a desecrated crypt as cold fog spills across mossy gravestones and crows scatter",
-        "suggested_location": "{session_caves} ➔ Desecrated Crypt ➔ Iron Sarcophagus Threshold",
-        "directive": "Delve Threshold: Dread expedition threshold, occult ward examination, lighting torches, and steeling resolve."
-      }
-    ]
-  },
   "isekai": {
     "name": "Isekai",
+    "category": "genre",
     "prompt_instructions": [
       "Blend modern-world knowledge and pop-culture sensibilities into an unfamiliar fantasy realm.",
       "Incorporate status appraisals, affinity meter checks, and over-the-top cheat skill applications.",
@@ -292,41 +263,44 @@
   },
   "slice_of_life": {
     "name": "Slice of Life",
+    "category": "genre",
     "prompt_instructions": [
-      "Focus narrative conflict on everyday life, personal drama, social status, and interpersonal relationships.",
-      "Incorporate opportunities for romance routes, casual banter, community gatherings, and heartwarming or bittersweet moments.",
-      "Emphasize character-driven interactions, daily routines, and relatable personal dilemmas."
+      "Focus narrative conflict on everyday urban life, personal drama, social status, and interpersonal relationships.",
+      "Incorporate opportunities for romance routes, casual banter, neighborhood gatherings, and heartwarming or bittersweet moments.",
+      "Emphasize character-driven interactions, city routines, and grounded street-level stakes."
     ],
     "allowed_mechanics": [
       "merchant_encounters",
       "relationship_meter",
       "contact_list",
       "faction_reputation",
-      "smartphone_hub"
+      "smartphone_hub",
+      "tactical_combat"
     ],
     "starting_hooks": [
       {
         "archetype": "hub_launchpad",
-        "hook": "at a cozy neighborhood café as the aroma of roasted coffee fills the air and friends wave from a corner table",
-        "suggested_location": "{session_cafe} ➔ Sunny Corner Booth ➔ Table 4",
-        "directive": "Open Hub Exploration: Warm community hub, friendly regulars, bulletin board with town notices, menu choices, and relaxed social interactions."
+        "hook": "at a sunlit window booth inside an artisanal coffee roastery along the covered shopping arcade as rain patters against the glass and neighborhood regulars trade local gossip",
+        "suggested_location": "Downtown Shopping Arcade & Café Row ➔ Roastery & Artisanal Café ➔ Window Corner Booth",
+        "directive": "Open Hub Exploration: Warm urban neighborhood hub, friendly regulars, community bulletin board with local gigs/notices, café menu choices, and relaxed social interactions."
       },
       {
         "archetype": "in_media_res",
-        "hook": "in a bustling community festival kitchen during a sudden rush as orders pile up and the head organizer calls for help",
-        "suggested_location": "{session_recreation_park} ➔ Festival Plaza ➔ Food Stall Kitchen",
-        "directive": "In Media Res: Hectic slice-of-life comedy crisis, dropped supplies, ticking preparation timer, and cooperative problem-solving choices."
+        "hook": "in a neon-lit back-alley behind a basement jazz bar as rowdy street thugs overturn trash cans and corner a local shopkeeper over a protection dispute",
+        "suggested_location": "Nightlife & Entertainment District ➔ Neon Back-Alley ➔ Rain-Slicked Dead End",
+        "directive": "In Media Res: Immediate street-level urban confrontation, shouting thugs, cornered local resident, and urgent tactical or social de-escalation choices."
       },
       {
         "archetype": "delve_threshold",
-        "hook": "along the scenic path of a newly reopened hilltop nature trail overlooking the entire sparkling town below",
-        "suggested_location": "{session_park} ➔ Hilltop Lookout ➔ Wooden Gazebo",
-        "directive": "Delve Threshold: Peaceful exploratory threshold, taking in panoramic views, discovering a local landmark, and planning the day's stroll."
+        "hook": "before the padlocked chain-link gate of an after-hours harbor warehouse pier while following a late-night lead from a neighborhood contact about missing local goods",
+        "suggested_location": "Harbor Pier & Civic Bayfront ➔ Container Pier & Warehouse Lot ➔ Padlocked Chain-Link Gate",
+        "directive": "Delve Threshold: Urban investigation threshold, checking the rusted padlock, scanning for night watchmen, reviewing smartphone clues, and slipping inside."
       }
     ]
   },
   "high_school": {
     "name": "High School",
+    "category": "genre",
     "prompt_instructions": [
       "Highlight modern high school tropes, youth emotional intensity, and personal growth dynamics.",
       "Incorporate social faction dynamics: student clubs, student council, delinquent gangs, and social cliques operate as powerful factions with real campus influence.",
@@ -362,6 +336,7 @@
   },
   "post_apocalypse": {
     "name": "Post-Apocalypse",
+    "category": "genre",
     "prompt_instructions": [
       "Emphasize wasteland survival challenges, radiation exposure hazards, and resource scavenging.",
       "Incorporate encounters with mutated creatures, raider skirmishes, and wasteland environmental hazards.",
@@ -395,17 +370,30 @@
       }
     ]
   },
+
+  "_section_tone_and_modifiers": "==================== TONE & MODIFIERS ====================",
+  "grimdark": {
+    "name": "Grimdark",
+    "category": "modifier",
+    "prompt_instructions": [
+      "Maintain an oppressive, bleak atmosphere focused on brutal reality, dread, and high-risk consequences.",
+      "Highlight moral ambiguity, corrupting power, grim survival, and psychological pressure.",
+      "Ensure mercy is scarce, resources are costly, and visceral stakes carry heavy permanent weight."
+    ]
+  },
   "nsfw": {
     "name": "NSFW",
+    "category": "modifier",
     "prompt_instructions": [
-      "Write explicit, unfiltered, and sensual sexual descriptions during lewd encounters and romantic situations.",
-      "Avoid euphemisms like 'length,' 'member,' or 'peak.' Use direct anatomical terms (e.g., dick, cock, pussy, tits, fuck) instead.",
-      "Use explicit sexual terms, sexual acts & vulgar words (eg: fuck, dick, pussy, cum, tits, etc).",
-      "Include sexually explicit and lewd gossips, rumors and quests."
+      "Write explicit, unfiltered, and sensual descriptions of sexual encounters, romantic tension, and lewd situations throughout the narrative.",
+      "Avoid euphemisms and coy phrasing like 'length,' 'member,' or 'grow' — use direct and explicit anatomical and sexual terms instead (e.g., dick, cock, pussy, tits, ass, fuck, cum).",
+      "Depict sexual acts in full graphic detail: arousal, penetration, oral and anal acts, positions, moans, fluids, and climax should all be describe explicitly rather than implied.",
+      "Include sexually explicit content beyond main scenes — lewd NPC dialogues, gossip, rumors, quests, and environmental details should all reflect the world's promiscuity."
     ]
   },
   "furry": {
     "name": "Furry",
+    "category": "modifier",
     "prompt_instructions": [
       "Highlight distinct anthropomorphic physical features (fur, paws, muzzles, coat patterns, feathers, scales, twitching animal ears, swaying tails, claws) in vivid detail.",
       "Emphasize unique animal instincts, species traits, sensory reactions (keen smell, sharp hearing, purring, tail wags, ear twitches, instinctual reflexes), and species-specific habits.",
@@ -415,17 +403,21 @@
   },
   "non_combat": {
     "name": "Non-Combat",
+    "category": "modifier",
     "prompt_instructions": [
       "This scenario is strictly non-combat, slice-of-life, and drama focused. All conflicts, challenges, and milestones are solved through social interactions, intellectual problem-solving, environmental investigation, and personal choices.",
       "Do NOT generate lethal physical combat encounters, monster attacks, weapons skirmishes, or hostile enemy combat rounds.",
       "Attire, accessories, stationery, and carried tools serve purely as cosmetics, personal style, and roleplay flavor for narrative descriptions, with zero combat attributes."
-    ],
-    "allowed_mechanics": [
-      "merchant_encounters",
-      "relationship_meter",
-      "contact_list",
-      "faction_reputation",
-      "smartphone_hub"
+    ]
+  },
+  "gore": {
+    "name": "Gore & Violence",
+    "category": "modifier",
+    "prompt_instructions": [
+      "Write vivid, unflinching descriptions of extreme violence, bodily injuries, and gory aftermath during combat and exploration.",
+      "Avoid tame wording like 'hurt,' 'wounded,' or 'injured.' Use direct visceral terms (e.g., gore, guts, severed, mangled, crushed, dismembered, blood) instead.",
+      "Describe graphic violence in explicit detail — torn flesh, broken bones, spilled entrails, and killing blows that leave the scene drenched in blood.",
+      "Include gory encounters, gruesome corpses, and mutilated remains as environmental storytelling and quest hooks."
     ]
   }
 }

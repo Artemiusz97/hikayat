@@ -6,8 +6,8 @@ import re
 from typing import Dict, Any, List, Optional
 from ..core import *
 
-def generate_dynamic_turn_ons(hash_val: int, race: str = "", dynamic: str = "") -> str:
-    """Dynamically generates 1-2 Physical items and 1-2 Action items, tagged cleanly with (Physical) and (Action)."""
+def generate_dynamic_turn_ons_and_spots(hash_val: int, race: str = "", dynamic: str = "") -> tuple[str, str]:
+    """Dynamically generates separate Sensitive Spots (Physical) and Turn-Ons (Action)."""
     race_l = str(race or "").lower()
     dyn_l = str(dynamic or "").lower()
 
@@ -63,7 +63,12 @@ def generate_dynamic_turn_ons(hash_val: int, race: str = "", dynamic: str = "") 
         item = act_pool.pop(idx % len(act_pool))
         chosen_act.append(f"{item} (Action)")
 
-    return ", ".join(chosen_phys + chosen_act)
+    return ", ".join(chosen_phys), ", ".join(chosen_act)
+
+def generate_dynamic_turn_ons(hash_val: int, race: str = "", dynamic: str = "") -> str:
+    """Dynamically generates 1-2 Physical items and 1-2 Action items, tagged cleanly with (Physical) and (Action)."""
+    phys, act = generate_dynamic_turn_ons_and_spots(hash_val, race=race, dynamic=dynamic)
+    return ", ".join([p for p in (phys, act) if p])
 
 def tag_turn_on_items(turn_ons_str: str, race: str = "") -> str:
     """Ensures each item in a turn-ons string is properly tagged as (Physical) or (Action)."""
@@ -128,13 +133,74 @@ def generate_dynamic_fetish(hash_val: int, race: str = "", dynamic: str = "", op
     idx = (hash_val // 43) % len(pool)
     return pool[idx]
 
+def generate_dynamic_turn_offs(hash_val: int, dynamic: str = "", openness: str = "", traits: List[str] = None) -> str:
+    """Dynamically generates 1-2 character-appropriate Turn-Offs (mood-killers / aversions)."""
+    dyn_l = str(dynamic or "").lower()
+    open_l = str(openness or "").lower()
+    traits_l = [str(t).lower() for t in (traits or [])]
+
+    pool = list(TURN_OFF_ITEMS)
+    favored = []
+
+    if any(kw in dyn_l for kw in ("receptive", "surrender", "yielding", "submissive")):
+        favored += ["Clumsy / careless rough handling", "Crude degradation & insults", "Overly aggressive biting or pinching"]
+    elif any(kw in dyn_l for kw in ("dominant", "proactive")):
+        favored += ["Unearned bossiness & arrogance", "Limp passivity & lack of effort"]
+    elif any(kw in dyn_l for kw in ("service")):
+        favored += ["Dead silence & emotional detachment", "Purely transactional feeling", "Mocking or laughing at vulnerability"]
+    elif any(kw in dyn_l for kw in ("switch", "brat")):
+        favored += ["Rushed impatience & entitlement", "Dead silence & emotional detachment", "Unearned bossiness & arrogance"]
+
+    if "prude" in open_l or "modest" in open_l:
+        favored += ["Crude degradation & insults", "Lack of discretion & careless exposure", "Poor hygiene & neglect", "Rushed impatience & entitlement"]
+    elif "shameless" in open_l or "lewd" in open_l:
+        favored += ["Limp passivity & lack of effort", "Smothering clinginess during intimacy", "Dead silence & emotional detachment"]
+    else:
+        favored += ["Poor hygiene & neglect", "Purely transactional feeling", "Rushed impatience & entitlement"]
+
+    if any("noble" in t or "proud" in t or "knight" in t or "royal" in t for t in traits_l):
+        favored += ["Unearned bossiness & arrogance", "Crude degradation & insults"]
+
+    count = 1 + ((hash_val // 71) % 2)  # 1 to 2
+    chosen = []
+    for f in favored:
+        if f in pool and len(chosen) < count:
+            if ((hash_val // 79) % 100) < 70:
+                chosen.append(f)
+                pool.remove(f)
+
+    while len(chosen) < count and pool:
+        idx = (hash_val // (83 + len(chosen) * 13)) % len(pool)
+        chosen.append(pool.pop(idx))
+
+    return ", ".join(chosen)
+
+def generate_dynamic_desires_and_turn_offs(hash_val: int, race: str = "", dynamic: str = "", openness: str = "moderate", traits: List[str] = None) -> tuple[str, str, str]:
+    """Dynamically generates:
+    1. Sensitive Spots (pure physical erogenous zones, 1-2 items)
+    2. Desires & Kinks (sensory triggers + 25% kink roll, 1-3 items)
+    3. Turn-Offs (mood-killers & aversions, 1-2 items)
+    """
+    phys_str, act_str = generate_dynamic_turn_ons_and_spots(hash_val, race=race, dynamic=dynamic)
+    fetish_str = generate_dynamic_fetish(hash_val, race=race, dynamic=dynamic, openness=openness)
+
+    desires_items = [x.strip() for x in act_str.split(",") if x.strip()]
+    if fetish_str and fetish_str.lower() not in ("none", "none (vanilla)", "unknown", ""):
+        if not any(fetish_str.lower() in d.lower() for d in desires_items):
+            desires_items.append(fetish_str)
+
+    desires_str = ", ".join(desires_items)
+    turn_offs_str = generate_dynamic_turn_offs(hash_val, dynamic=dynamic, openness=openness, traits=traits)
+
+    return phys_str, desires_str, turn_offs_str
+
 def generate_dynamic_act_preferences(hash_val: int, dynamic: str = "", demeanor: str = "", openness: str = "") -> Dict[str, str]:
-    """Dynamically generates 1-3 Likes and 1-3 Dislikes from symmetrical act preferences."""
+    """Dynamically generates 1-2 Likes and 1-2 Dislikes from strictly bedroom acts, positions, and pacing."""
     dyn_l = str(dynamic or "").lower()
     open_l = str(openness or "").lower()
 
-    likes_count = 1 + ((hash_val // 47) % 3)  # 1 to 3
-    dislikes_count = 1 + ((hash_val // 53) % 3)  # 1 to 3
+    likes_count = 1 + ((hash_val // 47) % 2)  # 1 to 2
+    dislikes_count = 1 + ((hash_val // 53) % 2)  # 1 to 2
 
     all_ids = [item["id"] for item in ACT_PREFERENCE_REGISTRY]
     name_map = {item["id"]: item["name"] for item in ACT_PREFERENCE_REGISTRY}
@@ -144,11 +210,11 @@ def generate_dynamic_act_preferences(hash_val: int, dynamic: str = "", demeanor:
     favored_dislikes = []
 
     if any(kw in dyn_l for kw in ("receptive", "surrender", "yielding", "submissive")):
-        favored_likes += ["pinned_down", "receiving_oral", "missionary", "slow_sensual"]
-        favored_dislikes += ["taking_charge", "rough_handling"]
+        favored_likes += ["receiving_oral", "missionary", "slow_sensual", "spooning"]
+        favored_dislikes += ["taking_charge", "rough_handling", "fast_urgent"]
     elif any(kw in dyn_l for kw in ("dominant", "proactive")):
-        favored_likes += ["taking_charge", "cowgirl_riding", "from_behind", "dirty_talk"]
-        favored_dislikes += ["pinned_down"]
+        favored_likes += ["taking_charge", "cowgirl_riding", "from_behind", "fast_urgent"]
+        favored_dislikes += ["spooning"]
     elif any(kw in dyn_l for kw in ("insatiable", "high-drive", "voracious")):
         favored_likes += ["swallowing", "cowgirl_riding", "fast_urgent", "prolonged_teasing"]
     elif any(kw in dyn_l for kw in ("service")):
@@ -156,9 +222,9 @@ def generate_dynamic_act_preferences(hash_val: int, dynamic: str = "", demeanor:
 
     if "prude" in open_l or "modest" in open_l:
         favored_likes += ["slow_sensual", "missionary", "spooning"]
-        favored_dislikes += ["public_thrill", "mirror_exhibition", "facial", "dirty_talk"]
+        favored_dislikes += ["facial", "rough_handling", "fast_urgent"]
     elif "shameless" in open_l or "lewd" in open_l:
-        favored_likes += ["swallowing", "facial", "public_thrill", "mirror_exhibition", "dirty_talk"]
+        favored_likes += ["swallowing", "facial", "cowgirl_riding", "from_behind"]
 
     # Select Likes
     chosen_likes_ids = []
@@ -192,7 +258,9 @@ def generate_dynamic_act_preferences(hash_val: int, dynamic: str = "", demeanor:
 
     return {
         "likes": likes_str,
-        "dislikes": dislikes_str
+        "dislikes": dislikes_str,
+        "act_likes": likes_str,
+        "act_dislikes": dislikes_str
     }
 
 def generate_dynamic_intimate_experience(hash_val: int, openness: str = "moderate") -> Dict[str, str]:
@@ -243,28 +311,48 @@ def generate_dynamic_intimate_experience(hash_val: int, openness: str = "moderat
     else:
         manual_val = "inexperienced"
 
+    # 4. Anal Intimacy Track
+    anal_rate = max(0, min(100, 8 + mod))
+    roll_anal = (hash_val // 19) % 100
+    if roll_anal < anal_rate:
+        sub_anal = (hash_val // 23) % 100
+        if sub_anal < 40:
+            anal_val = "has_done_anal"
+        elif sub_anal < 80:
+            anal_val = "has_received_anal"
+        else:
+            anal_val = "has_done_and_received_anal"
+    else:
+        anal_val = "inexperienced"
+
     return {
         "intercourse": intercourse_val,
         "oral": oral_val,
-        "manual": manual_val
+        "manual": manual_val,
+        "anal": anal_val
     }
 
-def generate_dynamic_intimate_attributes(hash_val: int, race: str = "", gender: str = "", dynamic: str = "", openness: str = "moderate") -> Dict[str, Any]:
-    """Dynamically generates unified turn-ons, 1-fetish (25%), symmetrical act preferences, 3-track experience, and undergarments."""
-    turn_ons_str = generate_dynamic_turn_ons(hash_val, race=race, dynamic=dynamic)
-    fetish_str = generate_dynamic_fetish(hash_val, race=race, dynamic=dynamic)
+def generate_dynamic_intimate_attributes(hash_val: int, race: str = "", gender: str = "", dynamic: str = "", openness: str = "moderate", traits: List[str] = None) -> Dict[str, Any]:
+    """Dynamically generates sensitive spots, desires & kinks, turn-offs, symmetrical act preferences, 4-track experience, and undergarments."""
+    phys_str, desires_str, turn_offs_str = generate_dynamic_desires_and_turn_offs(hash_val, race=race, dynamic=dynamic, openness=openness, traits=traits)
+    fetish_str = generate_dynamic_fetish(hash_val, race=race, dynamic=dynamic, openness=openness)
     act_prefs = generate_dynamic_act_preferences(hash_val, dynamic=dynamic, openness=openness)
     experience = generate_dynamic_intimate_experience(hash_val, openness=openness)
     undergarments = generate_procedural_undergarments(gender=gender, openness=openness, dynamic=dynamic, hash_val=hash_val)
 
     return {
-        "turn_ons": turn_ons_str,
+        "sensitive_spots": phys_str,
+        "turn_ons": desires_str,
+        "turn_offs": turn_offs_str,
+        "desires_and_kinks": desires_str,
+        "combined_turn_ons": desires_str,
         "fetishes": fetish_str,
         "act_likes": act_prefs["likes"],
         "act_dislikes": act_prefs["dislikes"],
         "intercourse": experience["intercourse"],
         "oral": experience["oral"],
         "manual": experience["manual"],
+        "anal": experience["anal"],
         "undergarments": undergarments
     }
 
@@ -293,6 +381,9 @@ def generate_intimate_synergy_tip(name: str, discovered: Dict[str, Any], info_le
         )
         if fetish and fetish not in ("None", "None (Vanilla)"):
             msg += f" Indulging their kink (*{fetish}*) grants a massive affinity surge."
+        turn_offs = discovered.get("turn_offs")
+        if turn_offs and turn_offs not in ("None", "Unknown", ""):
+            msg += f" ⚠️ **Turn-Off Warning**: Triggering their aversions (*{turn_offs}*) causes an immediate DC penalty (+5) and severe affinity loss."
 
         return {
             "name": "💡 Active Intimate Synergy & Modifiers",
@@ -358,6 +449,7 @@ def generate_past_intimate_history(
     intercourse: str = "",
     oral: str = "",
     manual: str = "",
+    anal: str = "",
     has_existing_partner: bool = False
 ) -> Optional[Dict[str, Any]]:
     """
@@ -369,8 +461,9 @@ def generate_past_intimate_history(
     i_state = (intercourse or "virgin").strip().lower()
     o_state = (oral or "inexperienced").strip().lower()
     m_state = (manual or "inexperienced").strip().lower()
+    a_state = (anal or "inexperienced").strip().lower()
 
-    if i_state in ("virgin", "unknown", "") and o_state in ("inexperienced", "unknown", "none", "") and m_state in ("inexperienced", "unknown", "none", ""):
+    if i_state in ("virgin", "unknown", "") and o_state in ("inexperienced", "unknown", "none", "") and m_state in ("inexperienced", "unknown", "none", "") and a_state in ("inexperienced", "unknown", "none", ""):
         return None
 
     raw_g = str(gender or "").strip().lower()
@@ -411,25 +504,117 @@ def generate_past_intimate_history(
         is_this_affair = has_affair and p_idx >= 1
         role_label = f"{role}, Secret Affair" if is_this_affair else role
 
-        if i_state == "non_virgin" and (p_idx == 0 or (is_shameless and (p_hash % 2 == 0)) or (o_state == "inexperienced" and m_state == "inexperienced") or (p_hash % 2 == 0)):
+        has_intercourse = (i_state == "non_virgin") and (
+            p_idx == 0 or (is_shameless and (p_hash % 2 == 0)) or (o_state == "inexperienced" and m_state == "inexperienced" and a_state == "inexperienced") or (p_hash % 2 == 0)
+        )
+        has_oral = (o_state != "inexperienced")
+        has_manual = (m_state != "inexperienced")
+        has_anal = (a_state != "inexperienced")
+
+        ic_count = count
+        ic_str = "1 time" if ic_count == 1 else f"{ic_count} times"
+
+        o_count = base_enc_min + ((p_hash // 7) % enc_range)
+        o_str = "1 time" if o_count == 1 else f"{o_count} times"
+
+        a_count = base_enc_min + ((p_hash // 13) % enc_range)
+        a_str = "1 time" if a_count == 1 else f"{a_count} times"
+
+        oral_act = ""
+        oral_participle = ""
+        if has_oral:
+            if o_state == "has_done_oral":
+                oral_act = f"performed oral ({o_str})"
+                oral_participle = f"performing oral ({o_str})"
+            elif o_state == "has_received_oral":
+                oral_act = f"received oral ({o_str})"
+                oral_participle = f"receiving oral ({o_str})"
+            else:
+                oral_act = f"performed & received oral ({o_str})"
+                oral_participle = f"performing & receiving oral ({o_str})"
+
+        anal_act = ""
+        anal_participle = ""
+        if has_anal:
+            if a_state == "has_done_anal":
+                anal_act = f"performed anal ({a_str})"
+                anal_participle = f"performing anal ({a_str})"
+            elif a_state == "has_received_anal":
+                anal_act = f"received anal ({a_str})"
+                anal_participle = f"receiving anal ({a_str})"
+            else:
+                anal_act = f"engaged in anal intimacy ({a_str})"
+                anal_participle = f"engaging in anal intimacy ({a_str})"
+
+        # Multi-act synthesis
+        if has_intercourse and has_oral and has_anal:
             if is_this_affair:
-                entry = f"Past History: Secret affair ({count_str}) with '{partner_name}' ({role}) behind partner's back"
-            elif count == 1 and p_idx == 0:
+                entry = f"Past History: Secret affair ({count_str}) by having intercourse ({ic_str}), {oral_participle} & {anal_participle} with '{partner_name}' ({role}) behind partner's back"
+            elif ic_count == 1 and p_idx == 0:
+                entry = f"Past History: Lost virginity & had intercourse (1 time), {oral_act} and {anal_act} during a relationship with '{partner_name}' ({role})"
+            else:
+                entry = f"Past History: Had intercourse ({ic_str}), {oral_act} & {anal_act} during a relationship with '{partner_name}' ({role})"
+        elif has_intercourse and has_oral:
+            if is_this_affair:
+                entry = f"Past History: Secret affair ({count_str}) by having intercourse ({ic_str}) & {oral_participle} with '{partner_name}' ({role}) behind partner's back"
+            elif ic_count == 1 and p_idx == 0:
+                entry = f"Past History: Lost virginity & had intercourse (1 time) and {oral_act} during a relationship with '{partner_name}' ({role})"
+            else:
+                entry = f"Past History: Had intercourse ({ic_str}) & {oral_act} during a relationship with '{partner_name}' ({role})"
+        elif has_intercourse and has_anal:
+            if is_this_affair:
+                entry = f"Past History: Secret affair ({count_str}) by having intercourse ({ic_str}) & {anal_participle} with '{partner_name}' ({role}) behind partner's back"
+            elif ic_count == 1 and p_idx == 0:
+                entry = f"Past History: Lost virginity & had intercourse (1 time) and {anal_act} during a relationship with '{partner_name}' ({role})"
+            else:
+                entry = f"Past History: Had intercourse ({ic_str}) & {anal_act} during a relationship with '{partner_name}' ({role})"
+        elif has_intercourse:
+            if is_this_affair:
+                entry = f"Past History: Secret affair ({count_str}) by having intercourse ({ic_str}) with '{partner_name}' ({role}) behind partner's back"
+            elif ic_count == 1 and p_idx == 0:
                 entry = f"Past History: Lost virginity and had intercourse 1 time with '{partner_name}' ({role})"
             else:
                 entry = f"Past History: Had intercourse {count_str} during a relationship with '{partner_name}' ({role})"
-        elif o_state != "inexperienced":
+        elif has_oral and has_anal:
             if is_this_affair:
-                entry = f"Past History: Illicit oral intimacy encounters ({count_str}) with '{partner_name}' ({role})"
-            elif o_state == "has_done_oral":
-                entry = f"Past History: Performed oral {count_str} with '{partner_name}' ({role})"
-            elif o_state == "has_received_oral":
-                entry = f"Past History: Received oral {count_str} from '{partner_name}' ({role})"
+                entry = f"Past History: Secret affair ({count_str}) by {oral_participle} & {anal_participle} with '{partner_name}' ({role}) behind partner's back"
             else:
-                entry = f"Past History: Engaged in mutual oral intimacy ({count_str}) with '{partner_name}' ({role})"
-        elif m_state != "inexperienced":
+                entry = f"Past History: Engaged in {oral_act} & {anal_act} during a relationship with '{partner_name}' ({role})"
+        elif has_oral:
+            if o_state == "has_done_oral":
+                if is_this_affair:
+                    entry = f"Past History: Secret affair ({count_str}) by performing oral ({count_str}) with '{partner_name}' ({role}) behind partner's back"
+                else:
+                    entry = f"Past History: Performed oral {count_str} with '{partner_name}' ({role})"
+            elif o_state == "has_received_oral":
+                if is_this_affair:
+                    entry = f"Past History: Secret affair ({count_str}) by receiving oral ({count_str}) from '{partner_name}' ({role}) behind partner's back"
+                else:
+                    entry = f"Past History: Received oral {count_str} from '{partner_name}' ({role})"
+            else:
+                if is_this_affair:
+                    entry = f"Past History: Secret affair ({count_str}) through mutual oral intimacy ({count_str}) with '{partner_name}' ({role}) behind partner's back"
+                else:
+                    entry = f"Past History: Engaged in mutual oral intimacy ({count_str}) with '{partner_name}' ({role})"
+        elif has_anal:
+            if a_state == "has_done_anal":
+                if is_this_affair:
+                    entry = f"Past History: Secret affair ({count_str}) by performing anal ({count_str}) with '{partner_name}' ({role}) behind partner's back"
+                else:
+                    entry = f"Past History: Performed anal {count_str} with '{partner_name}' ({role})"
+            elif a_state == "has_received_anal":
+                if is_this_affair:
+                    entry = f"Past History: Secret affair ({count_str}) by receiving anal ({count_str}) from '{partner_name}' ({role}) behind partner's back"
+                else:
+                    entry = f"Past History: Received anal {count_str} from '{partner_name}' ({role})"
+            else:
+                if is_this_affair:
+                    entry = f"Past History: Secret affair ({count_str}) through anal intimacy ({count_str}) with '{partner_name}' ({role}) behind partner's back"
+                else:
+                    entry = f"Past History: Engaged in anal intimacy ({count_str}) with '{partner_name}' ({role})"
+        elif has_manual:
             if is_this_affair:
-                entry = f"Past History: Secret manual intimacy ({count_str}) with '{partner_name}' ({role})"
+                entry = f"Past History: Secret affair ({count_str}) through manual intimacy with '{partner_name}' ({role}) behind partner's back"
             elif m_state == "has_done_manual":
                 entry = f"Past History: Manually stimulated '{partner_name}' ({role}) {count_str}"
             elif m_state == "has_received_manual":

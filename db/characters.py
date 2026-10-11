@@ -2,6 +2,7 @@ import db
 import asyncio
 import json
 import time
+from typing import Any, Optional
 from contextlib import contextmanager
 import re
 import sqlite3
@@ -13,27 +14,38 @@ from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, 
 def create_character(user_id: int, name: str, char_class: str = "Adventurer", class_description: str = "",
                      stats: dict = None, gold: int = cd.STARTING_GOLD, pending_stat_points: int = 0,
                      gender: str = "Male", scenario: str = "fantasy",
-                     race: str = "human", race_description: str = "") -> dict:
+                     race: str = "human", race_description: str = "", appearance: dict = None) -> dict:
     if stats is None:
         stats = {s: cd.BASE_STAT_VALUE for s in cd.STATS}
     existing = get_user_characters(user_id)
     if len(existing) >= 6:
         raise ValueError("Character creation limit reached (maximum 6 characters allowed per user).")
     from mechanics.social.races import normalize_race
+    from mechanics.social.persona import normalize_appearance
     norm_race = normalize_race(race, scen_key=scenario, seed=name) if race else "human"
     hp = cd.calculate_max_hp(stats["END"])
     mp = cd.calculate_max_mp(stats["END"])
+
+    app_dict = dict(appearance or {})
+    is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
+    if not app_dict.get("breast_size") and not is_male:
+        app_dict["breast_size"] = "Modest B-Cup"
+    if not app_dict.get("penis_size") and is_male:
+        app_dict["penis_size"] = "Average"
+    norm_app = normalize_appearance(app_dict, gender=gender, race=norm_race, scen_key=scenario, desc=class_description)
+    app_json = json.dumps(norm_app)
+
     with get_conn() as conn:
         conn.execute("UPDATE characters SET is_active=0 WHERE user_id=?", (user_id,))
         cur = conn.execute(
             """INSERT INTO characters
                (user_id, is_active, name, char_class, class_description, gender, scenario, race, race_description, str_, per_, end_, cha, int_, agi, luk,
                 hp, max_hp, temp_hp, mp, max_mp, level, xp, pending_stat_points, gold, status_effects,
-                skill_progress, active_session_id, created_at)
-               VALUES (?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,1,0,?,?,'[]','{}',NULL,?)""",
+                skill_progress, active_session_id, appearance_json, created_at)
+               VALUES (?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,1,0,?,?,'[]','{}',NULL,?,?)""",
             (user_id, name, char_class, class_description, gender, scenario, norm_race, race_description,
              stats["STR"], stats["PER"], stats["END"], stats["CHA"], stats["INT"], stats["AGI"], stats["LUK"],
-             hp, hp, mp, mp, pending_stat_points, gold, time.time()),
+             hp, hp, mp, mp, pending_stat_points, gold, app_json, time.time()),
         )
         char_id = cur.lastrowid
     return get_character_by_id(char_id)
@@ -124,6 +136,31 @@ def apply_adventure_loadout(
                 if slot == "Weapon":
                     equipped_weapon = True
                 continue
+            elif isinstance(entry, (tuple, list)) and len(entry) >= 2:
+                if slot == "Weapon":
+                    continue
+                gear_name = str(entry[0])
+                gear_effect = str(entry[1])
+                gear_slot_cost = int(entry[2]) if len(entry) > 2 else 1
+                if slot == "Shield":
+                    default_type = "Shield"
+                elif slot in ("Top", "Bottom"):
+                    default_type = "Clothing"
+                elif slot == "Armor":
+                    default_type = "Armor"
+                elif slot == "Head":
+                    default_type = "Headwear"
+                elif slot == "Gloves":
+                    default_type = "Gloves"
+                elif slot == "Shoes":
+                    default_type = "Shoes"
+                elif slot.startswith("Accessory"):
+                    default_type = "Accessory"
+                else:
+                    default_type = "Armor"
+                gear_id = db.add_item(user_id, gear_name, default_type, gear_effect, gear_slot_cost)
+                db.equip_item(user_id, gear_id, slot)
+                continue
 
 
     # 3. Starting weapon (utilizing new weapon generation system)
@@ -156,6 +193,23 @@ def _apply_debug_stat_override(char: dict | None) -> dict | None:
     # Overwrite the dict's status_effects so it heals itself on the next turn save
     char["status_effects"] = json.dumps(cleaned_status)
 
+    raw_app = char.get("appearance_json")
+    app_dict = {}
+    if isinstance(raw_app, str) and raw_app.strip():
+        try:
+            app_dict = json.loads(raw_app)
+        except Exception:
+            app_dict = {}
+    elif isinstance(raw_app, dict):
+        app_dict = dict(raw_app)
+
+    if not app_dict:
+        from mechanics.social.persona import normalize_appearance
+        is_m = any(kw in str(char.get("gender", "")).lower() for kw in ("male", "man", "boy")) and "female" not in str(char.get("gender", "")).lower()
+        default_app = {"penis_size": "Average"} if is_m else {"breast_size": "Modest B-Cup"}
+        app_dict = normalize_appearance(default_app, gender=char.get("gender", ""), race=char.get("race", "human"), scen_key=char.get("scenario", "fantasy"))
+    char["appearance"] = app_dict
+
     settings = db.get_settings(user_id)
     stat_mode = settings.get("debug_stat_mode", "off")
     if stat_mode == "max":
@@ -170,7 +224,31 @@ def _apply_debug_stat_override(char: dict | None) -> dict | None:
                 char[col] = cd.BASE_STAT_VALUE
     return char
 
+def update_character_appearance(character_id: int, appearance_dict: dict) -> dict | None:
+    char = get_character_by_id(character_id)
+    if not char:
+        return None
+    from mechanics.social.persona import normalize_appearance
+    existing_app = dict(char.get("appearance") or {})
+    for k, v in (appearance_dict or {}).items():
+        if v is not None:
+            existing_app[k] = v
+    norm_app = normalize_appearance(
+        existing_app,
+        gender=char.get("gender", "male"),
+        race=char.get("race", "human"),
+        scen_key=char.get("scenario", "fantasy"),
+        desc=char.get("class_description", "")
+    )
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE characters SET appearance_json=? WHERE id=?",
+            (json.dumps(norm_app), character_id)
+        )
+    return get_character_by_id(character_id)
+
 def get_character(user_id: int):
+    user_id = resolve_canonical_user_id(user_id)
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM characters WHERE user_id=? AND is_active=1 LIMIT 1", (user_id,)).fetchone()
         if not row:
@@ -185,6 +263,7 @@ def get_character_by_id(character_id: int):
         return _apply_debug_stat_override(dict(row)) if row else None
 
 def get_user_characters(user_id: int) -> list[dict]:
+    user_id = resolve_canonical_user_id(user_id)
     with get_conn() as conn:
         rows = conn.execute("SELECT * FROM characters WHERE user_id=? ORDER BY is_active DESC, id ASC", (user_id,)).fetchall()
         return [_apply_debug_stat_override(dict(r)) for r in rows]
@@ -434,4 +513,97 @@ def update_character_stats(user_id: int, stats: dict):
         max_mp=max_mp,
         mp=max_mp
     )
+
+
+def save_discord_user(user_id: int, username: str = "", display_name: str = "") -> bool:
+    if not user_id:
+        return False
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO discord_users (user_id, username, display_name, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(user_id) DO UPDATE SET
+               username=COALESCE(NULLIF(excluded.username, ''), discord_users.username),
+               display_name=COALESCE(NULLIF(excluded.display_name, ''), discord_users.display_name),
+               updated_at=excluded.updated_at""",
+            (int(user_id), (username or "").strip(), (display_name or "").strip(), time.time())
+        )
+    return True
+
+
+def find_user_id_by_name(query: str) -> Optional[int]:
+    if not query:
+        return None
+    q = str(query).strip()
+    if not q:
+        return None
+    if q.startswith("<@") and q.endswith(">"):
+        digits = "".join(ch for ch in q if ch.isdigit())
+        if digits:
+            return resolve_canonical_user_id(int(digits))
+    clean_q = q.lstrip("@").strip()
+    with get_conn() as conn:
+        # 1. Exact or case-insensitive match in discord_users
+        row = conn.execute(
+            "SELECT user_id FROM discord_users WHERE LOWER(username) = LOWER(?) OR LOWER(display_name) = LOWER(?) OR LOWER(username) = LOWER(?) OR LOWER(display_name) = LOWER(?) LIMIT 1",
+            (q, q, clean_q, clean_q)
+        ).fetchone()
+        if row:
+            return row["user_id"]
+        # 2. Check characters table for character name
+        char_row = conn.execute(
+            "SELECT user_id FROM characters WHERE LOWER(name) = LOWER(?) OR LOWER(name) = LOWER(?) LIMIT 1",
+            (q, clean_q)
+        ).fetchone()
+        if char_row:
+            return char_row["user_id"]
+    return None
+
+
+def resolve_canonical_user_id(user_id: Any) -> int:
+    """Resolves a user_id (even if precision-truncated by JS IEEE-754 float rounding)
+    to the exact canonical user_id present in the database.
+    """
+    if not user_id:
+        return 0
+    try:
+        raw_id = int(str(user_id).strip())
+    except (ValueError, TypeError):
+        return 0
+
+    with get_conn() as conn:
+        # 1. Exact match in characters or discord_users
+        row = conn.execute("SELECT user_id FROM characters WHERE user_id = ? LIMIT 1", (raw_id,)).fetchone()
+        if row:
+            return row["user_id"]
+        row_du = conn.execute("SELECT user_id FROM discord_users WHERE user_id = ? LIMIT 1", (raw_id,)).fetchone()
+        if row_du:
+            return row_du["user_id"]
+        # 2. Check if within float precision rounding window (±128 for 64-bit float around 10^17 - 10^19)
+        if raw_id > 10**16:
+            near_row = conn.execute(
+                "SELECT user_id FROM characters WHERE user_id BETWEEN ? AND ? LIMIT 1",
+                (raw_id - 128, raw_id + 128)
+            ).fetchone()
+            if near_row:
+                return near_row["user_id"]
+            near_du = conn.execute(
+                "SELECT user_id FROM discord_users WHERE user_id BETWEEN ? AND ? LIMIT 1",
+                (raw_id - 128, raw_id + 128)
+            ).fetchone()
+            if near_du:
+                return near_du["user_id"]
+    return raw_id
+
+
+def get_discord_user(user_id: int) -> Optional[dict]:
+    user_id = resolve_canonical_user_id(user_id)
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM discord_users WHERE user_id = ? LIMIT 1", (int(user_id),)).fetchone()
+        return dict(row) if row else None
+
+
+def delete_character_by_id(user_id: int, character_id: int) -> bool:
+    return delete_character(user_id, character_id)
+
 

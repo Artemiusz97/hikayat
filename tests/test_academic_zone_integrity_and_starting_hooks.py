@@ -111,9 +111,9 @@ class TestAcademicZoneIntegrityAndStartingHooks(unittest.TestCase):
         self.assertNotIn("{session_", hook_info["suggested_location"])
 
     def test_high_school_delve_hook_free_of_hardcoded_sunset(self):
-        """Issue 3 Regression Test: tags.json must not hardcode golden hour/sunset into morning high school delve hooks."""
-        tags = scenario_data.load_tags(reload=True)
-        hs_hooks = tags["high_school"]["starting_hooks"]
+        """Issue 3 Regression Test: genres.json must not hardcode golden hour/sunset into morning high school delve hooks."""
+        genres = scenario_data.load_genres(reload=True)
+        hs_hooks = genres["high_school"]["starting_hooks"]
         delve_hooks = [h for h in hs_hooks if h.get("archetype") == "delve_threshold"]
         self.assertTrue(len(delve_hooks) > 0)
         for h in delve_hooks:

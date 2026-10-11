@@ -344,6 +344,42 @@ class TestLocationSwitchingReliability(unittest.TestCase):
         )
         self.assertIsInstance(items_gained, dict)
 
+    def test_in_room_ambient_prose_does_not_trigger_spurious_hallway_exit(self):
+        """Conversational in-room interactions with ambient atmospheric prose mentioning 'down the hall' must never demote location to corridor."""
+        initial_loc = "Westlake Academy ➔ Old East Wing Music Room ➔ Upright Piano Alcove"
+        db.save_session_scene(
+            self.session_id,
+            scene_title="Piano Bench Confessions",
+            narrative="Sitting closely on the piano bench.",
+            choices=[],
+            history=["Turn 1"],
+            location=initial_loc,
+            current_npcs=[{"name": "Mia Yamada"}, {"name": "Yuki Kuroda"}]
+        )
+        db.update_session_dialogue_partner(self.session_id, ["Mia Yamada"])
+
+        action_text = "suggestively ask her how experienced she is"
+        narrative_with_atmospheric_hallway_cue = (
+            "The air in the alcove feels suddenly warmer, the scent of old piano wood mixing with "
+            "the faint scent of Mia's fur. The distant sounds of a trumpet practicing scales echo faintly from down the hall, "
+            "grounding the intimate tension of the alcove in the mundane bustle of the school morning."
+        )
+
+        reconciled = reconcile_movement_location(
+            self.session_id,
+            current_loc=initial_loc,
+            result_loc="Westlake Academy ➔ Old East Wing Music Room ➔ Upright Piano Alcove",
+            action_text=action_text,
+            narrative=narrative_with_atmospheric_hallway_cue,
+            scen_key="nsfw_high_school_drama",
+            char_name=self.char_name
+        )
+
+        self.assertEqual(reconciled, initial_loc)
+        self.assertNotIn("Corridor", reconciled)
+        self.assertNotIn("Hallway", reconciled)
+
+
 
 if __name__ == "__main__":
     unittest.main()

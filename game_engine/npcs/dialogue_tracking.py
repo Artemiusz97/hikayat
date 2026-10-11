@@ -206,51 +206,49 @@ def build_scene_escalation_and_consequence_directives(
 
 
 
-    # 1. Ticking Clock & Scene Escalation Tracker
-
+    # 1. Ticking Clock & Scene Escalation Tracker (Combat / Hazard scenarios outside active intimacy)
+    import scenario_data
+    from mechanics.social.physical_state import is_erotic_intimate_contact
+    scen_key = (session.get("scenario") if isinstance(session, dict) else None) or "fantasy"
+    phys_st = (session.get("physical_state") if isinstance(session, dict) else None) or {}
+    if not phys_st and isinstance(session, dict) and session.get("id"):
+        try:
+            phys_st = db.get_session_physical_state(session["id"]) or {}
+        except Exception:
+            phys_st = {}
     history = session.get("history") or []
+    is_intimate_scene = is_erotic_intimate_contact(str(phys_st.get("intimate_contact", "")))
+    is_non_combat = scenario_data.is_non_combat_scenario(scen_key)
 
+    if not is_intimate_scene and not is_non_combat:
 
-
-    tension_keywords = (
-
-        "hammer", "hammering", "patrol", "patrols", "sentry", "sentries", "guard", "guards",
-
-        "barricade", "barricaded", "breach", "breaching", "alarm", "alarms", "countdown",
-
-        "seconds away", "moments before", "collapse", "collapsing", "timer", "intruder",
-
-        "intruders", "ward-lines", "backlash", "locked in", "forced entry", "pounding",
-
-        "shattered circle", "defender", "defenders", "assault", "assaulting", "siege",
-
-        "standoff", "stand-off", "hostile", "ambush"
-
-    )
-
-
-
-    recent_tension_count = sum(1 for h in history[-6:] if any(kw in str(h).lower() for kw in tension_keywords))
-
-
-
-    if recent_tension_count >= 2:
-
-        directives.append(
-
-            "⚡ [MANDATORY SCENE ESCALATION & TICKING CLOCK DIRECTIVE]:\n"
-
-            "The ticking clock has EXPIRED! High tension / impending threats (e.g. sentries outside, collapsing architecture, alarms, breaching guards) CANNOT remain in a static 'seconds away' or 'hammering' state any longer.\n"
-
-            "- You MUST force the breach / catastrophe / confrontation THIS TURN in `outcome_narrative`!\n"
-
-            "- If guards/enemies were pounding on doors or barriers, the doors SMASH OPEN or the trap TRIGGERS now!\n"
-
-            "- If the player failed or lingered, apply immediate consequences (HP damage in character_outcomes, being spotted, cornered status, or direct combat encounter).\n"
-
-            "- STRICTLY PROHIBITED: Do NOT write that the threat is 'still waiting outside' or 'seconds away'."
-
+        tension_keywords = (
+            "hammer", "hammering", "patrol", "patrols", "sentry", "sentries", "guard", "guards",
+            "barricade", "barricaded", "breach", "breaching", "alarm", "alarms", "countdown",
+            "seconds away", "moments before", "collapse", "collapsing", "timer", "intruder",
+            "intruders", "ward-lines", "backlash", "locked in", "forced entry", "pounding",
+            "shattered circle", "defender", "defenders", "assault", "assaulting", "siege",
+            "standoff", "stand-off", "hostile", "ambush"
         )
+        intimate_prose_markers = (
+            "climax", "orgasm", "aftercare", "aftershocks", "moan", "kiss", "thighs", "arousal", "cunnilingus", "fellatio"
+        )
+
+        recent_tension_count = sum(
+            1 for h in history[-6:]
+            if any(kw in str(h).lower() for kw in tension_keywords)
+            and not any(im in str(h).lower() for im in intimate_prose_markers)
+        )
+
+        if recent_tension_count >= 2:
+            directives.append(
+                "⚡ [MANDATORY SCENE ESCALATION & TICKING CLOCK DIRECTIVE]:\n"
+                "The ticking clock has EXPIRED! High tension / impending threats (e.g. sentries outside, collapsing architecture, alarms, breaching guards) CANNOT remain in a static 'seconds away' or 'hammering' state any longer.\n"
+                "- You MUST force the breach / catastrophe / confrontation THIS TURN in `outcome_narrative`!\n"
+                "- If guards/enemies were pounding on doors or barriers, the doors SMASH OPEN or the trap TRIGGERS now!\n"
+                "- If the player failed or lingered, apply immediate consequences (HP damage in character_outcomes, being spotted, cornered status, or direct combat encounter).\n"
+                "- STRICTLY PROHIBITED: Do NOT write that the threat is 'still waiting outside' or 'seconds away'."
+            )
 
 
 
@@ -626,6 +624,15 @@ def is_dialogue_partner(name: str, dialogue_partners: list | str = None, session
 
 
 
+DIALOGUE_TITLE_WORDS: set[str] = {
+    "the", "elder", "lord", "lady", "sir", "madam", "captain", "dr", "mr", "ms", "mrs",
+    "druid", "scholar", "guardian", "student", "council", "president", "vice", "secretary",
+    "representative", "officer", "member", "guildmaster", "archivist", "warden", "guard",
+    "patron", "shopkeeper", "innkeeper", "headmaster", "dean", "professor", "teacher",
+    "coach", "trainer", "instructor", "principal", "referee", "sensei", "bartender", "nurse", "clerk", "vendor"
+}
+
+
 def extract_speaking_npcs_from_narrative(narrative_text: str, npcs_present: list) -> list[str]:
 
     """
@@ -702,23 +709,15 @@ def extract_speaking_npcs_from_narrative(narrative_text: str, npcs_present: list
 
         "smirk", "smirks", "smirked", "smirking", "smile", "smiles", "smiled", "smiling",
 
-        "snap", "snaps", "snapped", "snapping", "wave", "waves", "waved", "waving"
+        "snap", "snaps", "snapped", "snapping", "wave", "waves", "waved", "waving",
+
+        "gasp", "gasps", "gasped", "gasping"
 
     }
 
 
 
-    title_words = {
-
-        "the", "elder", "lord", "lady", "sir", "madam", "captain", "dr", "mr", "ms", "mrs",
-
-        "druid", "scholar", "guardian", "student", "council", "president", "vice", "secretary",
-
-        "representative", "officer", "member", "guildmaster", "archivist", "warden", "guard",
-
-        "patron", "shopkeeper", "innkeeper", "headmaster", "dean", "professor", "teacher"
-
-    }
+    title_words = DIALOGUE_TITLE_WORDS
 
 
 
@@ -765,23 +764,21 @@ def extract_speaking_npcs_from_narrative(narrative_text: str, npcs_present: list
 
 
         is_speaking = False
-
-        for s in sentences:
-
+        for idx, s in enumerate(sentences):
             if n_norm in s or any(t in s for t in n_tokens):
-
                 s_words = set(re.findall(r"\b\w+\b", s))
-
                 if s_words & speech_verbs:
-
                     is_speaking = True
-
                     break
-
+                if has_quotes and idx + 1 < len(sentences):
+                    next_s = sentences[idx + 1]
+                    next_words = set(re.findall(r"\b\w+\b", next_s))
+                    if (next_words & {"she", "he", "they"}) and (next_words & speech_verbs):
+                        is_speaking = True
+                        break
 
 
         if is_speaking and n_name not in speaking_npcs:
-
             speaking_npcs.append(n_name)
 
 
@@ -825,6 +822,226 @@ def is_npc_invited_in_action(npc_name: str, actions: list) -> bool:
             if any(iv in label for iv in invitation_verbs) or any(ft in label for ft in follow_terms):
 
                 return True
+
+    return False
+
+
+def can_chime_in_to_dialogue(
+    npc_name: str,
+    *,
+    retained_partners: list[str] | None = None,
+    actions: list | None = None,
+    narrative: str | None = None,
+    session: dict | None = None,
+    party: list | None = None,
+    npcs_present: list | None = None,
+) -> bool:
+    """
+    Determines whether an NPC who speaks or acts in the turn can chime into an
+    ongoing conversation with `retained_partners`.
+
+    Rules:
+    1. If no active conversation exists (not retained_partners), any speaker is allowed.
+    2. If npc_name is already one of the active retained partners, allow.
+    3. If player explicitly addresses or mentions the NPC in action choices, allow.
+    4. If the NPC is a party companion (in player party or session_party_npcs), allow.
+    5. If the NPC is relevant to an active quest (Story Quest target/objective,
+       side quest, active waypoint, or rendezvous target), allow.
+    6. If the NPC directly engages the player, retained partners, or ongoing dialogue
+       in the narrative prose (e.g. addressed to 'you', mentions partner names,
+       uses conversational/interjection verbs like interject/agree/propose/interrupt),
+       and is NOT an ambient third-party interaction (e.g. barking orders at freshmen,
+       shouting at drunken patrons), allow.
+    """
+    if not npc_name or str(npc_name).strip().lower() in ("none", ""):
+        return False
+
+    if not retained_partners:
+        return True
+
+    # 1. Already an active partner?
+    if any(is_dialogue_partner(npc_name, [p]) for p in retained_partners):
+        return True
+
+    n_norm = game_engine._norm_dialogue_name(npc_name)
+    n_tokens = [t for t in n_norm.split() if len(t) > 2 and t not in DIALOGUE_TITLE_WORDS]
+    if not n_tokens and len(n_norm) > 2:
+        n_tokens = [n_norm]
+
+    # 2. Player explicitly addressed or invited them in their action?
+    if actions:
+        act_txt = " ".join(
+            str(a.get("label", "")) if isinstance(a, dict) else str(a)
+            for a in actions
+        ).lower()
+        if n_norm in act_txt or any(t in act_txt for t in n_tokens):
+            return True
+
+    # 3. Party Companion?
+    if session:
+        p_npcs = session.get("party_npcs") or []
+        if any(is_dialogue_partner(npc_name, [p.get("name") if isinstance(p, dict) else str(p)]) for p in p_npcs):
+            return True
+
+        sess_id = session.get("id")
+        if sess_id:
+            try:
+                import db
+                db_party = db.get_session_party_npcs(sess_id)
+                if any(is_dialogue_partner(npc_name, [p.get("name") if isinstance(p, dict) else str(p)]) for p in db_party):
+                    return True
+            except Exception:
+                pass
+
+    if party:
+        for p_entry in party:
+            p_char = p_entry[0] if isinstance(p_entry, (list, tuple)) and p_entry else p_entry
+            if isinstance(p_char, dict):
+                p_nm = p_char.get("name", "")
+                if p_nm and is_dialogue_partner(npc_name, [p_nm]):
+                    return True
+
+    # 4. Quest Relevance (Story Quest, Waypoints, Rendezvous)?
+    if session:
+        sess_id = session.get("id")
+        if sess_id:
+            try:
+                import db
+                # Active Story Quest
+                sq = db.get_active_story_quest(sess_id)
+                if sq:
+                    sq_txt = f"{sq.get('target_npc', '')} {sq.get('title', '')} {sq.get('objective', '')}".lower()
+                    for so in (sq.get("sub_objectives") or []):
+                        if isinstance(so, dict) and not so.get("completed"):
+                            sq_txt += f" {so.get('target_npc', '')} {so.get('text', '')}".lower()
+                    if n_norm in sq_txt or any(t in sq_txt for t in n_tokens):
+                        return True
+
+                # Active Waypoints
+                active_wps = db.get_all_session_active_waypoints(sess_id)
+                for wp in (active_wps or []):
+                    wp_tgt = str(wp.get("target_npc", "")).lower()
+                    wp_txt = f"{wp.get('title', '')} {wp.get('stage_label', '')}".lower()
+                    if (wp_tgt and (n_norm in wp_tgt or wp_tgt in n_norm)) or any(t in wp_tgt for t in n_tokens):
+                        return True
+                    if n_norm in wp_txt or any(t in wp_txt for t in n_tokens):
+                        return True
+
+                # Rendezvous targets
+                from mechanics.world.mobility import is_rendezvous_target
+                if is_rendezvous_target(npc_name, session_id=sess_id, actions=actions):
+                    return True
+            except Exception:
+                pass
+
+    # 5. Direct Narrative Engagement / Focal Interjection vs Ambient Background
+    if narrative:
+        nar_norm = game_engine._norm_dialogue_name(narrative)
+        sentences = [s.strip() for s in re.split(r'[.!?\n]+', nar_norm) if s.strip()]
+
+        # Collect player identifiers
+        player_names = set()
+        if party:
+            for p_entry in party:
+                p_char = p_entry[0] if isinstance(p_entry, (list, tuple)) and p_entry else p_entry
+                if isinstance(p_char, dict) and p_char.get("name"):
+                    player_names.add(game_engine._norm_dialogue_name(p_char["name"]))
+
+        # Collect partner tokens
+        partner_tokens = set()
+        for rp in (retained_partners or []):
+            rp_norm = game_engine._norm_dialogue_name(rp)
+            for t in rp_norm.split():
+                if len(t) > 2 and t not in DIALOGUE_TITLE_WORDS:
+                    partner_tokens.add(t)
+
+        chime_in_verbs = {
+            "interject", "interjects", "interjected", "interjecting",
+            "interrupt", "interrupts", "interrupted", "interrupting",
+            "chime", "chimes", "chimed", "chiming",
+            "agree", "agrees", "agreed", "agreeing",
+            "concur", "concurs", "concurred", "concurring",
+            "counter", "counters", "countered", "countering",
+            "add", "adds", "added", "adding",
+            "propose", "proposes", "proposed", "proposing",
+            "suggest", "suggests", "suggested", "suggesting",
+            "step", "steps", "stepped", "stepping",
+            "turn", "turns", "turned", "turning",
+            "approach", "approaches", "approached", "approaching",
+            "respond", "responds", "responded", "responding",
+            "reply", "replies", "replied", "replying",
+            "join", "joins", "joined", "joining",
+            "face", "faces", "faced", "facing",
+            "address", "addresses", "addressed", "addressing",
+            "confront", "confronts", "confronted", "confronting",
+            "demand", "demands", "demanded", "demanding",
+            "nod", "nods", "nodded", "nodding",
+            "ask", "asks", "asked", "asking",
+            "warn", "warns", "warned", "warning",
+            "exclaim", "exclaims", "exclaimed", "exclaiming",
+            "explain", "explains", "explained", "explaining",
+            "argue", "argues", "argued", "arguing",
+            "note", "notes", "noted", "noting",
+            "state", "states", "stated", "stating",
+            "point", "points", "pointed", "pointing",
+            "remark", "remarks", "remarked", "remarking",
+            "insist", "insists", "insisted", "insisting",
+            "discuss", "discusses", "discussed", "discussing",
+            "debate", "debates", "debated", "debating",
+            "advise", "advises", "advised", "advising",
+            "voice", "voices", "voiced", "voicing",
+            "opine", "opines", "opined", "opining",
+            "weigh", "weighs", "weighed", "weighing",
+        }
+
+        ambient_targets = (
+            "freshmen", "freshman", "team", "players", "cadets", "recruits",
+            "patron", "patrons", "customer", "customers", "crowd", "audience",
+            "passersby", "passerby", "guards", "soldiers", "wagons", "carts", "animals", "dog", "horse"
+        )
+
+        for idx, s in enumerate(sentences):
+            if n_norm in s or any(t in s for t in n_tokens):
+                # If subsequent sentence continues with quotes or pronoun attribution, combine for analysis
+                s_eval = s
+                if idx + 1 < len(sentences):
+                    next_s = sentences[idx + 1]
+                    if any(q in next_s for q in ('"', '“', '‘')) or any(pr in next_s.split()[:2] for pr in ("she", "he", "they")):
+                        s_eval = f"{s} {next_s}"
+
+                words = set(re.findall(r"\b\w+\b", s_eval))
+
+                # Check if this sentence specifically targets a third-party ambient entity
+                is_ambient_shout = False
+                for at in ambient_targets:
+                    if at in s_eval and any(prep in s_eval for prep in (f"at the {at}", f"to the {at}", f"orders to {at}", f"orders at {at}")):
+                        is_ambient_shout = True
+                        break
+
+                if is_ambient_shout:
+                    continue
+
+                # A) Direct address to player (you, player character name)
+                if words & {"you", "your", "yours", "we", "us", "both"} or any(pn in s_eval for pn in player_names):
+                    return True
+
+                # B) Direct address / proximity to existing dialogue partner
+                if partner_tokens & words:
+                    return True
+
+                # C) Chime-in conversational verb
+                verb_matches = words & chime_in_verbs
+                if "notes" in verb_matches or "note" in verb_matches:
+                    if any(np in s_eval for np in ("taking notes", "takes notes", "took notes", "her notes", "his notes", "the notes", "their notes", "some notes")):
+                        verb_matches = verb_matches - {"notes", "note"}
+
+                if verb_matches:
+                    return True
+
+                # D) In an intimate or focused group meeting (<= 8 NPCs present) with direct quotes
+                has_quotes = any(q in s_eval for q in ('"', '“', '”', '‘', "'"))
+                if has_quotes and npcs_present and len(npcs_present) <= 8:
+                    return True
 
     return False
 

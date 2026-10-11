@@ -468,7 +468,8 @@ def is_dialogue_partner(name: str, dialogue_partners: list | str = None, session
     title_words = {
         "the", "elder", "lord", "lady", "sir", "madam", "captain", "dr", "mr", "ms", "mrs",
         "scholar", "guardian", "druid", "student", "council", "president", "vice", "secretary",
-        "representative", "officer", "member", "guildmaster", "archivist", "warden"
+        "representative", "officer", "member", "guildmaster", "archivist", "warden",
+        "coach", "trainer", "instructor", "principal", "referee", "sensei", "bartender", "nurse", "clerk", "vendor"
     }
     n_tokens = [t for t in n_clean.split() if len(t) > 2 and t not in title_words]
     if not n_tokens and len(n_clean) > 2:
@@ -497,6 +498,35 @@ MEETUP_INTENT_KEYWORDS = (
     "walk home", "walk back", "study together", "go together",
     "accompany", "come with", "join me", "tag along", "head out together"
 )
+
+def _extract_history_text(h: Any) -> str:
+    """Extract narrative and dialogue text from a history entry, ignoring system metadata keys."""
+    if isinstance(h, dict):
+        parts = [
+            h.get("narrative") or "",
+            h.get("outcome_narrative") or "",
+            h.get("next_narrative") or "",
+            h.get("action") or "",
+            h.get("player_action") or "",
+            h.get("label") or "",
+            h.get("content") or "",
+        ]
+        return " ".join(str(p) for p in parts if p)
+    elif isinstance(h, str):
+        return h
+    return ""
+
+
+def _has_meetup_intent_keyword(text: str) -> bool:
+    """Check if text contains any meetup intent keyword using whole-word boundaries."""
+    if not text:
+        return False
+    t_low = text.lower()
+    for kw in MEETUP_INTENT_KEYWORDS:
+        pattern = r"\b" + re.escape(kw) + r"\b"
+        if re.search(pattern, t_low):
+            return True
+    return False
 
 SOLO_TRAVEL_PHRASES = (
     "go alone", "going alone", "travel alone", "head alone", "walk alone", "leave alone",
@@ -586,15 +616,17 @@ def has_narrative_continuity_bridge(npc_name: str, session: dict = None, actions
 
     is_dp = is_dialogue_partner(npc_name, session=session) if session else False
 
-    # 1. Same primary venue (or no destination change): active dialogue partner or co-located NPC retains continuity
+    # 1. Same location (or no movement): active dialogue partner or co-located NPC retains continuity
     if session and not is_different_primary:
         if is_dp:
             return True
-        old_npcs = session.get("current_npcs") or []
-        for on in old_npcs:
-            on_name = str((on.get("name") or on.get("npc_name")) if isinstance(on, dict) else on).strip().lower()
-            if on_name and (on_name == n_low or (len(n_first) >= 3 and on_name.startswith(n_first))):
-                return True
+        # Bystanders only retain continuity if the player stayed in the exact same sub-location
+        if old_loc and new_loc and old_loc.lower() == new_loc.lower():
+            old_npcs = session.get("current_npcs") or []
+            for on in old_npcs:
+                on_name = str((on.get("name") or on.get("npc_name")) if isinstance(on, dict) else on).strip().lower()
+                if on_name and (on_name == n_low or (len(n_first) >= 3 and on_name.startswith(n_first))):
+                    return True
 
     # 2. Check actions for travel/meetup/accompanied intent
     if actions:
@@ -608,7 +640,7 @@ def has_narrative_continuity_bridge(npc_name: str, session: dict = None, actions
             if is_dp and any(term in lbl for term in ACCOMPANIED_TRAVEL_PHRASES):
                 return True
             if n_low in lbl or (len(n_first) >= 3 and f" {n_first}" in f" {lbl}"):
-                if any(k in lbl for k in MEETUP_INTENT_KEYWORDS) or any(
+                if _has_meetup_intent_keyword(lbl) or any(
                     k in lbl for k in ("travel to", "head to", "go to", "visit", "with", "invite", "bring", "follow")
                 ):
                     return True
@@ -627,10 +659,30 @@ def has_narrative_continuity_bridge(npc_name: str, session: dict = None, actions
             hist_list = []
 
         recent_hist = hist_list[-3:] if len(hist_list) > 3 else hist_list
+        has_split_up = False
+        SPLIT_PATTERNS = (
+            r"\b(?:split|separate|divide)\s+(?:up|the|our|tasks?|investigation)\b",
+            r"\b(?:take|takes)\s+(?:the\s+)?archives.*(?:take|takes)\s+(?:the\s+)?locker\b",
+            r"\bmeet\s+(?:in|after|later|at\s+the\s+stairwell)\b",
+            r"\bmeet\s+(?:back\s+)?(?:in\s+\d+|later)\b",
+            r"\bdivision\s+of\s+labor\b",
+            r"\bgo\s+(?:our\s+)?separate\s+ways\b"
+        )
         for h in recent_hist:
-            h_str = str(h).lower()
-            if n_low in h_str or (len(n_first) >= 3 and f" {n_first}" in f" {h_str}"):
-                if any(k in h_str for k in MEETUP_INTENT_KEYWORDS):
+            h_text = _extract_history_text(h).lower()
+            if any(re.search(pat, h_text) for pat in SPLIT_PATTERNS):
+                has_split_up = True
+                break
+
+        if not has_split_up:
+            for h in recent_hist:
+                h_text = _extract_history_text(h).lower()
+                if not h_text:
+                    continue
+                name_pattern = r"\b" + re.escape(n_low) + r"\b"
+                if len(n_first) >= 3:
+                    name_pattern += r"|\b" + re.escape(n_first) + r"\b"
+                if re.search(name_pattern, h_text) and _has_meetup_intent_keyword(h_text):
                     return True
 
     return False

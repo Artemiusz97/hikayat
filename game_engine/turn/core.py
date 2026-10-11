@@ -10,7 +10,7 @@ import json
 import random
 from config import LLM_PASS2_TIMEOUT
 import scenario_data
-from game_engine.core import SYSTEM_PROMPT, OUTCOME_SCHEMA, is_nsfw_scenario
+from game_engine.core import SYSTEM_PROMPT, OUTCOME_SCHEMA, is_nsfw_scenario, uses_nsfw_model
 import namegen
 from mechanics.combat.merchant import merchant_prompt_note
 import logging
@@ -222,9 +222,47 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
         if isinstance(m, dict) and m.get("hp", 1) > 0 and m.get("name")
     }
 
-    actions_text = _build_player_actions_text(actions)
+    actions_text = _build_player_actions_text(actions, session=session)
 
     new_partners, has_exited_convo = _compute_dialogue_intent(session, actions)
+
+    import db
+    from mechanics.world.mobility import get_session_dialogue_partners
+    from mechanics.social.physical_state import (
+        build_physical_prompt_block,
+        is_erotic_intimate_contact as _core_is_erotic,
+        detect_intimate_disengagement as _core_is_disengage,
+    )
+    from mechanics.social.intimate_excitement import classify_intimate_act as _core_classify_act
+
+    _pre_phys = (db.get_session_physical_state(session.get("id")) if session.get("id") else None) or session.get("physical_state") or {}
+    _pre_ic_str = str(_pre_phys.get("intimate_contact", "") if isinstance(_pre_phys, dict) else "")
+    _pre_act_str = " ".join(str(a.get("label", "") if isinstance(a, dict) else a) for a in (actions or []))
+    _pre_act_ok = True
+    for _pa in (actions or []):
+        if isinstance(_pa, dict):
+            _pchk = _pa.get("check")
+            _ptier = getattr(_pchk, "tier", None) or (_pchk.get("tier") if isinstance(_pchk, dict) else None)
+            if _pa.get("success") is False or _ptier in ("fail", "crit_fail"):
+                _pre_act_ok = False
+                break
+    _cand_core_partners = list(new_partners or [])
+    for _existing_dp in get_session_dialogue_partners(session):
+        if _existing_dp and _existing_dp not in _cand_core_partners:
+            _cand_core_partners.append(_existing_dp)
+    if not _cand_core_partners:
+        _cand_core_partners = ["Partner"]
+    _initiating_erotic_act = False
+    if _pre_act_ok and _pre_act_str:
+        for _cp_cand in _cand_core_partners:
+            if _core_classify_act(_pre_act_str, intimate_contact_str=_pre_ic_str, partner_name=_cp_cand).get("act_type", "none") not in ("none", "foreplay_nongenital"):
+                _initiating_erotic_act = True
+                break
+    _in_intimate_for_core = (
+        not _core_is_disengage(actions)
+        and (_core_is_erotic(_pre_ic_str) or _initiating_erotic_act)
+    )
+    _in_aftercare_for_core = (not _core_is_disengage(actions)) and ("aftercare" in _pre_ic_str.lower())
 
     simultaneity_note = ""
     if len(actions) > 1:
@@ -237,18 +275,17 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
             "hp_change/mp_change/etc in character_outcomes.\n"
         )
 
-    story_quest_context, side_bounties_context = _build_quest_and_bounty_directives(session, ctx)
-
     import game_engine.prompt_layout as prompt_layout
-    
+
     active_quests_str = ""
-    if story_quest_context.strip():
-        active_quests_str += f"### PRIMARY STORY QUEST\n{story_quest_context}\n\n"
-    if side_bounties_context.strip():
-        active_quests_str += f"### SECONDARY SIDE BOUNTIES\n{side_bounties_context}\n\n"
-        
-    if active_quests_str:
-        active_quests_str += "[QUEST PRESENCE NOTE: Characters mentioned in the above quests or bounties are NOT necessarily in the current room. Do NOT include them in the scene or dialogue unless they are explicitly listed in `NPCs currently present` or actively introduced.]\n\n"
+    if not _in_intimate_for_core and not _in_aftercare_for_core:
+        story_quest_context, side_bounties_context = _build_quest_and_bounty_directives(session, ctx)
+        if story_quest_context.strip():
+            active_quests_str += f"### PRIMARY STORY QUEST\n{story_quest_context}\n\n"
+        if side_bounties_context.strip():
+            active_quests_str += f"### SECONDARY SIDE BOUNTIES\n{side_bounties_context}\n\n"
+        if active_quests_str:
+            active_quests_str += "[QUEST PRESENCE NOTE: Characters mentioned in the above quests or bounties are NOT necessarily in the current room. Do NOT include them in the scene or dialogue unless they are explicitly listed in `NPCs currently present` or actively introduced.]\n\n"
 
     from mechanics.combat import is_in_combat, precompute_combat_turn, reconcile_combat_results
     mode = "combat" if is_in_combat(session) else "narrative"
@@ -259,7 +296,6 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
     from mechanics.system.memory.budget import DynamicTokenBudget
     budget = DynamicTokenBudget.from_session(session, party, actions)
     
-    import db
     await db.update_missing_lorebook_embeddings(session_id_val)
     
     hist_text, query_embedding = await _build_history_context(session, ctx, budget=budget)
@@ -270,14 +306,14 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
     # in_dialogue_mode prevents duplicate stall directive injection — dialogue_prompt_block
     # is the single authoritative prompt section for dialogue stall notes.
-    from mechanics.world.mobility import get_session_dialogue_partners
     _in_dialogue_mode = bool(get_session_dialogue_partners(session))
 
-    escalation_directives = game_engine.build_scene_escalation_and_consequence_directives(
-        session, party, actions, ctx.story_quest, in_dialogue_mode=_in_dialogue_mode
-    )
-    if escalation_directives:
-        directive_note += f"\n{escalation_directives}\n"
+    if not _in_intimate_for_core and not _in_aftercare_for_core:
+        escalation_directives = game_engine.build_scene_escalation_and_consequence_directives(
+            session, party, actions, ctx.story_quest, in_dialogue_mode=_in_dialogue_mode
+        )
+        if escalation_directives:
+            directive_note += f"\n{escalation_directives}\n"
 
     # --- HYBRID ENCOUNTER ENGINE (5-10% chance in dangerous/non-combat locations) ---
     ambush_triggered = False
@@ -286,6 +322,8 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
     if (
         not is_in_combat(session)
         and not is_retry
+        and not _in_intimate_for_core
+        and not _in_aftercare_for_core
         and scenario_data.is_mechanic_enabled(scen_key, "tactical_combat")
         and not is_hub_location(session.get("current_location", ""))
     ):
@@ -425,6 +463,8 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
                                     f"- {npc_name} agreed via DM to meet here at {appt_loc} and is actively waiting for the player.\n"
 
+                                    f"- This is a PRIVATE meeting/rendezvous between the player and {npc_name}. Uninvited peers or classmates from prior locations (such as homeroom or hallways) are NOT present and must NOT be mentioned in this scene.\n"
+
                                     f"- You MUST narrate {npc_name}'s greeting and presence in `outcome_narrative` and `next_narrative`.\n"
 
                                     f"- You MUST include {npc_name} in `present_named_characters`, `npcs_present`, and generate direct conversational choices with {npc_name} in `next_choices`.\n"
@@ -453,17 +493,18 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
 
 
-    from mechanics.social.physical_state import build_physical_prompt_block
-
     phys_prompt_block = build_physical_prompt_block(
 
         session, party,
 
         is_combat=is_in_combat(session),
 
-        is_nsfw=is_nsfw_scenario(session.get("scenario"))
+        is_nsfw=is_nsfw_scenario(session.get("scenario")),
+
+        actions=actions
 
     )
+
 
 
 
@@ -533,15 +574,26 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
     # Trim individual components to fit elastic budgets based on scene mode
 
-    raw_known_world = game_engine._known_world_text(
-
+    # KNOWN WORLD is split by volatility (see prompt_layout docstring):
+    #   canon -> Z1b (cached; fixed cap, independent of scene mode)
+    #   scene -> Z2  (per turn; "lore" budget)
+    #   board -> Z3  (waypoints: "quest" budget, caseboard: "caseboard" budget)
+    world_bundle = game_engine._load_known_world(session['id'])
+    raw_scene_ctx = game_engine._scene_context_text(
         session['id'], session.get('current_location', ''), current_npcs=session.get('current_npcs', []),
-
-        history_text=hist_text, destination_location=movement_dest_str
-
+        history_text=hist_text, world=world_bundle
     )
-
-    trimmed_world = budget.trim(raw_known_world, "lore")
+    trimmed_scene_ctx = budget.trim(raw_scene_ctx, "lore")
+    quest_board_text = ""
+    if not _in_intimate_for_core and not _in_aftercare_for_core:
+        wp_block, caseboard_block = game_engine._quest_board_parts(
+            session['id'], session.get('current_location', ''), destination_location=movement_dest_str
+        )
+        quest_board_text = "".join(
+            f"{b}\n\n" for b in (budget.trim(wp_block, "quest"), budget.trim(caseboard_block, "caseboard")) if b
+        )
+        if quest_board_text:
+            quest_board_text += "[CASEBOARD & WAYPOINT PRESENCE NOTE: NPCs named or referenced in clues, caseboard entries, or waypoints (e.g. clue sources, suspects, archivists) are background investigation records. They are NOT physically present in the current room unless explicitly listed in 'NPCs currently present'. NEVER narrate them acting, watching, or standing in this scene.]\n\n"
 
     trimmed_history = budget.trim(hist_text, "history")
 
@@ -599,6 +651,15 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
             "hidden details, and the postures/expressions of present characters.\n"
         )
 
+    if has_exited_convo:
+        directive_note += (
+            "\n[CONVERSATIONAL DEPARTURE & SCENE TRANSITION DIRECTIVE]:\n"
+            "The player has explicitly concluded the conversation and excused themselves or departed.\n"
+            "- In `outcome_narrative`, narrate only the immediate parting gesture or departure (e.g. nodding, thanking them, stepping away). "
+            "DO NOT reopen the conversation, do not renegotiate previously agreed deals, and do not repeat the partner's prior dialogue.\n"
+            "- In `next_narrative`, transition the scene forward to the new environment, surrounding atmosphere, or the player's next destination.\n"
+        )
+
     # --- 4-Zone Prompt Caching Architecture ---
     enemies_list = session.get('nearby_enemies', [])
     enemies_str = ""
@@ -609,9 +670,11 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
     zone_0 = prompt_layout.build_static_core(mode, "turn")
     zone_1 = prompt_layout.build_session_zone(session)
+    zone_1b = prompt_layout.build_world_canon_zone(session, world=world_bundle)
+    # Z2 ordered least -> most volatile; the clock changes every turn so it goes last.
     zone_2 = "\n".join(p for p in [
-        f"KNOWN WORLD:\n{trimmed_world}",
         f"CHARACTER SHEET(S):\n{game_engine._party_sheet_text(party)}",
+        f"{prompt_layout.SCENE_CONTEXT_HEADER}\n{trimmed_scene_ctx}",
         enemies_str.strip(),
         f"PHYSICAL CONTINUITY ANCHOR:\n{phys_prompt_block}",
         time_prompt_block,
@@ -619,6 +682,7 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
     
     user_prompt = (
         f"{active_quests_str}"
+        f"{quest_board_text}"
         f"RECENT HISTORY:\n{trimmed_history}{active_recall_text}\n\n"
         f"ACTIONS:\n{actions_text}\n{simultaneity_note}\n{directive_note}\n\n"
         f"{trimmed_dialogue}"
@@ -626,10 +690,12 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
         f"{prompt_layout.CLOSING_REMINDER}"
     )
     
-    final_system_prompt_list = prompt_layout.assemble_system_prompt(zone_0, zone_1, zone_2)
-    log.debug("prompt zones %s", prompt_layout.zone_fingerprints(zone_0, zone_1, zone_2))
+    final_system_prompt_list = prompt_layout.assemble_system_prompt(zone_0, zone_1, zone_1b, zone_2)
+    log.debug("prompt zones %s sizes %s",
+              prompt_layout.zone_fingerprints(zone_0, zone_1, zone_1b, zone_2),
+              [len(z) for z in (zone_0, zone_1, zone_1b, zone_2)])
 
-    is_nsfw_flag = is_nsfw_scenario(session.get("scenario"))
+    is_nsfw_flag = uses_nsfw_model(session.get("scenario"))
     
     if stream_callback:
         result = await game_engine.call_llm_json_stream(
@@ -656,17 +722,29 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
 
     if isinstance(result, dict):
+        result["_llm_system_prompt_list"] = final_system_prompt_list
+        act_label = actions[0].get("label", "") if actions and isinstance(actions[0], dict) else ""
+        lead_char_name = party[0][0].get("name", "You") if party and party[0] else "You"
 
         if result.get("outcome_narrative"):
             result["outcome_narrative"] = game_engine.sanitize_comparative_cliches(result["outcome_narrative"])
             result["outcome_narrative"] = game_engine.sanitize_meta_objective_leaks(result["outcome_narrative"])
+            result["outcome_narrative"] = game_engine.sanitize_narrative_context_echo(
+                result["outcome_narrative"], session, action_label=act_label, character_name=lead_char_name
+            )
+            result["outcome_narrative"] = game_engine.sanitize_absent_npc_hallucinations(
+                result["outcome_narrative"], session=session, result=result, actions=actions, party=party
+            )
 
         if result.get("next_narrative"):
             result["next_narrative"] = game_engine.sanitize_comparative_cliches(result["next_narrative"])
             result["next_narrative"] = game_engine.sanitize_meta_objective_leaks(result["next_narrative"])
-
-
-
+            result["next_narrative"] = game_engine.sanitize_narrative_context_echo(
+                result["next_narrative"], session, action_label="", character_name=lead_char_name, is_next_narrative=True
+            )
+            result["next_narrative"] = game_engine.sanitize_absent_npc_hallucinations(
+                result["next_narrative"], session=session, result=result, actions=actions, party=party
+            )
 
         result = game_engine.sync_hostile_entities(result, session)
 
@@ -807,31 +885,23 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
                 result["choices"] = code_choices
 
-        else:
+        elif not _in_intimate_for_core and not _in_aftercare_for_core:
+            _post_phys_upd = result.get("physical_updates") if isinstance(result.get("physical_updates"), dict) else {}
+            _post_ic_str = str(_post_phys_upd.get("intimate_contact", "") or "")
+            if not _core_is_erotic(_post_ic_str) and "aftercare" not in _post_ic_str.lower():
+                # --- DYNAMIC QUEST ACTION TAGGING & DEDUPLICATION ---
+                from mechanics.world.waypoints import tag_and_enrich_quest_choices
+                lead_char = party[0][0] if party and party[0] else None
+                raw_c = result.get("next_choices") or result.get("choices") or []
+                prelim_loc = result.get("location") or movement_dest_str or session.get("current_location", "")
+                enriched_c = tag_and_enrich_quest_choices(
+                    raw_c, session["id"], prelim_loc,
+                    scen_key=session.get("scenario", "fantasy"), char=lead_char
+                )
+                if enriched_c:
+                    result["next_choices"] = enriched_c[:5]
+                    result["choices"] = enriched_c[:5]
 
-            # --- DYNAMIC QUEST ACTION TAGGING & DEDUPLICATION ---
-
-            from mechanics.world.waypoints import tag_and_enrich_quest_choices
-
-            lead_char = party[0][0] if party and party[0] else None
-
-            raw_c = result.get("next_choices") or result.get("choices") or []
-
-            prelim_loc = result.get("location") or movement_dest_str or session.get("current_location", "")
-
-            enriched_c = tag_and_enrich_quest_choices(
-
-                raw_c, session["id"], prelim_loc,
-
-                scen_key=session.get("scenario", "fantasy"), char=lead_char
-
-            )
-
-            if enriched_c:
-
-                result["next_choices"] = enriched_c[:5]
-
-                result["choices"] = enriched_c[:5]
 
 
 
@@ -974,24 +1044,107 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
     from mechanics.social.relationships import safe_clamp_delta
 
     if isinstance(result, dict):
+        result["_llm_system_prompt_list"] = final_system_prompt_list
+        result["_llm_user_prompt"] = user_prompt
+
+        # Determine if this turn is non-combat or a social interaction without combat
+        scen_key = session.get("scenario", "fantasy") if session else "fantasy"
+        is_non_combat_scen = scenario_data.is_non_combat_scenario(scen_key)
+        active_enemies = (game_engine.get_active_enemies(result) or game_engine.get_active_enemies(session)) if result else []
+        is_combat_turn = bool(active_enemies or (result and (result.get("_combat_log") or result.get("_enemy_attack_notice"))))
+
+        from mechanics.social.intimate_excitement import is_intimate_action_label, matches_boundary
+        from mechanics.social.physical_state import is_erotic_intimate_contact
+        _sess_phys = (session.get("physical_state") if isinstance(session, dict) else None) or {}
+        _res_phys_upd = (result.get("physical_updates") if isinstance(result, dict) else None) or {}
+        _is_intimate_turn = (
+            is_erotic_intimate_contact(str(_sess_phys.get("intimate_contact", "")))
+            or is_erotic_intimate_contact(str(_res_phys_upd.get("intimate_contact", "")))
+        )
+
+        is_social_turn = not is_combat_turn and (
+            _is_intimate_turn
+            or any(
+                str(a.get("action_category") or "").lower() in (
+                    "dialogue", "disclosure_inquiry", "affection", "social_invite", "romantic_confession", "party_recruit", "social", "conversation", "chat", "flirt"
+                ) or
+                str(a.get("stat") or "").upper() == "CHA" or
+                is_intimate_action_label(str(a.get("label") or "")) or
+                bool(session.get("dialogue_partner") and matches_boundary(str(a.get("label") or "").lower(), ("talk", "speak", "ask", "tell", "say", "flirt", "tease", "confess", "whisper", "joke", "challenge", "inquire", "chat", "greet")))
+                for a in (actions or [])
+            )
+        )
 
         if "character_outcomes" in result and isinstance(result["character_outcomes"], list):
-
             party_by_name = {char["name"].lower(): char for char, inv in party}
+            filtered_outcomes = []
+            has_failed_check = any(
+                getattr(a.get("check"), "tier", "") in ("fail", "crit_fail") or
+                (isinstance(a.get("check"), dict) and a["check"].get("tier") in ("fail", "crit_fail"))
+                for a in (actions or [])
+            )
 
             for outcome in result["character_outcomes"]:
+                if isinstance(outcome, dict) and outcome.get("name"):
+                    c_name = str(outcome["name"]).strip()
+                    if c_name.lower() in party_by_name:
+                        char = party_by_name[c_name.lower()]
+                        if is_non_combat_scen or is_social_turn:
+                            raw_hp = outcome.get("hp_change", 0)
+                            if raw_hp and int(raw_hp) < 0:
+                                log.info("[VitalsGuard] Suppressed non-combat HP damage (%s) for '%s' in non-combat/social scene.", raw_hp, c_name)
+                                outcome["hp_change"] = 0
+                            if outcome.get("temp_hp_change", 0) and int(outcome["temp_hp_change"]) < 0:
+                                outcome["temp_hp_change"] = 0
 
-                if isinstance(outcome, dict) and outcome.get("name") and outcome["name"].lower() in party_by_name:
+                        reconciled = character_data.reconcile_character_outcomes(char, outcome, is_non_combat=(is_non_combat_scen or is_social_turn))
+                        outcome["hp_change"] = reconciled["actual_hp_delta"]
+                        outcome["mp_change"] = reconciled["actual_mp_delta"]
+                        outcome["gold_change"] = reconciled["actual_gold_delta"]
+                        filtered_outcomes.append(outcome)
+            result["character_outcomes"] = filtered_outcomes
 
-                    char = party_by_name[outcome["name"].lower()]
+            # Enforce that failed checks in social/non-combat scenes impact relationship affinity rather than physical HP
+            if (is_non_combat_scen or is_social_turn) and has_failed_check:
+                from mechanics.world.mobility import get_session_dialogue_partners
+                dp_list = get_session_dialogue_partners(session) if isinstance(session, dict) else []
+                target_npc = dp_list[0] if dp_list else None
+                if not target_npc and actions:
+                    for a in actions:
+                        if a.get("target_npc"):
+                            target_npc = a["target_npc"]
+                            break
+                        if a.get("combat_target"):
+                            target_npc = a["combat_target"]
+                            break
 
-                    reconciled = character_data.reconcile_character_outcomes(char, outcome)
+                if target_npc:
+                    rel_updates = result.setdefault("relationship_updates", [])
+                    target_ru = next(
+                        (ru for ru in rel_updates if isinstance(ru, dict) and str(ru.get("npc_name", "")).strip().lower() == target_npc.lower()),
+                        None
+                    )
+                    check_tier = "fail"
+                    for a in (actions or []):
+                        t = getattr(a.get("check"), "tier", None) or (a.get("check", {}).get("tier") if isinstance(a.get("check"), dict) else None)
+                        if t in ("fail", "crit_fail"):
+                            check_tier = t
+                            break
+                    penalty = -2 if check_tier == "crit_fail" else -1
 
-                    outcome["hp_change"] = reconciled["actual_hp_delta"]
-
-                    outcome["mp_change"] = reconciled["actual_mp_delta"]
-
-                    outcome["gold_change"] = reconciled["actual_gold_delta"]
+                    if target_ru is not None:
+                        if target_ru.get("delta_score", 0) >= 0:
+                            target_ru["delta_score"] = penalty
+                            log.info("[VitalsGuard] Converted failed check consequence for %s into relationship delta: %s", target_npc, penalty)
+                    else:
+                        lead_name = party[0][0].get("name", "Player") if party and party[0] else "Player"
+                        rel_updates.append({
+                            "npc_name": target_npc,
+                            "delta_score": penalty,
+                            "track": "platonic",
+                            "memory_summary": f"Felt awkward or put off after {lead_name}'s misstep."
+                        })
+                        log.info("[VitalsGuard] Added affinity penalty (%s) for %s due to failed social check.", penalty, target_npc)
 
 
 
@@ -1066,15 +1219,25 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
 
         if not outcome_narrative:
-
             a_label = actions[0].get("label", "acts") if actions else "acts"
-
             c_name = party[0][0].get("name", "The party") if party and party[0] else "The party"
-
-            outcome_narrative = f"{c_name} acts with deliberate intent: {a_label}."
-
+            is_second_person = str(c_name).strip().lower() in ("you", "i")
+            obs_keywords = ("observe", "inspect", "look", "examine", "survey", "perceive", "listen", "watch", "glance")
+            if any(kw in a_label.lower() for kw in obs_keywords):
+                take_verb = "take" if is_second_person else "takes"
+                outcome_narrative = f"{c_name} {take_verb} a moment to carefully observe the surroundings and inspect those present."
+            elif any(a_label.lower().startswith(pfx) for pfx in ("i travel to ", "travel to ", "i head to ", "head to ", "i walk to ", "walk to ")):
+                dest_clean = a_label
+                for pfx in ("i travel to ", "travel to ", "i head to ", "head to ", "i walk to ", "walk to "):
+                    if a_label.lower().startswith(pfx):
+                        dest_clean = a_label[len(pfx):].strip().rstrip(".")
+                        break
+                travel_verb = "travel" if is_second_person else "travels"
+                outcome_narrative = f"{c_name} {travel_verb} to {dest_clean}."
+            else:
+                act_verb = "act" if is_second_person else "acts"
+                outcome_narrative = f"{c_name} {act_verb} with deliberate intent: {a_label}."
             result["is_fallback"] = True
-
             result["_is_fallback_narrative"] = True
 
 
@@ -1106,12 +1269,35 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
     game_engine._sanitize_outcome_person_names(result, session["id"], scen_key)
 
     if isinstance(result, dict):
+        result["_llm_system_prompt_list"] = final_system_prompt_list
+        act_label = actions[0].get("label", "") if actions and isinstance(actions[0], dict) else ""
+        lead_char_name = party[0][0].get("name", "You") if party and party[0] else "You"
+        session_for_next = dict(session)
         if result.get("outcome_narrative"):
             result["outcome_narrative"] = game_engine.sanitize_meta_objective_leaks(result["outcome_narrative"])
+            result["outcome_narrative"] = game_engine.sanitize_narrative_context_echo(
+                result["outcome_narrative"], session, action_label=act_label, character_name=lead_char_name
+            )
+            result["outcome_narrative"] = game_engine.sanitize_absent_npc_hallucinations(
+                result["outcome_narrative"], session, result=result, actions=actions, party=party
+            )
+            session_for_next["narrative"] = result["outcome_narrative"]
         if result.get("next_narrative"):
             result["next_narrative"] = game_engine.sanitize_meta_objective_leaks(result["next_narrative"])
+            result["next_narrative"] = game_engine.sanitize_narrative_context_echo(
+                result["next_narrative"], session_for_next, action_label="", character_name=lead_char_name, is_next_narrative=True
+            )
+            result["next_narrative"] = game_engine.sanitize_absent_npc_hallucinations(
+                result["next_narrative"], session_for_next, result=result, actions=actions, party=party
+            )
         if result.get("narrative"):
             result["narrative"] = game_engine.sanitize_meta_objective_leaks(result["narrative"])
+            result["narrative"] = game_engine.sanitize_narrative_context_echo(
+                result["narrative"], session_for_next, action_label="", character_name=lead_char_name, is_next_narrative=True
+            )
+            result["narrative"] = game_engine.sanitize_absent_npc_hallucinations(
+                result["narrative"], session_for_next, result=result, actions=actions, party=party
+            )
 
         outcome_narrative = (result.get("outcome_narrative") or outcome_narrative).strip()
         next_narrative = (result.get("next_narrative") or next_narrative).strip()
@@ -1154,82 +1340,68 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
 
         # Automatically detect speaking NPCs from the narrative or rendezvous targets if dialogue wasn't explicitly exited
-
         if not has_exited_convo and result.get("npcs_present"):
-
             full_nar = f"{outcome_narrative}\n{next_narrative}\n{s_nar}"
+            pres_names = [game_engine._get_npc_name(n) for n in result["npcs_present"] if game_engine._get_npc_name(n)]
+            retained_partners = [p for p in new_partners if any(game_engine.is_dialogue_partner(p, [pn]) for pn in pres_names)]
 
             speaking_npcs = game_engine.extract_speaking_npcs_from_narrative(full_nar, result["npcs_present"])
 
-            
-
-            # Also check speaking_characters from entity_audit
-
+            # Also check speaking_characters from entity_audit (only if they converse with the player / no prior partner)
             audit_speaking = (result.get("entity_audit") or {}).get("speaking_characters") or []
-
             if isinstance(audit_speaking, list):
-
                 for asp in audit_speaking:
-
                     if isinstance(asp, str) and asp.strip():
-
                         matched_n = next((
-
                             game_engine._get_npc_name(n)
-
                             for n in result["npcs_present"]
-
                             if game_engine.is_dialogue_partner(asp, [game_engine._get_npc_name(n)])
-
                         ), None)
-
                         if matched_n and matched_n not in speaking_npcs:
-
-                            speaking_npcs.append(matched_n)
-
-
+                            # If already in dialogue with another NPC, allow legitimate chime-ins (quest, party, focal speech)
+                            if game_engine.can_chime_in_to_dialogue(
+                                matched_n,
+                                retained_partners=retained_partners,
+                                actions=actions,
+                                narrative=full_nar,
+                                session=session,
+                                party=party,
+                                npcs_present=result["npcs_present"],
+                            ):
+                                speaking_npcs.append(matched_n)
 
             if not speaking_npcs:
-
-                from mechanics.world.mobility import is_rendezvous_target, has_narrative_continuity_bridge
-
+                from mechanics.world.mobility import is_rendezvous_target
                 for n in result["npcs_present"]:
-
                     n_nm = game_engine._get_npc_name(n)
-
-                    if n_nm and n_nm.lower() != "none" and (is_rendezvous_target(n_nm, actions=actions, session_id=session.get("id"), new_loc=new_loc) or has_narrative_continuity_bridge(n_nm, session=session, actions=actions, new_loc=new_loc)):
-
+                    if n_nm and n_nm.lower() != "none" and is_rendezvous_target(n_nm, actions=actions, session_id=session.get("id"), new_loc=new_loc):
                         speaking_npcs.append(n_nm)
 
-
-
-            if speaking_npcs:
-
-                same_primary = bool(
-
-                    old_loc == new_loc
-
-                    or (
-
-                        get_primary_location_name(old_loc)
-
-                        and get_primary_location_name(old_loc).lower() == get_primary_location_name(new_loc).lower()
-
-                    )
-
+            same_primary = bool(
+                old_loc == new_loc
+                or (
+                    get_primary_location_name(old_loc)
+                    and get_primary_location_name(old_loc).lower() == get_primary_location_name(new_loc).lower()
                 )
+            )
 
-                # Merge existing partners (who are still present) with newly detected speaking NPCs
-
-                merged = list(new_partners) if (new_partners and same_primary) else []
-
-                for sn in speaking_npcs:
-
-                    if not any(game_engine.is_dialogue_partner(sn, [m]) for m in merged):
-
+            # Merge existing partners (who are still present) with newly detected speaking NPCs
+            merged = list(retained_partners) if same_primary else []
+            for sn in speaking_npcs:
+                if not any(game_engine.is_dialogue_partner(sn, [m]) for m in merged):
+                    # Allow legitimate chime-ins (quest, companion, directly engaged participants) to join active dialogue
+                    if game_engine.can_chime_in_to_dialogue(
+                        sn,
+                        retained_partners=retained_partners,
+                        actions=actions,
+                        narrative=full_nar,
+                        session=session,
+                        party=party,
+                        npcs_present=result["npcs_present"],
+                    ):
                         merged.append(sn)
 
-                new_partners = merged
+            new_partners = merged if merged else retained_partners
 
 
 
@@ -1251,7 +1423,18 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
         result["dialogue_partner"] = new_partners[0] if new_partners else None
 
-        if not (game_engine.get_active_enemies(session) or game_engine.get_active_enemies(result)):
+        from mechanics.social.physical_state import is_erotic_intimate_contact
+        _pre_ic = str(((session.get("physical_state") or {}).get("intimate_contact") or "")).lower()
+        _upd_ic = str(((result.get("physical_updates") or {}).get("intimate_contact") or "")).lower()
+        _is_erotic_turn = (
+            _in_intimate_for_core
+            or is_erotic_intimate_contact(_pre_ic)
+            or is_erotic_intimate_contact(_upd_ic)
+            or "aftercare" in _pre_ic
+            or "aftercare" in _upd_ic
+        )
+
+        if not _is_erotic_turn and not (game_engine.get_active_enemies(session) or game_engine.get_active_enemies(result)):
             from mechanics.world.waypoints import tag_and_enrich_quest_choices
             lead_char = party[0][0] if party and party[0] else None
             raw_c = result.get("next_choices") or result.get("choices") or []
@@ -1269,6 +1452,8 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                 result["choices"] = enriched_c[:5]
 
     if isinstance(result, dict):
+        result["_llm_system_prompt_list"] = final_system_prompt_list
+        result["_llm_user_prompt"] = user_prompt
         result, appended_encounter_text = ensure_enemy_encounter_narrative(
             result,
             session,
@@ -1358,6 +1543,7 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
         curr_choices = res.get("choices") if "choices" in res else res.get("next_choices")
         if curr_choices is not None and isinstance(curr_choices, list):
             import db
+            from mechanics.social.physical_state import _match_actor_key, is_erotic_intimate_contact
             phys = db.get_session_physical_state(session.get("id")) or {}
             if res.get("physical_updates"):
                 from mechanics.social.physical_state import merge_physical_state_updates
@@ -1367,33 +1553,39 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                 )
             res["_physical_state"] = phys
             actors = phys.get("actors", {})
+            in_active_intimate_turn = bool(
+                not _core_is_disengage(actions)
+                and (is_erotic_intimate_contact(str(phys.get("intimate_contact", ""))) or _in_intimate_for_core)
+            )
+            in_active_dialogue_turn = bool(new_partners)
 
-            # 1. Redress free action check across party members
-            for entry in party:
-                char = entry[0] if isinstance(entry, (tuple, list)) else entry
-                if not isinstance(char, dict) or not char.get("name"):
-                    continue
-                c_name = char["name"]
-                from mechanics.social.physical_state import _match_actor_key
-                m_key = _match_actor_key(c_name, actors)
-                if m_key in actors:
-                    c_data = actors[m_key]
-                    cloth = c_data.get("clothing", {})
-                    top = str(cloth.get("top", "")).lower()
-                    bottom = str(cloth.get("bottom", "")).lower()
-                    if any(w in top or w in bottom for w in ("none", "stripped", "removed", "naked", "bare", "undressed")):
-                        if not any("redress" in str(c.get("label", "")).lower() or "get dressed" in str(c.get("label", "")).lower() for c in curr_choices if isinstance(c, dict)):
-                            curr_choices.append({
-                                "label": f"Redress / Get dressed ({c_name})",
-                                "stat": "FREE",
-                                "requirement": 0,
-                                "mp_cost": 0
-                            })
 
-            # 2. Tether choice overriding for the lead/player character (party[0])
+            # 1. Redress free action check across party members (outside active erotic scenes)
+            if not in_active_intimate_turn:
+                for entry in party:
+                    char = entry[0] if isinstance(entry, (tuple, list)) else entry
+                    if not isinstance(char, dict) or not char.get("name"):
+                        continue
+                    c_name = char["name"]
+                    m_key = _match_actor_key(c_name, actors)
+                    if m_key in actors:
+                        c_data = actors[m_key]
+                        cloth = c_data.get("clothing", {})
+                        top = str(cloth.get("top", "")).lower()
+                        bottom = str(cloth.get("bottom", "")).lower()
+                        if any(w in top or w in bottom for w in ("none", "stripped", "removed", "naked", "bare", "undressed")):
+                            if not any("redress" in str(c.get("label", "")).lower() or "get dressed" in str(c.get("label", "")).lower() for c in curr_choices if isinstance(c, dict)):
+                                curr_choices.append({
+                                    "label": f"Redress / Get dressed ({c_name})",
+                                    "stat": "FREE",
+                                    "requirement": 0,
+                                    "mp_cost": 0
+                                })
+
+            # 2. Tether choice overriding for the lead/player character (party[0]) (outside active erotic scenes)
             is_player_restrained = False
             lead_char = party[0][0] if party and isinstance(party[0], (tuple, list)) else (party[0] if party and isinstance(party[0], dict) else None)
-            if lead_char and lead_char.get("name"):
+            if not in_active_intimate_turn and lead_char and lead_char.get("name"):
                 m_key = _match_actor_key(lead_char["name"], actors)
                 if m_key in actors:
                     lead_phys = actors[m_key]
@@ -1427,10 +1619,10 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                                 }
                             ]
 
-            # 3. Persistent observation choice (outside of active combat and hard physical restraints)
+            # 3. Persistent observation choice (only in open exploration outside active combat, restraints, dialogue, and intimacy)
             import game_engine as local_game_engine
             is_combat = bool(local_game_engine.get_active_enemies(session) or local_game_engine.get_active_enemies(res))
-            if not is_combat and not is_player_restrained:
+            if not is_combat and not is_player_restrained and not in_active_dialogue_turn and not in_active_intimate_turn:
                 if not any("observe your surroundings" in str(c.get("label", "")).lower() for c in curr_choices if isinstance(c, dict)):
                     curr_choices.append({
                         "label": "Observe your surroundings and inspect those present",

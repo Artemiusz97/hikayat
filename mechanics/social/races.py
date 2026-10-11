@@ -253,9 +253,13 @@ def normalize_race(raw_race: str, scen_key: str = "fantasy", seed: str = "") -> 
                         return f"beastfolk:{sub}"
             # Code-enforced probability roll (80% Beastfolk [Cat 25%, Fox 22.5%, Wolf 22.5%, Minor 10%], 20% Human)
             if not clean:
+                if seed:
+                    return random.Random(str(seed)).choices(FURRY_HIGH_SCHOOL_RACES, weights=FURRY_HIGH_SCHOOL_WEIGHTS, k=1)[0]
                 return random.choices(FURRY_HIGH_SCHOOL_RACES, weights=FURRY_HIGH_SCHOOL_WEIGHTS, k=1)[0]
             if clean == "human":
                 return "human"
+            if seed:
+                return random.Random(str(seed)).choices(FURRY_HIGH_SCHOOL_RACES, weights=FURRY_HIGH_SCHOOL_WEIGHTS, k=1)[0]
             return random.choices(FURRY_HIGH_SCHOOL_RACES, weights=FURRY_HIGH_SCHOOL_WEIGHTS, k=1)[0]
         elif clean and (clean in BEASTFOLK_ALIASES or resolve_half_beast(clean, seed=seed) or clean.startswith("beastfolk") or clean.startswith("half_beast") or clean in FANTASY_RACES):
             hb = resolve_half_beast(clean, seed=seed)

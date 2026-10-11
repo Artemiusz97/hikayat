@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  X, Camera, Video, MessageSquare, Rss, Wifi, Battery,
+  X, Camera, Video, MessageSquare, Rss, Wifi,
   MapPin, Calendar, Sparkles, ChevronLeft, Send, User, Image as ImageIcon, Heart, ShoppingBag,
-  Search, RefreshCw, UserPlus, Users, ShieldAlert
+  Search, RefreshCw, UserPlus, Users, ShieldAlert, GripHorizontal
 } from 'lucide-react';
 
 const formatTimestamp = (ts) => {
@@ -11,8 +11,8 @@ const formatTimestamp = (ts) => {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInventory, onRefreshCodex, onRefreshCharacter }) => {
-  const [activeApp, setActiveApp] = useState('photos'); // 'photos' | 'dms' | 'feed' | 'shop'
+const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRefreshInventory, onRefreshCodex, onRefreshCharacter }) => {
+  const [activeApp, setActiveApp] = useState('home'); // 'home' | 'photos' | 'dms' | 'feed' | 'shop' | 'bounties'
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [photoCategory, setPhotoCategory] = useState('all'); // 'all' | 'photo' | 'intimate' | 'video'
   const [photoContactFilter, setPhotoContactFilter] = useState('__all__');
@@ -35,9 +35,105 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
   const [buyingItem, setBuyingItem] = useState(null);
   const [shopFeedback, setShopFeedback] = useState(null);
 
+  // Requests / Bounties state
+  const [bountySubTab, setBountySubTab] = useState('available'); // 'available' | 'active'
+  const [selectedFactionFilter, setSelectedFactionFilter] = useState('all');
+  const [generatingBounties, setGeneratingBounties] = useState(false);
+  const [bountyActionBanner, setBountyActionBanner] = useState(null);
+
+  // Draggable window state
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0 });
+
+  // Reset to centered position and home screen when opened
+  useEffect(() => {
+    if (isOpen) {
+      setPosition({ x: 0, y: 0 });
+      setActiveApp('home');
+      setSelectedPhoto(null);
+    }
+  }, [isOpen]);
+
+  const handleStartDrag = (clientX, clientY) => {
+    setIsDragging(true);
+    dragRef.current = {
+      startX: clientX,
+      startY: clientY,
+      initialX: position.x,
+      initialY: position.y,
+    };
+  };
+
+  const handleMouseDown = (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('button, input, textarea, select, a, [role="button"]')) return;
+    handleStartDrag(e.clientX, e.clientY);
+  };
+
+  const handleTouchStart = (e) => {
+    if (e.target.closest('button, input, textarea, select, a, [role="button"]')) return;
+    const touch = e.touches[0];
+    if (touch) {
+      handleStartDrag(touch.clientX, touch.clientY);
+    }
+  };
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e) => {
+      const dx = e.clientX - dragRef.current.startX;
+      const dy = e.clientY - dragRef.current.startY;
+      const nextX = dragRef.current.initialX + dx;
+      const nextY = dragRef.current.initialY + dy;
+
+      const limitX = Math.max(80, (window.innerWidth - 320) / 2);
+      const limitY = Math.max(80, (window.innerHeight - 320) / 2);
+
+      setPosition({
+        x: Math.max(-limitX, Math.min(limitX, nextX)),
+        y: Math.max(-limitY, Math.min(limitY, nextY)),
+      });
+    };
+
+    const handleTouchMove = (e) => {
+      const touch = e.touches[0];
+      if (!touch) return;
+      const dx = touch.clientX - dragRef.current.startX;
+      const dy = touch.clientY - dragRef.current.startY;
+      const nextX = dragRef.current.initialX + dx;
+      const nextY = dragRef.current.initialY + dy;
+
+      const limitX = Math.max(80, (window.innerWidth - 320) / 2);
+      const limitY = Math.max(80, (window.innerHeight - 320) / 2);
+
+      setPosition({
+        x: Math.max(-limitX, Math.min(limitX, nextX)),
+        y: Math.max(-limitY, Math.min(limitY, nextY)),
+      });
+    };
+
+    const handleEndDrag = () => {
+      setIsDragging(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleEndDrag);
+    window.addEventListener('touchmove', handleTouchMove);
+    window.addEventListener('touchend', handleEndDrag);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleEndDrag);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleEndDrag);
+    };
+  }, [isDragging]);
+
   const {
     branding, appointments, gossipFeed, mediaGallery, contacts, socialState,
-    activeChatNpc, chatMessages, loadingChat, sendingChat,
+    activeChatNpc, chatMessages, dailyLimits, loadingChat, sendingChat,
     loadChatMessages, sendMessage, closeChat,
     refreshFeed, scourFeed, discoverPeer, sendFriendRequest, refreshPhoneData
   } = phoneHook;
@@ -185,7 +281,53 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
     }
   };
 
-  if (!isOpen) return null;
+  const handleRefreshBounties = async (factionId = null) => {
+    if (generatingBounties || !codexHook?.generateBounties) return;
+    setGeneratingBounties(true);
+    setBountyActionBanner(null);
+    try {
+      const targetFaction = factionId !== undefined ? factionId : (selectedFactionFilter !== 'all' ? selectedFactionFilter : null);
+      await codexHook.generateBounties(true, targetFaction);
+      setBountyActionBanner({ type: 'ok', text: 'Requests updated from bulletin board!' });
+      if (onRefreshCodex) onRefreshCodex();
+    } catch (err) {
+      setBountyActionBanner({ type: 'error', text: err.message || 'Failed to refresh requests.' });
+    } finally {
+      setGeneratingBounties(false);
+    }
+  };
+
+  const handleAcceptBounty = async (questId, questTitle) => {
+    if (!codexHook?.bountyAction) return;
+    setBountyActionBanner(null);
+    try {
+      await codexHook.bountyAction(questId, 'accept');
+      setBountyActionBanner({
+        type: 'ok',
+        text: `✅ Accepted "${questTitle}" — Moved to Active Tasks!`
+      });
+      if (onRefreshCodex) onRefreshCodex();
+      if (onRefreshCharacter) onRefreshCharacter();
+    } catch (err) {
+      setBountyActionBanner({ type: 'error', text: err.message || 'Could not accept request.' });
+    }
+  };
+
+  const handleAbandonBounty = async (questId, questTitle) => {
+    if (!codexHook?.bountyAction) return;
+    setBountyActionBanner(null);
+    try {
+      await codexHook.bountyAction(questId, 'abandon');
+      setBountyActionBanner({
+        type: 'warn',
+        text: `Dropped task "${questTitle}".`
+      });
+      if (onRefreshCodex) onRefreshCodex();
+      if (onRefreshCharacter) onRefreshCharacter();
+    } catch (err) {
+      setBountyActionBanner({ type: 'error', text: err.message || 'Could not abandon request.' });
+    }
+  };
 
   let displayTime = '9:41';
   if (session && session.current_minute !== undefined) {
@@ -238,11 +380,96 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
     }
   });
 
+  const allAvailableBounties = codexHook?.availableBounties || [];
+  const factionsList = codexHook?.factions || [];
+
+  const availableBounties = allAvailableBounties.filter(b => {
+    if (selectedFactionFilter === 'all') return true;
+    const bFaction = (b.faction_id || b.faction_name || b.faction || '').toLowerCase();
+    const targetF = factionsList.find(f => f.faction_id === selectedFactionFilter || f.name === selectedFactionFilter);
+    const targetId = (targetF?.faction_id || selectedFactionFilter).toLowerCase();
+    const targetName = (targetF?.name || '').toLowerCase();
+    return (
+      bFaction === targetId ||
+      (targetName && bFaction.includes(targetName)) ||
+      (b.title && targetName && b.title.toLowerCase().includes(targetName)) ||
+      (b.objective && targetName && b.objective.toLowerCase().includes(targetName))
+    );
+  });
+
+  const activeBounties = (codexHook?.quests || []).filter(q => q.status === 'Active' && (
+    (q.quest_id && (q.quest_id.startsWith('BNT-') || q.quest_id.startsWith('FBNT-'))) ||
+    (q.quest_type && (q.quest_type.includes('Bounty') || q.quest_type.includes('Request') || q.quest_type.includes('Commission') || q.quest_type.includes('Gig')))
+  ));
+
+  // Auto-generate bounties when opening requests app if none exist
+  useEffect(() => {
+    if (isOpen && activeApp === 'bounties' && allAvailableBounties.length === 0 && !generatingBounties && codexHook?.generateBounties) {
+      setGeneratingBounties(true);
+      codexHook.generateBounties().finally(() => setGeneratingBounties(false));
+    }
+  }, [isOpen, activeApp, allAvailableBounties.length]);
+
+  // Auto-refresh feed when opening feed app if empty
+  useEffect(() => {
+    if (isOpen && activeApp === 'feed' && (!gossipFeed || gossipFeed.length === 0) && !feedBusy && refreshFeed) {
+      refreshFeed();
+    }
+  }, [isOpen, activeApp, gossipFeed?.length]);
+
+  const apps = [
+    {
+      id: 'photos',
+      name: branding.gallery_app_name || 'Photo Vault',
+      subtitle: 'Vault & Media',
+      icon: Camera,
+      gradient: 'from-pink-500 via-rose-500 to-pink-600',
+      badge: (mediaGallery || []).length > 0 ? mediaGallery.length : null,
+      badgeColor: 'bg-pink-500',
+    },
+    {
+      id: 'dms',
+      name: branding.dm_app_name || 'Messages',
+      subtitle: 'Chats & Meetups',
+      icon: MessageSquare,
+      gradient: 'from-emerald-500 via-teal-500 to-cyan-600',
+      badge: (appointments || []).length > 0 ? appointments.length : null,
+      badgeColor: 'bg-emerald-500',
+    },
+    {
+      id: 'feed',
+      name: branding.feed_app_name || 'PeerPulse',
+      subtitle: 'Radar & Social',
+      icon: Rss,
+      gradient: 'from-violet-500 via-purple-600 to-indigo-600',
+      badge: (gossipFeed || []).length > 0 ? gossipFeed.length : null,
+      badgeColor: 'bg-purple-500',
+    },
+    {
+      id: 'shop',
+      name: branding.shop_app_name || 'SchoolMart Delivery',
+      subtitle: branding.shop_subtitle || 'Online Courier',
+      icon: ShoppingBag,
+      gradient: 'from-amber-500 via-orange-500 to-amber-600',
+      badge: null,
+      badgeColor: 'bg-amber-500',
+    },
+    {
+      id: 'bounties',
+      name: branding.bounty_app_name || branding.bounties_app_name || 'Campus Requests',
+      subtitle: branding.bounty_subtitle || 'Student Bulletin',
+      icon: ShieldAlert,
+      gradient: 'from-rose-500 via-red-600 to-rose-700',
+      badge: availableBounties.length > 0 ? availableBounties.length : null,
+      badgeColor: 'bg-rose-500',
+    },
+  ];
+
   const processDmOutcome = (res) => {
     const replyObj = res?.reply && typeof res.reply === 'object' ? res.reply : res;
-    if (replyObj && (replyObj.check || replyObj.affinity_delta !== undefined || replyObj.rendezvous_location || replyObj.media_dropped)) {
+    if (replyObj && (replyObj.check || replyObj.check_result || replyObj.affinity_delta !== undefined || replyObj.rendezvous_location || replyObj.media_dropped)) {
       setDmOutcomeBanner({
-        check: replyObj.check,
+        check: replyObj.check || replyObj.check_result,
         affinity_delta: replyObj.affinity_delta,
         rendezvous_location: replyObj.rendezvous_location,
         media_dropped: replyObj.media_dropped,
@@ -266,11 +493,12 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
     }
   };
 
-  const handleQuickSendDm = async () => {
+  const handleInstantIntentSend = async (intentId) => {
     if (!activeChatNpc || sendingChat) return;
+    setSelectedIntent(intentId);
     setDmOutcomeBanner(null);
     try {
-      const res = await sendMessage(activeChatNpc, '__auto__', selectedIntent);
+      const res = await sendMessage(activeChatNpc, '__auto__', intentId);
       processDmOutcome(res);
       if (onRefreshInventory) onRefreshInventory();
       if (onRefreshCodex) onRefreshCodex();
@@ -279,55 +507,158 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
     }
   };
 
+  if (!isOpen) return null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 select-none">
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/85 backdrop-blur-md transition-opacity"
-        onClick={onClose}
-      />
+    <div 
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      className="fixed inset-0 z-50 flex flex-col md:items-center md:justify-center md:p-4 bg-neutral-950 md:bg-black/80 md:backdrop-blur-md text-gray-100 select-none overflow-hidden"
+    >
+      {/* Phone Shell: Full-screen on mobile, centered phone shell on desktop */}
+      <div className="w-full h-full md:max-w-[420px] md:h-[840px] md:max-h-[92vh] md:rounded-[44px] md:border-[6px] md:border-neutral-800 md:shadow-[0_0_50px_rgba(0,0,0,0.85)] md:ring-1 md:ring-neutral-700/50 flex flex-col bg-neutral-950 overflow-hidden relative pb-[max(0.6rem,env(safe-area-inset-bottom))] md:pb-0">
+        
+        {/* Dynamic Island / Speaker Notch & Status Bar (Restored for desktop browser version, hidden on mobile) */}
+        <div className="hidden md:flex relative px-6 pt-3 pb-2 justify-between items-center text-xs font-semibold text-gray-200 bg-neutral-950/90 z-20 shrink-0">
+          <span className="font-mono text-[11px] tracking-tight select-none">{displayTime}</span>
 
-      {/* Phone Hardware Shell */}
-      <div className="relative w-full max-w-sm h-[720px] max-h-[92vh] bg-neutral-950 rounded-[44px] border-[6px] border-neutral-800 shadow-2xl flex flex-col overflow-hidden ring-1 ring-white/10 z-10">
-
-        {/* Dynamic Island / Speaker Notch & Status Bar */}
-        <div className="relative px-6 pt-3 pb-1 flex justify-between items-center text-xs font-semibold text-gray-200 bg-neutral-950/80 z-20 shrink-0">
-          <span className="font-mono text-[11px] tracking-tight">{displayTime}</span>
-
-          <div className="w-24 h-4 bg-black rounded-full flex items-center justify-center gap-1.5 border border-neutral-800/80 shadow-inner">
+          {/* Truly Centered Dynamic Island / Camera Notch */}
+          <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 w-24 h-4 bg-black rounded-full flex items-center justify-center gap-1.5 border border-neutral-800/80 shadow-inner pointer-events-none">
             <span className="w-2 h-2 rounded-full bg-neutral-800" />
             <span className="w-1.5 h-1.5 rounded-full bg-cyan-950/80" />
           </div>
 
-          <div className="flex items-center gap-1.5 text-gray-300">
-            <Wifi size={12} />
-            <span className="text-[10px] font-mono">5G</span>
-            <Battery size={14} className="text-emerald-400" />
+          <div className="flex items-center gap-1.5 text-gray-300 select-none">
+            <Wifi size={12} className="text-gray-300" />
+            <span className="text-[10px] font-mono text-gray-300">5G</span>
+
+            {/* Almost-full battery indicator (~88%) */}
+            <div className="flex items-center gap-[1px]" title="Battery: 88%">
+              <div className="w-[18px] h-[9.5px] rounded-[3px] border border-emerald-400/90 p-[1px] flex items-center bg-black/40">
+                <div className="h-full w-[88%] bg-emerald-400 rounded-[1px]" />
+              </div>
+              <div className="w-[1.5px] h-[4px] bg-emerald-400/90 rounded-r-[1px]" />
+            </div>
           </div>
         </div>
 
-        {/* OS Top Header */}
-        <div className="px-5 py-2 border-b border-neutral-800/80 flex justify-between items-center bg-neutral-900/60 shrink-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm">{branding.emoji || '📱'}</span>
-            <span className="font-bold text-xs text-gray-200 tracking-wide font-sans">{branding.os_name || 'Mobile OS'}</span>
+        {/* In-App Header (Only rendered when inside an app; hidden on home screen to eliminate useless smartphone label) */}
+        {activeApp !== 'home' && (
+          <div className="px-4 py-2 flex items-center justify-between border-b border-neutral-900 bg-neutral-950/95 shrink-0 select-none">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveApp('home');
+                setSelectedPhoto(null);
+                if (closeChat) closeChat();
+              }}
+              className="flex items-center gap-1 text-xs font-semibold text-pink-400 hover:text-pink-300 transition-colors cursor-pointer"
+            >
+              <ChevronLeft size={16} />
+              <span>Back to Apps</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-full text-gray-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
+              title="Close Phone"
+            >
+              <X size={18} />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-full text-gray-400 hover:text-gray-100 hover:bg-neutral-800 transition-colors"
-            title="Lock Phone"
-          >
-            <X size={15} />
-          </button>
-        </div>
+        )}
 
         {/* Screen Canvas */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-3.5 bg-gradient-to-b from-neutral-900/40 to-black relative">
+        <div className="flex-1 overflow-y-auto custom-scrollbar px-3.5 py-2.5 bg-gradient-to-b from-neutral-900/40 to-black relative flex flex-col min-h-0">
+
+          {/* 0. SMARTPHONE HOME MENU */}
+          {activeApp === 'home' && (
+            <div className="flex flex-col h-full space-y-4 select-none pb-2">
+              {/* Lockscreen / Clock Widget */}
+              <div className="pt-2 pb-1 flex flex-col items-center">
+                <span className="font-sans font-light text-5xl text-white tracking-tight drop-shadow-md">
+                  {displayTime}
+                </span>
+                <span className="text-xs text-neutral-400 font-medium mt-1 flex items-center gap-1.5">
+                  <Sparkles size={12} className="text-pink-400" />
+                  <span>{session?.scenario_display_name || session?.scenario || 'Connected OS'}</span>
+                  {session?.day && <span className="font-mono text-neutral-500">• Day {session.day}</span>}
+                  {session?.time_of_day && <span className="text-amber-400/80">• {session.time_of_day}</span>}
+                </span>
+              </div>
+
+              {/* Quick Glance Notification Banner */}
+              {(appointments.length > 0 || availableBounties.length > 0) && (
+                <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-2.5 flex items-center justify-between shadow-lg">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-7 h-7 rounded-full bg-pink-500/20 text-pink-300 flex items-center justify-center shrink-0">
+                      {appointments.length > 0 ? <MessageSquare size={13} /> : <ShieldAlert size={13} />}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-bold text-gray-200 truncate">
+                        {appointments.length > 0
+                          ? `${appointments.length} Rendezvous Planned`
+                          : `${availableBounties.length} Requests Posted`}
+                      </p>
+                      <p className="text-[10px] text-gray-400 truncate">
+                        {appointments.length > 0
+                          ? 'Check Messages for meetup details'
+                          : 'Visit Campus Requests for active tasks'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setActiveApp(appointments.length > 0 ? 'dms' : 'bounties')}
+                    className="px-2.5 py-1 rounded-full bg-pink-600/30 hover:bg-pink-600/50 text-pink-300 text-[10px] font-bold shrink-0 transition-colors border border-pink-500/40"
+                  >
+                    Open
+                  </button>
+                </div>
+              )}
+
+              {/* Main App Grid (iOS / Android Style) */}
+              <div className="space-y-2 flex-1 pt-2">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 font-mono">Applications</span>
+                  <span className="text-[10px] font-mono text-neutral-600">{apps.length} Installed</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-y-5 gap-x-3 p-1">
+                  {apps.map(app => {
+                    const Icon = app.icon;
+                    return (
+                      <button
+                        key={app.id}
+                        type="button"
+                        onClick={() => { setActiveApp(app.id); setSelectedPhoto(null); }}
+                        className="flex flex-col items-center group cursor-pointer focus:outline-none transition-transform duration-150 active:scale-95"
+                      >
+                        <div className={`w-15 h-15 rounded-2xl bg-gradient-to-br ${app.gradient} flex items-center justify-center text-white shadow-lg shadow-black/50 group-hover:shadow-pink-500/20 group-hover:scale-105 transition-all relative border border-white/20`}>
+                          <Icon size={27} className="drop-shadow-md text-white" />
+                          {app.badge !== null && app.badge > 0 && (
+                            <span className={`absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 rounded-full ${app.badgeColor} text-white text-[10px] font-bold flex items-center justify-center border-2 border-neutral-950 shadow-md`}>
+                              {app.badge}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-xs font-semibold text-gray-200 mt-1.5 text-center truncate max-w-[88px] group-hover:text-pink-300 transition-colors">
+                          {app.name}
+                        </span>
+                        <span className="text-[9px] text-gray-500 text-center truncate max-w-[88px]">
+                          {app.subtitle}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 1. PHOTOS / MEDIA GALLERY APP */}
           {activeApp === 'photos' && (
             <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between pb-1 border-b border-neutral-800/80">
                 <h4 className="font-bold text-sm text-gray-100 flex items-center gap-1.5">
                   <Camera size={15} className="text-pink-400" />
                   <span>{branding.gallery_app_name || 'Photo Vault'}</span>
@@ -339,7 +670,7 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
 
               {/* Category Filter Pills & Contact Dropdown */}
               <div className="space-y-1.5">
-                <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+                <div className="grid grid-cols-4 gap-1.5 pb-0.5">
                   {[
                     { id: 'all', label: 'All' },
                     { id: 'photo', label: '📸 Photos' },
@@ -350,9 +681,9 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
                       key={cat.id}
                       type="button"
                       onClick={() => setPhotoCategory(cat.id)}
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold transition-colors shrink-0 border ${
+                      className={`py-1.5 rounded-xl text-[11px] font-bold transition-colors text-center border cursor-pointer ${
                         photoCategory === cat.id
-                          ? 'bg-pink-600/30 text-pink-300 border-pink-500/50'
+                          ? 'bg-pink-600/30 text-pink-300 border-pink-500/50 shadow-xs'
                           : 'bg-neutral-900 text-gray-400 border-neutral-800 hover:text-gray-200'
                       }`}
                     >
@@ -433,58 +764,26 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
 
           {/* 2. DMs & APPOINTMENTS APP */}
           {activeApp === 'dms' && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="font-bold text-sm text-gray-100 flex items-center gap-1.5">
-                  <MessageSquare size={15} className="text-cyan-400" />
-                  <span>{branding.dm_app_name || 'Messages'}</span>
-                </h4>
-                {appointments.length > 0 && (
-                  <span className="text-[10px] font-bold px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded border border-amber-500/40">
-                    {appointments.length} Rendezvous
-                  </span>
-                )}
-              </div>
-
-              {/* Pending Appointments Banner */}
-              {appointments.length > 0 && !activeChatNpc && (
-                <div className="space-y-1.5">
-                  <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider flex items-center gap-1">
-                    <Calendar size={11} />
-                    <span>Scheduled Meetups</span>
-                  </span>
-                  {appointments.map((appt, i) => (
-                    <div
-                      key={appt.id || i}
-                      className="bg-amber-950/30 border border-amber-600/40 rounded-xl p-2.5 space-y-1"
-                    >
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold text-xs text-amber-200">{appt.npc_name}</span>
-                        <span className="text-[9px] font-mono px-1 bg-amber-900/60 text-amber-300 rounded uppercase font-bold">
-                          Pending
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1 text-[11px] text-gray-300">
-                        <MapPin size={11} className="text-amber-400 shrink-0" />
-                        <span>Rendezvous: <strong>{appt.rendezvous_location}</strong></span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Active Chat Thread or Contacts Directory */}
+            <div className="flex-1 flex flex-col h-full min-h-0">
+              {/* Active Chat Thread */}
               {activeChatNpc ? (
-                <div className="space-y-2 bg-neutral-900/70 border border-neutral-800 rounded-2xl p-3 flex flex-col h-[485px]">
-                  <div className="flex items-center justify-between border-b border-neutral-800 pb-2 shrink-0">
+                <div className="flex-1 flex flex-col h-full min-h-0 space-y-2">
+                  {/* Single Clean Chat Header */}
+                  <div className="flex items-center justify-between pb-2 border-b border-neutral-800/80 shrink-0">
                     <button
+                      type="button"
                       onClick={() => { setDmOutcomeBanner(null); closeChat(); }}
-                      className="flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300"
+                      className="p-1 rounded-full text-cyan-400 hover:text-cyan-300 hover:bg-neutral-800/80 transition-colors flex items-center gap-0.5 text-xs font-semibold cursor-pointer"
                     >
-                      <ChevronLeft size={14} />
-                      <span>Back</span>
+                      <ChevronLeft size={16} />
+                      <span>DMs</span>
                     </button>
-                    <span className="font-bold text-xs text-gray-200 truncate">{activeChatNpc}</span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-6 h-6 rounded-full bg-cyan-950 border border-cyan-800/60 flex items-center justify-center text-cyan-300 font-bold text-[10px] shrink-0">
+                        <User size={12} />
+                      </div>
+                      <span className="font-bold text-xs text-gray-100 truncate">{activeChatNpc}</span>
+                    </div>
                     <div className="w-8" />
                   </div>
 
@@ -519,13 +818,13 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
                     </div>
                   )}
 
-                  {/* Messages Bubble Canvas */}
-                  <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 py-2 pr-1">
+                  {/* Messages Bubble Canvas - Edge to Edge */}
+                  <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 py-1 pr-1 min-h-0">
                     {loadingChat ? (
                       <p className="text-[11px] text-gray-500 italic text-center py-8">Loading history...</p>
                     ) : chatMessages.length === 0 ? (
                       <p className="text-[11px] text-gray-500 italic text-center py-8">
-                        Send a message below to start texting {activeChatNpc}!
+                        Pick a message topic below to text {activeChatNpc}!
                       </p>
                     ) : (
                       chatMessages.map((msg, idx) => {
@@ -535,7 +834,7 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
                             key={msg.id || idx}
                             className={`flex flex-col ${isPlayer ? 'items-end' : 'items-start'}`}
                           >
-                            <div className={`max-w-[82%] rounded-2xl px-3 py-1.5 text-xs ${
+                            <div className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-xs ${
                               isPlayer
                                 ? 'bg-cyan-600 text-white rounded-tr-none'
                                 : 'bg-neutral-800 text-gray-200 rounded-tl-none border border-neutral-700/50'
@@ -558,99 +857,239 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
                     )}
                   </div>
 
-                  {/* 6 Intent Selector Pills */}
-                  <div className="flex items-center gap-1 pt-1 border-t border-neutral-800/80 overflow-x-auto shrink-0">
-                    {[
-                      { id: 'chat', label: '💬 Chat' },
-                      { id: 'flirt', label: '💕 Flirt' },
-                      { id: 'meetup', label: '📍 Meetup' },
-                      { id: 'photo', label: '📸 Photo' },
-                      { id: 'photo_nsfw', label: '🔥 Spicy' },
-                      { id: 'rumor', label: '🕵️ Rumor' },
-                    ].map(opt => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => setSelectedIntent(opt.id)}
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors shrink-0 ${
-                          selectedIntent === opt.id
-                            ? 'bg-cyan-600/30 text-cyan-300 border border-cyan-500/50'
-                            : 'bg-neutral-950 text-gray-400 border border-neutral-800'
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
+                  {/* 1-Click Intent Action Grid: 4 Columns x 2 Rows, NO SCROLLBAR, NEVER CUT OFF */}
+                  {(() => {
+                    const isMeetupAccepted = dailyLimits?.meetup?.status === 'accepted';
+                    const flirtLocked = !!(dailyLimits?.flirt?.locked || (dailyLimits?.flirt?.used >= 3));
+                    const meetupLocked = !!(dailyLimits?.meetup?.locked || (isMeetupAccepted ? ((dailyLimits?.meetup?.relocations_left ?? 2) <= 0) : ((dailyLimits?.meetup?.used ?? 0) >= 1)));
+                    const rumorLocked = !!(dailyLimits?.rumor?.locked || ((dailyLimits?.rumor?.used ?? 0) >= 1));
+                    const photoLocked = !!(dailyLimits?.photo?.locked || ((dailyLimits?.photo?.used ?? 0) >= 3));
+                    const spicyLocked = !!(dailyLimits?.spicy?.locked || ((dailyLimits?.spicy?.used ?? 0) >= 3));
 
-                  {/* Interactive 2-Way Message Composer + Quick Send */}
-                  <form onSubmit={handleSendDm} className="flex items-center gap-1.5 pt-1 shrink-0">
-                    <button
-                      type="button"
-                      disabled={sendingChat}
-                      onClick={handleQuickSendDm}
-                      title="Auto-compose & send message for selected intent"
-                      className="px-2 py-1.5 rounded-full bg-purple-950/70 hover:bg-purple-900/80 text-purple-200 border border-purple-700/60 text-[10px] font-bold shrink-0 disabled:opacity-40 transition-colors"
-                    >
-                      ⚡ Quick
-                    </button>
+                    const intentOptions = [
+                      {
+                        id: 'chat',
+                        label: 'Chat',
+                        icon: '💬',
+                        badge: '∞',
+                        locked: false,
+                        disabled: sendingChat,
+                        color: 'hover:border-cyan-500/50 hover:bg-cyan-950/40 text-cyan-200',
+                        title: 'Send a friendly chat message'
+                      },
+                      {
+                        id: 'flirt',
+                        label: 'Flirt',
+                        icon: '💕',
+                        badge: dailyLimits ? (flirtLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.flirt?.used ?? 0))}/3`) : '3/3',
+                        locked: flirtLocked,
+                        disabled: sendingChat || flirtLocked,
+                        color: 'hover:border-pink-500/50 hover:bg-pink-950/40 text-pink-200',
+                        title: 'Flirt with contact (3 attempts/day)'
+                      },
+                      {
+                        id: 'meetup',
+                        label: isMeetupAccepted ? 'Move' : 'Meetup',
+                        icon: '📍',
+                        badge: dailyLimits ? (isMeetupAccepted ? (meetupLocked ? '🔒' : `${dailyLimits?.meetup?.relocations_left ?? 2} left`) : (meetupLocked ? '🔒' : '1/1')) : '1/1',
+                        locked: meetupLocked,
+                        disabled: sendingChat || meetupLocked,
+                        color: 'hover:border-amber-500/50 hover:bg-amber-950/40 text-amber-200',
+                        title: isMeetupAccepted ? 'Relocate meetup spot (up to 2 times)' : 'Propose to meet up (1 attempt/day)'
+                      },
+                      {
+                        id: 'rumor',
+                        label: 'Rumor',
+                        icon: '🕵️',
+                        badge: dailyLimits ? (rumorLocked ? '🔒' : '1/1') : '1/1',
+                        locked: rumorLocked,
+                        disabled: sendingChat || rumorLocked,
+                        color: 'hover:border-emerald-500/50 hover:bg-emerald-950/40 text-emerald-200',
+                        title: 'Ask for rumors and gossip (1 attempt/day)'
+                      },
+                      {
+                        id: 'photo_ask',
+                        label: 'Ask Pic',
+                        icon: '📸',
+                        badge: dailyLimits ? (photoLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.photo?.used ?? 0))}/3`) : '3/3',
+                        locked: photoLocked,
+                        disabled: sendingChat || photoLocked,
+                        color: 'hover:border-purple-500/50 hover:bg-purple-950/40 text-purple-200',
+                        title: 'Ask contact for a casual photo (shared 3/day)'
+                      },
+                      {
+                        id: 'photo_send',
+                        label: 'Send Pic',
+                        icon: '📤',
+                        badge: dailyLimits ? (photoLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.photo?.used ?? 0))}/3`) : '3/3',
+                        locked: photoLocked,
+                        disabled: sendingChat || photoLocked,
+                        color: 'hover:border-teal-500/50 hover:bg-teal-950/40 text-teal-200',
+                        title: 'Send contact a casual photo (shared 3/day)'
+                      },
+                      {
+                        id: 'spicy_ask',
+                        label: 'Ask Spicy',
+                        icon: '🔥',
+                        badge: dailyLimits ? (spicyLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.spicy?.used ?? 0))}/3`) : '3/3',
+                        locked: spicyLocked,
+                        disabled: sendingChat || spicyLocked,
+                        color: 'hover:border-rose-500/50 hover:bg-rose-950/40 text-rose-200',
+                        title: 'Ask contact for a spicy photo (shared 3/day)'
+                      },
+                      {
+                        id: 'spicy_send',
+                        label: 'Send Spicy',
+                        icon: '💋',
+                        badge: dailyLimits ? (spicyLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.spicy?.used ?? 0))}/3`) : '3/3',
+                        locked: spicyLocked,
+                        disabled: sendingChat || spicyLocked,
+                        color: 'hover:border-red-500/50 hover:bg-red-950/40 text-red-200',
+                        title: 'Send contact a spicy photo of yourself (shared 3/day)'
+                      },
+                    ];
+
+                    return (
+                      <div className="grid grid-cols-4 gap-1.5 pt-2 border-t border-neutral-800/80 shrink-0">
+                        {intentOptions.map(opt => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            disabled={opt.disabled}
+                            onClick={() => handleInstantIntentSend(opt.id)}
+                            className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-xl transition-all cursor-pointer select-none active:scale-95 border shadow-xs ${
+                              opt.disabled
+                                ? 'opacity-40 cursor-not-allowed bg-neutral-900/40 border-neutral-800/40 text-neutral-500'
+                                : selectedIntent === opt.id
+                                  ? 'bg-cyan-600/30 text-cyan-100 border-cyan-400 ring-1 ring-cyan-500/40 shadow-sm'
+                                  : `bg-neutral-900/95 border-neutral-800/90 ${opt.color}`
+                            }`}
+                            title={opt.title}
+                          >
+                            <div className="flex items-center gap-1 leading-tight">
+                              <span className="text-xs shrink-0">{opt.icon}</span>
+                              <span className="text-[10px] font-bold truncate">{opt.label}</span>
+                            </div>
+                            {opt.badge && (
+                              <span className={`text-[8px] font-mono leading-none mt-0.5 px-1 rounded ${
+                                opt.locked ? 'text-red-400/90 bg-red-950/40' : 'text-neutral-400'
+                              }`}>
+                                {opt.badge}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Custom Message Composer */}
+                  <form onSubmit={handleSendDm} className="flex items-center gap-2 pt-1.5 shrink-0">
                     <input
                       type="text"
                       value={dmInput}
                       onChange={(e) => setDmInput(e.target.value)}
                       disabled={sendingChat}
-                      placeholder={`Message ${activeChatNpc}...`}
-                      className="flex-1 bg-neutral-950 border border-neutral-800 focus:border-cyan-500 rounded-full px-3 py-1.5 text-xs text-gray-200 focus:outline-none disabled:opacity-50"
+                      placeholder={`Custom message to ${activeChatNpc}...`}
+                      className="flex-1 bg-neutral-900 border border-neutral-800 focus:border-cyan-500 rounded-xl px-3.5 py-2.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none disabled:opacity-50 transition-colors"
                     />
                     <button
                       type="submit"
                       disabled={!dmInput.trim() || sendingChat}
-                      className="p-1.5 rounded-full bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-40 transition-colors"
+                      className="p-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-40 transition-colors cursor-pointer shrink-0 shadow-sm"
+                      title="Send Custom Message"
                     >
-                      <Send size={13} />
+                      <Send size={16} />
                     </button>
                   </form>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider block">
-                    Contacts ({dmDirectory.length})
-                  </span>
-                  {dmDirectory.length === 0 ? (
-                    <div className="text-center py-10 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl">
-                      <MessageSquare size={24} className="mx-auto opacity-30 text-cyan-400 mb-1" />
-                      <p className="text-xs">No contacts discovered yet.</p>
-                      <p className="text-[10px] text-gray-500 mt-1">
-                        Meet characters in the story to unlock their contact numbers!
-                      </p>
-                    </div>
-                  ) : (
-                    dmDirectory.map((c) => (
-                      <div
-                        key={c.npc_id}
-                        onClick={() => loadChatMessages(c.npc_id)}
-                        className="bg-neutral-900/60 border border-neutral-800 hover:border-cyan-500/50 rounded-xl p-2.5 flex items-center justify-between cursor-pointer transition-colors"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div className="w-8 h-8 rounded-full bg-cyan-950/60 border border-cyan-800/60 flex items-center justify-center text-cyan-300 font-bold text-xs shrink-0">
-                            <User size={14} />
-                          </div>
-                          <div className="min-w-0">
-                            <span className="font-semibold text-xs text-gray-200 block truncate">{c.name}</span>
-                            <span className="text-[10px] text-gray-400 block truncate">{c.role}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {c.score !== null && (
-                            <span className="text-[10px] font-mono text-pink-400 flex items-center gap-0.5">
-                              <Heart size={10} /> {c.score}
+                <div className="space-y-3 flex-1 flex flex-col min-h-0">
+                  {/* Single Clean Directory Header */}
+                  <div className="flex items-center justify-between pb-2 border-b border-neutral-800/80 shrink-0">
+                    <h4 className="font-bold text-sm text-gray-100 flex items-center gap-1.5">
+                      <MessageSquare size={15} className="text-cyan-400" />
+                      <span>{branding.dm_app_name || 'Messages'}</span>
+                    </h4>
+                    {appointments.length > 0 && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded-full border border-amber-500/40">
+                        {appointments.length} Rendezvous
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Pending Appointments Banner */}
+                  {appointments.length > 0 && (
+                    <div className="space-y-1.5 shrink-0">
+                      <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider flex items-center gap-1">
+                        <Calendar size={11} />
+                        <span>Scheduled Meetups</span>
+                      </span>
+                      {appointments.map((appt, i) => (
+                        <div
+                          key={appt.id || i}
+                          className="bg-amber-950/30 border border-amber-600/40 rounded-xl p-2.5 space-y-1"
+                        >
+                          <div className="flex justify-between items-center">
+                            <span className="font-bold text-xs text-amber-200">{appt.npc_name}</span>
+                            <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded uppercase font-bold border ${
+                              appt.status === 'arrived'
+                                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60'
+                                : 'bg-amber-900/60 text-amber-300 border-amber-700/60'
+                            }`}>
+                              {appt.status === 'arrived' ? 'Arrived' : 'Pending'}
                             </span>
-                          )}
-                          <ChevronLeft size={14} className="text-gray-500 rotate-180" />
+                          </div>
+                          <div className="flex items-center gap-1 text-[11px] text-gray-300">
+                            <MapPin size={11} className="text-amber-400 shrink-0" />
+                            <span>Rendezvous: <strong>{appt.rendezvous_location}</strong></span>
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      ))}
+                    </div>
                   )}
+
+                  {/* Contacts List */}
+                  <div className="space-y-2 flex-1 overflow-y-auto custom-scrollbar pr-0.5 min-h-0">
+                    <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider block">
+                      Contacts ({dmDirectory.length})
+                    </span>
+                    {dmDirectory.length === 0 ? (
+                      <div className="text-center py-10 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl">
+                        <MessageSquare size={24} className="mx-auto opacity-30 text-cyan-400 mb-1" />
+                        <p className="text-xs">No contacts discovered yet.</p>
+                        <p className="text-[10px] text-gray-500 mt-1">
+                          Meet characters in the story to unlock their contact numbers!
+                        </p>
+                      </div>
+                    ) : (
+                      dmDirectory.map((c) => (
+                        <div
+                          key={c.npc_id}
+                          onClick={() => loadChatMessages(c.npc_id)}
+                          className="bg-neutral-900/60 border border-neutral-800 hover:border-cyan-500/50 rounded-xl p-2.5 flex items-center justify-between cursor-pointer transition-colors"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-8 h-8 rounded-full bg-cyan-950/60 border border-cyan-800/60 flex items-center justify-center text-cyan-300 font-bold text-xs shrink-0">
+                              <User size={14} />
+                            </div>
+                            <div className="min-w-0">
+                              <span className="font-semibold text-xs text-gray-200 block truncate">{c.name}</span>
+                              <span className="text-[10px] text-gray-400 block truncate">{c.role}</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {c.score !== null && (
+                              <span className="text-[10px] font-mono text-pink-400 flex items-center gap-0.5">
+                                <Heart size={10} /> {c.score}
+                              </span>
+                            )}
+                            <ChevronLeft size={14} className="text-gray-500 rotate-180" />
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -658,9 +1097,9 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
 
           {/* 3. FEED / GOSSIP NET & PEERPULSE SOCIAL GRAPH APP */}
           {activeApp === 'feed' && (
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               {/* Header + Rumor Charges */}
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between pb-1 border-b border-neutral-800/80">
                 <h4 className="font-bold text-sm text-gray-100 flex items-center gap-1.5">
                   <Rss size={15} className="text-purple-400" />
                   <span>{branding.feed_app_name || 'NetWire Feed'}</span>
@@ -751,49 +1190,83 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {gossipFeed.map((post, idx) => (
-                        <div
-                          key={post.id || idx}
-                          className="bg-neutral-900/70 border border-neutral-800 rounded-xl p-3 space-y-1.5"
-                        >
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <span className="font-bold text-xs text-gray-200 block">{post.author_name}</span>
-                              {post.author_handle && (
-                                <span className="text-[10px] text-purple-400 font-mono block">
-                                  {post.author_handle.startsWith('@') ? post.author_handle : `@${post.author_handle}`}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              {post.tag && (
-                                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/40">
-                                  {post.tag}
-                                </span>
-                              )}
-                              {post.time_ago && (
-                                <span className="text-[9px] font-mono text-gray-500">{post.time_ago}</span>
-                              )}
-                            </div>
-                          </div>
-
-                          <p className="text-xs text-gray-300 leading-snug">{post.content}</p>
-
-                          <div className="flex items-center justify-between pt-1">
-                            {post.clue_hook ? (
-                              <div className="text-[10px] text-cyan-300 flex items-center gap-1">
-                                <Sparkles size={10} />
-                                <span>Lead: {post.clue_hook}</span>
+                      {gossipFeed.map((post, idx) => {
+                        const isLead = post.is_lead || post.tag === '#VerifiedLead';
+                        const isNoise = post.is_noise || post.tag === '#CampusChat' || post.tag === '#Noise';
+                        return (
+                          <div
+                            key={post.id || idx}
+                            className={`rounded-xl p-3 space-y-1.5 transition-all ${
+                              isLead
+                                ? 'bg-emerald-950/40 border border-emerald-500/60 shadow-[0_0_15px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/30'
+                                : isNoise
+                                ? 'bg-neutral-900/80 border border-neutral-700/60'
+                                : 'bg-neutral-900/70 border border-neutral-800'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs ${
+                                  isLead
+                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                    : 'bg-purple-900/30 text-purple-300 border border-purple-700/40'
+                                }`}>
+                                  {isLead ? '⚡' : (post.author_name ? post.author_name[0] : '?')}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`font-bold text-xs ${isLead ? 'text-emerald-300' : 'text-gray-200'}`}>
+                                      {post.author_name}
+                                    </span>
+                                    {isLead && (
+                                      <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
+                                        VERIFIED LEAD
+                                      </span>
+                                    )}
+                                  </div>
+                                  {post.author_handle && (
+                                    <span className="text-[10px] text-purple-400 font-mono block">
+                                      {post.author_handle.startsWith('@') ? post.author_handle : `@${post.author_handle}`}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
-                            ) : <span />}
-                            {post.likes !== undefined && (
-                              <span className="text-[10px] font-mono text-pink-400 flex items-center gap-1">
-                                <Heart size={10} /> {post.likes}
-                              </span>
-                            )}
+                              <div className="flex items-center gap-1.5">
+                                {post.tag && (
+                                  <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
+                                    isLead
+                                      ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 font-semibold'
+                                      : 'bg-purple-950/60 text-purple-300 border border-purple-800/40'
+                                  }`}>
+                                    {post.tag}
+                                  </span>
+                                )}
+                                {post.time_ago && (
+                                  <span className="text-[9px] font-mono text-gray-500">{post.time_ago}</span>
+                                )}
+                              </div>
+                            </div>
+
+                            <p className={`text-xs leading-snug ${isLead ? 'text-emerald-100 font-medium' : 'text-gray-300'}`}>
+                              {post.content}
+                            </p>
+
+                            <div className="flex items-center justify-between pt-1">
+                              {post.clue_hook ? (
+                                <div className="text-[10px] text-cyan-300 flex items-center gap-1 font-medium bg-cyan-950/40 px-2 py-0.5 rounded-lg border border-cyan-800/40">
+                                  <Sparkles size={11} className="text-cyan-400" />
+                                  <span>Lead: {post.clue_hook}</span>
+                                </div>
+                              ) : <span />}
+                              {post.likes !== undefined && (
+                                <span className="text-[10px] font-mono text-pink-400 flex items-center gap-1">
+                                  <Heart size={10} /> {post.likes}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -956,11 +1429,11 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
 
           {/* 4. E-SHOP / DELIVERY APP */}
           {activeApp === 'shop' && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
+            <div className="flex flex-col h-full space-y-2.5 min-h-0">
+              <div className="flex items-center justify-between pb-1 border-b border-neutral-800/80 shrink-0">
                 <h4 className="font-bold text-sm text-gray-100 flex items-center gap-1.5">
                   <ShoppingBag size={15} className="text-amber-400" />
-                  <span>{shopData?.flavor_name || 'Express Delivery'}</span>
+                  <span>{shopData?.flavor_name || branding.shop_app_name || 'E-Shop Delivery'}</span>
                 </h4>
                 {shopData && (
                   <div className="flex items-center gap-1.5">
@@ -977,18 +1450,18 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
               </div>
 
               {shopData?.greeting && (
-                <p className="text-[11px] text-gray-400 italic bg-neutral-900/60 p-2.5 rounded-xl border border-neutral-800">
+                <p className="text-[10px] text-gray-400 italic bg-neutral-900/60 px-2.5 py-1.5 rounded-xl border border-neutral-800 shrink-0 line-clamp-2">
                   "{shopData.greeting}"
                 </p>
               )}
 
               {shopFeedback && (
-                <div className={`px-3 py-1.5 rounded-xl text-xs border flex items-center justify-between ${
+                <div className={`px-2.5 py-1.5 rounded-xl text-xs border flex items-center justify-between shrink-0 ${
                   shopFeedback.type === 'error'
                     ? 'bg-red-950/60 border-red-800/60 text-red-200'
                     : 'bg-emerald-950/60 border-emerald-800/60 text-emerald-200'
                 }`}>
-                  <span>{shopFeedback.text}</span>
+                  <span className="text-[11px]">{shopFeedback.text}</span>
                   <button
                     onClick={() => setShopFeedback(null)}
                     className="text-[10px] opacity-70 hover:opacity-100 ml-2"
@@ -999,14 +1472,17 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
               )}
 
               {loadingShop ? (
-                <p className="text-xs text-gray-500 italic text-center py-12">Connecting to courier network...</p>
+                <div className="text-center py-16 text-gray-500 italic space-y-2">
+                  <RefreshCw size={20} className="animate-spin text-amber-400 mx-auto" />
+                  <p className="text-xs">Connecting to courier network...</p>
+                </div>
               ) : !shopData || !shopData.inventory || shopData.inventory.length === 0 ? (
                 <div className="text-center py-14 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl">
                   <ShoppingBag size={28} className="mx-auto opacity-30 text-amber-400 mb-1" />
                   <p className="text-xs">No courier catalog available right now.</p>
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-1.5 overflow-y-auto pr-0.5 flex-1 custom-scrollbar min-h-0">
                   {shopData.inventory.map((item, idx) => {
                     const finalPrice = item.final_price ?? item.price ?? 0;
                     const basePrice = item.base_price ?? item.price ?? finalPrice;
@@ -1014,40 +1490,48 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
                     return (
                       <div
                         key={item.name || idx}
-                        className="bg-neutral-900/80 border border-neutral-800 rounded-xl p-2.5 space-y-1.5"
+                        className="flex items-center justify-between gap-2 p-2 bg-neutral-900/80 hover:bg-neutral-900 border border-neutral-800 rounded-xl transition-all"
                       >
-                        <div className="flex justify-between items-start gap-2">
-                          <div className="min-w-0">
-                            <span className="font-bold text-xs text-gray-200 block truncate">
-                              {item.emoji || '📦'} {item.name}
-                            </span>
-                            <span className="text-[10px] text-gray-400 block leading-snug mt-0.5">
-                              {item.description || item.effect || 'Courier delivery item'}
-                            </span>
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          <div className="w-8 h-8 rounded-lg bg-neutral-800/80 border border-neutral-700/50 flex items-center justify-center text-base shrink-0">
+                            {item.emoji || '📦'}
                           </div>
-                          <div className="text-right shrink-0">
-                            {basePrice > finalPrice && (
-                              <span className="text-[10px] font-mono text-gray-500 line-through mr-1">
-                                {basePrice}
-                              </span>
-                            )}
-                            <span className="text-[11px] font-mono font-bold text-amber-300">
-                              {shopData.currency_emoji || '💰'} {finalPrice}
-                            </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-[11px] text-gray-200 truncate">{item.name}</span>
+                              {item.category && (
+                                <span className="text-[9px] px-1 py-0.2 rounded bg-neutral-800 text-gray-400 shrink-0 font-mono">
+                                  {item.category}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-gray-400 truncate leading-tight">
+                              {item.description || item.effect || 'Courier delivery item'}
+                            </p>
                           </div>
                         </div>
 
-                        <div className="flex justify-end pt-1">
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="text-right">
+                            {basePrice > finalPrice && (
+                              <span className="text-[9px] font-mono text-gray-500 line-through block leading-none">
+                                {basePrice}
+                              </span>
+                            )}
+                            <span className="text-[11px] font-mono font-bold text-amber-300 leading-tight block">
+                              {shopData.currency_emoji || '💰'}{finalPrice}
+                            </span>
+                          </div>
                           <button
                             disabled={!canAfford || buyingItem === item.name}
                             onClick={() => handleBuyDeliveryItem(item)}
-                            className={`px-3 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all shrink-0 ${
                               canAfford
-                                ? 'bg-amber-600/30 hover:bg-amber-500/40 text-amber-200 border border-amber-500/50'
+                                ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 active:scale-95 cursor-pointer'
                                 : 'bg-neutral-950 text-gray-600 border border-neutral-800 cursor-not-allowed'
                             }`}
                           >
-                            {buyingItem === item.name ? 'Ordering...' : canAfford ? 'Order Delivery' : 'Insufficient Funds'}
+                            {buyingItem === item.name ? '...' : canAfford ? 'Order' : 'Funds'}
                           </button>
                         </div>
                       </div>
@@ -1059,42 +1543,239 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
           )}
 
 
-        {/* 5. BOUNTIES APP */}
+        {/* 5. CAMPUS REQUESTS / BOUNTIES APP */}
         {activeApp === 'bounties' && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="font-bold text-sm text-gray-100 flex items-center gap-1.5">
-                <ShieldAlert size={15} className="text-rose-400" />
-                <span>{branding.bounties_app_name || 'Bounties'}</span>
-              </h4>
+          <div className="flex flex-col h-full space-y-2.5 min-h-0">
+            {/* Header + Subtitle + Refresh */}
+            <div className="flex items-center justify-between pb-1 border-b border-neutral-800/80 shrink-0">
+              <div>
+                <h4 className="font-bold text-sm text-gray-100 flex items-center gap-1.5">
+                  <ShieldAlert size={15} className="text-rose-400" />
+                  <span>{branding.bounty_app_name || branding.bounties_app_name || 'Campus Requests'}</span>
+                </h4>
+                <p className="text-[10px] text-gray-400">
+                  {branding.bounty_subtitle || 'Student Bulletin & Faction Gigs'}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  disabled={generatingBounties}
+                  onClick={() => handleRefreshBounties()}
+                  className="p-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-gray-300 border border-neutral-800 transition-colors cursor-pointer"
+                  title="Refresh Bulletin Requests"
+                >
+                  <RefreshCw size={13} className={generatingBounties ? 'animate-spin text-rose-400' : ''} />
+                </button>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-950/50 text-rose-300 border border-rose-700/50 font-semibold">
+                  {availableBounties.length} Available
+                </span>
+              </div>
             </div>
 
-            {!codexHook?.availableBounties || codexHook.availableBounties.length === 0 ? (
-              <div className="text-center py-14 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl">
-                <ShieldAlert size={28} className="mx-auto opacity-30 text-rose-400 mb-1" />
-                <p className="text-xs">No active bounty postings.</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {codexHook.availableBounties.map((bounty, idx) => (
-                  <div key={bounty.quest_id || idx} className="bg-neutral-900/80 border border-neutral-800 rounded-xl p-2.5 space-y-1.5">
-                    <div className="flex justify-between items-start gap-2">
-                      <span className="font-bold text-xs text-gray-200">{bounty.title}</span>
-                      <span className="text-[10px] font-mono text-rose-300 whitespace-nowrap">Target: {bounty.target_name}</span>
-                    </div>
-                    <p className="text-[10px] text-gray-400">{bounty.description}</p>
-                    <div className="flex justify-end pt-1">
-                      <button
-                        onClick={() => codexHook.bountyAction && codexHook.bountyAction(bounty.quest_id, 'accept')}
-                        className="px-3 py-1 rounded-lg text-[11px] font-bold bg-rose-600/30 hover:bg-rose-500/40 text-rose-200 border border-rose-500/50"
-                      >
-                        Accept Bounty
-                      </button>
-                    </div>
-                  </div>
+            {/* Sub-tabs: Available vs Active Tasks */}
+            <div className="flex bg-neutral-900 p-1 rounded-xl border border-neutral-800 gap-1 shrink-0">
+              <button
+                onClick={() => setBountySubTab('available')}
+                className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${
+                  bountySubTab === 'available'
+                    ? 'bg-rose-600/30 text-rose-200 border border-rose-500/50'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                <span>Available Tasks ({availableBounties.length})</span>
+              </button>
+              <button
+                onClick={() => setBountySubTab('active')}
+                className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${
+                  bountySubTab === 'active'
+                    ? 'bg-amber-600/30 text-amber-200 border border-amber-500/50'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                <span>Active Tasks ({activeBounties.length})</span>
+              </button>
+            </div>
+
+            {/* Faction Filter Navigation Pills (Available tab only) - Flex Wrap, NO SCROLLBAR */}
+            {bountySubTab === 'available' && factionsList.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 pb-0.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedFactionFilter('all')}
+                  className={`px-2.5 py-1 rounded-full text-xs font-bold transition-colors shrink-0 border cursor-pointer ${
+                    selectedFactionFilter === 'all'
+                      ? 'bg-rose-600/30 text-rose-200 border-rose-500/50'
+                      : 'bg-neutral-900 text-gray-400 border-neutral-800 hover:text-gray-200'
+                  }`}
+                >
+                  All ({allAvailableBounties.length})
+                </button>
+                {factionsList.map(f => (
+                  <button
+                    key={f.faction_id || f.name}
+                    type="button"
+                    onClick={() => setSelectedFactionFilter(f.faction_id || f.name)}
+                    className={`px-2.5 py-1 rounded-full text-xs font-bold transition-colors shrink-0 border cursor-pointer ${
+                      selectedFactionFilter === (f.faction_id || f.name)
+                        ? 'bg-purple-600/30 text-purple-200 border-purple-500/50'
+                        : 'bg-neutral-900 text-gray-400 border-neutral-800 hover:text-gray-200'
+                    }`}
+                  >
+                    {f.name}
+                  </button>
                 ))}
               </div>
             )}
+
+            {/* Feedback / Action Banner */}
+            {bountyActionBanner && (
+              <div className={`p-2.5 rounded-xl text-xs border flex items-center justify-between shrink-0 ${
+                bountyActionBanner.type === 'ok'
+                  ? 'bg-emerald-950/50 border-emerald-700/60 text-emerald-200'
+                  : bountyActionBanner.type === 'warn'
+                  ? 'bg-amber-950/50 border-amber-700/60 text-amber-200'
+                  : 'bg-red-950/50 border-red-800/60 text-red-200'
+              }`}>
+                <p className="text-[11px] leading-snug">{bountyActionBanner.text}</p>
+                <button onClick={() => setBountyActionBanner(null)} className="text-[10px] opacity-70 ml-2">✕</button>
+              </div>
+            )}
+
+            {/* Content: Available Tab vs Active Tab */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar pr-0.5 min-h-0 space-y-2">
+              {bountySubTab === 'available' ? (
+                availableBounties.length === 0 ? (
+                  <div className="text-center py-12 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl space-y-3">
+                    <ShieldAlert size={28} className="mx-auto opacity-30 text-rose-400" />
+                    <div>
+                      <p className="text-xs text-gray-300 font-semibold">
+                        {selectedFactionFilter !== 'all' ? 'No faction tasks currently posted' : 'Bulletin is quiet right now'}
+                      </p>
+                      <p className="text-[10px] text-gray-500 mt-0.5">
+                        {selectedFactionFilter !== 'all' ? 'Request contracts directly from this faction.' : 'Generate live procedural requests for your campus.'}
+                      </p>
+                    </div>
+                    <button
+                      disabled={generatingBounties}
+                      onClick={() => handleRefreshBounties(selectedFactionFilter !== 'all' ? selectedFactionFilter : null)}
+                      className="px-3.5 py-1.5 rounded-xl bg-rose-600/30 hover:bg-rose-600/50 text-rose-200 border border-rose-500/40 text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                    >
+                      {generatingBounties ? 'Generating...' : selectedFactionFilter !== 'all' ? 'Request Faction Tasks' : 'Generate New Requests'}
+                    </button>
+                  </div>
+                ) : (
+                  availableBounties.map((bounty, idx) => (
+                    <div
+                      key={bounty.quest_id || idx}
+                      className="bg-neutral-900/80 border border-neutral-800 rounded-xl p-3 space-y-2"
+                    >
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="min-w-0">
+                          <span className="font-bold text-xs text-gray-100 block">{bounty.title}</span>
+                          <span className="text-[10px] font-mono text-rose-400 block mt-0.5">
+                            {bounty.quest_type || 'Campus Request'}
+                            {bounty.target_name ? ` • Target: ${bounty.target_name}` : ''}
+                          </span>
+                        </div>
+                        {bounty.status && (
+                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-gray-400 border border-neutral-700 shrink-0">
+                            {bounty.status}
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-[11px] text-gray-300 leading-snug">{bounty.objective || bounty.description}</p>
+
+                      {/* Rewards row */}
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono pt-0.5">
+                        {bounty.reward_gold > 0 && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-950/40 text-amber-300 border border-amber-800/40">
+                            💰 {bounty.reward_gold} Gold
+                          </span>
+                        )}
+                        {bounty.reward_xp > 0 && (
+                          <span className="px-1.5 py-0.5 rounded bg-purple-950/40 text-purple-300 border border-purple-800/40">
+                            ⭐ {bounty.reward_xp} XP
+                          </span>
+                        )}
+                        {bounty.reward_item && (
+                          <span className="px-1.5 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40 truncate max-w-[150px]">
+                            🎁 {bounty.reward_item}
+                          </span>
+                        )}
+                        {bounty.faction_rep_reward > 0 && (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-950/40 text-emerald-300 border border-emerald-800/40">
+                            🏆 +{bounty.faction_rep_reward} Rep
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Action: Accept in phone */}
+                      <div className="flex justify-end pt-1">
+                        <button
+                          onClick={() => handleAcceptBounty(bounty.quest_id, bounty.title)}
+                          className="px-3 py-1 rounded-lg text-[11px] font-bold bg-rose-600/30 hover:bg-rose-500/40 text-rose-200 border border-rose-500/50 transition-all active:scale-95 cursor-pointer"
+                        >
+                          Accept Request
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )
+              ) : (
+                /* Active Tasks Tab */
+                activeBounties.length === 0 ? (
+                  <div className="text-center py-12 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl space-y-1">
+                    <ShieldAlert size={28} className="mx-auto opacity-30 text-gray-500" />
+                    <p className="text-xs text-gray-300 font-semibold">No active tasks in progress</p>
+                    <p className="text-[10px] text-gray-500">
+                      Switch to the Available tab and accept requests to track them here.
+                    </p>
+                  </div>
+                ) : (
+                  activeBounties.map((quest, idx) => (
+                    <div
+                      key={quest.quest_id || idx}
+                      className="bg-neutral-900/90 border border-amber-700/40 rounded-xl p-3 space-y-2"
+                    >
+                      <div className="flex justify-between items-start gap-2">
+                        <div>
+                          <span className="font-bold text-xs text-amber-200 block">{quest.title}</span>
+                          <span className="text-[10px] font-mono text-gray-400 block mt-0.5">
+                            {quest.quest_type}
+                            {quest.target_name ? ` • Target: ${quest.target_name}` : ''}
+                          </span>
+                        </div>
+                        <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold shrink-0">
+                          ⚡ Active
+                        </span>
+                      </div>
+
+                      <p className="text-[11px] text-gray-300 leading-snug">{quest.objective}</p>
+
+                      {quest.progress && (
+                        <div className="bg-neutral-950/80 p-1.5 rounded-lg border border-neutral-800 text-[10px] font-mono text-cyan-300 flex items-center justify-between">
+                          <span>Progress: {quest.progress}</span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between pt-1">
+                        <div className="flex items-center gap-1.5 text-[10px] font-mono text-gray-400">
+                          {quest.reward_gold > 0 && <span>💰 {quest.reward_gold}</span>}
+                          {quest.reward_xp > 0 && <span>⭐ {quest.reward_xp} XP</span>}
+                        </div>
+                        <button
+                          onClick={() => handleAbandonBounty(quest.quest_id, quest.title)}
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-semibold text-gray-400 hover:text-red-300 hover:bg-red-950/40 border border-neutral-800 hover:border-red-800/60 transition-colors cursor-pointer"
+                        >
+                          Abandon Task
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )
+              )}
+            </div>
           </div>
         )}
 
@@ -1107,7 +1788,7 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
               <span className="font-bold text-xs text-pink-300 truncate">{selectedPhoto.contact_name}</span>
               <button
                 onClick={() => setSelectedPhoto(null)}
-                className="p-1 text-gray-400 hover:text-gray-100"
+                className="p-1 text-gray-400 hover:text-gray-100 cursor-pointer"
               >
                 <X size={16} />
               </button>
@@ -1134,7 +1815,7 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
                   type="button"
                   disabled={deletingPhoto}
                   onClick={() => handleDeleteMedia(selectedPhoto)}
-                  className="mt-3 px-3 py-1.5 rounded-xl bg-red-950/60 hover:bg-red-900/70 text-red-300 border border-red-800/60 text-xs font-bold transition-colors"
+                  className="mt-3 px-3 py-1.5 rounded-xl bg-red-950/60 hover:bg-red-900/70 text-red-300 border border-red-800/60 text-xs font-bold transition-colors cursor-pointer"
                 >
                   {deletingPhoto ? 'Deleting...' : '🗑️ Delete Media'}
                 </button>
@@ -1143,81 +1824,58 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, session, user, onRefreshInvent
           </div>
         )}
 
-        {/* Bottom OS Navigation Dock */}
-        <div className="px-4 py-2.5 bg-neutral-950 border-t border-neutral-800/80 flex justify-around items-center shrink-0">
-          <button
-            onClick={() => { setActiveApp('photos'); setSelectedPhoto(null); }}
-            className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-xl transition-all ${
-              activeApp === 'photos'
-                ? 'text-pink-400 bg-pink-950/30'
-                : 'text-gray-500 hover:text-gray-300'
-            }`}
-          >
-            <Camera size={18} />
-            <span className="text-[9px] font-semibold tracking-tight">{branding.gallery_app_name || 'Photos'}</span>
-          </button>
+      {/* Sleek Modern Gesture Navigation Bar (Back, Home Pill, Lock) */}
+      <div className="px-5 py-2.5 bg-neutral-950/95 border-t border-neutral-800/70 flex items-center justify-between shrink-0 select-none">
+        {/* Back Gesture Button */}
+        <button
+          type="button"
+          onClick={() => {
+            if (selectedPhoto) {
+              setSelectedPhoto(null);
+            } else if (activeApp === 'dms' && activeChatNpc) {
+              closeChat();
+            } else if (activeApp !== 'home') {
+              setActiveApp('home');
+            } else {
+              onClose();
+            }
+          }}
+          className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold text-gray-400 hover:text-white hover:bg-neutral-800/70 transition-all active:scale-95 cursor-pointer"
+          title="Back / Previous Screen"
+        >
+          <ChevronLeft size={16} />
+          <span className="text-[11px]">Back</span>
+        </button>
 
-          <button
-            onClick={() => { setActiveApp('dms'); setSelectedPhoto(null); }}
-            className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-xl transition-all relative ${
-              activeApp === 'dms'
-                ? 'text-cyan-400 bg-cyan-950/30'
-                : 'text-gray-500 hover:text-gray-300'
-            }`}
-          >
-            <MessageSquare size={18} />
-            <span className="text-[9px] font-semibold tracking-tight">{branding.dm_app_name || 'DMs'}</span>
-            {appointments.length > 0 && (
-              <span className="absolute top-0 right-2 w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            )}
-          </button>
+        {/* iOS / Android Style Center Home Pill */}
+        <button
+          type="button"
+          onClick={() => {
+            if (activeApp !== 'home' || selectedPhoto || activeChatNpc) {
+              setActiveApp('home');
+              setSelectedPhoto(null);
+              if (closeChat) closeChat();
+            } else {
+              onClose();
+            }
+          }}
+          className="group py-2 px-6 flex items-center justify-center cursor-pointer focus:outline-none"
+          title={activeApp !== 'home' ? "Tap for Home" : "Tap to Lock Phone"}
+        >
+          <div className="w-28 h-1.5 bg-neutral-600 group-hover:bg-neutral-300 rounded-full transition-all group-active:scale-95 group-hover:h-2" />
+        </button>
 
-          <button
-            onClick={() => { setActiveApp('feed'); setSelectedPhoto(null); }}
-            className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-xl transition-all ${
-              activeApp === 'feed'
-                ? 'text-purple-400 bg-purple-950/30'
-                : 'text-gray-500 hover:text-gray-300'
-            }`}
-          >
-            <Rss size={18} />
-            <span className="text-[9px] font-semibold tracking-tight">{branding.feed_app_name || 'Feed'}</span>
-          </button>
-
-          <button
-            onClick={() => { setActiveApp('shop'); setSelectedPhoto(null); }}
-            className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-xl transition-all ${
-              activeApp === 'shop'
-                ? 'text-amber-400 bg-amber-950/30'
-                : 'text-gray-500 hover:text-gray-300'
-            }`}
-          >
-            <ShoppingBag size={18} />
-            <span className="text-[9px] font-semibold tracking-tight">{branding.shop_app_name || 'E-Shop'}</span>
-          </button>
-
-          <button
-            onClick={() => { setActiveApp('bounties'); setSelectedPhoto(null); }}
-            className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-xl transition-all ${
-              activeApp === 'bounties'
-                ? 'text-rose-400 bg-rose-950/30'
-                : 'text-gray-500 hover:text-gray-300'
-            }`}
-          >
-            <ShieldAlert size={18} />
-            <span className="text-[9px] font-semibold tracking-tight">{branding.bounties_app_name || 'Bounties'}</span>
-          </button>
-        </div>
-
-        {/* Hardware Home Indicator Bar */}
-        <div className="pb-2 pt-1 flex justify-center bg-neutral-950 shrink-0">
-          <div
-            onClick={onClose}
-            className="w-32 h-1 bg-neutral-600 hover:bg-neutral-400 rounded-full cursor-pointer transition-colors"
-            title="Swipe up to close"
-          />
-        </div>
-
+        {/* Lock / Sleep Gesture Button */}
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold text-gray-400 hover:text-white hover:bg-neutral-800/70 transition-all active:scale-95 cursor-pointer"
+          title="Lock & Sleep Phone"
+        >
+          <span className="text-[11px]">Lock</span>
+          <X size={14} />
+        </button>
+      </div>
       </div>
     </div>
   );

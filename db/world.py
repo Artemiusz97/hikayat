@@ -40,25 +40,34 @@ def upsert_lorebook_entity(session_id: int, entity_type: str, name: str,
     app_json = json.dumps(appearance) if isinstance(appearance, dict) else (appearance or "{}")
 
     import namegen
-    if entity_type.lower() == "person" and namegen.is_generic_role_name(name):
-        role_title = name
-        matched_name = None
-        with get_conn() as conn:
-            fac_rows = conn.execute("SELECT leadership_roster_json FROM factions WHERE session_id=?", (session_id,)).fetchall()
-            for fr in fac_rows:
-                try:
-                    r_list = json.loads(fr["leadership_roster_json"] or "[]")
-                    for r in r_list:
-                        if r.get("title", "").lower() == role_title.lower() or role_title.lower() in r.get("title", "").lower():
-                            matched_name = r.get("name")
-                            break
-                    if matched_name: break
-                except Exception:
-                    pass
-        if matched_name:
-            name = matched_name
-        if role_title.lower() not in (description or "").lower():
-            description = f"{role_title} — {description or ''}".strip(" —")
+    if entity_type.lower() == "person":
+        if namegen.is_collective_entity_name(name):
+            return
+        if namegen.is_generic_role_name(name) or not namegen.is_valid_entity_name(name):
+            role_title = name
+            matched_name = None
+            with get_conn() as conn:
+                fac_rows = conn.execute("SELECT leadership_roster_json FROM factions WHERE session_id=?", (session_id,)).fetchall()
+                for fr in fac_rows:
+                    try:
+                        r_list = json.loads(fr["leadership_roster_json"] or "[]")
+                        for r in r_list:
+                            if r.get("title", "").lower() == role_title.lower() or role_title.lower() in r.get("title", "").lower():
+                                matched_name = r.get("name")
+                                break
+                        if matched_name: break
+                    except Exception:
+                        pass
+            sess = None
+            try:
+                with get_conn() as conn:
+                    s_row = conn.execute("SELECT scenario FROM sessions WHERE id=?", (session_id,)).fetchone()
+                    scen = s_row["scenario"] if s_row and s_row["scenario"] else "fantasy"
+            except Exception:
+                scen = "fantasy"
+            name = matched_name or namegen.generate_person_name(scen)
+            if role_title.lower() not in (description or "").lower():
+                description = f"{role_title} — {description or ''}".strip(" —")
 
     with get_conn() as conn:
         existing = conn.execute(

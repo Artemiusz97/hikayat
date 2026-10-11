@@ -3,6 +3,24 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
 
+// Dynamically sync visible viewport height (excluding Edge/Chrome mobile bottom address bar and toolbars)
+const syncAppHeight = () => {
+  const height = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  if (height && height > 0) {
+    document.documentElement.style.setProperty('--app-height', `${height}px`);
+  }
+};
+
+syncAppHeight();
+window.addEventListener('resize', syncAppHeight);
+window.addEventListener('orientationchange', () => {
+  setTimeout(syncAppHeight, 100);
+});
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', syncAppHeight);
+  window.visualViewport.addEventListener('scroll', syncAppHeight);
+}
+
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);

@@ -612,7 +612,7 @@ def generate_relationship_status(
         except Exception:
             mems = [mems]
     has_relationship_mem = any(any(rc in str(m).lower() for rc in ("relationship", "dating", "lover", "girlfriend", "boyfriend", "accepted")) for m in mems)
-    is_player_partner = is_romantic_track or has_relationship_mem
+    is_player_partner = is_romantic_track
 
     is_player_interest = (
         is_player_partner
@@ -1191,6 +1191,15 @@ def ensure_contact_relations(
         player_name = resolve_player_character_name(contact, session_id=session_id or contact.get("session_id", 0))
         score = contact.get("relationship_score", 0)
         role_label = "Lover / Soulmate" if score >= 80 else ("Romantic Partner / Dating" if score >= 40 else "Romantic Partner")
+
+        # Preserve any existing non-player partner in ex_partners so canon history is retained
+        curr_p = existing["romance"].get("current_partner")
+        if curr_p and isinstance(curr_p, dict) and curr_p.get("name") and curr_p.get("name") != player_name:
+            if "ex_partners" not in existing["romance"] or not isinstance(existing["romance"]["ex_partners"], list):
+                existing["romance"]["ex_partners"] = []
+            if not any(e.get("name") == curr_p.get("name") for e in existing["romance"]["ex_partners"] if isinstance(e, dict)):
+                existing["romance"]["ex_partners"].append(curr_p)
+
         existing["romance"]["status"] = "In a Relationship"
         existing["romance"]["current_partner"] = {
             "name": player_name,
@@ -1356,6 +1365,81 @@ def format_relations_for_disclosure(
     return output
 
 
+def _retrieve_contextual_memories(
+    query_text: str,
+    memories: list,
+    max_recent: int = 3,
+    max_recalled: int = 2
+) -> list[str]:
+    """Dynamically substitutes older memories into the prompt budget when referenced by the player.
+    Guarantees total returned memories <= (max_recent + max_recalled), preserving 0% net token increase.
+    """
+    if not memories:
+        return []
+    if len(memories) <= max_recent:
+        return [str(m) for m in memories]
+
+    recent_slice = memories[-max_recent:]
+    recent_set = set(str(m) for m in recent_slice)
+    older_mems = [m for m in memories if str(m) not in recent_set]
+
+    if not older_mems or not query_text:
+        return [str(m) for m in memories[-5:]]
+
+    q_lower = query_text.lower()
+
+    # Check if query contains recall / query indicators or distinctive event cues
+    recall_cues = (
+        "remember", "recall", "back when", "that time", "our first", "first time",
+        "when we", "did you forget", "we once", "that night", "that day", "used to",
+        "do you still", "don't you remember", "you remember"
+    )
+    is_recall_query = any(rc in q_lower for rc in recall_cues)
+
+    # Extract significant search tokens (length >= 3, excluding common stop words)
+    stopwords = {
+        "the", "and", "that", "this", "with", "for", "have", "had", "was",
+        "were", "what", "when", "where", "which", "who", "whom", "will", "would",
+        "you", "your", "our", "are", "about", "from", "then", "them", "they",
+        "she", "her", "his", "him", "just", "like", "some", "more", "also", "into"
+    }
+    raw_tokens = re.findall(r'[a-zA-Z]{3,}', q_lower)
+    search_tokens = [t for t in raw_tokens if t not in stopwords]
+
+    if not search_tokens and not is_recall_query:
+        return [str(m) for m in memories[-5:]]
+
+    min_score = 1 if is_recall_query else 2
+    scored_candidates = []
+    for m in older_mems:
+        m_str = str(m)
+        m_lower = m_str.lower()
+        score = 0
+        for token in search_tokens:
+            if token in m_lower:
+                score += 1
+                if len(token) >= 5:
+                    score += 1
+
+        # Boost multi-word phrase matches from query
+        for phrase in ("first kiss", "first time", "last night", "in the library", "in the bedroom", "stargazing", "courtyard"):
+            if phrase in q_lower and phrase in m_lower:
+                score += 3
+
+        if score >= min_score:
+            scored_candidates.append((score, m_str))
+
+    if not scored_candidates:
+        return [str(m) for m in memories[-5:]]
+
+    # Sort by highest match score, breaking ties by order (more recent first)
+    scored_candidates.sort(key=lambda x: x[0], reverse=True)
+    recalled_mems = [f"[RECALLED PAST MOMENT]: {cand[1]}" for cand in scored_candidates[:max_recalled]]
+
+    # Combine recalled + recent (max 2 recalled + 3 recent = max 5 items total)
+    return recalled_mems + [str(m) for m in recent_slice]
+
+
 def build_topic_aware_npc_context(
     contact: dict,
     actions: list = None,
@@ -1381,11 +1465,16 @@ def build_topic_aware_npc_context(
     # Extract action text and recent history for topic detection
     act_pieces = []
     if actions:
-        for a in actions:
-            if isinstance(a, dict):
-                act_pieces.append(str(a.get("label", "")) + " " + str(a.get("text", "")))
-            else:
-                act_pieces.append(str(a))
+        if isinstance(actions, str):
+            act_pieces.append(actions)
+        elif isinstance(actions, (list, tuple)):
+            for a in actions:
+                if isinstance(a, dict):
+                    act_pieces.append(str(a.get("label", "")) + " " + str(a.get("text", "")))
+                else:
+                    act_pieces.append(str(a))
+        else:
+            act_pieces.append(str(actions))
     if session_history and isinstance(session_history, list):
         for h in session_history[-2:]:
             if isinstance(h, dict):
@@ -1439,19 +1528,29 @@ def build_topic_aware_npc_context(
     romance_kws = (
         "ex", "exes", "dated", "dating", "past relationship", "past relationships",
         "past partner", "prior partner", "ex-boyfriend", "ex-girlfriend",
-        "first kiss", "virginity", "who have you dated"
+        "first kiss", "virginity", "who have you dated",
+        "single", "taken", "boyfriend", "girlfriend", "partner", "current partner",
+        "in a relationship", "relationship", "love life", "dating anyone",
+        "seeing anyone", "crush", "significant other", "married", "spouse"
     )
     if any(kw in act_lower for kw in romance_kws):
         romance = relations.get("romance", {})
         if romance:
             status = romance.get("status", "Single")
+            curr_p = romance.get("current_partner")
+            curr_str = ""
+            if curr_p and isinstance(curr_p, dict) and curr_p.get("name"):
+                p_role = curr_p.get("role", "Partner")
+                p_type = curr_p.get("relationship_type", "Dating")
+                curr_str = f" | Current Partner: {curr_p.get('name')} ({p_role} - {p_type})"
+
             exes = romance.get("ex_partners", [])
             ex_strs = [f"{e.get('name')} ({e.get('role', 'Ex-Partner')})" for e in exes if isinstance(e, dict) and e.get("name")]
             ex_formatted = ", ".join(ex_strs) if ex_strs else "None (No prior relationships recorded)"
             sections.append(
                 f"  [CANON ROMANCE & DATING HISTORY - {name}]:\n"
-                f"  * Current Status: {status} | Past Ex-Partner(s): {ex_formatted}\n"
-                f"  * DIRECTIVE: When asked about dating history, strictly reference these canon records."
+                f"  * Current Status: {status}{curr_str} | Past Ex-Partner(s): {ex_formatted}\n"
+                f"  * DIRECTIVE: When asked about dating status, partners, or relationship history, strictly reference these canon records. If current status is 'In a Relationship', acknowledge the current partner."
             )
 
     # 3. Friends & Rivals Topic
@@ -1472,29 +1571,45 @@ def build_topic_aware_npc_context(
             f"  * DIRECTIVE: Reference these specific friends and rivals when discussing peer relationships."
         )
 
-    # 4. Established Shared Milestones with the Player
+    # 4. Established Shared Milestones & Recent Interactions with the Player
+    from mechanics.social.persona import is_romantic_milestone_str
     mems = contact.get("intimate_memories") or (contact.get("appearance") or {}).get("intimate_memories") or []
-    shared_mems = [m for m in mems if not str(m).startswith("Past History:")]
-    if shared_mems:
-        milestone_kws = (
-            "remember when", "remember that", "last night", "our night", "our kiss",
-            "our date", "first time we", "we kissed", "we slept", "intimate",
-            "confession", "promise", "past memory", "memories with you", "between us"
+    romantic_mems = [m for m in mems if not str(m).startswith("Past History:") and is_romantic_milestone_str(str(m))]
+
+    recent_interactions = contact.get("recent_memories") or contact.get("rel_history") or (contact.get("appearance") or {}).get("recent_memories") or []
+    if not recent_interactions:
+        recent_interactions = [m for m in mems if not str(m).startswith("Past History:") and not is_romantic_milestone_str(str(m))]
+
+    milestone_kws = (
+        "remember when", "remember that", "last night", "our night", "our kiss",
+        "our date", "first time we", "we kissed", "we slept", "intimate",
+        "confession", "promise", "past memory", "memories with you", "between us"
+    )
+    is_intimate_action = any(
+        ikw in act_lower for ikw in (
+            "kiss", "hold", "touch", "caress", "bed", "bedroom", "sheets",
+            "naked", "undress", "strip", "breast", "thigh", "whisper",
+            "embrace", "cuddle", "lie down", "lay down", "intercourse", "oral", "anal"
         )
-        is_intimate_action = any(
-            ikw in act_lower for ikw in (
-                "kiss", "hold", "touch", "caress", "bed", "bedroom", "sheets",
-                "naked", "undress", "strip", "breast", "thigh", "whisper",
-                "embrace", "cuddle", "lie down", "lay down", "intercourse", "oral"
-            )
+    )
+
+    # 4A. General Shared Interactions (Capped strictly at latest 5 or 3 recent + up to 2 recalled)
+    if recent_interactions:
+        selected_recent = _retrieve_contextual_memories(act_lower, recent_interactions, max_recent=3, max_recalled=2)
+        sections.append(
+            f"  [RECENT SHARED INTERACTIONS & MEMORIES - {name}]:\n"
+            f"  * Recent History: {'; '.join(selected_recent)}\n"
+            f"  * DIRECTIVE: Maintain continuous, coherent recall of these shared interactions with the player."
         )
-        if any(kw in act_lower for kw in milestone_kws) or is_intimate_action or len(shared_mems) > 0:
-            recent_mems = shared_mems[-8:]  # Cap at 8 most recent to avoid context bloat
-            sections.append(
-                f"  [ESTABLISHED SHARED MEMORIES WITH PLAYER - {name}]:\n"
-                f"  * Shared Milestones: {'; '.join(str(m) for m in recent_mems)}\n"
-                f"  * DIRECTIVE: Maintain continuous, coherent recall of these established shared moments with the player."
-            )
+
+    # 4B. Romantic & Intimate Milestones (Injected when romantic context is active or during intimate scenes, max 5)
+    if romantic_mems and (any(kw in act_lower for kw in milestone_kws) or is_intimate_action or contact.get("track") == "romantic"):
+        selected_romantic = _retrieve_contextual_memories(act_lower, romantic_mems, max_recent=3, max_recalled=2)
+        sections.append(
+            f"  [ESTABLISHED SHARED MEMORIES WITH PLAYER - {name}]:\n"
+            f"  * Romantic Milestones: {'; '.join(selected_romantic)}\n"
+            f"  * DIRECTIVE: Maintain continuous, coherent recall of these established shared moments with the player."
+        )
 
     # 5. Intimate Preferences & Sensitive Spots (Injected during intimate/romantic dialogue)
     sensitive_spots = appr.get("sensitive_spots")
@@ -1502,7 +1617,7 @@ def build_topic_aware_npc_context(
     is_intimacy_active = any(
         ikw in act_lower for ikw in (
             "kiss", "touch", "caress", "bed", "bedroom", "sheets", "naked",
-            "undress", "strip", "breast", "thigh", "intimate", "oral", "intercourse"
+            "undress", "strip", "breast", "thigh", "intimate", "oral", "intercourse", "anal"
         )
     )
     turns_revealed = (

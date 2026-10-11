@@ -88,13 +88,14 @@ export const useCodex = (sessionId, user) => {
     return data;
   };
 
-  const generateBounties = async (forceRefresh = false) => {
+  const generateBounties = async (forceRefresh = false, factionId = null) => {
     if (!sessionId) return null;
     const data = await apiCall(`/api/quests/${sessionId}/bounties/generate`, {
       method: 'POST',
       body: JSON.stringify({
         user_id: user?.user_id,
         force_refresh: forceRefresh,
+        faction_id: factionId || undefined,
       }),
     });
     if (data?.quests) setQuests(data.quests);

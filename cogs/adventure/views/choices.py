@@ -245,7 +245,7 @@ class ChoiceView(discord.ui.View):
             or ("acts with deliberate intent:" in curr_narr)
             or bool(session.get("is_fallback_generation"))
         )
-        is_fb = any(choice.get("is_fallback") for choice in choices) or is_fallback_narr
+        is_fb = any(choice.get("is_fallback") for choice in choices) or is_fallback_narr or bool(session.get("is_truncated_generation"))
 
         self.add_item(ChoiceDropdown(cog, session_id, choices, actor_char, is_sync=False, turn_user_id=turn_user_id))
 
@@ -733,6 +733,11 @@ class ChoiceView(discord.ui.View):
             await interaction.response.send_message(
                 f"It's not your turn — waiting on <@{self.turn_user_id}>.", ephemeral=True)
             return
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer()
+            except (discord.NotFound, discord.HTTPException):
+                pass
         await self.cog.handle_retry(interaction, self.session_id)
 
     async def _talk_to_merchant(self, interaction: discord.Interaction):
@@ -781,7 +786,7 @@ class SyncChoiceView(discord.ui.View):
             or ("acts with deliberate intent:" in curr_narr)
             or bool(session.get("is_fallback_generation"))
         )
-        is_fb = any(choice.get("is_fallback") for choice in choices) or is_fallback_narr
+        is_fb = any(choice.get("is_fallback") for choice in choices) or is_fallback_narr or bool(session.get("is_truncated_generation"))
         
         self.add_item(ChoiceDropdown(cog, session_id, choices, is_sync=True, party=party))
 
@@ -1060,6 +1065,11 @@ class SyncChoiceView(discord.ui.View):
         if interaction.user.id not in self.member_ids:
             await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
             return
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer()
+            except (discord.NotFound, discord.HTTPException):
+                pass
         await self.cog.handle_retry(interaction, self.session_id)
 
     async def _talk_to_merchant(self, interaction: discord.Interaction):

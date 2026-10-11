@@ -172,31 +172,83 @@ def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_re
         info_level = mechanics.social.relationships.get_unlocked_info_level(score)
 
     skill_modifier = mechanics.social.relationships.get_relationship_modifier(score)
+    raw_prefs = c.get("preferences") or []
     dislikes = c.get("dislikes")
-    if not dislikes:
-        try:
-            _, dislikes = mechanics.social.persona.categorize_likes_and_dislikes(
-                c.get("preferences") or [], traits=c.get("unlocked_traits") or []
-            )
-        except Exception:
-            dislikes = []
+    clean_likes = None
+    try:
+        cat_likes, cat_dislikes = mechanics.social.persona.categorize_likes_and_dislikes(
+            raw_prefs, traits=c.get("unlocked_traits") or []
+        )
+        if not dislikes and cat_dislikes:
+            dislikes = cat_dislikes
+        if cat_likes:
+            clean_likes = cat_likes
+    except Exception:
+        pass
 
-    family_tree = c.get("family_tree")
-    if not family_tree:
-        try:
-            family_tree = mechanics.social.genealogy.get_or_generate_family_tree(session_id, c)
-        except TypeError:
-            family_tree = _default_get_or_generate_family_tree(session_id, c, scen_key)
-        except Exception:
-            family_tree = (c.get("relations") or {}).get("family") or []
+    if dislikes:
+        dislike_set = {str(d).lower().strip() for d in dislikes}
+        if clean_likes:
+            c["preferences"] = [l for l in clean_likes if str(l).lower().strip() not in dislike_set]
+        else:
+            c["preferences"] = [p for p in raw_prefs if str(p).lower().strip() not in dislike_set]
+    elif clean_likes:
+        c["preferences"] = clean_likes
 
-    app = dict(c.get("appearance") or {})
+    # 1. Synchronize & format Relations, Romantic Standing, and Family Tree
+    try:
+        relations = mechanics.social.genealogy.ensure_contact_relations(
+            c, session_id=session_id, scenario=scen_key
+        )
+    except Exception:
+        relations = c.get("relations") if isinstance(c.get("relations"), dict) else {}
+
+    try:
+        disclosed_relations = mechanics.social.genealogy.format_relations_for_disclosure(
+            relations, info_level=info_level, debug_reveal=debug_reveal_all
+        )
+    except Exception:
+        disclosed_relations = {}
+
+    c["relations"] = relations
+    c["disclosed_relations"] = disclosed_relations
+    family_tree = relations.get("family") or c.get("family_tree") or []
+    c["family_tree"] = family_tree
+
+    # 2. Extract traits, gender, race, description for accurate intimate dossier normalization
+    from mechanics.social.persona import infer_contact_gender, clean_attribute_list_string, enforce_intimacy_safeguard_invariants
+    from mechanics.social.persona.intimacy.appearance import normalize_appearance
+    from mechanics.social.persona.intimacy.formatting import format_intimate_profile_sections
+
+    c_gender = infer_contact_gender(c) or str(c.get("gender") or (c.get("basic_info") or {}).get("gender") or "female")
+    c_basic = c.get("basic_info") or {}
+    c_race = str(c.get("race") or c_basic.get("race") or (c.get("appearance") or {}).get("race") or "")
+    c_desc = c_basic.get("description", "")
+    if isinstance(c_desc, dict):
+        c_desc = " ".join(str(v) for v in c_desc.values() if v)
+    c_traits = list(c.get("unlocked_traits", [])) or list(c.get("traits", []))
+    c_role = str(c_basic.get("role") or c_basic.get("occupation") or "")
+
+    raw_app = dict(c.get("appearance") or {})
+    raw_app["intimate_memories"] = list(c.get("intimate_memories", []))
+    app = normalize_appearance(
+        raw_app,
+        gender=c_gender,
+        race=c_race or "human",
+        scen_key=scen_key,
+        desc=c_desc,
+        traits=c_traits,
+        role=c_role
+    )
     app["intimate_memories"] = list(c.get("intimate_memories", []))
-    from mechanics.social.persona import enforce_intimacy_safeguard_invariants
     app = enforce_intimacy_safeguard_invariants(app)
 
-    i_exp = str(app.get("intercourse_experience") or app.get("virginity_intercourse") or "virgin").strip().lower()
-    had_first_time = bool(app.get("had_first_time_with_player")) and (i_exp == "non_virgin")
+    i_exp_val = str(app.get("intercourse_experience") or app.get("virginity_intercourse") or "virgin").strip().lower()
+    o_exp_val = str(app.get("oral_experience") or app.get("virginity_oral") or "inexperienced").strip().lower()
+    m_exp_val = str(app.get("manual_experience") or app.get("virginity_manual") or "inexperienced").strip().lower()
+    a_exp_val = str(app.get("anal_experience") or app.get("virginity_anal") or "inexperienced").strip().lower()
+
+    had_first_time = bool(app.get("had_first_time_with_player")) and (i_exp_val == "non_virgin")
     past_history = c.get("past_intimate_history") or app.get("past_intimate_history") or app.get("past_intimate_entries")
     if not past_history and c.get("intimate_memories"):
         past_mems = [str(m).replace("Past History:", "").strip() for m in c.get("intimate_memories") if str(m).startswith("Past History:")]
@@ -209,33 +261,49 @@ def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_re
     elif isinstance(past_history, str):
         is_virgin_shared = "shared first time with you" in past_history
 
+    # Check if existing past history is out of sync with current intimate experience tracks
+    has_oral_exp = o_exp_val in ("has_done_oral", "has_received_oral", "has_done_and_received_oral")
+    has_anal_exp = a_exp_val in ("has_done_anal", "has_received_anal", "has_done_and_received_anal")
+    past_str = " ".join(past_history) if isinstance(past_history, list) else str(past_history or "")
+    is_out_of_sync = bool(
+        past_history
+        and not had_first_time
+        and (
+            (has_oral_exp and "oral" not in past_str.lower())
+            or (has_anal_exp and "anal" not in past_str.lower())
+        )
+    )
+
     if had_first_time:
         past_history = ["Virgin (No prior intimate history before meeting you; shared first time with you)"]
-    elif not past_history or (is_virgin_shared and not had_first_time):
+    elif not past_history or is_out_of_sync or (is_virgin_shared and not had_first_time):
         try:
             name_str = str(c.get("name") or c.get("npc_id") or "npc").strip()
             import hashlib
             hash_val = int(hashlib.md5(f"{name_str}_past_history".encode("utf-8")).hexdigest(), 16)
-            c_race = str(c.get("race") or app.get("race") or "")
-            c_gender = str(c.get("gender") or app.get("gender") or "female")
-            i_exp = str(app.get("intercourse_experience") or app.get("virginity_intercourse") or "virgin").strip().lower()
-            o_exp = str(app.get("oral_experience") or app.get("virginity_oral") or "inexperienced").strip().lower()
-            m_exp = str(app.get("manual_experience") or app.get("virginity_manual") or "inexperienced").strip().lower()
+            c_race_val = str(c.get("race") or app.get("race") or "")
+            c_gender_val = str(c.get("gender") or app.get("gender") or "female")
             open_val = str(app.get("erotic_openness") or app.get("openness") or "moderate")
             pred_i = str(app.get("predetermined_intercourse") or "").strip().lower()
 
-            if (i_exp in ("virgin", "inexperienced", "") or pred_i == "virgin") and o_exp in ("inexperienced", "unknown", "") and m_exp in ("inexperienced", "unknown", ""):
+            if (i_exp_val in ("virgin", "inexperienced", "") or pred_i == "virgin") and o_exp_val in ("inexperienced", "unknown", "") and m_exp_val in ("inexperienced", "unknown", "") and a_exp_val in ("inexperienced", "unknown", ""):
                 past_history = ["Virgin (No prior intimate history before meeting you)"]
             else:
+                has_existing_partner = bool(
+                    c.get("relations", {}).get("current_partner")
+                    or (c.get("disclosed_relations") or {}).get("current_partner")
+                )
                 past_data = mechanics.social.persona.generate_past_intimate_history(
                     hash_val=hash_val,
-                    race=c_race,
-                    gender=c_gender,
+                    race=c_race_val,
+                    gender=c_gender_val,
                     scenario=scen_key,
                     openness=open_val,
-                    intercourse=i_exp,
-                    oral=o_exp,
-                    manual=m_exp,
+                    intercourse=i_exp_val,
+                    oral=o_exp_val,
+                    manual=m_exp_val,
+                    anal=a_exp_val,
+                    has_existing_partner=has_existing_partner,
                 )
                 if past_data and past_data.get("entries"):
                     past_history = [str(e).replace("Past History:", "").strip() for e in past_data["entries"]]
@@ -243,44 +311,88 @@ def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_re
                     past_history = [str(past_data["entry"]).replace("Past History:", "").strip()]
                 else:
                     past_history = []
-                # Persist generated past history as canonical memory entries so they stabilize across calls
+
+                # Persist generated past history into contact memories
                 if past_history:
                     try:
                         import db as _db
                         sess_id = c.get("session_id", 0)
                         char_id = c.get("character_id", 0)
                         npc_id = c.get("npc_id") or name_str
-                        for ph_entry in past_history:
-                            mem_str = f"Past History: {ph_entry}"
-                            _db.upsert_contact(
-                                session_id=sess_id,
-                                character_id=char_id,
-                                npc_id=npc_id,
-                                name=name_str,
-                                new_memory=mem_str,
-                            )
+
+                        if is_out_of_sync and c.get("id"):
+                            import json as _json
+                            with _db.get_conn() as conn:
+                                row = conn.execute("SELECT intimate_memories_json, appearance_json FROM contacts WHERE id = ?", (c.get("id"),)).fetchone()
+                                if row:
+                                    cur_mems = _json.loads(row[0] or "[]")
+                                    cur_app = _json.loads(row[1] or "{}")
+                                    clean_mems = [m for m in cur_mems if not str(m).startswith("Past History:")]
+                                    new_mems = [f"Past History: {e}" for e in past_history] + clean_mems
+                                    if "intimate_memories" in cur_app:
+                                        cur_app["intimate_memories"] = new_mems
+                                    if "shared_romantic_milestones" in cur_app:
+                                        srm = [m for m in cur_app.get("shared_romantic_milestones", []) if not str(m).startswith("Past History:")]
+                                        cur_app["shared_romantic_milestones"] = [f"Past History: {e}" for e in past_history] + srm
+                                    conn.execute(
+                                        "UPDATE contacts SET intimate_memories_json = ?, appearance_json = ? WHERE id = ?",
+                                        (_json.dumps(new_mems), _json.dumps(cur_app), c.get("id"))
+                                    )
+                        else:
+                            for ph_entry in past_history:
+                                mem_str = f"Past History: {ph_entry}"
+                                _db.upsert_contact(
+                                    session_id=sess_id,
+                                    character_id=char_id,
+                                    npc_id=npc_id,
+                                    name=name_str,
+                                    new_memory=mem_str,
+                                )
                     except Exception:
                         pass
         except Exception:
             past_history = []
 
-    # Enrich appearance for Web Codex / Phone display
-    intimate_unlocked = (info_level >= 3) or c.get("intimate_revealed", False) or c.get("all_revealed", False) or app.get("intimate_revealed", False)
-    i_rev = intimate_unlocked or c.get("intercourse_revealed", False) or app.get("intercourse_revealed", False)
-    o_rev = intimate_unlocked or c.get("oral_revealed", False) or app.get("oral_revealed", False) or i_rev
-    m_rev = intimate_unlocked or c.get("manual_revealed", False) or app.get("manual_revealed", False) or i_rev
+    # 3. Enrich appearance & Intimate Dossier for Web Codex / Phone display
+    intimate_unlocked = (info_level >= 3) or debug_reveal_all or c.get("intimate_revealed", False) or c.get("all_revealed", False) or app.get("intimate_revealed", False)
+    i_rev = intimate_unlocked or debug_reveal_all or c.get("intercourse_revealed", False) or app.get("intercourse_revealed", False)
+    o_rev = intimate_unlocked or debug_reveal_all or c.get("oral_revealed", False) or app.get("oral_revealed", False) or i_rev
+    m_rev = intimate_unlocked or debug_reveal_all or c.get("manual_revealed", False) or app.get("manual_revealed", False) or i_rev
+
+    revealed_flags = {
+        "intimate_revealed": intimate_unlocked,
+        "all_revealed": intimate_unlocked or debug_reveal_all,
+        "mannerisms_revealed": intimate_unlocked or (info_level >= 1) or debug_reveal_all,
+        "intercourse_revealed": i_rev,
+        "oral_revealed": o_rev,
+        "manual_revealed": m_rev,
+        "demeanor_revealed": intimate_unlocked or debug_reveal_all or c.get("demeanor_revealed", False) or app.get("demeanor_revealed", False),
+        "dynamic_revealed": intimate_unlocked or debug_reveal_all or c.get("dynamic_revealed", False) or app.get("dynamic_revealed", False),
+        "openness_revealed": intimate_unlocked or debug_reveal_all or c.get("openness_revealed", False) or app.get("openness_revealed", False),
+        "sensitive_spots_revealed": intimate_unlocked or debug_reveal_all or c.get("sensitive_spots_revealed", False) or app.get("sensitive_spots_revealed", False),
+        "turn_ons_revealed": intimate_unlocked or debug_reveal_all or c.get("turn_ons_revealed", False) or app.get("turn_ons_revealed", False),
+        "turn_offs_revealed": intimate_unlocked or debug_reveal_all or c.get("turn_offs_revealed", False) or app.get("turn_offs_revealed", False),
+        "fetishes_revealed": intimate_unlocked or debug_reveal_all or c.get("fetishes_revealed", False) or app.get("fetishes_revealed", False),
+        "underwear_revealed": intimate_unlocked or debug_reveal_all or c.get("underwear_revealed", False) or app.get("underwear_revealed", False),
+        "act_preferences_revealed": intimate_unlocked or debug_reveal_all or c.get("act_preferences_revealed", False) or app.get("act_preferences_revealed", False),
+    }
+
+    try:
+        intimate_sections = format_intimate_profile_sections(
+            app,
+            gender=c_gender,
+            race=c_race or "human",
+            scen_key=scen_key,
+            info_level=info_level,
+            revealed_flags=revealed_flags
+        )
+    except Exception:
+        intimate_sections = {}
+    c["intimate_sections"] = intimate_sections
 
     i_state = str(app.get("intercourse_experience") or "virgin").strip().lower()
     exp_disp = ("Virgin" if i_state == "virgin" else "Non-Virgin") if i_rev else "Unknown"
-    app["experience"] = exp_disp
-
-    from mechanics.social.persona import is_valid_persona_attribute_string
-    if not is_valid_persona_attribute_string(app.get("erotic_openness")):
-        app["erotic_openness"] = app.get("openness") if is_valid_persona_attribute_string(app.get("openness")) else ""
-    if not is_valid_persona_attribute_string(app.get("intimate_dynamic")):
-        app["intimate_dynamic"] = app.get("dynamic") if is_valid_persona_attribute_string(app.get("dynamic")) else ""
-    if not is_valid_persona_attribute_string(app.get("intimate_demeanor")):
-        app["intimate_demeanor"] = app.get("demeanor") if is_valid_persona_attribute_string(app.get("demeanor")) else ""
+    app["experience"] = exp_disp if i_rev else ""
 
     raw_g = str(c.get("gender") or app.get("gender") or "female").strip().lower()
     is_male = any(kw in raw_g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in raw_g for kw in ("female", "woman"))
@@ -309,11 +421,11 @@ def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_re
 
     if is_male:
         p_size = str(app.get("penis_size") or "average").title()
-        p_size_disp = p_size if intimate_unlocked else "Unknown"
+        p_size_disp = p_size if (intimate_unlocked or debug_reveal_all) else "Unknown"
         app["anatomy"] = f"Penis Size: {p_size_disp} • Intercourse: {exp_disp} • Oral: {oral_disp} • Manual: {man_disp}"
     else:
         b_size = str(app.get("breast_size") or "Modest B-Cup").title()
-        b_size_disp = b_size if intimate_unlocked else "Unknown"
+        b_size_disp = b_size
         app["anatomy"] = f"Breast Size: {b_size_disp} • Intercourse: {exp_disp} • Oral: {oral_disp} • Manual: {man_disp}"
 
     if isinstance(app.get("undergarments"), dict):
@@ -336,9 +448,7 @@ def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_re
         elif und_str:
             app["undergarments"] = f"Underwear: {und_str}"
 
-    from mechanics.social.persona import clean_attribute_list_string
-
-    t_rev = intimate_unlocked or c.get("turn_ons_revealed", False) or app.get("turn_ons_revealed", False)
+    t_rev = intimate_unlocked or debug_reveal_all or c.get("turn_ons_revealed", False) or app.get("turn_ons_revealed", False)
     if not t_rev:
         app["turn_ons"] = []
     else:
@@ -346,7 +456,7 @@ def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_re
         if t_cleaned:
             app["turn_ons"] = [t.strip() for t in t_cleaned.split(",") if t.strip() and t.strip().lower() not in ("none", "unknown")]
 
-    s_rev = intimate_unlocked or c.get("sensitive_spots_revealed", False) or app.get("sensitive_spots_revealed", False)
+    s_rev = intimate_unlocked or debug_reveal_all or c.get("sensitive_spots_revealed", False) or app.get("sensitive_spots_revealed", False)
     if not s_rev:
         app["erogenous_zones"] = []
         app["sensitive_spots"] = ""
@@ -357,7 +467,7 @@ def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_re
         elif not app.get("erogenous_zones") and app.get("sensitive_spots"):
             app["erogenous_zones"] = list(app.get("sensitive_spots"))
 
-    f_rev = intimate_unlocked or c.get("fetishes_revealed", False) or app.get("fetishes_revealed", False)
+    f_rev = intimate_unlocked or debug_reveal_all or c.get("fetishes_revealed", False) or app.get("fetishes_revealed", False)
     if not f_rev:
         app["kinks"] = []
         app["fetishes"] = ""
@@ -366,7 +476,7 @@ def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_re
         if f_cleaned and f_cleaned.lower() not in ("none", "none (vanilla)", "unknown", ""):
             app["kinks"] = [f.strip() for f in f_cleaned.split(",") if f.strip() and f.strip().lower() not in ("none", "none (vanilla)", "unknown")]
 
-    pref_rev = intimate_unlocked or c.get("act_preferences_revealed", False) or app.get("act_preferences_revealed", False)
+    pref_rev = intimate_unlocked or debug_reveal_all or c.get("act_preferences_revealed", False) or app.get("act_preferences_revealed", False)
     if not pref_rev:
         app["favorite_acts"] = []
         app["act_likes"] = ""
@@ -385,13 +495,32 @@ def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_re
     c["info_level"] = info_level
     c["skill_modifier"] = skill_modifier
     c["dislikes"] = dislikes or []
-    c["family_tree"] = family_tree if family_tree is not None else []
-    if isinstance(past_history, list):
-        c["past_intimate_history"] = " • ".join(past_history)
-        c["past_intimate_entries"] = past_history
+    c["debug_revealed"] = debug_reveal_all
+    history_unlocked = intimate_unlocked or (info_level >= 2) or debug_reveal_all or c.get("history_revealed", False) or app.get("history_revealed", False)
+    if history_unlocked:
+        if isinstance(past_history, list):
+            c["past_intimate_history"] = " • ".join(past_history)
+            c["past_intimate_entries"] = past_history
+        else:
+            c["past_intimate_history"] = str(past_history or "")
+            c["past_intimate_entries"] = [str(past_history)] if past_history else []
     else:
-        c["past_intimate_history"] = str(past_history or "")
-        c["past_intimate_entries"] = [str(past_history)] if past_history else []
+        c["past_intimate_history"] = ""
+        c["past_intimate_entries"] = []
+
+    from mechanics.social.persona import is_romantic_milestone_str
+    raw_mems = list(c.get("intimate_memories") or app.get("intimate_memories") or [])
+    c["shared_romantic_milestones"] = [
+        m for m in raw_mems if not str(m).startswith("Past History:") and is_romantic_milestone_str(str(m))
+    ]
+    recent_mems = list(c.get("recent_memories") or c.get("rel_history") or app.get("recent_memories") or [])
+    if not recent_mems:
+        recent_mems = [
+            m for m in raw_mems if not str(m).startswith("Past History:") and not is_romantic_milestone_str(str(m))
+        ]
+    from scenario_data import is_nsfw_scenario
+    c["is_nsfw"] = is_nsfw_scenario(scen_key)
+    c["recent_memories"] = recent_mems
     return c
 
 
@@ -411,7 +540,12 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None)):
     enriched_contacts = await adb(
         lambda: [_enrich_contact_record(c, session_id, scen_key, debug_reveal_all) for c in contacts]
     )
-    return {"contacts": enriched_contacts}
+    from scenario_data import is_nsfw_scenario
+    return {
+        "contacts": enriched_contacts,
+        "is_nsfw": is_nsfw_scenario(scen_key),
+        "scenario": scen_key
+    }
 
 
 def _enrich_factions_list(session_id: int, user_id: int | None = None) -> dict:
@@ -701,7 +835,16 @@ async def generate_session_bounties(session_id: int, req: BountyGenerateRequest)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    bounties = await game_engine.generate_bounty_board(session, force_refresh=req.force_refresh)
+    if req.faction_id:
+        factions = await adb(db.get_factions, session_id)
+        target_f = next((f for f in (factions or []) if f.get("faction_id") == req.faction_id), None)
+        if target_f:
+            bounties = await game_engine.generate_faction_bounty_board(session, target_f, force_refresh=req.force_refresh)
+        else:
+            bounties = await game_engine.generate_bounty_board(session, force_refresh=req.force_refresh)
+    else:
+        bounties = await game_engine.generate_bounty_board(session, force_refresh=req.force_refresh)
+
     payload = await adb(_build_quests_payload, session_id)
     return {
         "success": True,
@@ -813,20 +956,20 @@ async def get_phone_state(session_id: int, user_id: int = Query(...)):
         raise HTTPException(status_code=404, detail="Session not found")
 
     scen_key = session.get("scenario", "fantasy")
-    has_phone = scenario_has_smartphone(scen_key)
     inv = await adb(db.get_inventory, user_id)
-    has_phone_item = any("phone" in (i.get("name") or "").lower() or "cyberdeck" in (i.get("name") or "").lower() for i in inv)
-    is_supported = has_phone or has_phone_item
+    is_supported = True
 
-    branding = get_phone_branding(scen_key) if is_supported else None
-    appointments = await adb(db.get_phone_appointments, session_id, status="pending")
-    gossip = await adb(db.get_gossip_feed, session_id, limit=15) if is_supported else []
+    branding = get_phone_branding(scen_key)
+    pending_appts = await adb(db.get_phone_appointments, session_id, status="pending")
+    arrived_appts = await adb(db.get_phone_appointments, session_id, status="arrived")
+    appointments = (pending_appts or []) + (arrived_appts or [])
+    gossip = await adb(db.get_gossip_feed, session_id, limit=15)
     char_row = await adb(db.get_character, user_id)
     char_id = char_row.get("id", 0) if char_row else 0
     contacts = await adb(db.get_contacts, session_id, char_id)
     if not contacts and char_id != user_id:
         contacts = await adb(db.get_contacts, session_id, user_id)
-    social_state = await adb(get_social_state_summary, session_id, session) if is_supported else {"charges": 3, "turn_count": 0, "state": {}}
+    social_state = await adb(get_social_state_summary, session_id, session)
 
     digital_media = []
     for it in inv:
@@ -851,6 +994,9 @@ async def get_phone_state(session_id: int, user_id: int = Query(...)):
             "feed_app_name": branding.get("feed_app_name", "Feed") if branding else "Feed",
             "dm_app_name": branding.get("dm_app_name", "Messages") if branding else "Messages",
             "gallery_app_name": branding.get("gallery_app_name", "Photos") if branding else "Photos",
+            "bounty_app_name": branding.get("bounty_app_name", "Campus Requests") if branding else "Campus Requests",
+            "bounty_subtitle": branding.get("bounty_subtitle", "Student Bulletin") if branding else "Student Bulletin",
+            "shop_app_name": branding.get("shop_app_name", "E-Shop") if branding else "E-Shop",
             "emoji": branding.get("emoji", "📱") if branding else "📱",
         } if branding else None,
         "appointments": [dict(a) for a in appointments],
@@ -888,8 +1034,12 @@ async def scour_phone_feed(session_id: int, req: PhoneFeedActionRequest):
 
     res = await scour_feed_for_rumor(dict(session), req.user_id)
     social_state = await adb(get_social_state_summary, session_id, session)
+    gossip = res.get("gossip_feed")
+    if not gossip:
+        gossip = [dict(g) for g in (await adb(db.get_gossip_feed, session_id, limit=20))]
     return {
         **res,
+        "gossip_feed": [dict(g) for g in gossip],
         "social_state": social_state,
     }
 
@@ -938,8 +1088,14 @@ async def send_peerpulse_friend_request(session_id: int, req: PeerPulseFriendReq
 @router.get("/api/phone/{session_id}/messages/{npc_id}")
 async def get_npc_messages(session_id: int, npc_id: str):
     """Fetches direct message chat history with a specific NPC contact."""
-    messages = await adb(db.get_phone_messages, session_id, npc_id, limit=20)
-    return {"messages": [dict(m) for m in messages]}
+    clean_npc_id = npc_id.strip().lower().replace(" ", "_")
+    messages = await adb(db.get_phone_messages, session_id, clean_npc_id, limit=20)
+    current_day, _, _ = await adb(db.get_session_time, session_id)
+    daily_limits = await adb(db.get_phone_daily_limits, session_id, clean_npc_id, current_day)
+    return {
+        "messages": [dict(m) for m in messages],
+        "daily_limits": daily_limits,
+    }
 
 
 @router.post("/api/phone/{session_id}/messages/{npc_id}")
@@ -995,6 +1151,7 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
         "success": True,
         "generated_message": text,
         "reply": reply_data,
-        "messages": [dict(m) for m in messages]
+        "messages": [dict(m) for m in messages],
+        "daily_limits": reply_data.get("daily_limits"),
     }
 

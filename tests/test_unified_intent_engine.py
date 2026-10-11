@@ -135,6 +135,26 @@ class TestUnifiedIntentEngine(unittest.TestCase):
             self.assertEqual(intent.category, IntentCategory.DIALOGUE_EXIT)
             self.assertTrue(is_conversational_exit(text))
 
+        # Parting request exits in dialogue
+        parting_exits = [
+            "Thank Robert and ask him to keep an eye out for more gate intel",
+            "Take care, Maya!"
+        ]
+        for text in parting_exits:
+            intent = classify_action_intent(text, self.context)
+            self.assertEqual(intent.category, IntentCategory.DIALOGUE_EXIT)
+
+        # False positive guards: must NOT be classified as DIALOGUE_EXIT
+        non_exits = [
+            "Take care of the injured student",
+            "Take care of the enemy guards",
+            "Keep an eye out for traps",
+            "Thank Robert and ask what time it is"
+        ]
+        for text in non_exits:
+            intent = classify_action_intent(text, self.context)
+            self.assertNotEqual(intent.category, IntentCategory.DIALOGUE_EXIT)
+
         inits = [
             "Speak with Sofia Anderson about the student council",
             "Talk to Mr. Harrison regarding the biology test",
@@ -491,6 +511,76 @@ class TestUnifiedIntentEngine(unittest.TestCase):
         res4 = asyncio.run(game_engine.classify_custom_action(session, char, inventory, "Pick the lock on the office"))
         self.assertTrue(res4.get("fast_path"))
         self.assertEqual(res4["stat"], "INT")
+
+    def test_classify_custom_action_llm_dict_and_fallback(self):
+        """Verify classify_custom_action handles dict returns from call_llm_json without model_dump AttributeError."""
+        from unittest.mock import patch, AsyncMock
+        import game_engine
+
+        session = {
+            "id": 1,
+            "scenario": "high_school_drama",
+            "current_location": "Music Room",
+            "current_npcs": [{"name": "Mia Yamada"}],
+            "dialogue_partner": "Mia Yamada",
+            "history": []
+        }
+        char = {"name": "Alex", "mp": 10, "class": "Student"}
+        inventory = []
+
+        # 1. call_llm_json returns a dict directly
+        mock_dict_response = {
+            "stat": "AGI",
+            "requirement": 7,
+            "mp_cost": 0,
+            "action_category": "acrobatics",
+            "intent": "jump",
+            "target_npc": ""
+        }
+        with patch("game_engine.call_llm_json", new=AsyncMock(return_value=mock_dict_response)):
+            res = asyncio.run(game_engine.classify_custom_action(session, char, inventory, "Perform an acrobatic backflip off the chandelier"))
+            self.assertIsInstance(res, dict)
+            self.assertEqual(res["stat"], "AGI")
+            self.assertEqual(res["requirement"], 7)
+
+        # 2. call_llm_json raises an exception -> graceful fallback
+        with patch("game_engine.call_llm_json", new=AsyncMock(side_effect=RuntimeError("LLM error"))):
+            res_fb = asyncio.run(game_engine.classify_custom_action(session, char, inventory, "Channel intense psychic waves to shatter the crystal"))
+            self.assertIsInstance(res_fb, dict)
+            self.assertIn(res_fb["stat"], ("AGI", "CHA", "INT"))
+            self.assertEqual(res_fb["requirement"], 6)
+
+    def test_custom_action_disclosure_inquiry_and_in_dialogue_skill_checks(self):
+        """Verify that personal/intimate inquiries trigger DC skill checks and in-dialogue remarks are never swallowed by ambient free actions."""
+        import game_engine
+        session = {
+            "id": 999901,
+            "scenario": "nsfw_high_school_drama",
+            "current_location": "Westlake Academy ➔ Old East Wing Music Room ➔ Upright Piano Alcove",
+            "current_npcs": [{"name": "Mia Yamada"}, {"name": "Yuki Kuroda"}],
+            "dialogue_partners": ["Mia Yamada"],
+            "history": []
+        }
+        char = {"name": "Alex", "mp": 10, "class": "Student"}
+        inventory = []
+
+        # 1. 'suggestively ask her how experienced she is' -> DISCLOSURE_INQUIRY fast path -> CHA 8
+        res1 = asyncio.run(game_engine.classify_custom_action(session, char, inventory, "suggestively ask her how experienced she is"))
+        self.assertEqual(res1["stat"], "CHA")
+        self.assertEqual(res1["requirement"], 8)
+        self.assertEqual(res1["action_category"], "disclosure_inquiry")
+
+        # 2. 'ask her if she is single' -> DISCLOSURE_INQUIRY fast path -> CHA 8
+        res2 = asyncio.run(game_engine.classify_custom_action(session, char, inventory, "ask her if she is single"))
+        self.assertEqual(res2["stat"], "CHA")
+        self.assertEqual(res2["requirement"], 8)
+        self.assertEqual(res2["action_category"], "disclosure_inquiry")
+
+        # 3. 'say goodbye to Mia' -> DIALOGUE_EXIT -> free ambient action (stat: NONE, req: 0)
+        res3 = asyncio.run(game_engine.classify_custom_action(session, char, inventory, "say goodbye to Mia"))
+        self.assertEqual(res3["stat"], "NONE")
+        self.assertEqual(res3["requirement"], 0)
+
 
 
 if __name__ == "__main__":

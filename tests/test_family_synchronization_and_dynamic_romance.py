@@ -139,5 +139,87 @@ class TestFamilySyncAndDynamicRomance(unittest.TestCase):
         self.assertEqual(rel_plat["romance"]["status"], "Single")
         self.assertIsNone(rel_plat["romance"]["current_partner"])
 
+    def test_casual_sex_fwb_preserves_platonic_track_and_background_partner(self):
+        """
+        Verify that intimate encounters (casual sex / FWB) do NOT promote platonic track
+        to romantic, do NOT overwrite background partners, and only an explicit confession can promote.
+        """
+        sess_id = db.create_session(host_user_id=1, mode="solo", capacity=1, verbosity="normal", dialogue_mode="balanced", image_gen_enabled=False, scenario="high_school_drama")
+        char_id = 104
+
+        # 1. Setup a platonic contact with an established background partner
+        db.upsert_contact(sess_id, "mia_yamada", "Mia Yamada", character_id=char_id, track="platonic", delta_score=20)
+        c_init = db.get_contact(sess_id, "mia_yamada", char_id)
+        rel_init = genealogy.ensure_contact_relations(c_init, session_id=sess_id, scenario="high_school_drama")
+        rel_init["romance"] = {
+            "status": "In a Relationship",
+            "current_partner": {"name": "Daisuke Sato", "role": "Senior Classmate", "relationship_type": "Dating / Partner"},
+            "ex_partners": []
+        }
+        db.update_contact_relations(sess_id, "mia_yamada", rel_init, character_id=char_id)
+
+        # 2. Simulate an intimate encounter (casual sex / FWB)
+        # Action: Player sleeps with Mia Yamada (pure intimate act, NO confession)
+        # Outcome has milestone_event="intercourse" and LLM attempted track="romantic"
+        from game_engine.state.social import _reduce_social_and_milestones
+        outcome = {
+            "relationship_updates": [
+                {
+                    "npc_name": "Mia Yamada",
+                    "delta_score": 5,
+                    "track": "romantic",  # LLM erroneously tried to promote to romantic
+                    "milestone_event": "intercourse",
+                    "memory_summary": "Shared an intense, passionate night in secret",
+                    "revealed_attributes": ["sensitive_spots", "turn_ons", "fetishes"]
+                }
+            ],
+            "outcome_narrative": "They shared an intimate, passionate night together behind closed doors."
+        }
+        actions = [
+            {"label": "Take Mia into your arms and share an intimate night together", "intent": "intimate_act"}
+        ]
+        party = [({"id": char_id, "name": "Player", "user_id": 1}, 1)]
+        session = db.get_session(sess_id)
+        _reduce_social_and_milestones(sess_id, session, party, outcome, actions, "high_school_drama", {}, char_id, "Player")
+
+        # 3. Verify contact profile after casual intimate encounter
+        c_after = db.get_contact(sess_id, "mia_yamada", char_id)
+        # Track MUST remain platonic
+        self.assertEqual(c_after["track"], "platonic")
+        # Intimate experience must be updated
+        self.assertEqual(c_after["appearance"].get("intercourse_experience"), "non_virgin")
+        self.assertTrue(c_after["appearance"].get("turn_ons_revealed"))
+        # Partner MUST NOT be overwritten to Player
+        rel_after = genealogy.ensure_contact_relations(c_after, session_id=sess_id, scenario="high_school_drama")
+        self.assertEqual(rel_after["romance"]["current_partner"]["name"], "Daisuke Sato")
+        self.assertNotEqual(rel_after["romance"]["current_partner"]["name"], "Player")
+
+        # 4. Now perform an explicit, successful romantic confession
+        confession_outcome = {
+            "relationship_updates": [
+                {
+                    "npc_name": "Mia Yamada",
+                    "delta_score": 5,
+                    "track": "romantic",
+                    "milestone_event": "confession",
+                    "memory_summary": "Confessed deep romantic feelings to Mia"
+                }
+            ],
+            "outcome_narrative": "You confessed your true romantic feelings to Mia, and she agreed to be your girlfriend."
+        }
+        confession_actions = [
+            {"label": "Confess your romantic feelings to Mia Yamada and ask her to be your girlfriend", "intent": "romantic_confession", "target_npc": "Mia Yamada"}
+        ]
+        _reduce_social_and_milestones(sess_id, session, party, confession_outcome, confession_actions, "high_school_drama", {}, char_id, "Player")
+
+        # 5. Verify that confession successfully promotes track to romantic and updates partner
+        c_confessed = db.get_contact(sess_id, "mia_yamada", char_id)
+        self.assertEqual(c_confessed["track"], "romantic")
+        rel_confessed = genealogy.ensure_contact_relations(c_confessed, session_id=sess_id, scenario="high_school_drama")
+        self.assertEqual(rel_confessed["romance"]["status"], "In a Relationship")
+        self.assertEqual(rel_confessed["romance"]["current_partner"]["name"], "Player")
+        # Ex-partner Daisuke Sato must be preserved in ex_partners
+        self.assertTrue(any(e.get("name") == "Daisuke Sato" for e in rel_confessed["romance"].get("ex_partners", [])))
+
 if __name__ == '__main__':
     unittest.main()

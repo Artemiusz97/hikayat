@@ -33,7 +33,8 @@ def build_character_sheet_embed(char: dict, equipment: dict, title_prefix: str =
         xp_line += f"  |  🌟 {char['pending_stat_points']} unspent stat point(s) — use `/allocate`"
     embed.add_field(name="Level / XP", value=xp_line, inline=False)
     scen_key = char.get("scenario", "fantasy")
-    scen_name = load_scenarios().get(scen_key, {}).get("name", scen_key)
+    from scenario_data import get_scenario_display_name
+    scen_name = get_scenario_display_name(scen_key)
     identity_line = f"Scenario: **{scen_name}**"
     if char.get("race"):
         identity_line += f"  |  Race: **{format_race_display(char['race'])}**"
@@ -419,6 +420,14 @@ class ConfirmDeleteView(discord.ui.View):
 class CharacterCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user:
+            try:
+                await adb(db.save_discord_user, interaction.user.id, interaction.user.name, interaction.user.display_name)
+            except Exception:
+                pass
+        return True
 
     character_group = app_commands.Group(name="character", description="Manage your Hikayat character")
 

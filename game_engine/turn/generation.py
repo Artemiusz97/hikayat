@@ -332,7 +332,7 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         f"OPENING INCITING INCIDENT [{arch_title}]: {hook_text}\n"
         f"ARCHETYPE DIRECTIVE: {arch_directive}\n\n"
         f"{loc_anchor_line}"
-        f"KNOWN WORLD:\n{game_engine._known_world_text(session['id'], suggested_loc or '', [], [])}\n\n"
+        f"KNOWN WORLD:\n{game_engine._known_world_text(session['id'], suggested_loc or '')}\n\n"
         f"{time_prompt_block}\n"
         f"PHYSICAL CONTINUITY ANCHOR:\n{phys_anchor}\n\n"
         f"Begin adventure for {'party' if len(party) > 1 else 'character'}.\n\n"
@@ -342,7 +342,7 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
     )
     result = await game_engine.call_llm_json(
         system_prompt, user_prompt,
-        is_nsfw=is_nsfw_scenario(session.get("scenario")),
+        is_nsfw=scenario_data.uses_nsfw_model(session.get("scenario")),
         response_model=OpeningScene
     )
 
@@ -499,10 +499,38 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
                     db.save_quest_waypoints(session_id=session["id"], quest_id=sq_id, waypoints=wps, sub_obj_id=so_id)
 
         except Exception as e:
-
             import logging
-
-            logging.getLogger(__name__).warning("generate_story_quest for Chapter 1 failed: %s", e)
+            logging.getLogger(__name__).warning("generate_story_quest for Chapter 1 failed: %s. Applying emergency contextual generator.", e)
+            try:
+                sq_data = game_engine.create_contextual_story_quest_data(
+                    session["id"], session, chapter_num=1, starting_hook_context=starting_hook_ctx
+                )
+                formatted_sub_objs = sq_data.get("sub_objectives") or []
+                sub_waypoints = sq_data.get("sub_waypoints") or {}
+                import uuid
+                sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
+                db.upsert_quest(
+                    session_id=session["id"],
+                    quest_id=sq_id,
+                    quest_type=sq_data.get("archetype") or "Story Quest",
+                    title=sq_data.get("title") or "Story Quest #1: The Discovery",
+                    objective=sq_data.get("objective") or "Explore the area, uncover local mysteries, and establish your footing.",
+                    progress=f"0/{len(formatted_sub_objs)} Cleared" if formatted_sub_objs else "Quest #1",
+                    current_clues="",
+                    status="Active",
+                    reward_xp=250,
+                    reward_gold=60,
+                    is_story_quest=1,
+                    clues_required=len(formatted_sub_objs),
+                    sub_objectives=formatted_sub_objs
+                )
+                for so in formatted_sub_objs:
+                    so_id = so["id"]
+                    wps = sub_waypoints.get(so_id) or []
+                    if wps:
+                        db.save_quest_waypoints(session_id=session["id"], quest_id=sq_id, waypoints=wps, sub_obj_id=so_id)
+            except Exception as e2:
+                logging.getLogger(__name__).error("Failed to insert emergency contextual story quest: %s", e2)
 
 
 
@@ -581,26 +609,31 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
 
 
 
-    # Fast-path 1: Free ambient exploration actions
-
+    # Fast-path 1: Free ambient exploration actions (starting/leaving convo, traveling, routine rest)
+    is_in_dialogue = bool(ctx and (ctx.dialogue_partner or ctx.dialogue_partners))
     if is_free_ambient_action(parsed):
+        # In-dialogue interactions are never free ambient actions unless explicitly exiting or moving away
+        if not is_in_dialogue or parsed.category in (IntentCategory.DIALOGUE_EXIT, IntentCategory.MOVEMENT):
+            return {
+                "stat": "NONE",
+                "requirement": 0,
+                "mp_cost": 0,
+                "action_category": parsed.category.value,
+                "fast_path": True,
+                "intent": parsed.category.value,
+                "target_npc": parsed.target_entity or ""
+            }
 
+    # Fast-path 1.5: Progressive personal, romantic, or intimate disclosure inquiries
+    if parsed.category == IntentCategory.DISCLOSURE_INQUIRY:
         return {
-
-            "stat": "NONE",
-
-            "requirement": 0,
-
+            "stat": "CHA",
+            "requirement": 8,
             "mp_cost": 0,
-
-            "action_category": parsed.category.value,
-
+            "action_category": "disclosure_inquiry",
             "fast_path": True,
-
             "intent": parsed.category.value,
-
             "target_npc": parsed.target_entity or ""
-
         }
 
 
@@ -755,7 +788,7 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
 
     user_prompt = (
 
-        f"KNOWN WORLD:\n{game_engine._known_world_text(session['id'], session.get('current_location', ''), session.get('nearby_enemies', []), session.get('current_npcs', []))}\n\n"
+        f"KNOWN WORLD:\n{game_engine._known_world_text(session['id'], session.get('current_location', ''), current_npcs=session.get('current_npcs', []))}\n\n"
 
         f"CHARACTER SHEET:\n{game_engine._character_sheet_text(char, inventory)}\n\n"
 
@@ -767,15 +800,26 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
 
     )
 
-    result: ActionClassification = await game_engine.call_llm_json(SYSTEM_PROMPT, user_prompt, temperature=0.4,
-
-                                 max_tokens=800, retries=2, is_nsfw=is_nsfw_scenario(session.get("scenario")), use_utility=True, response_model=ActionClassification)
-
-    
-
-    # We dump it immediately because `classify_custom_action` returns a dict used by many places and mutates it
-
-    res_dict = result.model_dump(exclude_unset=True)
+    try:
+        result = await game_engine.call_llm_json(
+            SYSTEM_PROMPT, user_prompt, temperature=0.4,
+            max_tokens=800, retries=2, is_nsfw=scenario_data.uses_nsfw_model(session.get("scenario")),
+            use_utility=True, response_model=ActionClassification
+        )
+        if getattr(result, "model_dump", None):
+            res_dict = result.model_dump(exclude_unset=True)
+        elif isinstance(result, dict):
+            res_dict = dict(result)
+        else:
+            res_dict = {}
+    except Exception as e:
+        log.warning("classify_custom_action LLM call failed: %s; using fallback classification", e)
+        res_dict = {
+            "stat": "CHA" if any(w in action_text.lower() for w in ("talk", "speak", "ask", "tell", "whisper", "say", "confess", "smile", "greet")) else "AGI",
+            "requirement": 6,
+            "mp_cost": 0,
+            "action_category": "generic"
+        }
 
     if res_dict.get("stat") not in VALID_STATS:
 
@@ -849,7 +893,7 @@ async def generate_custom_starter_gear(char_class: str, class_description: str, 
 
     from mechanics.combat.items.envelope import serialize_item
 
-    from scenario_data import is_nsfw_scenario
+    from scenario_data import uses_nsfw_model
 
 
 
@@ -859,7 +903,7 @@ async def generate_custom_starter_gear(char_class: str, class_description: str, 
 
     race_str = str(race or "Human").strip()
 
-    is_nsfw = is_nsfw_scenario(scenario)
+    is_nsfw = uses_nsfw_model(scenario)
 
 
 
@@ -1127,7 +1171,15 @@ async def generate_custom_starter_gear(char_class: str, class_description: str, 
 
     loadout["Weapon"] = weapon
 
-
+    from scenario_data import is_non_combat_scenario
+    from mechanics.combat.items.tags import make_narrative_metadata
+    if is_non_combat_scenario(scenario):
+        for slot, itm in list(loadout.items()):
+            if isinstance(itm, dict):
+                meta = itm.get("metadata", {})
+                norm_meta = make_narrative_metadata(meta)
+                itm["metadata"] = norm_meta
+                itm["effect"] = _ser(norm_meta)
 
     return loadout
 

@@ -29,12 +29,12 @@ def _slugify(text: str) -> str:
 TAG_TO_LOCATION_SEED_KEY = {
     "space": "sci_fi",
     "sci_fi": "sci_fi",
-    "grimdark": "dark_fantasy",
     "dark_fantasy": "dark_fantasy",
     "isekai": "isekai_fantasy",
     "isekai_fantasy": "isekai_fantasy",
     "high_school": "high_school_drama",
     "high_school_drama": "high_school_drama",
+    "slice_of_life": "slice_of_life",
     "post_apocalypse": "nuclear_post_apocalypse",
     "nuclear_post_apocalypse": "nuclear_post_apocalypse",
     "cyberpunk": "cyberpunk",
@@ -73,16 +73,15 @@ def get_scenario_seed_data(scenario_key: str) -> dict:
     return scen_data
 
 def is_school_scenario(scenario_key: str) -> bool:
-    """Checks if scenario is an academic/school or modern slice-of-life setting."""
+    """Checks if scenario is an academic/school setting."""
     scen = str(scenario_key or "").lower().strip()
-    if any(k in scen for k in ("high_school", "school", "furry_high_school", "academy", "slice_of_life")):
+    if any(k in scen for k in ("high_school", "school", "furry_high_school", "academy")):
         return True
     try:
         from scenario_data import has_tag
         return bool(
             has_tag(scen, "high_school")
             or has_tag(scen, "high_school_drama")
-            or has_tag(scen, "slice_of_life")
         )
     except Exception:
         return False

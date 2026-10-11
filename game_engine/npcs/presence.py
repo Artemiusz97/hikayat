@@ -1,6 +1,7 @@
 import json
 import re
 import random
+import db
 import game_engine
 from game_engine.core import *
 from game_engine.core import _get_npc_name, _norm_dialogue_name
@@ -281,6 +282,25 @@ def classify_scene_npcs(
 
 
 
+    # Check if destination is a private phone rendezvous (e.g. meeting someone via DM)
+    target_meetup_npc_names: set[str] = set()
+    sess_id = session.get("id") if isinstance(session, dict) else None
+    if sess_id and (dest_primary or new_loc):
+        try:
+            from mechanics.world.waypoints import check_location_matches_waypoint
+            appts = db.get_phone_appointments(sess_id, status="pending") + db.get_phone_appointments(sess_id, status="arrived")
+            for appt in appts:
+                appt_loc = appt.get("rendezvous_location", "")
+                if appt_loc and (check_location_matches_waypoint(new_loc or dest_primary, appt_loc) or check_location_matches_waypoint(dest_primary, appt_loc)):
+                    a_name = str(appt.get("npc_name", "")).strip().lower()
+                    if a_name:
+                        target_meetup_npc_names.add(a_name)
+                        a_first = a_name.split()[0]
+                        if len(a_first) >= 3:
+                            target_meetup_npc_names.add(a_first)
+        except Exception:
+            pass
+
     for n in old_npcs:
 
         if not isinstance(n, dict) or not n.get("name"):
@@ -316,6 +336,19 @@ def classify_scene_npcs(
             left_behind_patrons.append(n)
 
             continue
+
+
+
+        # Private Rendezvous Isolation:
+        # If moving to a private phone meetup rendezvous, uninvited bystanders from previous locations
+        # MUST stay behind unless they are explicitly invited in the action or are the rendezvous partner.
+        if target_meetup_npc_names:
+            first_tok = n_clean.split()[0] if n_clean else ""
+            is_invited_in_action = game_engine.is_npc_invited_in_action(n_name, actions)
+            is_meetup_partner = n_clean in target_meetup_npc_names or (len(first_tok) >= 3 and first_tok in target_meetup_npc_names)
+            if not is_invited_in_action and not is_meetup_partner:
+                left_behind_patrons.append(n)
+                continue
 
 
 
@@ -413,42 +446,44 @@ def classify_scene_npcs(
 
             first_tok = n_clean.split()[0] if n_clean else ""
 
-            has_meetup_history = any(
-
-                (n_clean in str(h).lower() or (len(first_tok) >= 3 and first_tok in str(h).lower()))
-
-                and any(k in str(h).lower() for k in MEETUP_INTENT_KEYWORDS)
-
-                for h in recent_hist
-
+            from mechanics.world.mobility import _extract_history_text, _has_meetup_intent_keyword
+            has_meetup_history = False
+            has_split_up = False
+            SPLIT_PATTERNS = (
+                r"\b(?:split|separate|divide)\s+(?:up|the|our|tasks?|investigation)\b",
+                r"\b(?:take|takes)\s+(?:the\s+)?archives.*(?:take|takes)\s+(?:the\s+)?locker\b",
+                r"\bmeet\s+(?:in|after|later|at\s+the\s+stairwell)\b",
+                r"\bmeet\s+(?:back\s+)?(?:in\s+\d+|later)\b",
+                r"\bdivision\s+of\s+labor\b",
+                r"\bgo\s+(?:our\s+)?separate\s+ways\b"
             )
+            for h in recent_hist:
+                h_text = _extract_history_text(h).lower()
+                if not h_text:
+                    continue
+                if any(re.search(pat, h_text) for pat in SPLIT_PATTERNS):
+                    has_split_up = True
+                name_pattern = r"\b" + re.escape(n_clean) + r"\b"
+                if len(first_tok) >= 3:
+                    name_pattern += r"|\b" + re.escape(first_tok) + r"\b"
+                if re.search(name_pattern, h_text) and _has_meetup_intent_keyword(h_text):
+                    has_meetup_history = True
 
-
+            if has_split_up:
+                has_meetup_history = False
 
             narr_presence = False
-
             if full_narr:
-
                 narr_presence = has_active_physical_presence(n_name, result or {}, narrative_text=full_narr)
 
-
-
             # An NPC only travels as a companion if:
-
             # - Player explicitly travels with or invites them in the action (action_has_together or is_npc_invited_in_action)
-
-            # - OR there is an established date/meetup agreed in recent history (has_meetup_history)
-
-            # Merely being a dialogue partner (is_dp) or having relationship affinity does NOT make them follow!
-
+            # - OR there is an established active date/meetup agreed in recent history (is_romantic and has_meetup_history and not has_split_up)
+            # Merely having discussed a meetup or future rendezvous does NOT make them follow on separate travel!
             is_invited = game_engine.is_npc_invited_in_action(n_name, actions)
-
-            if action_has_together or is_invited or has_meetup_history:
-
+            if action_has_together or is_invited or (is_romantic and has_meetup_history):
                 if is_dp or narr_presence or has_meetup_history:
-
                     traveling_companions.append(n)
-
                     continue
 
 

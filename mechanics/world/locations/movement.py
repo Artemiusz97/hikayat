@@ -30,12 +30,9 @@ def is_invalid_location_string(name: str) -> bool:
 
     objective_markers = [
 
-        r"\bto (intercept|find|defeat|slay|kill|talk|speak|investigate|search|avoid|collect|gather|deliver|protect|steal|retrieve|discover|confront|rescue|track|scout|meet|acquire|inquire)\b",
-
+        r"\bto (intercept|find|defeat|slay|kill|talk|speak|investigate|search|avoid|collect|gather|deliver|protect|steal|retrieve|discover|confront|rescue|track|scout|meet|acquire|inquire|bypass|eliminate|clear|explore|infiltrate|study|examine|obtain|secure|reach|halt|stop)\b",
         r"\bin order to\b",
-
         r"\b(slink into|head over to|sneak past|search for|look for|pick up|gain entry to|break into|climb up to)\b",
-
         r"\b(notes|rumors|evidence|secrets|patrol|participants|culprit|target|plans|orders)\b.*?\b(in|at|near|behind|around)\b"
 
     ]
@@ -49,16 +46,21 @@ def is_invalid_location_string(name: str) -> bool:
 
 
     # 2. Too many words without delimiters (5+ words is almost always a narrative objective or sentence)
-
     if "➔" not in clean and "->" not in clean and ">" not in clean and "|" not in clean:
-
         words = clean.split()
-
         if len(words) >= 5:
-
-            return True
-
-
+            # Check if this is a known physical establishment or seed location noun (e.g. "Old East Wing Music Room")
+            physical_place_nouns = (
+                "room", "wing", "hall", "building", "academy", "office", "courtyard",
+                "station", "pavilion", "sanctuary", "temple", "shrine", "center",
+                "centre", "club", "dorm", "dormitory", "lounge", "plaza", "grounds",
+                "garden", "annex", "district", "quarter", "library", "store", "shop",
+                "cafe", "cafeteria", "canteen", "lab", "laboratory", "gym", "gymnasium",
+                "field", "rooftop", "roof", "auditorium", "theater", "theatre",
+                "infirmary", "clinic", "terrace", "balcony", "park", "avenue", "street", "alley"
+            )
+            if not any(pn in clean for pn in physical_place_nouns) or len(words) >= 8:
+                return True
 
     return False
 
@@ -80,82 +82,48 @@ def sanitize_location_target(raw_target: str, session_id: int = 0, scen_key: str
 
 
 
-    clean_raw = str(raw_target).strip()
-
-
+    clean_raw = re.sub(r"[*_`]", "", str(raw_target)).strip()
+    clean_raw = re.sub(r"\s*->\s*|\s*-->\s*", " ➔ ", clean_raw)
 
     # If already a valid, clean location name
-
     if not is_invalid_location_string(clean_raw):
-
         return clean_raw
 
-
-
     # Check if a known registered physical place in session matches any part of raw_target
-
     if session_id:
-
         existing = db.get_session_locations(session_id)
-
         raw_lower = clean_raw.lower()
-
         for r in existing:
-
             p_name = r.get("primary_name", "")
-
             if p_name:
-
                 p_lower = p_name.lower()
-
                 # Check direct inclusion of primary name
-
                 if p_lower in raw_lower:
-
                     z_name = r.get("zone_name") or ""
-
                     return format_tiered_location_string(z_name, p_name, "Main Area") if z_name else p_name
 
                 # Check root keyword (e.g. "library" in "the library to intercept...")
-
                 p_words = [w for w in p_lower.replace("'", "").replace("&", " ").split() if len(w) >= 4 and w not in ("school", "main", "hall", "room", "area", "house", "grounds", "place")]
-
                 if p_words and any(pw in raw_lower for pw in p_words):
-
                     z_name = r.get("zone_name") or ""
-
                     return format_tiered_location_string(z_name, p_name, "Main Area") if z_name else p_name
 
-
-
     # If no existing match, strip trailing objective clause: e.g. "the library to intercept..." -> "Library"
-
     to_idx = -1
-
-    for marker in (" to ", " in order to ", " and steal ", " and find ", " to avoid ", " to intercept "):
-
+    for marker in (" to ", " in order to ", " and steal ", " and find ", " and search ", " to avoid ", " to intercept ", " to bypass ", " to eliminate "):
         idx = clean_raw.lower().find(marker)
-
         if idx != -1:
-
             to_idx = idx
-
             break
 
-
-
     if to_idx != -1:
-
         extracted = clean_raw[:to_idx].strip()
-
         if extracted.lower().startswith("the "):
-
             extracted = extracted[4:].strip().title()
-
         if extracted:
-
+            if "➔" in extracted:
+                return extracted
             z_default, _, _ = get_default_tiered_location(scen_key, session_id=session_id, char_name=char_name)
-
             return format_tiered_location_string(z_default, extracted.title(), "Main Area")
 
 
@@ -184,32 +152,38 @@ def process_llm_location_update(session_id: int, raw_location: str, scenario_key
 
     ensure_session_locations_seeded(session_id, scenario_key, char_name=char_name)
 
-
+    # Clean markdown and delimiters from raw_location
+    if raw_location:
+        raw_location = re.sub(r"[*_`]", "", str(raw_location)).strip()
+        raw_location = re.sub(r"\s*->\s*|\s*-->\s*", " ➔ ", raw_location)
 
     # Sanitize invalid objective/sentence strings before parsing
-
     if is_invalid_location_string(raw_location):
-
         raw_location = sanitize_location_target(raw_location, session_id=session_id, scen_key=scenario_key, char_name=char_name)
-
-
 
     zone, primary, sub = parse_tiered_location(raw_location, scenario_key, session_id=session_id, char_name=char_name)
 
-
+    # Clean any surviving markdown from components
+    zone = re.sub(r"[*_`]", "", str(zone)).strip()
+    primary = re.sub(r"[*_`]", "", str(primary)).strip()
+    sub = re.sub(r"[*_`]", "", str(sub)).strip()
 
     # If primary is still detected as invalid objective sentence or poetic drift
-
     if is_invalid_location_string(primary) or is_poetic_drift_title(primary):
-
         sanitized_p = sanitize_location_target(primary, session_id=session_id, scen_key=scenario_key, char_name=char_name)
-
         _, primary, _ = parse_tiered_location(sanitized_p, scenario_key, session_id=session_id, char_name=char_name)
 
-
+    # If sub is detected as invalid objective sentence or contains action markers
+    if is_invalid_location_string(sub):
+        for marker in (" to ", " in order to ", " and steal ", " and find ", " and search ", " to avoid ", " to intercept ", " to bypass ", " to eliminate "):
+            m_idx = sub.lower().find(marker)
+            if m_idx != -1:
+                sub = sub[:m_idx].strip()
+                break
+        if not sub or is_invalid_location_string(sub):
+            sub = "Main Area"
 
     if is_incongruous_container(primary, sub, session_id=session_id, scenario_key=scenario_key):
-
         zone, primary, sub = auto_heal_incongruous_location(zone, primary, sub, session_id=session_id, scenario_key=scenario_key)
 
 
@@ -291,18 +265,16 @@ def process_llm_location_update(session_id: int, raw_location: str, scenario_key
 
     s_low_final = sub.strip().lower()
 
+    z_low_final = zone.strip().lower()
     is_valid_save = (
-
         zone and primary and sub
-
+        and not is_invalid_location_string(zone)
+        and not is_invalid_location_string(primary)
+        and not any(k in z_low_final for k in ("board", "desk", "table", "chair", "bed", "closet", "shelf", "counter"))
         and p_low_final not in zones_index
-
         and s_low_final not in zones_index
-
         and s_low_final not in primaries
-
         and not is_incongruous_container(primary, sub, session_id=session_id, scenario_key=scenario_key)
-
     )
 
     if is_school_scenario(scenario_key):
@@ -772,7 +744,17 @@ def is_movement_action(action_text: str) -> bool:
 
         return False
 
-
+    # Intimate and physical interaction actions are not spatial movements unless explicit travel tag/prefix is present
+    intimate_actions = (
+        "fuck", "fucking", "pound", "pounding", "thrust", "thrusting", "ride", "riding",
+        "caress", "caressing", "kiss", "kissing", "undress", "undressing", "strip", "stripping",
+        "suck", "sucking", "lick", "licking", "blowjob", "cunnilingus", "oral", "handjob",
+        "fingering", "make love", "grind", "grinding", "grope", "groping",
+        "taking her", "taking him", "take her", "take him", "from behind", "hands and knees",
+        "flip her", "flip him", "turn her", "turn him", "pull out and", "position", "positions"
+    )
+    if any(re.search(r'\b' + re.escape(ia) + r'\b', act_lower) for ia in intimate_actions) and not any(k in act_lower for k in override_movement_phrases):
+        return False
 
     movement_roots = (
 
@@ -864,7 +846,15 @@ def is_movement_action(action_text: str) -> bool:
 
     )
 
-    has_root = any(re.search(r'\b' + re.escape(root) + r'\b', act_lower) for root in movement_roots)
+    valid_movement_roots = []
+    for root in movement_roots:
+        if re.search(r'\b' + re.escape(root) + r'\b', act_lower):
+            # Reaching for a physical item, body part, or gesture is not spatial movement to a location
+            if root.startswith("reach") and re.search(r'\breach(?:es|ed|ing)?\s+(?:under|for|into|between|down|around|behind|out\s+to\s+touch)\b', act_lower):
+                continue
+            valid_movement_roots.append(root)
+
+    has_root = bool(valid_movement_roots)
 
     has_dir = any(dir_t in act_lower for dir_t in direction_terms)
 
@@ -920,6 +910,14 @@ def extract_movement_destination(action_text: str, session_id: int, current_zone
 
         return None
 
+    if is_school_scenario(scen_key):
+        existing = [
+            r for r in existing
+            if not any(k in (r.get("zone_name") or "").lower() for k in ("shadowlands", "dreadfall", "necro", "blight", "dungeon", "crypt", "obsidian altar", "ruined keep"))
+        ]
+        if not existing:
+            return None
+
 
 
     # Helper to check if two zone names refer to the same region (e.g. 'Astrid' vs 'Royal Capital of Astrid')
@@ -940,9 +938,24 @@ def extract_movement_destination(action_text: str, session_id: int, current_zone
 
         return bool(sz1 and sz2 and sz1 == sz2)
 
+    # 0. Direct tiered location matching with explicit delimiters (highest precedence)
+    delimiters = ["➔", "->", ">", "|"]
+    for d in delimiters:
+        if d in action_text:
+            raw_target = action_text
+            for pfx in ("i travel to ", "travel to ", "i head to ", "head to ", "i walk to ", "walk to ", "i move to ", "move to ", "i visit ", "visit "):
+                if act_lower.startswith(pfx):
+                    raw_target = action_text[len(pfx):].strip().rstrip(".")
+                    break
+            pz, pp, _ = parse_tiered_location(raw_target, scenario_key=scen_key, session_id=session_id, char_name=char_name)
+            is_known_place = any(
+                r.get("primary_name", "").strip().lower() == pp.strip().lower()
+                for r in existing
+            )
+            if pz and pp and pp not in ("Main Area", "") and (is_known_place or not is_poetic_drift_title(pp)):
+                return (pz, pp)
 
-
-    # 0. Check if action matches heading home (player's home or companion's home)
+    # 0a. Check if action matches heading home (player's home or companion's home)
 
     if any(k in act_lower for k in ("head home", "walk home", "go home", "return home", "travel home", "heading home", "heading back home", "head back home")):
 
@@ -1069,29 +1082,6 @@ def extract_movement_destination(action_text: str, session_id: int, current_zone
 
 
 
-    # 0c. Check if action_text contains a direct tiered location string (e.g. "I travel to Royal Capital of Astrid ➔ Adventurers' Guild Hall.")
-
-    delimiters = ["➔", "->", ">", "|"]
-
-    for d in delimiters:
-
-        if d in action_text:
-
-            raw_target = action_text
-
-            for pfx in ("i travel to ", "travel to ", "i head to ", "head to ", "i walk to ", "walk to ", "i move to ", "move to ", "i visit ", "visit "):
-
-                if act_lower.startswith(pfx):
-
-                    raw_target = action_text[len(pfx):].strip().rstrip(".")
-
-                    break
-
-            pz, pp, _ = parse_tiered_location(raw_target, scenario_key=scen_key, session_id=session_id, char_name=char_name)
-
-            if pz and pp and pp not in ("Main Area", "") and not is_poetic_drift_title(pp):
-
-                return (pz, pp)
 
 
 
@@ -1145,9 +1135,14 @@ def extract_movement_destination(action_text: str, session_id: int, current_zone
             continue
 
         p_lower = p_name.lower()
+        clean_p = re.sub(r'\(.*?\)', '', p_lower).strip()
+        has_match = False
+        if re.search(r'(?<!\w)' + re.escape(p_lower) + r'(?!\w)', act_lower):
+            has_match = True
+        elif clean_p and len(clean_p) >= 3 and re.search(r'(?<!\w)' + re.escape(clean_p) + r'(?!\w)', act_lower):
+            has_match = True
 
-        if re.search(r'\b' + re.escape(p_lower) + r'\b', act_lower):
-
+        if has_match:
             exact_matches.append((z_name, p_name, len(p_lower)))
 
 
@@ -1173,13 +1168,14 @@ def extract_movement_destination(action_text: str, session_id: int, current_zone
     # 2. Check distinct keywords of registered establishments (e.g. "guild hall", "market plaza", "sunken moonwell", "imperial palace")
 
     generic_words = (
-
         "school", "main", "hall", "room", "classroom", "area", "house", "grounds",
-
         "place", "building", "zone", "corridor", "store", "shop", "market", "bazaar",
-
-        "outlet", "spot", "center", "centre", "office"
-
+        "outlet", "spot", "center", "centre", "office",
+        "north", "south", "east", "west", "upper", "lower", "inner", "outer", "old", "new",
+        "wing", "front", "back", "side", "central", "middle", "corner",
+        "keep", "reach", "hold", "stand", "rest", "take", "step", "bring", "lead", "stop",
+        "behind", "beside", "between", "under", "over", "around", "near", "across", "through",
+        "along", "against", "toward", "towards"
     )
 
     keyword_matches = []
@@ -1195,21 +1191,14 @@ def extract_movement_destination(action_text: str, session_id: int, current_zone
             continue
 
         p_lower = p_name.lower()
-
-        p_words = [w for w in p_lower.replace("'", "").replace("&", " ").split() if len(w) >= 4 and w not in generic_words]
-
+        clean_p_words = re.sub(r'[()]', ' ', p_lower).replace("'", "").replace("&", " ")
+        p_words = [w for w in clean_p_words.split() if (len(w) >= 4 or w.isdigit()) and w not in generic_words]
         matched_words = []
-
         for pw in p_words:
-
-            if re.search(r'\b' + re.escape(pw) + r'\b', act_lower):
-
+            if re.search(r'(?<!\w)' + re.escape(pw) + r'(?!\w)', act_lower):
                 # Ensure it is not an origin being exited (e.g. "out of the office", "leave the room")
-
-                if re.search(r'\b(?:out\s+of(?:\s+the)?|leave(?:\s+the)?|exit(?:\s+the)?)\s+' + re.escape(pw) + r'\b', act_lower):
-
+                if re.search(r'\b(?:out\s+of(?:\s+the)?|leave(?:\s+the)?|exit(?:\s+the)?)\s+' + re.escape(pw) + r'(?!\w)', act_lower):
                     continue
-
                 matched_words.append(pw)
 
         if matched_words:
@@ -1236,13 +1225,28 @@ def extract_movement_destination(action_text: str, session_id: int, current_zone
 
     # 3. Direct travel prefix extraction (e.g. "I travel to Empty Classroom." -> "Empty Classroom")
 
-    for pfx in ("i travel to ", "travel to ", "i head to ", "head to ", "i walk to ", "walk to ", "i move to ", "move to ", "i visit ", "visit ", "sneak into ", "explore "):
+    for pfx in (
+        "i travel to ", "travel to ", "i head to ", "head to ", "i walk to ", "walk to ",
+        "i move to ", "move to ", "i visit ", "visit ", "sneak into ", "explore ",
+        "take the long walk to ", "take the walk to ", "make the walk to ", "the long walk to ", "long walk to ",
+        "head toward ", "head towards ", "walk toward ", "walk towards ", "travel toward ", "travel towards "
+    ):
 
         if act_lower.startswith(pfx):
 
             raw_target = action_text[len(pfx):].strip().rstrip(".")
 
             if raw_target:
+
+                if is_school_scenario(scen_key) and raw_target.lower() in ("school", "the school", "campus", "the campus", "academy", "the academy", "high school"):
+
+                    s_name = get_session_school_name(session_id, scen_key)
+
+                    if s_name:
+
+                        gw_p = next((r["primary_name"] for r in existing if r.get("zone_name") == s_name and ("gate" in r.get("primary_name", "").lower() or "entrance" in r.get("primary_name", "").lower())), "School Main Gates")
+
+                        return (s_name, gw_p)
 
                 for r in existing:
 
@@ -1301,11 +1305,18 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
     # Step 1: Check if the player explicitly chose a movement action to a registered physical establishment
 
     action_dest = extract_movement_destination(action_text, session_id, current_zone=curr_z, scen_key=scen_key, char_name=char_name)
-
     if action_dest and check_tier != "crit_fail":
-
         dest_z, dest_p = action_dest
 
+        # If the player is already grounded in an established primary venue (curr_p),
+        # and the LLM result kept that same venue, do not allow action_dest to pull the player
+        if raw_res and curr_p and dest_p.lower() != curr_p.lower():
+            p_z, p_p, p_s = parse_tiered_location(raw_res, scen_key, session_id=session_id, char_name=char_name)
+            if p_p.lower() == curr_p.lower() and p_s.lower() != (curr_s or "").lower() and dest_p.lower() not in str(action_text).lower():
+                action_dest = None
+
+    if action_dest and check_tier != "crit_fail":
+        dest_z, dest_p = action_dest
         sub_to_use = "Main Area"
 
         # Check if there is an active phone appointment at this destination with a specific sub-location
@@ -1355,10 +1366,21 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
             cand_words = [w for w in cand_lower.split() if len(w) >= 4 and w not in ("area", "spot", "your", "main")]
 
             if (cand_lower in act_lower or (cand_words and any(cw in act_lower for cw in cand_words))) or (cand_lower in narr_prose or (cand_words and any(cw in narr_prose for cw in cand_words))):
-
                 sub_to_use = sub_cand
-
                 break
+
+        for d in ("➔", "->", ">", "|"):
+            if d in action_text:
+                raw_t = action_text
+                for pfx in ("i travel to ", "travel to ", "i head to ", "head to ", "i walk to ", "walk to ", "i move to ", "move to ", "i visit ", "visit "):
+                    if act_lower.startswith(pfx):
+                        raw_t = action_text[len(pfx):].strip().rstrip(".")
+                        break
+                _, _, explicit_sub = parse_tiered_location(raw_t, scenario_key=scen_key, session_id=session_id, char_name=char_name)
+                if explicit_sub and explicit_sub not in ("Main Area", "") and not is_poetic_drift_title(explicit_sub):
+                    sub_to_use = explicit_sub
+                    break
+
 
 
 
@@ -1366,7 +1388,11 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
             parsed_z, parsed_p, parsed_sub = parse_tiered_location(raw_res, scen_key, session_id=session_id, char_name=char_name)
 
-            if parsed_sub and parsed_sub not in ("Main Area", "") and not is_poetic_drift_title(parsed_sub) and not is_incongruous_container(dest_p, parsed_sub, session_id=session_id, scenario_key=scen_key):
+            is_same_dest = bool(parsed_p and parsed_p.lower() == dest_p.lower())
+
+            is_known_sub = bool(known_subs_for_dest and any(parsed_sub.lower() == s.lower() for s in known_subs_for_dest))
+
+            if (is_same_dest or is_known_sub) and parsed_sub and parsed_sub not in ("Main Area", "") and not is_poetic_drift_title(parsed_sub) and not is_incongruous_container(dest_p, parsed_sub, session_id=session_id, scenario_key=scen_key):
 
                 sub_to_use = parsed_sub
 
@@ -1451,66 +1477,60 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
 
         # ENCLOSED ROOM EXIT DEMOTION GUARD:
-
         # If the player is currently in an interior room (e.g. Teachers' Staff Room, Homeroom, Chemistry Lab)
-
         # and the narrative (outside dialogue) describes stepping into the hallway, leaving the room, or the door clicking shut:
-
         # Switch primary place to the zone's hallway/corridor and clear room-specific NPCs.
-
         has_hallway_exit = False
+        action_str = str(action_text or "").lower()
+        is_departure_act = any(k in action_str for k in ("exit", "leave", "walk out", "step out", "head out", "slip out", "depart", "goodbye", "farewell", "excuse yourself"))
+
+        # Explicit in-room interactions (dialogue remarks, inquiries, sitting, playing piano, tender touch) anchor the player firmly in the current room
+        is_in_room_act = any(k in action_str for k in (
+            "ask", "tell", "say", "talk", "whisper", "tease", "kiss", "touch", "caress", "hold",
+            "sit", "bench", "piano", "desk", "chair", "table", "inspect", "examine", "look at",
+            "suggestive", "play", "listen", "confess", "smile", "laugh"
+        ))
+
+        # Check dialogue anchor from session
+        in_dialogue_anchor = False
+        if session_id:
+            try:
+                sess_obj = db.get_session(session_id)
+                if sess_obj and (sess_obj.get("dialogue_partners") or sess_obj.get("dialogue_partner")):
+                    in_dialogue_anchor = True
+            except Exception:
+                pass
 
         if curr_p and not any(h in curr_p.lower() for h in ("hallway", "hallways", "corridor")):
+            # Only evaluate hallway exit if the action is not an in-room interaction,
+            # and either player initiated a departure or is not actively locked in a dialogue conversation
+            if not is_in_room_act and (is_departure_act or is_move or not in_dialogue_anchor):
+                exit_hallway_cues = (
+                    "step into the hallway", "steps into the hallway", "stepped into the hallway", "stepping into the hallway",
+                    "step out into the hallway", "steps out into the hallway", "stepped out into the hallway",
+                    "door of the staff room clicks shut", "door clicks shut, sealing away", "sealing away the administrative hum",
+                    "away from the faculty", "left the staff room", "leaves the staff room",
+                    "walked out of the room", "walks out of the room", "walking out of the room",
+                    "walked out into the hallway", "walks out into the hallway",
+                    "out of the office", "leaves the office", "left the office",
+                    "leads the way out", "lead the way out", "led the way out"
+                )
+                has_hallway_exit = any(cue in narr_prose for cue in exit_hallway_cues) or (
+                    (is_move or is_departure_act) and any(k in action_str for k in ("exit", "way out", "the hallway", "step out", "walk out", "head out", "follow"))
+                )
 
-            exit_hallway_cues = (
-
-                "step into the hallway", "steps into the hallway", "stepped into the hallway", "stepping into the hallway",
-
-                "into the hallway", "in the corridor", "air in the corridor", "air in the hallway",
-
-                "door of the staff room clicks shut", "door clicks shut, sealing away", "sealing away the administrative hum",
-
-                "away from the faculty", "left the staff room", "leaves the staff room", "left the room", "leaves the room",
-
-                "exit the room", "exited the room", "walked out of the room", "walks out of the room",
-
-                "out of the office", "leaves the office", "left the office", "leads the way out", "lead the way out",
-
-                "led the way out", "walk through the halls", "walks through the halls", "through the halls",
-
-                "through the hallways", "down the hall", "down the corridor", "into the corridor",
-
-                "step outside", "steps outside", "stepped outside", "walk outside", "walks outside", "walked outside",
-
-                "onto the terrace", "to the terrace", "to the gardens", "into the gardens", "overlooking the gardens"
-
-            )
-
-            has_hallway_exit = any(cue in narr_prose for cue in exit_hallway_cues) or (is_move and any(k in str(action_text).lower() for k in ("exit", "way out", "the hallway", "step out", "walk out", "head out", "follow")))
-
-            if has_hallway_exit:
-
-                if res_p.lower() == curr_p.lower() and not any(h in res_p.lower() for h in ("hallway", "corridor", "hallways")):
-
-                    hall_match = next((
-
-                        (r.get("zone_name", ""), r.get("primary_name", ""))
-
-                        for r in existing
-
-                        if any(h in r.get("primary_name", "").lower() for h in ("hallway", "corridor", "hallways"))
-
-                        and (r.get("zone_name", "").strip().lower() == curr_z.strip().lower() or not curr_z)
-
-                    ), None)
-
-                    if hall_match and hall_match[1]:
-
-                        res_p = hall_match[1]
-
-                        res_z = hall_match[0] or curr_z
-
-                        res_s = "Main Corridor"
+                if has_hallway_exit:
+                    if res_p.lower() == curr_p.lower() and not any(h in res_p.lower() for h in ("hallway", "corridor", "hallways")):
+                        hall_match = next((
+                            (r.get("zone_name", ""), r.get("primary_name", ""))
+                            for r in existing
+                            if any(h in r.get("primary_name", "").lower() for h in ("hallway", "corridor", "hallways"))
+                            and (r.get("zone_name", "").strip().lower() == curr_z.strip().lower() or not curr_z)
+                        ), None)
+                        if hall_match and hall_match[1]:
+                            res_p = hall_match[1]
+                            res_z = hall_match[0] or curr_z
+                            res_s = "Main Corridor"
 
 
 
@@ -1617,17 +1637,14 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
 
             narr_arrival_verbs = (
-
                 "arrive at", "arrives at", "arrived at", "enter", "enters", "entered", "entering",
-
                 "walk into", "walks into", "walked into", "step into", "steps into", "stepped into",
-
                 "slip into", "slips into", "slipped into", "move into", "moves into", "moved into",
-
                 "head into", "heads into", "headed into", "navigate to", "navigated to",
-
-                "reach", "reaches", "reached"
-
+                "reach", "reaches", "reached", "round the final corner and see", "round the corner and see",
+                "rounds the corner and sees", "round the corner", "rounds the corner", "stop at", "stops at", "stopped at",
+                "stopping at", "stand before", "stands before", "stood before", "near the gate", "at the gate",
+                "front of the gate", "main gate ahead", "gates ahead", "at the entrance"
             )
 
             has_narr_arrival = any(ev in narr_prose for ev in narr_arrival_verbs)
@@ -1651,6 +1668,26 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
                         res_z = kz or target_zone
 
                         break
+
+                if is_school_scenario(scen_key) and res_p.lower() == curr_p.lower():
+
+                    if any(g in narr_prose for g in ("main gate", "school gate", "school's main gate", "front gate", "entrance gate", "school entrance")):
+
+                        gate_cand = next(((kz, kp) for kz, kp in known_candidates if "gate" in kp.lower() or "entrance" in kp.lower()), None)
+
+                        if gate_cand:
+
+                            res_z, res_p = gate_cand
+
+                        else:
+
+                            s_name = get_session_school_name(session_id, scen_key)
+
+                            if s_name:
+
+                                res_z = s_name
+
+                                res_p = "School Main Gates"
 
 
 
@@ -1877,22 +1914,33 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
 
         narr_arrival_verbs = (
-
             "arrive at", "arrives at", "arrived at", "enter", "enters", "entered", "entering",
-
             "walk into", "walks into", "walked into", "step into", "steps into", "stepped into",
-
             "slip into", "slips into", "slipped into", "move into", "moves into", "moved into",
-
             "head into", "heads into", "headed into", "navigate to", "navigated to",
-
-            "reach", "reaches", "reached"
-
+            "reach", "reaches", "reached", "round the final corner and see", "round the corner and see",
+            "rounds the corner and sees", "round the corner", "rounds the corner", "stop at", "stops at", "stopped at",
+            "stopping at", "stand before", "stands before", "stood before", "near the gate", "at the gate",
+            "front of the gate", "main gate ahead", "gates ahead", "at the entrance"
         )
 
         has_narr_arrival = any(ev in narr_prose for ev in narr_arrival_verbs)
 
         if has_narr_arrival:
+
+            if is_school_scenario(scen_key) and any(g in narr_prose for g in ("main gate", "school gate", "school's main gate", "front gate", "entrance gate", "school entrance")):
+
+                s_name = get_session_school_name(session_id, scen_key)
+
+                if s_name:
+
+                    gate_p = next((r["primary_name"] for r in existing if r.get("zone_name") == s_name and ("gate" in r.get("primary_name", "").lower() or "entrance" in r.get("primary_name", "").lower())), "School Main Gates")
+
+                    sub_area = "Entrance Path & Archway" if "path" in narr_prose else ("Gate Checkpoint" if ("checkpoint" in narr_prose or "delinquent" in narr_prose) else "Main Area")
+
+                    formatted = format_tiered_location_string(s_name, gate_p, sub_area)
+
+                    return process_llm_location_update(session_id, formatted, scen_key, char_name=char_name)
 
             for kp in known_in_z:
 

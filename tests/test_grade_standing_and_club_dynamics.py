@@ -89,7 +89,7 @@ class TestGradeStandingAndClubDynamics(unittest.TestCase):
         self.assertEqual(c["basic_info"].get("role"), "Drama Club Performer")
 
     def test_high_school_embed_displays_grade_and_rank_combined(self):
-        """Verify High School Drama embed displays '• **Grade / Standing**: [Grade], [Rank]'."""
+        """Verify High School Drama embed displays '• **Grade**: [Grade]' and dynamic Role under Faction Affiliation."""
         # 1. Member
         contact_member = {
             "name": "Aria Sato",
@@ -103,9 +103,9 @@ class TestGradeStandingAndClubDynamics(unittest.TestCase):
         }
         embed = build_contact_detail_embed(contact_member, "high_school_drama")
         basic_field = next(f for f in embed.fields if f.name == "Basic Details").value
-        self.assertIn("• **Grade / Standing**: Freshman, Club Member", basic_field)
-        self.assertIn("• **Role**: Club Member", basic_field)
+        self.assertIn("• **Grade**: Freshman", basic_field)
         self.assertIn("• **Faction Affiliation**: Science & Robotics Club", basic_field)
+        self.assertIn("• **Role**: Club Member", basic_field)
 
         # 2. Officer / Vice President
         contact_officer = {
@@ -121,7 +121,9 @@ class TestGradeStandingAndClubDynamics(unittest.TestCase):
         }
         embed_officer = build_contact_detail_embed(contact_officer, "high_school_drama")
         basic_officer = next(f for f in embed_officer.fields if f.name == "Basic Details").value
-        self.assertIn("• **Grade / Standing**: Junior, Club Vice President", basic_officer)
+        self.assertIn("• **Grade**: Junior", basic_officer)
+        self.assertIn("• **Faction Affiliation**: Drama Club", basic_officer)
+        self.assertIn("• **Role**: Club Vice President", basic_officer)
 
     def test_other_genres_standing_matches_faction_hierarchy(self):
         """Verify non-school genres display standing that matches faction hierarchy."""
@@ -137,9 +139,9 @@ class TestGradeStandingAndClubDynamics(unittest.TestCase):
         }
         embed = build_contact_detail_embed(contact_guildmaster, "fantasy")
         basic_val = next(f for f in embed.fields if f.name == "Basic Details").value
-        self.assertIn("• **Grade / Standing**: Guildmaster", basic_val)
-        self.assertIn("• **Role**: Guildmaster", basic_val)
+        self.assertIn("• **Standing**: Guildmaster", basic_val)
         self.assertIn("• **Faction Affiliation**: Ironfang Mercenary Guild", basic_val)
+        self.assertIn("• **Role**: Guildmaster", basic_val)
 
         # Knight Commander in Order
         contact_paladin = {
@@ -153,7 +155,7 @@ class TestGradeStandingAndClubDynamics(unittest.TestCase):
         }
         embed_paladin = build_contact_detail_embed(contact_paladin, "fantasy")
         basic_paladin = next(f for f in embed_paladin.fields if f.name == "Basic Details").value
-        self.assertIn("• **Grade / Standing**: Knight Commander", basic_paladin)
+        self.assertIn("• **Standing**: Knight Commander", basic_paladin)
 
     def test_high_school_student_club_rate(self):
         """Verify ~75% of newly generated students are assigned to a club."""

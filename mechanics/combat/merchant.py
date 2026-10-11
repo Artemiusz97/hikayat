@@ -236,7 +236,7 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
         system_prompt = (
             f"Generate catalog wares for an in-game online storefront / delivery app ({shop_title}) appropriate to the active scenario.\n"
             f"- Intro narrative: A short, welcoming 1-2 sentence app interface greeting or catalog summary (e.g. 'Welcome to {shop_title}! Select your snacks, study supplies, and essentials for immediate delivery.').\n"
-            f"- Stock: 4-6 themed items (snacks, beverages, stationery, tools, or consumable aids), quantity 1-5 each.\n"
+            f"- Stock: 8-12 themed items (snacks, beverages, stationery, study aids, gifts, electronic accessories, recovery items), quantity 1-5 each.\n"
             f"- Rumors: Return empty list [] (rumors are browsed separately via the Gossip Feed app).\n"
             f"Respond with ONLY a single valid JSON object matching the schema exactly, no prose or code fences."
         )
@@ -263,7 +263,7 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
         )
 
     result = await call_llm_json(system_prompt, user_prompt, temperature=0.8,
-                                  is_nsfw=is_nsfw_scenario(scen_key), use_utility=True)
+                                  is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
     result = namegen.resolve_tokens_deep(result, scenario=scen_key)
 
     from mechanics.combat.items import parse_item_tier
@@ -586,7 +586,7 @@ async def generate_faction_quartermaster_shop(faction: dict, session: dict) -> d
         f"Respond with JSON matching exactly this schema:\n{FACTION_QUARTERMASTER_SCHEMA}"
     )
     result = await call_llm_json(FACTION_QUARTERMASTER_SYSTEM_PROMPT, user_prompt,
-                                  temperature=0.7, is_nsfw=is_nsfw_scenario(scen_key),
+                                  temperature=0.7, is_nsfw=scenario_data.uses_nsfw_model(scen_key),
                                   use_utility=True)
     result = namegen.resolve_tokens_deep(result, scenario=scen_key)
     stock = []

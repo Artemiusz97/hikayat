@@ -49,6 +49,7 @@ _RESULT_COLORS = {
     "success":      discord.Color.from_rgb(26, 188, 156),   # teal
     "fail":         discord.Color.from_rgb(230, 126, 34),   # amber
     "crit_fail":    discord.Color.from_rgb(231, 76, 60),    # crimson
+    "free":         discord.Color.from_rgb(88, 101, 242),   # blurple / narrative indigo
 }
 
 _RESULT_TITLES = {
@@ -56,6 +57,7 @@ _RESULT_TITLES = {
     "success":      "🎯 SUCCESS",
     "fail":         "⚠️ FAILURE",
     "crit_fail":    "💥 CRITICAL FAILURE",
+    "free":         "📖 STORY PROGRESSION",
 }
 
 def _scenario_command_choices() -> list[app_commands.Choice[str]]:
@@ -64,21 +66,15 @@ def _scenario_command_choices() -> list[app_commands.Choice[str]]:
         for key, entry in load_scenarios().items():
             if key.startswith("custom_combinator_"):
                 continue
-            tags = entry.get("tags", [])
-            tag_badges = ""
-            name_lower = entry["name"].lower()
-            if "nsfw" in tags and "nsfw" not in name_lower: tag_badges += " [NSFW]"
-            elif "sfw" in tags and "sfw" not in name_lower: tag_badges += " [SFW]"
-            if "furry" in tags and "furry" not in name_lower: tag_badges += " [Furry]"
-            if ("space" in tags or "sci_fi" in tags) and "space" not in name_lower and "sci-fi" not in name_lower and "sci_fi" not in name_lower: tag_badges += " [Space]"
-            if "cyberpunk" in tags and "cyberpunk" not in name_lower: tag_badges += " [Cyberpunk]"
-            name = f"{entry['name']}{tag_badges}"[:100]
+            label = entry.get("dropdown_label") or entry.get("display_name") or entry.get("name", key)
+            emoji = entry.get("emoji", "")
+            name = (f"{emoji} {label}".strip() if emoji and not label.startswith(emoji) else label)[:100]
             choices.append(app_commands.Choice(name=name, value=key))
         choices.append(app_commands.Choice(name="🛠️ Custom Scenario (Use Tags Parameter)", value="custom"))
         return choices
     except ScenarioError:
         return [
-            app_commands.Choice(name="Fantasy", value=DEFAULT_SCENARIO),
+            app_commands.Choice(name="⚔️ Realms of Myth & Magic [Fantasy]", value=DEFAULT_SCENARIO),
             app_commands.Choice(name="🛠️ Custom Scenario (Use Tags Parameter)", value="custom")
         ]
 
@@ -366,7 +362,7 @@ def _strip_leading_emojis(text: str) -> str:
     if not text:
         return ""
     import re
-    cleaned = re.sub(r'^(?:[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55\u200d\ufe0f\s]+|\s*\[[A-Za-z0-9/ _-]+\]\s*)+', '', str(text)).strip()
+    cleaned = re.sub(r'^(?:[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55\u200d\ufe0f\s]+|\s*\[[A-Za-z0-9/: _\'\",-]+\]\s*)+', '', str(text)).strip()
     return cleaned if cleaned else str(text).strip()
 
 def _get_choice_quest_icon(choice: dict) -> str | None:
@@ -378,19 +374,23 @@ def _get_choice_quest_icon(choice: dict) -> str | None:
     qid = str(choice.get("quest_id", ""))
     ctype = str(choice.get("contract_type", "")).lower()
 
-    # 1. Story Climax
-    if choice.get("is_climax_action") or ctype == "climax" or "⚡" in raw_label or "[story climax]" in raw_l:
-        return "⚡"
+    from mechanics.social.intimate_excitement import is_intimate_action_label as _emb_is_intimate_lbl
+    _is_intimate = _emb_is_intimate_lbl(raw_label)
 
-    # 2. Story Quest Actions
-    if "⭐" in raw_label or "[story quest]" in raw_l or "sq-" in qid.lower() or "story" in ctype or choice.get("is_story_quest"):
-        return "⭐"
+    if not _is_intimate:
+        # 1. Story Climax
+        if choice.get("is_climax_action") or ctype == "climax" or "⚡" in raw_label or "[story climax]" in raw_l:
+            return "⚡"
 
-    # 3. Bounty / Sub-Quest Actions
-    if choice.get("is_quest_action") or ctype in ("sub_quest", "bounty", "side_bounty", "waypoint", "skill_check", "arrival", "resource_progress") or "🎯" in raw_label or "[bounty]" in raw_l or "bnt-" in qid.lower() or "qst-" in qid.lower():
-        if any(b in raw_l for b in ("contract board", "notice board", "bounty board", "bulletin board", "quest board")):
-            return None
-        return "🎯"
+        # 2. Story Quest Actions
+        if "⭐" in raw_label or "[story quest]" in raw_l or "sq-" in qid.lower() or "story" in ctype or choice.get("is_story_quest"):
+            return "⭐"
+
+        # 3. Bounty / Sub-Quest Actions
+        if choice.get("is_quest_action") or ctype in ("sub_quest", "bounty", "side_bounty", "waypoint", "skill_check", "arrival", "resource_progress") or "🎯" in raw_label or "[bounty]" in raw_l or "bnt-" in qid.lower() or "qst-" in qid.lower():
+            if any(b in raw_l for b in ("contract board", "notice board", "bounty board", "bulletin board", "quest board")):
+                return None
+            return "🎯"
 
     # 4. Meetup / Phone appointment
     if "💌" in raw_label or "[meetup]" in raw_l:
@@ -581,12 +581,17 @@ def build_outcome_embeds(
             summary_lines.extend(combat_log)
         elif enemy_attack_notice:
             summary_lines.append(enemy_attack_notice)
+        refr_toast = outcome.get("_refractory_recovered_notice")
+        if refr_toast:
+            summary_lines.append(refr_toast)
 
         vitals_lines = []
         for co in char_outcomes:
             if not isinstance(co, dict):
                 continue
-            name = co.get("name", "")
+            name = str(co.get("name", "")).strip()
+            if not name or name.startswith("_") or len(name) > 60:
+                continue
             parts = []
             hp = _safe_int(co.get("hp_change"), default=0)
             mp = _safe_int(co.get("mp_change"), default=0)
@@ -600,9 +605,11 @@ def build_outcome_embeds(
                 parts.append(f"💰 Gold {gold:+d}")
             if status_new:
                 parts.append(f"⚡ Status: {', '.join(status_new)}")
-            xp_gained = (xp_by_user or {}).get(name) or (xp_by_user or {}).get(
-                next((k for k in (xp_by_user or {}) if str(k) != name), None), 0
-            ) if xp_by_user and len(xp_by_user) == 1 else (xp_by_user or {}).get(name, 0)
+            xp_gained = (xp_by_user or {}).get(name, 0)
+            if not xp_gained and xp_by_user and len(xp_by_user) == 1:
+                first_k = next(iter(xp_by_user.keys()))
+                if name.lower() == str(first_k).lower():
+                    xp_gained = xp_by_user[first_k]
             if xp_gained:
                 parts.append(f"⭐ XP +{xp_gained}")
             if parts:
@@ -719,6 +726,61 @@ def build_outcome_embeds(
             _safe_add_field(breakdown_embed, name="⚔️ Combat Summary", value="\n".join(combat_log), inline=False)
         elif enemy_attack_notice:
             _safe_add_field(breakdown_embed, name="⚔️ Combat Summary", value=enemy_attack_notice, inline=False)
+        refr_toast = outcome.get("_refractory_recovered_notice")
+        if refr_toast:
+            _safe_add_field(breakdown_embed, name="⚡ Stamina Recovered", value=refr_toast, inline=False)
+
+    # ── Intimate Excitement Progress ───────────────────────────────────────
+    intimate_up = outcome.get("intimate_update")
+    if intimate_up and isinstance(intimate_up, dict) and intimate_up.get("active"):
+        from mechanics.social.intimate_excitement import format_compact_discord_meter
+        lead_name = "Player"
+        if outcome.get("character_outcomes"):
+            lead_name = outcome["character_outcomes"][0].get("name", "Player")
+        elif xp_by_user:
+            lead_name = next(iter(xp_by_user.keys()), "Player")
+        partner_name = intimate_up.get("partner_name") or outcome.get("dialogue_partner")
+        if not partner_name and outcome.get("dialogue_partners"):
+            _dps = outcome.get("dialogue_partners")
+            if isinstance(_dps, list) and _dps:
+                partner_name = str(_dps[0])
+            elif isinstance(_dps, str):
+                import json
+                try:
+                    _parsed = json.loads(_dps)
+                    partner_name = str(_parsed[0]) if isinstance(_parsed, list) and _parsed else _dps
+                except Exception:
+                    partner_name = _dps
+        lead_name = str(lead_name or "Player")
+        partner_name = str(partner_name or "Partner")
+        p_val = intimate_up.get("player_meter", 0)
+        n_val = intimate_up.get("partner_meter", 0)
+        n_climax = intimate_up.get("partner_climaxed", False)
+        discord_meter_line = format_compact_discord_meter(
+            player_name=lead_name,
+            player_meter=p_val,
+            partner_name=partner_name,
+            partner_meter=n_val,
+            partner_climaxed=n_climax,
+            actors=intimate_up.get("actors"),
+            partner_meters=intimate_up.get("partner_meters"),
+        )
+        field_val = discord_meter_line
+        if intimate_up.get("mutual_group_climax"):
+            field_val += "\n✨ **Mutual Group Climax!** Shared peak in passionate release."
+        elif intimate_up.get("simultaneous_partner_climax"):
+            field_val += "\n✨ **Simultaneous Climax!** Multiple partners peak together."
+        if intimate_up.get("sensitive_spot_matched") and intimate_up.get("matched_spot"):
+            field_val += f"\n✨ **Sensitive Spot:** {intimate_up['matched_spot']} (+6% bonus)"
+        if intimate_up.get("premature_finish"):
+            unsat_list = intimate_up.get("unsatisfied_partners") or []
+            if len(unsat_list) >= 2:
+                field_val += f"\n⚠️ **Spent:** Stamina depleted while {', '.join(unsat_list[:-1])} and {unsat_list[-1]} remain unsatisfied."
+            elif intimate_up.get("unsatisfied_partner"):
+                field_val += f"\n⚠️ **Spent:** Stamina depleted while {intimate_up['unsatisfied_partner']} remains unsatisfied."
+            else:
+                field_val += "\n⚠️ **Spent:** Stamina depleted while partner remains unsatisfied."
+        _safe_add_field(breakdown_embed, name="💋 Intimate Excitement", value=field_val, inline=False)
 
     # ── Combat Resolution — victory / defeat notices ───────────────────────
     combat_notice = outcome.get("_combat_resolved_notice")

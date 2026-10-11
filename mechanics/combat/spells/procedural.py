@@ -25,7 +25,7 @@ DND_SCHOOLS: Dict[str, Dict[str, Any]] = {
         "name": "Evocation",
         "emoji": "💥",
         "role": "damage",
-        "default_damage_types": ["fire", "cold", "lightning", "thunder", "radiant", "force"],
+        "default_damage_types": ["fire", "cold", "lightning", "thunder", "radiant", "force", "earth", "water", "wind"],
         "power_mult_range": {3: (1.1, 1.4), 2: (1.8, 2.2), 1: (2.8, 3.5)},
         "description": "Manipulates raw magical and elemental energy to unleash destructive bursts."
     },
@@ -53,9 +53,9 @@ DND_SCHOOLS: Dict[str, Dict[str, Any]] = {
         "name": "Conjuration",
         "emoji": "🌀",
         "role": "summon",
-        "default_damage_types": ["slashing", "piercing", "bludgeoning", "acid", "poison", "fire"],
+        "default_damage_types": ["slashing", "piercing", "bludgeoning", "acid", "poison", "fire", "earth", "water", "wind"],
         "power_mult_range": {3: (0.9, 1.2), 2: (1.5, 2.0), 1: (2.4, 3.0)},
-        "summon_types": ["spirit_wolf", "dire_bear", "fire_elemental", "storm_sprite", "hydra", "seraph"],
+        "summon_types": ["spirit_wolf", "dire_bear", "fire_elemental", "earth_elemental", "water_elemental", "storm_sprite", "hydra", "seraph"],
         "description": "Transports objects, creatures, and elements from other planes into physical reality."
     },
     "Transmutation": {
@@ -118,6 +118,18 @@ DND_DAMAGE_TYPES: Dict[str, Dict[str, Any]] = {
     "thunder": {
         "name": "Thunder", "emoji": "🌩️", "ailment": "Stunned", "dot": False,
         "adjectives": ["Sonic", "Resonant", "Concussive", "Thunderous", "Booming", "Seismic"]
+    },
+    "earth": {
+        "name": "Earth", "emoji": "🪨", "ailment": "Stunned", "dot": False,
+        "adjectives": ["Stone", "Terra", "Tectonic", "Granite", "Seismic", "Obsidian", "Continental"]
+    },
+    "water": {
+        "name": "Water", "emoji": "🌊", "ailment": "Slowed", "dot": False,
+        "adjectives": ["Tidal", "Hydro", "Torrential", "Oceanic", "Abyssal", "Cascading", "Riptide"]
+    },
+    "wind": {
+        "name": "Wind", "emoji": "🌪️", "ailment": "Exposed", "dot": False,
+        "adjectives": ["Zephyr", "Gale", "Tempest", "Aero", "Cyclone", "Supersonic", "Howling"]
     },
     "acid": {
         "name": "Acid", "emoji": "🧪", "ailment": "Exposed", "dot": True,
@@ -330,6 +342,21 @@ SUMMON_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "hp_per_level": 12, "base_hp": 65, "attack_type": "blunt", "damage_type": "fire",
         "description": "Living inferno avatar radiating intense heat."
     },
+    "earth_elemental": {
+        "name": "Greater Earth Elemental", "archetype": "Guardian", "count": 1, "duration": 5,
+        "hp_per_level": 14, "base_hp": 75, "attack_type": "blunt", "damage_type": "earth",
+        "description": "Colossal titan of living bedrock and dense stone."
+    },
+    "water_elemental": {
+        "name": "Tidal Elemental", "archetype": "Brute", "count": 1, "duration": 5,
+        "hp_per_level": 11, "base_hp": 60, "attack_type": "blunt", "damage_type": "water",
+        "description": "Surging vortex of crushing oceanic water."
+    },
+    "wind_elemental": {
+        "name": "Gale Djinn", "archetype": "Skirmisher", "count": 1, "duration": 4,
+        "hp_per_level": 8, "base_hp": 45, "attack_type": "ranged", "damage_type": "wind",
+        "description": "Whirling tempest avatar shearing foes with pressurized wind."
+    },
 
     # Celestial / Holy
     "guardian_wisp": {
@@ -426,6 +453,9 @@ SCENARIO_SPELL_AFFIXES: Dict[str, Dict[str, Any]] = {
             "lightning": ["Galvanic", "Tesla", "Arc-Charged", "Voltaic", "Electrified", "Induction"],
             "fire": ["Boiler-Flame", "Superheated", "Pressurized-Ignition", "Furnace", "Combustion"],
             "cold": ["Cryo-Condenser", "Refrigerant", "Pneumatic-Chill", "Frigid-Vapor", "Vapor-Frosted"],
+            "earth": ["Brass-Quarry", "Pneumatic-Drill", "Ore-Crushing", "Slag-Stone", "Subterranean-Steam", "Bedrock-Borer"],
+            "water": ["Hydraulic", "High-Pressure Waterjet", "Condensate", "Boiler-Feed", "Steam-Distilled", "Aqueduct"],
+            "wind": ["Pneumatic", "Ventilation-Gale", "Draft-Drafting", "Exhaust-Gale", "Aero-Draft", "Bellows-Blast"],
             "acid": ["Vitriolic", "Caustic Slag", "Alchemical Acid", "Caustic-Reagent", "Acid-Steam"],
             "force": ["Pneumatic Shock", "Steam-Pressure", "Kinetic Piston", "Aetheric Shock", "Hydraulic"],
             "thunder": ["Steam-Burst", "Boiler-Rupture", "Concussive Piston", "Whistle-Screech", "Percussive"],
@@ -465,6 +495,9 @@ SCENARIO_SPELL_AFFIXES: Dict[str, Dict[str, Any]] = {
             "lightning": ["EMP", "Overvoltage", "Static-Pulse", "Arc-Circuit", "High-Voltage", "Grid-Surge"],
             "fire": ["Plasma", "Thermobaric", "Laser-Thermal", "Superheated Core", "Incendiary"],
             "cold": ["Liquid Nitrogen", "Cryo-Stasis", "Sub-Zero", "Endothermic", "Absolute-Chilled"],
+            "earth": ["Ferro-Concrete", "Tectonic-Tap", "Nano-Aggregate", "Dense-Silicon", "Sub-Surface Impactor"],
+            "water": ["Coolant-Surge", "Liquid-Cryogel", "Hydro-Jet", "Micro-Fluidic", "Aqueous Stream"],
+            "wind": ["Aero-Turbine", "Jet-Slipstream", "Pressurized-Vent", "Vortex-Blower", "Aero-Sonic"],
             "acid": ["Nanite Acid", "Caustic Solvent", "Corrosive Slag", "Degrading Bio-Gel"],
             "force": ["Kinetic Rail", "Graviton", "Mass-Driver", "Shockwave", "Repulsor"],
             "thunder": ["Sonic Pulse", "Concussive Shock", "Frequency Blast", "Audio-Stun", "Resonance"],
@@ -506,6 +539,9 @@ SCENARIO_SPELL_AFFIXES: Dict[str, Dict[str, Any]] = {
             "dark": ["Void-Touched", "Abyssal", "Shadow-Veiled", "Dread", "Nether", "Stygian"],
             "fire": ["Ash-Flame", "Atomic", "Hellfire", "Irradiated-Fire", "Brimstone", "Pyre"],
             "cold": ["Nuclear-Winter", "Graveyard Chill", "Black-Frost", "Marrow-Cold", "Boreal Doom"],
+            "earth": ["Graveyard-Dirt", "Tomb-Stone", "Blighted-Terra", "Mire-Clay", "Cursed-Strata"],
+            "water": ["Stagnant-Mire", "Blight-Bog", "Fetid-Water", "Corrupted-Sump", "Black-Ichor"],
+            "wind": ["Plague-Wind", "Marrow-Chill Gale", "Howling-Abyss", "Desolation-Draft", "Rot-Zephyr"],
             "lightning": ["Gamma-Pulse", "Irradiated-Arc", "Storm-Blight", "Fulgurite", "Sickly-Static"],
             "acid": ["Caustic Slag", "Vat-Acid", "Rad-Leach", "Marrow-Melt", "Corrosive Bile"],
             "force": ["Shockwave", "Concussive Rubble", "Kinetic Fallout", "Grave-Force"],
@@ -561,12 +597,12 @@ def generate_spell_name(
             element = "necrotic"
         elif elem_lower in ("magical", "arcane"):
             element = "force"
-        elif elem_lower in ("earth", "stone"):
-            element = "bludgeoning"
-        elif elem_lower in ("wind", "gale", "air"):
-            element = "slashing"
-        elif elem_lower in ("water", "hydro"):
-            element = "cold"
+        elif elem_lower in ("stone", "terra"):
+            element = "earth"
+        elif elem_lower in ("gale", "air", "aero"):
+            element = "wind"
+        elif elem_lower in ("hydro", "aqua"):
+            element = "water"
 
     elem_info = DND_DAMAGE_TYPES.get(element, DND_DAMAGE_TYPES["force"])
     shape_info = DND_SHAPES.get(shape, DND_SHAPES["bolt"])
@@ -634,12 +670,12 @@ def generate_procedural_spell(
             element = "necrotic"
         elif elem_lower in ("magical", "arcane"):
             element = "force"
-        elif elem_lower in ("earth", "stone"):
-            element = "bludgeoning"
-        elif elem_lower in ("wind", "gale", "air"):
-            element = "slashing"
-        elif elem_lower in ("water", "hydro"):
-            element = "cold"
+        elif elem_lower in ("stone", "terra"):
+            element = "earth"
+        elif elem_lower in ("gale", "air", "aero"):
+            element = "wind"
+        elif elem_lower in ("hydro", "aqua"):
+            element = "water"
     if not element or element not in DND_DAMAGE_TYPES:
         element = random.choice(school_info["default_damage_types"])
     elem_info = DND_DAMAGE_TYPES[element]

@@ -6,24 +6,108 @@ from mechanics.combat.items.tags import derive_armor_tags
 from mechanics.combat.items.envelope import serialize_item
 
 HEADWEAR_ARCHETYPES: Dict[str, Dict[str, Any]] = {
+    # ── Civilian & Light Headwear (0 DT, Minor DR / Evasion / Special Utility) ──
     "cloth_hood": {
-        "mass": "light", "handedness": "Versatile", "armor_type": "light",
-        "base_dt": 1,
-        "type_dt": {"slashing": 2, "physical": 1},
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
         "base_eva": 2,
-        "stat_modifiers": {"eva": 2, "stealth": 3, "ambush_dmg": 5},
+        "stat_modifiers": {"eva": 2},
         "protection_types": ["physical"],
         "special_traits": ["stealth", "shadow", "light"]
     },
     "cap": {
         "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
         "base_dt": 0,
-        "type_dt": {"physical": 1},
+        "type_dt": {},
         "base_acc": 2,
-        "stat_modifiers": {"per": 1, "acc": 2, "cha": 1},
+        "stat_modifiers": {"per": 1, "acc": 2},
         "protection_types": ["physical"],
         "special_traits": ["light", "scout", "keen_eye"]
     },
+    "formal_hat": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"cha": 1, "eva": 1},
+        "protection_types": ["social"],
+        "special_traits": ["social", "civilian", "formal"]
+    },
+    "top_hat": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"cha": 1, "eva": 1},
+        "protection_types": ["social"],
+        "special_traits": ["social", "civilian", "period_formal", "gentleman"]
+    },
+    "bonnet": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"cha": 1, "eva": 2},
+        "protection_types": ["social"],
+        "special_traits": ["social", "civilian", "period_couture", "millinery"]
+    },
+    "bowler_hat": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"cha": 1, "physical_res": 2},
+        "protection_types": ["social"],
+        "special_traits": ["social", "civilian", "period_formal", "dapper"]
+    },
+    "fascinator": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"cha": 1, "eva": 1},
+        "protection_types": ["social"],
+        "special_traits": ["social", "civilian", "extravagant", "high_society"]
+    },
+    "beanie": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"eva": 2, "ice_res": 5},
+        "protection_types": ["physical"],
+        "special_traits": ["casual", "cozy", "streetwear"]
+    },
+    "beret": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"cha": 1, "eva": 1},
+        "protection_types": ["social"],
+        "special_traits": ["artistic", "chic", "bohemian"]
+    },
+    "bandana": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"acc": 2, "eva": 2},
+        "protection_types": ["physical"],
+        "special_traits": ["street", "martial", "active"]
+    },
+    "ar_glasses": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "stat_modifiers": {"per": 1, "acc": 3},
+        "protection_types": ["energy", "physical"],
+        "special_traits": ["optics", "hud", "datafeed", "smart", "precision"]
+    },
+    "circlet": {
+        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
+        "base_dt": 0,
+        "type_dt": {},
+        "base_matk": 4,
+        "stat_modifiers": {"matk": 4, "spell_crit": 3, "mana_regen": 1},
+        "protection_types": ["magical"],
+        "special_traits": ["magical", "channeling", "focus", "mind"]
+    },
+
+    # ── Dedicated Combat Headwear (Provides DT) ─────────────────────────────
     "open_helm": {
         "mass": "medium", "handedness": "Versatile", "armor_type": "light",
         "base_dt": 3,
@@ -46,46 +130,35 @@ HEADWEAR_ARCHETYPES: Dict[str, Dict[str, Any]] = {
         "mass": "light", "handedness": "Versatile", "armor_type": "light",
         "base_dt": 1,
         "type_dt": {"energy": 4, "energy_cell": 4},
-        "base_acc": 5,
-        "stat_modifiers": {"acc": 5, "per": 2, "crit_bonus": 4, "blind_immune": 1},
+        "base_acc": 4,
+        "stat_modifiers": {"acc": 4, "per": 1, "crit_bonus": 3, "blind_immune": 1},
         "protection_types": ["energy", "physical"],
         "special_traits": ["precision", "optics", "hud", "targeting"]
     },
     "gas_mask": {
         "mass": "medium", "handedness": "Versatile", "armor_type": "medium",
         "base_dt": 2,
-        "type_dt": {"poison": 12, "acid": 10, "hazard": 12},
+        "type_dt": {"poison": 12, "acid": 10},
         "base_eva": 0,
         "stat_modifiers": {"gas_immune": 1, "hazard_res": 20, "poison_res": 15},
         "protection_types": ["energy", "magical"],
         "special_traits": ["hazmat", "respirator", "environmental_isolation"]
-    },
-    "circlet": {
-        "mass": "light", "handedness": "Versatile", "armor_type": "light",
-        "base_dt": 1,
-        "type_dt": {"magical": 8, "holy": 6, "dark": 6},
-        "base_matk": 4,
-        "stat_modifiers": {"matk": 4, "int": 1, "spell_crit": 3, "mana_regen": 1},
-        "protection_types": ["magical"],
-        "special_traits": ["magical", "channeling", "focus", "mind"]
-    },
-    "formal_hat": {
-        "mass": "light", "handedness": "Versatile", "armor_type": "unarmored",
-        "base_dt": 0,
-        "type_dt": {},
-        "base_cha": 4,
-        "stat_modifiers": {"cha": 4, "luck": 1, "etiquette": 3},
-        "protection_types": ["social"],
-        "special_traits": ["social", "civilian", "formal", "leadership"]
     }
 }
 
 NON_COMBAT_HEADWEAR_ARCHETYPES: Dict[str, Dict[str, Any]] = {
     "cloth_hood": HEADWEAR_ARCHETYPES["cloth_hood"],
     "cap": HEADWEAR_ARCHETYPES["cap"],
-    "tech_visor": HEADWEAR_ARCHETYPES["tech_visor"],
-    "circlet": HEADWEAR_ARCHETYPES["circlet"],
-    "formal_hat": HEADWEAR_ARCHETYPES["formal_hat"]
+    "formal_hat": HEADWEAR_ARCHETYPES["formal_hat"],
+    "top_hat": HEADWEAR_ARCHETYPES["top_hat"],
+    "bonnet": HEADWEAR_ARCHETYPES["bonnet"],
+    "bowler_hat": HEADWEAR_ARCHETYPES["bowler_hat"],
+    "fascinator": HEADWEAR_ARCHETYPES["fascinator"],
+    "beanie": HEADWEAR_ARCHETYPES["beanie"],
+    "beret": HEADWEAR_ARCHETYPES["beret"],
+    "bandana": HEADWEAR_ARCHETYPES["bandana"],
+    "ar_glasses": HEADWEAR_ARCHETYPES["ar_glasses"],
+    "circlet": HEADWEAR_ARCHETYPES["circlet"]
 }
 
 for arch, data in HEADWEAR_ARCHETYPES.items():
@@ -105,7 +178,15 @@ SCENARIO_HEADWEAR_AFFIXES: Dict[str, Dict[str, Any]] = {
             "tech_visor": ["Hawkeye Monocle", "Archer's Focusing Lorgnette", "Gem-Cut Scrying Lens"],
             "gas_mask": ["Plague Doctor's Beaked Mask", "Alchemist's Filter Hood", "Asbestos Ash Mask"],
             "circlet": ["Mithril Arcane Circlet", "Runed Crownlet of Power", "Wizard's Pointed Hat"],
-            "formal_hat": ["Gilded Sovereign Crown", "Noble Velvet Cap", "Courtier's Plumed Hat"]
+            "formal_hat": ["Gilded Sovereign Crown", "Noble Velvet Cap", "Courtier's Plumed Hat"],
+            "top_hat": ["Courtier's Plumed Top Hat", "Illusionist's Silk Crown-Hat", "Aristocrat's Tall Hat"],
+            "bonnet": ["Embroidered Meadow Bonnet", "Silk Maid's Coif", "Court Lady's Lace Bonnet"],
+            "bowler_hat": ["Guild Clerk's Round Hat", "Merchant's Stiffened Derby", "Burgomaster's Felt Hat"],
+            "fascinator": ["Faerie-Wing Feather Fascinator", "Sapphire Veil Clip", "Elven Gilded Hair-Combe"],
+            "beanie": ["Highland Spun Wool Toque", "Traveler's Knit Cap", "Monastery Winter Cap"],
+            "beret": ["Bard's Slanted Velvet Beret", "Minstrel's Plumed Beret", "Master Painter's Cap"],
+            "bandana": ["Rogue's Knotted Tenugui", "Swashbuckler's Headband", "Highwayman Dust Bandana"],
+            "ar_glasses": ["Alchemist's Scrying Specs", "Enchanted Divination Lenses", "True-Sight Monocle"]
         },
         "prefixes_t3": ["Iron", "Steel", "Stout", "Hardened", "Honed", "Apprentice's", "Sturdy"],
         "prefixes_t2": ["Runic", "Gilded", "Mithril", "Moonlit", "Spell-Forged", "Aegis-Bound"],
@@ -122,7 +203,15 @@ SCENARIO_HEADWEAR_AFFIXES: Dict[str, Dict[str, Any]] = {
             "tech_visor": ["Multi-Lens Brass Goggles", "Aether-Spectrum Visor", "Galvanic Arc-Spectacles"],
             "gas_mask": ["Brass Filter Cannister Mask", "Mine-Shaft Respirator", "Steam-Vented Chem-Mask"],
             "circlet": ["Aether-Tuned Galvanic Diadem", "Clockwork Resonator Band", "Voltaic Induction Crown"],
-            "formal_hat": ["Silk Top Hat with Clockwork Buckle", "Victorian Bowler Hat", "Aristocrat's Gilded Topper"]
+            "formal_hat": ["Silk Top Hat with Clockwork Buckle", "Victorian Bowler Hat", "Aristocrat's Gilded Topper"],
+            "top_hat": ["Stovepipe Silk Top Hat", "Aeronaut's Goggled Top Hat", "Victorian High Topper"],
+            "bonnet": ["Victorian Calash Smog-Bonnet", "Gauze Ribbon Bonnet", "Millinery Brass-Beaded Bonnet"],
+            "bowler_hat": ["Detective's Stout Bowler", "Savile Row Felt Derby", "Machinist's Stiffened Bowler"],
+            "fascinator": ["Clockwork Filigree Fascinator", "Ostrich Feather & Gear Comb", "Aetheric Veil Fascinator"],
+            "beanie": ["Dockworker Knit Watch-Cap", "Grease-Monkey Smog Beanie", "Tweed Slouch Cap"],
+            "beret": ["Machinist Guild Beret", "Aetheric Artist Beret", "Continental Officer Beret"],
+            "bandana": ["Boiler-Stoker Sweat Rag", "Oiled Scarf Bandana", "Machinist Red Bandana"],
+            "ar_glasses": ["Multi-Lens Jeweler's Loupe", "Aether-Calibrated Spectacles", "Galvanic HUD Specs"]
         },
         "prefixes_t3": ["Brass-Rimmed", "Copper-Wired", "Machinist's", "Steam-Vented", "Rivet-Bound", "Standard"],
         "prefixes_t2": ["Galvanic", "Aether-Tuned", "Pneumatic", "Boiler-Forged", "Voltaic", "Clockwork-Laced"],
@@ -139,7 +228,15 @@ SCENARIO_HEADWEAR_AFFIXES: Dict[str, Dict[str, Any]] = {
             "tech_visor": ["Kiroshi Neural HUD Visor", "Smart-Link Targeting Optics", "Cyber-Eye Monocle"],
             "gas_mask": ["Anti-Smog Street Respirator", "Mil-Spec Tactical Gas Mask", "Hazmat Bio-Filter Mask"],
             "circlet": ["Neural-Interface Brain-Wreath", "Cyberdeck Headband", "Datajack Synapse-Crown"],
-            "formal_hat": ["Executive Fedora with Neon Band", "Corpo High-Roller Hat", "Holo-Matrix Crown"]
+            "formal_hat": ["Executive Fedora with Neon Band", "Corpo High-Roller Hat", "Holo-Matrix Crown"],
+            "top_hat": ["Holo-Rimmed Neon Stovepipe", "Chrome-Ribboned Cyber Topper", "Syndicate High-Hat"],
+            "bonnet": ["Cyber-Goth Wire Bonnet", "Harajuku Neon Bonnet", "Neoprene Veil Bonnet"],
+            "bowler_hat": ["Corporate Enforcer Derby", "Carbon-Weave Bowler", "Smart-Fiber Street Bowler"],
+            "fascinator": ["Fiber-Optic Neon Fascinator", "Holographic Glitch Comb", "Prismatic LED Veil Clip"],
+            "beanie": ["Signal-Shielded Netrunner Beanie", "Thermal Synth-Yarn Beanie", "Slouchy Street Beanie"],
+            "beret": ["Militech Officer Cyber-Beret", "Street Rebel Wool Beret", "Tactical Slanted Beret"],
+            "bandana": ["Kevlar-Threaded Street Bandana", "Cyber-Samurai Face Tenugui", "Anti-Facial-Recognition Wrap"],
+            "ar_glasses": ["Neural-Linked HUD Shades", "Ono-Sendai Cyberspecs", "Polarized Smart-Glasses"]
         },
         "prefixes_t3": ["Street-Grade", "Mil-Spec", "Carbon-Weave", "Chrome", "Reinforced", "Standard-Issue"],
         "prefixes_t2": ["Overclocked", "Smart-Linked", "High-Frequency", "Sub-Dermal", "Nanite-Laced", "Thermal-Chambered"],
@@ -156,7 +253,15 @@ SCENARIO_HEADWEAR_AFFIXES: Dict[str, Dict[str, Any]] = {
             "tech_visor": ["Cracked Aviator Goggles", "Jury-Rigged Scav Visor", "One-Eyed Scrap Monocle"],
             "gas_mask": ["Military Surplus Gas Mask", "Canister Rad-Respirator", "Hose-Fed Fallout Mask"],
             "circlet": ["Glowing Rad-Crystal Headband", "Mutant Mind-Coil", "Barbed-Wire Crown"],
-            "formal_hat": ["Pre-War Governor's Top Hat", "Scav King's Bottlecap Crown", "Faded Cowboy Stetson"]
+            "formal_hat": ["Pre-War Governor's Top Hat", "Scav King's Bottlecap Crown", "Faded Cowboy Stetson"],
+            "top_hat": ["Pre-War Mayor's Battered Topper", "Scrap-Spiked Top Hat", "Charred Formal Top Hat"],
+            "bonnet": ["Sun-Bleached Prairie Bonnet", "Frayed Rad-Dust Bonnet", "Scavenger Scrap Bonnet"],
+            "bowler_hat": ["Dented Old-World Bowler", "Bullet-Dented Derby", "Vault Inspector Bowler"],
+            "fascinator": ["Wire-and-Scrap Feather Clip", "Rusty Gear Hair Comb", "Mutant Crow Feather Pin"],
+            "beanie": ["Moth-Eaten Rag Beanie", "Scavenger Knitted Toque", "Rad-Storm Wool Beanie"],
+            "beret": ["Faded Militia Red Beret", "Survivor Scout Beret", "Old-World Tanker Beret"],
+            "bandana": ["Dust-Filter Skull Bandana", "Highway Raider Face Wrap", "Grease-Stained Bandana"],
+            "ar_glasses": ["Cracked Pip-Goggles", "Scrap HUD Monocle", "Jury-Rigged Targeting Glasses"]
         },
         "prefixes_t3": ["Scrap-Metal", "Rusty", "Jury-Rigged", "Weathered", "Makeshift", "Spiked", "Lead-Lined"],
         "prefixes_t2": ["Rad-Hardened", "Bio-Toxic", "Reinforced-Steel", "Wasteland-Master", "Gamma-Tuned", "Spike-Studded"],
@@ -173,7 +278,15 @@ SCENARIO_HEADWEAR_AFFIXES: Dict[str, Dict[str, Any]] = {
             "tech_visor": ["Holographic Tactical HUD", "Quantum Targeting Visor", "Target-Vector Optics"],
             "gas_mask": ["Sealed Void-Breathing Mask", "Atmospheric Filter Rig", "Hazard Plasma Mask"],
             "circlet": ["Psionic Resonance Diadem", "Tachyon Neural-Crown", "Quantum Wave Transmitter"],
-            "formal_hat": ["Admiral's Gold-Trimmed Visor Cap", "Fleet Sovereign Coronet", "Diplomatic Bicorne"]
+            "formal_hat": ["Admiral's Gold-Trimmed Visor Cap", "Fleet Sovereign Coronet", "Diplomatic Bicorne"],
+            "top_hat": ["Diplomatic Ambassador Top Hat", "Starlight Gala Topper", "Orbital High Hat"],
+            "bonnet": ["Colonial Pioneer Sun-Bonnet", "Habitat Garden Bonnet", "Hydroponics Gauze Bonnet"],
+            "bowler_hat": ["Orbital Station Master Bowler", "Fleet Bureaucrat Derby", "Synthetic Felt Bowler"],
+            "fascinator": ["Photonic Hard-Light Fascinator", "Prismatic Crystal Hair Comb", "Starlight Veil Clip"],
+            "beanie": ["Cryo-Recovery Thermal Beanie", "Station Crew Watch-Cap", "Zero-G Fleece Cap"],
+            "beret": ["Starfleet Vanguard Beret", "Colonial Ranger Beret", "Naval Honor Guard Beret"],
+            "bandana": ["Zero-G Tether Sweatband", "Hydroponics Deck Bandana", "Pilot Cool-Bandana"],
+            "ar_glasses": ["Holovision Spatial Spectacles", "Sub-Orbital Nav Specs", "Stellar Cartography Glasses"]
         },
         "prefixes_t3": ["Titanium", "Composite", "Field", "Standard-Issue", "Carbon-Alloy", "Ceramic"],
         "prefixes_t2": ["Overcharged", "Plasma-Infused", "Hyper-Coil", "Nanite-Lined", "Quantum-Phase", "Cryo-Cooled"],
@@ -190,7 +303,15 @@ SCENARIO_HEADWEAR_AFFIXES: Dict[str, Dict[str, Any]] = {
             "tech_visor": ["Oculus of Hex-Sight", "Weeping Eye Monocle", "Blood-Glass Scrying Lens"],
             "gas_mask": ["Corpse-Ash Death Mask", "Bone-Carved Ash-Filter", "Sanguine Muzzle"],
             "circlet": ["Crown of Bone Thorns", "Blood-Gem Diadem", "Hex-Weaver's Silver Band"],
-            "formal_hat": ["Desolate King's Iron Crown", "Funeral Veil & Mourning Hat", "Inquisitor's Wide-Brimmed Hat"]
+            "formal_hat": ["Desolate King's Iron Crown", "Funeral Veil & Mourning Hat", "Inquisitor's Wide-Brimmed Hat"],
+            "top_hat": ["Undertaker's Velvet Top Hat", "Grave-Lord's Mourning Topper", "Charred Silk Top Hat"],
+            "bonnet": ["Widow's Weeping Black Bonnet", "Catacomb Maid's Coif", "Blighted Lace Bonnet"],
+            "bowler_hat": ["Corpse-Bearer's Heavy Derby", "Gothic Inspector Bowler", "Dark Notary's Felt Hat"],
+            "fascinator": ["Raven-Feather Funeral Fascinator", "Black Lace Weeping Veil", "Bone-Carved Hair Comb"],
+            "beanie": ["Coarse Charcoal Slouch Cap", "Crypt-Keeper's Knitted Toque", "Grave-Digger Beanie"],
+            "beret": ["Inquisitorial Red Beret", "Torturer's Velvet Beret", "Occultist Slanted Cap"],
+            "bandana": ["Blood-Soaked Face Wrap", "Executioner's Mouth Bandana", "Crypt-Dust Tenugui"],
+            "ar_glasses": ["Hex-Glass Spectacles", "Corpse-Gazing Lorgnette", "Mourning Veil Glasses"]
         },
         "prefixes_t3": ["Blood-Stained", "Weathered", "Grim", "Jagged", "Ashen", "Roughspun", "Grave-Dug"],
         "prefixes_t2": ["Hex-Forged", "Cursed", "Grave-Tainted", "Sanguine", "Blight-Edged", "Bone-Carved", "Shadow-Veiled"],
@@ -207,7 +328,15 @@ SCENARIO_HEADWEAR_AFFIXES: Dict[str, Dict[str, Any]] = {
             "tech_visor": ["Designer Reading Glasses", "Trendy Sunglasses", "Computer Screen Glasses"],
             "gas_mask": ["Science Lab Safety Respirator", "Allergy Pollen Face Mask", "Art Club Paint Mask"],
             "circlet": ["Cute Ribbon Headband", "Athletic Gym Sweatband", "Cat-Ears Cosplay Headband"],
-            "formal_hat": ["Student Council President's Cap", "Festival Flower Crown", "Graduation Cap"]
+            "formal_hat": ["Student Council President's Cap", "Festival Flower Crown", "Graduation Cap"],
+            "top_hat": ["Drama Club Magician Top Hat", "School Play Stovepipe", "Festival Masquerade Topper"],
+            "bonnet": ["Lolita Frill Ribbon Bonnet", "Straw Sun-Bonnet", "Retro Cottagecore Bonnet"],
+            "bowler_hat": ["Prep School Derby", "Retro Uniform Bowler", "Literature Club Felt Hat"],
+            "fascinator": ["Lolita Lace Mini-Hat", "Flower Hair Comb", "School Dance Veil Clip"],
+            "beanie": ["Slouchy Skater Beanie", "Pastel Knit Beanie", "Campus Winter Toque"],
+            "beret": ["Academy Badge Wool Beret", "Art Club French Beret", "Chic Fashion Beret"],
+            "bandana": ["Sports Festival Headband", "Gym Sweat-Bandana", "Street Dance Paisley Bandana"],
+            "ar_glasses": ["Smart Study Glasses", "Fashion Blue-Light Specs", "Augmented Classroom Glasses"]
         },
         "prefixes_t3": ["Standard", "Student", "Clean", "Campus", "Everyday", "Casual", "School"],
         "prefixes_t2": ["Varsity", "Tailored", "Customized", "Honors", "Trendy", "Preppy", "Club-Captain's"],
@@ -266,8 +395,9 @@ def generate_random_equipment(
     base_data = HEADWEAR_ARCHETYPES[arch]
     tier_mult = 1.0 if item_tier == 3 else (1.20 if item_tier == 2 else 1.45)
     
-    base_dt = int(round(base_data["base_dt"] * tier_mult))
-    type_dt = {k: int(round(v * tier_mult)) for k, v in base_data.get("type_dt", {}).items()}
+    # Non-armor headwear strictly keeps base_dt = 0
+    base_dt = int(round(base_data["base_dt"] * tier_mult)) if base_data["base_dt"] > 0 else 0
+    type_dt = {k: int(round(v * tier_mult)) for k, v in base_data.get("type_dt", {}).items()} if base_dt > 0 else {}
     
     stat_mods: Dict[str, Any] = {}
     for k, v in base_data.get("stat_modifiers", {}).items():
@@ -277,6 +407,9 @@ def generate_random_equipment(
             scaled = int(round(v * tier_mult))
             if k == "per" and scaled < 0:
                 scaled = max(-1, scaled)  # Sensory penalty on enclosed helmets is strictly capped at -1 PER
+            # SPECIAL stats strictly capped at +1 maximum per design rule
+            if k in ("cha", "per") and scaled > 1:
+                scaled = 1
             stat_mods[k] = scaled
         else:
             stat_mods[k] = v

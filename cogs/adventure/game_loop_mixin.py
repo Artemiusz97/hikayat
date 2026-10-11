@@ -5,7 +5,7 @@ import game_engine
 from services.turn_service import TurnService
 from .embeds import *
 from .views.choices import ChoiceView, SyncChoiceView
-from .embeds import _apply_merchant_encounter_result, _format_items_gained, _format_items_gained_multi, _is_dialogue_partner, _safe_int
+from .embeds import _apply_merchant_encounter_result, _format_items_gained, _format_items_gained_multi, _is_dialogue_partner, _safe_int, _get_choice_skill_emoji
 from mechanics.system.concurrency import distributed_session_lock, LockAcquisitionError
 import logging
 logger = logging.getLogger(__name__)
@@ -123,9 +123,15 @@ class GameLoopMixin:
                 req = requirement
                 from mechanics.world.mobility import get_session_dialogue_partners
                 sess_dp = get_session_dialogue_partners(session) if isinstance(session, dict) else []
-                if sess_dp and isinstance(session, dict) and session.get("id"):
+                explicit_target = choice.get("target_npc")
+                if not explicit_target:
+                    named_dps = [dp for dp in sess_dp if dp and (dp.lower() in label.lower() or (len(dp.split()[0]) >= 3 and dp.split()[0].lower() in label.lower()))]
+                    if len(named_dps) == 1:
+                        explicit_target = named_dps[0]
+                target_candidates = [explicit_target] if explicit_target else list(sess_dp)
+                if target_candidates and isinstance(session, dict) and session.get("id"):
                     from mechanics.combat.traits import get_combined_dc_modifiers
-                    for dp_name in sess_dp:
+                    for dp_name in target_candidates:
                         if dp_name:
                             c_rec = db.get_contact(session["id"], str(dp_name).lower().replace(" ", "_"), char.get("id", 0))
                             if c_rec:
@@ -138,6 +144,15 @@ class GameLoopMixin:
                                     req += calculate_intimate_action_dc_modifier(label, app_rec)
                 req = max(1, req)
                 check = resolve_check(char.get(stat_col, 5), req, char.get("luk", 3), check_mode=check_mode)
+            final_action_cat = classification.get("action_category", action_cat) if action_cat == "custom" and isinstance(classification, dict) else action_cat
+            final_target_npc = choice.get("target_npc") or (classification.get("target_npc") if action_cat == "custom" and isinstance(classification, dict) else None)
+            if not final_action_cat:
+                from mechanics.narrative.intent import classify_action_intent
+                parsed_c = classify_action_intent(label)
+                final_action_cat = parsed_c.category.value
+                if not final_target_npc and parsed_c.target_entity:
+                    final_target_npc = parsed_c.target_entity
+
             return {
                 "char": char,
                 "label": label,
@@ -153,6 +168,8 @@ class GameLoopMixin:
                 "sub_obj_id": choice.get("sub_obj_id"),
                 "stage_index": choice.get("stage_index"),
                 "contract_type": choice.get("contract_type", ""),
+                "action_category": final_action_cat,
+                "target_npc": final_target_npc,
                 "active_recall": classification.get("_active_recall") if action_cat == "custom" and isinstance(classification, dict) else None
             }
 
@@ -253,8 +270,20 @@ class GameLoopMixin:
                     merchant = _apply_merchant_encounter_result(session_id, outcome.get("merchant_encounter"))
 
                     result_display = session.get("result_display", "detailed")
-                    result_summary = (f"**{action['stat']} check** ({action['check'].chance}% chance) "
-                                      f"→ **{action['check'].tier_label}**")
+                    is_free_action = (
+                        str(action.get("stat") or "").upper() in ("NONE", "FREE", "ITEM", "")
+                        or (getattr(action.get("check"), "chance", 100) == 100 and str(action.get("stat") or "").upper() in ("NONE", "FREE", "ITEM", "None"))
+                    )
+                    if is_free_action:
+                        emoji = _get_choice_skill_emoji(action)
+                        check_field_name = f"{emoji} Action"
+                        result_summary = f"*{action.get('label', 'Action')}*"
+                        primary_tier = "free"
+                    else:
+                        check_field_name = "🎯 Check"
+                        result_summary = (f"**{action['stat']} check** ({action['check'].chance}% chance) "
+                                          f"→ **{action['check'].tier_label}**")
+                        primary_tier = action["check"].tier
                     loot_text = _format_items_gained(items_gained_by_user.get(user_id, []))
 
 
@@ -272,13 +301,13 @@ class GameLoopMixin:
 
                     outcome_embeds = build_outcome_embeds(
                         outcome=outcome,
-                        check_field_name="🎯 Check",
+                        check_field_name=check_field_name,
                         check_field_value=result_summary,
                         loot_text=loot_text,
                         result_display=result_display,
                         xp_by_user={new_char["name"]: xp_gained},
                         session_id=session_id,
-                        primary_tier=action["check"].tier,
+                        primary_tier=primary_tier,
                     )
                     await self._safe_send(interaction, embeds=outcome_embeds)
 
@@ -304,11 +333,16 @@ class GameLoopMixin:
                     pass
 
     async def handle_retry(self, interaction: discord.Interaction, session_id: int):
+            if not interaction.response.is_done():
+                try:
+                    await interaction.response.defer()
+                except (discord.NotFound, discord.HTTPException):
+                    pass
             try:
                 async with distributed_session_lock(session_id, raise_http_error=False):
                     session = await adb(db.get_session, session_id)
                     if not session or session.get("status") != "active":
-                        await interaction.followup.send("This adventure isn't active anymore.", ephemeral=True)
+                        await self._safe_send(interaction, content="This adventure isn't active anymore.", ephemeral=True)
                         return
                 
                     last_info = self._last_picks.get(session_id)
@@ -321,7 +355,8 @@ class GameLoopMixin:
                     try:
                         turn_response = await TurnService.retry_narration(session_id, uid)
                     except Exception as e:
-                        await interaction.followup.send(f"The LLM failed to resolve this retry: {e}")
+                        logger.error("Failed to retry narration for session %s: %s", session_id, e, exc_info=True)
+                        await self._safe_send(interaction, content=f"⚠️ The LLM failed to resolve this retry: {e}")
                         return
 
                     outcome = turn_response.outcome
@@ -362,8 +397,20 @@ class GameLoopMixin:
                     chance_val = chk.get('chance', 100)
                     tier_label = chk.get('tier_label', 'Action')
                     
-                    line = (f"**{action.get('char', {}).get('name', 'Hero')}** \U0001f3af {action.get('stat', 'NONE')} check "
-                            f"({chance_val}%) \u2192 **{tier_label}**")
+                    is_free_action = (
+                        str(action.get("stat") or "").upper() in ("NONE", "FREE", "ITEM", "")
+                        or (chance_val == 100 and str(action.get("stat") or "").upper() in ("NONE", "FREE", "ITEM", "None"))
+                    )
+                    if is_free_action:
+                        emoji = _get_choice_skill_emoji(action)
+                        line = f"**{action.get('char', {}).get('name', 'Hero')}** {emoji} *{action.get('label', 'Action')}*"
+                        primary_tier = "free"
+                        check_field_name = f"{emoji} Action"
+                    else:
+                        line = (f"**{action.get('char', {}).get('name', 'Hero')}** \U0001f3af {action.get('stat', 'NONE')} check "
+                                f"({chance_val}%) \u2192 **{tier_label}**")
+                        primary_tier = chk.get('tier', 'success')
+                        check_field_name = "\U0001f3af Checks"
                     summaries.append(line)
 
                     if all_down:
@@ -374,12 +421,10 @@ class GameLoopMixin:
                         await adb(db.finish_session, session_id)
                         await self._safe_send(interaction, embed=embed)
                         return
-
-                    primary_tier = chk.get('tier', 'success')
                 
                     outcome_embeds = build_outcome_embeds(
                         outcome=outcome,
-                        check_field_name="\U0001f3af Checks",
+                        check_field_name=check_field_name,
                         check_field_value="\n\n".join(summaries),
                         loot_text=loot_text,
                         result_display=session.get("result_display", "detailed"),
@@ -537,8 +582,16 @@ class GameLoopMixin:
                             levels_gained.extend(bonus_levels)
                     
                         xp_by_name[action["char"]["name"]] = XP_REWARDS.get(action["check"].tier, 0) + bonus_xp
-                        line = (f"**{action['char']['name']}** — {action['stat']} check "
-                                f"({action['check'].chance}%) → **{action['check'].tier_label}**")
+                        is_free = (
+                            str(action.get("stat") or "").upper() in ("NONE", "FREE", "ITEM", "")
+                            or (action["check"].chance == 100 and str(action.get("stat") or "").upper() in ("NONE", "FREE", "ITEM", "None"))
+                        )
+                        if is_free:
+                            emoji = _get_choice_skill_emoji(action)
+                            line = f"**{action['char']['name']}** {emoji} *{action.get('label', 'Action')}*"
+                        else:
+                            line = (f"**{action['char']['name']}** — {action['stat']} check "
+                                    f"({action['check'].chance}%) → **{action['check'].tier_label}**")
                         summaries.append(line)
                         if levels_gained:
                             all_levels.append((uid, levels_gained))
@@ -592,14 +645,24 @@ class GameLoopMixin:
                         return
 
                     # Dominant tier = worst individual result (drives embed colour)
-                    tier_rank = {"crit_fail": 0, "fail": 1, "success": 2, "crit_success": 3}
-                    primary_tier = min(
-                        (a["check"].tier for a in actions),
-                        key=lambda t: tier_rank.get(t, 2)
+                    tier_rank = {"crit_fail": 0, "fail": 1, "free": 2, "success": 3, "crit_success": 4}
+                    all_free = all(
+                        str(a.get("stat") or "").upper() in ("NONE", "FREE", "ITEM", "")
+                        or (a["check"].chance == 100 and str(a.get("stat") or "").upper() in ("NONE", "FREE", "ITEM", "None"))
+                        for a in actions
                     )
+                    if all_free:
+                        primary_tier = "free"
+                        check_field_name = "💬 Actions"
+                    else:
+                        primary_tier = min(
+                            (a["check"].tier for a in actions),
+                            key=lambda t: tier_rank.get(t, 3)
+                        )
+                        check_field_name = "🎯 Checks"
                     outcome_embeds = build_outcome_embeds(
                         outcome=outcome,
-                        check_field_name="🎯 Checks",
+                        check_field_name=check_field_name,
                         check_field_value="\n\n".join(summaries),
                         loot_text=loot_text,
                         result_display=result_display,

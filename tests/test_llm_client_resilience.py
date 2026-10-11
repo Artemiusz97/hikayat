@@ -164,7 +164,118 @@ class TestLLMClientResilience(unittest.IsolatedAsyncioTestCase):
         cache_key = ("https://broken.api/v1", "transient-err-model")
         self.assertNotIn(cache_key, llm_client._MODEL_CAPABILITIES)
 
+    async def test_json_schema_capability_cached_after_rejection(self):
+        """Verify that if strict json_schema fails, it is cached so subsequent calls go straight to json_object."""
+        from pydantic import BaseModel
+
+        class DummySchema(BaseModel):
+            status: str
+
+        mock_client = MagicMock()
+        mock_client.base_url = "https://nano-gpt.com/api/v1"
+
+        async def side_effect(**kwargs):
+            rf = kwargs.get("response_format", {})
+            if rf.get("type") == "json_schema":
+                raise Exception("json_schema is not supported by this model")
+            resp = MagicMock()
+            choice = MagicMock()
+            choice.message.content = '{"status": "ok"}'
+            choice.finish_reason = "stop"
+            resp.choices = [choice]
+            return resp
+
+        mock_client.chat.completions.create = AsyncMock(side_effect=side_effect)
+        llm_client._MODEL_CAPABILITIES.pop(("https://nano-gpt.com/api/v1", "schema-unsupported-model"), None)
+        llm_client._MODEL_CAPABILITIES.pop("schema-unsupported-model", None)
+
+        with patch("llm_client.get_candidate_models", return_value=[(mock_client, "schema-unsupported-model")]):
+            # First call tries json_schema (fails) -> falls back to json_object (succeeds) = 2 calls
+            res1 = await llm_client.call_llm_json("Sys", "User", response_model=DummySchema)
+            self.assertEqual(res1, {"status": "ok"})
+            self.assertEqual(mock_client.chat.completions.create.call_count, 2)
+
+            # Second call should skip json_schema and go straight to json_object = 1 call
+            mock_client.chat.completions.create.reset_mock()
+            res2 = await llm_client.call_llm_json("Sys", "User", response_model=DummySchema)
+            self.assertEqual(res2, {"status": "ok"})
+            self.assertEqual(mock_client.chat.completions.create.call_count, 1)
+
+    async def test_json_schema_rate_limit_does_not_immediately_double_tap(self):
+        """Verify a 429 RateLimitError during json_schema does not immediately fall through to json_object without backoff."""
+        from pydantic import BaseModel
+
+        class DummySchema(BaseModel):
+            status: str
+
+        mock_client = MagicMock()
+        mock_client.base_url = "https://nano-gpt.com/api/v1"
+        rate_err = RateLimitError("Too Many Requests", response=MagicMock(status_code=429, headers={}), body=None)
+
+        resp_ok = MagicMock()
+        choice = MagicMock()
+        choice.message.content = '{"status": "recovered"}'
+        choice.finish_reason = "stop"
+        resp_ok.choices = [choice]
+
+        mock_client.chat.completions.create = AsyncMock(side_effect=[rate_err, resp_ok])
+        llm_client._MODEL_CAPABILITIES.pop(("https://nano-gpt.com/api/v1", "rate-limited-model"), None)
+        llm_client._MODEL_CAPABILITIES.pop("rate-limited-model", None)
+
+        with patch("llm_client.get_candidate_models", return_value=[(mock_client, "rate-limited-model")]), \
+             patch("llm_client._backoff_sleep", new_callable=AsyncMock) as mock_sleep:
+            res = await llm_client.call_llm_json("Sys", "User", retries=1, response_model=DummySchema)
+            self.assertEqual(res, {"status": "recovered"})
+            # Must have backed off before the second call rather than double-tapping in the same attempt
+            self.assertEqual(mock_sleep.call_count, 1)
+            self.assertEqual(mock_client.chat.completions.create.call_count, 2)
+
+    async def test_backoff_sleep_honors_retry_after_header(self):
+        """Verify _backoff_sleep extracts Retry-After header from RateLimitError."""
+        mock_resp = MagicMock(status_code=429, headers={"Retry-After": "4.5"})
+        rate_err = RateLimitError("Too Many Requests", response=mock_resp, body=None)
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_asyncio_sleep:
+            await llm_client._backoff_sleep(0, error=rate_err)
+            mock_asyncio_sleep.assert_called_once()
+            slept = mock_asyncio_sleep.call_args[0][0]
+            self.assertGreaterEqual(slept, 4.6)
+            self.assertLessEqual(slept, 5.1)
+
+    async def test_model_overloaded_fast_failover_without_retry_sleep(self):
+        """Verify 429 model_overloaded immediately trips circuit breaker and cascades to fallback without sleeping."""
+        overloaded_err = RateLimitError(
+            "Error code: 429 - {'error': {'message': 'Model is temporarily overloaded. Please try again after 60 seconds or choose another model.', 'status': 429, 'code': 'model_overloaded'}}",
+            response=MagicMock(status_code=429, headers={}),
+            body={"error": {"code": "model_overloaded"}},
+        )
+        self.assertTrue(llm_client._is_model_overloaded_error(overloaded_err))
+
+        client_1 = MagicMock()
+        client_1.chat.completions.create = AsyncMock(side_effect=overloaded_err)
+
+        client_2 = MagicMock()
+        resp_2 = MagicMock()
+        choice_2 = MagicMock()
+        choice_2.message.content = '{"status": "fallback_ok"}'
+        choice_2.finish_reason = "stop"
+        resp_2.choices = [choice_2]
+        client_2.chat.completions.create = AsyncMock(return_value=resp_2)
+
+        with patch("llm_client.get_candidate_models", return_value=[(client_1, "qwen/qwen3.8-27b-uncensored"), (client_2, "z-ai/glm-5.3-flash-uncensored")]), \
+             patch("llm_client._backoff_sleep", new_callable=AsyncMock) as mock_sleep:
+            res = await llm_client.call_llm_json("Sys", "User", retries=2)
+            self.assertEqual(res, {"status": "fallback_ok"})
+            mock_sleep.assert_not_called()
+            self.assertEqual(client_1.chat.completions.create.call_count, 1)
+            self.assertEqual(client_2.chat.completions.create.call_count, 1)
+            self.assertFalse(llm_client.is_model_healthy("qwen/qwen3.8-27b-uncensored"))
+
+        llm_client.reset_circuit_breakers()
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
 

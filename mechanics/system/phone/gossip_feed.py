@@ -3,6 +3,7 @@ from __future__ import annotations
 In-universe social media gossip feed generation, clue logging, and rumor scouring for Hikayat.
 """
 import random
+import time
 import db
 import scenario_data
 import mechanics.system.phone
@@ -78,7 +79,7 @@ async def generate_gossip_feed_posts(session: dict, force_refresh: bool = False)
     )
     user_prompt = f"Active Scenario: {scen_key}\nGenerate 4 fresh timeline posts for {branding['feed_app_name']}:\n{GOSSIP_FEED_SCHEMA}"
 
-    result = await mechanics.system.phone.call_llm_json(system_prompt, user_prompt, temperature=0.8, is_nsfw=scenario_data.is_nsfw_scenario(scen_key), use_utility=True)
+    result = await mechanics.system.phone.call_llm_json(system_prompt, user_prompt, temperature=0.8, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
     posts = result.get("posts", [])
     if not posts:
         posts = [
@@ -238,17 +239,36 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
             f"Location: {loc}.\n"
             f"Output a JSON object with: {{\"clue\": \"string (1-2 sentences of valuable clue)\", \"source\": \"string (e.g. anonymous student post, leaked audio file, overheard locker room chat)\"}}"
         )
-        res = await mechanics.system.phone.call_llm_json(system_prompt, "Generate verified rumor lead:", temperature=0.7, is_nsfw=scenario_data.is_nsfw_scenario(scen_key), use_utility=True)
+        res = await mechanics.system.phone.call_llm_json(system_prompt, "Generate verified rumor lead:", temperature=0.7, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
         clue_text = res.get("clue") or f"Unusual after-hours movement reported near {loc} connected to {sq_title}."
         source = res.get("source") or "Encrypted Forum Thread"
         log_gossip_clue_to_quest(session_id, clue_text)
+
+        # Prepend verified lead post into feed
+        current_feed = db.get_gossip_feed(session_id, limit=20) or []
+        lead_post = {
+            "id": f"lead_{int(time.time())}_{random.randint(100, 999)}",
+            "author_name": source,
+            "author_handle": "@whisper_wire" if "audio" in source.lower() or "thread" in source.lower() else "@campus_insider",
+            "content": clue_text,
+            "tag": "#VerifiedLead",
+            "clue_hook": clue_text,
+            "likes": random.randint(28, 88),
+            "time_ago": "Just now",
+            "is_lead": True
+        }
+        updated_feed = [lead_post] + [p for p in current_feed if p.get("content") != clue_text][:19]
+        db.save_gossip_feed(session_id, updated_feed)
+
         return {
             "success": True,
             "check": check,
             "clue": clue_text,
             "source": source,
             "charges_left": charges,
-            "tier_label": check["tier_label"]
+            "tier_label": check["tier_label"],
+            "feed_post": lead_post,
+            "gossip_feed": updated_feed
         }
     else:
         fallbacks = [
@@ -258,10 +278,29 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
             f"An alarming post turned out to just be students rehearsing a dramatic scene for the drama club."
         ]
         red_herring = random.choice(fallbacks)
+
+        # Prepend noise banter post into feed
+        current_feed = db.get_gossip_feed(session_id, limit=20) or []
+        noise_post = {
+            "id": f"noise_{int(time.time())}_{random.randint(100, 999)}",
+            "author_name": random.choice(["Campus Lurker", "Anon Student", "Corridor Whispers", "Meme Archivist"]),
+            "author_handle": random.choice(["@campus_anon", "@drama_radar", "@late_night_chatter", "@study_struggles"]),
+            "content": red_herring,
+            "tag": "#CampusChat",
+            "clue_hook": "",
+            "likes": random.randint(3, 19),
+            "time_ago": "Just now",
+            "is_lead": False
+        }
+        updated_feed = [noise_post] + [p for p in current_feed if p.get("content") != red_herring][:19]
+        db.save_gossip_feed(session_id, updated_feed)
+
         return {
             "success": False,
             "check": check,
             "red_herring": red_herring,
             "charges_left": charges,
-            "tier_label": check["tier_label"]
+            "tier_label": check["tier_label"],
+            "feed_post": noise_post,
+            "gossip_feed": updated_feed
         }

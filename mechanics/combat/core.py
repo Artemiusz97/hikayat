@@ -650,6 +650,7 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
             from mechanics.combat.items.consumables import parse_item_effect
             parsed_item = parse_item_effect(item_obj) if item_obj else parse_item_effect({"name": action.get("label", ""), "effect": ""})
 
+            item_available = True
             # Deduct item from inventory if not already consumed upstream (safeguard against infinite combat items)
             if not action.get("item_consumed") and acting_user_id:
                 consume_item_name = (
@@ -664,11 +665,25 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                     else:
                         consume_item_name = action.get("label", "").strip()
                 if consume_item_name:
-                    db.remove_item_by_name(acting_user_id, consume_item_name)
-                    action["item_consumed"] = True
+                    removed = db.remove_item_by_name(acting_user_id, consume_item_name)
+                    if not removed:
+                        item_available = False
+                        combat_log.append(f"⚠️ **{acting_char_name}** reached for **{consume_item_name}**, but had none left in inventory!")
+                    else:
+                        action["item_consumed"] = True
+                        # Sync in-memory party inventory list if present
+                        if party and isinstance(party[0], (tuple, list)) and len(party[0]) > 1:
+                            p_inv = party[0][1]
+                            if isinstance(p_inv, list):
+                                for idx, itm in enumerate(p_inv):
+                                    if isinstance(itm, dict) and itm.get("name", "").strip().lower() == consume_item_name.lower():
+                                        p_inv.pop(idx)
+                                        break
 
+            if not item_available:
+                pass
             # 1. Throwables & Explosives targeting enemy
-            if parsed_item.get("damage", 0) > 0 or any(w in label_lower for w in ["bomb", "grenade", "flask", "throw", "acid", "poison", "molotov", "damage"]):
+            elif parsed_item.get("damage", 0) > 0 or any(w in label_lower for w in ["bomb", "grenade", "flask", "throw", "acid", "poison", "molotov", "damage"]):
                 base_throw_dmg = parsed_item.get("damage", 0)
                 if base_throw_dmg <= 0:
                     base_throw_dmg = max(20, int(target_enemy.get("max_hp", 100) * 0.40) + 15)

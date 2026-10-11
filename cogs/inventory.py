@@ -310,10 +310,13 @@ class EquipSlotSelectDropdown(discord.ui.Select):
         item_type = str(item.get("item_type") or item_meta.get("item_type") or "").strip().title()
         archetype = str(item_meta.get("archetype") or "").strip().lower()
 
+        from mechanics.combat.items.clothing import CLOTHING_TOPS, CLOTHING_BOTTOMS
+        from mechanics.combat.items.headwear import HEADWEAR_ARCHETYPES
+
         # Slot filtering
-        is_combat_armor = (item_type == "Armor") or (item_meta.get("base_dt", 0) > 2 and archetype not in ("cloth_hood", "cap", "tech_visor", "open_helm", "full_greathelm"))
-        is_clothing = (item_type == "Clothing") or (archetype in ("casual_shirt", "blouse", "school_uniform_top", "jacket", "hoodie", "robe", "tunic", "trousers", "skirt", "shorts", "slacks", "jeans"))
-        is_headwear = (item_type in ("Headwear", "Helmet", "Head")) or (archetype in ("cloth_hood", "cap", "open_helm", "full_greathelm", "tech_visor", "gas_mask", "circlet", "formal_hat"))
+        is_clothing = (item_type == "Clothing") or (archetype in CLOTHING_TOPS or archetype in CLOTHING_BOTTOMS)
+        is_headwear = (item_type in ("Headwear", "Helmet", "Head")) or (archetype in HEADWEAR_ARCHETYPES)
+        is_combat_armor = (item_type == "Armor") or (item_meta.get("base_dt", 0) > 2 and not is_headwear and not is_clothing)
         is_shield = (item_type == "Shield") or (archetype in ("buckler", "heater_shield", "tower_shield", "riot_shield", "energy_shield"))
         is_weapon = (item_type == "Weapon") or ("multiplier" in item_meta) or (archetype in ("dagger", "shortsword", "wand", "pistol", "throwing", "sword", "axe", "mace", "spear", "revolver", "greatsword", "polearm", "warhammer", "staff", "bow", "crossbow", "rifle", "shotgun", "machinegun", "explosive", "katana"))
 
@@ -783,6 +786,7 @@ def build_item_inspect_embed(item: dict, user_id: int) -> discord.Embed:
     char = db.get_character(user_id)
     char_scen = char.get("scenario", "fantasy") if char else "fantasy"
     from scenario_data import is_non_combat_scenario
+    from mechanics.combat.items.tags import is_narrative_item
     is_non_combat = is_non_combat_scenario(char_scen)
 
     effect_raw = str(item.get("effect", "") or "")
@@ -799,21 +803,26 @@ def build_item_inspect_embed(item: dict, user_id: int) -> discord.Embed:
         or effect_raw.startswith("[ITEM_JSON]")
     )
 
-    if is_non_combat and is_equipment:
-        embed.description = "🎭 **Cosmetic / Narrative Gear**\n*In this non-combat scenario, equipment serves cosmetic & narrative roles without combat stats.*"
+    meta = parse_equipment_metadata(item) if is_equipment else None
+    item_is_narrative = is_narrative_item(item) or is_narrative_item(meta) or is_non_combat
+
+    if is_equipment and item_is_narrative:
+        if meta and (meta.get("archetype") or meta.get("social_modifiers") or meta.get("tags")):
+            embed.description = format_equipment_card(meta)
+        else:
+            embed.description = "🎭 **Cosmetic / Narrative Gear**\n*In this non-combat scenario, equipment serves cosmetic & narrative roles without combat stats.*"
         clean_effect = effect_raw.replace("(flavor only -- confers no stat bonus)", "").replace("Starting weapon (flavor only -- confers no stat bonus).", "").strip()
-        if clean_effect and not clean_effect.startswith("[GEAR_JSON]") and not clean_effect.startswith("[SPELLBOOK_JSON]"):
+        if clean_effect and not clean_effect.startswith("[GEAR_JSON]") and not clean_effect.startswith("[ITEM_JSON]") and not clean_effect.startswith("[SPELLBOOK_JSON]"):
             embed.add_field(name="📜 Description", value=clean_effect, inline=False)
     elif is_equipment:
-        meta = parse_equipment_metadata(item)
         if meta and (meta.get("archetype") or meta.get("stat_modifiers") or meta.get("social_modifiers") or meta.get("damage_types")):
             embed.description = format_equipment_card(meta)
         clean_effect = effect_raw.replace("(flavor only -- confers no stat bonus)", "").replace("Starting weapon (flavor only -- confers no stat bonus).", "").strip()
-        if clean_effect and not clean_effect.startswith("[GEAR_JSON]") and not clean_effect.startswith("[SPELLBOOK_JSON]"):
+        if clean_effect and not clean_effect.startswith("[GEAR_JSON]") and not clean_effect.startswith("[ITEM_JSON]") and not clean_effect.startswith("[SPELLBOOK_JSON]"):
             embed.add_field(name="📜 Lore / Description", value=clean_effect, inline=False)
 
         # Auto-Compare with Equipped Gear in Target Slot
-        if not item.get("equipped") and not is_non_combat:
+        if not item.get("equipped") and not is_non_combat and not item_is_narrative:
             target_slot = slot or DEFAULT_EQUIP_SLOT_FOR_ITEM_TYPE.get(item_type, "Weapon")
             equipped_dict = db.get_equipment(user_id) if user_id else {}
             
