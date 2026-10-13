@@ -637,3 +637,238 @@ def sanitize_absent_npc_hallucinations(
     return text
 
 
+def _clean_quotes_and_split(text: str) -> list[tuple[str, bool]]:
+    """Split text into segments: (segment_text, is_inside_quote)."""
+    pattern = r'("[^"]*"|[“][^”]*[”])'
+    parts = re.split(pattern, text)
+    segments = []
+    for p in parts:
+        if not p:
+            continue
+        if (p.startswith('"') and p.endswith('"')) or (p.startswith('“') and p.endswith('”')):
+            segments.append((p, True))
+        else:
+            segments.append((p, False))
+    return segments
+
+
+COMMON_VERBS = (
+    r"(?:said|asked|replied|answered|muttered|sighed|laughed|chuckled|whispered|"
+    r"spoke|stated|continued|added|noted|murmured|demanded|inquired|snapped|gasped|"
+    r"looked|glanced|stared|watched|turned|stepped|walked|moved|stood|sat|leaned|"
+    r"crossed|placed|held|reached|pulled|pushed|tilted|lifted|lowered|nodded|shook|"
+    r"smiled|grinned|frowned|scowled|blinked|smirked|shrugged|fidgeted|flicked|froze|"
+    r"blushed|blushes|turns|looks|glances|stares|smiles|grins|frowns|steps|stands|sits|leans|"
+    r"crosses|places|holds|reaches|pulls|pushes|tilts|lifts|lowers|nods|shakes|shrugs|"
+    r"fidgets|flicks|freezes|sighs|laughs|speaks|says|asks|replies|answers|whispers|"
+    r"is|was|had|has|felt|seemed|appeared|began|started|hesitated|stopped|"
+    r"adjusts|adjusted|straightens|straightened|clears|cleared|taps|tapped|touches|touched|"
+    r"brushes|brushed|checks|checked|writes|wrote|reads|read|types|typed|points|pointed|"
+    r"gestures|gestured|waves|waved|unfolds|unfolded|folds|folded)"
+)
+
+COMMON_FEATURES_AND_TAGS = (
+    r"(?:tail|ears|eyes|gaze|voice|tone|expression|face|features|head|brow|"
+    r"hand|hands|finger|fingers|arm|arms|shoulder|shoulders|chest|hair|fur|coat|"
+    r"breath|lips|mouth|chin|posture|stance|stride|steps|footsteps|"
+    r"desk|chair|seat|office|room|door|uniform|clothes|clothing|jacket|coat|blazer|"
+    r"shirt|skirt|pants|trousers|bag|backpack|notebook|paper|papers|files|folder|"
+    r"keycard|badge|pen|phone|screen|books|notes|coffee|cup|drink|snack|tray|"
+    r"glasses|spectacles|shoes|boots|watch|tie|collar|hat|cap|body|mind|attention|words|side|lap|knees|feet|throat|neck)"
+)
+
+
+def _replace_pronouns_to_masculine(segment: str) -> str:
+    res = re.sub(rf'(^|[.!?]\s+)She\b', r'\1He', segment)
+    res = re.sub(rf'\bShe\s+({COMMON_VERBS})\b', r'He \1', res)
+    res = re.sub(rf'\bshe\s+({COMMON_VERBS})\b', r'he \1', res)
+
+    res = re.sub(rf'(^|[.!?]\s+)Her\s+((?:[a-z]+\s+){{0,2}})({COMMON_FEATURES_AND_TAGS})\b', r'\1His \2\3', res, flags=re.IGNORECASE)
+    res = re.sub(rf'\bHer\s+((?:[a-z]+\s+){{0,2}})({COMMON_FEATURES_AND_TAGS})\b', r'His \1\2', res)
+    res = re.sub(rf'\bher\s+((?:[a-z]+\s+){{0,2}})({COMMON_FEATURES_AND_TAGS})\b', r'his \1\2', res)
+
+    res = re.sub(r'\bHerself\b', 'Himself', res)
+    res = re.sub(r'\bherself\b', 'himself', res)
+    return res
+
+
+def _replace_pronouns_to_feminine(segment: str) -> str:
+    res = re.sub(rf'(^|[.!?]\s+)He\b', r'\1She', segment)
+    res = re.sub(rf'\bHe\s+({COMMON_VERBS})\b', r'She \1', res)
+    res = re.sub(rf'\bhe\s+({COMMON_VERBS})\b', r'she \1', res)
+
+    res = re.sub(rf'(^|[.!?]\s+)His\s+((?:[a-z]+\s+){{0,2}})({COMMON_FEATURES_AND_TAGS})\b', r'\1Her \2\3', res, flags=re.IGNORECASE)
+    res = re.sub(rf'\bHis\s+((?:[a-z]+\s+){{0,2}})({COMMON_FEATURES_AND_TAGS})\b', r'Her \1\2', res)
+    res = re.sub(rf'\bhis\s+((?:[a-z]+\s+){{0,2}})({COMMON_FEATURES_AND_TAGS})\b', r'her \1\2', res)
+
+    res = re.sub(r'\bHimself\b', 'Herself', res)
+    res = re.sub(r'\bhimself\b', 'herself', res)
+    return res
+
+
+def sanitize_npc_pronoun_consistency(
+    text: str,
+    session: dict | None = None,
+    result: dict | None = None,
+    actions: list | None = None,
+    party: list | None = None,
+) -> str:
+    """
+    Deterministic pipeline guard that intercepts and corrects misgendered pronouns in generated
+    narrative prose based on the canonical genders of present NPCs and party characters.
+    Preserves text inside quotes and respects multi-character discourse boundaries.
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    char_genders: dict[str, str] = {}
+
+    if party:
+        for item in party:
+            char = item[0] if isinstance(item, (tuple, list)) else item
+            if isinstance(char, dict) and char.get("name"):
+                c_name = char["name"].strip().lower()
+                c_gen = str(char.get("gender") or "male").strip().lower()
+                is_m = ("male" in c_gen or "man" in c_gen or "boy" in c_gen) and "female" not in c_gen
+                is_f = "female" in c_gen or "woman" in c_gen or "girl" in c_gen
+                if is_m:
+                    char_genders[c_name] = "male"
+                    if len(c_name.split()) > 1:
+                        char_genders[c_name.split()[0]] = "male"
+                elif is_f:
+                    char_genders[c_name] = "female"
+                    if len(c_name.split()) > 1:
+                        char_genders[c_name.split()[0]] = "female"
+
+    session_id = session.get("id") if isinstance(session, dict) else None
+    contacts_map = {}
+    if session_id:
+        try:
+            import db
+            with db.get_conn() as _conn:
+                for row in _conn.execute("SELECT name, gender FROM contacts WHERE session_id=?", (session_id,)).fetchall():
+                    if row["name"] and row["gender"]:
+                        contacts_map[row["name"].strip().lower()] = str(row["gender"]).strip().lower()
+                for row in _conn.execute("SELECT name, gender FROM school_directory WHERE session_id=?", (session_id,)).fetchall():
+                    if row["name"] and row["gender"] and row["name"].strip().lower() not in contacts_map:
+                        contacts_map[row["name"].strip().lower()] = str(row["gender"]).strip().lower()
+        except Exception:
+            pass
+
+    scene_npcs = []
+    if isinstance(result, dict) and result.get("npcs_present"):
+        scene_npcs.extend(result["npcs_present"])
+    if isinstance(session, dict) and session.get("current_npcs"):
+        scene_npcs.extend(session["current_npcs"])
+    if isinstance(session, dict) and session.get("dialogue_partner"):
+        dp = session["dialogue_partner"]
+        if isinstance(dp, str):
+            scene_npcs.append({"name": dp})
+        elif isinstance(dp, dict):
+            scene_npcs.append(dp)
+
+    for n in scene_npcs:
+        nm = (n.get("name") if isinstance(n, dict) else str(n)) or ""
+        nm_low = nm.strip().lower()
+        if not nm_low:
+            continue
+        raw_g = (n.get("gender") if isinstance(n, dict) else "") or contacts_map.get(nm_low, "")
+        if not raw_g and len(nm_low.split()) > 1:
+            raw_g = contacts_map.get(nm_low.split()[0], "")
+        if not raw_g and isinstance(n, dict):
+            try:
+                from mechanics.social.persona.core import infer_contact_gender
+                raw_g = infer_contact_gender(n)
+            except Exception:
+                pass
+        if raw_g:
+            is_m = ("male" in raw_g.lower() or "man" in raw_g.lower() or "boy" in raw_g.lower()) and "female" not in raw_g.lower()
+            is_f = "female" in raw_g.lower() or "woman" in raw_g.lower() or "girl" in raw_g.lower()
+            if is_m:
+                char_genders[nm_low] = "male"
+                if len(nm_low.split()) > 1:
+                    char_genders[nm_low.split()[0]] = "male"
+            elif is_f:
+                char_genders[nm_low] = "female"
+                if len(nm_low.split()) > 1:
+                    char_genders[nm_low.split()[0]] = "female"
+
+    if not char_genders:
+        return text
+
+    paragraphs = text.split("\n\n")
+    processed_paragraphs = []
+
+    for para in paragraphs:
+        if not para.strip():
+            processed_paragraphs.append(para)
+            continue
+
+        para_lower = para.lower()
+        male_matches = [name for name, g in char_genders.items() if g == "male" and re.search(rf"\b{re.escape(name)}\b", para_lower)]
+        female_matches = [name for name, g in char_genders.items() if g == "female" and re.search(rf"\b{re.escape(name)}\b", para_lower)]
+
+        if male_matches and not female_matches:
+            segs = _clean_quotes_and_split(para)
+            out_segs = []
+            for s, in_q in segs:
+                out_segs.append(s if in_q else _replace_pronouns_to_masculine(s))
+            processed_paragraphs.append("".join(out_segs))
+        elif female_matches and not male_matches:
+            segs = _clean_quotes_and_split(para)
+            out_segs = []
+            for s, in_q in segs:
+                out_segs.append(s if in_q else _replace_pronouns_to_feminine(s))
+            processed_paragraphs.append("".join(out_segs))
+        elif not male_matches and not female_matches:
+            all_known = bool(scene_npcs) and all((n.get("name", "").strip().lower() in char_genders) for n in scene_npcs if isinstance(n, dict) and n.get("name"))
+            if all_known:
+                unique_genders = set(char_genders.values())
+                if unique_genders == {"male"}:
+                    segs = _clean_quotes_and_split(para)
+                    out_segs = []
+                    for s, in_q in segs:
+                        out_segs.append(s if in_q else _replace_pronouns_to_masculine(s))
+                    processed_paragraphs.append("".join(out_segs))
+                elif unique_genders == {"female"}:
+                    segs = _clean_quotes_and_split(para)
+                    out_segs = []
+                    for s, in_q in segs:
+                        out_segs.append(s if in_q else _replace_pronouns_to_feminine(s))
+                    processed_paragraphs.append("".join(out_segs))
+                else:
+                    processed_paragraphs.append(para)
+            else:
+                processed_paragraphs.append(para)
+        else:
+            sentences = re.split(r'(?<=[.!?])\s+', para)
+            proc_sentences = []
+            current_subj_gender = None
+
+            for sent in sentences:
+                sent_lower = sent.lower()
+                s_male = any(re.search(rf"\b{re.escape(name)}\b", sent_lower) for name, g in char_genders.items() if g == "male")
+                s_female = any(re.search(rf"\b{re.escape(name)}\b", sent_lower) for name, g in char_genders.items() if g == "female")
+
+                if s_male and not s_female:
+                    current_subj_gender = "male"
+                elif s_female and not s_male:
+                    current_subj_gender = "female"
+
+                segs = _clean_quotes_and_split(sent)
+                out_segs = []
+                for s, in_q in segs:
+                    if in_q:
+                        out_segs.append(s)
+                    elif current_subj_gender == "male":
+                        out_segs.append(_replace_pronouns_to_masculine(s))
+                    elif current_subj_gender == "female":
+                        out_segs.append(_replace_pronouns_to_feminine(s))
+                    else:
+                        out_segs.append(s)
+                proc_sentences.append("".join(out_segs))
+            processed_paragraphs.append(" ".join(proc_sentences))
+
+    return "\n\n".join(processed_paragraphs)
+
+

@@ -947,7 +947,7 @@ IMMUTABLE_PHYSICAL_APPEARANCE_KEYS = {
     "undergarments", "bra", "underwear",
 }
 
-def format_persona_summary(app_dict: Dict[str, Any], scen_key: str = "fantasy", mannerisms: str = "", traits: List[str] = None, revealed_flags: Dict[str, Any] = None) -> str:
+def format_persona_summary(app_dict: Dict[str, Any], scen_key: str = "fantasy", mannerisms: str = "", traits: List[str] = None, revealed_flags: Dict[str, Any] = None, gender: str = "") -> str:
     """Formats a concise persona summary (appearance, mannerisms, 3-4 traits) for LLM system prompt context."""
     if not app_dict:
         app_dict = {}
@@ -963,6 +963,16 @@ def format_persona_summary(app_dict: Dict[str, Any], scen_key: str = "fantasy", 
     outfit = (app_dict.get("outfit_style") or "").strip()
 
     parts = []
+    gen_val = str(gender or app_dict.get("gender") or "").strip().lower()
+    if gen_val:
+        if any(kw in gen_val for kw in ("male", "man", "boy")) and "female" not in gen_val:
+            parts.append("Gender: Male (he/him)")
+        elif any(kw in gen_val for kw in ("female", "woman", "girl")):
+            parts.append("Gender: Female (she/her)")
+        elif any(kw in gen_val for kw in ("non-binary", "enby", "neutral")):
+            parts.append("Gender: Non-binary (they/them)")
+        else:
+            parts.append(f"Gender: {gen_val.title()}")
     if eye:
         parts.append(f"{eye} eyes")
     if h_color or h_len or h_style:
@@ -1118,7 +1128,7 @@ def split_traits_and_preferences(
 
     # Normalize traits against canonical trait registry
     traits_out = normalize_traits(traits_in)
-    if len(traits_out) < 2:
+    if not traits_out:
         fallback_seed = seed_str or " ".join(str(t) for t in traits_in) or role or race
         traits_out = assign_npc_traits(fallback_seed, count=3, role=role, race=race)
 

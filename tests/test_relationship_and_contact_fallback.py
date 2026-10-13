@@ -143,10 +143,10 @@ class TestRelationshipAndContactFallback(unittest.TestCase):
         apply_outcome(self.session_id, party, outcome, mp_already_spent=False, actions=actions)
 
         self.assertEqual(len(outcome["relationship_updates"]), 1)
-        self.assertEqual(outcome["relationship_updates"][0]["delta_score"], 1)
+        self.assertEqual(outcome["relationship_updates"][0]["delta_score"], 2)
 
         c = db.get_contact(self.session_id, "Yea-ji Kang", character_id=self.char_id)
-        self.assertEqual(c["relationship_score"], 1)
+        self.assertEqual(c["relationship_score"], 2)
         self.assertIn("Ambitious", c["unlocked_traits"])
 
     def test_fantasy_generic_patron_safeguard(self):

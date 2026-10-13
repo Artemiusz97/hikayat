@@ -219,6 +219,16 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
         "{frozen_state_text}", frozen_state_text
     )
     
+    # Ensure lead character gender is populated if available
+    lead_char_obj = actions[0].get("char") if actions and isinstance(actions[0], dict) else None
+    if not session.get("lead_character_gender") and isinstance(lead_char_obj, dict):
+        session["lead_character_gender"] = lead_char_obj.get("gender", "male")
+
+    from game_engine.prompt_layout import build_language_directive
+    lang_dir = build_language_directive(session)
+    if lang_dir:
+        sys_prompt += f"\n\n{lang_dir}"
+    
     # Check for conversational exit intent in retry pass
     from mechanics.narrative.intent import is_conversational_exit
     has_exited_convo = any(is_conversational_exit(str(a.get("label") or "")) for a in actions)
@@ -281,6 +291,9 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
         out["outcome_narrative"] = game_engine.sanitize_absent_npc_hallucinations(
             out["outcome_narrative"], session=session_for_echo, result=applied, actions=actions
         )
+        out["outcome_narrative"] = game_engine.sanitize_npc_pronoun_consistency(
+            out["outcome_narrative"], session=session_for_echo, result=applied, actions=actions
+        )
         session_for_next["narrative"] = out["outcome_narrative"]
     if out.get("next_narrative"):
         out["next_narrative"] = game_engine.sanitize_meta_objective_leaks(out["next_narrative"])
@@ -288,6 +301,9 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
             out["next_narrative"], session_for_next, action_label="", character_name=lead_char_name, is_next_narrative=True
         )
         out["next_narrative"] = game_engine.sanitize_absent_npc_hallucinations(
+            out["next_narrative"], session=session_for_echo, result=applied, actions=actions
+        )
+        out["next_narrative"] = game_engine.sanitize_npc_pronoun_consistency(
             out["next_narrative"], session=session_for_echo, result=applied, actions=actions
         )
 

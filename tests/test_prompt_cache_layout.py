@@ -96,6 +96,37 @@ def test_build_messages():
     assert messages[0]["role"] == "system"
     assert "Part 1\n\nPart 2" in messages[0]["content"]
 
+def test_language_directive_prompt_caching():
+    # English must be empty to preserve byte-identical hash stability for existing games
+    assert prompt_layout.build_language_directive({"language": "en"}) == ""
+    assert prompt_layout.build_language_directive({}) == ""
+
+    # Polish male
+    pl_male = prompt_layout.build_language_directive({"language": "pl", "lead_character_gender": "male"})
+    assert "LANGUAGE DIRECTIVE: POLISH (Język polski)" in pl_male
+    assert "poszedłeś" in pl_male
+    assert "MALE" in pl_male
+
+    # Polish female
+    pl_female = prompt_layout.build_language_directive({"language": "pl", "lead_character_gender": "female"})
+    assert "poszłaś" in pl_female
+    assert "FEMALE" in pl_female
+
+    # Malay
+    ms = prompt_layout.build_language_directive({"language": "ms"})
+    assert "LANGUAGE DIRECTIVE: MALAY (Bahasa Melayu)" in ms
+    assert "kamu" in ms
+
+    # Zone 1 hash stability test
+    base_sess = {"id": "1", "scenario": "fantasy", "style": "normal"}
+    en_sess = {"id": "1", "scenario": "fantasy", "style": "normal", "language": "en"}
+    assert prompt_layout.build_session_zone(base_sess) == prompt_layout.build_session_zone(en_sess)
+
+    # Zone 1 contains directive when localized
+    pl_sess = {"id": "1", "scenario": "fantasy", "style": "normal", "language": "pl"}
+    assert "LANGUAGE DIRECTIVE: POLISH" in prompt_layout.build_session_zone(pl_sess)
+
+
 
 
 

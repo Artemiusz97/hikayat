@@ -87,7 +87,10 @@ async def manage_party_companion(req: CompanionPartyRequest):
         removed = await adb(db.remove_session_party_npc, req.session_id, npc_name)
         if not removed:
             raise HTTPException(status_code=404, detail=f"{npc_name} is not currently in your party")
-        party_npcs = await adb(db.get_session_party_npcs, req.session_id)
+        from .adventure import _enrich_session_for_client
+        updated_sess = await adb(db.get_session, req.session_id) or {}
+        enriched_sess = await adb(_enrich_session_for_client, updated_sess, req.user_id)
+        party_npcs = enriched_sess.get("party_npcs") if isinstance(enriched_sess, dict) else await adb(db.get_session_party_npcs, req.session_id)
         return {
             "success": True,
             "status": "dismissed",
@@ -97,7 +100,13 @@ async def manage_party_companion(req: CompanionPartyRequest):
             "party_npcs": party_npcs,
         }
 
-    # Recruit flow: enforce 2-companion cap & Friend+ affinity threshold (>= 15)
+    # Non-combat scenario guard
+    scen_key = str(session.get("scenario") or "fantasy").lower()
+    import scenario_data
+    if not scenario_data.is_mechanic_enabled(scen_key, "tactical_combat") or scenario_data.has_tag(scen_key, "non_combat") or scenario_data.has_tag(scen_key, "high_school"):
+        raise HTTPException(status_code=400, detail="Party companion recruitment is disabled in non-combat scenarios.")
+
+    # Recruit flow: enforce 2-companion cap
     current_companions = await adb(db.get_session_party_npcs, req.session_id)
     if len(current_companions) >= 2:
         raise HTTPException(status_code=400, detail="Party companion limit reached (max 2 NPC companions).")
@@ -111,18 +120,49 @@ async def manage_party_companion(req: CompanionPartyRequest):
         (dict(c) for c in contacts if (c.get("name") or "").strip().lower() == npc_name.lower() or (c.get("npc_id") or "").strip().lower() == npc_name.lower().replace(" ", "_")),
         None
     )
-    score = int((matched_contact or {}).get("relationship_score", 0) or 0)
-    if score < 15:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{npc_name} requires at least Friend standing (+15 affinity, currently {score}) to join your party."
-        )
+    if not matched_contact:
+        lore_data = await adb(db.get_lorebook, req.session_id)
+        if isinstance(lore_data, dict):
+            matched_contact = next(
+                (dict(p) for p in lore_data.get("person", []) if (p.get("name") or "").strip().lower() == npc_name.lower()),
+                None
+            )
+        if not matched_contact:
+            curr_npcs = session.get("current_npcs") or []
+            matched_contact = next(
+                (dict(n) for n in curr_npcs if isinstance(n, dict) and (n.get("name") or "").strip().lower() == npc_name.lower()),
+                None
+            )
+    if not matched_contact:
+        raise HTTPException(status_code=404, detail=f"NPC '{npc_name}' not found in contacts, current scene, or world codex.")
 
     basic_info = (matched_contact or {}).get("basic_info") or {}
+    role_check = str(basic_info.get("role") or basic_info.get("occupation") or matched_contact.get("role") or "").lower()
+    if any(m in role_check or m in npc_name.lower() for m in ("merchant", "shopkeeper", "vendor", "apothecary", "peddler", "trader")):
+        raise HTTPException(status_code=400, detail=f"{npc_name} is a merchant and cannot be recruited.")
+
+    enemy_list = game_engine.get_active_enemies(session) or []
+    if any(game_engine._get_npc_name(e).lower() == npc_name.lower() for e in enemy_list if e):
+        raise HTTPException(status_code=400, detail=f"{npc_name} is currently an active enemy and cannot be recruited.")
+
+    score = int((matched_contact or {}).get("relationship_score", 0) or 0)
+    from mechanics.social.relationships import get_recruitment_cost
+    char_level = max(1, int(char_row.get("level", 1) or 1)) if char_row else 1
+    rec_cost = get_recruitment_cost(score, level=char_level)
+    char_gold = int(char_row.get("gold", 0) or 0) if char_row else 0
+
+    if rec_cost > 0:
+        if char_gold < rec_cost:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{npc_name} requires at least Friend standing (100 affinity) to join for free, or {rec_cost} gold to recruit (you have {char_gold} gold)."
+            )
+        await adb(db.apply_hp_mp_delta, req.user_id, gold_delta=-rec_cost)
+
     npc_payload = {
         "name": (matched_contact or {}).get("name") or npc_name,
         "npc_id": (matched_contact or {}).get("npc_id") or npc_name.lower().replace(" ", "_"),
-        "role": basic_info.get("role") or basic_info.get("occupation") or "Companion",
+        "role": basic_info.get("role") or basic_info.get("occupation") or matched_contact.get("role") or "Companion",
         "hp": 45,
         "max_hp": 45,
         "mp": 25,
@@ -133,7 +173,34 @@ async def manage_party_companion(req: CompanionPartyRequest):
     if not added:
         raise HTTPException(status_code=400, detail=f"Could not add {npc_name} to party (party full or already recruited).")
 
-    party_npcs = await adb(db.get_session_party_npcs, req.session_id)
+    # Per contact rule 1b: Recruited party members automatically enter Contacts list
+    existing_in_contacts = any((c.get("name") or "").strip().lower() == npc_name.lower() for c in contacts)
+    delta_to_apply = 0 if existing_in_contacts else score
+    c_app = matched_contact.get("appearance") or matched_contact.get("appearance_json")
+    if isinstance(c_app, str):
+        try:
+            import json
+            c_app = json.loads(c_app)
+        except Exception:
+            c_app = {}
+    await adb(
+        db.upsert_contact,
+        session_id=req.session_id,
+        character_id=char_id,
+        npc_id=npc_payload["npc_id"],
+        name=npc_payload["name"],
+        basic_info=basic_info if basic_info else {"role": npc_payload["role"]},
+        delta_score=delta_to_apply,
+        track="platonic",
+        race=matched_contact.get("race", "") or "",
+        gender=matched_contact.get("gender", "") or "",
+        appearance=c_app if isinstance(c_app, dict) else None,
+    )
+
+    from .adventure import _enrich_session_for_client
+    updated_sess = await adb(db.get_session, req.session_id) or {}
+    enriched_sess = await adb(_enrich_session_for_client, updated_sess, req.user_id)
+    party_npcs = enriched_sess.get("party_npcs") if isinstance(enriched_sess, dict) else await adb(db.get_session_party_npcs, req.session_id)
     return {
         "success": True,
         "status": "recruited",
@@ -149,11 +216,42 @@ async def get_lorebook(session_id: int):
     """Fetches all lorebook entities (places, people, factions) grouped by category."""
     grouped = await adb(db.get_lorebook, session_id)
     commitments = await adb(db.get_active_commitments, session_id)
+    contacts = await adb(db.get_contacts, session_id) or []
+    contact_score_map = {
+        (c.get("name") or "").lower().strip(): int(c.get("relationship_score", 0) or 0)
+        for c in contacts if c.get("name")
+    }
     all_entities = []
     if isinstance(grouped, dict):
         for cat, items in grouped.items():
             for it in items:
-                all_entities.append(dict(it))
+                it_dict = dict(it)
+                if cat == "person" or it_dict.get("entity_type") == "person":
+                    p_name = (it_dict.get("name") or "").lower().strip()
+                    it_dict["relationship_score"] = contact_score_map.get(p_name, 0)
+                all_entities.append(it_dict)
+        for p in grouped.get("person", []):
+            if isinstance(p, dict):
+                p_name = (p.get("name") or "").lower().strip()
+                p["relationship_score"] = contact_score_map.get(p_name, 0)
+
+        existing_person_names = {str(p.get("name") or "").strip().lower() for p in grouped.get("person", [])}
+        for c in contacts:
+            c_name = str(c.get("name") or "").strip()
+            if c_name and c_name.lower() not in existing_person_names:
+                b_info = c.get("basic_info") or {}
+                p_dict = {
+                    "name": c_name,
+                    "role": b_info.get("role") or b_info.get("occupation") or "Contact",
+                    "race": c.get("race") or b_info.get("race") or "Unknown",
+                    "gender": c.get("gender") or b_info.get("gender") or "Unknown",
+                    "description": b_info.get("description") or "",
+                    "entity_type": "person",
+                    "relationship_score": contact_score_map.get(c_name.lower(), 0),
+                }
+                grouped.setdefault("person", []).append(p_dict)
+                all_entities.append(p_dict)
+                existing_person_names.add(c_name.lower())
     return {
         "categories": grouped,
         "entities": all_entities,
@@ -161,7 +259,7 @@ async def get_lorebook(session_id: int):
     }
 
 
-def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_reveal_all: bool) -> dict:
+def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_reveal_all: bool, phys_st: dict | None = None) -> dict:
     c = dict(c_raw)
     score = int(c.get("relationship_score", 0) or 0)
     if debug_reveal_all:
@@ -521,6 +619,26 @@ def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_re
     from scenario_data import is_nsfw_scenario
     c["is_nsfw"] = is_nsfw_scenario(scen_key)
     c["recent_memories"] = recent_mems
+
+    try:
+        from mechanics.social.physical_state import compute_clothing_summary_badge, _match_actor_key
+        phys_actors = (phys_st.get("actors") or {}) if isinstance(phys_st, dict) else {}
+        c_name_str = str(c.get("name") or "").strip()
+        m_act_key = _match_actor_key(c_name_str, phys_actors) if c_name_str else ""
+        n_act_data = phys_actors.get(m_act_key) or {}
+        c["clothing_status"] = compute_clothing_summary_badge(n_act_data.get("clothing"), gender=c_gender)
+    except Exception:
+        c.setdefault("clothing_status", "Fully Clothed 👕")
+
+    raw_effs = c.get("status_effects") or (c.get("basic_info") or {}).get("status_effects") or []
+    if isinstance(raw_effs, list):
+        c["status_effects"] = [
+            str(s).strip()
+            for s in raw_effs
+            if str(s).strip() and str(s).strip().lower() not in ("[]", "{}", '""', "''", "none", "null")
+        ]
+    else:
+        c["status_effects"] = []
     return c
 
 
@@ -529,6 +647,7 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None)):
     """Fetches NPC contacts and relationship standings."""
     session = await adb(db.get_session, session_id) or {}
     scen_key = session.get("scenario", "fantasy")
+    phys_st = session.get("physical_state") if isinstance(session.get("physical_state"), dict) else None
     lookup_uid = user_id or session.get("host_user_id") or 0
     settings = await adb(db.get_settings, lookup_uid) if lookup_uid else {}
     debug_reveal_all = bool((settings or {}).get("debug_reveal_all_info", 0))
@@ -538,7 +657,7 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None)):
     if not contacts and lookup_uid and char_id != lookup_uid:
         contacts = await adb(db.get_contacts, session_id, lookup_uid)
     enriched_contacts = await adb(
-        lambda: [_enrich_contact_record(c, session_id, scen_key, debug_reveal_all) for c in contacts]
+        lambda: [_enrich_contact_record(c, session_id, scen_key, debug_reveal_all, phys_st=phys_st) for c in contacts]
     )
     from scenario_data import is_nsfw_scenario
     return {

@@ -753,7 +753,16 @@ async def call_llm_json_stream(system_prompt: str | list, user_prompt: str,
                     t0 = time.perf_counter()
                     
                     while continuation_count <= 2:
-                        response = await client.chat.completions.create(stream=True, **kwargs)
+                        try:
+                            response = await client.chat.completions.create(stream=True, **kwargs)
+                        except BadRequestError as bad_req_err:
+                            if continuation_count > 0:
+                                log.warning(
+                                    "Stream auto-continuation (pass %d) rejected with BadRequestError: %s. Salvaging accumulated prose with json_repair...",
+                                    continuation_count, bad_req_err
+                                )
+                                break
+                            raise
                         
                         final_finish_reason = None
                         stripped_continuation_fence = False
@@ -789,7 +798,9 @@ async def call_llm_json_stream(system_prompt: str | list, user_prompt: str,
 
                         continuation_count += 1
                         log.warning(f"LLM model '{model_name}' stream was truncated. Auto-continuing (pass {continuation_count})...")
-                        clean_raw = re.sub(r"\s*```(?:json)?\s*$", "", full_text)
+                        clean_raw = re.sub(r"\s*```(?:json)?\s*$", "", full_text).rstrip()
+                        if clean_raw.count('"') % 2 != 0:
+                            clean_raw += '"'
                         
                         # Update kwargs messages for the continuation pass
                         cont_messages = list(messages) + [
@@ -979,7 +990,16 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
                     
                     while continuation_count <= 2:
                         if not response:
-                            response = await client.chat.completions.create(**kwargs)
+                            try:
+                                response = await client.chat.completions.create(**kwargs)
+                            except BadRequestError as bad_req_err:
+                                if continuation_count > 0:
+                                    log.warning(
+                                        "Batch auto-continuation (pass %d) rejected with BadRequestError: %s. Salvaging accumulated text with json_repair...",
+                                        continuation_count, bad_req_err
+                                    )
+                                    break
+                                raise
                         if not response.choices:
                             raise ValueError(f"LLM provider returned an empty response (no choices) for model '{model_name}'.")
 
@@ -1013,7 +1033,9 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
 
                             
                         log.warning(f"LLM model '{model_name}' output was truncated. Attempting auto-continuation (pass {continuation_count})...")
-                        clean_raw_for_context = re.sub(r"\s*```(?:json)?\s*$", "", raw)
+                        clean_raw_for_context = re.sub(r"\s*```(?:json)?\s*$", "", raw).rstrip()
+                        if clean_raw_for_context.count('"') % 2 != 0:
+                            clean_raw_for_context += '"'
                         
                         cont_messages = list(messages) + [
                             {"role": "assistant", "content": clean_raw_for_context},
@@ -1122,6 +1144,7 @@ GM_SHARED_RULES = """You are the Game Master for Hikayat. The PRIMARY STORY QUES
 ### Narrative & Roleplay Engine Rules
 ⚡ STYLE & DIALOGUE SUPREMACY (HIGHEST PRIORITY — OVERRIDES ALL OTHER RULES): The STYLE and DIALOGUE directives provided in the ACTIVE NARRATIVE STYLE & DIALOGUE DIRECTIVES section define the player's active narrative preferences. These ALWAYS take absolute precedence over any general narrative/roleplay guidance below. Follow the STYLE directive's paragraph quotas, vocabulary rules, and STRICTLY FORBIDDEN constraints exactly. Follow the DIALOGUE directive's exchange requirements and STRICTLY FORBIDDEN constraints exactly. NEVER default to purple prose, multi-paragraph sensory narration, or one-sided NPC monologues when the active STYLE or DIALOGUE directive explicitly forbids them.
 ⚡ IMMERSIVE NARRATIVE PURITY (NO META-LEAKS): Spoken character dialogue and story narration MUST remain 100% in-universe. NEVER write engine tracking labels, system prompts, or internal metadata (such as "Sub-Objective #", "Sub-Quest #", "Objective 1/2", "quest log", "DC check", "system directive") in story narration or character quotes. Characters must speak naturally, referring to the actual in-world plot events, clues, suspects, or evidence.
+⚡ CHARACTER IDENTITY, GENDER & PRONOUN IMMUTABILITY: An established character's canonical identity, gender, and pronouns (he/him/his for male, she/her/hers for female, they/them for non-binary) are absolute and immutable. You MUST NEVER switch, mix, or invert a character's pronouns or gender in narration or dialogue. Always address and describe male NPCs using masculine pronouns (he/him/his) and female NPCs using feminine pronouns (she/her/hers). Never refer to a male NPC as 'she' or describe them with female titles/terms, and never refer to a female NPC as 'he'.
 1. NARRATIVE & SCENE FLOW: Craft scenes according to the active STYLE directive. Apply prose richness, sensory environment details (lighting, sounds, scents), NPC dialogue, and micro-expressions/mannerisms only to the degree the STYLE directive permits. For `vivid` or `shakespearean` style, write with full atmospheric immersion. For `normal`, use clean contemporary prose. For `direct` or `concise`, keep narration tight, functional, and momentum-focused without sensory padding.
 
 2. SUB-QUEST COMPLETION & DELVE GUARDRAIL: Include a sub-quest ID in `completed_sub_quest_ids` ONLY when the player's action and the current scene physically and conclusively achieve that entire multi-step objective.

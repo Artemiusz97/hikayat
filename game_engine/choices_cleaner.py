@@ -483,6 +483,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
     premature_finish = False
     partner_demanded = True
     in_refr_cooldown = False
+    player_in_refr_cooldown = False
     last_act = "foreplay_nongenital"
     player_meter = 0
     partner_meter = 0
@@ -492,6 +493,9 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
     partner_actors_list: List[Dict[str, Any]] = []
     partner_climaxes_map: Optional[Dict[str, bool]] = None
     contacts_list: List[Dict[str, Any]] = []
+    ic_str = ""
+    climax_st: Dict[str, Any] = {}
+    phys_st = None
 
     if partners_list:
         primary_partner = partners_list[0]
@@ -515,7 +519,8 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                     from mechanics.social.physical_state import is_erotic_intimate_contact
                     is_active_intimate = is_erotic_intimate_contact(ic_str)
                     climax_st = phys_st.get("climax_state", {}) or {}
-                    partner_climaxes_map = climax_st.get("partner_climaxes") if isinstance(climax_st, dict) else None
+                    raw_pc_map = climax_st.get("partner_climaxes") if isinstance(climax_st, dict) else None
+                    partner_climaxes_map = dict(raw_pc_map) if isinstance(raw_pc_map, dict) else None
                     player_already_finished = bool(climax_st.get("player_climaxed", False))
                     player_spent_and_finished = player_already_finished and "hypersensitive ongoing" not in ic_str
                     partner_climaxed = bool(climax_st.get("partner_climaxed", False)) or "partner reached climax" in ic_str or "partner peaked" in ic_str
@@ -524,6 +529,18 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                     premature_finish = bool(exc_st.get("premature_finish", False)) or "player reached climax spent, partner unsatisfied" in ic_str
                     partner_demanded = bool(exc_st.get("partner_demanded", True))
                     in_refr_cooldown, _ = is_in_refractory_cooldown(sess, phys_st)
+                    if in_refr_cooldown and isinstance(exc_st.get("refractory_partners"), dict) and exc_st.get("refractory_partners"):
+                        if partner_climaxes_map is None:
+                            partner_climaxes_map = {}
+                        for rp_k, rp_v in exc_st["refractory_partners"].items():
+                            if rp_v:
+                                partner_climaxes_map[rp_k] = True
+                        if any(partner_climaxes_map.values()):
+                            partner_climaxed = True
+                    if exc_st.get("player_in_refractory") is not None:
+                        player_in_refr_cooldown = bool(in_refr_cooldown and exc_st.get("player_in_refractory"))
+                    else:
+                        player_in_refr_cooldown = bool(in_refr_cooldown and (player_already_finished or "ongoing for player" not in ic_str))
 
                     from mechanics.social.physical_state import _match_actor_key
                     char_name_val = str(char.get("name", "")).strip() if isinstance(char, dict) else ""
@@ -648,6 +665,8 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                             })
             except Exception:
                 pass
+        else:
+            player_in_refr_cooldown = False
 
         if partner_actors_list:
             partner_meter = max(int(p.get("meter", 0) or 0) for p in partner_actors_list)
@@ -666,7 +685,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
             player_meter=player_meter,
             partner_meter=partner_meter,
             partner_climaxed=partner_climaxed,
-            player_climaxed=player_spent_and_finished,
+            player_climaxed=bool(player_spent_and_finished or player_in_refr_cooldown),
             premature_finish=premature_finish,
             partner_demanded=partner_demanded,
             sensitive_spots=sensitive_spots,
@@ -807,13 +826,20 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
             dialogue_filtered.append(c)
 
         # Hybrid Guided Intimate System (Layer 2: State Validator, Contradiction Filter & Act/Posture/Meter-Aware Safety Net):
-        if is_active_intimate:
-            player_is_spent = bool(player_spent_and_finished or in_refr_cooldown)
+        is_filtering_intimate = bool(
+            is_active_intimate
+            or in_refr_cooldown
+            or player_spent_and_finished
+            or "aftercare" in ic_str
+            or (climax_st and (climax_st.get("player_climaxed") or climax_st.get("partner_climaxed")))
+        )
+        if is_filtering_intimate:
+            player_is_spent = bool(player_spent_and_finished or player_in_refr_cooldown)
             player_has_climaxed = bool(
                 player_already_finished
                 or player_spent_and_finished
                 or player_meter >= 100
-                or in_refr_cooldown
+                or player_in_refr_cooldown
                 or "player reached climax" in str(getattr(phys_st, "get", lambda *_: "")("intimate_contact", "")).lower()
             )
             # 1. Prune choices that contradict current act, posture, climax state, meter threshold, or spent state
@@ -854,7 +880,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
             if exit_choices:
                 has_exit = True
 
-            if player_spent_and_finished and premature_finish:
+            if (player_spent_and_finished or player_in_refr_cooldown) and premature_finish:
                 has_dynamic_post_climax = any(
                     matches_boundary(c.get("label", "").lower(), (
                         "finger", "fingers", "hand", "hands", "tongue", "mouth", "lick",
@@ -874,6 +900,30 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                             existing_lbls.add(fb_c["label"].lower())
                         if len(substantive_choices) >= target_sub_count:
                             break
+                    dialogue_filtered = substantive_choices + exit_choices
+            elif (player_spent_and_finished or player_in_refr_cooldown) and not premature_finish:
+                # Scenario A: Mutual Climax / All Partners Satisfied
+                # Prune any remaining intimate escalation choices and enforce aftercare blueprints
+                has_valid_aftercare = any(
+                    matches_boundary(c.get("label", "").lower(), (
+                        "aftercare", "cuddle", "hold", "kiss", "caress", "hair", "tender", "warmth",
+                        "breath", "rest", "whisper", "pillow", "talk", "drink", "water", "blanket", "dress"
+                    ))
+                    for c in substantive_choices
+                )
+                if not has_valid_aftercare:
+                    dialogue_filtered = [dict(fb_c) for fb_c in bp["choices"]]
+                    has_exit = True
+                else:
+                    target_sub_count = max(2, len(bp["choices"]) - 1)
+                    if len(substantive_choices) < target_sub_count:
+                        existing_lbls = {c.get("label", "").lower() for c in substantive_choices}
+                        for fb_c in bp["choices"][:-1]:
+                            if fb_c["label"].lower() not in existing_lbls:
+                                substantive_choices.append(dict(fb_c))
+                                existing_lbls.add(fb_c["label"].lower())
+                            if len(substantive_choices) >= target_sub_count:
+                                break
                     dialogue_filtered = substantive_choices + exit_choices
             else:
                 has_valid_intimate = any(

@@ -123,7 +123,20 @@ class PhysicalUpdate(BaseModel):
         if hasattr(v, "model_dump"):
             return v.model_dump()
         if isinstance(v, dict):
-            return v
+            cleaned = {}
+            for k, val in v.items():
+                name_str = str(k).strip()
+                if not name_str:
+                    continue
+                if isinstance(val, dict):
+                    cleaned[name_str] = val
+                elif hasattr(val, "model_dump"):
+                    cleaned[name_str] = val.model_dump()
+                elif isinstance(val, str) and val.strip():
+                    cleaned[name_str] = {"posture": val.strip()[:100]}
+                else:
+                    cleaned[name_str] = {}
+            return cleaned
         return {}
 
     @field_validator("props", mode="before")

@@ -10,7 +10,7 @@ class TestContactsUIDeclutter(unittest.TestCase):
         """1. Verify effect descriptions removed from traits and affinity descriptions removed from likes/dislikes."""
         contact = {
             "name": "Rachel Vance",
-            "relationship_score": 85,
+            "relationship_score": 220,
             "track": "platonic",
             "unlocked_traits": ["Diligent", "Warm"],
             "preferences": [
@@ -81,7 +81,7 @@ class TestContactsUIDeclutter(unittest.TestCase):
         """3. Verify 'Inner Circle (Friends)' -> 'Friends', 'Rivals & Adversaries' -> 'Rivals', and bracketed status removed."""
         contact = {
             "name": "Rachel Vance",
-            "relationship_score": 85,
+            "relationship_score": 150,
             "relations": {
                 "friends": [
                     {"name": "Jackson Noh", "role": "Drama Club Lead", "closeness": "Close Friend / Confidant"}
@@ -114,7 +114,7 @@ class TestContactsUIDeclutter(unittest.TestCase):
         """4. Verify parents' career removed, alive/deceased text removed, and skull emoji used for deceased."""
         contact = {
             "name": "Rachel Vance",
-            "relationship_score": 85,
+            "relationship_score": 220,
             "relations": {
                 "family": [
                     {

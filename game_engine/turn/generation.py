@@ -323,6 +323,11 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         f"- STRICTLY FORBIDDEN: Do NOT narrate sunset, dusk, evening, twilight, or night when the clock indicates morning! Describe morning sunlight, students arriving, homeroom preparations, or morning routines.\n\n"
     )
 
+    if party and not session.get("lead_character_gender"):
+        lead_c = party[0][0] if isinstance(party[0], (tuple, list)) else party[0]
+        if isinstance(lead_c, dict):
+            session["lead_character_gender"] = lead_c.get("gender", "male")
+
     zone_0 = prompt_layout.build_static_core(mode, "opening")
     zone_1 = prompt_layout.build_session_zone(session)
     system_prompt = prompt_layout.assemble_system_prompt(zone_0, zone_1)
@@ -377,6 +382,9 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         narrative = (res_deep.get("narrative") or res_deep.get("next_narrative") or res_deep.get("outcome_narrative") or "").strip()
 
         res_deep["narrative"] = game_engine.sanitize_comparative_cliches(narrative)
+        res_deep["narrative"] = game_engine.sanitize_npc_pronoun_consistency(
+            res_deep["narrative"], session=session, result=res_deep, party=party
+        )
 
         init_default_physical_state(session["id"], party, scen_key, opening_scene=res_deep)
 

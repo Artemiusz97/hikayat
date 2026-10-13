@@ -331,7 +331,10 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
             from mechanics.combat.enemies import generate_balanced_encounter
             party_dicts = [char for char, _ in party] if party else []
             cur_chapter = session.get("current_chapter", 1)
-            new_monsters, xp_mult = generate_balanced_encounter(party_dicts, scen_key, session.get("current_location", "area"), cur_chapter)
+            new_monsters, xp_mult = generate_balanced_encounter(
+                party_dicts, scen_key, session.get("current_location", "area"), cur_chapter,
+                language=session.get("narration_language") or session.get("language", "en")
+            )
             # Pre-inject them into session so they appear in prompt
             session["nearby_enemies"] = new_monsters
             ambush_triggered = True
@@ -413,29 +416,86 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
                     comp_str = ", ".join(comp_names) if comp_names else "None (traveling solo)"
 
+                    # Check if action or active quest specifies a target resident / station within dest_p
+                    target_station_sub = None
+                    target_resident_name = None
+                    lbl_lower = (label or "").lower()
+
+                    facility_residents = []
+                    try:
+                        facility_residents = db.get_school_characters_by_facility(session["id"], f"{dest_z} ➔ {dest_p}", limit=6)
+                    except Exception:
+                        facility_residents = []
+
+                    # 1. Check if action mentions one of the facility residents
+                    for fr in facility_residents:
+                        fr_nm = (fr.get("name") or "").strip().lower()
+                        if fr_nm and (fr_nm in lbl_lower or (len(fr_nm.split()) > 1 and fr_nm.split()[0] in lbl_lower)):
+                            fr_fac = fr.get("primary_facility") or ""
+                            if fr_fac:
+                                _, _, fr_s = parse_tiered_location(fr_fac, scen_key, session_id=session["id"])
+                                if fr_s and fr_s not in ("Main Area", ""):
+                                    target_station_sub = fr_s
+                                    target_resident_name = fr.get("name")
+                                    break
+
+                    # 2. Check active quest sub-objectives if not found yet
+                    if not target_station_sub:
+                        try:
+                            with db.get_conn() as _c_conn:
+                                q_rows = _c_conn.execute("SELECT sub_objectives_json FROM quests WHERE session_id=? AND status='Active'", (session["id"],)).fetchall()
+                                for qr in q_rows:
+                                    sub_objs = json.loads(qr["sub_objectives_json"] or "[]")
+                                    for so in sub_objs:
+                                        if not so.get("completed"):
+                                            t_loc = so.get("target_location", "")
+                                            t_npc = (so.get("target_npc") or "").strip().lower()
+                                            if t_loc:
+                                                qz, qp, qs = parse_tiered_location(t_loc, scen_key, session_id=session["id"])
+                                                if qp.lower() == dest_p.lower() and qs and qs not in ("Main Area", ""):
+                                                    if not t_npc or (t_npc in lbl_lower or (len(t_npc.split()) > 1 and t_npc.split()[0] in lbl_lower)):
+                                                        target_station_sub = qs
+                                                        target_resident_name = so.get("target_npc")
+                                                        break
+                                    if target_station_sub:
+                                        break
+                        except Exception:
+                            pass
+
+                    loc_prompt_target = target_station_sub or "[Specific Sub-Area]"
                     directive_note += (
-
                         f"\n[TRAVEL ARRIVAL & ESTABLISHMENT DEPARTURE DIRECTIVE]:\n"
-
                         f"- The party has departed [{old_primary}] and arrived at [{dest_z} ➔ {dest_p}].\n"
-
-                        f"- Set `location` to '{dest_z} ➔ {dest_p} ➔ [Specific Sub-Area]'.\n"
-
-                        f"- Companions traveling with the party: {comp_str}.\n"
-
+                        f"- Set `location` to '{dest_z} ➔ {dest_p} ➔ {loc_prompt_target}'.\n"
                     )
+                    if target_resident_name and target_station_sub:
+                        directive_note += f"- Target Resident: {target_resident_name} is stationed at {target_station_sub}.\n"
+                    directive_note += f"- Companions traveling with the party: {comp_str}.\n"
 
                     if patron_names:
-
                         patron_str = ", ".join(patron_names)
-
                         directive_note += (
-
                             f"- Patrons left behind at {old_primary} (DO NOT NARRATE OR INCLUDE IN `npcs_present`): {patron_str}.\n"
-
                         )
-
                     directive_note += f"- Local environment: Introduce or focus on local NPCs native to {dest_p}.\n"
+
+                    if facility_residents:
+                        resident_lines = []
+                        for fr in facility_residents:
+                            fr_name = fr.get("name")
+                            fr_role = fr.get("role") or ""
+                            fr_gender = fr.get("gender") or ""
+                            fr_fac = fr.get("primary_facility") or ""
+                            _, _, fr_s = parse_tiered_location(fr_fac, scen_key, session_id=session["id"]) if fr_fac else ("", "", "")
+                            station_txt = f" @ {fr_s}" if fr_s and fr_s not in ("Main Area", "") else ""
+                            gender_txt = f", {fr_gender}" if fr_gender else ""
+                            resident_lines.append(f"  * {fr_name} ({fr_role}{gender_txt}){station_txt}")
+                        if resident_lines:
+                            directive_note += (
+                                f"- Canonical Facility Occupants stationed at {dest_p}:\n"
+                                + "\n".join(resident_lines) + "\n"
+                                f"- Roster & Presence Guidance: Focus interaction on the active scene characters. Other room occupants may be working quietly at their designated stations or away in class. Do not seat one character at another occupant's specific desk or station.\n"
+                            )
 
 
 
@@ -668,6 +728,11 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
             game_engine._describe_tracked_entity(e) for e in enemies_list
         ) + "\n"
 
+    if party and not session.get("lead_character_gender"):
+        lead_c = party[0][0] if isinstance(party[0], (tuple, list)) else party[0]
+        if isinstance(lead_c, dict):
+            session["lead_character_gender"] = lead_c.get("gender", "male")
+
     zone_0 = prompt_layout.build_static_core(mode, "turn")
     zone_1 = prompt_layout.build_session_zone(session)
     zone_1b = prompt_layout.build_world_canon_zone(session, world=world_bundle)
@@ -735,6 +800,9 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
             result["outcome_narrative"] = game_engine.sanitize_absent_npc_hallucinations(
                 result["outcome_narrative"], session=session, result=result, actions=actions, party=party
             )
+            result["outcome_narrative"] = game_engine.sanitize_npc_pronoun_consistency(
+                result["outcome_narrative"], session=session, result=result, actions=actions, party=party
+            )
 
         if result.get("next_narrative"):
             result["next_narrative"] = game_engine.sanitize_comparative_cliches(result["next_narrative"])
@@ -743,6 +811,9 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                 result["next_narrative"], session, action_label="", character_name=lead_char_name, is_next_narrative=True
             )
             result["next_narrative"] = game_engine.sanitize_absent_npc_hallucinations(
+                result["next_narrative"], session=session, result=result, actions=actions, party=party
+            )
+            result["next_narrative"] = game_engine.sanitize_npc_pronoun_consistency(
                 result["next_narrative"], session=session, result=result, actions=actions, party=party
             )
 

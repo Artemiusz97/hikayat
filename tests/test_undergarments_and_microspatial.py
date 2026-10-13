@@ -168,7 +168,7 @@ class TestUndergarmentsAndMicrospatial(unittest.TestCase):
         contact = {
             "name": "Maya Anderson",
             "gender": "female",
-            "relationship_score": 100,
+            "relationship_score": 220,
             "appearance": {
                 "undergarments": {
                     "bra": "Black lace plunge bra",

@@ -1298,6 +1298,7 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
     narr_lower = str(narrative or "").lower()
 
+    act_lower = str(action_text or "").lower()
     is_move = is_movement_action(action_text)
 
 
@@ -1320,51 +1321,68 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
         sub_to_use = "Main Area"
 
         # Check if there is an active phone appointment at this destination with a specific sub-location
-
+        locked_target_sub = None
         try:
-
             pending_appts = db.get_phone_appointments(session_id, status="pending") + db.get_phone_appointments(session_id, status="arrived")
-
             for appt in pending_appts:
-
                 appt_loc = appt.get("rendezvous_location", "")
-
                 if appt_loc:
-
                     az, ap, asub = parse_tiered_location(appt_loc, scen_key, session_id=session_id, char_name=char_name)
-
                     if ap.lower() == dest_p.lower() and asub and asub not in ("Main Area", ""):
-
                         sub_to_use = asub
-
+                        locked_target_sub = asub
                         break
-
         except Exception:
-
             pass
 
+        # Check if there is an active quest waypoint or target character stationed at this primary place
+        try:
+            with db.get_conn() as _c_conn:
+                if not locked_target_sub:
+                    q_rows = _c_conn.execute("SELECT sub_objectives_json FROM quests WHERE session_id=? AND status='Active'", (session_id,)).fetchall()
+                    for qr in q_rows:
+                        sub_objs = json.loads(qr["sub_objectives_json"] or "[]")
+                        for so in sub_objs:
+                            if not so.get("completed"):
+                                t_loc = so.get("target_location", "")
+                                t_npc = (so.get("target_npc") or "").strip().lower()
+                                if t_loc:
+                                    qz, qp, qsub = parse_tiered_location(t_loc, scen_key, session_id=session_id, char_name=char_name)
+                                    if qp.lower() == dest_p.lower() and qsub and qsub not in ("Main Area", ""):
+                                        if (t_npc and (t_npc in act_lower or (len(t_npc.split()) > 1 and t_npc.split()[0] in act_lower))) or sub_to_use == "Main Area":
+                                            sub_to_use = qsub
+                                            locked_target_sub = qsub
+                                            break
+                        if locked_target_sub:
+                            break
 
+                if not locked_target_sub:
+                    cand_chars = _c_conn.execute(
+                        "SELECT name, primary_facility FROM school_directory WHERE session_id=?", (session_id,)
+                    ).fetchall()
+                    for cc in cand_chars:
+                        c_name = (cc["name"] or "").strip().lower()
+                        c_fac = cc["primary_facility"] or ""
+                        if c_name and (c_name in act_lower or (len(c_name.split()) > 1 and c_name.split()[0] in act_lower)):
+                            if c_fac and dest_p.lower() in c_fac.lower():
+                                _, _, npc_sub = parse_tiered_location(c_fac, scen_key, session_id=session_id, char_name=char_name)
+                                if npc_sub and npc_sub not in ("Main Area", ""):
+                                    sub_to_use = npc_sub
+                                    locked_target_sub = npc_sub
+                                    break
+        except Exception:
+            pass
 
         # Scan for sub-area within destination establishment
-
         existing = db.get_session_locations(session_id)
-
         known_subs_for_dest = [
-
             r["sub_name"] for r in existing
-
             if r.get("primary_name", "").strip().lower() == dest_p.strip().lower() and r.get("sub_name") and r.get("sub_name") not in ("Main Area", "")
-
         ]
-
         act_lower = str(action_text).lower()
-
         for sub_cand in known_subs_for_dest:
-
             cand_lower = sub_cand.lower()
-
             cand_words = [w for w in cand_lower.split() if len(w) >= 4 and w not in ("area", "spot", "your", "main")]
-
             if (cand_lower in act_lower or (cand_words and any(cw in act_lower for cw in cand_words))) or (cand_lower in narr_prose or (cand_words and any(cw in narr_prose for cw in cand_words))):
                 sub_to_use = sub_cand
                 break
@@ -1381,20 +1399,13 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
                     sub_to_use = explicit_sub
                     break
 
-
-
-
         if raw_res:
-
             parsed_z, parsed_p, parsed_sub = parse_tiered_location(raw_res, scen_key, session_id=session_id, char_name=char_name)
-
             is_same_dest = bool(parsed_p and parsed_p.lower() == dest_p.lower())
-
             is_known_sub = bool(known_subs_for_dest and any(parsed_sub.lower() == s.lower() for s in known_subs_for_dest))
-
             if (is_same_dest or is_known_sub) and parsed_sub and parsed_sub not in ("Main Area", "") and not is_poetic_drift_title(parsed_sub) and not is_incongruous_container(dest_p, parsed_sub, session_id=session_id, scenario_key=scen_key):
-
-                sub_to_use = parsed_sub
+                if not (locked_target_sub and parsed_sub.lower() != locked_target_sub.lower()):
+                    sub_to_use = parsed_sub
 
             if parsed_z and not dest_z and not is_poetic_drift_title(parsed_z):
 
@@ -1423,7 +1434,6 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
 
         formatted = format_tiered_location_string(dest_z or curr_z, dest_p, sub_to_use)
-
         return process_llm_location_update(session_id, formatted, scen_key, char_name=char_name)
 
 

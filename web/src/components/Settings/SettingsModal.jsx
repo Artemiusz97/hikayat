@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Zap, BookOpen, Sliders, Check, ShieldAlert, Image as ImageIcon, Activity, RefreshCw, Terminal, HeartPulse, Skull } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { X, Zap, BookOpen, Sliders, Check, ShieldAlert, Image as ImageIcon, Activity, RefreshCw, Terminal, HeartPulse, Skull, Globe, Monitor, Sparkles } from 'lucide-react';
 import { apiCall } from '../../api/client';
+import { AVAILABLE_LANGUAGES } from '../../i18n';
 
 const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSessionUpdated, onRefreshCharacter, onRefreshCodex }) => {
+  const { t, i18n } = useTranslation();
   const [activeTab, setActiveTab] = useState('preferences'); // 'preferences' | 'telemetry'
   const [telemetry, setTelemetry] = useState(null);
   const [debugStatMode, setDebugStatMode] = useState('off');
@@ -113,7 +116,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
         <div className="flex items-center justify-between p-4 border-b border-fantasy-border bg-black/40">
           <div className="flex items-center gap-2">
             <Sliders className="text-fantasy-accent" size={18} />
-            <h2 className="font-rpg font-bold text-lg text-gray-100">Chronicle Settings & Telemetry</h2>
+            <h2 className="font-rpg font-bold text-lg text-gray-100">{t('settings.modal_title', 'Chronicle Settings & Telemetry')}</h2>
           </div>
           <button 
             onClick={onClose} 
@@ -134,7 +137,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
             }`}
           >
             <Sliders size={13} />
-            <span>Preferences</span>
+            <span>{t('settings.tab_preferences', 'Preferences')}</span>
           </button>
           <button
             onClick={() => setActiveTab('telemetry')}
@@ -145,7 +148,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
             }`}
           >
             <Activity size={13} />
-            <span>Telemetry & Sandbox</span>
+            <span>{t('settings.tab_telemetry', 'Telemetry & Sandbox')}</span>
           </button>
         </div>
 
@@ -153,13 +156,96 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
         <div className="p-5 space-y-5 max-h-[75vh] overflow-y-auto custom-scrollbar">
           {activeTab === 'preferences' ? (
             <>
+              {/* Section 0A: Interface Language (UI & System) */}
+              <div className="bg-black/30 border border-fantasy-border/60 rounded-lg p-4">
+                <div className="flex items-start justify-between gap-4 mb-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Monitor size={16} className="text-fantasy-accent" />
+                      <span className="font-semibold text-gray-200 text-sm">{t('settings.ui_language')}</span>
+                    </div>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      {t('settings.ui_language_desc')}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  {AVAILABLE_LANGUAGES.map((lang) => {
+                    const activeCode = (settings.ui_language || i18n.language || 'en').split('-')[0].toLowerCase();
+                    const isSelected = activeCode === lang.code;
+                    return (
+                      <button
+                        key={lang.code}
+                        type="button"
+                        onClick={() => {
+                          i18n.changeLanguage(lang.code);
+                          localStorage.setItem('hikayat_ui_language', lang.code);
+                          localStorage.setItem('hikayat_language', lang.code);
+                          updateSettings({ ui_language: lang.code });
+                        }}
+                        disabled={saving}
+                        className={`px-3 py-2 rounded-lg text-xs font-medium border flex items-center justify-center gap-2 transition-all ${
+                          isSelected
+                            ? 'bg-fantasy-accent/20 border-fantasy-accent text-fantasy-accent font-bold shadow-sm'
+                            : 'bg-black/40 border-neutral-800 text-gray-300 hover:border-neutral-700 hover:text-white'
+                        }`}
+                      >
+                        <span className="text-sm">{lang.flag}</span>
+                        <span>{lang.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Section 0B: Game & Story Language (Narration & Mechanics) */}
+              <div className="bg-black/30 border border-fantasy-border/60 rounded-lg p-4">
+                <div className="flex items-start justify-between gap-4 mb-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Sparkles size={16} className="text-amber-400" />
+                      <span className="font-semibold text-gray-200 text-sm">{t('settings.narration_language')}</span>
+                    </div>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      {t('settings.narration_language_desc')}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  {AVAILABLE_LANGUAGES.map((lang) => {
+                    const activeCode = (settings.narration_language || settings.language || 'en').split('-')[0].toLowerCase();
+                    const isSelected = activeCode === lang.code;
+                    return (
+                      <button
+                        key={lang.code}
+                        type="button"
+                        onClick={() => {
+                          updateSettings({ narration_language: lang.code, language: lang.code });
+                        }}
+                        disabled={saving}
+                        className={`px-3 py-2 rounded-lg text-xs font-medium border flex items-center justify-center gap-2 transition-all ${
+                          isSelected
+                            ? 'bg-amber-500/20 border-amber-500/60 text-amber-300 font-bold shadow-sm'
+                            : 'bg-black/40 border-neutral-800 text-gray-300 hover:border-neutral-700 hover:text-white'
+                        }`}
+                      >
+                        <span className="text-sm">{lang.flag}</span>
+                        <span>{lang.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Section 1: Real-Time Narrative Streaming */}
               <div className="bg-black/30 border border-fantasy-border/60 rounded-lg p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <Zap size={16} className={isStreamingOn ? "text-amber-400" : "text-gray-500"} />
-                      <span className="font-semibold text-gray-200 text-sm">Real-Time Narrative Streaming</span>
+                      <span className="font-semibold text-gray-200 text-sm">{t('settings.streaming', 'Real-Time Narrative Streaming')}</span>
                       {isStreamingOn && (
                         <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
                           Live
@@ -167,7 +253,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                       )}
                     </div>
                     <p className="text-xs text-gray-400 leading-relaxed">
-                      Stream the Chronicler&apos;s narrative token-by-token in real time over WebSockets as it is conceived.
+                      {t('settings.streaming_desc', "Stream the Chronicler's narrative token-by-token in real time over WebSockets as it is conceived.")}
                     </p>
                   </div>
 
@@ -200,7 +286,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <ImageIcon size={16} className={isImageGenOn ? "text-purple-400" : "text-gray-500"} />
-                      <span className="font-semibold text-gray-200 text-sm">AI Scene Illustrations</span>
+                      <span className="font-semibold text-gray-200 text-sm">{t('settings.image_gen', 'AI Scene Illustrations')}</span>
                       {isImageGenOn && (
                         <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40">
                           Active
@@ -208,7 +294,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                       )}
                     </div>
                     <p className="text-xs text-gray-400 leading-relaxed">
-                      Automatically generate and stream atmospheric artwork for new scenes in the background.
+                      {t('settings.image_gen_desc', 'Automatically generate and stream atmospheric artwork for new scenes in the background.')}
                     </p>
                   </div>
 
@@ -233,7 +319,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
                   <BookOpen size={14} className="text-fantasy-accent" />
-                  Story Verbosity
+                  {t('settings.verbosity', 'Story Verbosity')}
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {[
@@ -269,7 +355,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
                   <Sliders size={14} className="text-fantasy-accent" />
-                  NPC Dialogue Density
+                  {t('settings.dialogue_mode', 'NPC Dialogue Density')}
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {[

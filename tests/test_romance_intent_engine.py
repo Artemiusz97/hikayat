@@ -72,12 +72,12 @@ class TestRomanceIntentEngine(unittest.TestCase):
 
     def test_confession_prerequisites(self):
         """Verify the 6 prerequisite gates of can_trigger_romantic_confession."""
-        # 1. Low Affinity (< 70) -> Should NOT trigger
+        # 1. Low Affinity (< 100) -> Should NOT trigger
         db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, delta_score=50, track="platonic")
         self.assertFalse(can_trigger_romantic_confession(self.session_id, self.char_id, self.npc_name, self.scenario))
 
-        # 2. High Affinity (>= 70, platonic) -> SHOULD trigger
-        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, delta_score=30, track="platonic") # score = 80
+        # 2. High Affinity (>= 100, platonic) -> SHOULD trigger
+        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, delta_score=60, track="platonic") # score = 110
         self.assertTrue(can_trigger_romantic_confession(self.session_id, self.char_id, self.npc_name, self.scenario))
 
         # 3. Already on Romantic track -> Should NOT trigger (already dating)
@@ -85,7 +85,7 @@ class TestRomanceIntentEngine(unittest.TestCase):
         self.assertFalse(can_trigger_romantic_confession(self.session_id, self.char_id, self.npc_name, self.scenario))
 
         # 4. Ineligible NPC (Teacher / Adult) -> Should NOT trigger
-        db.upsert_contact(self.session_id, "mr_harrison", "Mr. Harrison", delta_score=80, track="platonic")
+        db.upsert_contact(self.session_id, "mr_harrison", "Mr. Harrison", delta_score=110, track="platonic")
         self.assertFalse(can_trigger_romantic_confession(self.session_id, self.char_id, "Mr. Harrison", self.scenario))
 
         # 5. Cooldown Active -> Should NOT trigger
@@ -96,7 +96,7 @@ class TestRomanceIntentEngine(unittest.TestCase):
     def test_dedicated_choice_auto_injection(self):
         """Verify that _clean_choices auto-injects the dedicated romance milestone action."""
         from cogs.adventure import AdventureCog
-        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, delta_score=85, track="platonic")
+        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, delta_score=110, track="platonic")
 
         raw_choices = [
             {"label": "Discuss today's chemistry assignment", "stat": "INT", "requirement": 6, "mp_cost": 0},
@@ -157,9 +157,9 @@ class TestRomanceIntentEngine(unittest.TestCase):
         self.assertEqual(contact.get("track"), "romantic")
         self.assertEqual(contact.get("relationship_score"), 100)
 
-        # Verify tier is Lover / Partner
+        # Verify tier is Big Crush (Milestone 100 Romantic Unlock)
         tier = get_relationship_tier(contact["relationship_score"], contact["track"], self.scenario)
-        self.assertEqual(tier["name"], "Lover / Partner")
+        self.assertEqual(tier["name"], "Big Crush")
 
     def test_failed_confession_sets_cooldown(self):
         """Verify that a failed confession check keeps track platonic and sets a 3-turn cooldown."""

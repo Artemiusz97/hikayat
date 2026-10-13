@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Shield, Sword, Sparkles, Trash2, BookOpen,
   Coins, Camera, Video, Package, Check, X, HardHat, Footprints, Gift, User, Skull, Search, Lock, Globe
@@ -22,16 +23,32 @@ const SLOT_ICONS = {
 const getItemCategory = (item) => {
   const type = (item.type || item.item_type || '').toLowerCase();
   const name = (item.name || '').toLowerCase();
-  if (type.includes('weapon') || name.includes('sword') || name.includes('blade') || name.includes('bow') || name.includes('staff')) return 'Weapons';
-  if (type.includes('armor') || type.includes('shield') || type.includes('helm') || type.includes('boot')) return 'Armor';
+  if (
+    type.includes('weapon') || type.includes('broń') || type.includes('senjata') ||
+    name.includes('sword') || name.includes('blade') || name.includes('bow') || name.includes('staff') || name.includes('dagger') || name.includes('axe') || name.includes('hammer') ||
+    name.includes('miecz') || name.includes('sztylet') || name.includes('ostrze') || name.includes('łuk') || name.includes('laska') || name.includes('topór') || name.includes('młot') ||
+    name.includes('pedang') || name.includes('keris') || name.includes('parang') || name.includes('busur') || name.includes('panah') || name.includes('tongkat') || name.includes('kapak')
+  ) return 'Weapons';
+  if (
+    type.includes('armor') || type.includes('shield') || type.includes('helm') || type.includes('boot') ||
+    type.includes('zbroja') || type.includes('tarcza') || type.includes('perisai') ||
+    name.includes('shield') || name.includes('tarcza') || name.includes('perisai') ||
+    name.includes('armor') || name.includes('zbroja') || name.includes('baju besi') ||
+    name.includes('helm') || name.includes('hełm') || name.includes('topi keledar') ||
+    name.includes('boot') || name.includes('buty') || name.includes('kasut')
+  ) return 'Armor';
   if (
     type.includes('potion') || type.includes('consumable') || type.includes('scroll') ||
     type.includes('food') || type.includes('drink') || type.includes('spellbook') ||
+    type.includes('mikstura') || type.includes('ramuan') || type.includes('ubat') ||
     name.includes('potion') || name.includes('elixir') || name.includes('tonic') ||
-    name.includes('draught') || name.includes('spellbook:') || name.includes('grimoire:') || name.includes('tome:')
+    name.includes('draught') || name.includes('mikstura') || name.includes('eliksir') ||
+    name.includes('ramuan') || name.includes('penawar') || name.includes('ubat') ||
+    name.includes('spellbook:') || name.includes('grimoire:') || name.includes('tome:') ||
+    name.includes('grimuar:') || name.includes('kitab:')
   ) return 'Usables';
   if (type.includes('digital') || type.includes('photo') || type.includes('video') || name.includes('photo') || name.includes('selfie')) return 'Digital';
-  if (type.includes('quest') || type.includes('key') || type.includes('token') || item.is_key_item) return 'Quest';
+  if (type.includes('quest') || type.includes('key') || type.includes('token') || type.includes('klucz') || type.includes('kunci') || item.is_key_item) return 'Quest';
   return 'Misc';
 };
 
@@ -39,7 +56,7 @@ const isItemUsable = (item) => {
   const cat = getItemCategory(item);
   if (cat === 'Usables' || cat === 'Digital' || cat === 'Quest' || cat === 'Misc') return true;
   const eff = (item.clean_effect || item.effect || '').toLowerCase();
-  return eff.includes('restore') || eff.includes('heal') || eff.includes('spellbook_json') || eff.includes('consumable');
+  return eff.includes('restore') || eff.includes('heal') || eff.includes('leczenie') || eff.includes('pulih') || eff.includes('spellbook_json') || eff.includes('consumable');
 };
 
 const getInferredValidSlots = (item) => {
@@ -49,21 +66,41 @@ const getInferredValidSlots = (item) => {
   const type = (item.type || item.item_type || '').toLowerCase();
   const name = (item.name || '').toLowerCase();
   if (type.includes('spellbook') || name.startsWith('spellbook:') || name.startsWith('grimoire:') || name.startsWith('tome:')) return [];
-  if (type.includes('weapon') || name.includes('sword') || name.includes('dagger') || name.includes('blade') || name.includes('staff') || name.includes('bow')) return ['Weapon'];
-  if (type.includes('shield') || name.includes('shield') || name.includes('buckler')) return ['Shield'];
-  if (type.includes('helm') || name.includes('hat') || name.includes('hood') || name.includes('helmet')) return ['Head'];
-  if (type.includes('boot') || name.includes('shoes') || name.includes('greaves')) return ['Shoes'];
-  if (type.includes('glove') || name.includes('gauntlet') || name.includes('bracer')) return ['Gloves'];
-  if (type.includes('armor') || name.includes('chest') || name.includes('cuirass') || name.includes('robe') || name.includes('tunic')) return ['Armor'];
-  if (type.includes('top') || name.includes('shirt') || name.includes('jacket') || name.includes('dress')) return ['Top'];
-  if (type.includes('bottom') || name.includes('pants') || name.includes('skirt') || name.includes('trousers')) return ['Bottom'];
-  if (type.includes('ring') || type.includes('accessory') || name.includes('ring') || name.includes('amulet') || name.includes('necklace') || name.includes('pendant')) {
+  if (
+    type.includes('weapon') || type.includes('broń') || type.includes('senjata') ||
+    name.includes('sword') || name.includes('dagger') || name.includes('blade') || name.includes('staff') || name.includes('bow') ||
+    name.includes('miecz') || name.includes('sztylet') || name.includes('ostrze') || name.includes('łuk') ||
+    name.includes('pedang') || name.includes('keris') || name.includes('parang') || name.includes('busur')
+  ) return ['Weapon'];
+  if (
+    type.includes('armor') || type.includes('zbroja') || type.includes('baju zirah') || type.includes('baju perisai') ||
+    name.includes('chest') || name.includes('cuirass') || name.includes('robe') || name.includes('tunic') ||
+    name.includes('zbroja') || name.includes('napierśnik') || name.includes('kolczuga') || name.includes('szata') ||
+    name.includes('baju besi') || name.includes('baju perisai') || name.includes('perisai dada') || name.includes('jubah')
+  ) return ['Armor'];
+  if (
+    type.includes('shield') || type.includes('tarcza') || (type.includes('perisai') && !type.includes('baju perisai')) ||
+    name.includes('shield') || name.includes('buckler') || name.includes('tarcza') || name.includes('puklerz') ||
+    (name.includes('perisai') && !name.includes('baju perisai') && !name.includes('perisai dada'))
+  ) return ['Shield'];
+  if (type.includes('helm') || type.includes('hełm') || type.includes('topi') || name.includes('helm') || name.includes('hat') || name.includes('hood') || name.includes('helmet') || name.includes('hełm') || name.includes('czapka') || name.includes('kaptur') || name.includes('topi')) return ['Head'];
+  if (type.includes('boot') || type.includes('buty') || type.includes('kasut') || name.includes('boot') || name.includes('shoes') || name.includes('greaves') || name.includes('buty') || name.includes('kasut')) return ['Shoes'];
+  if (type.includes('glove') || type.includes('rękawice') || type.includes('sarung tangan') || name.includes('glove') || name.includes('gauntlet') || name.includes('bracer') || name.includes('rękawice') || name.includes('sarung tangan')) return ['Gloves'];
+  if (type.includes('top') || type.includes('koszula') || type.includes('baju') || name.includes('shirt') || name.includes('jacket') || name.includes('dress') || name.includes('koszula') || name.includes('kurtka') || name.includes('baju')) return ['Top'];
+  if (type.includes('bottom') || type.includes('spodnie') || type.includes('seluar') || name.includes('pants') || name.includes('skirt') || name.includes('trousers') || name.includes('spodnie') || name.includes('seluar')) return ['Bottom'];
+  if (
+    type.includes('ring') || type.includes('accessory') || type.includes('pierścień') || type.includes('cincin') ||
+    name.includes('ring') || name.includes('amulet') || name.includes('necklace') || name.includes('pendant') ||
+    name.includes('pierścień') || name.includes('naszyjnik') || name.includes('wisiorek') ||
+    name.includes('cincin') || name.includes('tangkal') || name.includes('loket') || name.includes('rantai')
+  ) {
     return ['Accessory 1', 'Accessory 2', 'Accessory 3', 'Accessory 4'];
   }
   return [];
 };
 
 const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, sessionId, session }) => {
+  const { t } = useTranslation();
   const {
     items, equipment, capacity, usedSlots, gold,
     loading, equipItem, unequipSlot, dropItem, useItem
@@ -190,7 +227,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                 : 'text-gray-400 hover:text-gray-200'
             }`}
           >
-            Backpack ({backpackItems.length})
+            {t('inventory.backpack')} ({backpackItems.length})
           </button>
           <button
             onClick={() => setActiveTab('gear')}
@@ -200,7 +237,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                 : 'text-gray-400 hover:text-gray-200'
             }`}
           >
-            Equipped Gear
+            {t('inventory.equipped_gear')}
           </button>
         </div>
 
@@ -234,7 +271,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
             <div className="flex justify-between items-center text-xs mb-1">
               <span className="text-gray-400 font-medium flex items-center gap-1 text-[11px]">
                 <Package size={12} className={isFull ? 'text-red-400' : 'text-fantasy-accent'} />
-                <span>Inventory Slots</span>
+                <span>{t('inventory.capacity')}</span>
               </span>
               <span className={`font-mono font-bold text-[11px] ${isFull ? 'text-red-400' : isNearFull ? 'text-amber-400' : 'text-gray-300'}`}>
                 {usedSlots} / {capacity}
@@ -252,29 +289,40 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
 
           {/* Category Filter Pills */}
           <div className="flex flex-wrap gap-1">
-            {categories.map(cat => (
-              <button
-                key={cat}
-                onClick={() => setFilterCat(cat)}
-                className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition-colors ${
-                  filterCat === cat
-                    ? 'bg-fantasy-border text-fantasy-accent border border-fantasy-accent/50'
-                    : 'bg-black/40 text-gray-400 hover:text-gray-200 border border-fantasy-border/30'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
+            {categories.map(cat => {
+              const labelMap = {
+                All: t('inventory.all'),
+                Weapons: t('inventory.weapons'),
+                Armor: t('inventory.armor'),
+                Usables: t('inventory.consumables'),
+                Digital: t('inventory.digital'),
+                Quest: t('quests.story_quest'),
+                Misc: t('inventory.misc')
+              };
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setFilterCat(cat)}
+                  className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition-colors ${
+                    filterCat === cat
+                      ? 'bg-fantasy-border text-fantasy-accent border border-fantasy-accent/50'
+                      : 'bg-black/40 text-gray-400 hover:text-gray-200 border border-fantasy-border/30'
+                  }`}
+                >
+                  {labelMap[cat] || cat}
+                </button>
+              );
+            })}
           </div>
 
           {/* Items List */}
           <div className="space-y-1.5 max-h-96 overflow-y-auto custom-scrollbar pr-1">
             {loading && items.length === 0 ? (
-              <p className="text-xs text-gray-500 italic text-center py-6">Checking pack...</p>
+              <p className="text-xs text-gray-500 italic text-center py-6">{t('inventory.checking_pack')}</p>
             ) : filteredItems.length === 0 ? (
               <div className="text-center py-8 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
                 <Package size={24} className="mx-auto mb-1.5 opacity-40" />
-                <p className="text-xs">No items in this category.</p>
+                <p className="text-xs">{t('inventory.no_items')}</p>
               </div>
             ) : (
               filteredItems.map(item => {
@@ -322,7 +370,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                           )}
                           {isKeyItem && (
                             <span className="text-[9px] px-1.5 py-0.2 bg-amber-950/80 text-amber-300 rounded border border-amber-700/60 font-bold flex items-center gap-0.5">
-                              🔒 Key Item
+                              🔒 {t('inventory.key_item')}
                             </span>
                           )}
                           {item.slot_cost === 0 && (
@@ -349,7 +397,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                           }`}
                           title="Inspect Item Details & Stat Comparison"
                         >
-                          🔍 Inspect
+                          🔍 {t('inventory.inspect')}
                         </button>
 
                         {usable && (
@@ -365,7 +413,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                             className="px-2 py-1 bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300 border border-emerald-700/50 rounded text-[10px] font-bold uppercase transition-colors disabled:opacity-50"
                             title={isSpellbook ? 'Study Spellbook' : isDigital ? 'Inspect Media' : 'Use or Gift Item'}
                           >
-                            {isBusy ? '...' : isSpellbook ? 'Study' : isDigital ? 'View' : 'Use'}
+                            {isBusy ? '...' : isSpellbook ? t('inventory.study') : isDigital ? t('inventory.view') : t('inventory.use')}
                           </button>
                         )}
 
@@ -382,7 +430,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                             className="px-2 py-1 bg-fantasy-accent/15 hover:bg-fantasy-accent/25 text-fantasy-accent border border-fantasy-accent/40 rounded text-[10px] font-bold uppercase transition-colors disabled:opacity-50"
                             title={validSlots.length === 1 ? `Equip into ${validSlots[0]}` : 'Choose Equipment Slot'}
                           >
-                            {isBusy ? '...' : 'Equip'}
+                            {isBusy ? '...' : t('inventory.equip')}
                           </button>
                         )}
 
@@ -422,7 +470,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                     {/* Multi-Slot Equip Picker Pills */}
                     {showSlotPicker && validSlots.length > 1 && (
                       <div className="pt-2 border-t border-fantasy-border/50 flex flex-wrap gap-1.5 items-center bg-black/40 p-2 rounded">
-                        <span className="text-[10px] uppercase tracking-wider text-gray-400 font-bold mr-1">Equip Slot:</span>
+                        <span className="text-[10px] uppercase tracking-wider text-gray-400 font-bold mr-1">{t('inventory.equip_slot')}</span>
                         {validSlots.map((slotName) => (
                           <button
                             key={slotName}
@@ -430,7 +478,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                             onClick={() => handleEquip(item.id, slotName)}
                             className="px-2 py-0.5 rounded bg-fantasy-accent/20 hover:bg-fantasy-accent/35 text-fantasy-accent border border-fantasy-accent/50 text-[10px] font-bold transition-colors"
                           >
-                            {slotName}
+                            {t('inventory.' + slotName.toLowerCase().replace(/[\s\-]+/g, '_'), slotName)}
                           </button>
                         ))}
                       </div>
@@ -441,7 +489,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                       <div className="pt-2 border-t border-fantasy-border/50 bg-black/60 p-2.5 rounded space-y-2 text-[11px]">
                         <div className="flex items-center justify-between text-gray-300">
                           <span className="font-bold text-cyan-300 uppercase text-[10px] tracking-wider">
-                            🔍 Item Inspector — {item.item_type || category}
+                            🔍 {t('inventory.item_inspector')} — {item.item_type || category}
                           </span>
                           {inspectData.slot && (
                             <span className="text-[10px] font-mono text-gray-400">Slot: {inspectData.slot}</span>
@@ -455,7 +503,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                         ) : cleanEffect ? (
                           <p className="text-gray-300">{cleanEffect}</p>
                         ) : (
-                          <p className="text-gray-500 italic">No additional stat modifiers recorded.</p>
+                          <p className="text-gray-500 italic">{t('inventory.no_stat_mods')}</p>
                         )}
 
                         {isSpellbook && inspectData.arcane_compatible === false && (
@@ -468,7 +516,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                         {Object.keys(statDeltas).length > 0 && (
                           <div className="space-y-1 pt-1">
                             <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">
-                              🔄 vs Equipped Comparison
+                              🔄 {t('inventory.vs_equipped')}
                             </span>
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
                               {Object.entries(statDeltas).map(([statName, deltaVal]) => {
@@ -500,12 +548,12 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                     {/* Inline Target Picker Popover */}
                     {showTargetPicker && (
                       <div className="pt-2 border-t border-fantasy-border/50 flex flex-wrap gap-1.5 items-center bg-black/40 p-2 rounded">
-                        <span className="text-[10px] uppercase tracking-wider text-gray-400 font-bold mr-1">Target:</span>
+                        <span className="text-[10px] uppercase tracking-wider text-gray-400 font-bold mr-1">{t('inventory.target')}</span>
                         <button
                           onClick={() => handleUse(item.id, 'self', 'self')}
                           className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-700/60 text-emerald-200 text-[10px] font-semibold"
                         >
-                          <User size={10} /> Yourself
+                          <User size={10} /> {t('inventory.target_yourself')}
                         </button>
                         {partyCompanions.map(name => (
                           <button
@@ -513,7 +561,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                             onClick={() => handleUse(item.id, 'companion', name)}
                             className="flex items-center gap-1 px-2 py-1 rounded bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-700/60 text-cyan-200 text-[10px] font-semibold"
                           >
-                            <Sparkles size={10} /> {name} (Party)
+                            <Sparkles size={10} /> {name} ({t('inventory.target_party')})
                           </button>
                         ))}
                         {sceneNpcs.map(name => (
@@ -522,7 +570,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                             onClick={() => handleUse(item.id, 'npc', name)}
                             className="flex items-center gap-1 px-2 py-1 rounded bg-pink-950/60 hover:bg-pink-900 border border-pink-700/60 text-pink-200 text-[10px] font-semibold"
                           >
-                            🎁 Give Gift
+                            🎁 {t('inventory.give_gift')}
                           </button>
                         ))}
                         {nearbyEnemies.map(name => (
@@ -531,14 +579,14 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                             onClick={() => handleUse(item.id, 'monster', name)}
                             className="flex items-center gap-1 px-2 py-1 rounded bg-red-950/60 hover:bg-red-900 border border-red-700/60 text-red-200 text-[10px] font-semibold"
                           >
-                            <Skull size={10} /> Throw: {name}
+                            <Skull size={10} /> {t('inventory.throw')}: {name}
                           </button>
                         ))}
                         <button
                           onClick={() => handleUse(item.id, 'ground', 'ground')}
                           className="flex items-center gap-1 px-2 py-1 rounded bg-amber-950/60 hover:bg-amber-900 border border-amber-700/60 text-amber-200 text-[10px] font-semibold"
                         >
-                          <Globe size={10} /> 🌐 The Ground / Environment
+                          <Globe size={10} /> 🌐 {t('inventory.ground_env')}
                         </button>
                       </div>
                     )}
@@ -572,7 +620,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                     <Icon size={16} />
                   </div>
                   <div className="min-w-0">
-                    <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider block">{slot}</span>
+                    <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider block">{t('inventory.' + slot.toLowerCase().replace(/[\s\-]+/g, '_'), slot)}</span>
                     {equippedItem ? (
                       <div>
                         <span className="text-xs font-semibold text-gray-200 block truncate">{equippedItem.name}</span>
@@ -581,7 +629,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                         )}
                       </div>
                     ) : (
-                      <span className="text-xs text-gray-600 italic">Empty Slot</span>
+                      <span className="text-xs text-gray-600 italic">{t('inventory.empty_slot')}</span>
                     )}
                   </div>
                 </div>
@@ -592,7 +640,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                     disabled={isBusy}
                     className="px-2 py-1 bg-black/60 hover:bg-red-950/40 text-gray-400 hover:text-red-300 border border-fantasy-border hover:border-red-800/60 rounded text-[10px] font-bold uppercase transition-colors shrink-0 disabled:opacity-50"
                   >
-                    {isBusy ? '...' : 'Unequip'}
+                    {isBusy ? '...' : t('inventory.unequip')}
                   </button>
                 )}
               </div>

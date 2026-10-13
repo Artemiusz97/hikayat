@@ -45,6 +45,14 @@ class TestIntimateExcitementMeter(unittest.TestCase):
             "traits": ["Athletic", "Determined"]
         }
 
+    def tearDown(self):
+        try:
+            with db.get_conn() as conn:
+                conn.execute("DELETE FROM characters WHERE user_id IN (101, 102, 103, 105, 106)")
+                conn.execute("DELETE FROM characters WHERE user_id = 1 AND name = 'Artemiusz'")
+        except Exception:
+            pass
+
     def test_classify_intimate_act_genital_vs_nongenital(self):
         """Verify direct genital acts are classified correctly while non-genital touch gives 0 gain."""
         # Non-genital
@@ -4273,6 +4281,972 @@ class TestIntimateExcitementMeter(unittest.TestCase):
         self.assertIn(actors["Kana"]["status"], ("Lingering Heat 🔥", "Trembling from Aftershocks 🔥"))
         # newly_climaxed_partners must NOT contain Kana
         self.assertNotIn("Kana", step.get("newly_climaxed_partners", []))
+
+    def test_aroused_turns_decrement_and_synergy_lifecycle(self):
+        """Verify that aroused_turns decrements on non-stimulating turns, halving decay until expiration."""
+        phys_state = {
+            "intimate_contact": "Intimate encounter with Kana (intercourse)",
+            "climax_state": {"partner_climaxed": False, "player_climaxed": False},
+            "excitement": {
+                "active": True,
+                "actors": {
+                    "Artemiusz": {"meter": 80, "delta": 15, "status": "Maintaining Rhythm", "idle_turns": 0, "aroused_turns": 3},
+                    "Kana": {"meter": 80, "delta": 15, "status": "Maintaining Rhythm", "idle_turns": 0, "aroused_turns": 3},
+                },
+            },
+        }
+
+        session = {"id": self.session_id, "current_day": 1, "current_minute": 500}
+
+        # Turn 1 pause: Grace Turn 1 (Lingering Heat)
+        compute_excitement_step(
+            physical_state=phys_state,
+            action_str="Catch your breath and look into Kana's eyes",
+            player_char=self.player_char,
+            partner_contact=self.partner_contact,
+            session=session,
+        )
+        actors = phys_state["excitement"]["actors"]
+        self.assertEqual(actors["Artemiusz"]["meter"], 80)
+        self.assertEqual(actors["Artemiusz"]["idle_turns"], 1)
+        self.assertEqual(actors["Artemiusz"]["aroused_turns"], 2)
+        self.assertEqual(actors["Artemiusz"]["status"], "Lingering Heat 🔥")
+
+        # Turn 2 pause: Grace Turn 2 (Catching Breath)
+        compute_excitement_step(
+            physical_state=phys_state,
+            action_str="Rest against the wall and catch your breath",
+            player_char=self.player_char,
+            partner_contact=self.partner_contact,
+            session=session,
+        )
+        actors = phys_state["excitement"]["actors"]
+        self.assertEqual(actors["Artemiusz"]["meter"], 80)
+        self.assertEqual(actors["Artemiusz"]["idle_turns"], 2)
+        self.assertEqual(actors["Artemiusz"]["aroused_turns"], 1)
+        self.assertEqual(actors["Artemiusz"]["status"], "Catching Breath 💨")
+
+        # Turn 3 pause: Decay begins with Aroused active (-5%)
+        compute_excitement_step(
+            physical_state=phys_state,
+            action_str="Wait in silence and adjust posture",
+            player_char=self.player_char,
+            partner_contact=self.partner_contact,
+            session=session,
+        )
+        actors = phys_state["excitement"]["actors"]
+        self.assertEqual(actors["Artemiusz"]["delta"], -5)
+        self.assertEqual(actors["Artemiusz"]["meter"], 75)
+        self.assertEqual(actors["Artemiusz"]["idle_turns"], 3)
+        self.assertEqual(actors["Artemiusz"]["aroused_turns"], 0)
+        self.assertIn("(-5%)", actors["Artemiusz"]["status"])
+
+        # Turn 4 pause: Aroused has expired, decay accelerates to base rate (-10%)
+        compute_excitement_step(
+            physical_state=phys_state,
+            action_str="Look away toward the window",
+            player_char=self.player_char,
+            partner_contact=self.partner_contact,
+            session=session,
+        )
+        actors = phys_state["excitement"]["actors"]
+        self.assertEqual(actors["Artemiusz"]["delta"], -10)
+        self.assertEqual(actors["Artemiusz"]["meter"], 65)
+        self.assertEqual(actors["Artemiusz"]["idle_turns"], 4)
+        self.assertEqual(actors["Artemiusz"]["aroused_turns"], 0)
+        self.assertIn("(-10%)", actors["Artemiusz"]["status"])
+
+        # Turn 5: Sensual maintenance action resets idle counter and refreshes aroused_turns to 3
+        compute_excitement_step(
+            physical_state=phys_state,
+            action_str="Whisper loving praise against her ear and softly kiss her neck",
+            player_char=self.player_char,
+            partner_contact=self.partner_contact,
+            session=session,
+        )
+        actors = phys_state["excitement"]["actors"]
+        self.assertEqual(actors["Artemiusz"]["delta"], 0)
+        self.assertEqual(actors["Artemiusz"]["meter"], 65)
+        self.assertEqual(actors["Artemiusz"]["idle_turns"], 0)
+        self.assertEqual(actors["Artemiusz"]["aroused_turns"], 3)
+
+    def test_directive_texture_fallback_and_player_appearance_gender(self):
+        """Verify tactile directive fallback when asset_texture is missing, and player_appearance gender detection."""
+        from mechanics.social.persona.intimacy.formatting import format_body_asset_narrative_directive
+
+        # 1. Partner has generic C-Cup with no texture explicitly stored
+        dir1 = format_body_asset_narrative_directive(
+            partner_name="Seraphina",
+            gender="female",
+            asset_size="C-Cup",
+            demeanor="poised",
+            race="human",
+            asset_texture="",
+        )
+        self.assertIn("Seraphina", dir1)
+        self.assertIn("TACTILE SENSATION & TOUCH RESPONSE", dir1)
+
+        # 2. Player appearance with gender="female" inside appearance dict and no player_gender param
+        dir2 = format_body_asset_narrative_directive(
+            partner_name="Kana",
+            gender="female",
+            asset_size="D-Cup",
+            demeanor="bold",
+            player_appearance={"gender": "female", "breast_size": "Voluptuous D-Cup"},
+        )
+        self.assertIn("Kana", dir2)
+        self.assertIn("BIDIRECTIONAL REACTION TO PLAYER", dir2)
+        self.assertIn("breasts / bust", dir2)
+        self.assertNotIn("pp / length", dir2)
+
+    def test_clothing_summary_badge_permutations(self):
+        """Verify compute_clothing_summary_badge correctly identifies all 6 states."""
+        from mechanics.social.physical_state import compute_clothing_summary_badge
+
+        # 1. None / empty / invalid
+        self.assertEqual(compute_clothing_summary_badge(None), "Fully Clothed 👕")
+        self.assertEqual(compute_clothing_summary_badge({}), "Fully Clothed 👕")
+
+        # 2. Fully Clothed
+        clothed = {
+            "top": "School Uniform Shirt",
+            "bottom": "Pleated Skirt",
+            "under_top": "Worn (White Bra)",
+            "under_bottom": "Worn (Lace Panties)",
+        }
+        self.assertEqual(compute_clothing_summary_badge(clothed), "Fully Clothed 👕")
+
+        # 3. Disheveled (e.g. unbuttoned or pulled aside outer layer, or undergarment off)
+        disheveled_top = {
+            "top": "Unbuttoned shirt, loose tie",
+            "bottom": "Pleated Skirt",
+            "under_top": "Worn",
+            "under_bottom": "Worn",
+        }
+        self.assertEqual(compute_clothing_summary_badge(disheveled_top), "Disheveled 👔")
+
+        disheveled_under = {
+            "top": "School Uniform Shirt",
+            "bottom": "Pleated Skirt",
+            "under_top": "None (Bra-less)",
+            "under_bottom": "Worn",
+        }
+        self.assertEqual(compute_clothing_summary_badge(disheveled_under), "Disheveled 👔")
+
+        # 4. Topless
+        topless = {
+            "top": "none",
+            "bottom": "Pleated Skirt",
+            "under_top": "none",
+            "under_bottom": "Worn (Panties)",
+        }
+        self.assertEqual(compute_clothing_summary_badge(topless), "Topless 🍈")
+
+        # 5. Bottomless
+        bottomless = {
+            "top": "School Uniform Shirt",
+            "bottom": "removed",
+            "under_top": "Worn",
+            "under_bottom": "none",
+        }
+        self.assertEqual(compute_clothing_summary_badge(bottomless), "Bottomless 🍑")
+
+        # 6. Underwear Only
+        underwear_only = {
+            "top": "none",
+            "bottom": "none",
+            "under_top": "Worn (Lace Bra)",
+            "under_bottom": "Worn (Lace Panties)",
+        }
+        self.assertEqual(compute_clothing_summary_badge(underwear_only), "Underwear Only 👙")
+
+        # 7. Fully Naked
+        fully_naked = {
+            "top": "none",
+            "bottom": "none",
+            "under_top": "none",
+            "under_bottom": "none",
+        }
+        self.assertEqual(compute_clothing_summary_badge(fully_naked), "Fully Naked 🔞")
+
+        # 8. Male Permutations (Shirtless, Underwear Only 🩲, and Fully Clothed with None under_top)
+        male_clothed = {
+            "top": "Academy Blazer",
+            "bottom": "Trousers",
+            "under_top": "None (N/A)",
+            "under_bottom": "Worn (Boxers)",
+        }
+        self.assertEqual(compute_clothing_summary_badge(male_clothed, gender="Male"), "Fully Clothed 👕")
+
+        male_shirtless = {
+            "top": "none",
+            "bottom": "Trousers",
+            "under_top": "none",
+            "under_bottom": "Worn (Boxers)",
+        }
+        self.assertEqual(compute_clothing_summary_badge(male_shirtless, gender="Male"), "Shirtless 👕")
+
+        male_underwear = {
+            "top": "none",
+            "bottom": "none",
+            "under_top": "None (N/A)",
+            "under_bottom": "Worn (Boxers)",
+        }
+        self.assertEqual(compute_clothing_summary_badge(male_underwear, gender="Male"), "Underwear Only 🩲")
+
+        male_naked = {
+            "top": "none",
+            "bottom": "none",
+            "under_top": "none",
+            "under_bottom": "none",
+        }
+        self.assertEqual(compute_clothing_summary_badge(male_naked, gender="Male"), "Fully Naked 🔞")
+
+    def test_refractory_minute_countdown_sanitization_and_clock_dissolution(self):
+        """
+        Verify:
+        1. Minute-accurate status tag formatting for male and female characters.
+        2. Status effect sanitization prevents Aroused, Breathless, and Spent while in refractory recovery.
+        3. Clock resolution clears refractory tags and restores zero excitement meters.
+        """
+        from mechanics.social.intimate_excitement import (
+            format_refractory_status_tag,
+            format_partner_recovery_status_tag,
+            check_and_resolve_refractory_clock,
+        )
+        from game_engine.state.reducers import _reduce_vitals_and_inventory
+
+        # 1. Formatting
+        self.assertEqual(format_refractory_status_tag(28), "Refractory Recovery [28 min]")
+        self.assertEqual(format_partner_recovery_status_tag(28, "Female"), "Satisfied [28 min]")
+        self.assertEqual(format_partner_recovery_status_tag(28, "Male"), "Refractory Recovery [28 min]")
+
+        # 2. Setup session with active refractory cooldown (until minute 530)
+        session = db.get_session(self.session_id)
+        session["current_day"] = 1
+        session["current_minute"] = 502
+        db.update_session_time(self.session_id, current_day=1, current_minute=502)
+        if not db.get_character(1):
+            db.create_character(1, "Artemiusz", gender="Male")
+
+        phys = {
+            "intimate_contact": "cuddling / aftercare with Kana",
+            "climax_state": {"player_climaxed": True, "partner_climaxed": True},
+            "refractory_until_minute": (1 * 1440) + 530,
+            "excitement": {
+                "active": False,
+                "refractory_until_minute": (1 * 1440) + 530,
+                "actors": {
+                    "Artemiusz": {"meter": 0, "status": "💥 Climaxed (Spent)"},
+                    "Kana": {"meter": 0, "status": "✨ Satisfied"},
+                },
+            },
+        }
+        db.update_session_physical_state(self.session_id, phys)
+
+        # Apply vitals reduction with leftover Aroused/Breathless
+        party_char = dict(self.player_char)
+        party_char["user_id"] = 1
+        party_char["status_effects"] = ["Aroused [3 turns]"]
+        party = [(party_char, [])]
+        outcome_vitals = {
+            "character_outcomes": [
+                {
+                    "name": "Artemiusz",
+                    "status_effects": ["Aroused [2 turns]", "Breathless [1 turns]"],
+                }
+            ]
+        }
+        _reduce_vitals_and_inventory(
+            session_id=self.session_id,
+            session=session,
+            party=party,
+            outcome=outcome_vitals,
+            mp_already_spent={},
+            scen_key="nsfw_high_school_drama",
+            is_combat=False,
+            items_gained_by_user={},
+        )
+        saved_effects = db.get_status_effects(1)
+        self.assertNotIn("Aroused [2 turns]", saved_effects)
+        self.assertNotIn("Breathless [1 turns]", saved_effects)
+        self.assertIn("Refractory Recovery [28 min]", saved_effects)
+
+        # 3. Advance clock to minute 535 (> 530) and resolve clock
+        session["current_minute"] = 535
+        phys_saved = db.get_session_physical_state(self.session_id)
+        recovered, toast = check_and_resolve_refractory_clock(session, phys_saved)
+        self.assertTrue(recovered)
+        self.assertIn("Stamina Recovered", toast)
+        self.assertIsNone(phys_saved.get("excitement", {}).get("refractory_until_minute"))
+
+    def test_post_climax_choice_gating_scenarios_a_and_b(self):
+        """
+        Verify post-climax choice filtering:
+        - Scenario A (Mutual climax): Prunes ALL escalation/penetrative choices, leaving only aftercare/dialogue/departure.
+        - Scenario B (Player spent, partner unsatisfied / premature_finish): Prunes penetrative choices, but explicitly keeps manual and oral stimulation choices.
+        """
+        mixed_choices = [
+            {"label": "Maintain a steady, deep rhythm and thrust deeper inside Kana", "stat": "END", "requirement": 6},
+            {"label": "Lift Kana onto your lap and take her from behind", "stat": "STR", "requirement": 6},
+            {"label": "Use your fingers to stroke and please Kana toward her climax", "stat": "AGI", "requirement": 6},
+            {"label": "Focus your tongue gently on her entrance and lick tenderly", "stat": "CHA", "requirement": 6},
+            {"label": "Slow your rhythm, gently withdraw, and hold Kana close", "stat": "NONE", "requirement": 0},
+            {"label": "Pull the blankets over both of you and rest together", "stat": "NONE", "requirement": 0},
+        ]
+
+        # SCENARIO B: Player spent, partner unsatisfied (premature_finish=True)
+        session_b = db.get_session(self.session_id)
+        session_b["current_day"] = 1
+        session_b["current_minute"] = 500
+        phys_b = {
+            "intimate_contact": "Intimate encounter with Kana (player reached climax spent, partner unsatisfied)",
+            "climax_state": {"player_climaxed": True, "partner_climaxed": False},
+            "refractory_until_minute": (1 * 1440) + 528,
+            "excitement": {
+                "active": True,
+                "last_act": "penetrative",
+                "refractory_until_minute": (1 * 1440) + 528,
+                "premature_finish": True,
+                "partner_demanded": True,
+                "actors": {
+                    "Artemiusz": {"meter": 100, "status": "💥 Climaxed (Spent)"},
+                    "Kana": {"meter": 70, "status": "✨ Highly Aroused"},
+                },
+            },
+        }
+        db.update_session_physical_state(self.session_id, phys_b)
+
+        cleaned_b = clean_choices_impl(
+            None,
+            choices=list(mixed_choices),
+            scenario="nsfw_high_school_drama",
+            location="Bedroom",
+            char=self.player_char,
+            dialogue_partner="Kana",
+            session_id=self.session_id,
+        )
+        lbls_b = [c["label"] for c in cleaned_b]
+        # Penetrative must be pruned
+        self.assertFalse(any("thrust deeper" in l.lower() for l in lbls_b))
+        self.assertFalse(any("onto your lap" in l.lower() for l in lbls_b))
+        # Manual and oral stimulation must be preserved
+        self.assertTrue(any("fingers" in l.lower() for l in lbls_b))
+        self.assertTrue(any("tongue" in l.lower() for l in lbls_b))
+
+        # SCENARIO A: Mutual Climax (both climaxed / all satisfied)
+        phys_a = {
+            "intimate_contact": "cuddling / aftercare with Kana",
+            "climax_state": {"player_climaxed": True, "partner_climaxed": True},
+            "refractory_until_minute": (1 * 1440) + 528,
+            "excitement": {
+                "active": False,
+                "last_act": "penetrative",
+                "refractory_until_minute": (1 * 1440) + 528,
+                "premature_finish": False,
+                "partner_demanded": False,
+                "actors": {
+                    "Artemiusz": {"meter": 0, "status": "💥 Climaxed (Spent)"},
+                    "Kana": {"meter": 0, "status": "✨ Satisfied"},
+                },
+            },
+        }
+        db.update_session_physical_state(self.session_id, phys_a)
+
+        cleaned_a = clean_choices_impl(
+            None,
+            choices=list(mixed_choices),
+            scenario="nsfw_high_school_drama",
+            location="Bedroom",
+            char=self.player_char,
+            dialogue_partner="Kana",
+            session_id=self.session_id,
+        )
+        lbls_a = [c["label"] for c in cleaned_a]
+        # All escalation must be pruned
+        self.assertFalse(any("thrust deeper" in l.lower() for l in lbls_a))
+        self.assertFalse(any("onto your lap" in l.lower() for l in lbls_a))
+        self.assertFalse(any("fingers" in l.lower() for l in lbls_a))
+        self.assertFalse(any("tongue" in l.lower() for l in lbls_a))
+        # Aftercare blueprints must be present
+        self.assertTrue(any("tender" in l.lower() or "hold" in l.lower() or "aftercare" in l.lower() or "rest" in l.lower() or "drink" in l.lower() or "dress" in l.lower() for l in lbls_a))
+
+    def test_client_session_enrichment_clothing_and_status_effects(self):
+        """Verify _enrich_session_for_client attaches clothing status and status effects to NPCs and player."""
+        from unittest.mock import patch
+        from api.adventure import _enrich_session_for_client
+
+        session = db.get_session(self.session_id)
+        session["current_npcs"] = [{"name": "Kana", "role": "Classmate"}]
+        session["character"] = {"name": "Artemiusz", "gender": "Male"}
+
+        phys = {
+            "actors": {
+                "Artemiusz": {
+                    "clothing": {
+                        "top": "none",
+                        "bottom": "none",
+                        "under_top": "none",
+                        "under_bottom": "none",
+                    }
+                },
+                "Kana": {
+                    "clothing": {
+                        "top": "none",
+                        "bottom": "none",
+                        "under_top": "Worn (Lace Bra)",
+                        "under_bottom": "Worn (Lace Panties)",
+                    }
+                },
+            }
+        }
+        db.update_session_physical_state(self.session_id, phys)
+
+        mock_contacts = [
+            {
+                "name": "Kana",
+                "gender": "Female",
+                "status_effects": ["Satisfied [25 min]"],
+            }
+        ]
+
+        with patch("db.get_contacts", return_value=mock_contacts):
+            enriched = _enrich_session_for_client(session, 1)
+
+        # Player clothing badge
+        self.assertEqual(enriched.get("player_clothing_status"), "Fully Naked 🔞")
+        self.assertEqual(enriched.get("character", {}).get("clothing_status"), "Fully Naked 🔞")
+
+        # Present NPC Kana clothing badge & synced status effects
+        npcs = enriched.get("current_npcs", [])
+        self.assertEqual(len(npcs), 1)
+        kana_npc = npcs[0]
+        self.assertEqual(kana_npc["name"], "Kana")
+        self.assertEqual(kana_npc.get("clothing_status"), "Underwear Only 👙")
+        self.assertIn("Satisfied [25 min]", kana_npc.get("status_effects", []))
+
+    def test_contact_status_effects_persistence_and_retrieval(self):
+        """Verify update_contact_status_effects persists to basic_info_json and get_contacts exposes it directly."""
+        db.upsert_contact(self.session_id, "kana_test", "Kana", gender="Female")
+        ok = db.update_contact_status_effects(self.session_id, "Kana", status_effects=["Satisfied [28 min]", "Sensitive"])
+        self.assertTrue(ok)
+
+        contact = db.get_contact(self.session_id, "Kana")
+        self.assertIsNotNone(contact)
+        self.assertIn("Satisfied [28 min]", contact.get("status_effects", []))
+        self.assertIn("Sensitive", contact.get("status_effects", []))
+
+        all_contacts = db.get_contacts(self.session_id)
+        matched = next((c for c in all_contacts if c.get("name") == "Kana"), None)
+        self.assertIsNotNone(matched)
+        self.assertIn("Satisfied [28 min]", matched.get("status_effects", []))
+
+    def test_female_player_male_npc_climax_and_mutual_recovery_symmetry(self):
+        """
+        Verify:
+        1. When male partner climaxes with female player, partner gets Refractory Recovery [X min].
+        2. When female player and male partner both reach climax, mutual aftercare triggers:
+           - Female player receives 'Satisfied [X min]'
+           - Male partner receives 'Refractory Recovery [X min]'
+        3. Countdown timer decrements and dissolves upon clock recovery for both.
+        """
+        from game_engine.state.reducers import _reduce_physical_state_and_memories, _reduce_vitals_and_inventory
+
+        # Setup session & female player Seraphina
+        sess = db.get_session(self.session_id)
+        sess["current_day"] = 1
+        sess["current_minute"] = 600
+        db.update_session_time(self.session_id, current_day=1, current_minute=600)
+
+        # Clean up any residual records for test isolation
+        with db.get_conn() as conn:
+            conn.execute("DELETE FROM characters WHERE user_id=101")
+            conn.execute("DELETE FROM contacts WHERE session_id=? AND lower(name)='liam'", (self.session_id,))
+
+        seraphina = {"id": 101, "user_id": 101, "name": "Seraphina", "gender": "Female", "status_effects": []}
+        db.create_character(101, "Seraphina", gender="Female")
+
+        # Setup male contact Liam
+        db.upsert_contact(self.session_id, "liam", "Liam", gender="Male")
+
+        # Mutual climax outcome
+        outcome = {
+            "intimate_update": {
+                "active": False,
+                "act_type": "intercourse",
+                "player_climaxed": True,
+                "partner_climaxed": True,
+                "partner_climaxes": {"Liam": True},
+            }
+        }
+        phys = {
+            "intimate_contact": "Intimate encounter with Liam (intercourse)",
+            "excitement": {
+                "active": True,
+                "refractory_until_minute": (1 * 1440) + 600 + 25, # 25 min cooldown
+            },
+            "climax_state": {"player_climaxed": True, "partner_climaxed": True},
+            "actors": {
+                "seraphina": {"meter": 100, "status": "💥 Climax Reached!"},
+                "liam": {"meter": 100, "status": "💥 Climax (Spent)"},
+            }
+        }
+
+        db.update_session_physical_state(self.session_id, phys)
+        party = [[seraphina, 101]]
+        _reduce_physical_state_and_memories(
+            self.session_id, sess, outcome, party, 101,
+            actions=[{"char": seraphina, "label": "Rest in aftercare with Liam"}]
+        )
+
+        # 1. Female player Seraphina received "Satisfied [25 min]"
+        char_db = db.get_character(101)
+        self.assertIn("Satisfied [25 min]", char_db.get("status_effects", []))
+        self.assertNotIn("Refractory Recovery [25 min]", char_db.get("status_effects", []))
+
+        # 2. Male partner Liam received "Refractory Recovery [25 min]"
+        liam_db = db.get_contact(self.session_id, "Liam")
+        self.assertIn("Refractory Recovery [25 min]", liam_db.get("status_effects", []))
+        self.assertNotIn("Satisfied [25 min]", liam_db.get("status_effects", []))
+
+        # 3. Countdown timer decrements and dissolves upon clock recovery for both
+        sess["current_minute"] = 626
+        db.update_session_time(self.session_id, current_day=1, current_minute=626)
+        _reduce_physical_state_and_memories(
+            self.session_id, sess, {"dialogue_partners": ["Liam"]}, party, 101,
+            actions=[{"char": seraphina, "label": "Gently stretch and talk with Liam"}]
+        )
+        char_db2 = db.get_character(101)
+        self.assertNotIn("Satisfied", str(char_db2.get("status_effects", [])))
+        liam_db2 = db.get_contact(self.session_id, "Liam")
+        self.assertNotIn("Refractory Recovery", str(liam_db2.get("status_effects", [])))
+
+    def test_unilateral_partner_climax_refractory_and_primacy_symmetry(self):
+        """
+        Verify:
+        1. Female partner climaxing before Male player (Player Climax Primacy) does NOT trigger
+           refractory_until_minute or apply Refractory Recovery to the unclimaxed Male player.
+        2. Male partner climaxing before Female player DOES trigger refractory_until_minute and
+           persists Refractory Recovery [X min] on the Male NPC contact without applying
+           Satisfied [X min] to the unclimaxed Female player.
+        """
+        from game_engine.state.reducers import _reduce_physical_state_and_memories
+
+        # Case 1: Female partner Kana climaxes first while Male player Artemiusz is at 60%
+        if not db.get_character(103):
+            db.create_character(103, "Artemiusz", gender="Male")
+        sess = db.get_session(self.session_id)
+        sess["current_day"] = 1
+        sess["current_minute"] = 600
+        db.update_session_time(self.session_id, current_day=1, current_minute=600)
+        db.set_status_effects(103, ["Aroused [3 turns]"])
+        db.upsert_contact(self.session_id, "kana", "Kana", gender="Female")
+
+        phys_primacy = {
+            "intimate_contact": "Intimate encounter with Kana (intercourse)",
+            "actors": {
+                "Artemiusz": {"posture": "Moving inside Kana", "clothing": {"top": "removed", "bottom": "removed"}},
+                "Kana": {"posture": "Wrapped around Artemiusz", "clothing": {"top": "removed", "bottom": "removed"}},
+            },
+            "excitement": {
+                "active": True,
+                "last_act": "penetrative",
+                "actors": {
+                    "Artemiusz": {"meter": 45, "max": 100, "delta": 0, "endurance": 5, "climaxes_count": 0, "status": ""},
+                    "Kana": {"meter": 90, "max": 100, "delta": 0, "endurance": 5, "climaxes_count": 0, "status": ""},
+                },
+            },
+        }
+        db.update_session_physical_state(self.session_id, phys_primacy)
+        sess["physical_state"] = phys_primacy
+        outcome_primacy = {
+            "dialogue_partner": "Kana",
+            "outcome_narrative": "Kana cries out as she reaches a shuddering climax while Artemiusz maintains his rhythm inside her.",
+            "next_narrative": "She clings to his shoulders breathlessly.",
+            "choices": [
+                {"label": "Maintain your steady rhythm inside Kana", "stat": "STR", "requirement": 5},
+            ],
+        }
+        _reduce_physical_state_and_memories(
+            session_id=self.session_id,
+            session=sess,
+            outcome=outcome_primacy,
+            party=[(self.player_char, 103)],
+            scen_key="nsfw_furry_high_school_drama",
+            actions=[{"label": "Thrust steadily with Kana", "success": True}],
+        )
+        art_db = db.get_character(103)
+        self.assertNotIn("Refractory Recovery", str(art_db.get("status_effects", [])))
+
+        # Case 2: Male partner Liam climaxes first while Female player Seraphina has not climaxed
+        with db.get_conn() as conn:
+            conn.execute("DELETE FROM characters WHERE user_id=102")
+            conn.execute("DELETE FROM contacts WHERE session_id=? AND lower(name)='liam'", (self.session_id,))
+
+        seraphina = {
+            "id": 102,
+            "user_id": 102,
+            "name": "Seraphina",
+            "gender": "Female",
+            "status_effects": ["Aroused [3 turns]"],
+        }
+        db.create_character(102, "Seraphina", gender="Female")
+        db.set_status_effects(102, ["Aroused [3 turns]"])
+        db.upsert_contact(self.session_id, "liam", "Liam", gender="Male")
+        phys_male_npc = {
+            "intimate_contact": "Intimate encounter with Liam (intercourse)",
+            "actors": {
+                "Seraphina": {"posture": "Moving with Liam", "clothing": {"top": "removed", "bottom": "removed"}},
+                "Liam": {"posture": "Holding Seraphina's hips", "clothing": {"top": "removed", "bottom": "removed"}},
+            },
+            "excitement": {
+                "active": True,
+                "last_act": "penetrative",
+                "actors": {
+                    "Seraphina": {"meter": 50, "max": 100, "delta": 0, "endurance": 5, "climaxes_count": 0, "status": ""},
+                    "Liam": {"meter": 92, "max": 100, "delta": 0, "endurance": 5, "climaxes_count": 0, "status": ""},
+                },
+            },
+        }
+        db.update_session_physical_state(self.session_id, phys_male_npc)
+        sess["physical_state"] = phys_male_npc
+        outcome_male_npc = {
+            "dialogue_partner": "Liam",
+            "outcome_narrative": "Liam groans deeply as he reaches his climax inside Seraphina.",
+            "next_narrative": "He breathes heavily against her neck.",
+            "choices": [],
+        }
+        _reduce_physical_state_and_memories(
+            session_id=self.session_id,
+            session=sess,
+            outcome=outcome_male_npc,
+            party=[(seraphina, 102)],
+            scen_key="nsfw_furry_high_school_drama",
+            actions=[{"char": seraphina, "label": "Ride Liam Faster", "success": True}],
+        )
+        sera_db = db.get_character(102)
+        self.assertNotIn("Satisfied", str(sera_db.get("status_effects", [])))
+        self.assertNotIn("Refractory Recovery", str(sera_db.get("status_effects", [])))
+        liam_after = db.get_contact(self.session_id, "Liam")
+        self.assertIn("Refractory Recovery", str(liam_after.get("status_effects", [])))
+
+        # Verify clean_choices_impl preserves Player Climax Primacy choices (not aftercare) for Seraphina
+        from game_engine.choices_cleaner import clean_choices_impl
+        cleaned_primacy = clean_choices_impl(
+            None,
+            [],
+            char=seraphina,
+            location="Dorm Room",
+            dialogue_partner="Liam",
+            session_id=self.session_id,
+        )
+        primacy_lbls = " | ".join(c["label"].lower() for c in cleaned_primacy)
+        self.assertIn("your own release", primacy_lbls)
+        self.assertNotIn("in tender aftercare", primacy_lbls)
+
+    def test_disengagement_refractory_persistence_and_aroused_countdown(self):
+        """
+        Verify:
+        1) Disengaging from intimacy while in refractory recovery preserves Refractory Recovery [X min]
+           and updates its countdown across both _reduce_vitals_and_inventory and _reduce_physical_state_and_memories.
+        2) Non-stimulating turns count down Aroused [3 turns] -> Aroused [2 turns] in DB and outcome['character_outcomes'].
+        3) Premature finish transitioning to aftercare does not assign Satisfied [X min] to an unsatisfied partner.
+        """
+        from game_engine.state.reducers import (
+            _reduce_physical_state_and_memories,
+            _reduce_vitals_and_inventory,
+        )
+
+        # 1. Disengagement during active refractory recovery
+        if not db.get_character(105):
+            db.create_character(105, "Dante", gender="Male")
+        db.set_status_effects(105, ["Refractory Recovery [20 min]"])
+        db.upsert_contact(self.session_id, "elena", "Elena", gender="Female")
+        db.update_contact_status_effects(self.session_id, "elena", ["Satisfied [5 min]"])
+
+        dante = {
+            "user_id": 105,
+            "name": "Dante",
+            "gender": "Male",
+            "status_effects": ["Refractory Recovery [20 min]"],
+        }
+        sess = db.get_session(self.session_id)
+        sess["current_day"] = 1
+        sess["current_minute"] = 500
+        phys_refr = {
+            "intimate_contact": "Intimate encounter with Elena (aftercare)",
+            "climax_state": {
+                "player_climaxed": True,
+                "partner_climaxed": True,
+                "mutual_climax": True,
+                "partner_climaxes": {"Elena": True},
+            },
+            "excitement": {
+                "active": False,
+                "last_act": "aftercare",
+                "refractory_until_minute": (1 * 1440) + 515,
+                "player_in_refractory": True,
+                "refractory_partners": {"Elena": True},
+                "actors": {
+                    "Dante": {"meter": 0, "max": 100, "delta": 0, "endurance": 5, "climaxes_count": 1, "status": ""},
+                    "Elena": {"meter": 0, "max": 100, "delta": 0, "endurance": 5, "climaxes_count": 1, "status": ""},
+                },
+            },
+        }
+        db.update_session_physical_state(self.session_id, phys_refr)
+        sess["physical_state"] = phys_refr
+
+        outcome_disengage = {
+            "dialogue_partner": "Elena",
+            "outcome_narrative": "Dante and Elena get dressed and step out onto the balcony.",
+            "next_narrative": "The cool night air greets them.",
+            "character_outcomes": [
+                {"name": "Dante", "status_effects": ["[]", "Breathless", "Refractory Recovery [20 min]"]}
+            ],
+            "choices": [],
+        }
+        _reduce_vitals_and_inventory(
+            session_id=self.session_id,
+            session=sess,
+            party=[(dante, 105)],
+            outcome=outcome_disengage,
+            mp_already_spent={},
+            scen_key="nsfw_furry_high_school_drama",
+            is_combat=False,
+            items_gained_by_user={},
+        )
+        # Verify co["status_effects"] was sanitized of "[]" and "Breathless", keeping Refractory Recovery
+        co_effects = outcome_disengage["character_outcomes"][0]["status_effects"]
+        self.assertNotIn("[]", co_effects)
+        self.assertNotIn("Breathless", co_effects)
+        self.assertTrue(any("Refractory Recovery" in s for s in co_effects))
+
+        _reduce_physical_state_and_memories(
+            session_id=self.session_id,
+            session=sess,
+            outcome=outcome_disengage,
+            party=[(dante, 105)],
+            scen_key="nsfw_furry_high_school_drama",
+            actions=[{"char": dante, "label": "Step away and get dressed", "success": True}],
+        )
+        dante_db = db.get_character(105)
+        # Remaining time is 515 - 500 = 15 min; must NOT be wiped by disengagement!
+        self.assertIn("Refractory Recovery [15 min]", dante_db.get("status_effects", []))
+        self.assertIn("Refractory Recovery [15 min]", outcome_disengage["character_outcomes"][0]["status_effects"])
+
+        # 2. Non-stimulating turn Aroused [3 turns] -> Aroused [2 turns] countdown sync
+        db.set_status_effects(105, ["Aroused [3 turns]"])
+        dante["status_effects"] = ["Aroused [3 turns]"]
+        phys_aroused = {
+            "intimate_contact": "none",
+            "excitement": {
+                "active": False,
+                "last_act": "none",
+                "actors": {
+                    "Dante": {
+                        "meter": 45,
+                        "max": 100,
+                        "delta": 0,
+                        "endurance": 5,
+                        "climaxes_count": 0,
+                        "aroused_turns": 3,
+                        "status": "Aroused [3 turns]",
+                    },
+                },
+            },
+        }
+        db.update_session_physical_state(self.session_id, phys_aroused)
+        sess["physical_state"] = phys_aroused
+        outcome_non_stim = {
+            "dialogue_partner": "Elena",
+            "outcome_narrative": "Dante chats casually with Elena about the festival.",
+            "next_narrative": "She smiles and nods.",
+            "character_outcomes": [{"name": "Dante", "status_effects": ["Aroused [3 turns]"]}],
+            "choices": [],
+        }
+        _reduce_physical_state_and_memories(
+            session_id=self.session_id,
+            session=sess,
+            outcome=outcome_non_stim,
+            party=[(dante, 105)],
+            scen_key="nsfw_furry_high_school_drama",
+            actions=[{"char": dante, "label": "Ask about the festival", "success": True}],
+        )
+        dante_after_decay = db.get_character(105)
+        self.assertIn("Aroused [2 turns]", dante_after_decay.get("status_effects", []))
+        self.assertIn("Aroused [2 turns]", outcome_non_stim["character_outcomes"][0]["status_effects"])
+
+    def test_multi_partner_partial_climax_and_npc_refractory_countdown_refresh(self):
+        """
+        Verify:
+        1. In a multi-partner encounter (Elena + Lyra) where Elena climaxed earlier and Lyra has NOT climaxed,
+           when a Female PC reaches climax, both_climaxed_now is False and she stays in hypersensitive ongoing mode
+           (player_in_refractory = False) rather than prematurely transitioning to aftercare.
+        2. On subsequent non-erotic turns while refractory_until_minutes is active, NPC contacts in refractory_partners
+           have their Satisfied [X min] / Refractory Recovery [X min] tag dynamically refreshed to the current [X min]
+           and any inactive NPC Aroused [3 turns] ticks down to Aroused [2 turns].
+        """
+        from game_engine.state.reducers import _reduce_physical_state_and_memories
+
+        # 1. Multi-partner partial climax with Female PC
+        phys_multi = {
+            "intimate_contact": "intimate encounter with Elena and Lyra",
+            "climax_state": {
+                "player_climaxed": True,
+                "partner_climaxed": True,
+                "partner_climaxes": {"Elena": True, "Lyra": False},
+            },
+            "excitement": {
+                "active": True,
+                "last_act": "oral_receive",
+                "actors": {
+                    "Aria": {"meter": 95, "max": 100, "delta": 0, "endurance": 5, "climaxes_count": 0, "aroused_turns": 3},
+                    "Elena": {"meter": 35, "max": 100, "delta": 0, "endurance": 5, "climaxes_count": 1, "aroused_turns": 2},
+                    "Lyra": {"meter": 85, "max": 100, "delta": 0, "endurance": 5, "climaxes_count": 0, "aroused_turns": 3},
+                },
+            },
+        }
+        updated_multi = compute_excitement_step(
+            physical_state=phys_multi,
+            action_str="Grind hips against Elena and ride her tongue into climax",
+            player_char={"name": "Aria", "gender": "Female", "stats": {"constitution": 10, "charisma": 10, "willpower": 10}},
+            partner_contact={"name": "Elena", "affinity": 50, "disposition": "Romantic", "appearance": {"gender": "Female"}},
+            narrative_str="Aria arches her back and reaches a breathless climax while Elena laps at her core.",
+            partner_contacts=[
+                {"name": "Elena", "affinity": 50, "disposition": "Romantic", "appearance": {"gender": "Female"}},
+                {"name": "Lyra", "affinity": 50, "disposition": "Romantic", "appearance": {"gender": "Female"}},
+            ],
+        )
+        exc_multi = updated_multi
+        # Because Lyra has not climaxed yet, Aria (Female PC) stays in hypersensitive ongoing mode (35%)!
+        self.assertFalse(exc_multi.get("player_in_refractory"))
+        self.assertEqual(exc_multi["actors"]["Aria"]["meter"], 35)
+        self.assertFalse(exc_multi.get("refractory_partners", {}).get("Elena", False))
+        self.assertFalse(exc_multi.get("refractory_partners", {}).get("Lyra", False))
+
+        # Turn 2: Now Lyra also reaches climax -> all_partners_climaxed is True -> mutual completion triggers!
+        updated_multi_2 = compute_excitement_step(
+            physical_state=phys_multi,
+            action_str="Lick Lyra's clit until she climaxes",
+            player_char={"name": "Aria", "gender": "Female", "stats": {"constitution": 10, "charisma": 10, "willpower": 10}},
+            partner_contact={"name": "Lyra", "affinity": 50, "disposition": "Romantic", "appearance": {"gender": "Female"}},
+            narrative_str="Lyra cries out as a shuddering climax overtakes her body.",
+            partner_contacts=[
+                {"name": "Elena", "affinity": 50, "disposition": "Romantic", "appearance": {"gender": "Female"}},
+                {"name": "Lyra", "affinity": 50, "disposition": "Romantic", "appearance": {"gender": "Female"}},
+            ],
+        )
+        self.assertTrue(updated_multi_2.get("player_in_refractory"))
+        self.assertTrue(updated_multi_2.get("refractory_partners", {}).get("Elena"))
+        self.assertTrue(updated_multi_2.get("refractory_partners", {}).get("Lyra"))
+
+        # 2. Non-erotic turn refreshes NPC Refractory/Satisfied [X min] and ticks down NPC Aroused [3 turns] -> [2 turns]
+        if not db.get_character(106):
+            db.create_character(106, "Dante", gender="Male")
+        db.set_status_effects(106, ["Refractory Recovery [20 min]"])
+        db.upsert_contact(self.session_id, "elena", "Elena", gender="Female")
+        db.update_contact_status_effects(self.session_id, "elena", ["Satisfied [20 min]"])
+        db.upsert_contact(self.session_id, "lyra", "Lyra", gender="Female")
+        db.update_contact_status_effects(self.session_id, "lyra", ["Aroused [3 turns]"])
+
+        dante = {
+            "user_id": 106,
+            "name": "Dante",
+            "gender": "Male",
+            "status_effects": ["Refractory Recovery [20 min]"],
+        }
+        phys_cooldown = {
+            "intimate_contact": "none",
+            "climax_state": {"player_climaxed": False, "partner_climaxed": False, "partner_climaxes": {}},
+            "excitement": {
+                "active": False,
+                "last_act": "none",
+                "refractory_until_minute": (1 * 1440) + 612,
+                "player_in_refractory": True,
+                "refractory_partners": {"Elena": True},
+                "actors": {},
+            },
+        }
+        db.update_session_physical_state(self.session_id, phys_cooldown)
+        sess = db.get_session(self.session_id) or {}
+        sess["current_day"] = 1
+        sess["current_minute"] = 600  # 612 - 600 = 12 min remaining
+        sess["physical_state"] = phys_cooldown
+
+        outcome_chat = {
+            "dialogue_partner": "Elena",
+            "outcome_narrative": "They sip water and talk quietly by the window.",
+            "next_narrative": "A cool breeze drifts through the curtains.",
+            "character_outcomes": [{"name": "Dante", "status_effects": ["Refractory Recovery [20 min]"]}],
+            "choices": [],
+        }
+        _reduce_physical_state_and_memories(
+            session_id=self.session_id,
+            session=sess,
+            outcome=outcome_chat,
+            party=[(dante, 106)],
+            scen_key="nsfw_furry_high_school_drama",
+            actions=[{"char": dante, "label": "Drink some water and chat", "success": True}],
+        )
+        dante_now = db.get_character(106)
+        self.assertIn("Refractory Recovery [12 min]", dante_now.get("status_effects", []))
+        contacts_now = {c["name"]: c.get("status_effects", []) for c in db.get_contacts(self.session_id)}
+        self.assertIn("Satisfied [12 min]", contacts_now.get("Elena", []))
+        self.assertIn("Aroused [2 turns]", contacts_now.get("Lyra", []))
+
+        # 3. Disengagement right after a unilateral Female NPC climax initializes refractory_until_minute
+        #    and applies Satisfied [X min] to the climaxed NPC without marking the unclimaxed player in refractory
+        db.set_status_effects(106, ["Aroused [3 turns]"])
+        dante["status_effects"] = ["Aroused [3 turns]"]
+        db.update_contact_status_effects(self.session_id, "elena", ["Aroused [3 turns]"])
+        phys_unilat = {
+            "intimate_contact": "Intimate encounter with Elena (oral give - partner reached climax, ongoing for player)",
+            "climax_state": {
+                "player_climaxed": False,
+                "partner_climaxed": True,
+                "partner_climaxes": {"Elena": True},
+            },
+            "excitement": {
+                "active": True,
+                "last_act": "oral_give",
+                "actors": {
+                    "Dante": {"meter": 0, "max": 100, "delta": 0, "endurance": 5, "climaxes_count": 0, "aroused_turns": 3},
+                    "Elena": {"meter": 100, "max": 100, "delta": 0, "endurance": 5, "climaxes_count": 1, "aroused_turns": 3},
+                },
+            },
+        }
+        db.update_session_physical_state(self.session_id, phys_unilat)
+        sess["current_day"] = 1
+        sess["current_minute"] = 600
+        sess["physical_state"] = phys_unilat
+        outcome_unilat_dis = {
+            "dialogue_partner": "Elena",
+            "outcome_narrative": "Dante steps back and gets dressed while Elena catches her breath.",
+            "next_narrative": "Elena smiles warmly in post-climax satisfaction.",
+            "character_outcomes": [{"name": "Dante", "status_effects": []}],
+            "choices": [],
+        }
+        _reduce_physical_state_and_memories(
+            session_id=self.session_id,
+            session=sess,
+            outcome=outcome_unilat_dis,
+            party=[(dante, 106)],
+            scen_key="nsfw_furry_high_school_drama",
+            actions=[{"char": dante, "label": "Step back and get dressed", "success": True}],
+        )
+        dante_after_unilat = db.get_character(106)
+        self.assertNotIn("Refractory Recovery", str(dante_after_unilat.get("status_effects", [])))
+        contacts_after_unilat = {c["name"]: c.get("status_effects", []) for c in db.get_contacts(self.session_id)}
+        self.assertTrue(any("Satisfied [" in s for s in contacts_after_unilat.get("Elena", [])))
+
+        # 4. Verify clean_choices_impl with session_id=None and dialogue_partner does not raise UnboundLocalError
+        cleaned_no_sess = clean_choices_impl(
+            None,
+            [{"label": "Ask Elena about her studies", "stat": "CHA", "requirement": 5}],
+            dialogue_partner=["Elena"],
+            session_id=None,
+        )
+        self.assertTrue(len(cleaned_no_sess) >= 1)
 
 
 if __name__ == "__main__":

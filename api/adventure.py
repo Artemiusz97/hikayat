@@ -263,6 +263,96 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
         session["combat_decks_by_target"] = {}
         session["combat_deck"] = None
 
+    # Dynamic Clothing Status & Present NPC Enrichment
+    try:
+        import character_data as cd
+        from mechanics.social.physical_state import compute_clothing_summary_badge, _match_actor_key
+        phys_st = db.get_session_physical_state(session.get("id")) if session.get("id") else None
+        phys_actors = (phys_st.get("actors") or {}) if isinstance(phys_st, dict) else {}
+
+        # 1. Player character clothing status
+        sess_char = session.get("character") if isinstance(session.get("character"), dict) else {}
+        char_dict = dict(char) if char else sess_char
+        char_name = char_dict.get("name") if isinstance(char_dict, dict) else ""
+        matched_p_key = _match_actor_key(char_name, phys_actors) if char_name else ""
+        if matched_p_key not in phys_actors and sess_char.get("name"):
+            alt_key = _match_actor_key(str(sess_char["name"]), phys_actors)
+            if alt_key in phys_actors:
+                matched_p_key = alt_key
+                char_dict = sess_char
+                char_name = str(sess_char["name"])
+        if char_name:
+            p_act_data = phys_actors.get(matched_p_key) or {}
+            p_cloth_badge = compute_clothing_summary_badge(p_act_data.get("clothing"), gender=char_dict.get("gender", "Male"))
+            session["player_clothing_status"] = p_cloth_badge
+            if isinstance(session.get("character"), dict):
+                session["character"]["clothing_status"] = p_cloth_badge
+            elif char:
+                session["character"] = dict(char)
+                session["character"]["clothing_status"] = p_cloth_badge
+
+        if isinstance(session.get("party_members"), list):
+            for pm in session["party_members"]:
+                if isinstance(pm, dict) and pm.get("name"):
+                    m_pm_key = _match_actor_key(str(pm["name"]), phys_actors)
+                    pm_act_data = phys_actors.get(m_pm_key) or {}
+                    pm["clothing_status"] = compute_clothing_summary_badge(
+                        pm_act_data.get("clothing"),
+                        gender=pm.get("gender", "Male"),
+                    )
+
+        # 2. Present NPCs & Party Companions clothing status & status effects
+        raw_npcs = session.get("current_npcs") or []
+        contacts_list = db.get_contacts(session.get("id")) or [] if session.get("id") else []
+        contacts_by_name = {str(c.get("name", "")).strip().lower(): c for c in contacts_list if isinstance(c, dict)}
+
+        def _enrich_npc_entry(npc_item):
+            if isinstance(npc_item, str):
+                n_dict = {"name": npc_item.strip()}
+            elif isinstance(npc_item, dict):
+                n_dict = dict(npc_item)
+            else:
+                return None
+
+            n_name = str(n_dict.get("name") or "").strip()
+            if not n_name:
+                return None
+
+            matched_n_key = _match_actor_key(n_name, phys_actors)
+            n_act_data = phys_actors.get(matched_n_key) or {}
+            c_rec = contacts_by_name.get(n_name.lower())
+            if not c_rec and contacts_by_name:
+                m_c_key = _match_actor_key(n_name, contacts_by_name)
+                c_rec = contacts_by_name.get(m_c_key)
+            c_appr = (c_rec.get("appearance") or {}) if isinstance(c_rec, dict) else {}
+            n_gender = (c_appr.get("gender") if isinstance(c_appr, dict) else None) or (c_rec.get("gender") if isinstance(c_rec, dict) else None) or n_dict.get("gender") or "Female"
+            n_dict["clothing_status"] = compute_clothing_summary_badge(n_act_data.get("clothing"), gender=n_gender)
+
+            # Synchronize active status effects
+            if isinstance(c_rec, dict) and c_rec.get("status_effects") is not None:
+                n_dict["status_effects"] = cd.sanitize_status_effects(c_rec.get("status_effects") or [])
+            else:
+                n_dict["status_effects"] = cd.sanitize_status_effects(n_dict.get("status_effects") or [])
+
+            return n_dict
+
+        enriched_npcs = []
+        for npc in raw_npcs:
+            enr = _enrich_npc_entry(npc)
+            if enr:
+                enriched_npcs.append(enr)
+        session["current_npcs"] = enriched_npcs
+
+        if isinstance(session.get("party_npcs"), list):
+            enriched_party_npcs = []
+            for p_npc in session["party_npcs"]:
+                enr_p = _enrich_npc_entry(p_npc)
+                if enr_p:
+                    enriched_party_npcs.append(enr_p)
+            session["party_npcs"] = enriched_party_npcs
+    except Exception as e:
+        logger.debug(f"Could not enrich clothing status for session: {e}")
+
     return session
 
 
@@ -376,6 +466,8 @@ async def start_adventure(req: StartAdventureRequest):
         choices_style = user_settings.get("choices_style", "dropdown")
         result_display = user_settings.get("result_display", "detailed")
         show_percentages = user_settings.get("show_percentages", 1)
+        language = user_settings.get("narration_language") or user_settings.get("language", "en")
+        narration_language = language
 
         scenario_key = req.scenario or char.get("scenario", "fantasy")
         if req.tags:
@@ -429,6 +521,8 @@ async def start_adventure(req: StartAdventureRequest):
             choices_style=choices_style,
             result_display=result_display,
             show_percentages=show_percentages,
+            language=language,
+            narration_language=narration_language,
         )
 
         await adb(db.add_session_member, session_id, req.user_id)

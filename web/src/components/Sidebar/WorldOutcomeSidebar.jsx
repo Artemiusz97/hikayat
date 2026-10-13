@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { 
   Sparkles, Swords, ScrollText, Heart, ShieldAlert, Coins, Gift, ChevronDown, ChevronUp,
   Compass, MapPin, Map, Calendar, Users
 } from 'lucide-react';
 import { getOutcomeTierTheme } from '../StoryFeed/HistoryCard';
+import { StatusEffectBadge } from './CharacterSheet';
 
 const parseLocationTiers = (rawLocation, fallbackTitle) => {
   const loc = String(rawLocation || fallbackTitle || 'Local Region').trim();
@@ -86,8 +88,10 @@ export const extractTurnOutcomes = (entry, turnNumber, seenClues = new Set(), se
       if (name) itemsLost.add(name);
     });
     (Array.isArray(co.status_effects) ? co.status_effects : []).forEach(st => {
-      const name = typeof st === 'string' ? st : st?.name;
-      if (name) statusEffects.add(name);
+      const name = String(typeof st === 'string' ? st : (st?.name || '')).trim();
+      if (name && !['[]', '{}', '""', "''", 'none', 'null'].includes(name.toLowerCase())) {
+        statusEffects.add(name);
+      }
     });
   });
 
@@ -198,6 +202,7 @@ const WorldOutcomeSidebar = ({
   onSelectContact,
   isMobileDrawer = false,
 }) => {
+  const { t } = useTranslation();
   const [expandedTurnMap, setExpandedTurnMap] = useState({});
 
   const toggleTurnExpanded = (turnNumber, defaultExpanded) => {
@@ -237,6 +242,9 @@ const WorldOutcomeSidebar = ({
   });
   turnOutcomes.reverse();
 
+  const rawTime = session?.formatted_time || 'Day 1 • 08:00';
+  const localizedTime = rawTime.replace(/\bDay\b/gi, t('scene.day', 'Day'));
+
   return (
     <div className="flex flex-col h-full bg-fantasy-panel text-gray-200 select-none">
       {/* SECTION 1: World & Scene Context (Location, Map, Day/Time, Present NPCs) - Desktop only (hidden in mobile drawer) */}
@@ -246,11 +254,11 @@ const WorldOutcomeSidebar = ({
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs font-rpg font-bold uppercase tracking-wider text-fantasy-accent">
               <Compass size={15} />
-              <span>Scene & World</span>
+              <span>{t('scene.title', 'Scene & World')}</span>
             </div>
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-950/60 border border-amber-600/50 text-[11px] font-mono text-amber-300 shadow-sm">
               <Calendar size={11} className="text-amber-400" />
-              <span>{session?.formatted_time || 'Day 1 • 08:00'}</span>
+              <span>{localizedTime}</span>
             </span>
           </div>
 
@@ -277,7 +285,7 @@ const WorldOutcomeSidebar = ({
                 className="w-full py-1.5 px-3 rounded-lg bg-fantasy-accent/15 hover:bg-fantasy-accent/25 border border-fantasy-accent/40 hover:border-fantasy-accent text-fantasy-accent text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-[0.99]"
               >
                 <Map size={13} />
-                <span>Open World Map & Fast Travel</span>
+                <span>{t('scene.open_map', 'Open World Map & Fast Travel')}</span>
               </button>
             )}
           </div>
@@ -287,7 +295,7 @@ const WorldOutcomeSidebar = ({
             <div className="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-gray-300">
               <span className="flex items-center gap-1.5">
                 <Users size={12} className="text-fantasy-accent/80" />
-                <span>Present in Scene</span>
+                <span>{t('scene.present', 'Present in Scene')}</span>
               </span>
               <span className="px-1.5 py-0.2 rounded bg-black/60 border border-fantasy-border text-[10px] text-gray-300 font-bold">
                 {npcs.length}
@@ -295,36 +303,63 @@ const WorldOutcomeSidebar = ({
             </div>
 
             {npcs.length > 0 ? (
-              <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto custom-scrollbar pr-0.5">
+              <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto custom-scrollbar pr-0.5">
                 {npcs.map((npc, idx) => {
                   const name = typeof npc === 'string' ? npc : (npc?.name || 'Unknown');
                   const isPartner = dialoguePartners.has(name.toLowerCase().trim());
+                  const clothing = typeof npc === 'object' ? npc?.clothing_status : null;
+                  const statusEffects = (typeof npc === 'object' && Array.isArray(npc?.status_effects) ? npc.status_effects : []).filter(eff => {
+                    const str = (typeof eff === 'string' ? eff : (eff?.name || '')).trim();
+                    return str && str !== '[]' && str !== '{}' && str !== '""' && str !== "''" && str.toLowerCase() !== 'none' && str.toLowerCase() !== 'null';
+                  });
                   return (
-                    <button
+                    <div
                       key={`${name}-${idx}`}
-                      type="button"
-                      onClick={() => onSelectContact && onSelectContact(name)}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[10px] font-medium transition-colors ${
+                      className={`flex flex-col gap-1 p-1.5 rounded-lg border text-[11px] transition-colors ${
                         isPartner
-                          ? 'bg-purple-950/60 border-purple-500/60 text-purple-200 hover:border-purple-400'
-                          : 'bg-black/60 border-neutral-800 text-gray-200 hover:border-fantasy-accent/60'
+                          ? 'bg-purple-950/40 border-purple-500/50'
+                          : 'bg-black/40 border-neutral-800/80 hover:border-neutral-700'
                       }`}
-                      title={onSelectContact ? `View ${name} in Codex` : name}
                     >
-                      <span className={`w-1.5 h-1.5 rounded-full ${isPartner ? 'bg-purple-400 animate-pulse' : 'bg-emerald-400/80'}`} />
-                      <span className="truncate max-w-[160px]">{name}</span>
-                      {isPartner && (
-                        <span className="text-[9px] font-mono uppercase px-1 py-0.2 rounded bg-purple-900/80 text-purple-300 font-semibold">
-                          Talking
-                        </span>
+                      <div className="flex items-center justify-between gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => onSelectContact && onSelectContact(name)}
+                          className={`inline-flex items-center gap-1.5 font-medium transition-colors text-left truncate ${
+                            isPartner
+                              ? 'text-purple-200 hover:text-purple-100 font-semibold'
+                              : 'text-gray-200 hover:text-fantasy-accent'
+                          }`}
+                          title={onSelectContact ? `View ${name} in Codex` : name}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isPartner ? 'bg-purple-400 animate-pulse' : 'bg-emerald-400/80'}`} />
+                          <span className="truncate max-w-[140px]">{name}</span>
+                          {isPartner && (
+                            <span className="text-[8.5px] font-mono uppercase px-1 py-0.2 rounded bg-purple-900/80 text-purple-300 font-semibold shrink-0">
+                              {t('scene.talking', 'Talking')}
+                            </span>
+                          )}
+                        </button>
+                        {clothing && (
+                          <span className="text-[9.5px] font-mono px-1.5 py-0.2 rounded bg-neutral-900/90 border border-neutral-700/80 text-gray-300 font-normal shrink-0">
+                            {clothing}
+                          </span>
+                        )}
+                      </div>
+                      {statusEffects && statusEffects.length > 0 && (
+                        <div className="flex flex-wrap gap-1 pt-0.5">
+                          {statusEffects.map((eff, eIdx) => (
+                            <StatusEffectBadge key={eIdx} effect={eff} />
+                          ))}
+                        </div>
                       )}
-                    </button>
+                    </div>
                   );
                 })}
               </div>
             ) : (
               <div className="text-[11px] text-gray-500 italic px-1">
-                No other characters in the immediate area.
+                {t('scene.no_npcs', 'No other characters in the immediate area.')}
               </div>
             )}
           </div>
@@ -335,10 +370,12 @@ const WorldOutcomeSidebar = ({
       <div className="px-3.5 py-2 border-b border-fantasy-border bg-black/60 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2 text-xs font-rpg font-bold uppercase tracking-wider text-fantasy-accent">
           <ScrollText size={14} />
-          <span>Outcomes & Changes</span>
+          <span>{t('scene.outcomes_title', 'Outcomes & Changes')}</span>
         </div>
         <span className="text-[10px] font-mono text-gray-300 bg-black/60 px-2 py-0.5 rounded border border-fantasy-border">
-          {turnOutcomes.length} {turnOutcomes.length === 1 ? 'Turn' : 'Turns'}
+          {turnOutcomes.length === 1
+            ? t('scene.turns_count_one', { count: 1, defaultValue: '1 Turn' })
+            : t('scene.turns_count_other', { count: turnOutcomes.length, defaultValue: `${turnOutcomes.length} Turns` })}
         </span>
       </div>
 
@@ -346,9 +383,9 @@ const WorldOutcomeSidebar = ({
         {turnOutcomes.length === 0 ? (
           <div className="text-center py-12 px-4 text-xs text-gray-500 space-y-2">
             <Sparkles size={20} className="mx-auto text-fantasy-accent/50" />
-            <p className="font-semibold text-gray-300 text-sm">No Turn Outcomes Yet</p>
+            <p className="font-semibold text-gray-300 text-sm">{t('scene.no_outcomes_title', 'No Turn Outcomes Yet')}</p>
             <p className="text-xs text-gray-400 leading-relaxed max-w-xs mx-auto">
-              Skill check rolls, EXP gains, combat logs, loot, and newly discovered clues will appear here as your story unfolds.
+              {t('scene.no_outcomes_desc', 'Skill check rolls, EXP gains, combat logs, loot, and newly discovered clues will appear here as your story unfolds.')}
             </p>
           </div>
         ) : (
@@ -380,11 +417,11 @@ const WorldOutcomeSidebar = ({
                       <div className="flex items-center gap-1.5 min-w-0">
                         {isLatest ? (
                           <span className="px-1.5 py-0.5 rounded bg-fantasy-accent/20 border border-fantasy-accent/60 text-fantasy-accent text-[10px] font-mono font-bold uppercase shrink-0">
-                            Turn #{item.turnNumber}
+                            {t('scene.turn_number', { number: item.turnNumber, defaultValue: `Turn #${item.turnNumber}` })}
                           </span>
                         ) : (
                           <span className="text-[10px] font-mono uppercase text-gray-400 font-semibold shrink-0">
-                            Turn #{item.turnNumber}
+                            {t('scene.turn_number', { number: item.turnNumber, defaultValue: `Turn #${item.turnNumber}` })}
                           </span>
                         )}
                         <span className="text-xs text-gray-300 truncate font-medium">
@@ -418,12 +455,12 @@ const WorldOutcomeSidebar = ({
                             <span className="relative inline-flex rounded-full h-2 w-2 bg-fantasy-accent"></span>
                           </span>
                           <span className="px-2 py-0.5 rounded-full bg-fantasy-accent/20 border border-fantasy-accent/60 text-fantasy-accent text-[11px] font-mono font-bold uppercase tracking-wider shadow-sm">
-                            Latest Outcome • Turn #{item.turnNumber}
+                            {t('scene.latest_outcome', { number: item.turnNumber, defaultValue: `Latest Outcome • Turn #${item.turnNumber}` })}
                           </span>
                         </div>
                       ) : (
                         <span className="text-[10px] font-mono uppercase tracking-wider text-gray-400 font-medium">
-                          Turn #{item.turnNumber}
+                          {t('scene.turn_number', { number: item.turnNumber, defaultValue: `Turn #${item.turnNumber}` })}
                         </span>
                       )}
 
@@ -476,7 +513,7 @@ const WorldOutcomeSidebar = ({
                             isLatest ? 'px-2.5 py-0.5 text-xs' : 'px-2 py-0.5 text-[9.5px]'
                           }`}
                         >
-                          🎉 LEVEL UP (Lv.{item.levelsGained[item.levelsGained.length - 1]})
+                          🎉 {t('outcomes.level_up', 'LEVEL UP')} (Lv.{item.levelsGained[item.levelsGained.length - 1]})
                         </span>
                       )}
 

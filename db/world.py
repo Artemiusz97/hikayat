@@ -23,11 +23,13 @@ def save_merchant_state(session_id: int, merchant: dict):
 def upsert_lorebook_entity(session_id: int, entity_type: str, name: str,
                             description: str = "", disposition: str = "neutral", faction: str = "",
                             traits: list | str = None, motivation: str = "", mannerisms: str = "",
-                            race: str = "", appearance: dict = None, status: str = "active"):
+                            race: str = "", appearance: dict = None, status: str = "active",
+                            gender: str = ""):
     name = (name or "").strip()
     if not name:
         return
     race = (race or "").strip()
+    gender = (gender or "").strip().lower()
     status = (status or "active").strip().lower()
     # Defensively coerce string fields — the LLM can sometimes return a dict
     # instead of a plain string (e.g. disposition={"mood": "friendly"}).
@@ -65,13 +67,13 @@ def upsert_lorebook_entity(session_id: int, entity_type: str, name: str,
                     scen = s_row["scenario"] if s_row and s_row["scenario"] else "fantasy"
             except Exception:
                 scen = "fantasy"
-            name = matched_name or namegen.generate_person_name(scen)
+            name = matched_name or namegen.generate_person_name(scen, gender=gender)
             if role_title.lower() not in (description or "").lower():
                 description = f"{role_title} — {description or ''}".strip(" —")
 
     with get_conn() as conn:
         existing = conn.execute(
-            "SELECT id, race, appearance_json, status FROM lorebook WHERE session_id=? AND lower(name)=lower(?)",
+            "SELECT id, race, appearance_json, status, gender FROM lorebook WHERE session_id=? AND lower(name)=lower(?)",
             (session_id, name)).fetchone()
         if existing:
             existing_race = existing["race"]
@@ -103,18 +105,19 @@ def upsert_lorebook_entity(session_id: int, entity_type: str, name: str,
                                         traits=COALESCE(NULLIF(?, '[]'), NULLIF(?, ''), traits),
                                         motivation=COALESCE(NULLIF(?, ''), motivation),
                                         mannerisms=COALESCE(NULLIF(?, ''), mannerisms),
+                                        gender=COALESCE(NULLIF(?, ''), gender),
                                         race=?,
                                         appearance_json=?,
                                         status=?,
                                         updated_at=? WHERE id=?""",
-                (description, disposition, faction, traits_json, traits_json, motivation, mannerisms, final_race, final_app_json, final_status, time.time(), existing["id"]))
+                (description, disposition, faction, traits_json, traits_json, motivation, mannerisms, gender, final_race, final_app_json, final_status, time.time(), existing["id"]))
         else:
             conn.execute(
                 """INSERT INTO lorebook (session_id, entity_type, name, description, disposition,
-                                          faction, traits, motivation, mannerisms, race, appearance_json, status, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                          faction, traits, motivation, mannerisms, gender, race, appearance_json, status, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (session_id, entity_type, name, description, disposition or "neutral",
-                 faction, traits_json, motivation or "", mannerisms or "", race or "", app_json, status, time.time()))
+                 faction, traits_json, motivation or "", mannerisms or "", gender, race or "", app_json, status, time.time()))
 
 def get_lorebook(session_id: int) -> dict:
     with get_conn() as conn:

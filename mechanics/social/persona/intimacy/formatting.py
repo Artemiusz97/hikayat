@@ -337,9 +337,12 @@ def format_body_asset_narrative_directive(
         if not undergarments and "undergarments" in npc_appearance:
             undergarments = npc_appearance.get("undergarments")
 
-    if isinstance(player_appearance, dict) and not player_asset:
-        is_pl_m = any(kw in str(player_gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(player_gender).lower()
-        player_asset = player_appearance.get("penis_size" if is_pl_m else "breast_size") or ""
+    if isinstance(player_appearance, dict):
+        if not player_gender and player_appearance.get("gender"):
+            player_gender = player_appearance.get("gender")
+        if not player_asset:
+            is_pl_m = any(kw in str(player_gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(player_gender).lower()
+            player_asset = player_appearance.get("penis_size" if is_pl_m else "breast_size") or ""
 
     if not asset_size or str(asset_size).lower() in ("unknown", "none", "n/a", ""):
         return ""
@@ -435,6 +438,15 @@ def format_body_asset_narrative_directive(
 
     # 2. Tactile Touch & Foreplay Sensations
     effective_tex = asset_texture or extract_asset_texture(asset_size, gender=gender)
+    if not effective_tex:
+        from .appearance import roll_dynamic_asset_texture
+        effective_tex = roll_dynamic_asset_texture(
+            seed_val=partner_name or "partner",
+            gender="male" if is_male_npc else "female",
+            race=race,
+            demeanor=demeanor,
+            size_tier=tier,
+        )
     if effective_tex:
         tex_guide = f"- TACTILE SENSATION & TOUCH RESPONSE ({effective_tex}): When the partner touches, cups, caresses, kisses, or squeezes their {asset_label}, the prose MUST emphasize this specific tactile feel ({effective_tex})—describing the exact physical reaction (e.g. yielding warmth molding into palms, perkiness quivering under cold fingertips, burying fingers into soft fur/down, or smooth scales warming against skin)."
         behavior_lines.append(tex_guide)

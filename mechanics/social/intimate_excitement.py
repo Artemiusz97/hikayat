@@ -1407,14 +1407,33 @@ def compute_excitement_step(
                 act_entry["status"] = "Warming Up"
             if "idle_turns" not in act_entry:
                 act_entry["idle_turns"] = 0
+            if "aroused_turns" not in act_entry:
+                init_aroused = 0
+                raw_st = char_dict.get("status_effects") if isinstance(char_dict, dict) else None
+                if isinstance(raw_st, list):
+                    for s_item in raw_st:
+                        if isinstance(s_item, str) and "aroused" in s_item.lower():
+                            m_ar = re.search(r"\[(\d+)\s*turns?\]", s_item, re.IGNORECASE)
+                            init_aroused = int(m_ar.group(1)) if m_ar else 3
+                            break
+                act_entry["aroused_turns"] = init_aroused
             return matched_k, act_entry
 
+        init_aroused_new = 0
+        raw_st_new = char_dict.get("status_effects") if isinstance(char_dict, dict) else None
+        if isinstance(raw_st_new, list):
+            for s_item in raw_st_new:
+                if isinstance(s_item, str) and "aroused" in s_item.lower():
+                    m_ar = re.search(r"\[(\d+)\s*turns?\]", s_item, re.IGNORECASE)
+                    init_aroused_new = int(m_ar.group(1)) if m_ar else 3
+                    break
         actors[clean_name] = {
             "meter": 0, "max": 100, "delta": 0,
             "endurance": get_actor_endurance(char_dict, is_player=is_player),
             "climaxes_count": 0,
             "status": "Warming Up",
-            "idle_turns": 0
+            "idle_turns": 0,
+            "aroused_turns": init_aroused_new
         }
         return clean_name, actors[clean_name]
 
@@ -1565,15 +1584,19 @@ def compute_excitement_step(
     for t in partner_actor_tuples:
         partner_climaxes.setdefault(t[0], False)
 
+    in_refr, _ = is_in_refractory_cooldown(session or {}, physical_state)
+    refr_partners_existing = curr_excitement.get("refractory_partners") if isinstance(curr_excitement.get("refractory_partners"), dict) else {}
+
     if curr_excitement.get("active") is False and not curr_excitement.get("premature_finish", False):
-        climax_st["partner_climaxed"] = False
-        climax_st["player_climaxed"] = False
+        keep_pl_climaxed = bool(in_refr and curr_excitement.get("player_in_refractory") and not is_female_player)
+        climax_st["player_climaxed"] = keep_pl_climaxed
         for k in partner_climaxes:
-            partner_climaxes[k] = False
-        p_data["meter"] = 0
+            partner_climaxes[k] = bool(in_refr and refr_partners_existing.get(k, False))
+        climax_st["partner_climaxed"] = any(partner_climaxes.values())
+        p_data["meter"] = 100 if keep_pl_climaxed else 0
         p_data["delta"] = 0
         p_data["idle_turns"] = 0
-        p_data["status"] = "Warming Up"
+        p_data["status"] = "💥 Climaxed (Spent)" if keep_pl_climaxed else "Warming Up"
         for t in partner_actor_tuples:
             t[1]["meter"] = 0
             t[1]["delta"] = 0
@@ -1587,10 +1610,14 @@ def compute_excitement_step(
     )
 
     player_already_climaxed = bool(climax_st.get("player_climaxed"))
-    in_refr, _ = is_in_refractory_cooldown(session or {}, physical_state)
-    male_spent = (not is_female_player) and (player_already_climaxed or in_refr)
+    if curr_excitement.get("player_in_refractory") is not None:
+        player_in_refr = bool(in_refr and curr_excitement.get("player_in_refractory"))
+    else:
+        player_in_refr = bool(in_refr and (player_already_climaxed or "ongoing for player" not in curr_ic_low))
+    male_spent = (not is_female_player) and (player_already_climaxed or player_in_refr)
 
     player_stimulated = any(cl["player_stimulated"] for cl in partner_classifications.values())
+    any_partner_stimulated_now = any(cl.get("partner_stimulated") for cl in partner_classifications.values())
     p_delta = 0
     if male_spent:
         p_delta = 0
@@ -1604,7 +1631,7 @@ def compute_excitement_step(
         p_data["aroused_turns"] = 3
         p_delta = 0
     else:
-        # Non-stimulating action: check grace period and gradual decay
+        # Non-stimulating action for player: check grace period and gradual decay
         if p_data.get("meter", 0) > 0:
             p_data["idle_turns"] = p_data.get("idle_turns", 0) + 1
             if p_data["idle_turns"] <= INTIMATE_DECAY_GRACE_TURNS:
@@ -1613,8 +1640,18 @@ def compute_excitement_step(
                 p_has_aroused = _actor_has_aroused(player_char, p_data)
                 decay_rate = AROUSED_DECAY_PER_TURN if p_has_aroused else BASE_DECAY_PER_TURN
                 p_delta = -min(p_data.get("meter", 0), decay_rate)
+            if any_partner_stimulated_now:
+                p_data["aroused_turns"] = 3
+            elif p_data.get("aroused_turns", 0) > 0:
+                p_data["aroused_turns"] = max(0, p_data["aroused_turns"] - 1)
         else:
             p_delta = 0
+            if any_partner_stimulated_now:
+                p_data["aroused_turns"] = 3
+            elif p_data.get("aroused_turns", 0) > 0:
+                p_data["aroused_turns"] = max(0, p_data["aroused_turns"] - 1)
+            else:
+                p_data["aroused_turns"] = 0
 
     p_data["delta"] = p_delta
     p_data["meter"] = max(0, min(100, p_data.get("meter", 0) + p_delta))
@@ -1636,6 +1673,8 @@ def compute_excitement_step(
         if cl.get("turn_off_triggered"):
             n_delta = 0
             n_d["idle_turns"] = n_d.get("idle_turns", 0) + 1
+            if n_d.get("aroused_turns", 0) > 0:
+                n_d["aroused_turns"] = max(0, n_d["aroused_turns"] - 1)
         elif cl["partner_stimulated"]:
             n_d["idle_turns"] = 0
             n_d["aroused_turns"] = 3
@@ -1670,8 +1709,18 @@ def compute_excitement_step(
                     n_has_aroused = _actor_has_aroused(pc, n_d)
                     n_decay = AROUSED_DECAY_PER_TURN if n_has_aroused else BASE_DECAY_PER_TURN
                     n_delta = -min(n_d.get("meter", 0), n_decay)
+                if cl.get("player_stimulated"):
+                    n_d["aroused_turns"] = 3
+                elif n_d.get("aroused_turns", 0) > 0:
+                    n_d["aroused_turns"] = max(0, n_d["aroused_turns"] - 1)
             else:
                 n_delta = 0
+                if cl.get("player_stimulated"):
+                    n_d["aroused_turns"] = 3
+                elif n_d.get("aroused_turns", 0) > 0:
+                    n_d["aroused_turns"] = max(0, n_d["aroused_turns"] - 1)
+                else:
+                    n_d["aroused_turns"] = 0
 
         # Multi-climax reset to 35% hypersensitive baseline if already peaked earlier (female anatomy)
         # Male anatomy stays spent at 100%
@@ -1715,7 +1764,7 @@ def compute_excitement_step(
             elif p_already_climaxed and not cl["partner_stimulated"] and n_d.get("idle_turns", 0) == 0 and not male_npc_spent:
                 n_d["status"] = "Trembling from Aftershocks 🔥"
             elif n_delta < 0:
-                rate_lbl = 5 if _actor_has_aroused(pc, n_d) else 10
+                rate_lbl = 5 if abs(n_delta) == 5 or (n_delta < 0 and _actor_has_aroused(pc, n_d)) else 10
                 n_d["status"] = f"Cooling Down ⏳ (-{rate_lbl}%)" if n_d["meter"] > 0 else "Cooled Down"
             elif n_d.get("idle_turns", 0) == 1 and n_d["meter"] > 0 and not cl["partner_stimulated"] and not is_sensual_action:
                 n_d["status"] = "Lingering Heat 🔥"
@@ -1728,12 +1777,12 @@ def compute_excitement_step(
                     n_d["status"] = "Deepening Pleasure"
                 else:
                     n_d["status"] = "Sensual Warmth 🔥"
+            elif n_delta > 0 and not cl["partner_stimulated"] and not is_targeted_p:
+                n_d["status"] = "Watching with Arousal"
             elif n_d["meter"] >= 75:
                 n_d["status"] = "On the Brink 🔥"
             elif n_d["meter"] >= 50:
                 n_d["status"] = "Deepening Pleasure"
-            elif n_delta > 0 and not cl["partner_stimulated"] and not is_targeted_p:
-                n_d["status"] = "Watching with Arousal"
             elif n_d["meter"] == 0 and n_d.get("idle_turns", 0) >= 3:
                 n_d["status"] = "Cooled Down"
             else:
@@ -1825,13 +1874,14 @@ def compute_excitement_step(
                 curr_excitement["unsatisfied_partners"] = []
 
             cooldown_dur = calculate_refractory_duration(p_data.get("endurance", 10))
-            curr_day = session.get("current_day", 1)
-            curr_min = session.get("current_minute", 480)
+            curr_day = (session or {}).get("current_day", 1)
+            curr_min = (session or {}).get("current_minute", 480)
             target_abs = (curr_day * 1440) + curr_min + cooldown_dur
             curr_excitement["refractory_until_minute"] = target_abs
             curr_excitement["cooldown_notified"] = False
+            curr_excitement["player_in_refractory"] = True
     elif p_delta < 0:
-        p_rate_lbl = 5 if _actor_has_aroused(player_char, p_data) else 10
+        p_rate_lbl = 5 if abs(p_delta) == 5 or (p_delta < 0 and _actor_has_aroused(player_char, p_data)) else 10
         p_data["status"] = f"Cooling Down ⏳ (-{p_rate_lbl}%)" if p_data["meter"] > 0 else "Cooled Down"
     elif p_data.get("idle_turns", 0) == 1 and p_data["meter"] > 0 and not player_stimulated and not is_sensual_action:
         p_data["status"] = "Lingering Heat 🔥"
@@ -1852,6 +1902,40 @@ def compute_excitement_step(
         p_data["status"] = "Cooled Down"
     else:
         p_data["status"] = "Arousal Building"
+
+    any_male_partner_climaxed = any(
+        t[0] in newly_climaxed_partners
+        and "male" in str(t[2].get("gender") or (t[2].get("appearance") or {}).get("gender") or "Female").lower()
+        and "female" not in str(t[2].get("gender") or (t[2].get("appearance") or {}).get("gender") or "Female").lower()
+        for t in partner_actor_tuples
+    )
+    all_partners_climaxed = bool(
+        partner_actor_tuples and all(partner_climaxes.get(t[0], False) for t in partner_actor_tuples)
+    )
+    both_climaxed_now = bool(climax_st.get("player_climaxed") and all_partners_climaxed)
+    refr_partners_map = curr_excitement.setdefault("refractory_partners", {})
+    if both_climaxed_now:
+        curr_excitement["player_in_refractory"] = True
+        for t in partner_actor_tuples:
+            if partner_climaxes.get(t[0], False):
+                refr_partners_map[t[0]] = True
+    elif any_male_partner_climaxed:
+        curr_excitement.setdefault("player_in_refractory", False)
+        for t in partner_actor_tuples:
+            if (
+                t[0] in newly_climaxed_partners
+                and "male" in str(t[2].get("gender") or (t[2].get("appearance") or {}).get("gender") or "Female").lower()
+                and "female" not in str(t[2].get("gender") or (t[2].get("appearance") or {}).get("gender") or "Female").lower()
+            ):
+                refr_partners_map[t[0]] = True
+    if (both_climaxed_now or any_male_partner_climaxed) and not curr_excitement.get("refractory_until_minute"):
+        p_end = (primary_contact.get("stats") or {}).get("endurance") or primary_contact.get("endurance") or 10 if isinstance(primary_contact, dict) else 10
+        cooldown_dur = calculate_refractory_duration(p_end)
+        curr_day = (session or {}).get("current_day", 1)
+        curr_min = (session or {}).get("current_minute", 480)
+        target_abs = (curr_day * 1440) + curr_min + cooldown_dur
+        curr_excitement["refractory_until_minute"] = target_abs
+        curr_excitement["cooldown_notified"] = False
 
     mutual_group_climax = (
         player_newly_climaxed and
@@ -1899,10 +1983,16 @@ def compute_excitement_step(
         "actors": actors,
         "partner_meters": partner_meters_list,
         "partner_climaxes": partner_climaxes,
+        "all_partners_climaxed": all_partners_climaxed,
+        "player_in_refractory": curr_excitement.get("player_in_refractory", False),
+        "refractory_partners": dict(curr_excitement.get("refractory_partners") or {}),
         "simultaneous_partner_climax": simultaneous_partner_climax,
         "mutual_group_climax": mutual_group_climax,
         "all_cooled_down": all_cooled_down,
         "player_idle_turns": p_data.get("idle_turns", 0),
+        "player_stimulated": bool(player_stimulated),
+        "is_sensual_action": bool(is_sensual_action),
+        "any_partner_stimulated": bool(any(cl.get("partner_stimulated") for cl in partner_classifications.values())),
     }
 
 
@@ -1994,7 +2084,7 @@ def check_and_resolve_refractory_clock(
     Returns (is_recovered_now, toast_message).
     """
     excitement = physical_state.get("excitement", {}) if isinstance(physical_state, dict) else {}
-    target_abs = excitement.get("refractory_until_minute")
+    target_abs = excitement.get("refractory_until_minute") or (physical_state.get("refractory_until_minute") if isinstance(physical_state, dict) else None)
     if not target_abs:
         return False, None
 
@@ -2008,6 +2098,10 @@ def check_and_resolve_refractory_clock(
     if current_abs >= target_abs:
         excitement["cooldown_notified"] = True
         excitement["refractory_until_minute"] = None
+        excitement["player_in_refractory"] = False
+        excitement["refractory_partners"] = {}
+        if isinstance(physical_state, dict):
+            physical_state["refractory_until_minute"] = None
         excitement["premature_finish"] = False
         excitement["partner_demanded"] = False
         excitement["unsatisfied_partner"] = ""
@@ -2051,7 +2145,7 @@ def is_in_refractory_cooldown(
     Returns (is_active, minutes_remaining).
     """
     excitement = physical_state.get("excitement", {}) if isinstance(physical_state, dict) else {}
-    target_abs = excitement.get("refractory_until_minute")
+    target_abs = excitement.get("refractory_until_minute") or (physical_state.get("refractory_until_minute") if isinstance(physical_state, dict) else None)
     if not target_abs:
         return False, 0
 
@@ -2063,6 +2157,19 @@ def is_in_refractory_cooldown(
         return True, target_abs - current_abs
 
     return False, 0
+
+
+def format_refractory_status_tag(mins_remaining: int) -> str:
+    """Formats clock-accurate male refractory recovery status effect."""
+    return f"Refractory Recovery [{max(1, int(mins_remaining))} min]"
+
+
+def format_partner_recovery_status_tag(mins_remaining: int, gender: str = "Female") -> str:
+    """Formats clock-accurate partner recovery/satisfied status effect."""
+    gen = str(gender or "Female").lower()
+    if "male" in gen and "female" not in gen:
+        return f"Refractory Recovery [{max(1, int(mins_remaining))} min]"
+    return f"Satisfied [{max(1, int(mins_remaining))} min]"
 
 
 INTIMATE_CHOICE_KEYWORDS = (
@@ -2184,22 +2291,46 @@ def has_state_contradiction_in_choice(
         and not player_spent
     )
 
-    # 0. Contradiction: Male player is physically spent / in refractory cooldown but choice assumes penetrative thrusting
+    # 0. Contradiction: Male player is physically spent / in refractory cooldown but choice assumes penetrative intercourse
     if player_spent:
+        if re.search(
+            r"\b(?:"
+            r"thrust(?:ing|s)?|"
+            r"drive\s+deeper|"
+            r"keep\s+thrusting|"
+            r"maintain\s+(?:a\s+)?(?:steady,?\s+)?(?:deep\s+)?rhythm|"
+            r"slow\s+your\s+rhythm,?\s+gently\s+withdraw|"
+            r"gently\s+withdraw|"
+            r"bury\s+yourself\s+deeper|"
+            r"hilt\s+inside|"
+            r"finish\s+inside|"
+            r"spill\s+(?:deep\s+)?inside|"
+            r"penetrat(?:e|ing|ion)|"
+            r"(?:lift|pull|guide|heave)\s+(?:.*?\s+)?onto\s+(?:your\s+)?lap|"
+            r"take\s+(?:.*?\s+)?from\s+behind|"
+            r"another\s+round|"
+            r"resume\s+(?:intercourse|lovemaking)|"
+            r"straddle\s+and\s+lower|"
+            r"move\s+to\s+enter|"
+            r"enter\s+(?:her|him|them)"
+            r")\b",
+            lbl,
+            re.IGNORECASE,
+        ):
+            return True
+
+    # 0b. Contradiction: Both player and partner have climaxed / all satisfied, but choice attempts to escalate intimacy or start another round
+    player_finished = bool(player_climaxed or player_spent or player_meter >= 100)
+    all_partners_finished = bool(
+        partner_climaxed
+        or (partner_climaxes and isinstance(partner_climaxes, dict) and len(partner_climaxes) > 0 and all(partner_climaxes.values()))
+    )
+    if player_finished and all_partners_finished:
         if any(
             p in lbl for p in (
-                "maintain a steady, deep rhythm",
-                "drive deeper",
-                "thrust deeper",
-                "keep thrusting",
-                "thrust inside",
-                "thrust into",
-                "gently withdraw",
-                "slow your rhythm, gently withdraw",
-                "bury yourself deeper",
-                "hilt inside",
-                "finish inside",
-                "spill deep inside",
+                "thrust", "deeper", "penetrate", "enter", "finger", "fingers",
+                "tongue", "fellatio", "cunnilingus", "undress", "strip",
+                "another round", "resume", "straddle", "pump"
             )
         ):
             return True
@@ -3014,7 +3145,10 @@ def build_intimate_choice_blueprints(
         )
         slot2_lbl = f"Caress {p_name}'s {spot_phrase} and whisper breathless praise as you quicken your pace"
         if partner_climaxed:
-            slot3_lbl = f"Shift position to drive deeper and push over the edge into your own release in {p_name}'s arms"
+            if is_male_p and act_norm != "anal_give":
+                slot3_lbl = f"Guide {p_name}'s touch and push over the edge into your own release in {p_name}'s arms"
+            else:
+                slot3_lbl = f"Shift position to drive deeper and push over the edge into your own release in {p_name}'s arms"
         elif high_excitement:
             slot3_lbl = f"Shift position to drive deeper and push over the edge with {p_name}"
         else:

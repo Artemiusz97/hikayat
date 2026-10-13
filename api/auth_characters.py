@@ -556,6 +556,19 @@ async def get_character(user_id: int):
         raise HTTPException(status_code=404, detail="Character not found")
 
     char_dict = _format_character_dict(char)
+    try:
+        active_sid = await adb(db.get_active_session_id_for_user, canonical_id)
+        if active_sid:
+            phys_st = await adb(db.get_session_physical_state, active_sid)
+            if isinstance(phys_st, dict):
+                from mechanics.social.physical_state import compute_clothing_summary_badge, _match_actor_key
+                phys_actors = phys_st.get("actors", {}) or {}
+                matched_key = _match_actor_key(char_dict.get("name", ""), phys_actors)
+                p_data = phys_actors.get(matched_key) or {}
+                char_dict["clothing_status"] = compute_clothing_summary_badge(p_data.get("clothing"), gender=char_dict.get("gender", "Male"))
+    except Exception:
+        pass
+    char_dict.setdefault("clothing_status", "Fully Clothed 👕")
     capacity = cd.inventory_capacity(char_dict["str_"])
     items = await adb(db.get_inventory, canonical_id)
     used_slots = sum(i.get("slot_cost", 1) for i in items if not i.get("equipped"))

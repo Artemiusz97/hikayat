@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiCall } from '../api/client';
+import i18n from '../i18n';
 
 export const useSettings = (userId) => {
   const [settings, setSettings] = useState({
@@ -9,7 +10,8 @@ export const useSettings = (userId) => {
     result_display: 'detailed',
     choices_style: 'dropdown',
     show_percentages: 1,
-    image_gen_enabled: 0
+    image_gen_enabled: 0,
+    language: 'en'
   });
   const [debugState, setDebugState] = useState({
     debug_stat_mode: 'off',
@@ -28,6 +30,11 @@ export const useSettings = (userId) => {
       const data = await apiCall(`/api/settings/${userId}`);
       if (data && data.settings) {
         setSettings(data.settings);
+        const uiLang = data.settings.ui_language || localStorage.getItem('hikayat_ui_language') || data.settings.language;
+        if (uiLang && uiLang !== i18n.language) {
+          i18n.changeLanguage(uiLang);
+          localStorage.setItem('hikayat_ui_language', uiLang);
+        }
       }
       try {
         const dbg = await apiCall(`/api/debug/${userId}`);

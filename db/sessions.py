@@ -14,8 +14,10 @@ def create_session(host_user_id: int, mode: str, capacity: int, verbosity: str,
                     dialogue_mode: str, image_gen_enabled: bool, choices_style: str = "dropdown",
                     channel_id: int = 0, scenario: str = "fantasy",
                     result_display: str = "detailed", combat_ui_style: str = "battle_deck",
-                    show_percentages: int = 1) -> int:
+                    show_percentages: int = 1, language: str = "en",
+                    narration_language: str = None) -> int:
     status = "active" if capacity <= 1 else "waiting"
+    eff_narr_lang = narration_language or language or "en"
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO sessions (mode, capacity, status, turn_order, current_turn_index,
@@ -23,12 +25,12 @@ def create_session(host_user_id: int, mode: str, capacity: int, verbosity: str,
                                       current_location, nearby_enemies_json, current_npcs_json,
                                       verbosity, dialogue_mode, image_gen_enabled, choices_style, combat_ui_style,
                                       result_display, scenario, channel_id, host_user_id, created_at, updated_at,
-                                      show_percentages)
-               VALUES (?,?,?,?,0,'[]','[]','{}','','[]','[]',?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                      show_percentages, language, narration_language)
+               VALUES (?,?,?,?,0,'[]','[]','{}','','[]','[]',?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (mode, capacity, status, json.dumps([host_user_id]), verbosity,
              dialogue_mode, 1 if image_gen_enabled else 0, choices_style, combat_ui_style,
              result_display, scenario, channel_id, host_user_id, time.time(), time.time(),
-             1 if show_percentages else 0),
+             1 if show_percentages else 0, language or eff_narr_lang, eff_narr_lang),
         )
         session_id = cur.lastrowid
         conn.execute("INSERT INTO session_members (session_id, user_id, joined_at) VALUES (?,?,?)",

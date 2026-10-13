@@ -14,6 +14,8 @@ import SettingsModal from '../components/Settings/SettingsModal';
 import WorldMapModal from '../components/Modals/WorldMapModal';
 import StoryFeed from '../components/StoryFeed/StoryFeed';
 import ActionPanel from '../components/ActionPanel/ActionPanel';
+import { useTranslation } from 'react-i18next';
+import LanguageSwitcher from '../components/Common/LanguageSwitcher';
 import { useInventory } from '../hooks/useInventory';
 import { useCodex } from '../hooks/useCodex';
 import { usePhone } from '../hooks/usePhone';
@@ -42,6 +44,7 @@ const GameView = ({
   retryGeneration,
   leaveSession
 }) => {
+  const { t } = useTranslation();
   const [activeSidebarTab, setActiveSidebarTab] = useState('hero'); // 'hero' | 'inventory' | 'party' | 'quests' | 'codex' | 'outcomes'
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [mobileOutcomeOpen, setMobileOutcomeOpen] = useState(false);
@@ -151,12 +154,12 @@ const GameView = ({
   const hasActiveMerchant = Boolean(session?.merchant?.available || session?.merchant?.active);
 
   const tabs = [
-    { id: 'hero', label: 'Hero', icon: User, badge: character?.pending_stat_points ? '!' : null },
-    { id: 'inventory', label: 'Pack', icon: Package, badge: inventory.items?.length || null },
-    { id: 'party', label: 'Party', icon: Users, badge: (session.party_members?.length || 1) + (session.party_npcs?.length || 0) },
-    { id: 'quests', label: 'Quests', icon: Compass, badge: activeQuestCount || null },
-    { id: 'codex', label: 'Codex', icon: BookOpen, badge: contactsCount },
-    { id: 'outcomes', label: 'Outcomes', icon: ScrollText, badge: null }
+    { id: 'hero', label: t('nav.hero'), icon: User, badge: character?.pending_stat_points ? '!' : null },
+    { id: 'inventory', label: t('nav.inventory'), icon: Package, badge: inventory.items?.length || null },
+    { id: 'party', label: t('nav.party'), icon: Users, badge: (session.party_members?.length || 1) + (session.party_npcs?.length || 0) },
+    { id: 'quests', label: t('nav.quests'), icon: Compass, badge: activeQuestCount || null },
+    { id: 'codex', label: t('nav.codex'), icon: BookOpen, badge: contactsCount },
+    { id: 'outcomes', label: t('nav.outcomes'), icon: ScrollText, badge: null }
   ];
 
   const renderSidebarContent = () => {
@@ -227,7 +230,7 @@ const GameView = ({
       default:
         return (
           <CharacterSheet
-            character={character}
+            character={session?.player_clothing_status && character ? { ...character, clothing_status: session.player_clothing_status } : character}
             onAllocateStat={allocateStatPoint}
             onCastSpell={handleCastSpell}
             processingTurn={processingTurn}
@@ -256,20 +259,7 @@ const GameView = ({
           </div>
 
           <div className="flex items-center gap-1">
-            {/* Smartphone OS Button */}
-            {phone.isSupported && (
-              <button
-                onClick={() => setPhoneModalOpen(true)}
-                className="flex items-center gap-1 px-2 py-1 bg-black/60 hover:bg-neutral-900 border border-neutral-700 hover:border-pink-500/60 rounded-lg text-xs font-semibold text-gray-200 transition-all shadow-sm relative group"
-                title={`Open ${phone.branding?.device_name || 'Smartphone'}`}
-              >
-                <Smartphone size={13} className="text-pink-400" />
-                <span className="font-mono text-[11px]">Phone</span>
-                {(phone.appointments?.length > 0 || phone.mediaGallery?.length > 0) && (
-                  <span className="w-2 h-2 rounded-full bg-pink-400 animate-pulse" />
-                )}
-              </button>
-            )}
+            <LanguageSwitcher settingsHook={settings} />
 
             {/* Share Public Adventure Link */}
             <button
@@ -279,7 +269,7 @@ const GameView = ({
                   ? 'text-green-400 bg-green-950/40 border border-green-500/40'
                   : 'text-gray-500 hover:text-fantasy-accent hover:bg-black/40'
               }`}
-              title={headerCopied ? "Link Copied to Clipboard!" : "Share Adventure Link (Invite Friends)"}
+              title={headerCopied ? t('common.copied') : t('common.share')}
             >
               {headerCopied ? <Check size={14} className="text-green-400" /> : <Share2 size={14} />}
             </button>
@@ -288,7 +278,7 @@ const GameView = ({
             <button
               onClick={() => setSavesModalOpen(true)}
               className="p-1.5 text-gray-500 hover:text-fantasy-accent rounded hover:bg-black/40 transition-colors"
-              title="Save / Load Checkpoints"
+              title={t('nav.saves')}
             >
               <Bookmark size={14} />
             </button>
@@ -296,7 +286,7 @@ const GameView = ({
             <button
               onClick={() => setSettingsModalOpen(true)}
               className="p-1.5 text-gray-500 hover:text-fantasy-accent rounded hover:bg-black/40 transition-colors"
-              title="Preferences & Streaming Settings"
+              title={t('nav.settings')}
             >
               <Sliders size={14} />
             </button>
@@ -305,7 +295,7 @@ const GameView = ({
               <button
                 onClick={exitToDashboard}
                 className="p-1.5 text-gray-400 hover:text-fantasy-accent rounded hover:bg-black/40 transition-colors"
-                title="Exit to Dashboard (Keep Adventure Active)"
+                title={t('nav.exit_dashboard')}
               >
                 <ArrowLeft size={14} />
               </button>
@@ -315,7 +305,7 @@ const GameView = ({
               <button
                 onClick={endSession}
                 className="p-1.5 text-amber-500/80 hover:text-red-400 rounded hover:bg-black/40 transition-colors"
-                title="End Adventure"
+                title={t('nav.end_adventure')}
               >
                 <FlagOff size={14} />
               </button>
@@ -324,7 +314,7 @@ const GameView = ({
             <button
               onClick={leaveSession}
               className="p-1.5 text-gray-500 hover:text-red-400 rounded hover:bg-black/40 transition-colors"
-              title="Log Out"
+              title={t('dashboard.logout')}
             >
               <LogOut size={14} />
             </button>
@@ -408,6 +398,8 @@ const GameView = ({
               <span className="truncate max-w-[110px] sm:max-w-[140px]">{session?.formatted_time || 'Day 1 • 08:00'}</span>
             </div>
 
+            <LanguageSwitcher settingsHook={settings} />
+
             <div className="relative">
               <button
                 type="button"
@@ -439,7 +431,7 @@ const GameView = ({
                     }`}
                   >
                     {headerCopied ? <Check size={15} className="text-green-400" /> : <Share2 size={15} className="text-gray-400" />}
-                    <span>{headerCopied ? 'Link Copied!' : 'Share Adventure'}</span>
+                    <span>{headerCopied ? t('common.copied') : t('common.share')}</span>
                   </button>
 
                   {/* Save & Load Checkpoints */}
@@ -452,7 +444,7 @@ const GameView = ({
                     className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-gray-200 hover:text-white hover:bg-white/5 transition-colors text-left"
                   >
                     <Bookmark size={15} className="text-gray-400" />
-                    <span>Save & Load Checkpoints</span>
+                    <span>{t('nav.saves')}</span>
                   </button>
 
                   {/* Settings & Chronicle */}
@@ -465,7 +457,7 @@ const GameView = ({
                     className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-gray-200 hover:text-white hover:bg-white/5 transition-colors text-left"
                   >
                     <Sliders size={15} className="text-gray-400" />
-                    <span>Settings & Chronicle</span>
+                    <span>{t('nav.settings')}</span>
                   </button>
 
                   <div className="my-1 border-t border-fantasy-border/60" />
@@ -481,11 +473,10 @@ const GameView = ({
                       className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-gray-200 hover:text-fantasy-accent hover:bg-white/5 transition-colors text-left"
                     >
                       <ArrowLeft size={15} className="text-gray-400" />
-                      <span>Return to Dashboard</span>
+                      <span>{t('nav.exit_dashboard')}</span>
                     </button>
                   )}
 
-                  {/* End Adventure */}
                   {endSession && (
                     <button
                       type="button"
@@ -496,7 +487,7 @@ const GameView = ({
                       className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-amber-400 hover:text-amber-300 hover:bg-amber-950/30 transition-colors text-left"
                     >
                       <FlagOff size={15} className="text-amber-400" />
-                      <span>End Adventure</span>
+                      <span>{t('nav.end_adventure')}</span>
                     </button>
                   )}
 
@@ -510,7 +501,7 @@ const GameView = ({
                     className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-red-400 hover:text-red-300 hover:bg-red-950/30 transition-colors text-left"
                   >
                     <LogOut size={15} className="text-red-400" />
-                    <span>Log Out</span>
+                    <span>{t('dashboard.logout')}</span>
                   </button>
                 </div>
               </>

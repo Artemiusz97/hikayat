@@ -246,8 +246,6 @@ class TestRelationshipPipelineStreamlining(unittest.TestCase):
 
         apply_outcome(self.session_id, party, outcome, mp_already_spent=False, actions=actions)
 
-        # Deterministic affinity calculation: Base (+1) + Diligent trait resonance (+2) + Tactical depth preference (+2) -> 5 * Warm trait (1.3) = 6.
-        # Single application: no duplicate modifier stacking.
         c = db.get_contact(self.session_id, "Yea-ji Kang", self.char_id)
         self.assertIsNotNone(c)
         self.assertEqual(c["relationship_score"], 6)

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Users, Heart, Zap, UserCheck, Shield, Sparkles, UserMinus, MessageSquare, Send, Share2, Check } from 'lucide-react';
 import { apiCall } from '../../api/client';
+import { StatusEffectBadge } from './CharacterSheet';
 
 const MiniBar = ({ label, current, max, color, icon: Icon }) => {
   const safeCurrent = Math.max(0, current || 0);
@@ -44,6 +46,14 @@ const PartyMemberCard = ({ member, isNpc = false, isSelf = false, isOnline = tru
       statusList = member.status_effects.split(',').map(s => s.trim()).filter(Boolean);
     }
   }
+  if (Array.isArray(statusList)) {
+    statusList = statusList.filter(s => {
+      const str = typeof s === 'string' ? s.trim() : (s?.name || '').trim();
+      return str && !['[]', '{}', '""', "''", 'none', 'null'].includes(str.toLowerCase());
+    });
+  } else {
+    statusList = [];
+  }
 
   return (
     <div className={`p-2.5 rounded-lg border transition-all ${
@@ -86,6 +96,11 @@ const PartyMemberCard = ({ member, isNpc = false, isSelf = false, isOnline = tru
                   NPC
                 </span>
               )}
+              {member.clothing_status && (
+                <span className="text-[8.5px] font-mono px-1 py-0.2 rounded bg-black/60 text-gray-300 border border-neutral-700/60 leading-tight">
+                  {member.clothing_status}
+                </span>
+              )}
             </div>
             <span className="text-[10px] text-gray-400 font-medium block">
               Lv.{level} {role}
@@ -121,14 +136,9 @@ const PartyMemberCard = ({ member, isNpc = false, isSelf = false, isOnline = tru
       {/* Status Badges */}
       {statusList && statusList.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1.5">
-          {statusList.map((eff, i) => {
-            const effStr = typeof eff === 'string' ? eff : (eff.name || 'Condition');
-            return (
-              <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-red-950/60 text-red-300 border border-red-800/50 font-medium">
-                {effStr}
-              </span>
-            );
-          })}
+          {statusList.map((eff, i) => (
+            <StatusEffectBadge key={i} effect={eff} />
+          ))}
         </div>
       )}
 
@@ -172,6 +182,7 @@ const PartyWidget = ({
   onSessionUpdated,
   onTriggerAction
 }) => {
+  const { t } = useTranslation();
   const [dismissingNpc, setDismissingNpc] = useState(null);
   const [chatText, setChatText] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
@@ -242,7 +253,7 @@ const PartyWidget = ({
         <div>
           <div className="flex items-center gap-2">
             <Users size={15} className="text-fantasy-accent" />
-            <h3 className="font-rpg font-bold text-xs sm:text-sm text-gray-100 uppercase tracking-wider">Party Roster</h3>
+            <h3 className="font-rpg font-bold text-xs sm:text-sm text-gray-100 uppercase tracking-wider">{t('party.roster')}</h3>
           </div>
           {session.id && (
             <div className="flex items-center gap-2 mt-1">
@@ -256,13 +267,13 @@ const PartyWidget = ({
                 title="Copy shareable link and invite code for friends"
               >
                 {copiedLink ? <Check size={10} className="text-green-400" /> : <Share2 size={10} />}
-                <span>{copiedLink ? 'Copied Link!' : 'Share Link'}</span>
+                <span>{copiedLink ? t('party.copied_link') : t('party.share_link')}</span>
               </button>
             </div>
           )}
         </div>
         <span className="text-[11px] font-mono font-bold text-fantasy-accent bg-black/60 px-2 py-0.5 rounded border border-fantasy-border">
-          {totalMembers} / 4 Members
+          {totalMembers} / 4 {t('party.members')}
         </span>
       </div>
 
@@ -302,7 +313,7 @@ const PartyWidget = ({
           >
             <span className="text-[11px] italic flex items-center justify-center gap-1">
               <Shield size={12} className="opacity-40" />
-              Empty Companion Slot
+              {t('party.empty_slot')}
             </span>
           </div>
         ))}
@@ -313,7 +324,7 @@ const PartyWidget = ({
         <div className="flex items-center justify-between">
           <span className="text-[11px] uppercase tracking-wider font-bold text-fantasy-accent flex items-center gap-1.5">
             <MessageSquare size={13} />
-            <span>Party Chat</span>
+            <span>{t('party.chat')}</span>
           </span>
           <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -324,7 +335,7 @@ const PartyWidget = ({
         <div className="bg-black/50 border border-fantasy-border/60 rounded p-2.5 h-36 overflow-y-auto custom-scrollbar space-y-1.5">
           {partyChatMessages.length === 0 ? (
             <p className="text-[11px] text-gray-500 italic text-center py-10">
-              Coordinate tactics or chat with your party in real time...
+              {t('party.chat_placeholder_empty')}
             </p>
           ) : (
             partyChatMessages.map((msg) => {
@@ -344,7 +355,7 @@ const PartyWidget = ({
         <form onSubmit={handleSendChat} className="flex gap-1.5">
           <input
             type="text"
-            placeholder="Message party..."
+            placeholder={t('party.message_placeholder')}
             value={chatText}
             onChange={(e) => setChatText(e.target.value)}
             maxLength={240}

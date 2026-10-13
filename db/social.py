@@ -644,10 +644,11 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 if matched_name:
                     break
 
-        sess = db.get_session(session_id)
-        scen = sess.get("scenario", "fantasy") if sess else "fantasy"
-        clean_name = matched_name or namegen.generate_person_name(scen, gender=gender)
+        if not matched_name:
+            # Ambient generic roles (e.g. "Town Guard", "Merchant", "Villager") without explicit faction leadership cannot be contacts
+            return {}
 
+        clean_name = matched_name
         if basic_info is None or not isinstance(basic_info, dict):
             basic_info = {}
         basic_info["role"] = role_title
@@ -707,8 +708,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
         if existing:
             final_name = existing["name"] if (len(existing["name"].split()) > len(name.split()) and name.lower() in existing["name"].lower()) else name
             final_npc_id = existing["npc_id"]
-            current_score = existing["relationship_score"] + delta_score
-            current_score = max(-100, min(100, current_score))
+            current_score = relationships.clamp_score(existing["relationship_score"] + delta_score)
 
             raw_cur_info = json.loads(existing["basic_info_json"] or "{}")
             cur_info = _merge_basic_info_safely(raw_cur_info, basic_info)
@@ -877,7 +877,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 "updated_at": now
             }
         else:
-            initial_score = max(-100, min(100, delta_score))
+            initial_score = relationships.clamp_score(delta_score)
             info = _merge_basic_info_safely({}, basic_info)
             if race and not _is_empty_info_val(race):
                 info["race"] = race
@@ -1194,6 +1194,8 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
             except Exception:
                 d["relations"] = {}
 
+            d["status_effects"] = (d.get("basic_info") or {}).get("status_effects") or []
+
             contacts.append(d)
 
     if resolve_relations:
@@ -1217,7 +1219,8 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
 def update_contact_score(session_id: int, npc_id: str, new_score: int, character_id: int = 0):
     if isinstance(npc_id, int) and isinstance(character_id, str):
         npc_id, character_id = character_id, npc_id
-    clamped_score = max(-100, min(100, int(new_score)))
+    from mechanics.social.relationships import clamp_score
+    clamped_score = clamp_score(new_score)
     now = time.time()
     npc_clean_id = str(npc_id or "").strip().lower().replace(" ", "_")
     npc_raw_name = str(npc_id or "").strip().lower()
@@ -1263,6 +1266,48 @@ def update_contact_relations(session_id: int, npc_id: str, relations: dict, char
                WHERE session_id=? AND (? = 0 OR character_id=? OR character_id=0)
                AND (npc_id=? OR lower(npc_id)=? OR lower(name)=? OR lower(name)=?)""",
             (rel_json, now, session_id, character_id, character_id, clean_id, clean_name, clean_name, clean_id)
+        )
+        return cursor.rowcount > 0
+
+def update_contact_status_effects(session_id: int, npc_id: str, character_id: int = 0, status_effects: list = None) -> bool:
+    """Updates the status effects list inside basic_info_json for a contact."""
+    if isinstance(character_id, list) and status_effects is None:
+        status_effects = character_id
+        character_id = 0
+    if isinstance(npc_id, int) and isinstance(character_id, str):
+        npc_id, character_id = character_id, npc_id
+    clean_id = str(npc_id or "").strip().lower().replace(" ", "_")
+    clean_name = str(npc_id or "").strip().lower()
+    character_id = int(character_id or 0)
+    effs_list = [str(s).strip() for s in (status_effects or []) if str(s).strip()]
+    now = time.time()
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT id, basic_info_json FROM contacts
+               WHERE session_id=? AND (? = 0 OR character_id=? OR character_id=0)
+               AND (npc_id=? OR lower(npc_id)=? OR lower(name)=? OR lower(name)=?)
+               ORDER BY id DESC LIMIT 1""",
+            (session_id, character_id, character_id, clean_id, clean_name, clean_name, clean_id)
+        ).fetchone()
+        if not row:
+            row = conn.execute(
+                """SELECT id, basic_info_json FROM contacts
+                   WHERE session_id=? AND (? = 0 OR character_id=? OR character_id=0)
+                   AND (npc_id LIKE ? OR lower(name) LIKE ? OR ? LIKE (lower(name) || '%'))
+                   ORDER BY id DESC LIMIT 1""",
+                (session_id, character_id, character_id, f"{clean_id}_%", f"{clean_name} %", clean_name)
+            ).fetchone()
+        if not row:
+            return False
+        c_id = row["id"]
+        try:
+            b_info = json.loads(row["basic_info_json"] or "{}")
+        except Exception:
+            b_info = {}
+        b_info["status_effects"] = effs_list
+        cursor = conn.execute(
+            "UPDATE contacts SET basic_info_json=?, updated_at=? WHERE id=?",
+            (json.dumps(b_info), now, c_id)
         )
         return cursor.rowcount > 0
 
@@ -1412,6 +1457,7 @@ def get_contact(session_id: int, npc_id: str, character_id: int = 0) -> dict | N
             except Exception:
                 pass
 
+    d["status_effects"] = (d.get("basic_info") or {}).get("status_effects") or []
     return d
 
 def update_relationship_score(session_id: int, npc_id: str, delta_score: int, character_id: int = 0) -> dict | None:

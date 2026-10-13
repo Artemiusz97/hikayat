@@ -20,9 +20,24 @@ from mechanics.world.locations.core import (
     reconcile_movement_location,
 )
 
+import db
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 HIGH_SCHOOL = "high_school"
 SESSION_1 = 1   # has St. Michael Academy + Kaede Residential Quarter
+
+
+@pytest.fixture(autouse=True, scope="module")
+def setup_chimera_session_fixture():
+    with db.get_conn() as conn:
+        conn.execute("DELETE FROM sessions WHERE id = ?", (SESSION_1,))
+        conn.execute("DELETE FROM session_locations WHERE session_id = ?", (SESSION_1,))
+        conn.commit()
+    yield
+    with db.get_conn() as conn:
+        conn.execute("DELETE FROM sessions WHERE id = ?", (SESSION_1,))
+        conn.execute("DELETE FROM session_locations WHERE session_id = ?", (SESSION_1,))
+        conn.commit()
 
 
 # ══════════════════════════════════════════════════════════════════════════════

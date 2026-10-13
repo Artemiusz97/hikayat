@@ -78,7 +78,9 @@ export const useAuth = () => {
     if (!user) return;
     try {
       const data = await apiCall(`/api/characters/${user.user_id}`);
-      setCharacters(data.characters || []);
+      const roster = data.characters || [];
+      // Keep characters stably ordered by creation ID so their positions never jump when switching
+      setCharacters([...roster].sort((a, b) => (a.id || 0) - (b.id || 0)));
     } catch (e) {
       console.warn("Failed to fetch characters roster");
     }

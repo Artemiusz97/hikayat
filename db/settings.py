@@ -21,6 +21,9 @@ def get_settings(user_id: int) -> dict:
             d.setdefault("debug_check_mode", "off")
             d.setdefault("debug_reveal_all_info", 0)
             d.setdefault("stream_narrative", 1)
+            d.setdefault("language", "en")
+            d.setdefault("ui_language", d.get("language") or "en")
+            d.setdefault("narration_language", d.get("language") or "en")
             return d
         conn.execute("INSERT INTO user_settings (user_id) VALUES (?)", (user_id,))
         return {
@@ -30,7 +33,10 @@ def get_settings(user_id: int) -> dict:
             "result_display": "detailed", "show_percentages": 1,
             "stream_narrative": 1,
             "debug_stat_mode": "off", "debug_check_mode": "off",
-            "debug_reveal_all_info": 0
+            "debug_reveal_all_info": 0,
+            "language": "en",
+            "ui_language": "en",
+            "narration_language": "en"
         }
 
 def get_user_settings(user_id: int) -> dict:
@@ -43,6 +49,10 @@ def save_user_settings(user_id: int, **fields):
 
 def update_settings(user_id: int, **fields):
     db.get_settings(user_id)  # ensure row exists
+    if "narration_language" in fields and "language" not in fields:
+        fields["language"] = fields["narration_language"]
+    elif "language" in fields and "narration_language" not in fields:
+        fields["narration_language"] = fields["language"]
     cols = ", ".join(f"{k}=?" for k in fields)
     with get_conn() as conn:
         conn.execute(f"UPDATE user_settings SET {cols} WHERE user_id=?",
@@ -51,7 +61,7 @@ def update_settings(user_id: int, **fields):
         session_id = db.get_active_session_id_for_user(user_id)
         if session_id:
             session_fields = {k: v for k, v in fields.items() if k in (
-                "verbosity", "dialogue_mode", "image_gen_enabled",
+                "language", "narration_language", "verbosity", "dialogue_mode", "image_gen_enabled",
                 "choices_style", "combat_ui_style", "result_display", "show_percentages"
             )}
             if session_fields:

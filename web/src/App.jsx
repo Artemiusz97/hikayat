@@ -17,8 +17,9 @@ function App() {
     waitingForParty, partyStatus, lastSyncTimestamp,
     partyChatMessages, onlineUserIds, sendPartyChat,
     startSession, joinSession, submitAction,
-    exitToDashboard, resumeSession, endSession, retryGeneration
-  } = useGameSession(user);
+    exitToDashboard, resumeSession, endSession, retryGeneration,
+    refreshSession
+  } = useGameSession(user, character);
 
   if (authLoading) {
     return <div className="flex h-screen items-center justify-center text-fantasy-accent">Loading...</div>;
@@ -44,12 +45,12 @@ function App() {
         onResumeSession={resumeSession}
         onEndSession={endSession}
         refreshCharacter={refreshCharacter}
+        refreshSession={refreshSession}
         onSessionLoaded={(s) => {
           setSession(s);
           resumeSession();
         }}
       />
-
     );
   }
 

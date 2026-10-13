@@ -30,9 +30,9 @@ class TestFamilySyncAndDynamicRomance(unittest.TestCase):
         char_id = 101
 
         # 1. Create 3 contacts: Maya (platonic), Sofia (platonic), Zihan (platonic)
-        db.upsert_contact(sess_id, "maya_anderson", "Maya Anderson", character_id=char_id, track="platonic", delta_score=80)
-        db.upsert_contact(sess_id, "sofia_anderson", "Sofia Anderson", character_id=char_id, track="platonic", delta_score=80)
-        db.upsert_contact(sess_id, "zihan_moon", "Zihan Moon", character_id=char_id, track="platonic", delta_score=75)
+        db.upsert_contact(sess_id, "maya_anderson", "Maya Anderson", character_id=char_id, track="platonic", delta_score=120)
+        db.upsert_contact(sess_id, "sofia_anderson", "Sofia Anderson", character_id=char_id, track="platonic", delta_score=120)
+        db.upsert_contact(sess_id, "zihan_moon", "Zihan Moon", character_id=char_id, track="platonic", delta_score=110)
 
         session = db.get_session(sess_id)
         party = [({"id": char_id, "name": "Artemiusz", "user_id": 1}, {"id": 1, "username": "player"})]
@@ -148,7 +148,7 @@ class TestFamilySyncAndDynamicRomance(unittest.TestCase):
         char_id = 104
 
         # 1. Setup a platonic contact with an established background partner
-        db.upsert_contact(sess_id, "mia_yamada", "Mia Yamada", character_id=char_id, track="platonic", delta_score=20)
+        db.upsert_contact(sess_id, "mia_yamada", "Mia Yamada", character_id=char_id, track="platonic", delta_score=120)
         c_init = db.get_contact(sess_id, "mia_yamada", char_id)
         rel_init = genealogy.ensure_contact_relations(c_init, session_id=sess_id, scenario="high_school_drama")
         rel_init["romance"] = {

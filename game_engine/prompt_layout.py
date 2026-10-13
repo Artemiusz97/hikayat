@@ -48,6 +48,35 @@ def build_static_core(mode: Mode, kind: Kind) -> str:
         tail = []
     return SEP.join([GM_SHARED_RULES, mode_block, *tail, f"OUTPUT SCHEMA (respond with JSON matching this):\n{schema}"])
 
+def build_language_directive(session: dict) -> str:
+    lang = (session.get("narration_language") or session.get("language") or "en").lower().strip()
+    if lang == "pl":
+        lead_gender = (session.get("lead_character_gender") or session.get("gender") or "male").lower()
+        is_female = any(kw in lead_gender for kw in ("fem", "woman", "girl", "lady", "she"))
+        gender_inflection = (
+            "The protagonist is FEMALE. Use feminine verb endings and adjectives when describing them "
+            "(e.g., 'zrobiłaś', 'poszłaś', 'zauważyłaś', 'byłaś gotowa')."
+            if is_female else
+            "The protagonist is MALE. Use masculine verb endings and adjectives when describing them "
+            "(e.g., 'zrobiłeś', 'poszedłeś', 'zauważyłeś', 'byłeś gotowy')."
+        )
+        return (
+            "LANGUAGE DIRECTIVE: POLISH (Język polski)\n"
+            "- Output `outcome_narrative`, `next_narrative`, `scene_title`, and all `next_choices.label` strictly in natural, immersive Polish.\n"
+            f"- GRAMMATICAL GENDER: {gender_inflection}\n"
+            "- CRITICAL SCHEMA RULE: Keep all JSON keys (e.g. 'outcome_narrative', 'next_choices'), stat abbreviations (STR, PER, END, CHA, INT, AGI, LUK, NONE), and status effect codes strictly in English.\n"
+            "- Procedural items, weapon descriptors, and NPC titles must be in natural Polish (e.g. 'Żelazny miecz', 'Karczmarz', 'Mikstura leczenia'). Keep proper character names and place names intact."
+        )
+    elif lang == "ms":
+        return (
+            "LANGUAGE DIRECTIVE: MALAY (Bahasa Melayu)\n"
+            "- Output `outcome_narrative`, `next_narrative`, `scene_title`, and all `next_choices.label` strictly in evocative, natural Bahasa Melayu.\n"
+            "- Use natural literary fantasy storytelling ('kamu' or 'anda' adapted to narrative tone and dramatic tension).\n"
+            "- CRITICAL SCHEMA RULE: Keep all JSON keys, stat abbreviations (STR, PER, END, CHA, INT, AGI, LUK, NONE), and status effect codes strictly in English.\n"
+            "- Procedural items, weapon descriptors, and NPC titles must be in natural Malay (e.g. 'Pedang Besi', 'Pemilik Kedai', 'Penawar Luka'). Keep proper character names and place names intact."
+        )
+    return ""
+
 def build_session_zone(session: dict) -> str:
     """Z1: changes only when scenario / style settings change."""
     import game_engine
@@ -59,6 +88,7 @@ def build_session_zone(session: dict) -> str:
         "STYLE-BOUND NARRATIVE REQUIREMENTS:\n" + get_narrative_requirements(
             session.get("verbosity", "vivid"), session.get("dialogue_mode", "balanced")),
         merchant_prompt_note(scen_key=session.get("scenario")),
+        build_language_directive(session),
     ] if p and p.strip())
 
 #: Fixed size cap for Z1b. Deliberately NOT tied to DynamicTokenBudget's scene mode:

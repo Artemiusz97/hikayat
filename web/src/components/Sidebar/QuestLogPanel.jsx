@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { 
   Compass, CheckCircle2, Circle, Search, Award, 
   MapPin, Coins, Sparkles, ChevronDown, ChevronRight, ShieldAlert,
@@ -14,6 +15,7 @@ const CATEGORY_META = {
 };
 
 const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMap }) => {
+  const { t } = useTranslation();
   const {
     quests,
     availableBounties = [],
@@ -173,10 +175,10 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Compass size={16} className="text-fantasy-accent" />
-            <h3 className="font-rpg font-bold text-xs sm:text-sm text-gray-100 uppercase tracking-wider">Quest Journal</h3>
+            <h3 className="font-rpg font-bold text-xs sm:text-sm text-gray-100 uppercase tracking-wider">{t('quests.journal')}</h3>
           </div>
           <span className="text-[10px] font-mono font-bold text-fantasy-accent bg-black/60 px-2 py-0.5 rounded border border-fantasy-border">
-            {(activeStoryQuest ? 1 : 0) + sideQuests.length} Active
+            {(activeStoryQuest ? 1 : 0) + sideQuests.length} {t('quests.active')}
           </span>
         </div>
 
@@ -192,7 +194,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
             }`}
           >
             <Compass size={12} className="shrink-0" />
-            <span>Active</span>
+            <span>{t('quests.active')}</span>
           </button>
 
           <button
@@ -205,7 +207,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
             }`}
           >
             <ShieldAlert size={12} className="shrink-0" />
-            <span>Bounties</span>
+            <span>{t('quests.bounties')}</span>
             {availableBounties.length > 0 && (
               <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-mono shrink-0">
                 {availableBounties.length}
@@ -223,7 +225,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
             }`}
           >
             <FileSearch size={12} className="shrink-0" />
-            <span>Caseboard</span>
+            <span>{t('quests.caseboard')}</span>
             {clues.length > 0 && (
               <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-cyan-500/20 text-cyan-300 font-mono shrink-0">
                 {clues.length}
@@ -241,7 +243,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
             }`}
           >
             <Award size={12} className="shrink-0" />
-            <span>Campaign</span>
+            <span>{t('quests.campaign')}</span>
           </button>
 
           <button
@@ -254,7 +256,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
             }`}
           >
             <Circle size={12} className="shrink-0" />
-            <span>History</span>
+            <span>{t('quests.completed')}</span>
           </button>
         </div>
       </div>

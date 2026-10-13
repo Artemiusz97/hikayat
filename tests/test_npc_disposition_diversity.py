@@ -10,7 +10,7 @@ class TestNpcDispositionDiversity(unittest.TestCase):
             conn.execute("DELETE FROM sessions WHERE turn_order LIKE '%99050%' OR turn_order LIKE '%99051%'")
 
     def test_friendly_npc_auto_added_to_contacts(self):
-        """When a new entity is emitted with disposition 'friendly', it is automatically added to contacts."""
+        """When a new entity is emitted, it is added to the World Codex (lorebook), while contacts require Friend tier (affinity >= 100) or party recruitment."""
         uid = 99050
         char = db.create_character(uid, "DispTester", "Mage", "fantasy")
         sess_id = db.create_session(uid, "solo", 1, "vivid", "individual", False, scenario="fantasy")
@@ -39,18 +39,22 @@ class TestNpcDispositionDiversity(unittest.TestCase):
 
         game_engine.apply_outcome(sess_id, party, outcome)
 
-        # Verify added to lorebook with friendly disposition
+        # Verify added to lorebook (World Codex)
         lore = next((p for p in db.get_lorebook(sess_id).get("person", []) if p["name"] == "Elowen Greenbrier"), None)
         self.assertIsNotNone(lore)
-        self.assertEqual(lore["disposition"], "friendly")
 
-        # Verify added to contacts
+        # Contacts are strictly gated behind Friend tier (>= 100) or party recruitment
         contact = db.get_contact(sess_id, "Elowen Greenbrier", char["id"])
-        self.assertIsNotNone(contact)
-        self.assertEqual(contact["name"], "Elowen Greenbrier")
+        self.assertIsNone(contact)
+
+        # Once reaching Friend tier (affinity >= 100), NPC enters contacts
+        db.upsert_contact(sess_id, "Elowen Greenbrier", "Elowen Greenbrier", character_id=char["id"], delta_score=100)
+        c_friend = db.get_contact(sess_id, "Elowen Greenbrier", char["id"])
+        self.assertIsNotNone(c_friend)
+        self.assertEqual(c_friend["name"], "Elowen Greenbrier")
 
     def test_relationship_update_promotes_neutral_npc_to_friendly(self):
-        """When a neutral NPC receives a positive relationship update, their lorebook disposition is promoted to 'friendly'."""
+        """Neutral NPCs preserve non-hostile stance and only graduate to contacts upon reaching Friend tier (>= 100)."""
         uid = 99051
         char = db.create_character(uid, "DispTester2", "Mage", "fantasy")
         sess_id = db.create_session(uid, "solo", 1, "vivid", "individual", False, scenario="fantasy")
@@ -82,7 +86,7 @@ class TestNpcDispositionDiversity(unittest.TestCase):
         self.assertIsNotNone(lore_1)
         self.assertEqual(lore_1["disposition"], "neutral")
 
-        # Turn 2: Player has positive conversation (+5 relationship score)
+        # Turn 2: Player has positive conversation (+5 relationship score, still Stranger tier)
         outcome_2 = {
             "scene_title": "Sharing Ale",
             "narrative": "Boran smiles and shares an old recipe.",
@@ -99,15 +103,16 @@ class TestNpcDispositionDiversity(unittest.TestCase):
         }
         game_engine.apply_outcome(sess_id, party, outcome_2)
 
-        # Verify promoted to friendly in lorebook
+        # Disposition remains neutral (non-hostile)
         lore_2 = next((p for p in db.get_lorebook(sess_id).get("person", []) if p["name"] == "Boran Stout"), None)
         self.assertIsNotNone(lore_2)
-        self.assertEqual(lore_2["disposition"], "friendly")
+        self.assertEqual(lore_2["disposition"], "neutral")
 
-        # Verify exists in contacts with score
+        # Turn 3: Reach Friend tier (>= 100), promoting to contacts
+        db.upsert_contact(sess_id, "Boran Stout", "Boran Stout", character_id=char["id"], delta_score=100)
         contact = db.get_contact(sess_id, "Boran Stout", char["id"])
         self.assertIsNotNone(contact)
-        self.assertEqual(contact["relationship_score"], 5)
+        self.assertGreaterEqual(contact["relationship_score"], 100)
 
 
 if __name__ == "__main__":

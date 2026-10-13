@@ -265,7 +265,7 @@ def get_character_by_id(character_id: int):
 def get_user_characters(user_id: int) -> list[dict]:
     user_id = resolve_canonical_user_id(user_id)
     with get_conn() as conn:
-        rows = conn.execute("SELECT * FROM characters WHERE user_id=? ORDER BY is_active DESC, id ASC", (user_id,)).fetchall()
+        rows = conn.execute("SELECT * FROM characters WHERE user_id=? ORDER BY id ASC", (user_id,)).fetchall()
         return [_apply_debug_stat_override(dict(r)) for r in rows]
 
 def switch_character(user_id: int, character_id_or_name) -> dict | None:

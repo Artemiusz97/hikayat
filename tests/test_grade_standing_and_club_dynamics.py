@@ -159,7 +159,7 @@ class TestGradeStandingAndClubDynamics(unittest.TestCase):
 
     def test_high_school_student_club_rate(self):
         """Verify ~75% of newly generated students are assigned to a club."""
-        names = [f"Student_{i}" for i in range(40)]
+        names = [f"Alex{i} Sato" for i in range(40)]
         in_club = 0
         for name in names:
             c = db.upsert_contact(

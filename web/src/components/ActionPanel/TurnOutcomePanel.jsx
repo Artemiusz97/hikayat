@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ScrollText, ChevronDown, ChevronUp, Heart, Zap, Coins, Gift, ShieldAlert, Sparkles } from 'lucide-react';
 import { getOutcomeTierTheme } from '../StoryFeed/HistoryCard';
 import { extractTurnOutcomes } from '../Sidebar/WorldOutcomeSidebar';
+import { parseAndTranslateStatus } from '../Sidebar/CharacterSheet';
 
 const TurnOutcomePanel = ({ session }) => {
+  const { t } = useTranslation();
   const rawHistory = Array.isArray(session?.history) ? session.history : [];
   let actionCount = 0;
   const turnOutcomes = [];
@@ -106,14 +109,14 @@ const TurnOutcomePanel = ({ session }) => {
           </span>
 
           <span className="text-xs font-semibold text-gray-200 group-hover:text-white truncate">
-            {latestOutcome ? `Turn #${latestOutcome.turnNumber} Outcome` : 'Intimate State'}
+            {latestOutcome ? t('outcomes.turn_outcome', { turn: latestOutcome.turnNumber }) : t('outcomes.intimate_state')}
           </span>
 
           {/* New Turn Notification Badge */}
           {hasUnread && (
             <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500 text-black text-[9px] font-mono font-extrabold uppercase tracking-wider animate-pulse shadow-sm">
               <span className="w-1.5 h-1.5 rounded-full bg-black animate-ping" />
-              <span>NEW</span>
+              <span>{t('outcomes.badge_new')}</span>
             </span>
           )}
         </div>
@@ -142,7 +145,7 @@ const TurnOutcomePanel = ({ session }) => {
         {/* Right Side: Toggle Chevron */}
         <div className="flex items-center gap-1 shrink-0 text-gray-400 group-hover:text-fantasy-accent transition-colors">
           <span className="text-[10px] font-mono hidden xs:inline text-gray-400">
-            {isExpanded ? 'Hide' : 'Details'}
+            {isExpanded ? t('common.hide') : t('common.details')}
           </span>
           {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </div>
@@ -181,7 +184,7 @@ const TurnOutcomePanel = ({ session }) => {
 
                 {latestOutcome.levelsGained.length > 0 && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-yellow-500/25 border border-yellow-400 text-yellow-300 font-mono text-[10px] font-bold animate-pulse">
-                    🎉 LEVEL UP (Lv.{latestOutcome.levelsGained[latestOutcome.levelsGained.length - 1]})
+                    🎉 {t('outcomes.level_up')} (Lv.{latestOutcome.levelsGained[latestOutcome.levelsGained.length - 1]})
                   </span>
                 )}
 
@@ -220,7 +223,7 @@ const TurnOutcomePanel = ({ session }) => {
                     }`}
                   >
                     <Coins size={10} />
-                    {latestOutcome.goldDelta > 0 ? `+${latestOutcome.goldDelta}` : latestOutcome.goldDelta} Gold
+                    {latestOutcome.goldDelta > 0 ? `+${latestOutcome.goldDelta}` : latestOutcome.goldDelta} {t('inventory.gold')}
                   </span>
                 )}
 
@@ -292,7 +295,7 @@ const TurnOutcomePanel = ({ session }) => {
                     >
                       <div className="font-semibold flex items-center gap-1 text-amber-300">
                         <span>📜</span>
-                        <span>{q.title || 'Quest Updated'}</span>
+                        <span>{q.title || t('outcomes.quest_updated')}</span>
                         {q.status && <span className="text-[9px] uppercase font-mono px-1 rounded bg-amber-900/60">({q.status})</span>}
                       </div>
                       {Array.isArray(q.new_clues) && q.new_clues.map((clue, cIdx) => (
@@ -322,12 +325,12 @@ const TurnOutcomePanel = ({ session }) => {
                 <span className="flex items-center gap-1.5">
                   <span className="text-xs">💋</span>
                   <span className="font-rpg tracking-wider uppercase text-[10px] md:text-xs text-pink-200">
-                    Intimate Excitement & Arousal
+                    {t('outcomes.intimate_excitement')}
                   </span>
                 </span>
                 {excitement.last_act && (
                   <span className="text-[9px] uppercase font-mono tracking-wider px-2 py-0.5 rounded-full bg-pink-900/60 border border-pink-500/40 text-pink-200">
-                    {excitement.last_act === 'foreplay_nongenital' ? 'Foreplay' : excitement.last_act.replace(/_/g, ' ')}
+                    {excitement.last_act === 'foreplay_nongenital' ? t('outcomes.foreplay') : excitement.last_act.replace(/_/g, ' ')}
                   </span>
                 )}
               </div>
@@ -364,7 +367,7 @@ const TurnOutcomePanel = ({ session }) => {
                           style={{ width: `${Math.min(100, meter)}%` }}
                         />
                       </div>
-                      {status && <div className="text-[9px] text-pink-300/80 italic truncate">{status}</div>}
+                      {status && <div className="text-[9px] text-pink-300/80 italic truncate">{parseAndTranslateStatus(status, t).formattedText}</div>}
                     </div>
                   );
                 })}
@@ -375,7 +378,7 @@ const TurnOutcomePanel = ({ session }) => {
                 <div className="text-[10px] text-amber-300 font-medium flex items-center gap-1 pt-0.5">
                   <span>✨</span>
                   <span>
-                    Sensitive Spot: <span className="font-bold underline decoration-amber-400/60">{excitement.sensitive_spot_hit}</span> (+6% bonus!)
+                    {t('outcomes.sensitive_spot')}: <span className="font-bold underline decoration-amber-400/60">{excitement.sensitive_spot_hit}</span> (+6% {t('outcomes.bonus')})
                   </span>
                 </div>
               )}
@@ -384,12 +387,12 @@ const TurnOutcomePanel = ({ session }) => {
               {excitement.mutual_group_climax ? (
                 <div className="text-[10px] text-pink-200 bg-pink-950/50 border border-pink-500/50 rounded p-1.5 flex items-center gap-1">
                   <span>💥</span>
-                  <span>Mutual group climax reached together!</span>
+                  <span>{t('outcomes.mutual_climax')}</span>
                 </div>
               ) : excitement.simultaneous_partner_climax ? (
                 <div className="text-[10px] text-pink-200 bg-pink-950/50 border border-pink-500/50 rounded p-1.5 flex items-center gap-1">
                   <span>💥</span>
-                  <span>Partners reached climax simultaneously!</span>
+                  <span>{t('outcomes.partner_climax')}</span>
                 </div>
               ) : null}
 
@@ -398,13 +401,12 @@ const TurnOutcomePanel = ({ session }) => {
                 <div className="text-[10px] text-orange-200 bg-orange-950/40 border border-orange-700/50 rounded p-1.5 flex items-center gap-1">
                   <span>⚠️</span>
                   <span>
-                    Physical exhaustion: Climax reached before{' '}
+                    {t('outcomes.premature_exhaustion')}
                     {Array.isArray(excitement.unsatisfied_partners) && excitement.unsatisfied_partners.length > 0
-                      ? `${excitement.unsatisfied_partners.join(' & ')} ${excitement.unsatisfied_partners.length > 1 ? 'were' : 'was'}`
+                      ? ` (${excitement.unsatisfied_partners.join(', ')})`
                       : excitement.unsatisfied_partner
-                        ? `${excitement.unsatisfied_partner} was`
-                        : 'partner was'}{' '}
-                    satisfied!
+                        ? ` (${excitement.unsatisfied_partner})`
+                        : ''}
                   </span>
                 </div>
               )}
