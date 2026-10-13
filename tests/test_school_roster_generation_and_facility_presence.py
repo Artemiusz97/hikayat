@@ -30,6 +30,7 @@ class TestSchoolRosterGenerationAndFacilityPresence(unittest.TestCase):
     def tearDown(self):
         with db.get_conn() as conn:
             conn.execute("DELETE FROM sessions WHERE id=?", (self.test_session_id,))
+            conn.execute("DELETE FROM session_locations WHERE session_id=?", (self.test_session_id,))
             conn.execute("DELETE FROM school_directory WHERE session_id=?", (self.test_session_id,))
             conn.execute("DELETE FROM contacts WHERE session_id=?", (self.test_session_id,))
             conn.execute("DELETE FROM characters WHERE user_id=?", (self.user_id,))

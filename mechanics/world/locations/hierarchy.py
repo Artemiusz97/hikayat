@@ -221,6 +221,7 @@ def _build_session_zone_index(session_id: int = 0, scenario_key: str = "fantasy"
     for z in scen_data.get("zones", []):
 
         z_name = z.get("name", "")
+        orig_z_name = z_name
 
         if school_name and z_name in ("Main Academy Campus", "Main Academy Building"):
 
@@ -253,19 +254,27 @@ def _build_session_zone_index(session_id: int = 0, scenario_key: str = "fantasy"
         
 
         if z_name:
-
             zones[z_name.strip().lower()] = (z_name, gateway_p, "Main Area")
-
             short = get_clean_zone_short_name(z_name).lower()
-
             if short and short != z_name.strip().lower():
-
                 zones[short] = (z_name, gateway_p, "Main Area")
+            if orig_z_name and orig_z_name.strip().lower() not in zones:
+                zones[orig_z_name.strip().lower()] = (z_name, gateway_p, "Main Area")
 
             if is_school_scenario(scenario_key) and (any(k in z_name.lower() for k in ("high school", "academy", "university")) or (school_name and z_name.lower() == school_name.lower())):
                 for alias in ("school", "the school", "campus", "the campus", "academy", "the academy", "high school"):
                     if alias not in zones:
                         zones[alias] = (z_name, gateway_p, "Main Area")
+
+            if is_school_scenario(scenario_key) and (any(k in z_name.lower() for k in ("residential", "quarter", "neighborhood")) or (residential_name and z_name.lower() == residential_name.lower())):
+                for alias in ("residential", "the residential area", "residential area", "residential neighborhood", "residential quarter", "neighborhood"):
+                    if alias not in zones:
+                        zones[alias] = (z_name, gateway_p, "Main Area")
+                from namegen import generate_residential_neighborhood_name
+                for h in range(15):
+                    gen_res = generate_residential_neighborhood_name(scenario_key, hash_val=h).strip().lower()
+                    if gen_res not in zones:
+                        zones[gen_res] = (z_name, gateway_p, "Main Area")
 
     # Also incorporate registered zones from SQLite session_locations
     if session_id:
