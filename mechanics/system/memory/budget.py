@@ -107,6 +107,18 @@ class DynamicTokenBudget:
         """Infer the current scene mode from session state and return a budget."""
         mode = _classify_scene(session, party, actions)
         budgets = dict(_MODE_BUDGETS.get(mode, _DEFAULT_BUDGET))
+
+        # In non-English languages (e.g. Malay "ms", Polish "pl"), tokenizer token-per-character
+        # density is ~2x higher. Calibrate character allowances so prompts preserve ample output headroom.
+        lang = str((session.get("narration_language") or session.get("language") or "en") if isinstance(session, dict) else "en").lower().strip()
+        if lang in ("ms", "pl", "id", "ru", "ja", "zh", "ko"):
+            if "dialogue" in budgets and budgets["dialogue"] > 7000:
+                budgets["dialogue"] = 7000
+            if "history" in budgets and budgets["history"] > 1400:
+                budgets["history"] = 1400
+            if "lore" in budgets and budgets["lore"] > 1600:
+                budgets["lore"] = 1600
+
         return cls(mode=mode, _budgets=budgets)
 
     # ------------------------------------------------------------------

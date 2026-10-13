@@ -113,9 +113,9 @@ class TestIntimateProfilePage(unittest.TestCase):
         self.assertIn("Information Disclosure Level: 1/3", embed.footer.text)
 
     def test_build_intimate_profile_embed_level_3_revealed(self):
-        """Verify that level 3 (score >= 71) reveals intimate details and active synergy helper."""
+        """Verify that level 3 (score >= 200) reveals intimate details and active synergy helper."""
         high_score_contact = dict(self.female_contact)
-        high_score_contact["relationship_score"] = 85
+        high_score_contact["relationship_score"] = 220
 
         embed = build_intimate_profile_embed(high_score_contact, "nsfw_high_school_drama", user_id=self.test_user_id)
         field_map = {f.name: f for f in embed.fields}

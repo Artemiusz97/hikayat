@@ -10,6 +10,8 @@ from mechanics.social.factions import (
 )
 import re
 import logging
+log = logging.getLogger(__name__)
+logger = log
 import game_engine
 
 from game_engine.core import CONFESSION_KEYWORDS, NPC_ORAL_RECEIVE_KEYWORDS, NPC_ORAL_GIVE_KEYWORDS, NPC_MANUAL_RECEIVE_KEYWORDS, NPC_MANUAL_GIVE_KEYWORDS, NPC_ANAL_RECEIVE_KEYWORDS, NPC_ANAL_GIVE_KEYWORDS, ANAL_KEYWORDS, INTERCOURSE_KEYWORDS, KISS_KEYWORDS, DATE_KEYWORDS, ROMANCE_KEYWORDS
@@ -531,8 +533,8 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
 
       for cs in char_status:
           if isinstance(cs, str) and cs.strip():
-              if re.search(r"\[\d+\s*turns?\]", cs, re.IGNORECASE):
-                  base_name = re.sub(r"\s*\[\d+\s*turns?\]", "", cs).strip().lower()
+              if re.search(r"\[\d+\s*(?:turns?|min)\]", cs, re.IGNORECASE):
+                  base_name = re.sub(r"\s*\[\d+\s*(?:turns?|min)\]", "", cs).strip().lower()
                   if not any(base_name in str(s).lower() for s in status_raw):
                       status_raw.append(cs)
 
@@ -545,6 +547,36 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
               if not any(k in s for k in ("Iron Skin", "Aegis Warding", "Combat Booster", "Quickstep", "DT]", "DR]", "% ATK]", "% EVA]"))
               and not (re.search(r"\[\d+\s*turns?\]", s, re.IGNORECASE) and "aroused" not in s.lower())
           ]
+
+      # Refractory & Climax Cleanse: If in refractory recovery or spent, purge lingering Aroused and Breathless
+      try:
+          from mechanics.social.intimate_excitement import is_in_refractory_cooldown, format_partner_recovery_status_tag
+          sess_row = session if isinstance(session, dict) and session else (db.get_session(session_id) if session_id else {})
+          p_state = (db.get_session_physical_state(session_id) if session_id else None) or (sess_row.get("physical_state") if isinstance(sess_row, dict) else {})
+          in_refr_check, refr_mins_check = is_in_refractory_cooldown(sess_row or {}, p_state or {})
+          p_exc = (p_state or {}).get("excitement") if isinstance(p_state, dict) else {}
+          p_climax_st = (p_state or {}).get("climax_state") if isinstance(p_state, dict) else {}
+          if isinstance(p_exc, dict) and p_exc.get("player_in_refractory") is not None:
+              pl_climaxed_flag = bool(p_exc.get("player_in_refractory"))
+          else:
+              pl_climaxed_flag = p_climax_st.get("player_climaxed", True) if isinstance(p_climax_st, dict) and p_climax_st else True
+          if in_refr_check and refr_mins_check > 0 and pl_climaxed_flag:
+              char_gen = char.get("gender", "Male") if isinstance(char, dict) else "Male"
+              refr_tag = format_partner_recovery_status_tag(refr_mins_check, char_gen)
+              cleaned_status = [
+                  s for s in cleaned_status
+                  if not any(k in str(s).lower() for k in ("aroused", "breathless", "spent"))
+                  and not any(k in str(s).lower() for k in ("refractory", "satisfied"))
+              ]
+              cleaned_status.append(refr_tag)
+          else:
+              cleaned_status = [
+                  s for s in cleaned_status
+                  if not any(k in str(s).lower() for k in ("refractory", "satisfied"))
+              ]
+      except Exception:
+          pass
+
       if any(k in s.lower() for s in (status_raw or []) + (cleaned_status or []) for k in ("recovering", "exhausted")):
           # Character was revived or recovering from party defeat: purge trauma/combat debuffs and turn counters
           cleaned_status = [
@@ -555,6 +587,9 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
           if not any("exhausted" in s.lower() or "recovering" in s.lower() for s in cleaned_status):
               cleaned_status.append("Exhausted / Recovering")
       db.set_status_effects(user_id, cleaned_status)
+      if isinstance(char, dict):
+          char["status_effects"] = list(cleaned_status)
+      co["status_effects"] = list(cleaned_status)
       if not is_combat:
           db.apply_turn_regen(user_id)
 
@@ -939,6 +974,14 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
         _infer_initial_undergarments_state
     )
 
+    first_char_id = 0
+    if party and isinstance(party, list) and party[0]:
+        first_entry = party[0]
+        first_c = first_entry[0] if isinstance(first_entry, (tuple, list)) else first_entry
+        first_char_id = (first_c.get("id") if isinstance(first_c, dict) else None) or (first_c.get("user_id") if isinstance(first_c, dict) else None) or (first_entry[1] if isinstance(first_entry, (tuple, list)) and len(first_entry) > 1 else 0)
+    if not first_char_id and session:
+        first_char_id = (session.get("turn_order") or [0])[0]
+
     current_phys = db.get_session_physical_state(session_id)
     phys_updates = (
         outcome.get("physical_updates")
@@ -1070,6 +1113,18 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
             if isinstance(p_char, dict) and p_char.get("name"):
                 player_name = p_char["name"]
 
+        def _sync_player_outcome_status(new_effs_list: list):
+            p_low_sync = player_name.lower().strip()
+            for co_item in (outcome.get("character_outcomes") or []):
+                if isinstance(co_item, dict) and str(co_item.get("name", "")).lower().strip() == p_low_sync:
+                    co_item["status_effects"] = list(new_effs_list)
+
+        prev_climax_on_disengage = dict(
+            (current_phys.get("climax_state") if isinstance(current_phys, dict) else None)
+            or updated_phys.get("climax_state")
+            or {}
+        )
+
         is_disengagement = detect_intimate_disengagement(actions)
         act_text_raw = " ".join(((a.get("label") or "") if isinstance(a, dict) else str(a)).lower() for a in (actions or []))
         is_explicit_withdrawal = any(
@@ -1090,8 +1145,29 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
         ) and not is_explicit_withdrawal
         if is_disengagement and not is_aftercare_act:
             updated_phys["intimate_contact"] = "none"
-            updated_phys["climax_state"] = {"partner_climaxed": False, "player_climaxed": False, "partner_climaxes": {}}
-            if "excitement" in updated_phys:
+            if "excitement" in updated_phys and isinstance(updated_phys["excitement"], dict):
+                had_any_climax_dis = bool(
+                    prev_climax_on_disengage.get("player_climaxed")
+                    or prev_climax_on_disengage.get("partner_climaxed")
+                    or any((prev_climax_on_disengage.get("partner_climaxes") or {}).values())
+                )
+                if had_any_climax_dis and not updated_phys["excitement"].get("refractory_until_minute"):
+                    from mechanics.social.intimate_excitement import calculate_refractory_duration
+                    sess_dis = session or (db.get_session(session_id) if session_id else {}) or {}
+                    p_end_dis = int((p_char.get("end_") or p_char.get("endurance") or 10) if isinstance(p_char, dict) else 10)
+                    cd_dur_dis = calculate_refractory_duration(p_end_dis)
+                    updated_phys["excitement"]["refractory_until_minute"] = (sess_dis.get("current_day", 1) * 1440) + sess_dis.get("current_minute", 480) + cd_dur_dis
+                    updated_phys["excitement"]["cooldown_notified"] = False
+                if updated_phys["excitement"].get("refractory_until_minute"):
+                    if updated_phys["excitement"].get("player_in_refractory") is None:
+                        updated_phys["excitement"]["player_in_refractory"] = bool(prev_climax_on_disengage.get("player_climaxed", False))
+                    refr_p_dis = updated_phys["excitement"].setdefault("refractory_partners", {})
+                    if isinstance(prev_climax_on_disengage.get("partner_climaxes"), dict) and prev_climax_on_disengage.get("partner_climaxes"):
+                        for pk, pv in prev_climax_on_disengage["partner_climaxes"].items():
+                            if pv:
+                                refr_p_dis[pk] = True
+                    elif prev_climax_on_disengage.get("partner_climaxed") and partner:
+                        refr_p_dis[partner] = True
                 updated_phys["excitement"]["active"] = False
                 updated_phys["excitement"]["last_act"] = "none"
                 updated_phys["excitement"]["premature_finish"] = False
@@ -1100,6 +1176,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                 updated_phys["excitement"]["unsatisfied_partners"] = []
                 updated_phys["excitement"]["simultaneous_partner_climax"] = False
                 updated_phys["excitement"]["mutual_group_climax"] = False
+            updated_phys["climax_state"] = {"partner_climaxed": False, "player_climaxed": False, "partner_climaxes": {}}
 
         # Dialogue partner switch clearance: if talking to a new NPC without referencing intimate partner, clear contact
         if dps:
@@ -1129,14 +1206,37 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                     act_text = " ".join(((a.get("label") or "") if isinstance(a, dict) else str(a)).lower() for a in (actions or []))
                     if not any(ic_p in act_text or ((ic_p.split() or [""])[0] in act_text and len((ic_p.split() or [""])[0]) >= 3) for ic_p in ic_targets):
                         updated_phys["intimate_contact"] = "none"
-                        updated_phys["climax_state"] = {"partner_climaxed": False, "player_climaxed": False, "partner_climaxes": {}}
                         if "excitement" in updated_phys and isinstance(updated_phys["excitement"], dict):
+                            had_any_climax_sw = bool(
+                                prev_climax_on_disengage.get("player_climaxed")
+                                or prev_climax_on_disengage.get("partner_climaxed")
+                                or any((prev_climax_on_disengage.get("partner_climaxes") or {}).values())
+                            )
+                            if had_any_climax_sw and not updated_phys["excitement"].get("refractory_until_minute"):
+                                from mechanics.social.intimate_excitement import calculate_refractory_duration
+                                sess_sw = session or (db.get_session(session_id) if session_id else {}) or {}
+                                p_end_sw = int((p_char.get("end_") or p_char.get("endurance") or 10) if isinstance(p_char, dict) else 10)
+                                cd_dur_sw = calculate_refractory_duration(p_end_sw)
+                                updated_phys["excitement"]["refractory_until_minute"] = (sess_sw.get("current_day", 1) * 1440) + sess_sw.get("current_minute", 480) + cd_dur_sw
+                                updated_phys["excitement"]["cooldown_notified"] = False
+                            if updated_phys["excitement"].get("refractory_until_minute"):
+                                if updated_phys["excitement"].get("player_in_refractory") is None:
+                                    updated_phys["excitement"]["player_in_refractory"] = bool(prev_climax_on_disengage.get("player_climaxed", False))
+                                refr_p_sw = updated_phys["excitement"].setdefault("refractory_partners", {})
+                                if isinstance(prev_climax_on_disengage.get("partner_climaxes"), dict) and prev_climax_on_disengage.get("partner_climaxes"):
+                                    for pk, pv in prev_climax_on_disengage["partner_climaxes"].items():
+                                        if pv:
+                                            refr_p_sw[pk] = True
+                                elif prev_climax_on_disengage.get("partner_climaxed") and ic_targets:
+                                    for ic_t in ic_targets:
+                                        refr_p_sw[ic_t] = True
                             updated_phys["excitement"]["active"] = False
                             updated_phys["excitement"]["last_act"] = "none"
                             updated_phys["excitement"]["premature_finish"] = False
                             updated_phys["excitement"]["partner_demanded"] = False
                             updated_phys["excitement"]["unsatisfied_partner"] = ""
                             updated_phys["excitement"]["unsatisfied_partners"] = []
+                        updated_phys["climax_state"] = {"partner_climaxed": False, "player_climaxed": False, "partner_climaxes": {}}
                         partner_switched_clear = True
 
         # Climax detection & Player Climax Primacy
@@ -1159,7 +1259,9 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
             # Excitement Meter Step calculation
             from mechanics.social.intimate_excitement import (
                 compute_excitement_step, check_and_resolve_refractory_clock,
-                format_compact_discord_meter, classify_intimate_act
+                format_compact_discord_meter, classify_intimate_act,
+                is_in_refractory_cooldown, format_refractory_status_tag,
+                format_partner_recovery_status_tag, calculate_refractory_duration
             )
 
             sess_dict = session or (db.get_session(session_id) if session_id else {}) or {}
@@ -1181,8 +1283,82 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                 "partner_climaxes": dict(prev_p_climaxes) if isinstance(prev_p_climaxes, dict) else {},
             }
             is_recovered, toast_notice = check_and_resolve_refractory_clock(sess_dict, updated_phys)
-            if is_recovered and toast_notice:
-                outcome["_refractory_recovered_notice"] = toast_notice
+            if is_recovered:
+                if toast_notice:
+                    outcome["_refractory_recovered_notice"] = toast_notice
+                try:
+                    for entry in (party or []):
+                        ch_lead = entry[0] if isinstance(entry, (tuple, list)) else entry
+                        u_lead = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else (ch_lead.get("user_id") if isinstance(ch_lead, dict) else None)
+                        if u_lead:
+                            char_rec = db.get_character(u_lead) if u_lead else None
+                            cur_effs = char_rec.get("status_effects") if char_rec else []
+                            if isinstance(cur_effs, str):
+                                try:
+                                    cur_effs = json.loads(cur_effs)
+                                except Exception:
+                                    cur_effs = [cur_effs] if cur_effs else []
+                            cur_effs = [s for s in cur_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
+                            db.set_status_effects(u_lead, cur_effs)
+                            if isinstance(ch_lead, dict):
+                                ch_lead["status_effects"] = cur_effs
+                            _sync_player_outcome_status(cur_effs)
+                    all_c_list = db.get_contacts(session_id) or [] if session_id else []
+                    for c_full in all_c_list:
+                        if isinstance(c_full, dict) and c_full.get("name"):
+                            c_effs = c_full.get("status_effects") or []
+                            if any(k in str(s).lower() for s in c_effs for k in ("refractory", "satisfied", "spent")):
+                                c_id = c_full.get("npc_id") or c_full.get("contact_id") or str(c_full.get("name")).lower().replace(" ", "_")
+                                c_effs = [s for s in c_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
+                                db.update_contact_status_effects(session_id, c_id, first_char_id, c_effs)
+                except Exception as e:
+                    log.debug("Could not clear refractory status on clock recovery: %s", e)
+            else:
+                try:
+                    in_refr_tick, refr_mins_tick = is_in_refractory_cooldown(sess_dict, updated_phys)
+                    if in_refr_tick and refr_mins_tick > 0:
+                        exc_tick = updated_phys.get("excitement") or {}
+                        pl_in_refr_tick = (
+                            bool(exc_tick.get("player_in_refractory"))
+                            if exc_tick.get("player_in_refractory") is not None
+                            else bool((updated_phys.get("climax_state") or {}).get("player_climaxed", False))
+                        )
+                        if pl_in_refr_tick:
+                            for entry in (party or []):
+                                ch_lead = entry[0] if isinstance(entry, (tuple, list)) else entry
+                                u_lead = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else (ch_lead.get("user_id") if isinstance(ch_lead, dict) else None)
+                                if u_lead:
+                                    char_rec = db.get_character(u_lead) if u_lead else None
+                                    cur_effs = char_rec.get("status_effects") if char_rec else []
+                                    if isinstance(cur_effs, str):
+                                        try:
+                                            cur_effs = json.loads(cur_effs)
+                                        except Exception:
+                                            cur_effs = [cur_effs] if cur_effs else []
+                                    pl_gen_tick = (char_rec.get("gender") if char_rec else None) or (ch_lead.get("gender") if isinstance(ch_lead, dict) else "Male")
+                                    refr_tag_tick = format_partner_recovery_status_tag(refr_mins_tick, pl_gen_tick)
+                                    cur_effs = [s for s in cur_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
+                                    cur_effs.append(refr_tag_tick)
+                                    db.set_status_effects(u_lead, cur_effs)
+                                    if isinstance(ch_lead, dict):
+                                        ch_lead["status_effects"] = cur_effs
+                                    _sync_player_outcome_status(cur_effs)
+                        refr_p_tick = exc_tick.get("refractory_partners") if isinstance(exc_tick.get("refractory_partners"), dict) else {}
+                        all_c_tick = db.get_contacts(session_id) or [] if session_id else []
+                        for c_full in all_c_tick:
+                            if isinstance(c_full, dict) and c_full.get("name"):
+                                c_effs = c_full.get("status_effects") or []
+                                c_name_t = c_full.get("name", "")
+                                m_k_t = _match_actor_key(c_name_t, refr_p_tick) if refr_p_tick else ""
+                                if bool(refr_p_tick.get(m_k_t or c_name_t, False)) or any(k in str(s).lower() for s in c_effs for k in ("refractory", "satisfied")):
+                                    c_id = c_full.get("npc_id") or c_full.get("contact_id") or str(c_name_t).lower().replace(" ", "_")
+                                    p_gen_t = (c_full.get("appearance") or {}).get("gender") or c_full.get("gender") or "Female"
+                                    p_rec_tag_t = format_partner_recovery_status_tag(refr_mins_tick, p_gen_t)
+                                    c_effs = [s for s in c_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
+                                    c_effs.append(p_rec_tag_t)
+                                    db.update_contact_status_effects(session_id, c_id, first_char_id, c_effs)
+                except Exception as e:
+                    log.debug("Could not refresh refractory countdown on turn: %s", e)
 
             # Pre-infer intimate_contact from relationship_updates milestone_event if still "none"
             if updated_phys.get("intimate_contact") in ("none", "", None) and action_succeeded:
@@ -1291,6 +1467,10 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                             actors[mk]["posture"] = f"Resting against {player_name} in shared aftercare"
                 else:
                     updated_phys["intimate_contact"] = f"Cuddling / aftercare with {target_p}"
+                was_premature_ac = bool((updated_phys.get("excitement") or {}).get("premature_finish"))
+                unsat_partners_ac = {str(x).lower().strip() for x in ((updated_phys.get("excitement") or {}).get("unsatisfied_partners") or []) if x}
+                if (updated_phys.get("excitement") or {}).get("unsatisfied_partner"):
+                    unsat_partners_ac.add(str(updated_phys["excitement"]["unsatisfied_partner"]).lower().strip())
                 if "excitement" in updated_phys and isinstance(updated_phys["excitement"], dict):
                     updated_phys["excitement"]["active"] = False
                     updated_phys["excitement"]["last_act"] = "none"
@@ -1298,6 +1478,73 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                     updated_phys["excitement"]["partner_demanded"] = False
                     updated_phys["excitement"]["unsatisfied_partner"] = ""
                     updated_phys["excitement"]["unsatisfied_partners"] = []
+                try:
+                    climax_st_ac = updated_phys.get("climax_state") or {}
+                    pl_clim_ac = bool(climax_st_ac.get("player_climaxed", False))
+                    pt_clim_ac = bool(climax_st_ac.get("partner_climaxed", False))
+                    pt_map_ac = climax_st_ac.get("partner_climaxes") if isinstance(climax_st_ac.get("partner_climaxes"), dict) else {}
+                    in_refr, refr_mins = is_in_refractory_cooldown(sess_dict, updated_phys)
+                    if not in_refr and (pl_clim_ac or pt_clim_ac):
+                        exc_ac = updated_phys.setdefault("excitement", {})
+                        p_end_ac = int(player_dict.get("end_") or player_dict.get("endurance") or 10) if isinstance(player_dict, dict) else 10
+                        cd_dur_ac = calculate_refractory_duration(p_end_ac)
+                        c_day_ac = sess_dict.get("current_day", 1)
+                        c_min_ac = sess_dict.get("current_minute", 480)
+                        exc_ac["refractory_until_minute"] = (c_day_ac * 1440) + c_min_ac + cd_dur_ac
+                        exc_ac["cooldown_notified"] = False
+                        in_refr, refr_mins = True, cd_dur_ac
+                    if in_refr and refr_mins > 0:
+                        exc_ac = updated_phys.setdefault("excitement", {})
+                        if exc_ac.get("player_in_refractory") is not None:
+                            pl_did_climax_ac = bool(exc_ac.get("player_in_refractory")) or pl_clim_ac
+                        else:
+                            pl_did_climax_ac = pl_clim_ac or (not pt_clim_ac)
+                        exc_ac["player_in_refractory"] = pl_did_climax_ac
+                        p_gender = "Female" if is_female_player else "Male"
+                        p_refr_tag = format_partner_recovery_status_tag(refr_mins, p_gender)
+                        party_list = party or []
+                        lead_entry = party_list[0] if party_list else None
+                        lead_c = lead_entry[0] if isinstance(lead_entry, (tuple, list)) else lead_entry
+                        u_id = lead_entry[1] if isinstance(lead_entry, (tuple, list)) and len(lead_entry) > 1 else ((lead_c.get("user_id") if isinstance(lead_c, dict) else None) or (sess_dict.get("turn_order", [None])[0] if sess_dict else None))
+                        if u_id:
+                            char_rec = db.get_character(u_id) if u_id else None
+                            cur_effs = char_rec.get("status_effects") if char_rec else []
+                            if isinstance(cur_effs, str):
+                                try:
+                                    cur_effs = json.loads(cur_effs)
+                                except Exception:
+                                    cur_effs = [cur_effs] if cur_effs else []
+                            cur_effs = [s for s in cur_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("aroused", "breathless", "spent", "refractory", "satisfied"))]
+                            if pl_did_climax_ac:
+                                cur_effs.append(p_refr_tag)
+                            db.set_status_effects(u_id, cur_effs)
+                            if isinstance(lead_c, dict):
+                                lead_c["status_effects"] = cur_effs
+                            _sync_player_outcome_status(cur_effs)
+
+                        # Partner recovery tag (e.g. Satisfied [25 min] or Refractory Recovery [25 min])
+                        for pc_item in (partner_contacts or ([partner_contact] if partner_contact else [])):
+                            if isinstance(pc_item, dict) and pc_item.get("name"):
+                                pc_name_ac = str(pc_item.get("name")).strip()
+                                pc_name_low_ac = pc_name_ac.lower()
+                                if pc_name_low_ac in unsat_partners_ac or (was_premature_ac and not pt_clim_ac):
+                                    p_did_climax_ac = False
+                                elif pt_map_ac:
+                                    m_k_ac = _match_actor_key(pc_name_ac, pt_map_ac)
+                                    p_did_climax_ac = bool(pt_map_ac.get(m_k_ac or pc_name_ac, False))
+                                else:
+                                    p_did_climax_ac = pt_clim_ac or (not pl_clim_ac and not was_premature_ac)
+                                p_gen = (pc_item.get("appearance") or {}).get("gender") or pc_item.get("gender") or "Female"
+                                p_rec_tag = format_partner_recovery_status_tag(refr_mins, p_gen)
+                                npc_effs = [s for s in (pc_item.get("status_effects") or []) if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("aroused", "breathless", "spent", "refractory", "satisfied"))]
+                                if p_did_climax_ac:
+                                    npc_effs.append(p_rec_tag)
+                                    exc_ac.setdefault("refractory_partners", {})[pc_name_ac] = True
+                                pc_item["status_effects"] = npc_effs
+                                c_id = pc_item.get("npc_id") or pc_item.get("contact_id") or str(pc_item.get("name")).lower().replace(" ", "_")
+                                db.update_contact_status_effects(session_id, c_id, first_char_id, npc_effs)
+                except Exception as e:
+                    log.debug("Could not apply aftercare recovery status: %s", e)
             else:
                 act_class = classify_intimate_act(
                     action_str=act_text if (was_erotic or is_erotic or action_succeeded) else "",
@@ -1387,13 +1634,37 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                             updated_phys["excitement"]["active"] = False
                             updated_phys["excitement"]["last_act"] = "none"
 
-                    # Synchronize Aroused [3 turns] status effect on player and partner when excitement is active or meter > 0
-                    if (
+                    # Synchronize Aroused [3 turns] status effect on player and partner when stimulated or sensual maintenance
+                    is_stimulating_turn = bool(
                         excitement_res
-                        and (excitement_res.get("player_meter", 0) > 0 or excitement_res.get("partner_meter", 0) > 0 or is_genital_act)
+                        and (
+                            excitement_res.get("player_stimulated")
+                            or excitement_res.get("any_partner_stimulated")
+                            or excitement_res.get("is_sensual_action")
+                            or is_genital_act
+                            or (excitement_res.get("player_delta", 0) > 0)
+                            or (excitement_res.get("partner_delta", 0) > 0)
+                        )
                         and not excitement_res.get("all_cooled_down")
-                    ):
-                        aroused_tag = "Aroused [3 turns]"
+                    )
+
+                    if is_stimulating_turn:
+                        in_refr_p, refr_mins_p = is_in_refractory_cooldown(sess_dict, updated_phys)
+                        exc_curr_st = updated_phys.get("excitement") or {}
+                        pl_clim_flag = (
+                            bool(exc_curr_st.get("player_in_refractory"))
+                            if exc_curr_st.get("player_in_refractory") is not None
+                            else (bool((updated_phys.get("climax_state") or {}).get("player_climaxed", False)) or bool(excitement_res and excitement_res.get("player_climaxed")))
+                        )
+                        pl_gender_str = "Female" if is_female_player else "Male"
+                        exc_actors_stim = (updated_phys.get("excitement") or {}).get("actors") or {}
+                        p_act_k_st = _match_actor_key(player_name, exc_actors_stim) if player_name and exc_actors_stim else None
+                        p_actor_st = exc_actors_stim.get(p_act_k_st or player_name) if exc_actors_stim else None
+                        if isinstance(p_actor_st, dict) and "aroused_turns" in p_actor_st:
+                            p_ar_t_st = int(p_actor_st.get("aroused_turns", 0) or 0)
+                        else:
+                            p_ar_t_st = 3
+                        aroused_tag = f"Aroused [{p_ar_t_st} turn{'s' if p_ar_t_st != 1 else ''}]" if p_ar_t_st > 0 else None
                         party_list = party or []
                         lead_entry = party_list[0] if party_list else None
                         lead_c = lead_entry[0] if isinstance(lead_entry, (tuple, list)) else lead_entry
@@ -1410,10 +1681,17 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                         c_effs = [c_effs] if c_effs else []
                                 else:
                                     c_effs = list(c_effs or [])
-                                if not any("aroused" in str(s).lower() for s in c_effs):
-                                    c_effs.append(aroused_tag)
+                                if in_refr_p and refr_mins_p > 0 and pl_clim_flag:
+                                    refr_tag_p = format_partner_recovery_status_tag(refr_mins_p, pl_gender_str)
+                                    c_effs = [s for s in c_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("aroused", "breathless", "refractory", "spent", "satisfied"))]
+                                    c_effs.append(refr_tag_p)
+                                elif aroused_tag:
+                                    if not any("aroused" in str(s).lower() for s in c_effs):
+                                        c_effs.append(aroused_tag)
+                                    else:
+                                        c_effs = [aroused_tag if "aroused" in str(s).lower() else s for s in c_effs]
                                 else:
-                                    c_effs = [aroused_tag if "aroused" in str(s).lower() else s for s in c_effs]
+                                    c_effs = [s for s in c_effs if "aroused" not in str(s).lower()]
                                 db.set_status_effects(u_id, c_effs)
                                 if isinstance(lead_c, dict):
                                     lead_c["status_effects"] = c_effs
@@ -1424,19 +1702,175 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                         for co_item in (outcome.get("character_outcomes") or []):
                             if isinstance(co_item, dict) and str(co_item.get("name", "")).lower().strip() == p_name_low:
                                 co_effs = list(co_item.get("status_effects") or [])
-                                if not any("aroused" in str(s).lower() for s in co_effs):
-                                    co_effs.append(aroused_tag)
+                                if in_refr_p and refr_mins_p > 0 and pl_clim_flag:
+                                    refr_tag_p = format_partner_recovery_status_tag(refr_mins_p, pl_gender_str)
+                                    co_effs = [s for s in co_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("aroused", "breathless", "refractory", "spent", "satisfied"))]
+                                    co_effs.append(refr_tag_p)
+                                elif aroused_tag:
+                                    if not any("aroused" in str(s).lower() for s in co_effs):
+                                        co_effs.append(aroused_tag)
+                                    else:
+                                        co_effs = [aroused_tag if "aroused" in str(s).lower() else s for s in co_effs]
                                 else:
-                                    co_effs = [aroused_tag if "aroused" in str(s).lower() else s for s in co_effs]
+                                    co_effs = [s for s in co_effs if "aroused" not in str(s).lower()]
                                 co_item["status_effects"] = co_effs
 
                         for pc_item in (partner_contacts or ([partner_contact] if partner_contact else [])):
                             if isinstance(pc_item, dict):
-                                npc_effs = pc_item.setdefault("status_effects", [])
-                                if not any("aroused" in str(s).lower() for s in npc_effs):
-                                    npc_effs.append(aroused_tag)
+                                npc_effs = list(pc_item.get("status_effects") or [])
+                                if any("satisfied" in str(s).lower() or "refractory" in str(s).lower() for s in npc_effs):
+                                    continue
+                                n_act_k_st = _match_actor_key(pc_item.get("name", ""), exc_actors_stim) if pc_item.get("name") else None
+                                n_actor_st = exc_actors_stim.get(n_act_k_st or pc_item.get("name", "")) if exc_actors_stim else None
+                                if isinstance(n_actor_st, dict) and "aroused_turns" in n_actor_st:
+                                    n_ar_t_st = int(n_actor_st.get("aroused_turns", 0) or 0)
                                 else:
-                                    pc_item["status_effects"] = [aroused_tag if "aroused" in str(s).lower() else s for s in npc_effs]
+                                    n_ar_t_st = 3
+                                n_ar_lbl_st = f"Aroused [{n_ar_t_st} turn{'s' if n_ar_t_st != 1 else ''}]" if n_ar_t_st > 0 else None
+                                if n_ar_lbl_st:
+                                    if not any("aroused" in str(s).lower() for s in npc_effs):
+                                        npc_effs.append(n_ar_lbl_st)
+                                    else:
+                                        npc_effs = [n_ar_lbl_st if "aroused" in str(s).lower() else s for s in npc_effs]
+                                else:
+                                    npc_effs = [s for s in npc_effs if "aroused" not in str(s).lower()]
+                                pc_item["status_effects"] = npc_effs
+                                if pc_item.get("name"):
+                                    c_id = pc_item.get("npc_id") or pc_item.get("contact_id") or str(pc_item.get("name")).lower().replace(" ", "_")
+                                    try:
+                                        db.update_contact_status_effects(session_id, c_id, first_char_id, pc_item["status_effects"])
+                                    except Exception:
+                                        pass
+                    elif excitement_res:
+                        all_cooled = bool(excitement_res.get("all_cooled_down"))
+                        exc_actors_map = (updated_phys.get("excitement") or {}).get("actors") or {}
+                        p_act_k = _match_actor_key(player_name, exc_actors_map) if player_name else None
+                        p_aroused_t = 0 if all_cooled else int((exc_actors_map.get(p_act_k or player_name) or {}).get("aroused_turns", 0) or 0)
+                        p_aroused_lbl = f"Aroused [{p_aroused_t} turn{'s' if p_aroused_t != 1 else ''}]" if p_aroused_t > 0 else None
+
+                        party_list = party or []
+                        lead_entry = party_list[0] if party_list else None
+                        lead_c = lead_entry[0] if isinstance(lead_entry, (tuple, list)) else lead_entry
+                        u_id = lead_entry[1] if isinstance(lead_entry, (tuple, list)) and len(lead_entry) > 1 else ((lead_c.get("user_id") if isinstance(lead_c, dict) else None) or (sess_dict.get("turn_order", [None])[0] if sess_dict else None))
+                        if u_id:
+                            try:
+                                char_record = db.get_character(u_id)
+                                c_effs = char_record.get("status_effects") if char_record else []
+                                if isinstance(c_effs, str):
+                                    import json
+                                    try:
+                                        c_effs = json.loads(c_effs)
+                                    except Exception:
+                                        c_effs = [c_effs] if c_effs else []
+                                else:
+                                    c_effs = list(c_effs or [])
+                                if p_aroused_lbl and any("aroused" in str(s).lower() for s in c_effs):
+                                    c_effs = [p_aroused_lbl if "aroused" in str(s).lower() else s for s in c_effs if s and s not in ("[]", "{}", '""', "''")]
+                                else:
+                                    c_effs = [s for s in c_effs if s and s not in ("[]", "{}", '""', "''") and "aroused" not in str(s).lower()]
+                                db.set_status_effects(u_id, c_effs)
+                                if isinstance(lead_c, dict):
+                                    lead_c["status_effects"] = c_effs
+                            except Exception as e:
+                                log.debug("Could not update player Aroused status on non-stimulating turn: %s", e)
+
+                        p_name_low = player_name.lower().strip()
+                        for co_item in (outcome.get("character_outcomes") or []):
+                            if isinstance(co_item, dict) and str(co_item.get("name", "")).lower().strip() == p_name_low:
+                                co_effs = list(co_item.get("status_effects") or [])
+                                if p_aroused_lbl and any("aroused" in str(s).lower() for s in co_effs):
+                                    co_effs = [p_aroused_lbl if "aroused" in str(s).lower() else s for s in co_effs]
+                                else:
+                                    co_effs = [s for s in co_effs if "aroused" not in str(s).lower()]
+                                co_item["status_effects"] = co_effs
+
+                        for pc_item in (partner_contacts or ([partner_contact] if partner_contact else [])):
+                            if isinstance(pc_item, dict):
+                                cur_npc_effs = list(pc_item.get("status_effects") or [])
+                                if not all_cooled and any("satisfied" in str(s).lower() or "refractory" in str(s).lower() for s in cur_npc_effs):
+                                    continue
+                                n_act_k = _match_actor_key(pc_item.get("name", ""), exc_actors_map) if pc_item.get("name") else None
+                                n_aroused_t = 0 if all_cooled else int((exc_actors_map.get(n_act_k or pc_item.get("name", "")) or {}).get("aroused_turns", 0) or 0)
+                                n_aroused_lbl = f"Aroused [{n_aroused_t} turn{'s' if n_aroused_t != 1 else ''}]" if n_aroused_t > 0 else None
+                                if n_aroused_lbl and any("aroused" in str(s).lower() for s in cur_npc_effs):
+                                    pc_item["status_effects"] = [n_aroused_lbl if "aroused" in str(s).lower() else s for s in cur_npc_effs]
+                                else:
+                                    pc_item["status_effects"] = [s for s in cur_npc_effs if "aroused" not in str(s).lower()]
+                                if pc_item.get("name"):
+                                    c_id = pc_item.get("npc_id") or pc_item.get("contact_id") or str(pc_item.get("name")).lower().replace(" ", "_")
+                                    try:
+                                        db.update_contact_status_effects(session_id, c_id, first_char_id, pc_item["status_effects"])
+                                    except Exception:
+                                        pass
+                else:
+                    # Tick down lingering Aroused [N turns] when excitement engine is inactive
+                    party_list = party or []
+                    lead_entry = party_list[0] if party_list else None
+                    lead_c = lead_entry[0] if isinstance(lead_entry, (tuple, list)) else lead_entry
+                    u_id = lead_entry[1] if isinstance(lead_entry, (tuple, list)) and len(lead_entry) > 1 else ((lead_c.get("user_id") if isinstance(lead_c, dict) else None) or (sess_dict.get("turn_order", [None])[0] if sess_dict else None))
+                    if u_id:
+                        try:
+                            char_record = db.get_character(u_id)
+                            c_effs = char_record.get("status_effects") if char_record else []
+                            if isinstance(c_effs, str):
+                                import json
+                                try:
+                                    c_effs = json.loads(c_effs)
+                                except Exception:
+                                    c_effs = [c_effs] if c_effs else []
+                            else:
+                                c_effs = list(c_effs or [])
+                            if any("aroused" in str(s).lower() for s in c_effs):
+                                new_c_effs = []
+                                next_aroused_t = 0
+                                for s in c_effs:
+                                    if not s or s in ("[]", "{}", '""', "''"):
+                                        continue
+                                    if "aroused" in str(s).lower():
+                                        m_ar = re.search(r"\[(\d+)\s*turns?\]", str(s), re.IGNORECASE)
+                                        cur_t = int(m_ar.group(1)) if m_ar else 1
+                                        next_aroused_t = max(0, cur_t - 1)
+                                        if next_aroused_t > 0:
+                                            new_c_effs.append(f"Aroused [{next_aroused_t} turn{'s' if next_aroused_t != 1 else ''}]")
+                                    else:
+                                        new_c_effs.append(s)
+                                db.set_status_effects(u_id, new_c_effs)
+                                if isinstance(lead_c, dict):
+                                    lead_c["status_effects"] = new_c_effs
+                                _sync_player_outcome_status(new_c_effs)
+                                exc_actors_map = (updated_phys.get("excitement") or {}).get("actors") or {}
+                                p_act_k = _match_actor_key(player_name, exc_actors_map) if player_name else None
+                                if p_act_k and isinstance(exc_actors_map.get(p_act_k), dict):
+                                    exc_actors_map[p_act_k]["aroused_turns"] = next_aroused_t
+                        except Exception as e:
+                            log.debug("Could not tick down inactive Aroused status: %s", e)
+                    if session_id:
+                        try:
+                            exc_actors_map = (updated_phys.get("excitement") or {}).get("actors") or {}
+                            for c_full in (db.get_contacts(session_id) or []):
+                                if isinstance(c_full, dict) and c_full.get("name"):
+                                    c_effs = list(c_full.get("status_effects") or [])
+                                    if any("aroused" in str(s).lower() for s in c_effs):
+                                        new_npc_effs = []
+                                        next_npc_t = 0
+                                        for s in c_effs:
+                                            if not s or s in ("[]", "{}", '""', "''"):
+                                                continue
+                                            if "aroused" in str(s).lower():
+                                                m_ar = re.search(r"\[(\d+)\s*turns?\]", str(s), re.IGNORECASE)
+                                                cur_t = int(m_ar.group(1)) if m_ar else 1
+                                                next_npc_t = max(0, cur_t - 1)
+                                                if next_npc_t > 0:
+                                                    new_npc_effs.append(f"Aroused [{next_npc_t} turn{'s' if next_npc_t != 1 else ''}]")
+                                            else:
+                                                new_npc_effs.append(s)
+                                        c_id = c_full.get("npc_id") or c_full.get("contact_id") or str(c_full.get("name")).lower().replace(" ", "_")
+                                        db.update_contact_status_effects(session_id, c_id, first_char_id, new_npc_effs)
+                                        n_act_k = _match_actor_key(c_full.get("name", ""), exc_actors_map)
+                                        if n_act_k and isinstance(exc_actors_map.get(n_act_k), dict):
+                                            exc_actors_map[n_act_k]["aroused_turns"] = next_npc_t
+                        except Exception as e:
+                            log.debug("Could not tick down inactive NPC Aroused status: %s", e)
 
                 if excitement_res:
                     has_player_climax = bool(excitement_res.get("player_climaxed"))
@@ -1444,6 +1878,13 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                 else:
                     has_player_climax = (phys_up_dict.get("player_climaxed") is True) or detect_player_climax(full_turn_text, player_name)
                     has_partner_climax = (phys_up_dict.get("partner_climaxed") is True) or detect_partner_climax(full_turn_text, partner)
+
+                partner_climaxes_res = (excitement_res.get("partner_climaxes") if excitement_res else None) or {}
+                all_partners_climaxed = (
+                    bool(partner_climaxes_res and all(bool(v) for v in partner_climaxes_res.values()))
+                    if partner_climaxes_res
+                    else bool(has_partner_climax)
+                )
 
                 target_label = (" and ".join(c.get("name", "") for c in partner_contacts if c.get("name"))) if (partner_contacts and len(partner_contacts) >= 2) else target_p
                 _eff_act_type = act_class["act_type"]
@@ -1462,69 +1903,162 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                 )
 
                 if has_player_climax:
-                    if is_female_player:
-                        # Female multi-climax: drops to 35% hypersensitive baseline; ongoing rhythm
+                    if is_female_player and not all_partners_climaxed:
+                        # Female multi-climax while at least one partner is still ongoing: drops to 35% hypersensitive baseline; ongoing rhythm
                         updated_phys["intimate_contact"] = f"Intimate encounter with {target_label} ({_ongoing_act_label} - player reached climax, hypersensitive ongoing)"
                         updated_phys["climax_state"] = {"partner_climaxed": bool(has_partner_climax), "player_climaxed": True}
                         if excitement_res and excitement_res.get("partner_climaxes"):
                             updated_phys["climax_state"]["partner_climaxes"] = dict(excitement_res["partner_climaxes"])
                         if excitement_res:
                             outcome["intimate_update"]["female_multiorgasmic"] = True
+                    elif (not is_female_player) and excitement_res and excitement_res.get("premature_finish"):
+                        # Male anatomy climax: physical penetration ceases, partner unsatisfied (< 100%)
+                        updated_phys["intimate_contact"] = f"Intimate encounter with {target_label} (player reached climax spent, partner unsatisfied)"
+                        updated_phys["climax_state"] = {"partner_climaxed": bool(has_partner_climax), "player_climaxed": True}
+                        if excitement_res and excitement_res.get("partner_climaxes"):
+                            updated_phys["climax_state"]["partner_climaxes"] = dict(excitement_res["partner_climaxes"])
+                        try:
+                            in_refr, refr_mins = is_in_refractory_cooldown(sess_dict, updated_phys)
+                            if not in_refr:
+                                exc_pf = updated_phys.setdefault("excitement", {})
+                                p_end_pf = int(player_dict.get("end_") or player_dict.get("endurance") or 10) if isinstance(player_dict, dict) else 10
+                                cd_dur_pf = calculate_refractory_duration(p_end_pf)
+                                exc_pf["refractory_until_minute"] = (sess_dict.get("current_day", 1) * 1440) + sess_dict.get("current_minute", 480) + cd_dur_pf
+                                exc_pf["cooldown_notified"] = False
+                                in_refr, refr_mins = True, cd_dur_pf
+                            if in_refr and refr_mins > 0:
+                                updated_phys.setdefault("excitement", {})["player_in_refractory"] = True
+                                p_refr_tag = format_refractory_status_tag(refr_mins)
+                                party_list = party or []
+                                lead_entry = party_list[0] if party_list else None
+                                lead_c = lead_entry[0] if isinstance(lead_entry, (tuple, list)) else lead_entry
+                                u_id = lead_entry[1] if isinstance(lead_entry, (tuple, list)) and len(lead_entry) > 1 else ((lead_c.get("user_id") if isinstance(lead_c, dict) else None) or (sess_dict.get("turn_order", [None])[0] if sess_dict else None))
+                                if u_id:
+                                    char_rec = db.get_character(u_id) if u_id else None
+                                    cur_effs = char_rec.get("status_effects") if char_rec else []
+                                    if isinstance(cur_effs, str):
+                                        try:
+                                            cur_effs = json.loads(cur_effs)
+                                        except Exception:
+                                            cur_effs = [cur_effs] if cur_effs else []
+                                    cur_effs = [s for s in cur_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("aroused", "breathless", "spent", "refractory"))]
+                                    cur_effs.append(p_refr_tag)
+                                    db.set_status_effects(u_id, cur_effs)
+                                    if isinstance(lead_c, dict):
+                                        lead_c["status_effects"] = cur_effs
+                                    _sync_player_outcome_status(cur_effs)
+                        except Exception as e:
+                            log.debug("Could not apply premature finish refractory tag: %s", e)
+                        if has_partner_climax:
+                            actors = updated_phys.get("actors", {})
+                            partner_climaxes_map = excitement_res.get("partner_climaxes") or {}
+                            in_refr_pf, refr_mins_pf = is_in_refractory_cooldown(sess_dict, updated_phys)
+                            for pc_item in (partner_contacts or ([{"name": target_p}] if target_p else [])):
+                                p_name_item = pc_item.get("name", "")
+                                if not p_name_item:
+                                    continue
+                                m_key = _match_actor_key(p_name_item, actors)
+                                p_clim_k = _match_actor_key(p_name_item, partner_climaxes_map) if partner_climaxes_map else ""
+                                p_clim = bool(partner_climaxes_map.get(p_clim_k or p_name_item, False)) if partner_climaxes_map else has_partner_climax
+                                if m_key in actors:
+                                    posture_str = str(actors[m_key].get("posture", "")).lower()
+                                    other_names = [c.get("name", "") for c in partner_contacts if c.get("name") and c.get("name") != p_name_item]
+                                    other_names_str = " and ".join(other_names)
+                                    if p_clim and any(k in posture_str for k in ("sleeping", "asleep", "lying down spent", "resting side by side", "resting close beside", "post-coital", "standing", "")):
+                                        if other_names:
+                                            actors[m_key]["posture"] = f"Trembling from aftershocks beside {player_name} and {other_names_str}"
+                                        else:
+                                            actors[m_key]["posture"] = f"Trembling from aftershocks in {player_name}'s embrace"
+                                if p_clim and in_refr_pf and refr_mins_pf > 0 and isinstance(pc_item, dict):
+                                    p_gen_pf = (pc_item.get("appearance") or {}).get("gender") or pc_item.get("gender") or "Female"
+                                    p_rec_tag_pf = format_partner_recovery_status_tag(refr_mins_pf, p_gen_pf)
+                                    npc_effs_pf = [s for s in (pc_item.get("status_effects") or []) if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("aroused", "breathless", "spent", "refractory", "satisfied"))]
+                                    npc_effs_pf.append(p_rec_tag_pf)
+                                    pc_item["status_effects"] = npc_effs_pf
+                                    updated_phys.setdefault("excitement", {}).setdefault("refractory_partners", {})[p_name_item] = True
+                                    c_id_pf = pc_item.get("npc_id") or pc_item.get("contact_id") or str(p_name_item).lower().replace(" ", "_")
+                                    try:
+                                        db.update_contact_status_effects(session_id, c_id_pf, first_char_id, npc_effs_pf)
+                                    except Exception:
+                                        pass
                     else:
-                        # Male anatomy climax: physical penetration ceases
-                        if excitement_res and excitement_res.get("premature_finish"):
-                            # Partner unsatisfied (< 100%)
-                            updated_phys["intimate_contact"] = f"Intimate encounter with {target_label} (player reached climax spent, partner unsatisfied)"
-                            updated_phys["climax_state"] = {"partner_climaxed": bool(has_partner_climax), "player_climaxed": True}
-                            if excitement_res and excitement_res.get("partner_climaxes"):
-                                updated_phys["climax_state"]["partner_climaxes"] = dict(excitement_res["partner_climaxes"])
-                            if has_partner_climax:
-                                actors = updated_phys.get("actors", {})
-                                partner_climaxes_map = excitement_res.get("partner_climaxes") or {}
-                                for pc_item in (partner_contacts or ([{"name": target_p}] if target_p else [])):
-                                    p_name_item = pc_item.get("name", "")
-                                    if not p_name_item:
-                                        continue
-                                    m_key = _match_actor_key(p_name_item, actors)
-                                    if m_key in actors:
-                                        posture_str = str(actors[m_key].get("posture", "")).lower()
-                                        p_clim_k = _match_actor_key(p_name_item, partner_climaxes_map) if partner_climaxes_map else ""
-                                        p_clim = bool(partner_climaxes_map.get(p_clim_k or p_name_item, False)) if partner_climaxes_map else has_partner_climax
-                                        other_names = [c.get("name", "") for c in partner_contacts if c.get("name") and c.get("name") != p_name_item]
-                                        other_names_str = " and ".join(other_names)
-                                        if p_clim and any(k in posture_str for k in ("sleeping", "asleep", "lying down spent", "resting side by side", "resting close beside", "post-coital", "standing", "")):
-                                            if other_names:
-                                                actors[m_key]["posture"] = f"Trembling from aftershocks beside {player_name} and {other_names_str}"
-                                            else:
-                                                actors[m_key]["posture"] = f"Trembling from aftershocks in {player_name}'s embrace"
+                        # Mutual climax or partner was already satisfied -> aftercare
+                        if partner_contacts and len(partner_contacts) >= 2:
+                            p_names_list = [c.get("name", "") for c in partner_contacts if c.get("name")]
+                            p_names_str = " and ".join(p_names_list)
+                            hold_str = f"both {p_names_str}" if len(p_names_list) == 2 else f"all of {p_names_str}"
+                            updated_phys["intimate_contact"] = f"Cuddling / aftercare with {p_names_str}"
+                            actors = updated_phys.get("actors", {})
+                            c_matched = _match_actor_key(player_name, actors) if player_name else None
+                            if c_matched and c_matched in actors:
+                                actors[c_matched]["posture"] = f"Resting in aftercare, holding {hold_str}"
+                            for pc_item in partner_contacts:
+                                pn = pc_item.get("name", "")
+                                mk = _match_actor_key(pn, actors) if pn else None
+                                if mk and mk in actors:
+                                    actors[mk]["posture"] = f"Resting against {player_name} in shared aftercare"
                         else:
-                            # Mutual climax or partner was already satisfied -> aftercare
-                            if partner_contacts and len(partner_contacts) >= 2:
-                                p_names_list = [c.get("name", "") for c in partner_contacts if c.get("name")]
-                                p_names_str = " and ".join(p_names_list)
-                                hold_str = f"both {p_names_str}" if len(p_names_list) == 2 else f"all of {p_names_str}"
-                                updated_phys["intimate_contact"] = f"Cuddling / aftercare with {p_names_str}"
-                                actors = updated_phys.get("actors", {})
-                                c_matched = _match_actor_key(player_name, actors) if player_name else None
-                                if c_matched and c_matched in actors:
-                                    actors[c_matched]["posture"] = f"Resting in aftercare, holding {hold_str}"
-                                for pc_item in partner_contacts:
-                                    pn = pc_item.get("name", "")
-                                    mk = _match_actor_key(pn, actors) if pn else None
-                                    if mk and mk in actors:
-                                        actors[mk]["posture"] = f"Resting against {player_name} in shared aftercare"
-                            else:
-                                updated_phys["intimate_contact"] = f"Cuddling / aftercare with {target_p}"
-                            updated_phys["climax_state"] = {"partner_climaxed": True, "player_climaxed": True}
-                            if excitement_res and excitement_res.get("partner_climaxes"):
-                                updated_phys["climax_state"]["partner_climaxes"] = dict(excitement_res["partner_climaxes"])
-                            if "excitement" in updated_phys:
-                                updated_phys["excitement"]["active"] = False
-                                updated_phys["excitement"]["last_act"] = "none"
-                                updated_phys["excitement"]["premature_finish"] = False
-                                updated_phys["excitement"]["partner_demanded"] = False
-                                updated_phys["excitement"]["unsatisfied_partner"] = ""
-                                updated_phys["excitement"]["unsatisfied_partners"] = []
+                            updated_phys["intimate_contact"] = f"Cuddling / aftercare with {target_p}"
+                        updated_phys["climax_state"] = {"partner_climaxed": True, "player_climaxed": True}
+                        if excitement_res and excitement_res.get("partner_climaxes"):
+                            updated_phys["climax_state"]["partner_climaxes"] = dict(excitement_res["partner_climaxes"])
+                        if "excitement" in updated_phys:
+                            updated_phys["excitement"]["active"] = False
+                            updated_phys["excitement"]["last_act"] = "none"
+                            updated_phys["excitement"]["premature_finish"] = False
+                            updated_phys["excitement"]["partner_demanded"] = False
+                            updated_phys["excitement"]["unsatisfied_partner"] = ""
+                            updated_phys["excitement"]["unsatisfied_partners"] = []
+                        try:
+                            in_refr, refr_mins = is_in_refractory_cooldown(sess_dict, updated_phys)
+                            if not in_refr:
+                                exc_mc = updated_phys.setdefault("excitement", {})
+                                p_end_mc = int(player_dict.get("end_") or player_dict.get("endurance") or 10) if isinstance(player_dict, dict) else 10
+                                cd_dur_mc = calculate_refractory_duration(p_end_mc)
+                                exc_mc["refractory_until_minute"] = (sess_dict.get("current_day", 1) * 1440) + sess_dict.get("current_minute", 480) + cd_dur_mc
+                                exc_mc["cooldown_notified"] = False
+                                in_refr, refr_mins = True, cd_dur_mc
+                            if in_refr and refr_mins > 0:
+                                exc_mc = updated_phys.setdefault("excitement", {})
+                                exc_mc["player_in_refractory"] = True
+                                p_gender = "Female" if is_female_player else "Male"
+                                p_refr_tag = format_partner_recovery_status_tag(refr_mins, p_gender)
+                                party_list = party or []
+                                lead_entry = party_list[0] if party_list else None
+                                lead_c = lead_entry[0] if isinstance(lead_entry, (tuple, list)) else lead_entry
+                                u_id = lead_entry[1] if isinstance(lead_entry, (tuple, list)) and len(lead_entry) > 1 else ((lead_c.get("user_id") if isinstance(lead_c, dict) else None) or (sess_dict.get("turn_order", [None])[0] if sess_dict else None))
+                                if u_id:
+                                    char_rec = db.get_character(u_id) if u_id else None
+                                    cur_effs = char_rec.get("status_effects") if char_rec else []
+                                    if isinstance(cur_effs, str):
+                                        try:
+                                            cur_effs = json.loads(cur_effs)
+                                        except Exception:
+                                            cur_effs = [cur_effs] if cur_effs else []
+                                    cur_effs = [s for s in cur_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("aroused", "breathless", "spent", "refractory", "satisfied"))]
+                                    cur_effs.append(p_refr_tag)
+                                    db.set_status_effects(u_id, cur_effs)
+                                    if isinstance(lead_c, dict):
+                                        lead_c["status_effects"] = cur_effs
+                                    _sync_player_outcome_status(cur_effs)
+
+                                # Partner recovery tag (e.g. Satisfied [28 min])
+                                for pc_item in (partner_contacts or ([partner_contact] if partner_contact else [])):
+                                    if isinstance(pc_item, dict) and pc_item.get("name"):
+                                        pc_name_mc = str(pc_item.get("name")).strip()
+                                        m_k_mc = _match_actor_key(pc_name_mc, partner_climaxes_res) if partner_climaxes_res else ""
+                                        p_did_clim_mc = bool(partner_climaxes_res.get(m_k_mc or pc_name_mc, True)) if partner_climaxes_res else True
+                                        p_gen = (pc_item.get("appearance") or {}).get("gender") or pc_item.get("gender") or "Female"
+                                        p_rec_tag = format_partner_recovery_status_tag(refr_mins, p_gen)
+                                        npc_effs = [s for s in (pc_item.get("status_effects") or []) if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("aroused", "breathless", "spent", "refractory", "satisfied"))]
+                                        if p_did_clim_mc:
+                                            npc_effs.append(p_rec_tag)
+                                            exc_mc.setdefault("refractory_partners", {})[pc_name_mc] = True
+                                        pc_item["status_effects"] = npc_effs
+                                        c_id = pc_item.get("npc_id") or pc_item.get("contact_id") or str(pc_item.get("name")).lower().replace(" ", "_")
+                                        db.update_contact_status_effects(session_id, c_id, first_char_id, npc_effs)
+                        except Exception as e:
+                            log.debug("Could not apply mutual climax recovery status: %s", e)
                 elif (was_erotic or is_erotic or is_genital_act) and has_partner_climax and not has_player_climax:
                     # Partner reached climax, but player is still going! (Player Climax Primacy)
                     primacy_act = _ongoing_act_label
@@ -1541,10 +2075,10 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                         if not p_name_item:
                             continue
                         m_key = _match_actor_key(p_name_item, actors)
+                        p_clim_k = _match_actor_key(p_name_item, partner_climaxes_map) if partner_climaxes_map else ""
+                        p_clim = bool(partner_climaxes_map.get(p_clim_k or p_name_item, False)) if partner_climaxes_map else has_partner_climax
                         if m_key in actors:
                             posture_str = str(actors[m_key].get("posture", "")).lower()
-                            p_clim_k = _match_actor_key(p_name_item, partner_climaxes_map) if partner_climaxes_map else ""
-                            p_clim = bool(partner_climaxes_map.get(p_clim_k or p_name_item, False)) if partner_climaxes_map else has_partner_climax
                             other_names = [c.get("name", "") for c in partner_contacts if c.get("name") and c.get("name") != p_name_item]
                             other_names_str = " and ".join(other_names)
                             if p_clim:
@@ -1556,6 +2090,32 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                             elif has_partner_climax or has_player_climax:
                                 if any(k in posture_str for k in ("sleeping", "asleep", "standing", "")):
                                     actors[m_key]["posture"] = f"Resting close beside {player_name} with flushed warmth"
+                        if p_clim and isinstance(pc_item, dict) and ("status_effects" in pc_item or pc_item.get("contact_id") or pc_item.get("npc_id")):
+                            p_gen = (pc_item.get("appearance") or {}).get("gender") or pc_item.get("gender") or "Female"
+                            if str(p_gen).strip().lower() in ("male", "m"):
+                                try:
+                                    from mechanics.social.intimate_excitement import is_in_refractory_cooldown, format_partner_recovery_status_tag
+                                    sess_for_clock = session or (db.get_session(session_id) if session_id else {}) or {}
+                                    in_refr_p, refr_mins_p = is_in_refractory_cooldown(sess_for_clock, updated_phys)
+                                    if not in_refr_p:
+                                        exc_mp = updated_phys.setdefault("excitement", {})
+                                        p_end_mp = (pc_item.get("stats") or {}).get("endurance") or pc_item.get("endurance") or 10
+                                        cd_dur_mp = calculate_refractory_duration(int(p_end_mp))
+                                        exc_mp["refractory_until_minute"] = (sess_for_clock.get("current_day", 1) * 1440) + sess_for_clock.get("current_minute", 480) + cd_dur_mp
+                                        exc_mp["cooldown_notified"] = False
+                                        in_refr_p, refr_mins_p = True, cd_dur_mp
+                                    if in_refr_p and refr_mins_p > 0:
+                                        exc_mp = updated_phys.setdefault("excitement", {})
+                                        exc_mp.setdefault("player_in_refractory", False)
+                                        exc_mp.setdefault("refractory_partners", {})[p_name_item] = True
+                                        p_rec_tag = format_partner_recovery_status_tag(refr_mins_p, p_gen)
+                                        npc_effs = [s for s in (pc_item.get("status_effects") or []) if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("aroused", "breathless", "spent", "refractory", "satisfied"))]
+                                        npc_effs.append(p_rec_tag)
+                                        pc_item["status_effects"] = npc_effs
+                                        c_id = pc_item.get("npc_id") or pc_item.get("contact_id") or str(p_name_item).lower().replace(" ", "_")
+                                        db.update_contact_status_effects(session_id, c_id, first_char_id, npc_effs)
+                                except Exception as e:
+                                    log.debug("Could not apply unilateral male partner refractory status: %s", e)
                     if c_matched and c_matched in actors:
                         c_posture_str = str(actors[c_matched].get("posture", "")).lower()
                         if any(k in c_posture_str for k in ("sleeping", "asleep", "lying down spent", "resting side by side")):
@@ -1604,11 +2164,123 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                         break
         else:
             # Check in-game clock refractory recovery even on disengagement turns
-            from mechanics.social.intimate_excitement import check_and_resolve_refractory_clock
+            from mechanics.social.intimate_excitement import (
+                check_and_resolve_refractory_clock,
+                is_in_refractory_cooldown,
+                format_refractory_status_tag,
+                format_partner_recovery_status_tag,
+            )
             sess_for_clock = session or (db.get_session(session_id) if session_id else {}) or {}
             is_recovered, toast_notice = check_and_resolve_refractory_clock(sess_for_clock, updated_phys)
-            if is_recovered and toast_notice:
-                outcome["_refractory_recovered_notice"] = toast_notice
+            if is_recovered:
+                if toast_notice:
+                    outcome["_refractory_recovered_notice"] = toast_notice
+                try:
+                    for entry in (party or []):
+                        ch_lead = entry[0] if isinstance(entry, (tuple, list)) else entry
+                        u_lead = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else (ch_lead.get("user_id") if isinstance(ch_lead, dict) else None)
+                        if u_lead:
+                            char_rec = db.get_character(u_lead) if u_lead else None
+                            cur_effs = char_rec.get("status_effects") if char_rec else []
+                            if isinstance(cur_effs, str):
+                                try:
+                                    cur_effs = json.loads(cur_effs)
+                                except Exception:
+                                    cur_effs = [cur_effs] if cur_effs else []
+                            cur_effs = [s for s in cur_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
+                            db.set_status_effects(u_lead, cur_effs)
+                            if isinstance(ch_lead, dict):
+                                ch_lead["status_effects"] = cur_effs
+                            _sync_player_outcome_status(cur_effs)
+                    all_c_list = db.get_contacts(session_id) or [] if session_id else []
+                    for c_full in all_c_list:
+                        if isinstance(c_full, dict) and c_full.get("name"):
+                            c_effs = c_full.get("status_effects") or []
+                            if any(k in str(s).lower() for s in c_effs for k in ("refractory", "satisfied", "spent", "aroused", "breathless")):
+                                c_id = c_full.get("npc_id") or c_full.get("contact_id") or str(c_full.get("name")).lower().replace(" ", "_")
+                                c_effs = [s for s in c_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
+                                db.update_contact_status_effects(session_id, c_id, first_char_id, c_effs)
+                except Exception as e:
+                    log.debug("Could not clear refractory status on disengagement recovery: %s", e)
+            else:
+                try:
+                    in_refr_dis, refr_mins_dis = is_in_refractory_cooldown(sess_for_clock, updated_phys)
+                    if in_refr_dis and refr_mins_dis > 0:
+                        exc_dis = updated_phys.get("excitement") or {}
+                        if exc_dis.get("player_in_refractory") is not None:
+                            pl_climaxed_dis = bool(exc_dis.get("player_in_refractory"))
+                        else:
+                            pl_climaxed_dis = bool(prev_climax_on_disengage.get("player_climaxed") or (updated_phys.get("climax_state") or {}).get("player_climaxed"))
+                        for entry in (party or []):
+                            ch_lead = entry[0] if isinstance(entry, (tuple, list)) else entry
+                            u_lead = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else (ch_lead.get("user_id") if isinstance(ch_lead, dict) else None)
+                            if u_lead:
+                                char_rec = db.get_character(u_lead) if u_lead else None
+                                cur_effs = char_rec.get("status_effects") if char_rec else []
+                                if isinstance(cur_effs, str):
+                                    try:
+                                        cur_effs = json.loads(cur_effs)
+                                    except Exception:
+                                        cur_effs = [cur_effs] if cur_effs else []
+                                cur_effs = [s for s in cur_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
+                                if pl_climaxed_dis:
+                                    pl_gen = (char_rec.get("gender") if char_rec else None) or (ch_lead.get("gender") if isinstance(ch_lead, dict) else "Male")
+                                    refr_tag_dis = format_partner_recovery_status_tag(refr_mins_dis, pl_gen)
+                                    cur_effs.append(refr_tag_dis)
+                                db.set_status_effects(u_lead, cur_effs)
+                                if isinstance(ch_lead, dict):
+                                    ch_lead["status_effects"] = cur_effs
+                                _sync_player_outcome_status(cur_effs)
+                        p_clim_map_dis = {
+                            **(prev_climax_on_disengage.get("partner_climaxes") or {}),
+                            **(exc_dis.get("refractory_partners") or {}),
+                        }
+                        all_c_list = db.get_contacts(session_id) or [] if session_id else []
+                        for c_full in all_c_list:
+                            if isinstance(c_full, dict) and c_full.get("name"):
+                                c_effs = c_full.get("status_effects") or []
+                                c_name_dis = c_full.get("name", "")
+                                m_k_dis = _match_actor_key(c_name_dis, p_clim_map_dis) if p_clim_map_dis else ""
+                                c_climaxed_dis = bool(p_clim_map_dis.get(m_k_dis or c_name_dis, False))
+                                if c_climaxed_dis or any(k in str(s).lower() for s in c_effs for k in ("refractory", "satisfied", "spent")):
+                                    c_id = c_full.get("npc_id") or c_full.get("contact_id") or str(c_full.get("name")).lower().replace(" ", "_")
+                                    p_gen = (c_full.get("appearance") or {}).get("gender") or c_full.get("gender") or "Female"
+                                    p_rec_tag = format_partner_recovery_status_tag(refr_mins_dis, p_gen)
+                                    c_effs = [s for s in c_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
+                                    c_effs.append(p_rec_tag)
+                                    db.update_contact_status_effects(session_id, c_id, first_char_id, c_effs)
+                                elif any(k in str(s).lower() for s in c_effs for k in ("aroused", "breathless")):
+                                    c_id = c_full.get("npc_id") or c_full.get("contact_id") or str(c_full.get("name")).lower().replace(" ", "_")
+                                    c_effs = [s for s in c_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("aroused", "breathless"))]
+                                    db.update_contact_status_effects(session_id, c_id, first_char_id, c_effs)
+                    else:
+                        for entry in (party or []):
+                            ch_lead = entry[0] if isinstance(entry, (tuple, list)) else entry
+                            u_lead = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else (ch_lead.get("user_id") if isinstance(ch_lead, dict) else None)
+                            if u_lead:
+                                char_rec = db.get_character(u_lead) if u_lead else None
+                                cur_effs = char_rec.get("status_effects") if char_rec else []
+                                if isinstance(cur_effs, str):
+                                    try:
+                                        cur_effs = json.loads(cur_effs)
+                                    except Exception:
+                                        cur_effs = [cur_effs] if cur_effs else []
+                                if any(k in str(s).lower() for s in cur_effs for k in ("aroused", "breathless", "refractory", "satisfied", "spent")):
+                                    cur_effs = [s for s in cur_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("aroused", "breathless", "refractory", "satisfied", "spent"))]
+                                    db.set_status_effects(u_lead, cur_effs)
+                                    if isinstance(ch_lead, dict):
+                                        ch_lead["status_effects"] = cur_effs
+                                    _sync_player_outcome_status(cur_effs)
+                        all_c_list = db.get_contacts(session_id) or [] if session_id else []
+                        for c_full in all_c_list:
+                            if isinstance(c_full, dict) and c_full.get("name"):
+                                c_effs = c_full.get("status_effects") or []
+                                if any(k in str(s).lower() for s in c_effs for k in ("aroused", "breathless", "refractory", "satisfied", "spent")):
+                                    c_id = c_full.get("npc_id") or c_full.get("contact_id") or str(c_full.get("name")).lower().replace(" ", "_")
+                                    c_effs = [s for s in c_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("aroused", "breathless", "refractory", "satisfied", "spent"))]
+                                    db.update_contact_status_effects(session_id, c_id, first_char_id, c_effs)
+                except Exception as e:
+                    log.debug("Could not update refractory status on disengagement turn: %s", e)
 
 
     # 7. Downed / 0 HP character posture synchronization
@@ -2084,27 +2756,34 @@ def _reduce_entities_and_gifts(session_id: int, session: dict, outcome: dict, pa
             appearance=norm_app,
         )
         if ent_type.lower() == "person" and ent_name:
-            ent_binfo = {}
-            if clean_desc:
-                ent_binfo["description"] = clean_desc
-            for k in ("role", "occupation", "faction", "club", "club_role", "grade", "clique", "age", "location", "motivation", "mannerisms", "disposition"):
-                val = entity.get(k)
-                if val not in (None, "", "None", "Unknown", [], {}):
-                    ent_binfo[k] = val
-            db.upsert_contact(
-                session_id=session_id,
-                character_id=first_char_id,
-                npc_id=ent_name,
-                name=ent_name,
-                basic_info=ent_binfo if ent_binfo else None,
-                delta_score=0,
-                new_traits=entity.get("traits", []),
-                new_preferences=entity.get("preferences", []),
-                race=norm_race,
-                gender=gender,
-                appearance=norm_app,
-                narrative_text=raw_turn_narrative,
-            )
+            existing_c = db.get_contact(session_id, ent_name, first_char_id)
+            party_npcs = db.get_session_party_npcs(session_id)
+            party_names = {p.get("name", "").lower() for p in (party_npcs or [])}
+            is_party = ent_name.lower() in party_names
+            # Only existing contacts or party members get contacts table updates.
+            # Ambient strangers and unrecruited NPCs remain in lorebook (World Codex) only.
+            if existing_c or is_party:
+                ent_binfo = {}
+                if clean_desc:
+                    ent_binfo["description"] = clean_desc
+                for k in ("role", "occupation", "faction", "club", "club_role", "grade", "clique", "age", "location", "motivation", "mannerisms", "disposition"):
+                    val = entity.get(k)
+                    if val not in (None, "", "None", "Unknown", [], {}):
+                        ent_binfo[k] = val
+                db.upsert_contact(
+                    session_id=session_id,
+                    character_id=first_char_id,
+                    npc_id=ent_name,
+                    name=ent_name,
+                    basic_info=ent_binfo if ent_binfo else None,
+                    delta_score=0,
+                    new_traits=entity.get("traits", []),
+                    new_preferences=entity.get("preferences", []),
+                    race=norm_race,
+                    gender=gender,
+                    appearance=norm_app,
+                    narrative_text=raw_turn_narrative,
+                )
 
 def _reduce_media_capture(session_id: int, session: dict, party: list, outcome: dict, actions: list, scen_key: str, items_gained_by_user: dict):
     """Extracted Phase 2B Reducer for Smartphone Media Capture."""

@@ -968,6 +968,66 @@ def _canonical_clothing_slot(slot_name: str) -> str:
     return s
 
 
+def compute_clothing_summary_badge(clothing_dict: Optional[Dict[str, Any]], gender: str = "Female") -> str:
+    """
+    Synthesizes current actor clothing layers into an intuitive, UI-friendly status badge:
+      - Fully Naked 🔞 (everything off)
+      - Underwear Only 👙 / 🩲 (outer top and bottom off, underwear worn)
+      - Topless 🍈 / Shirtless 👕 (top off, bottom on)
+      - Bottomless 🍑 (bottom off, top on)
+      - Disheveled 👔 (any layer disheveled/pulled aside, or missing undergarment while outer layers are on)
+      - Fully Clothed 👕 (all standard clothing on)
+    """
+    if not clothing_dict or not isinstance(clothing_dict, dict):
+        return "Fully Clothed 👕"
+
+    gen = str(gender or "Female").lower()
+    is_male = any(kw in gen for kw in ("male", "man", "boy", "he", "him", "his")) and not any(kw in gen for kw in ("female", "woman"))
+
+    top = str(clothing_dict.get("top", "clothed") or "clothed").strip().lower()
+    bot = str(clothing_dict.get("bottom", "clothed") or "clothed").strip().lower()
+    u_top = str(clothing_dict.get("under_top", "worn") or "worn").strip().lower()
+    u_bot = str(clothing_dict.get("under_bottom", "worn") or "worn").strip().lower()
+
+    def _is_off(val: str) -> bool:
+        return any(k in val for k in ("off", "none", "removed", "stripped", "bare", "nude", "dropped to floor", "dropped"))
+
+    def _is_disheveled(val: str) -> bool:
+        return any(k in val for k in ("disheveled", "unbuttoned", "pulled down", "pulled aside", "lowered", "loosened", "askew", "open", "torn", "exposed"))
+
+    top_off = _is_off(top)
+    bot_off = _is_off(bot)
+    u_top_off = _is_off(u_top)
+    u_bot_off = _is_off(u_bot)
+
+    # 1. Fully Naked: Both outer top/bottom off, and undergarments off
+    # Note: For male characters, under_top is naturally None (N/A)
+    if top_off and bot_off and (u_top_off or is_male) and u_bot_off:
+        return "Fully Naked 🔞"
+
+    # 2. Underwear Only: Outer top and bottom off, but at least one undergarment worn
+    if top_off and bot_off:
+        return "Underwear Only 🩲" if is_male else "Underwear Only 👙"
+
+    # 3. Topless / Shirtless: Top is off, but bottom is not completely off
+    if top_off and not bot_off:
+        return "Shirtless 👕" if is_male else "Topless 🍈"
+
+    # 4. Bottomless: Bottom is off, but top is not completely off
+    if bot_off and not top_off:
+        return "Bottomless 🍑"
+
+    # 5. Disheveled: Any layer is disheveled/pulled down/unbuttoned, or missing undergarment
+    # Note: For male characters, having no bra (under_top) is standard, so only u_bot_off indicates commando
+    has_disheveled_layer = _is_disheveled(top) or _is_disheveled(bot) or _is_disheveled(u_top) or _is_disheveled(u_bot)
+    has_missing_undergarment = u_bot_off or (u_top_off and not is_male)
+    if has_disheveled_layer or has_missing_undergarment:
+        return "Disheveled 👔"
+
+    # 6. Default: Fully Clothed
+    return "Fully Clothed 👕"
+
+
 def _is_name_allowed(name: str, allowed_names: set) -> bool:
     if not allowed_names:
         return True

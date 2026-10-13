@@ -274,12 +274,18 @@ PHONE_FLIRT_GUARD_PATTERNS = (
 )
 
 # --- DIALOGUE LOCK & EXITS ---
+from localization import (
+    get_all_dialogue_exit_phrases,
+    get_all_dialogue_init_prefixes,
+    get_all_movement_prefixes,
+)
+
 DIALOGUE_EXIT_PHRASES = (
     "say goodbye", "take your leave", "part ways", "excuse your", "excuse yourself",
     "leave the conversation", "end the conversation", "wrap up the chat", "step away",
     "bid farewell", "head back to class", "return to what you were doing",
     "walk away", "exit conversation", "farewell"
-)
+) + get_all_dialogue_exit_phrases()
 
 PARTING_REQUEST_RE = re.compile(
     r"\b(?:thank\w*|thanks)\b.*?\b(?:keep (?:an eye out|in touch|me posted)|let (?:me|us) know if you (?:hear|see|find|spot)|take care)\b",
@@ -297,7 +303,7 @@ DIALOGUE_INIT_PREFIXES = (
     "strike up a conversation with ", "approach and speak with ", "approach and talk to ",
     "approach and greet ", "say hello to ", "say hi to ", "say hello", "say hi",
     "wave to ", "wave at ", "wave towards ", "wave toward ", "call over "
-)
+) + get_all_dialogue_init_prefixes()
 
 # --- SPATIAL MOVEMENT & RESIDENCES ---
 MOVEMENT_PREFIXES = (
@@ -308,7 +314,7 @@ MOVEMENT_PREFIXES = (
     "step into ", "step through ", "enter the ", "enter ", "visit the ", "visit ",
     "go to ", "move to ", "move into ", "return to ", "leave for ", "make our way to ",
     "make your way to ", "make my way to ", "slip into ", "slip to "
-)
+) + get_all_movement_prefixes()
 
 RESIDENCE_VISIT_RE = re.compile(
     r"\b(?:her|his|their|my|our)\s+(?:home|house|place|apartment|residence|foyer|dorm|porch)\b|"

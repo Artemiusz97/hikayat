@@ -70,5 +70,23 @@ class TestCharacterLimit(unittest.TestCase):
         self.assertIsNotNone(equip1_again["Weapon"])
         self.assertEqual(equip1_again["Weapon"]["name"], "Iron Sword")
 
+    def test_character_order_preserved_on_switch(self):
+        base_stats = {"STR": 1, "PER": 1, "END": 1, "CHA": 1, "INT": 1, "AGI": 1, "LUK": 1}
+        char1 = db.create_character(self.user_id, "Artemiusz", "Honor Student", "", base_stats)
+        char2 = db.create_character(self.user_id, "Artem", "School Journalist", "", base_stats)
+
+        # Before switch: char1 should be first, char2 second (creation order)
+        chars = db.get_user_characters(self.user_id)
+        self.assertEqual([c["name"] for c in chars], ["Artemiusz", "Artem"])
+
+        # Switch to Artem (char2)
+        db.switch_character(self.user_id, char2["id"])
+
+        # Characters order must remain identical: Artemiusz first, Artem second
+        chars_after = db.get_user_characters(self.user_id)
+        self.assertEqual([c["name"] for c in chars_after], ["Artemiusz", "Artem"])
+        self.assertEqual(chars_after[0]["is_active"], 0)
+        self.assertEqual(chars_after[1]["is_active"], 1)
+
 if __name__ == "__main__":
     unittest.main()

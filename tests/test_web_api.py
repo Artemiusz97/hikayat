@@ -874,13 +874,34 @@ def test_wave4_circuit_breaker_companions_phone_shop_and_lobbies():
         location="Downtown ➔ Neon Alley"
     )
 
-    # Add friendly NPC contact (affinity 25 >= 15)
+    # Add contact with affinity 25 (< 100 Friend threshold, requires gold to recruit)
     db.upsert_contact(
         session_id=session_id,
         character_id=char["id"],
         npc_id="kira_vex",
         name="Kira Vex",
         delta_score=25,
+        basic_info={"role": "Shadow Runner", "level": 3},
+        track="platonic"
+    )
+
+    # 1. Attempting recruitment with insufficient gold (< 187 gold) triggers 400
+    res_recruit_fail = client.post("/api/party/companion", json={
+        "user_id": user_id,
+        "session_id": session_id,
+        "npc_name": "Kira Vex",
+        "action": "recruit"
+    })
+    assert res_recruit_fail.status_code == 400
+    assert "requires at least Friend standing" in res_recruit_fail.json()["detail"]
+
+    # 2. Promoting contact to Friend standing (100+ Affinity) allows free recruitment
+    db.upsert_contact(
+        session_id=session_id,
+        character_id=char["id"],
+        npc_id="kira_vex",
+        name="Kira Vex",
+        delta_score=75,  # 25 + 75 = 100
         basic_info={"role": "Shadow Runner", "level": 3},
         track="platonic"
     )
@@ -895,6 +916,25 @@ def test_wave4_circuit_breaker_companions_phone_shop_and_lobbies():
     rec_data = res_recruit.json()
     assert rec_data["status"] == "recruited"
     assert any(p["name"] == "Kira Vex" for p in rec_data["party_npcs"])
+
+    # 3. Merchants cannot be recruited into the party even at high affinity
+    db.upsert_contact(
+        session_id=session_id,
+        character_id=char["id"],
+        npc_id="barkeep_tom",
+        name="Barkeep Tom",
+        delta_score=150,
+        basic_info={"role": "Shopkeeper", "level": 1},
+        track="platonic"
+    )
+    res_recruit_merch = client.post("/api/party/companion", json={
+        "user_id": user_id,
+        "session_id": session_id,
+        "npc_name": "Barkeep Tom",
+        "action": "recruit"
+    })
+    assert res_recruit_merch.status_code == 400
+    assert "merchant" in res_recruit_merch.json()["detail"]
 
     res_dismiss = client.post("/api/party/companion", json={
         "user_id": user_id,

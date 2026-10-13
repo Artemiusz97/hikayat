@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 export const formatNarrative = (text) => {
   if (!text) return null;
@@ -77,6 +78,7 @@ export const getOutcomeTierTheme = (rawTier, rawTierLabel, rawStat) => {
 };
 
 const HistoryCard = ({ entry, prevSceneTitle = '', sceneImageUrl = null }) => {
+  const { t } = useTranslation();
   if (!entry) return null;
 
   if (typeof entry === 'string') {
@@ -157,7 +159,7 @@ const HistoryCard = ({ entry, prevSceneTitle = '', sceneImageUrl = null }) => {
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5 pt-2 border-t border-white/5">
         <div className="flex items-center gap-2 min-w-0 text-xs text-gray-400/90 italic">
           <span className="text-fantasy-accent/70 not-italic font-mono text-[11px]">▸</span>
-          <span className="truncate">{actionLabel || 'Action Resolved'}</span>
+          <span className="truncate">{actionLabel || t('history.action_resolved')}</span>
         </div>
 
         <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[10px] font-mono font-bold uppercase tracking-wider shrink-0 ${theme.badgeClass}`}>

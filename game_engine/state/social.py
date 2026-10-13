@@ -41,13 +41,10 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
     for a in (actions or []):
         a_label = str(a.get("label", ""))
         a_parsed = classify_action_intent(a_label)
-        is_recruit = (
-            (is_combat_scen and a_parsed.category == IntentCategory.PARTY_RECRUIT)
-            or (not is_combat_scen and a_parsed.category in (IntentCategory.PARTY_RECRUIT, IntentCategory.SOCIAL_INVITE))
-        )
+        is_recruit = is_combat_scen and a_parsed.category == IntentCategory.PARTY_RECRUIT
         if is_recruit:
             a_check = a.get("check")
-            is_success = is_check_success(a_check, default_if_none=not is_combat_scen)
+            is_success = is_check_success(a_check, default_if_none=False)
   
             # Identify target NPC from label or dialogue_partners or current_npcs
             target_npc_name = None
@@ -66,11 +63,34 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                     target_npc_name = dps[0]
   
             if target_npc_name:
-                if is_success:
+                # Merchants and active hostile combat enemies cannot be recruited
+                lore_ent = next((p for p in db.get_lorebook(session_id).get("person", []) if p.get("name", "").lower() == target_npc_name.lower()), {})
+                t_role = str(lore_ent.get("role") or lore_ent.get("occupation") or "").lower()
+                if any(m in t_role for m in ("merchant", "shopkeeper", "vendor", "apothecary")):
+                    continue
+                enemy_list = game_engine.get_active_enemies(session) or []
+                if any(game_engine._get_npc_name(e).lower() == target_npc_name.lower() for e in enemy_list if e):
+                    continue
+                from mechanics.social.relationships import get_recruitment_cost
+                contact_c = db.get_contact(session_id, target_npc_name, first_char_id)
+                current_affinity = contact_c.get("relationship_score", 0) if contact_c else 0
+                party_level = max(1, party[0][0].get("level", 1)) if (party and party[0]) else 1
+                rec_cost = get_recruitment_cost(current_affinity, party_level)
+
+                is_money_recruit = any(kw in a_label.lower() for kw in ("pay", "hire", "gold", "coin", "bribe", "contract", "salary", "wage", "money"))
+                user_id = party[0][0]["user_id"] if (party and party[0]) else 0
+                char_data = db.get_character(user_id) if user_id else None
+                char_gold = char_data.get("gold", 0) if char_data else 0
+
+                can_afford = (char_gold >= rec_cost)
+                recruitment_succeeded = can_afford if is_money_recruit else is_success
+
+                if recruitment_succeeded:
+                    if is_money_recruit and rec_cost > 0 and user_id:
+                        db.apply_hp_mp_delta(user_id, gold_delta=-rec_cost)
                     party_npcs = db.get_session_party_npcs(session_id)
                     human_count = len(session.get("turn_order", [])) if session else 1
                     if human_count + len(party_npcs) < 4:
-                        party_level = max(1, party[0][0].get("level", 1)) if (party and party[0]) else 1
                         comp_hp = 15 + party_level * 3 if is_combat_scen else 100
                         comp_mp = 10 + party_level * 2 if is_combat_scen else 100
                         from mechanics.world.locations import resolve_companion_origin_location
@@ -85,15 +105,7 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                                     role_clean = cand
                                     break
                         else:
-                            contact_c = db.get_contact(session_id, target_npc_name.lower().replace(" ", "_"))
-                            c_trk = str(contact_c.get("track") or "").lower() if contact_c else ""
-                            c_sc = contact_c.get("relationship_score", 0) if contact_c else 0
-                            if "date" in a_label or c_trk == "romance" or c_sc >= 15:
-                                role_clean = "Date"
-                            elif "study" in a_label:
-                                role_clean = "Study Partner"
-                            else:
-                                role_clean = "Friend"
+                            role_clean = "Friend"
                             
                         companion_data = {
                             "name": target_npc_name,
@@ -165,6 +177,12 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
             # Check Peer / Role Eligibility (e.g. students vs teachers/parents/clerks in high school)
             import mechanics.social.relationships as relationships
             if not relationships.is_contact_eligible(name=n_name, role=n_role, description=n_desc, scenario=scen_key):
+                continue
+
+            # Contacts require Friend tier (score >= 100) or active party membership
+            existing_c = db.get_contact(session_id, n_name, first_char_id)
+            is_party = n_name.lower() in party_names
+            if not is_party and (not existing_c or existing_c.get("relationship_score", 0) < 100):
                 continue
   
             n_traits = (npc.get("traits") if isinstance(npc, dict) else []) or []
@@ -788,7 +806,8 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                     and is_confession_target_npc
                     and overall_check_success
                 )
-                if not has_confession:
+                cur_sc = (contact.get("relationship_score", 0) if contact else 0) + delta
+                if not has_confession or cur_sc < 100:
                     track = existing_track
   
             app_dict["intercourse_experience"] = current_intercourse
@@ -845,23 +864,7 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 narrative_text=narrative_text
             )
   
-            # Auto-promote neutral NPC to friendly in lorebook when positive affinity is established
             updated_contact = db.get_contact(session_id, npc_name, first_char_id)
-            if updated_contact and (updated_contact.get("relationship_score", 0) >= 3 or delta > 0):
-                up_binfo = updated_contact.get("basic_info") or {}
-                db.upsert_lorebook_entity(
-                    session_id=session_id,
-                    entity_type="person",
-                    name=updated_contact.get("name") or npc_name,
-                    description=up_binfo.get("description", ""),
-                    disposition="friendly",
-                    faction=up_binfo.get("faction") or up_binfo.get("club") or "",
-                    traits=updated_contact.get("unlocked_traits", []),
-                    motivation=up_binfo.get("motivation", ""),
-                    mannerisms=up_binfo.get("mannerisms", ""),
-                    race=updated_contact.get("race") or "",
-                    appearance=updated_contact.get("appearance", {})
-                )
             # Breakup handling: If affinity plunges into negative territory (< 0), demote romantic track to platonic
             if updated_contact and str(updated_contact.get("track", "")).lower() == "romantic" and updated_contact.get("relationship_score", 0) < 0:
                 db.update_contact_track(session_id, npc_name, "platonic", character_id=first_char_id)
@@ -991,7 +994,8 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                         and is_conf_target
                         and overall_check_success
                     )
-                    if not has_confession:
+                    cur_sc = (c.get("relationship_score", 0) if c else 0)
+                    if not has_confession or cur_sc < 100:
                         track = orig_track
   
                 app_dict["intercourse_experience"] = current_intercourse

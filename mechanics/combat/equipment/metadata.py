@@ -38,14 +38,11 @@ def is_two_handed(item: Any) -> bool:
     else:
         return False
 
-    # Check against known 2H archetypes and keywords
-    heavy_archetypes = [
-        "greatsword", "polearm", "warhammer", "staff", "bow", "crossbow",
-        "rifle", "shotgun", "machinegun", "explosive", "longsword", "halberd", "pike"
-    ]
-    if any(k in arch for k in heavy_archetypes):
+    from localization import TWO_HANDED_ARCHETYPES, TWO_HANDED_KEYWORDS
+
+    if any(k in arch for k in TWO_HANDED_ARCHETYPES):
         return True
-    if any(k in name_str for k in ["greatsword", "halberd", "pike", "warhammer", "staff", "bow", "crossbow", "rifle", "shotgun", "machine gun", "cannon", "rocket", "two-handed", "2h"]):
+    if any(k in name_str for k in TWO_HANDED_KEYWORDS):
         return True
     return False
 

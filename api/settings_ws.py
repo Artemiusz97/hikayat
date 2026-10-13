@@ -50,6 +50,9 @@ async def save_settings(user_id: int, req: SettingsUpdateRequest):
     await adb(
         db.save_user_settings,
         user_id=user_id,
+        language=req.language,
+        ui_language=req.ui_language,
+        narration_language=req.narration_language,
         verbosity=req.verbosity,
         dialogue_mode=req.dialogue_mode,
         image_gen_enabled=req.image_gen_enabled,

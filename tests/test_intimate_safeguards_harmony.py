@@ -116,7 +116,7 @@ class TestIntimateSafeguardsHarmony(unittest.TestCase):
         contact_virgin = {
             "name": "Rachel Vance",
             "gender": "female",
-            "relationship_score": 84,  # Level 3 disclosure
+            "relationship_score": 220,  # Level 3 disclosure
             "appearance": {
                 "predetermined_intercourse": "virgin",
                 "intercourse_experience": "virgin",
@@ -145,7 +145,7 @@ class TestIntimateSafeguardsHarmony(unittest.TestCase):
         contact_experienced = {
             "name": "Lyra Ravenwood",
             "gender": "female",
-            "relationship_score": 84,  # Level 3 disclosure
+            "relationship_score": 220,  # Level 3 disclosure
             "appearance": {
                 "predetermined_intercourse": "non_virgin",
                 "intercourse_experience": "non_virgin",

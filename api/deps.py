@@ -358,6 +358,9 @@ class LoadSlotRequest(BaseModel):
 
 class SettingsUpdateRequest(BaseModel):
     user_id: int
+    language: Optional[str] = "en"
+    ui_language: Optional[str] = None
+    narration_language: Optional[str] = None
     verbosity: Optional[str] = "normal"
     dialogue_mode: Optional[str] = "balanced"
     image_gen_enabled: Optional[int] = 0

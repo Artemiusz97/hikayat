@@ -1,7 +1,7 @@
-# Hikayat (v2.2.0) — Living AI Tabletop RPG & Web Application
+# Hikayat (v2.3.0) — Living AI Tabletop RPG & Web Application
 
 [![Tests](https://github.com/Artemiusz97/hikayat/actions/workflows/tests.yml/badge.svg)](https://github.com/Artemiusz97/hikayat/actions/workflows/tests.yml)
-[![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)](releases/CHANGELOG-v2.2.0.md)
+[![Version](https://img.shields.io/badge/version-2.3.0-blue.svg)](releases/CHANGELOG-v2.3.0.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/react-18.2-61dafb.svg)](web/)
 
@@ -36,6 +36,10 @@ Hikayat is a comprehensive, multi-genre LLM-driven Tabletop RPG engine powered b
 ### 6. Headless Turn Service & Omnichannel Architecture
 * **Presentation-Decoupled Game Loop**: The turn engine (`services/turn_service.py`) operates as a completely headless core.
 * **100% Platform Parity**: Both the Discord bot (slash commands, button decks, modal sheets) and the React Web SPA (REST endpoints, WebSockets) consume the exact same underlying service, ensuring synchronized state across platforms.
+
+### 7. Multi-Language Internationalization & NPC Pronoun Consistency
+* **Trilingual Localization Engine (`localization/`, `web/src/locales/`)**: Real-time translation and canonicalization of item affixes, inventory lemmas, movement prefixes, and dialogue intents across English, Polish, and Malay.
+* **Grammatical Parity & Anti-Drift Engine**: Strict immutable prompt directives and deterministic narrative sanitizers (`sanitize_npc_pronoun_consistency`) guaranteeing persistent gender and pronoun accuracy across extended sessions.
 
 ---
 
@@ -131,6 +135,7 @@ hikayat/
 │   ├── turn/                   # Turn loop generation & outcome handling
 │   ├── context.py              # Known-world prompt assembly & token budget
 │   └── core.py                 # Narrative rules & schema constraints
+├── localization/               # Multi-language i18n subsystem (en, ms, pl)
 ├── mechanics/                  # Domain-specific gameplay subsystems
 │   ├── combat/                 # Tactical decks, 2000+ line weapons arsenal, armor & spells
 │   ├── narrative/              # Anti-cliche filters, paragraph quotas & style supremacy
@@ -144,7 +149,7 @@ hikayat/
 ├── tests/                      # Automated unit, integration, simulator & contract test suites
 ├── web/                        # Unified modern React Single-Page Application
 │   ├── dist/                   # Production compiled assets (pre-built, served natively by FastAPI)
-│   ├── src/                    # ActionPanel, TurnOutcomePanel, StoryFeed, PhoneModal, CodexPanel
+│   ├── src/                    # ActionPanel, TurnOutcomePanel, StoryFeed, PhoneModal, CodexPanel, locales & i18n
 │   ├── package.json
 │   └── vite.config.js
 ├── config.py                   # Environment configuration loader

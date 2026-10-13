@@ -28,6 +28,30 @@ def get_scenario_contact_title(scen_key: str) -> tuple[str, str]:
     return ("📜", "Codex of Acquaintances")
 
 
+def filter_unlocked_contacts(contacts: list[dict], party_names: set[str], scenario_key: str) -> list[dict]:
+    """Filters contacts down strictly to Friends (score >= 100) or active party members.
+    In High School scenarios, also requires peer/student eligibility.
+    """
+    from mechanics.social.relationships import is_contact_eligible
+    from scenario_data import has_tag
+    is_hs = has_tag(scenario_key, "high_school")
+    unlocked = []
+    for c in contacts:
+        name = c.get("name", "")
+        score = c.get("relationship_score", 0)
+        is_party = name.lower() in party_names
+        if not is_party and score < 100:
+            continue
+        if is_hs:
+            b_info = c.get("basic_info") or {}
+            r = b_info.get("role") or b_info.get("occupation") or ""
+            d = b_info.get("description") or ""
+            if not is_contact_eligible(name=name, role=r, description=d, scenario=scenario_key):
+                continue
+        unlocked.append(c)
+    return unlocked
+
+
 class ContactSelect(discord.ui.Select):
     def __init__(self, page_contacts: list[dict], all_contacts: list[dict], scenario_key: str, page: int = 0, total_pages: int = 1,
                  session_id: int = 0, cog = None, from_phone: bool = False):
@@ -214,6 +238,95 @@ class RelationsView(discord.ui.View):
         return True
 
 
+class WorldCodexButton(discord.ui.Button):
+    def __init__(self, session_id: int, scenario_key: str, user_id: int, contacts: list[dict],
+                 cog=None, from_phone: bool = False, row: int = 1):
+        super().__init__(label="World Codex", emoji="🌍", style=discord.ButtonStyle.secondary, row=row)
+        self.session_id = session_id
+        self.scenario_key = scenario_key
+        self.user_id = user_id
+        self.contacts = contacts
+        self.cog = cog
+        self.from_phone = from_phone
+
+    async def callback(self, interaction: discord.Interaction):
+        char = await adb(db.get_character, self.user_id)
+        char_name = char.get("name", "Hero") if char else "Player"
+        embed, total_pages, _ = build_world_codex_embed(self.session_id, self.scenario_key, char_name, page=0)
+        view = WorldCodexView(
+            self.session_id, self.scenario_key, self.user_id, self.contacts,
+            page=0, total_pages=total_pages, cog=self.cog, from_phone=self.from_phone
+        )
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class WorldCodexView(discord.ui.View):
+    def __init__(self, session_id: int, scenario_key: str, user_id: int, contacts: list[dict],
+                 page: int = 0, total_pages: int = 1, cog=None, from_phone: bool = False):
+        super().__init__(timeout=180)
+        self.session_id = session_id
+        self.scenario_key = scenario_key
+        self.user_id = user_id
+        self.contacts = contacts
+        self.page = page
+        self.total_pages = total_pages
+        self.cog = cog
+        self.from_phone = from_phone
+
+        contacts_btn = discord.ui.Button(label="Personal Contacts", emoji="👥", style=discord.ButtonStyle.primary, row=0)
+        async def _on_contacts(inter: discord.Interaction):
+            char = await adb(db.get_character, self.user_id)
+            char_name = char.get("name", "Hero") if char else "Player"
+            c_embed = build_contact_list_embed(self.contacts, self.scenario_key, char_name)
+            c_view = ContactView(
+                self.contacts, self.scenario_key, self.user_id,
+                session_id=self.session_id, cog=self.cog, from_phone=self.from_phone
+            )
+            await inter.response.edit_message(embed=c_embed, view=c_view)
+        contacts_btn.callback = _on_contacts
+        self.add_item(contacts_btn)
+
+        if total_pages > 1:
+            prev_btn = discord.ui.Button(label="◀️ Prev", style=discord.ButtonStyle.secondary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self._on_prev
+            self.add_item(prev_btn)
+
+            page_label = discord.ui.Button(label=f"Page {self.page + 1}/{total_pages}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_label)
+
+            next_btn = discord.ui.Button(label="Next ▶️", style=discord.ButtonStyle.secondary, disabled=(self.page >= total_pages - 1), row=1)
+            next_btn.callback = self._on_next
+            self.add_item(next_btn)
+
+    async def _on_prev(self, interaction: discord.Interaction):
+        new_page = max(0, self.page - 1)
+        char = await adb(db.get_character, self.user_id)
+        char_name = char.get("name", "Hero") if char else "Player"
+        embed, total_pages, _ = build_world_codex_embed(self.session_id, self.scenario_key, char_name, page=new_page)
+        new_view = WorldCodexView(
+            self.session_id, self.scenario_key, self.user_id, self.contacts,
+            page=new_page, total_pages=total_pages, cog=self.cog, from_phone=self.from_phone
+        )
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
+    async def _on_next(self, interaction: discord.Interaction):
+        new_page = min(self.total_pages - 1, self.page + 1)
+        char = await adb(db.get_character, self.user_id)
+        char_name = char.get("name", "Hero") if char else "Player"
+        embed, total_pages, _ = build_world_codex_embed(self.session_id, self.scenario_key, char_name, page=new_page)
+        new_view = WorldCodexView(
+            self.session_id, self.scenario_key, self.user_id, self.contacts,
+            page=new_page, total_pages=total_pages, cog=self.cog, from_phone=self.from_phone
+        )
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This codex view is for another player.", ephemeral=True)
+            return False
+        return True
+
+
 class ContactView(discord.ui.View):
     def __init__(self, contacts: list[dict], scenario_key: str, user_id: int,
                  active_contact: dict = None, page: int = 0,
@@ -254,6 +367,12 @@ class ContactView(discord.ui.View):
                     active_contact, scenario_key, user_id, contacts,
                     session_id=session_id, cog=cog, from_phone=from_phone
                 ))
+
+        if session_id and not from_phone:
+            self.add_item(WorldCodexButton(
+                session_id=session_id, scenario_key=scenario_key, user_id=user_id,
+                contacts=contacts, cog=cog, from_phone=from_phone, row=1
+            ))
 
         # Phone-specific navigation items
         if from_phone and session_id:
@@ -750,18 +869,97 @@ def build_intimate_profile_embed(contact: dict, scenario_key: str = "fantasy", u
     return embed
 
 
+def build_world_codex_embed(session_id: int, scenario_key: str, char_name: str, page: int = 0, page_size: int = 10) -> tuple[discord.Embed, int, list[dict]]:
+    """Builds an embed listing all known/discovered people in the world from lorebook and contacts."""
+    lore = db.get_lorebook(session_id) or {}
+    persons = list(lore.get("person", []) or [])
+
+    contact_scores = {}
+    try:
+        raw_c = db.get_contacts(session_id) or []
+        for c in raw_c:
+            c_n = str(c.get("name") or "").strip().lower()
+            if c_n:
+                contact_scores[c_n] = (c.get("relationship_score", 0), c.get("track", "platonic"))
+    except Exception:
+        pass
+
+    seen = {str(p.get("name") or "").strip().lower() for p in persons if str(p.get("name") or "").strip().lower() not in ("", "none")}
+    for c in (raw_c or []):
+        c_n = str(c.get("name") or "").strip()
+        if c_n and c_n.lower() not in seen and c_n.lower() != "none":
+            b_info = c.get("basic_info") or {}
+            persons.append({
+                "name": c_n,
+                "role": b_info.get("role") or b_info.get("occupation") or "Contact",
+                "race": c.get("race") or b_info.get("race") or "Unknown",
+                "gender": c.get("gender") or b_info.get("gender") or "Unknown",
+                "description": b_info.get("description") or "",
+                "entity_type": "person",
+            })
+            seen.add(c_n.lower())
+
+    unique_persons = []
+    unique_seen = set()
+    for p in persons:
+        n = str(p.get("name") or "").strip()
+        if n and n.lower() not in unique_seen and n.lower() != "none":
+            unique_seen.add(n.lower())
+            unique_persons.append(p)
+
+    total_pages = max(1, (len(unique_persons) + page_size - 1) // page_size)
+    page = max(0, min(page, total_pages - 1))
+    start = page * page_size
+    page_items = unique_persons[start:start + page_size]
+
+    embed = discord.Embed(
+        title="🌍 World Codex: Discovered Characters & Lore",
+        description=f"Record of all characters discovered by **{char_name}** across the world.\n*Detailed personal traits, romantic memories, and full profiles are unlocked exclusively for Friends (100+ Affinity) or Party Members in your Contacts list.*",
+        color=discord.Color.teal()
+    )
+
+    if not page_items:
+        embed.add_field(
+            name="No Discovered People Yet",
+            value="You haven't encountered any notable people in this world yet. Explore locations and converse with residents to populate your World Codex!",
+            inline=False
+        )
+        return embed, total_pages, unique_persons
+
+    for p in page_items:
+        name = p.get("name", "Unknown")
+        role = p.get("role") or p.get("occupation") or p.get("description") or "Citizen"
+        race = p.get("race") or "Unknown"
+        gender = p.get("gender") or "Unknown"
+        score, track = contact_scores.get(name.lower(), (0, "platonic"))
+        tier = get_relationship_tier(score, track, scenario_key)
+        bar = format_progress_bar(score, width=8)
+
+        field_name = f"👤 {name} — *{role}*"
+        field_val = (
+            f"• **Race**: {format_race_display(race)} | **Gender**: {gender.capitalize()}\n"
+            f"• **Affinity**: {score} [{bar}] ({tier['name']})\n"
+            f"• *🔒 Detailed Profile Locked (Requires Friend 100+ or Party Member)*"
+        )
+        embed.add_field(name=field_name[:256], value=field_val[:1024], inline=False)
+
+    embed.set_footer(text=f"World Codex Page {page + 1}/{total_pages} • {len(unique_persons)} Discovered People")
+    return embed, total_pages, unique_persons
+
+
 def build_contact_list_embed(contacts: list[dict], scenario_key: str, char_name: str) -> discord.Embed:
     icon, title = get_scenario_contact_title(scenario_key)
     embed = discord.Embed(
         title=f"{icon} {title}",
-        description=f"Contacts and relationship standings for **{char_name}**.",
+        description=f"Personal contacts and relationship standings for **{char_name}**.",
         color=discord.Color.blue()
     )
 
     if not contacts:
         embed.add_field(
-            name="No Contacts Yet",
-            value="You haven't met any notable NPCs in this adventure yet. Interact with characters to build your contact list!",
+            name="No Personal Contacts Yet",
+            value="You haven't unlocked any personal contacts yet. Ambient characters and strangers are recorded in the **World Codex**.\n\n"
+                  "Raise an NPC's affinity to **Friend Tier (100+ Affinity)** or recruit them into your active party to unlock their full personal contact card!",
             inline=False
         )
         return embed
@@ -1037,10 +1235,17 @@ class ContactsCog(commands.Cog):
             return
 
         contacts = await adb(db.get_contacts, session_id=session_id, character_id=character["id"])
-        embed = build_contact_list_embed(contacts, scenario_key, character["name"])
-        view = ContactView(contacts, scenario_key, interaction.user.id)
+        party_npcs = await adb(db.get_session_party_npcs, session_id)
+        party_names = {p.get("name", "").lower() for p in (party_npcs or [])}
+        unlocked_contacts = filter_unlocked_contacts(contacts, party_names, scenario_key)
+        embed = build_contact_list_embed(unlocked_contacts, scenario_key, character["name"])
+        view = ContactView(unlocked_contacts, scenario_key, interaction.user.id, session_id=session_id, cog=self)
 
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+    @app_commands.command(name="codex", description="Open your Codex: browse personal contacts (Friends/Party) or World Lore (Known NPCs).")
+    async def codex_cmd(self, interaction: discord.Interaction):
+        await self.contacts_cmd(interaction)
 
 
 

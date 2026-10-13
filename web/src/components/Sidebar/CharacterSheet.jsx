@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Shield, Heart, Zap, User, Coins, Sparkles, Plus, AlertCircle, BookOpen, X } from 'lucide-react';
 import { apiCall } from '../../api/client';
 
@@ -29,13 +30,41 @@ const StatBar = ({ label, current, max, color, icon: Icon, extraText }) => {
   );
 };
 
-const StatusEffectBadge = ({ effect }) => {
-  const effName = typeof effect === 'string' ? effect : (effect.name || 'Effect');
-  const duration = typeof effect === 'object' && effect.duration !== undefined ? effect.duration : null;
+export const parseAndTranslateStatus = (effect, t) => {
+  let effName = typeof effect === 'string' ? effect : (effect?.name || 'Effect');
+  let duration = typeof effect === 'object' && effect?.duration !== undefined ? effect.duration : null;
+  let durationUnit = 't';
+
+  // Support bracketed duration strings like "Refractory Recovery [28 min]" or "Aroused [3 turns]"
+  const match = typeof effName === 'string' ? effName.match(/^(.*?)\s*\[(\d+)\s*(min|m|turns?|t)\]$/i) : null;
+  if (match) {
+    effName = match[1].trim();
+    duration = match[2];
+    durationUnit = match[3].toLowerCase().startsWith('m') ? 'm' : 't';
+  }
+
+  const displayLabel = effName.includes(' & ')
+    ? effName
+        .split(' & ')
+        .map(part => {
+          const pk = part.trim().toLowerCase().replace(/[\s\-]+/g, '_');
+          return t(`conditions.${pk}`, part.trim());
+        })
+        .join(' & ')
+    : t(`conditions.${effName.toLowerCase().replace(/[\s\-]+/g, '_')}`, effName);
+
+  const formattedText = duration !== null ? `${displayLabel} [${duration}${durationUnit}]` : displayLabel;
+
+  return { effName, displayLabel, duration, durationUnit, formattedText };
+};
+
+export const StatusEffectBadge = ({ effect }) => {
+  const { t } = useTranslation();
+  const { effName, displayLabel, duration, durationUnit } = parseAndTranslateStatus(effect, t);
   
   const lower = effName.toLowerCase();
   const isNegative = ['bleed', 'poison', 'burn', 'stun', 'prone', 'weaken', 'wound', 'curse', 'drain', 'freeze'].some(k => lower.includes(k));
-  const isPositive = ['shield', 'buff', 'bless', 'haste', 'regen', 'focus', 'inspire', 'guard'].some(k => lower.includes(k));
+  const isPositive = ['shield', 'buff', 'bless', 'haste', 'regen', 'focus', 'inspire', 'guard', 'satisfied'].some(k => lower.includes(k));
 
   const badgeColor = isNegative 
     ? 'bg-red-950/60 text-red-300 border-red-800/60' 
@@ -43,19 +72,24 @@ const StatusEffectBadge = ({ effect }) => {
       ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60' 
       : 'bg-amber-950/60 text-amber-300 border-amber-800/60';
 
+  const tooltip = duration !== null 
+    ? `${displayLabel} (${duration}${durationUnit === 'm' ? ' min' : ' turns'} remaining)` 
+    : displayLabel;
+
   return (
     <span 
       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border ${badgeColor}`}
-      title={duration !== null ? `${effName} (${duration} turns remaining)` : effName}
+      title={tooltip}
     >
       <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"></span>
-      {effName}
-      {duration !== null && <span className="opacity-70 text-[9px] font-mono font-bold">({duration}t)</span>}
+      {displayLabel}
+      {duration !== null && <span className="opacity-70 text-[9px] font-mono font-bold">({duration}{durationUnit})</span>}
     </span>
   );
 };
 
 const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn }) => {
+  const { t } = useTranslation();
   const [allocating, setAllocating] = useState(null);
   const [showAppearanceModal, setShowAppearanceModal] = useState(false);
   const [editBSize, setEditBSize] = useState(character?.appearance?.breast_size || character?.breast_size || 'average');
@@ -132,16 +166,24 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
       statusList = character.status_effects.split(',').map(s => s.trim()).filter(Boolean);
     }
   }
+  if (Array.isArray(statusList)) {
+    statusList = statusList.filter(s => {
+      const str = typeof s === 'string' ? s.trim() : (s?.name || '').trim();
+      return str && !['[]', '{}', '""', "''", 'none', 'null'].includes(str.toLowerCase());
+    });
+  } else {
+    statusList = [];
+  }
 
   // Core 7 attributes
   const coreStats = [
-    { key: 'str_', label: 'STR', name: 'STR', val: character.str_ ?? 1, desc: 'Attack & Inventory' },
-    { key: 'agi', label: 'AGI', name: 'AGI', val: character.agi ?? 1, desc: 'Speed & Evasion' },
-    { key: 'int_', label: 'INT', name: 'INT', val: character.int_ ?? 1, desc: 'Magic & Lore' },
-    { key: 'end_', label: 'END', name: 'END', val: character.end_ ?? 1, desc: 'Health & Defense' },
-    { key: 'per_', label: 'PER', name: 'PER', val: character.per_ ?? 1, desc: 'Perception & Crit' },
-    { key: 'cha', label: 'CHA', name: 'CHA', val: character.cha ?? 1, desc: 'Social & Romance' },
-    { key: 'luk', label: 'LUK', name: 'LUK', val: character.luk ?? 1, desc: 'Fortune & Loot' },
+    { key: 'str_', label: 'STR', name: 'STR', val: character.str_ ?? 1, fullLabel: t('stats.str'), desc: t('stats.str_desc') },
+    { key: 'agi', label: 'AGI', name: 'AGI', val: character.agi ?? 1, fullLabel: t('stats.agi'), desc: t('stats.agi_desc') },
+    { key: 'int_', label: 'INT', name: 'INT', val: character.int_ ?? 1, fullLabel: t('stats.int'), desc: t('stats.int_desc') },
+    { key: 'end_', label: 'END', name: 'END', val: character.end_ ?? 1, fullLabel: t('stats.end'), desc: t('stats.end_desc') },
+    { key: 'per_', label: 'PER', name: 'PER', val: character.per_ ?? 1, fullLabel: t('stats.per'), desc: t('stats.per_desc') },
+    { key: 'cha', label: 'CHA', name: 'CHA', val: character.cha ?? 1, fullLabel: t('stats.cha'), desc: t('stats.cha_desc') },
+    { key: 'luk', label: 'LUK', name: 'LUK', val: character.luk ?? 1, fullLabel: t('stats.luk'), desc: t('stats.luk_desc') },
   ];
 
   const combatGrid = [
@@ -194,10 +236,20 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
                   className="px-1.5 py-0.2 rounded bg-pink-950/60 hover:bg-pink-900/80 border border-pink-700/60 text-pink-300 font-medium text-[9px] flex items-center gap-1 transition-colors"
                   title="Click to customize breast size & tactile flavor"
                 >
-                  <span>🔞 Breast Size: {character.appearance?.breast_size || character.breast_size || 'Modest'}</span>
-                  {(character.appearance?.asset_texture || character.asset_texture) && (
-                    <span className="text-pink-200/70 italic">({character.appearance?.asset_texture || character.asset_texture})</span>
-                  )}
+                  {(() => {
+                    const rawBSize = character.appearance?.breast_size || character.breast_size || 'Modest';
+                    const bKey = String(rawBSize).toLowerCase().replace(/[\s\-]+/g, '_');
+                    const bLabel = t(`anatomy.${bKey}`, rawBSize);
+                    const rawTex = character.appearance?.asset_texture || character.asset_texture;
+                    const texKey = rawTex ? String(rawTex).toLowerCase().replace(/[\s\-&]+/g, '_') : '';
+                    const texLabel = rawTex ? t(`anatomy.${texKey}`, rawTex) : '';
+                    return (
+                      <>
+                        <span>🔞 {t('anatomy.breast_size', 'Breast Size')}: {bLabel}</span>
+                        {rawTex && <span className="text-pink-200/70 italic">({texLabel})</span>}
+                      </>
+                    );
+                  })()}
                 </button>
               )}
               {isNsfw && isMale && (
@@ -207,10 +259,20 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
                   className="px-1.5 py-0.2 rounded bg-purple-950/60 hover:bg-purple-900/80 border border-purple-700/60 text-purple-300 font-medium text-[9px] flex items-center gap-1 transition-colors"
                   title="Click to customize penis size & tactile flavor"
                 >
-                  <span>🔞 Penis Size: {character.appearance?.penis_size || character.penis_size || 'Average'}</span>
-                  {(character.appearance?.asset_texture || character.asset_texture) && (
-                    <span className="text-purple-200/70 italic">({character.appearance?.asset_texture || character.asset_texture})</span>
-                  )}
+                  {(() => {
+                    const rawPSize = character.appearance?.penis_size || character.penis_size || 'Average';
+                    const pKey = String(rawPSize).toLowerCase().replace(/[\s\-]+/g, '_');
+                    const pLabel = t(`anatomy.${pKey}`, rawPSize);
+                    const rawTex = character.appearance?.asset_texture || character.asset_texture;
+                    const texKey = rawTex ? String(rawTex).toLowerCase().replace(/[\s\-&]+/g, '_') : '';
+                    const texLabel = rawTex ? t(`anatomy.${texKey}`, rawTex) : '';
+                    return (
+                      <>
+                        <span>🔞 {t('anatomy.penis_size', 'Penis Size')}: {pLabel}</span>
+                        {rawTex && <span className="text-purple-200/70 italic">({texLabel})</span>}
+                      </>
+                    );
+                  })()}
                 </button>
               )}
             </div>
@@ -229,7 +291,7 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
       {isNonCombat && (
         <div className="bg-cyan-950/30 border border-cyan-800/50 px-2.5 py-1.5 rounded text-[11px] text-cyan-200 flex items-center gap-1.5">
           <Sparkles size={13} className="text-cyan-400 shrink-0" />
-          <span><strong>Social / Roleplay Scenario:</strong> Attributes scale social influence and stamina.</span>
+          <span>{t('stats.social_scenario_notice', 'Social / Roleplay Scenario: Attributes scale social influence and stamina.')}</span>
         </div>
       )}
 
@@ -238,23 +300,23 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
         {tempHp > 0 && (
           <div className="flex justify-end mb-0.5">
             <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-600/60 flex items-center gap-1">
-              <Shield size={9} /> +{tempHp} Shield
+              <Shield size={9} /> +{tempHp} {t('inventory.shield', 'Shield')}
             </span>
           </div>
         )}
         <StatBar 
-          label="HP" current={character.hp} max={character.max_hp} 
+          label={t('stats.hp')} current={character.hp} max={character.max_hp} 
           icon={Heart} color={{ text: 'text-health', bg: 'bg-health' }} 
           extraText={tempHp > 0 ? `+${tempHp} Shield` : null}
         />
         <StatBar 
-          label="MP" current={character.mp} max={character.max_mp} 
+          label={t('stats.mp')} current={character.mp} max={character.max_mp} 
           icon={Zap} color={{ text: 'text-mana', bg: 'bg-mana' }} 
         />
         {/* XP Bar */}
         <div className="pt-1 border-t border-fantasy-border/30">
           <div className="flex justify-between items-center text-[11px] text-gray-300 mb-0.5">
-            <span className="uppercase font-semibold tracking-wider text-gray-400 text-[10px]">Experience</span>
+            <span className="uppercase font-semibold tracking-wider text-gray-400 text-[10px]">{t('stats.xp')}</span>
             <span className="font-mono text-[10px]">{character.xp || 0} / {nextLevelXp} XP</span>
           </div>
           <div className="h-1.5 w-full bg-black/80 rounded-full overflow-hidden border border-fantasy-border/40">
@@ -266,12 +328,25 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
         </div>
       </div>
 
+      {/* Dynamic Clothing Status */}
+      {character.clothing_status && (
+        <div className="flex items-center justify-between px-2.5 py-1.5 rounded-md bg-black/40 border border-fantasy-border/40 text-[11px]">
+          <span className="text-gray-400 font-medium flex items-center gap-1.5">
+            <span className="text-xs">👔</span>
+            <span>{t('stats.clothing_status', 'Clothing Status')}:</span>
+          </span>
+          <span className="font-semibold text-gray-200 bg-neutral-900/80 px-2 py-0.5 rounded border border-neutral-700/80 text-[10.5px]">
+            {character.clothing_status}
+          </span>
+        </div>
+      )}
+
       {/* Active Status Effects */}
       {statusList && statusList.length > 0 && (
         <div className="bg-black/40 p-2 rounded-md border border-fantasy-border/40">
           <div className="text-[10px] uppercase font-bold text-gray-400 mb-1 flex items-center gap-1">
             <AlertCircle size={12} className="text-amber-400" />
-            <span>Active Conditions</span>
+            <span>{t('stats.active_conditions', 'Active Conditions')}</span>
           </div>
           <div className="flex flex-wrap gap-1">
             {statusList.map((eff, idx) => (
@@ -286,18 +361,24 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
         <div className="bg-amber-950/40 border border-amber-600/50 p-2 rounded-md flex items-center justify-between text-xs text-amber-200 animate-pulse">
           <div className="flex items-center gap-1.5">
             <Sparkles size={13} className="text-amber-400" />
-            <span className="font-medium text-[11px]"><strong>{pendingPoints}</strong> unspent point{pendingPoints > 1 ? 's' : ''}!</span>
+            <span className="font-medium text-[11px]">
+              {pendingPoints === 1
+                ? t('stats.unspent_points_one', { count: 1, defaultValue: '1 unspent point!' })
+                : t('stats.unspent_points_other', { count: pendingPoints, defaultValue: `${pendingPoints} unspent points!` })}
+            </span>
           </div>
-          <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">Allocate Below</span>
+          <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">
+            {t('stats.allocate_below', 'Allocate Below')}
+          </span>
         </div>
       )}
 
       {/* Core Attributes Grid */}
       <div>
         <div className="text-[11px] uppercase font-bold text-gray-300 tracking-wider mb-1.5 flex justify-between items-center">
-          <span>S.P.E.C.I.A.L. Attributes</span>
+          <span>{t('stats.special_attributes', 'S.P.E.C.I.A.L. Attributes')}</span>
           <span className="text-[10px] text-gray-400 font-mono">
-            Slots: {character.used_inventory_slots ?? 0}/{character.inventory_capacity ?? 10}
+            {t('stats.slots_label', 'Slots')}: {character.used_inventory_slots ?? 0}/{character.inventory_capacity ?? 10}
           </span>
         </div>
         <div className="grid grid-cols-4 gap-1 text-center text-xs">
@@ -318,14 +399,14 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
                   title={`Add +1 to ${st.label}`}
                 >
                   <Plus size={9} />
-                  <span>Add</span>
+                  <span>{t('stats.add', 'Add')}</span>
                 </button>
               )}
             </div>
           ))}
           {/* Capacity stat tile */}
           <div className="bg-black/50 p-1.5 sm:p-2 rounded border border-fantasy-border/60 flex flex-col justify-between">
-            <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Slots</div>
+            <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">{t('stats.slots_label', 'Slots')}</div>
             <div className="font-mono text-[11px] text-gray-300 my-auto">
               {character.used_inventory_slots ?? 0}/{character.inventory_capacity ?? 10}
             </div>
@@ -336,7 +417,7 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
       {/* Derived Combat Attributes Grid */}
       <div className="pt-1.5 border-t border-fantasy-border/40">
         <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-1.5">
-          <span>Combat & Tactical Stats</span>
+          <span>{t('stats.combat_tactical_stats', 'Combat & Tactical Stats')}</span>
         </div>
         <div className="grid grid-cols-4 sm:grid-cols-7 gap-1 text-center">
           {combatGrid.map((cg) => (
@@ -354,9 +435,9 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
           <div className="text-xs uppercase font-bold text-indigo-300 tracking-wider mb-2 flex items-center justify-between">
             <span className="flex items-center gap-1.5">
               <BookOpen size={14} className="text-indigo-400" />
-              <span>Grimoire ({character.learned_spells.length})</span>
+              <span>{t('character.grimoire', 'Grimoire')} ({character.learned_spells.length})</span>
             </span>
-            <span className="text-xs text-gray-400 font-mono">Learned Spells</span>
+            <span className="text-xs text-gray-400 font-mono">{t('character.learned_spells', 'Learned Spells')}</span>
           </div>
           <div className="space-y-1.5 max-h-56 overflow-y-auto custom-scrollbar pr-1">
             {character.learned_spells.map((sp, idx) => {
@@ -384,7 +465,7 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
                           className="px-2 py-0.5 rounded bg-indigo-600/30 hover:bg-indigo-500/40 text-indigo-200 border border-indigo-500/50 text-[10px] font-mono font-bold flex items-center gap-1 disabled:opacity-40 transition-colors"
                         >
                           <Zap size={10} className="text-blue-300" />
-                          <span>Cast ({mpCost} MP)</span>
+                          <span>{t('character.cast', 'Cast')} ({mpCost} MP)</span>
                         </button>
                       ) : (
                         <span className="text-[10px] font-mono text-blue-400 flex items-center gap-0.5">
@@ -412,10 +493,10 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
                 <span className="text-lg">🔞</span>
                 <div>
                   <h3 className="font-rpg font-bold text-sm text-fantasy-accent">
-                    Customize Physical Anatomy
+                    {t('character.customize_anatomy', 'Customize Physical Anatomy')}
                   </h3>
                   <p className="text-[10px] text-gray-400">
-                    Live update your character's assets &amp; tactile textures
+                    {t('character.anatomy_desc', "Live update your character's assets & tactile textures")}
                   </p>
                 </div>
               </div>
@@ -431,7 +512,7 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
             <div className="space-y-3.5 text-xs">
               <div>
                 <label className="block text-[11px] uppercase tracking-wider font-bold text-pink-300 mb-1">
-                  Breast Size Tier
+                  {t('character.breast_size_tier', 'Breast Size Tier')}
                 </label>
                 <select
                   value={editBSize}
@@ -448,7 +529,7 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
 
               <div>
                 <label className="block text-[11px] uppercase tracking-wider font-bold text-purple-300 mb-1">
-                  Penis Size Tier
+                  {t('character.penis_size_tier', 'Penis Size Tier')}
                 </label>
                 <select
                   value={editPSize}
@@ -465,7 +546,7 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-300">
-                    Tactile Texture / Feature
+                    {t('character.tactile_texture', 'Tactile Texture / Feature')}
                   </label>
                   <button
                     type="button"
@@ -486,7 +567,7 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
                     }}
                     className="text-[10px] text-pink-400 hover:text-pink-300 flex items-center gap-1 font-semibold"
                   >
-                    <Sparkles size={11} /> Roll Feature
+                    <Sparkles size={11} /> {t('character.roll_feature', 'Roll Feature')}
                   </button>
                 </div>
                 <select
@@ -533,7 +614,7 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
                 disabled={savingApp}
                 className="px-4 py-1.5 rounded bg-fantasy-accent hover:bg-amber-400 text-black font-bold text-xs uppercase disabled:opacity-50 transition-colors"
               >
-                {savingApp ? 'Saving...' : 'Save Changes'}
+                {savingApp ? t('common.saving', 'Saving...') : t('common.save_changes', 'Save Changes')}
               </button>
             </div>
           </div>

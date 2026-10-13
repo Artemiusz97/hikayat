@@ -15,13 +15,13 @@ class TestIntimateDisclosure(unittest.TestCase):
     def test_unlocked_info_level_1_to_3_scale(self):
         # 1-3 scale
         self.assertEqual(get_unlocked_info_level(0), 1)
-        self.assertEqual(get_unlocked_info_level(15), 1)
-        self.assertEqual(get_unlocked_info_level(30), 1)
-        self.assertEqual(get_unlocked_info_level(31), 2)
-        self.assertEqual(get_unlocked_info_level(65), 2)
-        self.assertEqual(get_unlocked_info_level(70), 2)
-        self.assertEqual(get_unlocked_info_level(71), 3)
-        self.assertEqual(get_unlocked_info_level(100), 3)
+        self.assertEqual(get_unlocked_info_level(50), 1)
+        self.assertEqual(get_unlocked_info_level(99), 1)
+        self.assertEqual(get_unlocked_info_level(100), 2)
+        self.assertEqual(get_unlocked_info_level(150), 2)
+        self.assertEqual(get_unlocked_info_level(199), 2)
+        self.assertEqual(get_unlocked_info_level(200), 3)
+        self.assertEqual(get_unlocked_info_level(300), 3)
 
     def test_past_intimate_history_safeguards(self):
         # Strict safeguard: Virgins or unknowns MUST NEVER generate past history
@@ -49,19 +49,22 @@ class TestIntimateDisclosure(unittest.TestCase):
 
         # Level 2 target: Mannerisms / Traits
         self.assertEqual(get_information_disclosure_penalty(0, 2), -4)
-        self.assertEqual(get_information_disclosure_penalty(20, 2), -2)
-        self.assertEqual(get_information_disclosure_penalty(40, 2), 0)
+        self.assertEqual(get_information_disclosure_penalty(20, 2), -4)
+        self.assertEqual(get_information_disclosure_penalty(60, 2), -2)
+        self.assertEqual(get_information_disclosure_penalty(100, 2), 0)
 
         # Level 3 target: Preferences / Intimate Profile / Deep Secrets
         self.assertEqual(get_information_disclosure_penalty(0, 3), -8)
-        self.assertEqual(get_information_disclosure_penalty(20, 3), -5)
-        self.assertEqual(get_information_disclosure_penalty(50, 3), -3)
-        self.assertEqual(get_information_disclosure_penalty(75, 3), 0)
+        self.assertEqual(get_information_disclosure_penalty(20, 3), -8)
+        self.assertEqual(get_information_disclosure_penalty(60, 3), -5)
+        self.assertEqual(get_information_disclosure_penalty(120, 3), -3)
+        self.assertEqual(get_information_disclosure_penalty(200, 3), 0)
 
         # Requirement calculation
         self.assertEqual(get_disclosure_check_requirement(4, current_score=0, target_info_level=3), 12)
-        self.assertEqual(get_disclosure_check_requirement(4, current_score=50, target_info_level=3), 7)
-        self.assertEqual(get_disclosure_check_requirement(4, current_score=80, target_info_level=3), 4)
+        self.assertEqual(get_disclosure_check_requirement(4, current_score=60, target_info_level=3), 9)
+        self.assertEqual(get_disclosure_check_requirement(4, current_score=120, target_info_level=3), 7)
+        self.assertEqual(get_disclosure_check_requirement(4, current_score=200, target_info_level=3), 4)
     def test_db_get_known_world_data_loads_appearance(self):
         import db, time
         db.init_db()

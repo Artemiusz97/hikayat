@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Save, RotateCcw, Trash2, MapPin, Clock, Bookmark } from 'lucide-react';
 import { apiCall } from '../../api/client';
 
@@ -13,6 +14,7 @@ const formatSaveDate = (ts) => {
 };
 
 const SavesModal = ({ isOpen, onClose, user, onSessionLoaded }) => {
+  const { t } = useTranslation();
   const [saves, setSaves] = useState([]);
   const [loading, setLoading] = useState(false);
   const [slotName, setSlotName] = useState('');
@@ -121,8 +123,8 @@ const SavesModal = ({ isOpen, onClose, user, onSessionLoaded }) => {
           <div className="flex items-center gap-2">
             <Bookmark size={18} className="text-fantasy-accent" />
             <div>
-              <h3 className="font-rpg font-bold text-base text-fantasy-accent">Chronicle Checkpoints</h3>
-              <p className="text-[11px] text-gray-400">Save or restore campaign snapshots ({saves.length}/10 slots)</p>
+              <h3 className="font-rpg font-bold text-base text-fantasy-accent">{t('saves.title')}</h3>
+              <p className="text-[11px] text-gray-400">{t('saves.subtitle', { count: saves.length })}</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1 text-gray-400 hover:text-white">
@@ -137,7 +139,7 @@ const SavesModal = ({ isOpen, onClose, user, onSessionLoaded }) => {
             maxLength={32}
             value={slotName}
             onChange={(e) => setSlotName(e.target.value)}
-            placeholder="New checkpoint name (e.g. Before Boss)..."
+            placeholder={t('saves.name_placeholder')}
             className="flex-1 bg-black/60 border border-fantasy-border rounded px-3 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-fantasy-accent"
           />
           <button
@@ -146,7 +148,7 @@ const SavesModal = ({ isOpen, onClose, user, onSessionLoaded }) => {
             className="px-3 py-1.5 rounded bg-fantasy-accent text-fantasy-dark font-bold text-xs flex items-center gap-1.5 disabled:opacity-40 transition-colors"
           >
             <Save size={13} />
-            <span>Save</span>
+            <span>{t('saves.save')}</span>
           </button>
         </form>
 
@@ -167,12 +169,12 @@ const SavesModal = ({ isOpen, onClose, user, onSessionLoaded }) => {
         {/* Save Slots List */}
         <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2.5">
           {loading ? (
-            <p className="text-center py-8 text-xs text-gray-500 italic">Loading checkpoints...</p>
+            <p className="text-center py-8 text-xs text-gray-500 italic">{t('saves.loading')}</p>
           ) : saves.length === 0 ? (
             <div className="text-center py-10 text-gray-500 border border-dashed border-fantasy-border/50 rounded-lg">
               <Save size={24} className="mx-auto mb-1.5 opacity-40" />
-              <p className="text-xs">No saved checkpoints yet.</p>
-              <p className="text-[11px] text-gray-600 mt-1">Create a checkpoint above to snapshot your current timeline.</p>
+              <p className="text-xs">{t('saves.no_saves')}</p>
+              <p className="text-[11px] text-gray-600 mt-1">{t('saves.hint')}</p>
             </div>
           ) : (
             saves.map((slot) => (
@@ -209,7 +211,7 @@ const SavesModal = ({ isOpen, onClose, user, onSessionLoaded }) => {
                     className="px-2 py-1 rounded bg-black/60 hover:bg-neutral-800 text-gray-300 border border-fantasy-border text-[10px] font-semibold uppercase flex items-center gap-1"
                     title="Overwrite this slot"
                   >
-                    <Save size={11} /> Overwrite
+                    <Save size={11} /> {t('saves.overwrite')}
                   </button>
                   <button
                     type="button"
@@ -217,7 +219,7 @@ const SavesModal = ({ isOpen, onClose, user, onSessionLoaded }) => {
                     disabled={busySlot !== null}
                     className="px-2.5 py-1 rounded bg-fantasy-accent/20 hover:bg-fantasy-accent/30 text-fantasy-accent border border-fantasy-accent/50 text-[10px] font-bold uppercase flex items-center gap-1"
                   >
-                    <RotateCcw size={11} /> Restore
+                    <RotateCcw size={11} /> {t('saves.restore')}
                   </button>
                   <button
                     type="button"

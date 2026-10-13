@@ -10,7 +10,7 @@ import re
 from typing import Dict, Any, List
 
 MIN_RELATIONSHIP = -100
-MAX_RELATIONSHIP = 100
+MAX_RELATIONSHIP = 300
 
 NON_PEER_HIGH_SCHOOL_ROLE_PATTERNS = [
     # Faculty / Administration / Honorifics
@@ -142,20 +142,20 @@ def is_contact_eligible(
 TIER_LABELS: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
     "default": {
         "positive_platonic": [
-            {"min": 91, "max": 100, "name": "Lifelong Ally", "tier_level": 5},
-            {"min": 71, "max": 90, "name": "Confidant", "tier_level": 4},
-            {"min": 51, "max": 70, "name": "Close Companion", "tier_level": 3},
-            {"min": 31, "max": 50, "name": "Friend", "tier_level": 2},
-            {"min": 11, "max": 30, "name": "Acquaintance", "tier_level": 1},
-            {"min": 0, "max": 10, "name": "Stranger", "tier_level": 0},
+            {"min": 250, "max": 300, "name": "Sworn Lifelong Ally", "tier_level": 5},
+            {"min": 200, "max": 249, "name": "Confidant", "tier_level": 4},
+            {"min": 150, "max": 199, "name": "Close Friend", "tier_level": 3},
+            {"min": 100, "max": 149, "name": "Friend", "tier_level": 2},
+            {"min": 50, "max": 99, "name": "Acquaintance", "tier_level": 1},
+            {"min": 0, "max": 49, "name": "Stranger", "tier_level": 0},
         ],
         "positive_romantic": [
-            {"min": 91, "max": 100, "name": "Lover / Soulmate", "tier_level": 5},
-            {"min": 71, "max": 90, "name": "Love Interest", "tier_level": 4},
-            {"min": 51, "max": 70, "name": "Crush", "tier_level": 3},
-            {"min": 31, "max": 50, "name": "Friend", "tier_level": 2},
-            {"min": 11, "max": 30, "name": "Acquaintance", "tier_level": 1},
-            {"min": 0, "max": 10, "name": "Stranger", "tier_level": 0},
+            {"min": 250, "max": 300, "name": "Soulmate / Eternal Bond", "tier_level": 5},
+            {"min": 200, "max": 249, "name": "Devoted Lovers", "tier_level": 4},
+            {"min": 150, "max": 199, "name": "Dating / Confessed Partners", "tier_level": 3},
+            {"min": 100, "max": 149, "name": "Mutual Attraction / Crush", "tier_level": 2},
+            {"min": 50, "max": 99, "name": "Acquaintance", "tier_level": 1},
+            {"min": 0, "max": 49, "name": "Stranger", "tier_level": 0},
         ],
         "negative": [
             {"min": -10, "max": -1, "name": "Unfriendly", "tier_level": -1},
@@ -168,20 +168,20 @@ TIER_LABELS: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
     },
     "high_school_drama": {
         "positive_platonic": [
-            {"min": 91, "max": 100, "name": "Sworn Bestie", "tier_level": 5},
-            {"min": 71, "max": 90, "name": "Inner Circle", "tier_level": 4},
-            {"min": 51, "max": 70, "name": "Best Friend", "tier_level": 3},
-            {"min": 31, "max": 50, "name": "Lunch Friend", "tier_level": 2},
-            {"min": 11, "max": 30, "name": "Hallway Buddy", "tier_level": 1},
-            {"min": 0, "max": 10, "name": "Stranger", "tier_level": 0},
+            {"min": 250, "max": 300, "name": "Sworn Bestie", "tier_level": 5},
+            {"min": 200, "max": 249, "name": "Inner Circle", "tier_level": 4},
+            {"min": 150, "max": 199, "name": "Best Friend", "tier_level": 3},
+            {"min": 100, "max": 149, "name": "Lunch Friend", "tier_level": 2},
+            {"min": 50, "max": 99, "name": "Hallway Buddy", "tier_level": 1},
+            {"min": 0, "max": 49, "name": "Stranger", "tier_level": 0},
         ],
         "positive_romantic": [
-            {"min": 91, "max": 100, "name": "Lover / Partner", "tier_level": 5},
-            {"min": 71, "max": 90, "name": "Love Interest", "tier_level": 4},
-            {"min": 51, "max": 70, "name": "Big Crush", "tier_level": 3},
-            {"min": 31, "max": 50, "name": "Lunch Friend", "tier_level": 2},
-            {"min": 11, "max": 30, "name": "Hallway Buddy", "tier_level": 1},
-            {"min": 0, "max": 10, "name": "Stranger", "tier_level": 0},
+            {"min": 250, "max": 300, "name": "High School Sweethearts / Soulmate", "tier_level": 5},
+            {"min": 200, "max": 249, "name": "Exclusive Romance", "tier_level": 4},
+            {"min": 150, "max": 199, "name": "Dating / Partner", "tier_level": 3},
+            {"min": 100, "max": 149, "name": "Big Crush", "tier_level": 2},
+            {"min": 50, "max": 99, "name": "Hallway Buddy", "tier_level": 1},
+            {"min": 0, "max": 49, "name": "Stranger", "tier_level": 0},
         ],
         "negative": [
             {"min": -10, "max": -1, "name": "Annoyance", "tier_level": -1},
@@ -196,7 +196,7 @@ TIER_LABELS: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
 
 
 def clamp_score(score: int) -> int:
-    """Ensure score stays strictly within [-100, 100]."""
+    """Ensure score stays strictly within [-100, 300]."""
     return max(MIN_RELATIONSHIP, min(MAX_RELATIONSHIP, int(score)))
 
 
@@ -224,26 +224,34 @@ def get_relationship_tier(score: int, track: str = "platonic", scenario: str = "
 def get_relationship_modifier(score: int) -> int:
     """
     Calculate skill check modifier based on relationship score.
-    Formula: floor(score / 10)
-    e.g. +45 -> +4, -35 -> -4, +85 -> +8, -75 -> -8
+    Formula: floor(score / 10), clamped between -10 and +10.
+    e.g. +45 -> +4, +85 -> +8, +150 -> +10, -35 -> -4, -75 -> -8
     """
     score = clamp_score(score)
-    return math.floor(score / 10)
+    raw = math.floor(score / 10)
+    return max(-10, min(10, raw))
 
 
 def get_unlocked_info_level(score: int) -> int:
     """
     Returns disclosure level (1 to 3) based on score magnitude.
-    Level 1 (Score < 31 or -30..30): Surface details & visible anatomy (Stranger / Acquaintance)
-    Level 2 (Score 31-70 or -31 to -70): Mannerisms & personality traits (Friend / Rival)
-    Level 3 (Score 71+ or -71-): Preferences, deep secrets & full intimate profile (Confidant / Lover / Nemesis)
+    Level 1 (Score < 100 or -30..30): Surface details & visible anatomy (Stranger / Acquaintance)
+    Level 2 (Score 100-199 or -31 to -70): Mannerisms & personality traits (Friend / Rival)
+    Level 3 (Score 200+ or -71-): Preferences, deep secrets & full intimate profile (Confidant / Lover / Nemesis)
     """
     abs_score = abs(clamp_score(score))
-    if abs_score >= 71:
-        return 3
-    elif abs_score >= 31:
-        return 2
-    return 1
+    if score >= 0:
+        if abs_score >= 200:
+            return 3
+        elif abs_score >= 100:
+            return 2
+        return 1
+    else:
+        if abs_score >= 71:
+            return 3
+        elif abs_score >= 31:
+            return 2
+        return 1
 
 
 def get_information_disclosure_penalty(current_score: int, target_info_level: int) -> int:
@@ -251,31 +259,31 @@ def get_information_disclosure_penalty(current_score: int, target_info_level: in
     Returns the skill check penalty (negative integer or 0) when attempting to pry or inquire
     about information above the current relationship standing.
     - Level 1 Info (Surface & Appearance): 0 penalty (Accessible to all)
-    - Level 2 Info (Mannerisms / Traits, req score 31+):
-        Stranger (score < 11): -4 penalty
-        Acquaintance (score 11-30): -2 penalty
-        Friend+ (score >= 31): 0 penalty
-    - Level 3 Info (Preferences / Intimate Profile / Deep Secrets, req score 71+):
-        Stranger (score < 11): -8 penalty (Heavily guarded against strangers)
-        Acquaintance (score 11-30): -5 penalty
-        Friendly (score 31-70): -3 penalty
-        Close / Trusted / Lover (score 71+): 0 penalty
+    - Level 2 Info (Mannerisms / Traits, req score 100+):
+        Stranger (< 50): -4 penalty
+        Acquaintance (50-99): -2 penalty
+        Friend+ (>= 100): 0 penalty
+    - Level 3 Info (Preferences / Intimate Profile / Deep Secrets, req score 200+):
+        Stranger (< 50): -8 penalty (Heavily guarded against strangers)
+        Acquaintance (50-99): -5 penalty
+        Friendly / Close Friend (100-199): -3 penalty
+        Confidant / Soulmate (200+): 0 penalty
     """
     abs_score = abs(clamp_score(current_score))
     if target_info_level <= 1:
         return 0
     elif target_info_level == 2:
-        if abs_score < 11:
+        if abs_score < 50:
             return -4
-        elif abs_score < 31:
+        elif abs_score < 100:
             return -2
         return 0
     elif target_info_level >= 3:
-        if abs_score < 11:
+        if abs_score < 50:
             return -8
-        elif abs_score < 31:
+        elif abs_score < 100:
             return -5
-        elif abs_score < 71:
+        elif abs_score < 200:
             return -3
         return 0
     return 0
@@ -292,17 +300,78 @@ def get_disclosure_check_requirement(base_req: int, current_score: int, target_i
 
 def format_progress_bar(score: int, width: int = 10) -> str:
     """
-    Generate a text progress bar representing score from -100 to +100.
+    Generate a text progress bar representing score from -100 to +300.
     Center is 0.
-    e.g. [-100 [███████░░░] +100]
+    e.g. [-100 [███████░░░] +300]
     """
     score = clamp_score(score)
-    # Map -100..100 -> 0..width
-    normalized = int(((score + 100) / 200) * width)
+    # Map -100..300 -> 0..width
+    normalized = int(((score + 100) / 400) * width)
     normalized = max(0, min(width, normalized))
     bar = "█" * normalized + "░" * (width - normalized)
     sign = "+" if score > 0 else ""
     return f"[{bar}] {sign}{score}"
+
+
+MARTIAL_ROLE_PATTERNS = [
+    # Fantasy / Isekai
+    r"\b(guard|town guard|city guard|gate guard|watchman|sentry|patrol|guard captain|soldier|knight|paladin|warrior|mercenary|sellsword|ranger|archer|scout|mage|wizard|sorcerer|sorceress|warlock|assassin|rogue|monk|berserker|templar|slayer|spellsword|duelist|commander|brawler)\b",
+    # Sci-Fi / Space
+    r"\b(marine|shock trooper|trooper|bounty hunter|security officer|enforcer|commando|gunslinger|pilot|fleet officer)\b",
+    # Cyberpunk
+    r"\b(street samurai|solo|netrunner|corporate enforcer|hitman|bodyguard|cyber-thug|bouncer|syndicate gunner|security drone)\b",
+    # Steampunk
+    r"\b(airship gunner|sky pirate|clockwork automaton guard|rifleman|brass sentinel|mechanical enforcer)\b",
+    # Post-Apocalypse
+    r"\b(raider|scavenger|wasteland warrior|gunner|mutant hunter|militia|survivalist)\b",
+    # Explicit combat descriptions
+    r"\b(combatant|fighter|veteran|swordsman|blademaster|sharpshooter|martial artist|armed with|weapons? drawn|battle-hardened|war hero)\b"
+]
+
+CIVILIAN_ROLE_PATTERNS = [
+    # Commercial / Service
+    r"\b(merchant|vendor|shopkeeper|innkeeper|barkeep|bartender|peddler|grocer|trader|blacksmith|armorer|apothecary|baker|butcher|tailor|jeweler)\b",
+    # Domestic / Civic
+    r"\b(villager|farmer|peasant|fisherman|dockworker|laborer|waiter|waitress|maid|butler|servant|cook|chef|clerk|cashier|accountant|librarian|desk scholar|scholar|researcher|scientist|doctor|nurse|janitor|custodian)\b",
+    # Vulnerable / Non-combatant
+    r"\b(child|boy|girl|elder|elderly|invalid|civilian|bystander|onlooker|citizen|customer|patron|passerby|pedestrian)\b",
+]
+
+_MARTIAL_RE = [re.compile(p, re.IGNORECASE) for p in MARTIAL_ROLE_PATTERNS]
+_CIVILIAN_RE = [re.compile(p, re.IGNORECASE) for p in CIVILIAN_ROLE_PATTERNS]
+
+
+def is_martial_npc(entity: dict | str, scenario: str = "fantasy") -> bool:
+    """
+    Determines deterministically whether an NPC is a martial combatant or a civilian bystander.
+    Evaluates role, occupation, and description against genre combat archetypes.
+    """
+    import scenario_data
+    if scenario_data.has_tag(scenario, "non_combat") or scenario.lower() in ("high_school", "high_school_drama"):
+        return False
+
+    if isinstance(entity, str):
+        combined = entity.lower()
+    elif isinstance(entity, dict):
+        role = str(entity.get("role") or entity.get("occupation") or "")
+        desc = str(entity.get("description") or "")
+        name = str(entity.get("name") or "")
+        combined = f"{name} {role} {desc}".lower()
+    else:
+        return False
+
+    # 1. Hard Civilian Blacklist
+    if any(rx.search(combined) for rx in _CIVILIAN_RE):
+        # Exception: explicit veteran / combatant overrides civilian trade (e.g. "retired vanguard soldier")
+        if any(w in combined for w in ("veteran", "retired soldier", "retired knight", "former mercenary", "battle-hardened", "armed with")):
+            return True
+        return False
+
+    # 2. Martial Archetype Match
+    if any(rx.search(combined) for rx in _MARTIAL_RE):
+        return True
+
+    return False
 
 
 def safe_clamp_delta(val: Any, min_val: int = -10, max_val: int = 10) -> int:
@@ -516,7 +585,7 @@ def can_trigger_romantic_confession(
 ) -> bool:
     """
     Evaluates whether the dedicated Romance Confession Milestone Choice should appear for an NPC:
-    1. High Affinity Threshold: Score >= 70 (Tier 4 Confidant/Inner Circle)
+    1. High Affinity Threshold: Score >= 100 (Tier 3 Friend/Crush - Romance Route Unlocks)
     2. Social Track: Currently 'platonic'
     3. Peer Eligibility: Student contemporary / peer (not teacher, store clerk, parent)
     4. Gender & Orientation Compatibility: True
@@ -539,9 +608,9 @@ def can_trigger_romantic_confession(
     if not contact:
         return False
 
-    # 4. Affinity threshold check (>= 70)
+    # 4. Affinity threshold check (>= 100: Friend / Crush tier unlocks romance route)
     score = contact.get("relationship_score", 0)
-    if score < 70:
+    if score < 100:
         return False
 
     # 5. Track & Romance Status Check: Must currently be platonic and not already romantically involved
@@ -572,5 +641,22 @@ def can_trigger_romantic_confession(
         return False
 
     return True
+
+
+def get_recruitment_cost(affinity: int, level: int = 1) -> int:
+    """
+    Calculates the gold cost to recruit an NPC into the party in combat scenarios.
+    - Affinity >= 100 (Friend+): 0 gold (joins out of loyalty).
+    - Affinity = 50 (Acquaintance): 50% of base mercenary contract cost.
+    - Affinity <= 0 (Stranger): Full base mercenary contract cost.
+    Formula: Base Cost * max(0, 1 - Affinity / 100)
+    Base cost scales moderately with party level: 200 + max(1, level) * 50
+    """
+    if affinity >= 100:
+        return 0
+    base_cost = 200 + max(1, level) * 50
+    affinity_factor = max(0.0, 1.0 - (max(0, affinity) / 100.0))
+    return int(base_cost * affinity_factor)
+
 
 

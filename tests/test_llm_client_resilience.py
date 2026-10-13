@@ -273,9 +273,66 @@ class TestLLMClientResilience(unittest.IsolatedAsyncioTestCase):
 
         llm_client.reset_circuit_breakers()
 
+    def test_physical_updates_actor_coercion_handles_empty_and_raw_strings(self):
+        """Verify TurnOutcome / PhysicalUpdate gracefully coerces empty strings and raw strings in actors dict."""
+        from models.llm_schemas import TurnOutcome
+
+        payload = {
+            "scene_title": "Test Scene",
+            "outcome_narrative": "Story unfolds.",
+            "next_narrative": "What next?",
+            "physical_updates": {
+                "actors": {
+                    "Artemiusz": "",
+                    "Mia Yamada": "standing",
+                    "Ally": {"posture": "sitting"}
+                }
+            },
+            "next_choices": [{"label": "Continue"}]
+        }
+        outcome = TurnOutcome.model_validate(payload)
+        self.assertIn("Artemiusz", outcome.physical_updates.actors)
+        self.assertEqual(outcome.physical_updates.actors["Artemiusz"], {})
+        self.assertEqual(outcome.physical_updates.actors["Mia Yamada"].posture, "standing")
+
+    async def test_stream_continuation_bad_request_salvages_with_json_repair(self):
+        """Verify BadRequestError during stream continuation breaks cleanly and salvages accumulated JSON."""
+        from openai import BadRequestError
+
+        mock_client = MagicMock()
+        mock_client.base_url = "https://nano-gpt.com/api/v1"
+
+        # Pass 1: emits truncated JSON chunk
+        chunk_1 = MagicMock()
+        chunk_1.choices = [MagicMock(delta=MagicMock(content='{"scene_title": "Interrupted", "outcome_narrative": "Action occurs'), finish_reason=None)]
+        chunk_1.usage = None
+
+        chunk_end = MagicMock()
+        chunk_end.choices = [MagicMock(delta=None, finish_reason="length")]
+        chunk_end.usage = None
+
+        async def stream_gen():
+            yield chunk_1
+            yield chunk_end
+
+        # Pass 2: continuation throws 400 Bad Request
+        bad_req = BadRequestError("Invalid request parameters", response=MagicMock(status_code=400), body={"error": {"param": "messages"}})
+
+        mock_client.chat.completions.create = AsyncMock(side_effect=[stream_gen(), bad_req])
+
+        with patch("llm_client.get_candidate_models", return_value=[(mock_client, "test-stream-model")]):
+            tokens = []
+            async def on_token(t):
+                tokens.append(t)
+
+            res = await llm_client.call_llm_json_stream("Sys", "User", on_narrative_token=on_token)
+            self.assertEqual(res["scene_title"], "Interrupted")
+            self.assertEqual(res["outcome_narrative"], "Action occurs")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

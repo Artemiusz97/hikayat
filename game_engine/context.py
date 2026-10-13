@@ -63,6 +63,14 @@ def _describe_tracked_entity(entity) -> str:
         return ""
     name = entity.get("name") or "Unknown"
     bits = []
+    gen = str(entity.get("gender") or "").strip().lower()
+    if gen:
+        if any(kw in gen for kw in ("male", "man", "boy")) and "female" not in gen:
+            bits.append("Male, he/him")
+        elif any(kw in gen for kw in ("female", "woman", "girl")):
+            bits.append("Female, she/her")
+        elif "non-binary" in gen:
+            bits.append("Non-binary, they/them")
     if entity.get("level") is not None:
         bits.append(f"Lvl {entity['level']}")
     if entity.get("hp") is not None and entity.get("max_hp") is not None:
@@ -336,7 +344,14 @@ def _world_canon_text(session_id: int, world: dict | None = None,
             f"{f['name']} [{f.get('disposition') or 'neutral'}]" for f in lore_factions[:max_factions]))
 
     if lore.get("person") or contacts:
-        lines.append("NPC CANON RULE: You MUST strictly depict known characters with their exact stated Race, Appearance, and Status. Human characters have human ears and human features with NO animal traits. Beastfolk characters with dyed hair have natural biological fur/coat; their hair styling is dyed. If an NPC is DECEASED, they must NOT appear alive.")
+        lines.append(
+            "NPC CANON RULE: You MUST strictly depict known characters with their exact stated Gender, Pronouns, Race, "
+            "Appearance, and Status. Male characters (he/him) must NEVER be addressed or referred to with feminine pronouns (she/her) "
+            "or described as female. Female characters (she/her) must NEVER be referred to with masculine pronouns (he/him). "
+            "Human characters have human ears and human features with NO animal traits. "
+            "Beastfolk characters with dyed hair have natural biological fur/coat; their hair styling is dyed. "
+            "If an NPC is DECEASED, they must NOT appear alive."
+        )
 
     if world.get("party_npcs"):
         lines.append("COMPANION CANON: The party companions listed in the current scene travel everywhere with the player and fight alongside them. Include their distinct spoken dialogue, banter, and reactions.")
@@ -403,10 +418,20 @@ def _scene_context_text(session_id: int, current_location: str,
                 f"{p['name']} ({p['description']})" if p.get("description") else p["name"]
                 for p in nearby))
 
-    if lore["person"] or contacts:
+    if lore["person"] or contacts or current_npcs:
         scene_npc_names = {e.get("name", "").lower().strip() for e in (current_npcs or []) if isinstance(e, dict)}
         
         contacts_by_name = {c.get("name", "").lower().strip(): c for c in (contacts or []) if isinstance(c, dict) and c.get("name")}
+        school_dir = {}
+        try:
+            with db.get_conn() as _conn:
+                _rows = _conn.execute("SELECT name, gender, race, role, grade, club FROM school_directory WHERE session_id=?", (session_id,)).fetchall()
+                for _r in _rows:
+                    if _r["name"]:
+                        school_dir[_r["name"].lower().strip()] = dict(_r)
+        except Exception:
+            pass
+
         combined_persons = []
         seen_names = set()
 
@@ -417,7 +442,12 @@ def _scene_context_text(session_id: int, current_location: str,
             p_key = p_name.lower()
             seen_names.add(p_key)
             c_data = contacts_by_name.get(p_key, {})
+            sd_data = school_dir.get(p_key, {})
             p_copy = dict(p)
+            if not p_copy.get("gender"):
+                p_copy["gender"] = c_data.get("gender") or sd_data.get("gender") or ""
+            if not p_copy.get("race"):
+                p_copy["race"] = c_data.get("race") or sd_data.get("race") or ""
             if c_data.get("appearance"):
                 p_copy["appearance"] = c_data["appearance"]
             if c_data.get("unlocked_traits"):
@@ -428,15 +458,35 @@ def _scene_context_text(session_id: int, current_location: str,
             c_name = c.get("name", "").strip()
             if c_name and c_name.lower() not in seen_names:
                 seen_names.add(c_name.lower())
+                sd_data = school_dir.get(c_name.lower(), {})
                 combined_persons.append({
                     "name": c_name,
-                    "race": c.get("race") or "",
+                    "gender": c.get("gender") or sd_data.get("gender") or "",
+                    "race": c.get("race") or sd_data.get("race") or "",
                     "disposition": "friendly",
                     "appearance": c.get("appearance", {}),
                     "mannerisms": (c.get("basic_info") or {}).get("mannerisms", ""),
                     "traits": c.get("unlocked_traits", []),
-                    "description": (c.get("basic_info") or {}).get("description", "")
+                    "description": (c.get("basic_info") or {}).get("description", "") or sd_data.get("role") or ""
                 })
+
+        for e in (current_npcs or []):
+            if isinstance(e, dict):
+                e_name = e.get("name", "").strip()
+                if e_name and e_name.lower() not in seen_names:
+                    seen_names.add(e_name.lower())
+                    c_data = contacts_by_name.get(e_name.lower(), {})
+                    sd_data = school_dir.get(e_name.lower(), {})
+                    combined_persons.append({
+                        "name": e_name,
+                        "gender": e.get("gender") or c_data.get("gender") or sd_data.get("gender") or "",
+                        "race": e.get("race") or c_data.get("race") or sd_data.get("race") or "",
+                        "disposition": e.get("disposition") or "neutral",
+                        "appearance": e.get("appearance") or c_data.get("appearance", {}),
+                        "mannerisms": e.get("mannerisms") or (c_data.get("basic_info") or {}).get("mannerisms", ""),
+                        "traits": e.get("traits") or c_data.get("unlocked_traits", []),
+                        "description": e.get("description") or (c_data.get("basic_info") or {}).get("description", "") or sd_data.get("role") or ""
+                    })
 
         present_persons = [p for p in combined_persons if p.get("name", "").lower().strip() in scene_npc_names]
         absent_persons = [p for p in combined_persons if p.get("name", "").lower().strip() not in scene_npc_names]
@@ -444,9 +494,26 @@ def _scene_context_text(session_id: int, current_location: str,
         # 1. Characters physically present in this room / scene get full dossiers
         present_entries = []
         for p in present_persons:
+            raw_gen = str(p.get("gender") or "").strip().lower()
+            if not raw_gen:
+                c_data = contacts_by_name.get(p.get("name", "").lower().strip(), {})
+                sd_data = school_dir.get(p.get("name", "").lower().strip(), {})
+                raw_gen = str(c_data.get("gender") or sd_data.get("gender") or (p.get("appearance") or {}).get("gender") or "").strip().lower()
+
+            gender_tag = ""
+            if raw_gen:
+                if any(kw in raw_gen for kw in ("male", "man", "boy")) and "female" not in raw_gen:
+                    gender_tag = "Gender: Male (he/him) | "
+                elif any(kw in raw_gen for kw in ("female", "woman", "girl")):
+                    gender_tag = "Gender: Female (she/her) | "
+                elif any(kw in raw_gen for kw in ("non-binary", "enby", "neutral")):
+                    gender_tag = "Gender: Non-binary (they/them) | "
+                else:
+                    gender_tag = f"Gender: {raw_gen.title()} | "
+
             details = []
             if p.get("appearance"):
-                app_str = format_persona_summary(p["appearance"], scen_key=scen_key, mannerisms=p.get("mannerisms"), traits=p.get("traits"), revealed_flags=p["appearance"])
+                app_str = format_persona_summary(p["appearance"], scen_key=scen_key, mannerisms=p.get("mannerisms"), traits=p.get("traits"), revealed_flags=p["appearance"], gender=raw_gen)
                 if app_str:
                     details.append("Appearance: " + app_str)
             elif p.get("mannerisms"):
@@ -460,13 +527,39 @@ def _scene_context_text(session_id: int, current_location: str,
             extra = (" (" + "; ".join(details) + ")") if details else ""
             race_raw = p.get('race') or ""
             race_tag = f"Race: {format_race_display(race_raw)} | " if race_raw else ""
+            # Binary Stance (Hostile vs Non-Hostile) and Combat Reaction Matrix
+            is_non_combat = scenario_data.has_tag(scen_key, "non_combat") or scenario_data.has_tag(scen_key, "high_school_drama") or scenario_data.has_tag(scen_key, "slice_of_life")
+            disp_raw = str(p.get("disposition", "neutral")).lower()
+            is_hostile = (not is_non_combat) and (disp_raw == "hostile" or p.get("is_hostile") is True)
+            stance_tag = "Stance: Hostile" if is_hostile else "Stance: Non-Hostile"
+
+            combat_tag = ""
+            nearby_enemies = session.get("nearby_enemies", []) if session else []
+            is_combat_active = (not is_non_combat) and bool(game_engine.get_active_enemies({"nearby_enemies": nearby_enemies}))
+            if is_combat_active and not is_hostile:
+                from mechanics.social.relationships import is_martial_npc
+                c_data = contacts_by_name.get(p.get("name", "").lower().strip(), {})
+                affinity = c_data.get("relationship_score", 0) if c_data else 0
+                is_martial = is_martial_npc(p, scen_key)
+                if affinity >= 100:
+                    combat_tag = " | Combat: Allied Defender"
+                elif is_martial:
+                    p_role = str(p.get("role") or p.get("description") or "").lower()
+                    if any(w in p_role for w in ("guard", "knight", "soldier", "watch", "constable", "deputy", "paladin")):
+                        combat_tag = " | Combat: Allied Defender"
+                    else:
+                        combat_tag = " | Combat: Cautious Observer"
+                else:
+                    combat_tag = " | Combat: Civilian Bystander"
+
+            tag_inner = f"{gender_tag}{race_tag}{stance_tag}{combat_tag}"
             status = str(p.get("status", "active")).strip().lower()
             if status in ("deceased", "dead", "killed"):
-                present_entries.append(f"{p['name']} [STATUS: DECEASED / DEAD - DO NOT RESURRECT OR INTRODUCE AS LIVING] [{race_tag}Disposition: {p.get('disposition', 'neutral')}]" + extra)
+                present_entries.append(f"{p['name']} [STATUS: DECEASED / DEAD - DO NOT RESURRECT OR INTRODUCE AS LIVING] [{tag_inner}]" + extra)
             elif status != "active":
-                present_entries.append(f"{p['name']} [STATUS: {status.upper()}] [{race_tag}Disposition: {p.get('disposition', 'neutral')}]" + extra)
+                present_entries.append(f"{p['name']} [STATUS: {status.upper()}] [{tag_inner}]" + extra)
             else:
-                present_entries.append(f"{p['name']} [{race_tag}Disposition: {p.get('disposition', 'neutral')}]" + extra)
+                present_entries.append(f"{p['name']} [{tag_inner}]" + extra)
 
             # Subsystem 2: Inject Entity-Centric Memory Graph if the NPC is present in the scene
             from db.memory import get_npc_memories
@@ -495,7 +588,19 @@ def _scene_context_text(session_id: int, current_location: str,
             lines.append("Contacts elsewhere in the world (NOT present in this scene — DO NOT narrate as present): " + "; ".join(absent_entries))
 
     if current_npcs:
-        lines.append("NPCs currently present: " + "; ".join(game_engine._describe_tracked_entity(e) for e in current_npcs))
+        described_npcs = []
+        for e in current_npcs:
+            if isinstance(e, dict):
+                e_copy = dict(e)
+                if not e_copy.get("gender"):
+                    e_name = (e_copy.get("name") or "").strip().lower()
+                    c_d = contacts_by_name.get(e_name, {})
+                    sd_d = school_dir.get(e_name, {})
+                    e_copy["gender"] = c_d.get("gender") or sd_d.get("gender") or ""
+                described_npcs.append(game_engine._describe_tracked_entity(e_copy))
+            else:
+                described_npcs.append(str(e))
+        lines.append("NPCs currently present: " + "; ".join(described_npcs))
     else:
         lines.append("NPCs currently present: none")
 
@@ -561,8 +666,9 @@ def _scene_context_text(session_id: int, current_location: str,
                 for ac in ambient_chars:
                     sib_str = f" (Sibling of {ac['sibling_name']})" if ac.get("sibling_name") else ""
                     club_str = f" [{ac['club']}]" if ac.get("club") and ac["club"] != "None" else ""
+                    gen_str = f", {ac['gender'].title()}" if ac.get("gender") else ""
                     race_str = f", {format_race_display(ac['race'])}" if ac.get("race") else ""
-                    dir_entries.append(f"{ac['name']} ({ac['grade']}{race_str} — {ac['role']}{club_str}{sib_str})")
+                    dir_entries.append(f"{ac['name']} ({ac['grade']}{gen_str}{race_str} — {ac['role']}{club_str}{sib_str})")
                 lines.append("Campus Directory & Ambient Residents (Stationed/frequenting this facility): " + "; ".join(dir_entries))
                 lines.append("FACILITY POPULATION DIRECTIVE: Feel free to depict these canonical facility residents in ambient descriptions or dialogue choices if appropriate.")
         except Exception:

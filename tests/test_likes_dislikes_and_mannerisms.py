@@ -36,7 +36,7 @@ class TestLikesDislikesAndMannerisms(unittest.IsolatedAsyncioTestCase):
             "name": "Sofia Anderson",
             "race": "fox_beastfolk",
             "gender": "female",
-            "relationship_score": 100,
+            "relationship_score": 220,
             "track": "platonic",
             "traits": ["Confident", "Responsive", "Focused"],
             "preferences": ["Likes Attention", "Likes Precision", "Likes Control", "Dislikes Sloppiness", "Dislikes Power Outages"],

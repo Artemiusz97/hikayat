@@ -12,6 +12,7 @@ import scenario_data
 from llm_client import call_llm_json
 log = logging.getLogger("hikayat.phone")
 from skill_check import resolve_check, success_chance, CheckResult
+from mechanics.social.relationships import clamp_score, is_contact_eligible
 
 from .embeds import *
 
@@ -223,9 +224,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         db.save_phone_message(session_id, npc_id, sender="npc", message=reply_text, intent=intent)
 
         if affinity_delta != 0:
-            from mechanics.social.relationships import is_contact_eligible
             if is_contact_eligible(name=contact_name, role=role, scenario=scen_key):
-                new_score = max(-100, min(100, score + affinity_delta))
+                new_score = clamp_score(score + affinity_delta)
                 db.update_contact_score(session_id, npc_id, new_score, character_id=player_char.get("id", 0))
 
         updated_limits = db.record_phone_daily_interaction(
@@ -243,7 +243,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             "rendezvous_location": "",
             "is_romantic": is_romantic,
             "intent": intent,
-            "new_score": max(-100, min(100, score + affinity_delta)),
+            "new_score": clamp_score(score + affinity_delta),
             "digital_item_id": None,
             "media_type_created": None,
             "daily_limits": updated_limits,
@@ -867,9 +867,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
 
     # Update affinity score — guard against ineligible NPCs (teachers, parents, store clerks) slipping through
     if affinity_delta != 0:
-        from mechanics.social.relationships import is_contact_eligible
         if is_contact_eligible(name=contact_name, role=role, scenario=scen_key):
-            new_score = max(-100, min(100, score + affinity_delta))
+            new_score = clamp_score(score + affinity_delta)
             db.update_contact_score(session_id, npc_id, new_score, character_id=player_char.get("id", 0))
         else:
             log.info(f"[phone] Skipping affinity update for ineligible contact '{contact_name}' (role: {role}).")
@@ -976,7 +975,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         "rendezvous_location": resolved_rendezvous,
         "is_romantic": is_romantic,
         "intent": intent,
-        "new_score": max(-100, min(100, score + affinity_delta)),
+        "new_score": clamp_score(score + affinity_delta),
         "digital_item_id": digital_item_id,
         "media_type_created": media_type_created,
         "daily_limits": updated_limits,

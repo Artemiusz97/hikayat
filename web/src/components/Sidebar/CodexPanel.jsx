@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { 
   BookOpen, Users, Flag, Globe, Heart, Shield, 
   Sparkles, Search, MessageCircle, MapPin, ChevronDown, ChevronRight, User, UserPlus, UserMinus,
   Crown, ShoppingBag, Swords, BedDouble, Lock, Scroll
 } from 'lucide-react';
+import { StatusEffectBadge } from './CharacterSheet';
 
 const formatPersonEntity = (item) => {
   if (!item) return '';
@@ -82,30 +84,129 @@ const renderBulletPoints = (lines) => {
   );
 };
 
-const getRelationshipTier = (score, track = 'platonic') => {
+const getRelationshipTier = (score, track = 'platonic', t = null) => {
   const isRom = String(track || '').toLowerCase() === 'romantic';
-  if (score >= 80) return isRom
-    ? { label: 'In Love / Devoted', color: 'text-pink-400', bg: 'bg-pink-500' }
-    : { label: 'Sworn Confidant', color: 'text-purple-400', bg: 'bg-purple-500' };
-  if (score >= 50) return isRom
-    ? { label: 'Romantic Partner', color: 'text-pink-400', bg: 'bg-pink-500' }
-    : { label: 'Close Companion', color: 'text-purple-400', bg: 'bg-purple-500' };
-  if (score >= 25) return { label: 'Friendly Ally', color: 'text-blue-400', bg: 'bg-blue-500' };
-  if (score >= 15) return { label: 'Friend', color: 'text-emerald-400', bg: 'bg-emerald-500' };
-  if (score >= 5) return { label: 'Familiar', color: 'text-cyan-400', bg: 'bg-cyan-500' };
-  if (score >= -5) return { label: 'Acquaintance', color: 'text-gray-400', bg: 'bg-gray-500' };
-  if (score >= -30) return { label: 'Suspicious / Cold', color: 'text-amber-400', bg: 'bg-amber-500' };
-  return { label: 'Hostile / Rival', color: 'text-red-400', bg: 'bg-red-500' };
+  let tierKey = 'stranger';
+  let fallback = 'Stranger';
+  let color = 'text-gray-400';
+  let bg = 'bg-gray-500';
+
+  if (score >= 250) {
+    if (isRom) {
+      tierKey = 'soulmate';
+      fallback = 'Soulmate / Eternal Bond';
+      color = 'text-pink-400';
+      bg = 'bg-pink-500';
+    } else {
+      tierKey = 'sworn_lifelong_ally';
+      fallback = 'Sworn Lifelong Ally';
+      color = 'text-purple-400';
+      bg = 'bg-purple-500';
+    }
+  } else if (score >= 200) {
+    if (isRom) {
+      tierKey = 'devoted_lovers';
+      fallback = 'Devoted Lovers';
+      color = 'text-pink-400';
+      bg = 'bg-pink-500';
+    } else {
+      tierKey = 'confidant';
+      fallback = 'Confidant';
+      color = 'text-purple-400';
+      bg = 'bg-purple-500';
+    }
+  } else if (score >= 150) {
+    if (isRom) {
+      tierKey = 'dating_partner';
+      fallback = 'Dating / Confessed Partners';
+      color = 'text-pink-400';
+      bg = 'bg-pink-500';
+    } else {
+      tierKey = 'close_friend';
+      fallback = 'Close Friend';
+      color = 'text-blue-400';
+      bg = 'bg-blue-500';
+    }
+  } else if (score >= 100) {
+    if (isRom) {
+      tierKey = 'mutual_attraction';
+      fallback = 'Mutual Attraction / Crush';
+      color = 'text-pink-300';
+      bg = 'bg-pink-400';
+    } else {
+      tierKey = 'friend';
+      fallback = 'Friend';
+      color = 'text-emerald-400';
+      bg = 'bg-emerald-500';
+    }
+  } else if (score >= 50) {
+    tierKey = 'acquaintance';
+    fallback = 'Acquaintance';
+    color = 'text-cyan-400';
+    bg = 'bg-cyan-500';
+  } else if (score >= 0) {
+    tierKey = 'stranger';
+    fallback = 'Stranger';
+    color = 'text-gray-400';
+    bg = 'bg-gray-500';
+  } else if (score >= -10) {
+    tierKey = 'unfriendly';
+    fallback = 'Unfriendly';
+    color = 'text-amber-400';
+    bg = 'bg-amber-500';
+  } else if (score >= -30) {
+    tierKey = 'distrusted';
+    fallback = 'Distrusted';
+    color = 'text-amber-500';
+    bg = 'bg-amber-600';
+  } else if (score >= -50) {
+    tierKey = 'adversary';
+    fallback = 'Adversary';
+    color = 'text-orange-500';
+    bg = 'bg-orange-600';
+  } else if (score >= -70) {
+    tierKey = 'hostile';
+    fallback = 'Hostile';
+    color = 'text-red-500';
+    bg = 'bg-red-600';
+  } else if (score >= -90) {
+    tierKey = 'bitter_nemesis';
+    fallback = 'Bitter Nemesis';
+    color = 'text-red-600';
+    bg = 'bg-red-700';
+  } else {
+    tierKey = 'mortal_foe';
+    fallback = 'Mortal Foe';
+    color = 'text-rose-600';
+    bg = 'bg-rose-700';
+  }
+
+  const label = t ? t(`codex.tiers.${tierKey}`, fallback) : fallback;
+  return { label, color, bg };
 };
 
-const getReputationTier = (score) => {
-  if (score >= 81) return { label: 'Exalted', color: 'text-emerald-300', bg: 'bg-emerald-400' };
-  if (score >= 51) return { label: 'Honored', color: 'text-emerald-400', bg: 'bg-emerald-500' };
-  if (score >= 21) return { label: 'Friendly', color: 'text-blue-400', bg: 'bg-blue-500' };
-  if (score >= 1) return { label: 'Liked', color: 'text-cyan-400', bg: 'bg-cyan-500' };
-  if (score >= -10) return { label: 'Neutral', color: 'text-gray-400', bg: 'bg-gray-500' };
-  if (score >= -40) return { label: 'Unfavorable', color: 'text-amber-400', bg: 'bg-amber-500' };
-  return { label: 'Hostile / Rival', color: 'text-red-400', bg: 'bg-red-500' };
+const getReputationTier = (score, t = null) => {
+  let tierKey = 'hostile_rival';
+  let fallback = 'Hostile / Rival';
+  let color = 'text-red-400';
+  let bg = 'bg-red-500';
+
+  if (score >= 81) {
+    tierKey = 'exalted'; fallback = 'Exalted'; color = 'text-emerald-300'; bg = 'bg-emerald-400';
+  } else if (score >= 51) {
+    tierKey = 'honored'; fallback = 'Honored'; color = 'text-emerald-400'; bg = 'bg-emerald-500';
+  } else if (score >= 21) {
+    tierKey = 'friendly'; fallback = 'Friendly'; color = 'text-blue-400'; bg = 'bg-blue-500';
+  } else if (score >= 1) {
+    tierKey = 'liked'; fallback = 'Liked'; color = 'text-cyan-400'; bg = 'bg-cyan-500';
+  } else if (score >= -10) {
+    tierKey = 'neutral'; fallback = 'Neutral'; color = 'text-gray-400'; bg = 'bg-gray-500';
+  } else if (score >= -40) {
+    tierKey = 'unfavorable'; fallback = 'Unfavorable'; color = 'text-amber-400'; bg = 'bg-amber-500';
+  }
+
+  const label = t ? t(`codex.rep_tiers.${tierKey}`, fallback) : fallback;
+  return { label, color, bg };
 };
 
 const CodexPanel = ({
@@ -118,6 +219,7 @@ const CodexPanel = ({
   onTriggerAction,
   targetContactName,
 }) => {
+  const { t } = useTranslation();
   const { contacts, factions, lorebook, commitments = [], loading, factionHqAction, refreshCodex } = codexHook;
   const [subTab, setSubTab] = useState('contacts'); // 'contacts' | 'factions' | 'lore'
   const [searchQuery, setSearchQuery] = useState('');
@@ -254,10 +356,14 @@ const CodexPanel = ({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BookOpen size={16} className="text-fantasy-accent" />
-            <h3 className="font-rpg font-bold text-xs sm:text-sm text-gray-100 uppercase tracking-wider">World Codex</h3>
+            <h3 className="font-rpg font-bold text-xs sm:text-sm text-gray-100 uppercase tracking-wider">{t('codex.title', 'World Codex')}</h3>
           </div>
           <span className="text-[10px] font-mono text-gray-400">
-            {subTab === 'contacts' ? `${contacts.length} NPCs` : subTab === 'factions' ? `${factions.length} Factions` : `${loreEntities.length} Lore`}
+            {subTab === 'contacts'
+              ? t('codex.npcs_count', { count: contacts.length, defaultValue: `${contacts.length} NPCs` })
+              : subTab === 'factions'
+              ? t('codex.factions_count', { count: factions.length, defaultValue: `${factions.length} Factions` })
+              : t('codex.lore_count', { count: loreEntities.length, defaultValue: `${loreEntities.length} Lore` })}
           </span>
         </div>
 
@@ -272,7 +378,7 @@ const CodexPanel = ({
             }`}
           >
             <Users size={11} />
-            <span>Contacts</span>
+            <span>{t('codex.contacts', 'Contacts')}</span>
           </button>
 
           <button
@@ -284,7 +390,7 @@ const CodexPanel = ({
             }`}
           >
             <Flag size={11} />
-            <span>Factions</span>
+            <span>{t('codex.factions', 'Factions')}</span>
           </button>
 
           <button
@@ -296,7 +402,7 @@ const CodexPanel = ({
             }`}
           >
             <Globe size={11} />
-            <span>Lore</span>
+            <span>{t('codex.lore', 'Lore')}</span>
           </button>
         </div>
 
@@ -305,7 +411,7 @@ const CodexPanel = ({
           <Search size={12} className="absolute left-2.5 top-2 text-gray-500" />
           <input
             type="text"
-            placeholder={`Search ${subTab}...`}
+            placeholder={t('codex.search_placeholder', { category: t(`codex.${subTab}`, subTab), defaultValue: `Search ${subTab}...` })}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full bg-black/60 border border-fantasy-border/60 pl-7 pr-2.5 py-1 rounded text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-fantasy-accent/50"
@@ -341,18 +447,21 @@ const CodexPanel = ({
             filteredContacts.length === 0 ? (
               <div className="text-center py-8 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
                 <Users size={24} className="mx-auto mb-1.5 opacity-40" />
-                <p className="text-xs">No matching contacts recorded yet.</p>
+                <p className="text-xs">{t('codex.no_contacts', 'No matching contacts recorded yet.')}</p>
               </div>
             ) : (
               filteredContacts.map(npc => {
                 const score = npc.relationship_score || npc.affinity || 0;
                 const isRomantic = (npc.track === 'romantic') || (npc.relations?.track === 'romantic');
-                const tier = getRelationshipTier(score, isRomantic ? 'romantic' : 'platonic');
+                const tier = getRelationshipTier(score, isRomantic ? 'romantic' : 'platonic', t);
                 const isExpanded = expandedNpc === (npc.id || npc.name);
                 const isInParty = partyNpcNames.has((npc.name || '').toLowerCase());
-                const canRecruit = score >= 15;
-
                 const basic = npc.basic_info || {};
+                const isMerchant = /merchant|shopkeeper|vendor|apothecary|peddler|trader/i.test(basic.role || basic.occupation || npc.name || '');
+                const isNonCombatScen = ['high_school_drama', 'high_school', 'slice_of_life', 'cozy_cafe'].includes((session?.scenario || '').toLowerCase());
+                const isDialoguePartner = Boolean(session?.dialogue_partner && (session.dialogue_partner.toLowerCase() === (npc.name || '').toLowerCase()));
+                const isDetailedUnlocked = score >= 100 || isInParty || isDialoguePartner;
+                const canRecruit = !isNonCombatScen && !isMerchant;
                 const traits = npc.unlocked_traits || [];
                 const rawDislikes = npc.dislikes || basic.dislikes || [];
                 const dislikes = rawDislikes.map(d => typeof d === 'string' ? d : (d.dislike || d.name || ''));
@@ -410,12 +519,17 @@ const CodexPanel = ({
                             <span className="font-bold text-xs sm:text-sm text-gray-100">{npc.name}</span>
                             {isInParty && (
                               <span className="text-[9px] px-1 py-0.2 bg-purple-950/60 text-purple-300 rounded font-bold uppercase border border-purple-800/40">
-                                In Party
+                                {t('codex.in_party', 'In Party')}
                               </span>
                             )}
                             {isRomantic && (
                               <span className="text-[9px] px-1 py-0.2 bg-pink-950/60 text-pink-300 rounded font-bold uppercase border border-pink-800/40">
-                                Romantic
+                                {t('codex.romantic', 'Romantic')}
+                              </span>
+                            )}
+                            {npc.clothing_status && (
+                              <span className="text-[8.5px] font-mono px-1 py-0.2 rounded bg-black/60 text-gray-300 border border-neutral-700/60 leading-tight">
+                                {npc.clothing_status}
                               </span>
                             )}
                           </div>
@@ -438,11 +552,28 @@ const CodexPanel = ({
                       </div>
                     </div>
 
+                    {/* Active Status Effects */}
+                    {Array.isArray(npc.status_effects) && npc.status_effects.filter(s => {
+                      const str = typeof s === 'string' ? s.trim() : (s?.name || '').trim();
+                      return str && !['[]', '{}', '""', "''", 'none', 'null'].includes(str.toLowerCase());
+                    }).length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-0.5">
+                        {npc.status_effects
+                          .filter(s => {
+                            const str = typeof s === 'string' ? s.trim() : (s?.name || '').trim();
+                            return str && !['[]', '{}', '""', "''", 'none', 'null'].includes(str.toLowerCase());
+                          })
+                          .map((eff, i) => (
+                            <StatusEffectBadge key={i} effect={eff} />
+                          ))}
+                      </div>
+                    )}
+
                     {/* Affinity Meter Bar */}
                     <div className="h-1.5 w-full bg-black/80 rounded-full overflow-hidden border border-fantasy-border/40">
                       <div 
                         className={`h-full ${tier.bg} transition-all duration-300`}
-                        style={{ width: `${Math.max(5, Math.min(100, ((score + 100) / 200) * 100))}%` }}
+                        style={{ width: `${Math.max(5, Math.min(100, ((score + 100) / 400) * 100))}%` }}
                       />
                     </div>
 
@@ -454,10 +585,14 @@ const CodexPanel = ({
                         <div className="flex items-center justify-between bg-black/40 p-2.5 rounded-lg border border-fantasy-border/40">
                           <span className="text-xs text-gray-300">
                             {isInParty
-                              ? 'Currently traveling in your party.'
-                              : canRecruit
-                                ? 'Friendly enough to join your party!'
-                                : 'Requires Friend+ (+15 Affinity) to recruit.'}
+                              ? t('codex.in_party_desc', 'Currently traveling in your party.')
+                              : isNonCombatScen
+                                ? t('codex.non_combat_recruit_desc', 'Party companion recruitment is disabled in non-combat scenarios.')
+                                : isMerchant
+                                  ? t('codex.merchant_recruit_desc', 'Merchants cannot be recruited into your party.')
+                                  : score >= 100
+                                    ? t('codex.can_recruit_desc', 'Friendly standing reached! Ready to join party freely.')
+                                    : t('codex.recruit_gold_desc', 'Recruitable via gold contract or higher affinity.')}
                           </span>
                           {(isInParty || canRecruit) && (
                             <button
@@ -473,11 +608,21 @@ const CodexPanel = ({
                               }`}
                             >
                               {isInParty ? <UserMinus size={13} /> : <UserPlus size={13} />}
-                              <span>{companionBusy === npc.name ? '...' : (isInParty ? 'Dismiss' : 'Recruit')}</span>
+                              <span>{companionBusy === npc.name ? '...' : (isInParty ? t('codex.dismiss', 'Dismiss') : t('codex.recruit', 'Recruit'))}</span>
                             </button>
                           )}
                         </div>
 
+                        {!isDetailedUnlocked ? (
+                          <div className="p-4 text-center border border-dashed border-fantasy-border/40 rounded-md bg-black/40 space-y-1">
+                            <Lock size={18} className="mx-auto text-amber-400/70" />
+                            <p className="text-xs font-semibold text-gray-200">{t('codex.profile_locked', 'Personal Dossier Locked')}</p>
+                            <p className="text-[11px] text-gray-400">
+                              {t('codex.profile_locked_desc', 'Reach Friend standing (100+ Affinity), recruit them into your party, or speak with them directly to view their full profile.')}
+                            </p>
+                          </div>
+                        ) : (
+                          <>
                         {/* Browser / Folder Tabs Header */}
                         <div className="grid grid-cols-4 border-b border-fantasy-border/70 pt-1.5 px-1 bg-black/60 rounded-t-lg gap-1 items-end select-none">
                           {[
@@ -1146,6 +1291,8 @@ const CodexPanel = ({
                           );
                         })()}
                         </div>
+                        </>
+                      )}
 
                       </div>
                     )}
@@ -1161,13 +1308,13 @@ const CodexPanel = ({
             filteredFactions.length === 0 ? (
               <div className="text-center py-8 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
                 <Flag size={24} className="mx-auto mb-1.5 opacity-40" />
-                <p className="text-xs">No factions discovered yet.</p>
+                <p className="text-xs">{t('codex.factions_empty', 'No factions discovered yet.')}</p>
               </div>
             ) : (
               filteredFactions.map(faction => {
                 const fid = faction.faction_id || faction.name;
                 const rep = faction.reputation ?? faction.reputation_score ?? 0;
-                const repTier = getReputationTier(rep);
+                const repTier = getReputationTier(rep, t);
                 const isExpanded = expandedFaction === fid;
                 const isMember = Boolean(faction.is_member);
                 const playerRank = Number(faction.player_rank || 0);
@@ -1194,7 +1341,7 @@ const CodexPanel = ({
                           <span>{faction.name || faction.faction_id}</span>
                           {isMember && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40 font-bold uppercase">
-                              Rank {playerRank || 1} {faction.player_title ? `• ${faction.player_title}` : 'Member'}
+                              Rank {playerRank || 1} {faction.player_title ? `• ${faction.player_title}` : t('codex.member', 'Member')}
                             </span>
                           )}
                         </h4>
@@ -1240,7 +1387,7 @@ const CodexPanel = ({
                             {activePerks.length > 0 && (
                               <div>
                                 <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block mb-1">
-                                  ✨ Active Faction Perks
+                                  ✨ {t('codex.active_faction_perks', 'Active Faction Perks')}
                                 </span>
                                 <div className="flex flex-wrap gap-1">
                                   {activePerks.map((perk, idx) => (
@@ -1254,7 +1401,7 @@ const CodexPanel = ({
                             {rivalFactions.length > 0 && (
                               <div>
                                 <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider block mb-0.5">
-                                  ⚔️ Rival Factions
+                                  ⚔️ {t('codex.rival_factions', 'Rival Factions')}
                                 </span>
                                 <span className="text-[11px] text-gray-300">{rivalFactions.join(', ')}</span>
                               </div>
@@ -1268,7 +1415,7 @@ const CodexPanel = ({
                             <div className="flex items-center justify-between text-[10px] font-bold text-gray-400 uppercase tracking-wider">
                               <span className="flex items-center gap-1">
                                 <Crown size={11} className="text-amber-400" />
-                                <span>Leadership Hierarchy</span>
+                                <span>{t('codex.leadership_hierarchy', 'Leadership Hierarchy')}</span>
                               </span>
                               <span className="font-mono text-gray-500">Ranks 1–4</span>
                             </div>
@@ -1295,7 +1442,7 @@ const CodexPanel = ({
                                         {isLeader && <Crown size={11} className="text-amber-400 shrink-0" />}
                                       </div>
                                       <span className="text-[10px] text-gray-400 block mt-0.5">
-                                        Holder: <strong className="text-gray-200">{slot.is_vacant ? 'Vacant' : slot.name}</strong>
+                                        {t('codex.holder', 'Holder')}: <strong className="text-gray-200">{slot.is_vacant ? t('codex.vacant', 'Vacant') : slot.name}</strong>
                                         {slot.is_player && (
                                           <span className="ml-1.5 text-[9px] px-1 bg-amber-500/20 text-amber-300 rounded border border-amber-500/40 font-bold uppercase">
                                             You
@@ -1316,7 +1463,7 @@ const CodexPanel = ({
                         {/* Faction HQ Operations Grid */}
                         <div className="space-y-1.5">
                           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
-                            Faction Headquarters Operations
+                            {t('codex.faction_hq_ops', 'Faction Headquarters Operations')}
                           </span>
                           <div className="grid grid-cols-2 gap-1.5">
                             {/* Join or Leave */}
@@ -1330,7 +1477,7 @@ const CodexPanel = ({
                               }`}
                             >
                               <Flag size={12} />
-                              <span>{isMember ? 'Leave Faction' : 'Pledge / Join'}</span>
+                              <span>{isMember ? t('codex.leave_faction', 'Leave Faction') : t('codex.join_faction', 'Pledge / Join')}</span>
                             </button>
 
                             {/* Safehouse Rest */}
@@ -1345,7 +1492,7 @@ const CodexPanel = ({
                               }`}
                             >
                               <BedDouble size={12} />
-                              <span>Safehouse Rest</span>
+                              <span>{t('codex.safehouse_rest', 'Safehouse Rest')}</span>
                             </button>
 
                             {/* Quartermaster Shop */}
@@ -1355,7 +1502,7 @@ const CodexPanel = ({
                               className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border bg-amber-950/40 hover:bg-amber-900/50 border-amber-700/60 text-amber-300 transition-all"
                             >
                               <ShoppingBag size={12} />
-                              <span>Quartermaster</span>
+                              <span>{t('codex.quartermaster', 'Quartermaster')}</span>
                             </button>
 
                             {/* Promotion Trial */}
@@ -1413,7 +1560,7 @@ const CodexPanel = ({
                       : 'bg-black/40 text-gray-400 border-fantasy-border/50 hover:text-gray-200'
                   }`}
                 >
-                  📖 World Lore ({loreEntities.length})
+                  📖 {t('codex.world_lore', 'World Lore')} ({loreEntities.length})
                 </button>
                 <button
                   type="button"
@@ -1424,7 +1571,7 @@ const CodexPanel = ({
                       : 'bg-black/40 text-gray-400 border-fantasy-border/50 hover:text-gray-200'
                   }`}
                 >
-                  🤝 Commitments ({(commitments || []).length})
+                  🤝 {t('codex.commitments', 'Commitments')} ({(commitments || []).length})
                 </button>
               </div>
 
@@ -1432,7 +1579,7 @@ const CodexPanel = ({
                 filteredCommitments.length === 0 ? (
                   <div className="text-center py-8 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
                     <Shield size={24} className="mx-auto mb-1.5 opacity-40" />
-                    <p className="text-xs">No active promises, debts, secrets, or pacts recorded.</p>
+                    <p className="text-xs">{t('codex.no_commitments', 'No active promises, debts, secrets, or pacts recorded.')}</p>
                   </div>
                 ) : (
                   filteredCommitments.map((c, idx) => (
@@ -1463,7 +1610,7 @@ const CodexPanel = ({
               ) : filteredLore.length === 0 ? (
                 <div className="text-center py-8 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
                   <Globe size={24} className="mx-auto mb-1.5 opacity-40" />
-                  <p className="text-xs">No lore entries documented yet.</p>
+                  <p className="text-xs">{t('codex.no_lore', 'No lore entries documented yet.')}</p>
                 </div>
               ) : (
                 filteredLore.map((ent, idx) => (
@@ -1487,6 +1634,20 @@ const CodexPanel = ({
                         <MapPin size={10} />
                         <span>{ent.location}</span>
                       </span>
+                    )}
+
+                    {ent.entity_type === 'person' && (
+                      <div className="flex flex-wrap gap-2 text-[10px] text-gray-400 pt-1 border-t border-fantasy-border/30">
+                        {ent.role && <span>Role: <strong className="text-gray-300">{ent.role}</strong></span>}
+                        {ent.race && <span>Race: <strong className="text-gray-300">{formatRace(ent.race)}</strong></span>}
+                        {ent.gender && <span>Gender: <strong className="text-gray-300">{formatTitle(ent.gender)}</strong></span>}
+                        {ent.relationship_score !== undefined && ent.relationship_score !== null && (
+                          <span className="flex items-center gap-0.5 text-fantasy-accent">
+                            <Heart size={10} />
+                            <span>Affinity: <strong>{ent.relationship_score > 0 ? `+${ent.relationship_score}` : ent.relationship_score}</strong></span>
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                 ))

@@ -25,53 +25,53 @@ def sync_hostile_entities(result: dict, session: dict) -> dict:
 
 
 
-    # If combat was resolved on this turn, preserve the cleared state
-
-    if result.get("_combat_resolved_notice") and not result.get("nearby_enemies"):
-
+    # NON-COMBAT SCENARIO GUARD: Strictly disable combat and nearby_enemies in non-combat genres
+    import scenario_data
+    scen_key = (session.get("scenario") if session else None) or "fantasy"
+    if scenario_data.has_tag(scen_key, "non_combat") or str(scen_key).lower() in ("high_school", "high_school_drama"):
         session["nearby_enemies"] = []
-
-        session["nearby_enemies"] = []
-
+        result["nearby_enemies"] = []
         return result
 
-
-
-    # GROUND TRUTH: If session already has active hostiles, KEEP session's list (do not let LLM overwrite it)
-
-    existing_hostiles = session.get("nearby_enemies")
-
-    if existing_hostiles and isinstance(existing_hostiles, list):
-
-        nearby = [dict(m) for m in existing_hostiles if isinstance(m, dict)]
-
-    else:
-
-        # Initializing hostiles from LLM for the first time
-
-        llm_nearby = result.get("nearby_enemies")
-
-        if isinstance(llm_nearby, list) and llm_nearby:
-
-            nearby = [dict(m) for m in llm_nearby if isinstance(m, dict)]
-
-        else:
-
-            nearby = []
-
-
+    # If combat was resolved on this turn, preserve the cleared state
+    if result.get("_combat_resolved_notice") and not result.get("nearby_enemies"):
+        session["nearby_enemies"] = []
+        return result
 
     from mechanics.combat.enemies import disambiguate_enemy_list, is_generic_enemy_name, generate_scenario_enemy
-
     import re
 
     def get_base_name(n: str) -> str:
-
         return re.sub(r'\s+(?:#?\d+|[A-Z])$', '', str(n).strip())
 
-
+    existing_hostiles = session.get("nearby_enemies")
+    if existing_hostiles and isinstance(existing_hostiles, list):
+        nearby = [dict(m) for m in existing_hostiles if isinstance(m, dict)]
+    else:
+        nearby = []
 
     existing_base_names = {get_base_name(m.get("name", "")).lower() for m in nearby if isinstance(m, dict)}
+
+    # MID-COMBAT REINFORCEMENTS: Merge new hostiles from LLM's nearby_enemies without resetting existing enemies
+    llm_nearby = result.get("nearby_enemies")
+    if isinstance(llm_nearby, list) and llm_nearby:
+        for m in llm_nearby:
+            if isinstance(m, dict):
+                m_name = m.get("name")
+                if m_name and get_base_name(m_name).lower() not in existing_base_names:
+                    nearby.append(dict(m))
+                    existing_base_names.add(get_base_name(m_name).lower())
+            elif isinstance(m, str) and m.strip():
+                base_m = get_base_name(m.strip())
+                if base_m.lower() not in existing_base_names:
+                    gen_obj = generate_scenario_enemy(
+                        scenario=session.get("scenario", "fantasy"),
+                        location=session.get("current_location", "area"),
+                        chapter=session.get("chapter", 1),
+                        custom_name=base_m
+                    )
+                    nearby.append(gen_obj)
+                    existing_base_names.add(base_m.lower())
 
 
 
@@ -93,13 +93,11 @@ def sync_hostile_entities(result: dict, session: dict) -> dict:
 
                     continue
 
-                # Do not re-add dead or defeated entities
-
-                if disp in ("dead", "defeated", "destroyed", "friendly", "neutral"):
-
+                # Do not re-add dead, defeated, or non-hostile entities
+                if disp in ("dead", "defeated", "destroyed", "friendly", "neutral", "non-hostile") and not ent.get("is_hostile"):
                     continue
 
-                if disp == "hostile" or ent_type in ("enemy", "monster", "hostile", "creature", "boss"):
+                if disp == "hostile" or ent.get("is_hostile") is True or ent_type in ("enemy", "monster", "hostile", "creature", "boss"):
 
                     base_ent_name = get_base_name(name)
 
@@ -142,16 +140,8 @@ def sync_hostile_entities(result: dict, session: dict) -> dict:
 
 
     # Sync back to both session and result
-
     session["nearby_enemies"] = nearby
-
-    session["nearby_enemies"] = nearby
-
     result["nearby_enemies"] = nearby
-
-    result["nearby_enemies"] = nearby
-
-
 
     return result
 

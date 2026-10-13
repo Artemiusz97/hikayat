@@ -120,8 +120,8 @@ class TestSocialSimulation:
             # At score 40, confession milestone must be False
             assert can_trigger_romantic_confession(sid, cid, peer_name, scenario="high_school_drama") is False
 
-            # Boost to 75 (crosses Tier 4 threshold)
-            db.update_contact_score(sid, peer_name, 75, character_id=cid)
+            # Boost to 105 (crosses Friend/Crush Tier 3 threshold)
+            db.update_contact_score(sid, peer_name, 105, character_id=cid)
             assert can_trigger_romantic_confession(sid, cid, peer_name, scenario="high_school_drama") is True
 
             # Trigger confession cooldown
@@ -598,7 +598,7 @@ class TestSocialSimulation:
         sid = 999977
         cid = 101
         try:
-            db.upsert_contact(session_id=sid, character_id=cid, npc_id="Mia Yamada", name="Mia Yamada", track="platonic", delta_score=20)
+            db.upsert_contact(session_id=sid, character_id=cid, npc_id="Mia Yamada", name="Mia Yamada", track="platonic", delta_score=100)
             contact_before = db.get_contact(sid, "Mia Yamada", character_id=cid)
             assert contact_before["track"] == "platonic"
 

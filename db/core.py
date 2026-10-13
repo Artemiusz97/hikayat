@@ -85,7 +85,10 @@ CREATE TABLE IF NOT EXISTS user_settings (
     stream_narrative    INTEGER DEFAULT 1,       -- 1 = stream real-time, 0 = batch
     debug_stat_mode     TEXT DEFAULT 'off',  -- 'off' | 'max' | 'min'
     debug_check_mode    TEXT DEFAULT 'off',  -- 'off' | 'always_success' | 'always_fail' | 'always_crit_success' | 'always_crit_fail'
-    debug_reveal_all_info INTEGER DEFAULT 0  -- 0 | 1 (reveal all predetermined info & history)
+    debug_reveal_all_info INTEGER DEFAULT 0, -- 0 | 1 (reveal all predetermined info & history)
+    language            TEXT DEFAULT 'en',
+    ui_language         TEXT DEFAULT 'en',
+    narration_language  TEXT DEFAULT 'en'
 );
 
 CREATE TABLE IF NOT EXISTS discord_users (
@@ -137,7 +140,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     extra_json          TEXT DEFAULT '{}',   -- flexible extension dict (e.g. pending_promotion)
     faction_reinforcements_used INTEGER DEFAULT 0,
     show_percentages    INTEGER DEFAULT 1,
-    last_turn_snapshot_json TEXT DEFAULT '{}'
+    last_turn_snapshot_json TEXT DEFAULT '{}',
+    language            TEXT DEFAULT 'en',
+    narration_language  TEXT DEFAULT 'en'
 );
 
 CREATE TABLE IF NOT EXISTS session_members (
@@ -158,6 +163,7 @@ CREATE TABLE IF NOT EXISTS lorebook (
     traits          TEXT DEFAULT '[]',
     motivation      TEXT DEFAULT '',
     mannerisms      TEXT DEFAULT '',
+    gender          TEXT DEFAULT '',
     race            TEXT DEFAULT 'human',
     appearance_json TEXT DEFAULT '{}',
     status          TEXT DEFAULT 'active',   -- active | deceased | captured | ruined
@@ -650,6 +656,42 @@ SCHEMA_MIGRATIONS: list[tuple[int, str, list[str]]] = [
         "add_characters_appearance_json",
         [
             "ALTER TABLE characters ADD COLUMN appearance_json TEXT DEFAULT '{}'"
+        ],
+    ),
+    (
+        13,
+        "add_user_settings_language",
+        [
+            "ALTER TABLE user_settings ADD COLUMN language TEXT DEFAULT 'en'"
+        ],
+    ),
+    (
+        14,
+        "add_sessions_language",
+        [
+            "ALTER TABLE sessions ADD COLUMN language TEXT DEFAULT 'en'"
+        ],
+    ),
+    (
+        15,
+        "add_user_settings_ui_and_narration_language",
+        [
+            "ALTER TABLE user_settings ADD COLUMN ui_language TEXT DEFAULT 'en'",
+            "ALTER TABLE user_settings ADD COLUMN narration_language TEXT DEFAULT 'en'",
+        ],
+    ),
+    (
+        16,
+        "add_sessions_narration_language",
+        [
+            "ALTER TABLE sessions ADD COLUMN narration_language TEXT DEFAULT 'en'",
+        ],
+    ),
+    (
+        17,
+        "add_lorebook_gender",
+        [
+            "ALTER TABLE lorebook ADD COLUMN gender TEXT DEFAULT ''",
         ],
     ),
 ]

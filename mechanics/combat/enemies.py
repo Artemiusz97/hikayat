@@ -472,7 +472,8 @@ def roll_enemy_intent(archetype: str) -> str:
 
 def generate_scenario_enemy(scenario: str, location: str, chapter: int, custom_name: str = None,
                             custom_archetype: str = None, custom_primary: list = None, custom_forbidden: list = None,
-                            exact_tier: int = None, exact_extra_points: int = None) -> dict:
+                            exact_tier: int = None, exact_extra_points: int = None,
+                            language: str = "en") -> dict:
     scenario_lower = _resolve_enemy_scenario_key(scenario)
     
     template = None
@@ -548,7 +549,9 @@ def generate_scenario_enemy(scenario: str, location: str, chapter: int, custom_n
         # Remove conflicting weaknesses if granted resistance
         base_weak = [w for w in base_weak if w not in base_res]
 
-    final_name = f"{affixes[0]} {name}" if affixes else name
+    from localization import translate_affix
+    display_affix = translate_affix(affixes[0], language) if affixes else ""
+    final_name = f"{display_affix} {name}" if display_affix else name
     initial_intent = roll_enemy_intent(arch_name) if tier_rank >= 3 else None
 
     return {
@@ -577,7 +580,7 @@ def generate_scenario_enemy(scenario: str, location: str, chapter: int, custom_n
 generate_scenario_monster = generate_scenario_enemy
 
 
-def generate_balanced_encounter(party_members: list, scenario: str, location: str, chapter: int) -> tuple[list, float]:
+def generate_balanced_encounter(party_members: list, scenario: str, location: str, chapter: int, language: str = "en") -> tuple[list, float]:
     if not party_members:
         party_members = [{"level": 1, "str_": 2, "per_": 2, "end_": 2, "cha": 1, "int_": 2, "agi": 2, "luk": 1}]
 
@@ -663,7 +666,8 @@ def generate_balanced_encounter(party_members: list, scenario: str, location: st
         e_obj = generate_scenario_enemy(
             scenario=scenario_lower, location=location, chapter=chapter,
             custom_name=base_name, custom_archetype=arch_name,
-            exact_tier=tier_rank, exact_extra_points=extra_pts
+            exact_tier=tier_rank, exact_extra_points=extra_pts,
+            language=language
         )
         
         # Fix name disambiguation 

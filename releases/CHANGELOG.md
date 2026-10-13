@@ -23,6 +23,7 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v2.3.0** | 2026-10-13 | Minor | Multi-Language Localization, NPC Gender & Pronoun Consistency, Combat Stance & Affinity Synergy, Sub-Facility Waypoints, Web UI Internationalization. |
 | **v2.2.0** | 2026-10-12 | Minor | Deterministic Affinity Engine, In-Game Smartphone Narrative Bridge, Engine Auditor, Equipment Expansion & Web UI Overhaul. |
 | **v2.1.0** | 2026-10-04 | Minor | Mechanics Domain Restructuring, Unified Web Frontend Architecture, Root Declutter, and Distribution Hardening. |
 | **v2.0.0** | 2026-09-30 | **MAJOR** | Modern Modular Architecture, React Web Application, Decoupled API & Services, 3-Track Intimacy Consolidation. |
@@ -41,6 +42,34 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 ---
 
 ## Release Details
+
+### [v2.3.0] - 2026-10-13
+
+#### Added & Enhanced
+- **Multi-Language & Internationalization Subsystem (`localization/`, `web/src/locales/`, `web/src/i18n.js`)**:
+  - Trilingual core support across Python backend and React frontend: English (`en`), Polish (`pl`), and Malay (`ms`).
+  - Affix translations and canonicalization (`translate_affix`, `canonicalize_affix`) for equipment and combat modifiers.
+  - Localized item lemmas and unicode icon resolvers (`get_item_icon`).
+  - Localized intent recognizers, conversation exit phrasing, and movement prefixes.
+  - React frontend `i18next` integration with dedicated `LanguageSwitcher.jsx` component and settings persistence.
+- **NPC Identity, Gender & Pronoun Consistency Engine (`game_engine/keywords.py`, `game_engine/prompts.py`, `llm_client.py`)**:
+  - Post-generation pronoun sanitizer (`sanitize_npc_pronoun_consistency`) matching narrative text against registered NPC directory records.
+  - Explicit prompt directives (`MANDATORY GENDER & PRONOUN CANON`) preventing gender drift and pronoun hallucinations across turns.
+  - Context formatters (`_describe_tracked_entity`, `format_persona_summary`) explicitly formatting pronouns (`he/him`, `she/her`).
+- **Combat Stance & Affinity Mechanics Synergy (`mechanics/social/relationships.py`, `cogs/contacts.py`)**:
+  - Deterministic 0-300 affinity scale milestones (*Stranger*, *Acquaintance*, *Friend*, *Close Friend*, *Confidant*).
+  - Scaled companion recruitment costs and tactical cooperation based on affinity standing.
+  - Combat stance mechanics synchronized with affinity tiers and martial roles.
+- **Sub-Facility Waypoint Preservation & Multi-Occupant Roster (`mechanics/world/locations/movement.py`, `db/world.py`)**:
+  - Hierarchical waypoint retention preserving complete navigation paths (*Zone ➔ Facility ➔ Sub-Facility*) across movement reconciliations.
+  - Multi-occupant facility roster allowing multiple distinct NPCs to inhabit shared sub-locations without record collisions.
+  - School directory and lorebook schema gender parity synchronization.
+- **Modern Web Application Enhancements & Internationalization (`web/src/`)**:
+  - Responsive language switcher component in top navigation and Settings modal.
+  - Settings Modal and Saves Modal updated with localized strings and responsive drawers.
+  - Fresh production bundle built in `web/dist/`.
+- **Automated Contract Test Suites (`tests/`)**:
+  - Added `test_localization_mechanics.py`, `test_npc_gender_and_pronoun_consistency.py`, `test_affinity_and_combat_stance.py`, and `test_subfacility_waypoint_preservation.py`.
 
 ### [v2.2.0] - 2026-10-12
 

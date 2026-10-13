@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { apiCall } from '../api/client';
 
-export const useGameSession = (user) => {
+export const useGameSession = (user, character) => {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [processingTurn, setProcessingTurn] = useState(false);
@@ -18,7 +18,11 @@ export const useGameSession = (user) => {
   const socketRef = useRef(null);
 
   const fetchActiveSession = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setSession(null);
+      setLoading(false);
+      return;
+    }
     try {
       const data = await apiCall(`/api/adventure/active-session/${user.user_id}`);
       if (data && data.session) {
@@ -32,7 +36,7 @@ export const useGameSession = (user) => {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, character?.id]);
 
   useEffect(() => {
     fetchActiveSession();
@@ -233,10 +237,16 @@ export const useGameSession = (user) => {
       } else {
         setSession(data.session);
         setWaitingForParty(false);
+        setIsStreaming(false);
+        setStreamingNarrative(null);
+        setStreamingState(null);
         setProcessingTurn(false);
         setLastSyncTimestamp(Date.now());
       }
     } catch (e) {
+      setIsStreaming(false);
+      setStreamingNarrative(null);
+      setStreamingState(null);
       setProcessingTurn(false);
       throw e;
     }

@@ -905,6 +905,8 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                         p_asset_tex = str(appr_c.get("asset_texture") or "").strip()
 
                         lead_char = party[0][0] if party and isinstance(party[0], (tuple, list)) else (party[0] if party and isinstance(party[0], dict) else {})
+                        if not lead_char and actions and isinstance(actions[0], dict) and isinstance(actions[0].get("char"), dict):
+                            lead_char = actions[0]["char"]
                         pl_gender = str(lead_char.get("gender", "male")).strip().lower()
                         is_pl_male = any(kw in pl_gender for kw in ("male", "man", "boy")) and "female" not in pl_gender
                         pl_app = lead_char.get("appearance", {}) if isinstance(lead_char.get("appearance"), dict) else {}
@@ -1025,6 +1027,8 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                     p_gender = str(matched_c.get("gender") or (matched_c.get("appearance") or {}).get("gender") or "Female").lower() if matched_c else "female"
                     is_male_npc = "male" in p_gender and "female" not in p_gender
                     lead_char = party[0][0] if party and isinstance(party[0], (tuple, list)) else (party[0] if party and isinstance(party[0], dict) else {})
+                    if not lead_char and actions and isinstance(actions[0], dict) and isinstance(actions[0].get("char"), dict):
+                        lead_char = actions[0]["char"]
                     player_gender = str(lead_char.get("gender", "Male")).lower()
                     is_female_player = "female" in player_gender or "woman" in player_gender
 
@@ -1044,7 +1048,8 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                     this_p_clim = bool(partner_climaxes_map.get(p_clim_k or p, False)) if partner_climaxes_map else (partner_peaked or p_val >= 100)
 
                     if premature_finish and not this_p_clim and p_val < 100:
-                        partner_demanded = excitement_data.get("partner_demanded", True)
+                        from mechanics.social.intimate_excitement import roll_partner_demand
+                        partner_demanded = roll_partner_demand(matched_c) if matched_c else excitement_data.get("partner_demanded", True)
                         if partner_demanded:
                             intimate_dynamic_openness_blocks.append(
                                 f"  * [PREMATURE PLAYER FINISH & UNSATISFIED PARTNER DEMAND ({p})]: The player character has finished, but {p} is STILL UNSATISFIED!{gauge_str} "
@@ -1102,10 +1107,34 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
             # Check if in refractory cooldown on normal dialogue (injected once per turn)
             in_refr, refr_mins = is_in_refractory_cooldown(session, curr_phys)
             if in_refr and refr_mins > 0:
-                intimate_dynamic_openness_blocks.append(
-                    f"  * [REFRACTORY COOLDOWN ACTIVE]: The male player character is currently catching their breath and physically spent (~{refr_mins} in-game minutes remaining). "
-                    f"Full penetrative intercourse cannot be sustained yet. Direct any physical intimacy toward non-penetrative affection (kissing, gentle caressing, pillow talk, or cuddling)."
-                )
+                curr_ic_dlg = str(curr_phys.get("intimate_contact", "")).lower() if curr_phys else ""
+                exc_dlg = (curr_phys.get("excitement") or {}) if curr_phys else {}
+                pl_climaxed_dlg = bool((curr_phys.get("climax_state") or {}).get("player_climaxed")) if curr_phys else False
+                pl_in_refr_dlg = bool(exc_dlg.get("player_in_refractory")) if exc_dlg.get("player_in_refractory") is not None else ("ongoing for player" not in curr_ic_dlg or pl_climaxed_dlg)
+                if pl_in_refr_dlg:
+                    lead_c_dlg = party[0][0] if party and isinstance(party[0], (tuple, list)) else (party[0] if party and isinstance(party[0], dict) else {})
+                    if not lead_c_dlg and actions and isinstance(actions[0], dict) and isinstance(actions[0].get("char"), dict):
+                        lead_c_dlg = actions[0]["char"]
+                    pl_gen_dlg = str(lead_c_dlg.get("gender", "Male")).lower() if isinstance(lead_c_dlg, dict) else "male"
+                    if "female" in pl_gen_dlg or "woman" in pl_gen_dlg:
+                        intimate_dynamic_openness_blocks.append(
+                            f"  * [POST-CLIMAX RECOVERY / AFTERCARE ACTIVE]: Both partners are resting in post-climax recovery (~{refr_mins} in-game minutes remaining). "
+                            f"Full penetrative intercourse cannot be sustained yet. Direct any physical intimacy toward tender aftercare (kissing, gentle caressing, pillow talk, or cuddling)."
+                        )
+                    else:
+                        intimate_dynamic_openness_blocks.append(
+                            f"  * [REFRACTORY COOLDOWN ACTIVE]: The male player character is currently catching their breath and physically spent (~{refr_mins} in-game minutes remaining). "
+                            f"Full penetrative intercourse cannot be sustained yet. Direct any physical intimacy toward non-penetrative affection (kissing, gentle caressing, manual/oral attention, pillow talk, or cuddling)."
+                        )
+                elif not _in_active_erotic_dlg:
+                    refr_partners_dlg = exc_dlg.get("refractory_partners") if isinstance(exc_dlg.get("refractory_partners"), dict) else {}
+                    for p in partners_list:
+                        matched_rp = _match_actor_key(p, refr_partners_dlg) if refr_partners_dlg else ""
+                        if matched_rp and refr_partners_dlg.get(matched_rp):
+                            intimate_dynamic_openness_blocks.append(
+                                f"  * [PARTNER POST-CLIMAX RECOVERY ({p})]: {p} recently reached climax and is resting in post-climax recovery (~{refr_mins} in-game minutes remaining). "
+                                f"Acknowledge their satisfied, recovering state naturally in dialogue or gentle affection."
+                            )
 
         intimate_dynamic_openness_section = "\n".join(intimate_dynamic_openness_blocks) + "\n" if intimate_dynamic_openness_blocks else ""
 

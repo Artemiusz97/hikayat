@@ -17,7 +17,8 @@ from mechanics.social.relationships import (
     format_progress_bar,
     format_llm_relationship_context,
     MIN_RELATIONSHIP,
-    MAX_RELATIONSHIP
+    MAX_RELATIONSHIP,
+    is_martial_npc
 )
 
 
@@ -25,7 +26,7 @@ class TestRelationshipsMechanic(unittest.TestCase):
 
     def test_score_clamping(self):
         self.assertEqual(clamp_score(50), 50)
-        self.assertEqual(clamp_score(150), MAX_RELATIONSHIP)
+        self.assertEqual(clamp_score(350), MAX_RELATIONSHIP)
         self.assertEqual(clamp_score(-200), MIN_RELATIONSHIP)
         self.assertEqual(clamp_score(0), 0)
 
@@ -33,21 +34,33 @@ class TestRelationshipsMechanic(unittest.TestCase):
         tier_stranger = get_relationship_tier(5, track="platonic", scenario="high_school_drama")
         self.assertEqual(tier_stranger["name"], "Stranger")
 
-        tier_friend = get_relationship_tier(45, track="platonic", scenario="high_school_drama")
+        tier_hallway = get_relationship_tier(75, track="platonic", scenario="high_school_drama")
+        self.assertEqual(tier_hallway["name"], "Hallway Buddy")
+
+        tier_friend = get_relationship_tier(120, track="platonic", scenario="high_school_drama")
         self.assertEqual(tier_friend["name"], "Lunch Friend")
 
-        tier_bestie = get_relationship_tier(60, track="platonic", scenario="high_school_drama")
+        tier_bestie = get_relationship_tier(170, track="platonic", scenario="high_school_drama")
         self.assertEqual(tier_bestie["name"], "Best Friend")
 
-        tier_inner = get_relationship_tier(80, track="platonic", scenario="high_school_drama")
+        tier_inner = get_relationship_tier(220, track="platonic", scenario="high_school_drama")
         self.assertEqual(tier_inner["name"], "Inner Circle")
 
+        tier_sworn = get_relationship_tier(270, track="platonic", scenario="high_school_drama")
+        self.assertEqual(tier_sworn["name"], "Sworn Bestie")
+
     def test_tier_resolution_romantic(self):
-        tier_crush = get_relationship_tier(60, track="romantic", scenario="high_school_drama")
+        tier_crush = get_relationship_tier(120, track="romantic", scenario="high_school_drama")
         self.assertEqual(tier_crush["name"], "Big Crush")
 
-        tier_lover = get_relationship_tier(95, track="romantic", scenario="high_school_drama")
-        self.assertEqual(tier_lover["name"], "Lover / Partner")
+        tier_partner = get_relationship_tier(170, track="romantic", scenario="high_school_drama")
+        self.assertEqual(tier_partner["name"], "Dating / Partner")
+
+        tier_exclusive = get_relationship_tier(220, track="romantic", scenario="high_school_drama")
+        self.assertEqual(tier_exclusive["name"], "Exclusive Romance")
+
+        tier_soulmate = get_relationship_tier(270, track="romantic", scenario="high_school_drama")
+        self.assertEqual(tier_soulmate["name"], "High School Sweethearts / Soulmate")
 
     def test_tier_resolution_negative(self):
         tier_unfriendly = get_relationship_tier(-5, track="platonic", scenario="high_school_drama")
@@ -62,20 +75,21 @@ class TestRelationshipsMechanic(unittest.TestCase):
     def test_skill_check_modifiers(self):
         self.assertEqual(get_relationship_modifier(45), 4)
         self.assertEqual(get_relationship_modifier(85), 8)
+        self.assertEqual(get_relationship_modifier(150), 10)
         self.assertEqual(get_relationship_modifier(0), 0)
         self.assertEqual(get_relationship_modifier(-35), -4)
         self.assertEqual(get_relationship_modifier(-75), -8)
 
     def test_unlocked_info_level(self):
         self.assertEqual(get_unlocked_info_level(5), 1)
-        self.assertEqual(get_unlocked_info_level(20), 1)
-        self.assertEqual(get_unlocked_info_level(45), 2)
-        self.assertEqual(get_unlocked_info_level(85), 3)
+        self.assertEqual(get_unlocked_info_level(80), 1)
+        self.assertEqual(get_unlocked_info_level(120), 2)
+        self.assertEqual(get_unlocked_info_level(220), 3)
 
     def test_progress_bar_format(self):
-        bar = format_progress_bar(50, width=10)
+        bar = format_progress_bar(200, width=10)
         self.assertIn("███████", bar)
-        self.assertIn("+50", bar)
+        self.assertIn("+200", bar)
 
     def test_database_contacts_crud(self):
         db.init_db()
@@ -177,6 +191,39 @@ class TestRelationshipsMechanic(unittest.TestCase):
         self.assertGreaterEqual(delta_fail, -5)
         self.assertLessEqual(delta_fail, 0)
 
+    def test_is_martial_npc(self):
+        # Fantasy martial roles
+        self.assertTrue(is_martial_npc({"name": "Alex", "role": "Town Guard", "description": "Standing watch."}, scenario="fantasy"))
+        self.assertTrue(is_martial_npc({"name": "Bob", "role": "Knight", "description": "Wandering knight with claymore."}, scenario="fantasy"))
+        self.assertTrue(is_martial_npc({"name": "Kael", "role": "Mage", "description": "Battle wizard."}, scenario="fantasy"))
+        
+        # Fantasy civilian roles
+        self.assertFalse(is_martial_npc({"name": "Donald", "role": "Blacksmith", "description": "Hammering horseshoes."}, scenario="fantasy"))
+        self.assertFalse(is_martial_npc({"name": "Toby", "role": "Innkeeper", "description": "Cleaning mugs."}, scenario="fantasy"))
+        self.assertFalse(is_martial_npc({"name": "Jack", "role": "Villager", "description": "Farming wheat."}, scenario="fantasy"))
+        self.assertFalse(is_martial_npc({"name": "Rowan", "role": "Merchant", "description": "Selling fruits."}, scenario="fantasy"))
+
+        # Veteran exception
+        self.assertTrue(is_martial_npc({"name": "Jack", "role": "Farmer", "description": "Retired veteran of the Vanguard."}, scenario="fantasy"))
+
+        # Non-combat genres (e.g. High School) are always non-martial
+        self.assertFalse(is_martial_npc({"name": "Alex", "role": "Town Guard", "description": "Campus security."}, scenario="high_school_drama"))
+
+    def test_get_recruitment_cost(self):
+        from mechanics.social.relationships import get_recruitment_cost
+        # Friend tier (>= 100): 0 gold
+        self.assertEqual(get_recruitment_cost(100, level=1), 0)
+        self.assertEqual(get_recruitment_cost(250, level=5), 0)
+        
+        # Stranger (0): Full base cost = 200 + level * 50 = 250 at lvl 1
+        self.assertEqual(get_recruitment_cost(0, level=1), 250)
+        # Stranger (< 0): Full base cost
+        self.assertEqual(get_recruitment_cost(-30, level=1), 250)
+
+        # Acquaintance (50): 50% discount = 125 at lvl 1
+        self.assertEqual(get_recruitment_cost(50, level=1), 125)
+
 
 if __name__ == "__main__":
     unittest.main()
+
