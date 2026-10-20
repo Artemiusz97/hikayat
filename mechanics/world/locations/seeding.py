@@ -148,9 +148,17 @@ def get_archetype_starting_location(
 
             z_name = z.get("name", "World Region")
 
-            if z_name == "Main Academy Building" or z_id == "zone_school_main" or is_school_scenario(scenario_key):
+            if z_name in ("Main Academy Building", "Main Academy Campus") or z_id == "zone_school_main":
 
                 z_name = get_session_school_name(session_id, scenario_key) if session_id else "Suimei Institute"
+
+            elif (z_name == "Residential Neighborhood" or z_id == "zone_residential") and is_school_scenario(scenario_key):
+
+                z_name = get_session_residential_neighborhood_name(session_id, scenario_key)
+
+            elif (z_name == "Commercial District" or z_id == "zone_commercial") and is_school_scenario(scenario_key):
+
+                z_name = get_session_commercial_district_name(session_id, scenario_key)
 
             z_hub = bool(z.get("is_hub", False))
 
@@ -160,7 +168,7 @@ def get_archetype_starting_location(
 
                 p_name = p.get("name", "Main Area")
 
-                if p_name == "Homeroom Classroom" or p_id == "loc_homeroom" or is_school_scenario(scenario_key):
+                if p_name == "Homeroom Classroom" or p_id == "loc_homeroom":
 
                     p_name = get_session_classroom_name(session_id, scenario_key) if session_id else "Homeroom Classroom"
 
@@ -210,15 +218,22 @@ def get_archetype_starting_location(
 
 
 
-        # Priority 1: Match primary place specifically (e.g. 'School Rooftop')
-
+        # Priority 0: Match both primary place AND sub-location when both are present in hint_parts
         matching_hint = [
-
             (z, p, s) for (z, p, s, h) in seeded_triples
-
             if any(hp == p.lower() or (len(hp) >= 5 and (hp in p.lower() or p.lower() in hp)) for hp in hint_parts)
-
+            and any(hs == s.lower() or (len(hs) >= 4 and (hs in s.lower() or s.lower() in hs)) for hs in hint_parts)
         ]
+
+        # Priority 1: Match primary place specifically (e.g. 'School Rooftop')
+        if not matching_hint:
+            matching_hint = [
+
+                (z, p, s) for (z, p, s, h) in seeded_triples
+
+                if any(hp == p.lower() or (len(hp) >= 5 and (hp in p.lower() or p.lower() in hp)) for hp in hint_parts)
+
+            ]
 
         # Priority 2: Match sub-location specifically (e.g. 'Behind Water Tank' or 'Rooftop Benches')
 
@@ -892,6 +907,16 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
                 db.save_session_location(**item)
 
     _reconcile_faction_hq_locations(session_id, scenario_key, school_name)
+    try:
+        from .graph_seeder import ensure_session_spatial_graph_seeded
+        ensure_session_spatial_graph_seeded(session_id, scenario_key, char_name=char_name)
+        sess = db.get_session(session_id)
+        if sess and not sess.get("current_node_id") and sess.get("current_location"):
+            init_nid = db.resolve_node_id_from_location(session_id, sess["current_location"])
+            if init_nid:
+                db.update_session(session_id, current_node_id=init_nid)
+    except Exception:
+        pass
 
 def resolve_companion_origin_location(session_id: int, current_location: str, scen_key: str = "fantasy") -> str:
 

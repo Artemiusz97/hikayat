@@ -51,6 +51,9 @@ hikayat_sim_*.db
 # Scratch & Temporary Scripts
 scratch/
 
+# Generated Media / Scene Artwork
+data/generated_images/
+
 # Dependencies & Executables
 node_modules/
 frontend/node_modules/

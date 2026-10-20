@@ -150,3 +150,225 @@ class TestIntimateDisclosure(unittest.TestCase):
         contact = db.get_contact(sess_id, "Ren", char_id)
         app = contact.get("appearance", {})
         self.assertFalse(app.get("sensitive_spots_revealed", False))
+
+    def test_dialogue_prompt_virginity_and_dating_history_grounding(self):
+        from game_engine.turn.dialogue import _build_dialogue_prompt_block
+        from game_engine.turn_context import TurnContext
+        import db, time
+
+        db.init_db()
+        sess_id = int(time.time() * 1000)
+        char_id = 99933
+        party = [({"id": char_id, "user_id": 99933, "name": "Artemiusz", "gender": "male", "hp": 20, "max_hp": 20, "mp": 10, "max_mp": 10, "stats": {"STR": 5, "AGI": 5, "END": 5, "INT": 5, "PER": 5, "CHA": 5, "LUK": 5}}, [])]
+
+        session = {
+            "id": sess_id,
+            "scenario": "nsfw_furry_high_school_drama",
+            "host_user_id": 99933,
+            "current_location": "School Courtyard",
+            "dialogue_partner": "Seo-ah Vance",
+            "history": []
+        }
+        with db.get_conn() as conn:
+            conn.execute(
+                "INSERT INTO sessions (id, mode, capacity, scenario, current_location, history_json) VALUES (?, 'solo', 1, ?, ?, ?)",
+                (sess_id, "nsfw_furry_high_school_drama", "School Courtyard", "[]")
+            )
+            conn.commit()
+
+        db.upsert_contact(
+            session_id=sess_id,
+            character_id=char_id,
+            npc_id="seo-ah_vance",
+            name="Seo-ah Vance",
+            delta_score=5,
+            appearance={
+                "intercourse_experience": "virgin",
+                "oral_experience": "inexperienced",
+                "manual_experience": "inexperienced",
+                "erotic_openness": "shameless",
+                "intimate_demeanor": "Poised & Articulate",
+                "intimate_dynamic": "Attentive Service-Oriented"
+            }
+        )
+        db.update_contact_relations(
+            sess_id,
+            "seo-ah_vance",
+            {
+                "romance": {
+                    "status": "Single",
+                    "current_partner": None,
+                    "secret_partner": None,
+                    "ex_partners": []
+                }
+            },
+            char_id
+        )
+
+        ctx = TurnContext(sess_id, session)
+
+        actions = [{
+            "char": party[0][0],
+            "label": "ask her if she has had any experience handling guys",
+            "stat": "CHA"
+        }]
+
+        block = _build_dialogue_prompt_block(session, ctx, ["Seo-ah Vance"], party, actions)
+
+        # 1. Grounding in virginity AND zero dating history
+        self.assertIn("CANON VIRGINITY & PAST EXPERIENCE GROUNDING", block)
+        self.assertIn("ZERO prior dating, relationship, or suitor history", block)
+        self.assertIn("balancing suitors/guys on their schedule", block)
+        self.assertIn("NEVER fabricate fake past suitors", block)
+
+        # 2. Protagonist Gender & Attraction Target Integrity
+        self.assertIn("PROTAGONIST GENDER & ATTRACTION TARGET INTEGRITY", block)
+        self.assertIn("The player character (Artemiusz) is canonically MALE", block)
+        self.assertIn("a GIRL / WOMAN / FEMALE PARTNER", block)
+        self.assertIn("NEVER invert attraction or mistakenly ask a male player flirting with a female NPC 'what are you looking for in a guy?'", block)
+
+    def test_deterministic_dialogue_canon_sanitization(self):
+        from game_engine.keywords import (
+            sanitize_dialogue_canon_and_attraction_integrity,
+            validate_canon_dialogue_invariants,
+        )
+        import db, time
+
+        db.init_db()
+        sess_id = int(time.time() * 1000)
+        char_id = 99944
+        party = [({"id": char_id, "user_id": 99944, "name": "Artemiusz", "gender": "male"}, [])]
+
+        session = {
+            "id": sess_id,
+            "host_user_id": 99944,
+            "dialogue_partner": "Seo-ah Vance",
+        }
+
+        db.upsert_contact(
+            session_id=sess_id,
+            character_id=char_id,
+            npc_id="seo-ah_vance",
+            name="Seo-ah Vance",
+            delta_score=5,
+            appearance={
+                "intercourse_experience": "virgin",
+            }
+        )
+        db.update_contact_relations(
+            sess_id,
+            "seo-ah_vance",
+            {
+                "romance": {
+                    "status": "Single",
+                    "current_partner": None,
+                    "secret_partner": None,
+                    "ex_partners": []
+                }
+            },
+            char_id
+        )
+
+        raw_hallucinated_prose = (
+            'Handling guys?" she repeats, her tone dripping with smooth amusement. '
+            '"I\'ve had plenty of practice balancing them on my schedule—though most of them break under the pressure." '
+            'She tilts her head with a gleam. "But if you\'re asking about the physical kind? '
+            'I\'m still a virgin, Artemiusz. I like to keep my options open until I find someone who '
+            'doesn\'t make me want to strangle them for being boring." She taps the keychain. '
+            '"So tell me—what exactly are you looking for in a guy?'
+        )
+
+        # 1. Validator detects violations in raw hallucinated prose
+        violations = validate_canon_dialogue_invariants(raw_hallucinated_prose, session=session, party=party)
+        self.assertTrue(len(violations) >= 2)
+        self.assertTrue(any("MALE" in v for v in violations))
+        self.assertTrue(any("VIRGIN" in v for v in violations))
+
+        # 2. Deterministic sanitizer cleanly repairs both violations
+        sanitized = sanitize_dialogue_canon_and_attraction_integrity(raw_hallucinated_prose, session=session, party=party)
+
+        # Invariant 1: No fabricated schedule balancing / suitor rosters
+        self.assertNotIn("balancing them on my schedule", sanitized)
+        self.assertNotIn("strangle them for being boring", sanitized)
+
+        # Invariant 2: Attraction target flipped from guy to girl for male player
+        self.assertIn("what exactly are you looking for in a girl?", sanitized)
+        self.assertNotIn("looking for in a guy?", sanitized)
+
+        # Invariant 3: Cleaned text passes validation
+        cleaned_violations = validate_canon_dialogue_invariants(sanitized, session=session, party=party)
+        self.assertEqual(len(cleaned_violations), 0)
+
+    def test_deterministic_commando_canon_sanitization(self):
+        from game_engine.keywords import (
+            sanitize_dialogue_canon_and_attraction_integrity,
+            validate_canon_dialogue_invariants,
+        )
+        from mechanics.social.persona.intimacy.formatting import format_body_asset_narrative_directive
+        import db, time
+
+        db.init_db()
+        sess_id = int(time.time() * 1000) + 1
+        char_id = 99945
+        party = [({"id": char_id, "user_id": 99945, "name": "Artemiusz", "gender": "male"}, [])]
+
+        session = {
+            "id": sess_id,
+            "host_user_id": 99945,
+            "dialogue_partner": "Seo-ah Vance",
+        }
+
+        db.upsert_contact(
+            session_id=sess_id,
+            character_id=char_id,
+            npc_id="seo-ah_vance",
+            name="Seo-ah Vance",
+            delta_score=5,
+            appearance={
+                "breast_size": "Voluptuous D-Cup",
+                "undergarments": {
+                    "bra": "Baby Pink low-cut halter lace bralette",
+                    "underwear": "None (Commando)",
+                },
+            }
+        )
+
+        # 1. Verify format_body_asset_narrative_directive outputs commando directive
+        directive = format_body_asset_narrative_directive(
+            partner_name="Seo-ah Vance",
+            gender="female",
+            asset_size="Voluptuous D-Cup",
+            undergarments={
+                "bra": "Baby Pink low-cut halter lace bralette",
+                "underwear": "None (Commando)",
+            },
+        )
+        self.assertIn("UNDERGARMENT CANON (Seo-ah Vance - COMMANDO)", directive)
+        self.assertIn("wearing NO UNDERWEAR / PANTIES (going completely commando underneath)", directive)
+        self.assertIn("STRICTLY FORBIDDEN: NEVER narrate peeling back, sliding aside, pulling down, or snapping panties", directive)
+        self.assertIn("LINGERIE FIT & UNDRESSING (Bra: Baby Pink low-cut halter lace bralette)", directive)
+        self.assertNotIn("Underwear: None (Commando)): When undressing", directive)
+
+        # 2. Raw hallucinated prose with phantom panties
+        raw_prose = (
+            "She looked into Artemiusz's eyes and gave a sultry smirk as her fingers found the hem of her pleated skirt. "
+            "With deliberate slowness, she lifted the fabric and peeled back the damp fabric of her soaked panties from between her swollen lips with a soft snap against her thigh."
+        )
+
+        # 3. Validator detects commando violation
+        violations = validate_canon_dialogue_invariants(raw_prose, session=session, party=party)
+        self.assertTrue(any("COMMANDO" in v for v in violations))
+
+        # 4. Sanitizer rewrites phantom panty removal to commando-accurate prose
+        sanitized = sanitize_dialogue_canon_and_attraction_integrity(raw_prose, session=session, party=party)
+        self.assertNotIn("soaked panties", sanitized)
+        self.assertNotIn("fabric of her soaked panties", sanitized)
+        self.assertNotIn("snap against her thigh", sanitized)
+        self.assertIn("bare underneath", sanitized)
+
+        # 5. Cleaned text passes validation
+        cleaned_violations = validate_canon_dialogue_invariants(sanitized, session=session, party=party)
+        self.assertEqual(len(cleaned_violations), 0)
+
+
+

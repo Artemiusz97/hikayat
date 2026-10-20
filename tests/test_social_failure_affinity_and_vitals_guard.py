@@ -30,6 +30,14 @@ class TestSocialFailureAffinityAndVitalsGuard(unittest.IsolatedAsyncioTestCase):
         }
         self.party = [(self.char, [])]
 
+    def tearDown(self):
+        try:
+            import db
+            with db.get_conn() as conn:
+                conn.execute("DELETE FROM contacts WHERE session_id = 999943")
+        except Exception:
+            pass
+
     def test_reconcile_character_outcomes_non_combat(self):
         outcome = {"name": "Artemiusz", "hp_change": -12, "temp_hp_change": -12}
         # In non-combat, negative hp_change should be clamped to 0
@@ -127,9 +135,7 @@ class TestSocialFailureAffinityAndVitalsGuard(unittest.IsolatedAsyncioTestCase):
              patch("db.get_active_story_quest", return_value=None), \
              patch("db.get_session_quests", return_value=[]), \
              patch("db.get_session_chapter", return_value=1), \
-             patch("game_engine.reconcile_movement_location", return_value="Music Room ➔ Upright Piano Alcove"), \
-             patch("game_engine.state.core.should_trigger_state_arbiter_pass", return_value=False), \
-             patch("game_engine.state.core.should_trigger_social_arbiter_pass", return_value=False):
+             patch("game_engine.reconcile_movement_location", return_value="Music Room ➔ Upright Piano Alcove"):
             outcome = await game_engine.resolve_turn(session, self.party, [action])
 
         # Verify HP loss was suppressed

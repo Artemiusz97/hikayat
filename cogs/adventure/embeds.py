@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import random
 import re
 import time
@@ -897,12 +898,53 @@ def _truncate_embed_text(text: str, max_len: int = 4000) -> str:
         return truncated[:last_period + 1] + "\n\n*(Text truncated to fit Discord limits)*"
     return truncated.rsplit(' ', 1)[0] + "...\n\n*(Text truncated to fit Discord limits)*"
 
+
+def prepare_discord_image(image_val) -> tuple[str | None, discord.File | None]:
+    """
+    Resolves an image value to (embed_url, discord_file).
+    Supports GeneratedImage, local /images/ paths, local filesystem paths, or remote URLs.
+    """
+    if not image_val:
+        return None, None
+
+    local_path = getattr(image_val, "local_path", None)
+    remote_url = getattr(image_val, "remote_url", None)
+    filename = getattr(image_val, "filename", None)
+
+    if not local_path and isinstance(image_val, str):
+        val_str = image_val.strip()
+        if val_str.startswith("/images/") or (not val_str.startswith("http://") and not val_str.startswith("https://")):
+            from config import GENERATED_IMAGES_DIR
+            base_name = os.path.basename(val_str)
+            candidate = os.path.join(GENERATED_IMAGES_DIR, base_name)
+            if os.path.exists(candidate):
+                local_path = candidate
+                filename = base_name
+
+    if local_path and os.path.exists(local_path):
+        fname = filename or os.path.basename(local_path)
+        try:
+            dfile = discord.File(local_path, filename=fname)
+            return f"attachment://{fname}", dfile
+        except Exception as e:
+            logger.warning("Failed to create discord.File from %s: %s", local_path, e)
+
+    if remote_url and (remote_url.startswith("http://") or remote_url.startswith("https://")):
+        return remote_url, None
+    if isinstance(image_val, str) and (image_val.startswith("http://") or image_val.startswith("https://")):
+        return image_val, None
+
+    return None, None
+
+
 def scene_embed(session: dict, actor_char: dict, scene_title: str, narrative: str,
                  choices: list, image_url: str | None = None) -> list[discord.Embed]:
     story_embed = discord.Embed(title=_truncate_field_name(scene_title or "Hikayat", 256), description=_truncate_embed_text(narrative),
                            color=discord.Color.dark_gold())
     if image_url:
-        story_embed.set_image(url=image_url)
+        embed_url, _ = prepare_discord_image(image_url)
+        if embed_url:
+            story_embed.set_image(url=embed_url)
 
     dash_embed = discord.Embed(title="⚙️ Game Dashboard", color=discord.Color.gold())
     _safe_add_field(dash_embed, name="📍 Location", value=_location_text(session, char_name=actor_char.get("name", "")), inline=False)
@@ -963,7 +1005,9 @@ def sync_scene_embed(session: dict, party: list, scene_title: str, narrative: st
     story_embed = discord.Embed(title=_truncate_field_name(scene_title or "Hikayat", 256), description=_truncate_embed_text(narrative),
                            color=discord.Color.dark_teal())
     if image_url:
-        story_embed.set_image(url=image_url)
+        embed_url, _ = prepare_discord_image(image_url)
+        if embed_url:
+            story_embed.set_image(url=embed_url)
 
     first_p = party[0][0] if (party and isinstance(party[0], (tuple, list)) and party[0]) else (party[0] if party else None)
     first_char_name = first_p.get("name", "") if isinstance(first_p, dict) else ""
@@ -1094,7 +1138,39 @@ def build_zone_places_embed(session_id: int, zone_name: str, scen_key: str, curr
                 arch_emoji = p.get("archetype_emoji") or p.get("emoji") or "📍"
                 badges = p.get("badges", "")
                 badge_str = f" {badges}" if badges else ""
-                place_lines.append(f"• {arch_emoji} **{p['name']}**{badge_str}")
+
+                # Access and curfew indicators
+                access_badge = p.get("access_badge")
+                access_str = ""
+                if access_badge:
+                    if p.get("is_unlocked"):
+                        access_str = " `🔓 Unlocked`"
+                    elif p.get("is_curfew_active") or p.get("schedule_locked") or "Closed" in access_badge or "Locked" in access_badge or access_badge in ("Restricted", "Private"):
+                        access_str = f" `🔒 {access_badge}`"
+                    elif access_badge != "Open":
+                        access_str = f" `[{access_badge}]`"
+
+                line = f"• {arch_emoji} **{p['name']}**{badge_str}{access_str}"
+
+                # Live Occupancy (Known contacts, rendezvous partners, unmet roster students)
+                occ_parts = []
+                for kn in (p.get("known_npcs_here") or []):
+                    kn_name = kn.get("name") if isinstance(kn, dict) else kn
+                    if kn_name:
+                        occ_parts.append(f"👤 {kn_name}")
+                unmet = p.get("unmet_activity_count", 0)
+                if unmet > 0:
+                    occ_parts.append(f"👥 +{unmet} nearby")
+
+                if occ_parts:
+                    line += f"\n  ↳ {' | '.join(occ_parts)}"
+
+                # Scene Memory Residue
+                res = p.get("scene_residue")
+                if res:
+                    line += f"\n  *💭 \"{res[:65]}\"*"
+
+                place_lines.append(line)
             _safe_add_field(embed, name="📍 Discovered Locations", value="\n".join(place_lines), inline=False)
     return embed
 

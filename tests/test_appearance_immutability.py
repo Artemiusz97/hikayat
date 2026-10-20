@@ -283,6 +283,101 @@ class TestAppearanceImmutability(unittest.TestCase):
         self.assertEqual(c4["appearance"]["hair_color"], "golden-blonde")
         self.assertEqual(c4["race"], "beastfolk:fox")
 
+    def test_merge_appearance_safely_preserves_hair_dye_and_natural_base(self):
+        """Verify merge_appearance_safely strictly protects hair dye status and natural base from being overwritten."""
+        # 1. Dyed beastfolk NPC
+        established_dyed = {
+            "eye_color": "sapphire blue",
+            "coat_color": "vibrant azure-blue fur",
+            "hair_color": "crimson red",
+            "is_dyed": True,
+            "natural_hair_color": "vibrant azure-blue"
+        }
+        rogue_incoming_natural = {
+            "hair_color": "vibrant azure-blue",
+            "is_dyed": False,
+            "natural_hair_color": "golden-blonde"
+        }
+        merged_dyed = merge_appearance_safely(established_dyed, rogue_incoming_natural)
+        self.assertTrue(merged_dyed["is_dyed"], "Dyed status must not be wiped out")
+        self.assertEqual(merged_dyed["hair_color"], "crimson red", "Dyed hair color must not be overwritten")
+        self.assertEqual(merged_dyed["natural_hair_color"], "vibrant azure-blue", "Natural base hair color must not be overwritten")
+
+        # 2. Natural beastfolk NPC
+        established_natural = {
+            "eye_color": "amber",
+            "coat_color": "silky ocean-blue fur",
+            "hair_color": "silky ocean-blue",
+            "is_dyed": False
+        }
+        rogue_incoming_dyed = {
+            "hair_color": "neon pink",
+            "is_dyed": True,
+            "natural_hair_color": "black"
+        }
+        merged_natural = merge_appearance_safely(established_natural, rogue_incoming_dyed)
+        self.assertFalse(merged_natural["is_dyed"], "Natural status must not be flipped to dyed")
+        self.assertEqual(merged_natural["hair_color"], "silky ocean-blue", "Natural hair color must not be overwritten")
+
+    def test_actor_direction_card_tracks_coat_skin_dye_and_canon_guardrail(self):
+        """Verify build_actor_direction_card explicitly formats coat/skin, dyed hair, and the canon guardrail."""
+        from mechanics.social.persona.actor_card import build_actor_direction_card
+
+        session = {"id": self.session_id, "current_location": "academy_hall"}
+        dyed_fox_npc = {
+            "name": "Kitsune Ren",
+            "race": "beastfolk:fox",
+            "gender": "female",
+            "basic_info": {"description": "A clever fox student", "role": "Student"},
+            "appearance": {
+                "eye_color": "amber",
+                "coat_color": "vibrant azure-blue fur",
+                "hair_color": "crimson red",
+                "hair_length": "medium",
+                "hair_style": "twin-tails",
+                "is_dyed": True,
+                "natural_hair_color": "vibrant azure-blue",
+                "distinctive_features": "fluffy fox tail"
+            }
+        }
+
+        card = build_actor_direction_card(session=session, npc=dyed_fox_npc, in_active_erotic=False)
+
+        # 1. Visual Presentation line must track coat and dyed status with natural base
+        self.assertIn("Visual Presentation:", card)
+        self.assertIn("vibrant azure-blue fur", card)
+        self.assertIn("crimson red hair (dyed; naturally vibrant azure-blue)", card.lower())
+
+        # 2. Canon Visual Appearance Guardrail must be present and warn the LLM
+        self.assertIn("CANON VISUAL APPEARANCE GUARDRAIL (Kitsune Ren)", card)
+        self.assertIn("coat/fur: vibrant azure-blue fur", card)
+        self.assertIn("hair: Crimson Red (dyed; naturally vibrant azure-blue)", card)
+        self.assertIn("Maintain strict descriptive fidelity", card)
+
+        # 3. Test Humanoid with skin tone and natural hair
+        human_npc = {
+            "name": "Li Wei",
+            "race": "human",
+            "gender": "male",
+            "basic_info": {"description": "A disciplined swordsman", "role": "Warrior"},
+            "appearance": {
+                "eye_color": "dark slate",
+                "skin_color": "warm honey complexion",
+                "hair_color": "ink-black",
+                "hair_length": "short",
+                "hair_style": "topknot",
+                "is_dyed": False
+            }
+        }
+        card_human = build_actor_direction_card(session=session, npc=human_npc, in_active_erotic=False)
+        self.assertIn("Visual Presentation:", card_human)
+        self.assertIn("warm honey complexion", card_human)
+        self.assertIn("short topknot Ink-Black hair", card_human)
+        self.assertIn("CANON VISUAL APPEARANCE GUARDRAIL (Li Wei)", card_human)
+        self.assertIn("skin: warm honey complexion", card_human)
+        self.assertIn("hair: Ink-Black (natural)", card_human)
+
 
 if __name__ == "__main__":
     unittest.main()
+

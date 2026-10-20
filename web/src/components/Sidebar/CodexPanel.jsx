@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { 
   BookOpen, Users, Flag, Globe, Heart, Shield, 
   Sparkles, Search, MessageCircle, MapPin, ChevronDown, ChevronRight, User, UserPlus, UserMinus,
-  Crown, ShoppingBag, Swords, BedDouble, Lock, Scroll
+  Crown, ShoppingBag, Swords, BedDouble, Lock, Scroll, Calendar, Clock
 } from 'lucide-react';
 import { StatusEffectBadge } from './CharacterSheet';
 
@@ -84,7 +84,7 @@ const renderBulletPoints = (lines) => {
   );
 };
 
-const getRelationshipTier = (score, track = 'platonic', t = null) => {
+export const getRelationshipTier = (score, track = 'platonic', t = null) => {
   const isRom = String(track || '').toLowerCase() === 'romantic';
   let tierKey = 'stranger';
   let fallback = 'Stranger';
@@ -363,6 +363,8 @@ const CodexPanel = ({
               ? t('codex.npcs_count', { count: contacts.length, defaultValue: `${contacts.length} NPCs` })
               : subTab === 'factions'
               ? t('codex.factions_count', { count: factions.length, defaultValue: `${factions.length} Factions` })
+              : subTab === 'agenda'
+              ? `${(commitments || []).length} Commitments`
               : t('codex.lore_count', { count: loreEntities.length, defaultValue: `${loreEntities.length} Lore` })}
           </span>
         </div>
@@ -403,6 +405,18 @@ const CodexPanel = ({
           >
             <Globe size={11} />
             <span>{t('codex.lore', 'Lore')}</span>
+          </button>
+
+          <button
+            onClick={() => { setSubTab('agenda'); setSearchQuery(''); }}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1 rounded text-[11px] font-semibold uppercase tracking-wider transition-colors ${
+              subTab === 'agenda' 
+                ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40' 
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Calendar size={11} />
+            <span>{t('codex.agenda', 'Agenda')}</span>
           </button>
         </div>
 
@@ -1651,6 +1665,109 @@ const CodexPanel = ({
                     )}
                   </div>
                 ))
+              )}
+            </div>
+          )}
+
+          {/* SUBTAB 4: AGENDA & COMMITMENTS */}
+          {subTab === 'agenda' && (
+            <div className="space-y-3 pb-8">
+              {filteredCommitments.length === 0 ? (
+                <div className="text-center py-10 text-gray-500 border border-dashed border-fantasy-border/50 rounded-lg">
+                  <Calendar size={28} className="mx-auto mb-2 opacity-40 text-fantasy-accent" />
+                  <p className="text-xs font-medium text-gray-400">{t('codex.no_agenda', 'No Active Obligations or Rendezvous')}</p>
+                  <p className="text-[10px] text-gray-500 mt-1 max-w-[220px] mx-auto leading-relaxed">
+                    Promises, debts, pacts, and scheduled meetups will appear here as you make commitments with entities in the world.
+                  </p>
+                </div>
+              ) : (
+                filteredCommitments.map((c, idx) => {
+                  const isRendezvous = c.commitment_type === 'rendezvous';
+                  const isArrived = c.status === 'arrived';
+                  const isFulfilled = c.status === 'fulfilled';
+                  const isFlaked = c.status === 'flaked';
+                  const isConfidential = Boolean(c.is_confidential);
+                  const shortLoc = (c.target_location || c.rendezvous_location || '').split('➔').pop().trim();
+                  const targetName = c.target_entity || c.npc_name || 'Counterparty';
+
+                  const hasOverlapConflict = isRendezvous && filteredCommitments.some(other => {
+                    if (!other || (other.id && other.id === c.id) || (other.commitment_key && other.commitment_key === c.commitment_key) || other.commitment_type !== 'rendezvous') return false;
+                    const sameDay = (other.scheduled_day || 1) === (c.scheduled_day || 1);
+                    if (!sameDay) return false;
+                    const oStart = other.start_minute ?? 0;
+                    const oEnd = other.end_minute ?? 1439;
+                    const cStart = c.start_minute ?? 0;
+                    const cEnd = c.end_minute ?? 1439;
+                    return Math.max(oStart, cStart) < Math.min(oEnd, cEnd);
+                  });
+
+                  return (
+                    <div
+                      key={c.id || c.commitment_key || idx}
+                      className={`p-3.5 rounded-lg border transition-all ${
+                        isArrived
+                          ? 'bg-emerald-950/20 border-emerald-500/40 shadow-sm shadow-emerald-950/40'
+                          : isFulfilled
+                          ? 'bg-black/30 border-gray-800 opacity-70'
+                          : isFlaked
+                          ? 'bg-rose-950/20 border-rose-800/40'
+                          : 'bg-black/50 border-fantasy-border/60 hover:border-fantasy-accent/40'
+                      }`}
+                    >
+                      <div className="flex justify-between items-start gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {isRendezvous ? (
+                            <Calendar size={13} className="text-fantasy-accent shrink-0" />
+                          ) : (
+                            <Scroll size={13} className="text-amber-400 shrink-0" />
+                          )}
+                          <h5 className="font-semibold text-xs text-gray-100">
+                            {c.title || (isRendezvous ? `Meetup with ${targetName}` : `Promise to ${targetName}`)}
+                          </h5>
+                          {hasOverlapConflict && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-950/60 text-amber-300 border border-amber-800/40">
+                              ⚠️ Overlap
+                            </span>
+                          )}
+                        </div>
+
+                        <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono uppercase font-bold border ${
+                          isArrived
+                            ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/50'
+                            : isFulfilled
+                            ? 'bg-neutral-800 text-gray-400 border-neutral-700'
+                            : isFlaked
+                            ? 'bg-rose-950/60 text-rose-300 border-rose-800/50'
+                            : 'bg-fantasy-accent/10 text-fantasy-accent border-fantasy-accent/30'
+                        }`}>
+                          {c.status || 'Active'}
+                        </span>
+                      </div>
+
+                      <p className="text-[11px] text-gray-300 leading-snug mt-1.5">
+                        {c.description || c.topic || 'No details provided.'}
+                      </p>
+
+                      <div className="flex flex-wrap items-center justify-between text-[10px] text-gray-400 pt-2 mt-2 border-t border-fantasy-border/30 gap-1">
+                        <div className="flex items-center gap-2">
+                          <span>👤 <strong>{targetName}</strong></span>
+                          {isConfidential && (
+                            <span className="text-[9px] px-1 py-0.2 rounded bg-purple-950/60 text-purple-300 border border-purple-800/40">
+                              Confidential
+                            </span>
+                          )}
+                        </div>
+
+                        {shortLoc && (
+                          <span className="flex items-center gap-1 text-gray-400">
+                            <MapPin size={10} className="text-fantasy-accent" />
+                            <span>{shortLoc}</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
           )}

@@ -13,9 +13,11 @@ from mechanics.social.persona.intimacy.appearance import (
     extract_asset_texture,
     roll_dynamic_asset_texture,
     normalize_appearance,
+    fuse_asset_size_and_texture,
 )
 from mechanics.social.persona.intimacy.formatting import (
     format_body_asset_narrative_directive,
+    format_intimate_profile_sections,
 )
 import db
 
@@ -228,7 +230,7 @@ class TestAssetNarrativeAndTactileDiversity:
         char = db.get_character(user_id)
         assert char is not None
         assert "appearance" in char
-        assert char["appearance"]["breast_size"] == "Voluptuous D-Cup"
+        assert char["appearance"]["breast_size"] == "Firm & Toned D-Cup"
         assert char["appearance"]["asset_texture"] == "Firm & Toned"
 
         # Update character appearance
@@ -237,10 +239,10 @@ class TestAssetNarrativeAndTactileDiversity:
             "asset_texture": "Pillowy Soft & Yielding",
         })
         assert isinstance(updated_char_res, dict)
-        assert updated_char_res["appearance"]["breast_size"] == "Bountiful E-Cup"
+        assert updated_char_res["appearance"]["breast_size"] == "Pillowy Soft & Yielding E-Cup"
 
         updated_char = db.get_character(user_id)
-        assert updated_char["appearance"]["breast_size"] == "Bountiful E-Cup"
+        assert updated_char["appearance"]["breast_size"] == "Pillowy Soft & Yielding E-Cup"
         assert updated_char["appearance"]["asset_texture"] == "Pillowy Soft & Yielding"
         # Previously set traits must be preserved
         assert updated_char["appearance"]["eye_color"] == "amber"
@@ -279,7 +281,7 @@ class TestAssetNarrativeAndTactileDiversity:
         data = res.json()
         assert data["success"] is True
         char_data = data["character"]
-        assert char_data["appearance"]["breast_size"] == "Modest B-Cup"
+        assert char_data["appearance"]["breast_size"] == "Soft & Downy Chest Fur B-Cup"
         assert char_data["appearance"]["asset_texture"] == "Soft & Downy Chest Fur"
 
         # Update appearance endpoint
@@ -293,7 +295,7 @@ class TestAssetNarrativeAndTactileDiversity:
         assert up_res.status_code == 200, up_res.text
         up_data = up_res.json()
         assert up_data["success"] is True
-        assert up_data["appearance"]["breast_size"] == "Voluptuous D-Cup"
+        assert up_data["appearance"]["breast_size"] == "Pillowy Soft & Yielding D-Cup"
         assert up_data["appearance"]["asset_texture"] == "Pillowy Soft & Yielding"
 
         # Clean up
@@ -333,3 +335,108 @@ class TestAssetNarrativeAndTactileDiversity:
             actions=[]
         )
         assert isinstance(block_tuple, str)
+
+    def test_fuse_asset_size_and_texture_female(self):
+        """Tests that fuse_asset_size_and_texture seamlessly combines breast size and tactile features."""
+        # Generic adjective stripping with cup preservation
+        assert fuse_asset_size_and_texture("Generous DD-Cup", "Bouncy & Sensitive", "female") == "Bouncy & Sensitive DD-Cup"
+        assert fuse_asset_size_and_texture("Voluptuous D-Cup", "Pillowy Soft & Yielding", "female") == "Pillowy Soft & Yielding D-Cup"
+        assert fuse_asset_size_and_texture("Modest B-Cup", "Perky & High-Set", "female") == "Perky & High-Set B-Cup"
+        assert fuse_asset_size_and_texture("Petite A-Cup", "Tender & Delicate", "female") == "Tender & Delicate A-Cup"
+        assert fuse_asset_size_and_texture("Flat AA-Cup", "Tender & Delicate", "female") == "Tender & Delicate AA-Cup"
+        assert fuse_asset_size_and_texture("Flat Chest", "Tender & Delicate", "female") == "Tender & Delicate Flat Chest"
+
+        # Species & Beastfolk affinities
+        assert fuse_asset_size_and_texture("Modest B-Cup", "Soft & Downy Chest Fur", "female") == "Soft & Downy Chest Fur B-Cup"
+        assert fuse_asset_size_and_texture("Voluptuous D-Cup", "Silky Warm with Smooth Micro-Scales", "female") == "Silky Warm with Smooth Micro-Scales D-Cup"
+
+        # Idempotence: already contains texture
+        assert fuse_asset_size_and_texture("Bouncy & Sensitive DD-Cup", "Bouncy & Sensitive", "female") == "Bouncy & Sensitive DD-Cup"
+
+    def test_fuse_asset_size_and_texture_male(self):
+        """Tests that fuse_asset_size_and_texture seamlessly combines penis size and tactile features."""
+        # Inch measurements with adjective stripping
+        assert fuse_asset_size_and_texture("Thick 7.5\"", "Veined & Firm", "male") == "Veined & Firm 7.5\""
+        assert fuse_asset_size_and_texture("8.0 inches", "Sleek Scaled Base & Firm", "male") == "Sleek Scaled Base & Firm 8.0\""
+        assert fuse_asset_size_and_texture("Slender 6\"", "Toned & Athletic", "male") == "Toned & Athletic 6\""
+        assert fuse_asset_size_and_texture("Massive 8.5\"", "Dense & Formidable", "male") == "Dense & Formidable 8.5\""
+
+        # Categorical tiers
+        assert fuse_asset_size_and_texture("Average", "Warm & Pulsing", "male") == "Warm & Pulsing Average"
+
+        # Idempotence: already contains texture
+        assert fuse_asset_size_and_texture("Veined & Firm 7.5\"", "Veined & Firm", "male") == "Veined & Firm 7.5\""
+
+    def test_classify_asset_size_tier_fused_compounds(self):
+        """Tests that classify_asset_size_tier accurately classifies fused compound strings."""
+        assert classify_asset_size_tier("Bouncy & Sensitive DD-Cup", "female") == "large"
+        assert classify_asset_size_tier("Pillowy Soft & Yielding D-Cup", "female") == "large"
+        assert classify_asset_size_tier("Heavy & Plush Voluptuous E-Cup", "female") == "huge"
+        assert classify_asset_size_tier("Perky & High-Set B-Cup", "female") == "small"
+        assert classify_asset_size_tier("Tender & Delicate Petite A-Cup", "female") == "small"
+        assert classify_asset_size_tier("Tender & Delicate AA-Cup", "female") == "flat"
+
+        # Male fused compounds
+        assert classify_asset_size_tier("Veined & Firm 7.5\"", "male") == "large"
+        assert classify_asset_size_tier("Dense & Formidable 8.5\"", "male") == "huge"
+        assert classify_asset_size_tier("Toned & Athletic 5.5\"", "male") == "average"
+        assert classify_asset_size_tier("Slender & Ultra-Sensitive 4.0\"", "male") == "small"
+        assert classify_asset_size_tier("Slender & Ultra-Sensitive 3.0\"", "male") == "flat"
+
+    def test_extract_asset_texture_from_fused_and_flared_prose(self):
+        """Tests extracting canonical texture anchors from fused and LLM-flared prose."""
+        assert extract_asset_texture("Bouncy & Sensitive DD-Cup", "female") == "Bouncy & Sensitive"
+        assert extract_asset_texture("Veined & Firm 7.5\"", "male") == "Veined & Firm"
+        assert extract_asset_texture("Soft & Downy Chest Fur B-Cup", "female") == "Soft & Downy Chest Fur"
+        assert extract_asset_texture("Silky Warm with Smooth Micro-Scales D-Cup", "female") == "Silky Warm with Smooth Micro-Scales"
+        assert extract_asset_texture("Sleek Scaled Base & Firm 8\"", "male") == "Sleek Scaled Base & Firm"
+
+        # Flared LLM phrases map gracefully to canonical anchors
+        assert extract_asset_texture("Trembling & Sensitive DD-Cup", "female") == "Sensitive & Responsive"
+        assert extract_asset_texture("Warm & Pulsing Average", "male") == "Warm & Pulsing"
+
+    def test_normalize_appearance_fuses_tactile_and_size(self):
+        """Tests that normalize_appearance seamlessly fuses size and texture without brackets."""
+        # Female normalization
+        norm_f = normalize_appearance(
+            raw_app={"breast_size": "Voluptuous D-Cup", "asset_texture": "Firm & Toned"},
+            gender="female",
+            race="human",
+            scen_key="fantasy_nsfw"
+        )
+        assert norm_f["asset_texture"] == "Firm & Toned"
+        assert norm_f["breast_size"] == "Firm & Toned D-Cup"
+        assert "(" not in norm_f["breast_size"]
+        assert ")" not in norm_f["breast_size"]
+
+        # Male normalization
+        norm_m = normalize_appearance(
+            raw_app={"penis_size": "7.5\"", "asset_texture": "Veined & Firm"},
+            gender="male",
+            race="human",
+            scen_key="fantasy_nsfw"
+        )
+        assert norm_m["asset_texture"] == "Veined & Firm"
+        assert norm_m["penis_size"] == "Veined & Firm 7.5\""
+        assert "(" not in norm_m["penis_size"]
+        assert ")" not in norm_m["penis_size"]
+
+    def test_format_intimate_profile_sections_fused_display(self):
+        """Tests that format_intimate_profile_sections displays fused size cleanly without separate brackets."""
+        sections_f = format_intimate_profile_sections(
+            app_dict={"breast_size": "DD-Cup", "asset_texture": "Bouncy & Sensitive"},
+            gender="female",
+            race="human",
+            info_level=3
+        )
+        assert any("Bouncy & Sensitive DD-Cup" in line for line in sections_f["anatomy"])
+        assert not any("(" in line and ")" in line and "Bouncy" in line for line in sections_f["anatomy"])
+
+        sections_m = format_intimate_profile_sections(
+            app_dict={"penis_size": "7.5\"", "asset_texture": "Veined & Firm"},
+            gender="male",
+            race="human",
+            info_level=3
+        )
+        assert any("Veined & Firm 7.5\"" in line for line in sections_m["anatomy"])
+        assert not any("(" in line and ")" in line and "Veined" in line for line in sections_m["anatomy"])

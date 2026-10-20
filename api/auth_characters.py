@@ -429,6 +429,10 @@ async def get_class_templates(scenario: Optional[str] = None, tags: Optional[str
         }
         starting_weapons = cd.get_starting_weapons(scenario)
 
+    is_non_combat = scenario_data.is_non_combat_scenario(resolved_scenario)
+    if is_non_combat:
+        starting_weapons = []
+
     race_options = [
         "Human", "Elf", "Dwarf", "Dark Elf", "Orc", "Goblin", "Gnome", "Halfling",
         "Beastfolk / Anthro", "Half-Beast / Hybrid", "Cyborg", "Android / Synth",
@@ -437,6 +441,7 @@ async def get_class_templates(scenario: Optional[str] = None, tags: Optional[str
     return {
         "classes": classes,
         "starting_weapons": starting_weapons,
+        "is_non_combat": is_non_combat,
         "all_classes": all_classes,
         "all_starting_weapons": all_starting_weapons,
         "resolved_scenario": resolved_scenario,
@@ -463,6 +468,10 @@ async def preview_character_gear(req: PreviewGearRequest):
     race = req.race or "Human"
     weapon_name = (req.starting_weapon or "").strip()
 
+    is_non_combat = scenario_data.is_non_combat_scenario(scen_key)
+    if is_non_combat:
+        weapon_name = ""
+
     all_templates = cd.get_all_class_templates()
     is_preset_class = chosen_class in all_templates
 
@@ -484,7 +493,15 @@ async def preview_character_gear(req: PreviewGearRequest):
             if is_preset_class:
                 raw_loadout = cd.get_starter_gear_by_class(scen_key, chosen_class, gender=gender, race=race)
 
+    if is_non_combat and isinstance(raw_loadout, dict):
+        raw_loadout.pop("Weapon", None)
+        raw_loadout.pop("Shield", None)
+        raw_loadout.pop("Armor", None)
     normalized = _normalize_loadout_dict(raw_loadout)
+    if is_non_combat and isinstance(normalized, dict):
+        normalized.pop("Weapon", None)
+        normalized.pop("Shield", None)
+        normalized.pop("Armor", None)
     starting_items = [
         {"name": item[0], "item_type": item[1], "description": item[2], "slot_cost": item[3]}
         for item in (cd.get_starting_items(scen_key, chosen_class) or [])
@@ -561,9 +578,9 @@ async def get_character(user_id: int):
         if active_sid:
             phys_st = await adb(db.get_session_physical_state, active_sid)
             if isinstance(phys_st, dict):
-                from mechanics.social.physical_state import compute_clothing_summary_badge, _match_actor_key
+                from mechanics.social.physical_state import compute_clothing_summary_badge, _match_actor_key, find_player_actor_key
                 phys_actors = phys_st.get("actors", {}) or {}
-                matched_key = _match_actor_key(char_dict.get("name", ""), phys_actors)
+                matched_key = find_player_actor_key(phys_actors, party=[(char_dict, [])], session_id=active_sid) or _match_actor_key(char_dict.get("name", ""), phys_actors)
                 p_data = phys_actors.get(matched_key) or {}
                 char_dict["clothing_status"] = compute_clothing_summary_badge(p_data.get("clothing"), gender=char_dict.get("gender", "Male"))
     except Exception:
@@ -622,10 +639,15 @@ async def create_character(req: CharacterCreateRequest):
     try:
         user_id = await adb(db.resolve_canonical_user_id, req.user_id)
         appearance_payload = dict(req.appearance or {})
-        if req.breast_size:
-            appearance_payload["breast_size"] = req.breast_size
-        if req.penis_size:
-            appearance_payload["penis_size"] = req.penis_size
+        is_req_m = any(kw in str(req.gender or "Male").lower() for kw in ("male", "man", "boy")) and "female" not in str(req.gender or "Male").lower()
+        if is_req_m:
+            if req.penis_size:
+                appearance_payload["penis_size"] = req.penis_size
+            appearance_payload.pop("breast_size", None)
+        else:
+            if req.breast_size:
+                appearance_payload["breast_size"] = req.breast_size
+            appearance_payload.pop("penis_size", None)
         if req.asset_texture:
             appearance_payload["asset_texture"] = req.asset_texture
 
@@ -655,28 +677,31 @@ async def create_character(req: CharacterCreateRequest):
                 gender=req.gender or "Male",
                 force_dynamic=False,
             )
+        is_non_combat = scenario_data.is_non_combat_scenario(scen_key)
+        skip_w = bool(req.starting_weapon) or is_non_combat
         await _equip_starter_loadout_dict(
             user_id,
             starter_loadout,
-            skip_weapon=bool(req.starting_weapon),
+            skip_weapon=skip_w,
         )
 
-        starting_weapon = req.starting_weapon or "Rusty Sword"
-        weapon_effect = _build_starting_weapon_effect(
-            starting_weapon,
-            req.starting_weapon_description or "",
-            scen_key,
-        )
-        weapon_id = await adb(
-            db.add_item,
-            user_id,
-            starting_weapon,
-            item_type="Weapon",
-            effect=weapon_effect,
-            slot_cost=1,
-            force=True,
-        )
-        await adb(db.equip_item, user_id, weapon_id, "Weapon")
+        if not is_non_combat and (req.starting_weapon or not starter_loadout.get("Weapon")):
+            starting_weapon = req.starting_weapon or "Rusty Sword"
+            weapon_effect = _build_starting_weapon_effect(
+                starting_weapon,
+                req.starting_weapon_description or "",
+                scen_key,
+            )
+            weapon_id = await adb(
+                db.add_item,
+                user_id,
+                starting_weapon,
+                item_type="Weapon",
+                effect=weapon_effect,
+                slot_cost=1,
+                force=True,
+            )
+            await adb(db.equip_item, user_id, weapon_id, "Weapon")
 
         created = await adb(db.get_character, user_id)
         return {"success": True, "character": _format_character_dict(created), "resolved_scenario": scen_key}
@@ -754,10 +779,16 @@ async def update_character_appearance(req: CharacterAppearanceUpdateRequest):
         raise HTTPException(status_code=404, detail="Character not found")
 
     appearance_update = dict(req.appearance or {})
-    if req.breast_size is not None:
-        appearance_update["breast_size"] = req.breast_size
-    if req.penis_size is not None:
-        appearance_update["penis_size"] = req.penis_size
+    char_gen = char.get("gender", "male")
+    is_char_m = any(kw in str(char_gen).lower() for kw in ("male", "man", "boy")) and "female" not in str(char_gen).lower()
+    if is_char_m:
+        if req.penis_size is not None:
+            appearance_update["penis_size"] = req.penis_size
+        appearance_update.pop("breast_size", None)
+    else:
+        if req.breast_size is not None:
+            appearance_update["breast_size"] = req.breast_size
+        appearance_update.pop("penis_size", None)
     if req.asset_texture is not None:
         appearance_update["asset_texture"] = req.asset_texture
 

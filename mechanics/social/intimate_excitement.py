@@ -125,6 +125,8 @@ PENETRATIVE_KEYWORDS = (
     "penetrate both", "penetrating both",
     "thrust deeper inside", "thrusting deeper inside", "thrust deep",
     "thrust deeply inside", "thrusting deeply inside", "thrust deeply into her", "thrust deeply into him", "thrust deeply",
+    "thrust steadily inside", "thrusting steadily inside", "thrust steadily into her", "thrust steadily into him", "thrust steadily into them", "thrust steadily",
+    "thrust gently inside", "thrust gently into her", "thrust gently into him", "thrust rhythmically inside", "thrust rhythmically into her", "thrust rhythmically into him",
     "thrust hips", "thrusting hips", "thrust his pelvis",
     "thrust your pelvis", "deep thrusts", "steady thrusts", "rhythmic thrusts",
     "maintain a steady, deep rhythm", "maintain a steady deep rhythm",
@@ -778,10 +780,13 @@ def _normalize_partner_pronouns(
     poss_pronoun = "his" if is_male else "her"
     obj_pronoun = "him" if is_male else "her"
 
+    import namegen
     names_to_replace = [p_clean]
     first_name = (p_clean.split() or [""])[0]
-    if first_name and len(first_name) >= 3 and first_name != p_clean:
-        names_to_replace.append(first_name)
+    given_name = namegen.extract_first_and_last_name(partner_name)[0].lower().strip()
+    for fn in (first_name, given_name):
+        if fn and len(fn) >= 3 and fn != p_clean and fn not in namegen.NAME_PARTICLES_AND_HONORIFICS and fn not in names_to_replace:
+            names_to_replace.append(fn)
 
     if not any(n in t_low for n in names_to_replace):
         return t_low
@@ -812,7 +817,7 @@ def _normalize_partner_pronouns(
 
 
 def is_name_in_turn(name_str: str, text: str) -> bool:
-    """Checks whether `name_str` (full name or >=3 char first name) appears in `text` on word boundaries."""
+    """Checks whether `name_str` (full name or >=3 char first/given name) appears in `text` on word boundaries."""
     if not name_str or not text:
         return False
     clean_n = str(name_str).strip().strip("*_`\"' ").lower()
@@ -820,9 +825,12 @@ def is_name_in_turn(name_str: str, text: str) -> bool:
         return False
     if re.search(rf"\b{re.escape(clean_n)}\b", text, re.IGNORECASE):
         return True
+    import namegen
     first_n = (clean_n.split() or [""])[0]
-    if len(first_n) >= 3 and re.search(rf"\b{re.escape(first_n)}\b", text, re.IGNORECASE):
-        return True
+    given_n = namegen.extract_first_and_last_name(clean_n)[0].lower().strip()
+    for fn in {first_n, given_n}:
+        if len(fn) >= 3 and fn not in namegen.NAME_PARTICLES_AND_HONORIFICS and re.search(rf"\b{re.escape(fn)}\b", text, re.IGNORECASE):
+            return True
     return False
 
 
@@ -834,11 +842,14 @@ def is_actively_targeted_in_action(name_str: str, text: str) -> bool:
     """
     if not is_name_in_turn(name_str, text):
         return False
+    import namegen
     clean_n = str(name_str).strip().strip("*_`\"' ").lower()
     first_n = (clean_n.split() or [""])[0]
+    given_n = namegen.extract_first_and_last_name(clean_n)[0].lower().strip()
     patterns = [re.escape(clean_n)]
-    if len(first_n) >= 3 and first_n != clean_n:
-        patterns.append(re.escape(first_n))
+    for fn in (first_n, given_n):
+        if len(fn) >= 3 and fn != clean_n and fn not in namegen.NAME_PARTICLES_AND_HONORIFICS and re.escape(fn) not in patterns:
+            patterns.append(re.escape(fn))
     n_pat = "(?:" + "|".join(patterns) + ")"
     stripped = re.sub(
         rf"\b(?:as|while)\s+{n_pat}(?:'s|\s+\w+)?\s+(?:recovers|rests|watches|waits|catches|lies|sits|sleeps|breathes|trembles|shudders)\b[^,.;]*",
@@ -873,6 +884,7 @@ def scope_text_to_partner(text: str, target_partner: str, other_partners: List[s
     if not any(is_name_in_turn(op, text) for op in other_partners):
         return text
 
+    import namegen
     raw_clauses = re.split(
         r"(?<=[.!?;])\s+|\b(?:while|as|whereas)\b",
         text,
@@ -885,8 +897,10 @@ def scope_text_to_partner(text: str, target_partner: str, other_partners: List[s
         if cn:
             p_tokens.append(re.escape(cn))
             fn = (cn.split() or [""])[0]
-            if len(fn) >= 3 and fn != cn:
-                p_tokens.append(re.escape(fn))
+            gn = namegen.extract_first_and_last_name(cn)[0].lower().strip()
+            for tok in (fn, gn):
+                if len(tok) >= 3 and tok != cn and tok not in namegen.NAME_PARTICLES_AND_HONORIFICS and re.escape(tok) not in p_tokens:
+                    p_tokens.append(re.escape(tok))
     p_union = "(?:" + "|".join(p_tokens) + ")(?:'s)?" if p_tokens else ""
 
     clauses: List[str] = []
@@ -1657,8 +1671,6 @@ def compute_excitement_step(
     p_data["meter"] = max(0, min(100, p_data.get("meter", 0) + p_delta))
 
     # Process deltas, baselines, and climaxes for all partners
-    from mechanics.social.physical_state import detect_partner_climax, detect_player_climax
-
     newly_climaxed_partners: List[str] = []
 
     for n_k, n_d, pc in partner_actor_tuples:
@@ -1737,20 +1749,19 @@ def compute_excitement_step(
             n_d["delta"] = n_delta
             n_d["meter"] = max(0, min(100, n_d["meter"] + n_delta))
 
-            # Check narrative climax disambiguation
-            other_names = [t[0] for t in partner_actor_tuples if t[0] != n_k]
-            partner_narrative_climax = (
-                cl["partner_stimulated"] and
-                act_type != "foreplay_nongenital" and
-                detect_partner_climax(narrative_str, n_k, other_partner_names=other_names)
+            # Partner climax check: strictly gauge-driven (>= 100% or >= 80% on explicit finisher phrase)
+            act_low = str(action_str or "").lower()
+            explicit_partner_finisher = any(
+                p in act_low for p in (
+                    "over the edge", "to climax", "into climax", "reach climax",
+                    "make her cum", "make him cum", "finish together", "climax together"
+                )
             )
-
             partner_newly_climaxed = False
             if act_type != "foreplay_nongenital" and not male_npc_spent:
-                if (
-                    (cl["partner_stimulated"] and (n_d["meter"] >= 100 or partner_narrative_climax))
-                    or (n_delta > 0 and n_d["meter"] >= 100 and not p_already_climaxed)
-                ):
+                if cl["partner_stimulated"] and (n_d["meter"] >= 100 or (n_d["meter"] >= 80 and explicit_partner_finisher)):
+                    partner_newly_climaxed = True
+                elif n_delta > 0 and n_d["meter"] >= 100 and not p_already_climaxed:
                     partner_newly_climaxed = True
 
             if partner_newly_climaxed:
@@ -1777,7 +1788,7 @@ def compute_excitement_step(
                     n_d["status"] = "Deepening Pleasure"
                 else:
                     n_d["status"] = "Sensual Warmth 🔥"
-            elif n_delta > 0 and not cl["partner_stimulated"] and not is_targeted_p:
+            elif not cl["partner_stimulated"] and not is_targeted_p and len(partner_actor_tuples) > 1 and n_d.get("idle_turns", 0) == 0 and not male_npc_spent:
                 n_d["status"] = "Watching with Arousal"
             elif n_d["meter"] >= 75:
                 n_d["status"] = "On the Brink 🔥"
@@ -1834,17 +1845,20 @@ def compute_excitement_step(
     matched_spot_val = ", ".join(matched_spots) if matched_spots else None
     curr_excitement["sensitive_spot_hit"] = matched_spot_val or ""
 
-    player_narrative_climax = (
-        player_stimulated and
-        act_type != "foreplay_nongenital" and
-        detect_player_climax(narrative_str, player_name)
+    act_low = str(action_str or "").lower()
+    explicit_player_finisher = any(
+        p in act_low for p in (
+            "finish inside", "pull out and finish", "spills inside", "release inside",
+            "toward your own release", "into your own release", "finish together",
+            "climax together", "reach your climax", "reach my climax"
+        )
     )
 
     player_newly_climaxed = False
     # Check Player Climax
     if male_spent:
         p_data["status"] = "💥 Climaxed (Spent)"
-    elif (p_data["meter"] >= 100 or player_narrative_climax) and player_stimulated and act_type != "foreplay_nongenital":
+    elif (p_data["meter"] >= 100 or (p_data["meter"] >= 80 and explicit_player_finisher)) and player_stimulated and act_type != "foreplay_nongenital":
         player_newly_climaxed = True
         climax_st["player_climaxed"] = True
         p_data["climaxes_count"] += 1
@@ -2574,6 +2588,43 @@ def build_intimate_choice_blueprints(
     spot_phrase = _clean_spot_phrase(sensitive_spots, is_kneeling=is_kneeling)
     high_excitement = (player_meter >= 70 or partner_meter >= 70)
 
+    def _stamp_intimate_choice(c: dict, default_partner: str, act_nm: str, ex_lbl: str) -> dict:
+        lbl = c.get("label", "")
+        lbl_low = lbl.lower()
+        if c.get("stat") in ("NONE", "FREE") or lbl == ex_lbl:
+            c["intent"] = "dialogue_exit"
+            c["sub_intent"] = "aftercare" if "aftercare" in lbl_low else ""
+            c["target_npc"] = default_partner
+        elif "aftercare" in lbl_low:
+            c["intent"] = "affection_touch"
+            c["sub_intent"] = "aftercare"
+            c["target_npc"] = default_partner
+        else:
+            c["intent"] = "intimate_act"
+            if any(w in lbl_low for w in ("anal", "pegging", "rear", "anus")):
+                c["sub_intent"] = "anal_receive" if any(w in lbl_low for w in ("pegs", "takes you", "into your rear")) else "anal_give"
+            elif any(w in lbl_low for w in ("thrust", "drive deeper", "penetrat", "intercourse", "ride his", "ride her", "deeper angle")):
+                c["sub_intent"] = "intercourse"
+            elif any(w in lbl_low for w in ("oral", "tongue", "lick", "suck", "mouth")):
+                if act_nm == "oral_receive" or "mouth around" in lbl_low or "pleasures you with" in lbl_low:
+                    c["sub_intent"] = "oral_receive"
+                elif act_nm == "oral_mutual":
+                    c["sub_intent"] = "oral_mutual"
+                else:
+                    c["sub_intent"] = "oral_give"
+            elif any(w in lbl_low for w in ("finger", "hand")):
+                if act_nm == "manual_receive" or "strokes you" in lbl_low:
+                    c["sub_intent"] = "manual_receive"
+                else:
+                    c["sub_intent"] = "manual_give"
+            elif "kiss" in lbl_low:
+                c["sub_intent"] = "kiss"
+            else:
+                c["sub_intent"] = act_nm if act_nm in ("kiss", "foreplay", "manual_give", "manual_receive", "oral_give", "oral_receive", "oral_mutual", "intercourse", "anal_give", "anal_receive", "aftercare") else "foreplay"
+
+            c["target_npc"] = default_partner
+        return c
+
     # ─────────────────────────────────────────────────────────────────────────────
     # MULTI-PARTNER CHOICE BLUEPRINT GENERATION (2 or more active partners)
     # ─────────────────────────────────────────────────────────────────────────────
@@ -2868,6 +2919,7 @@ def build_intimate_choice_blueprints(
             f"- MULTI-PARTNER HYBRID CHOICE BLUEPRINTS (Coordinate choices {coord_target} in `next_choices` — NEVER mix in quest objectives, clues, or investigation props, and NEVER prefix with ⭐, 🎯, or ⚡):",
         ]
         for idx, c in enumerate(choices, 1):
+            _stamp_intimate_choice(c, all_p_names_flat, act_norm, exit_label)
             stat_tag = "FREE" if c["stat"] in ("NONE", "FREE") else c["stat"]
             guide_lines.append(f"  {idx}. [{stat_tag}] \"{c['label']}\"")
 
@@ -3177,6 +3229,7 @@ def build_intimate_choice_blueprints(
         f"- HYBRID CHOICE BLUEPRINTS (Adapt these situational archetypes to the exact intimate act, partner reactions, and postures for `next_choices` — NEVER mix in quest objectives, clues, or investigation props, and NEVER prefix with ⭐, 🎯, or ⚡):"
     ]
     for idx, c in enumerate(choices, 1):
+        _stamp_intimate_choice(c, p_name, act_norm, exit_label)
         stat_tag = "FREE" if c["stat"] in ("NONE", "FREE") else c["stat"]
         guide_lines.append(f"  {idx}. [{stat_tag}] \"{c['label']}\"")
 
@@ -3184,5 +3237,165 @@ def build_intimate_choice_blueprints(
         "choices": choices,
         "exit_label": exit_label,
         "guide_lines": guide_lines,
+    }
+
+
+def resolve_pre_turn_intimacy_and_clothing(
+    session: Dict[str, Any],
+    party: Optional[List[Any]] = None,
+    actions: Optional[List[Any]] = None,
+    new_partners: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Deterministic pre-turn intimacy and clothing resolution engine.
+    Runs BEFORE the Narrator LLM on intimate/social turns:
+    1. Classifies the player's action via classify_intimate_act.
+    2. Displaces/removes blocking clothing layers (bottom, under_bottom, top, under_top)
+       for participating actors in session['physical_state'].
+    3. Computes the excitement step pre-turn and caches the result in session['_pre_turn_excitement_res'].
+    4. Generates [MANDATORY CLIMAX DIRECTIVE] instructions when meters peak so narrative matches state 100%.
+    """
+    from mechanics.social.physical_state import is_erotic_intimate_contact
+
+    player_char = session.get("player_character")
+    if not player_char and party:
+        first_party = party[0]
+        player_char = first_party[0] if isinstance(first_party, (tuple, list)) else first_party
+    if not isinstance(player_char, dict):
+        player_char = {}
+
+    player_name = str(player_char.get("name") or "Player").strip()
+
+    action_str = ""
+    if actions:
+        first_act = actions[0]
+        if isinstance(first_act, dict):
+            action_str = str(first_act.get("label") or first_act.get("action") or "")
+        else:
+            action_str = str(first_act or "")
+
+    session_id = session.get("id") or 0
+    physical_state = session.get("_physical_state") or session.get("physical_state")
+    if not isinstance(physical_state, dict) or not physical_state:
+        if session_id:
+            try:
+                physical_state = db.get_session_physical_state(session_id) or {}
+            except Exception:
+                physical_state = {}
+        else:
+            physical_state = {}
+    session["physical_state"] = physical_state
+    session["_physical_state"] = physical_state
+
+    is_check_success = True
+    if actions and isinstance(actions[0], dict) and actions[0].get("check"):
+        chk = actions[0]["check"]
+        tier = getattr(chk, "tier", None) if not isinstance(chk, dict) else chk.get("tier")
+        if tier in ("fail", "crit_fail"):
+            is_check_success = False
+
+    from mechanics.world.mobility import get_session_dialogue_partners
+    sess_dps = list(get_session_dialogue_partners(session))
+    if new_partners:
+        for np in new_partners:
+            if np and np not in sess_dps:
+                sess_dps.append(np)
+
+    partner_name = sess_dps[0] if sess_dps else (session.get("dialogue_partner") or "Partner")
+
+    partner_contacts: List[Dict[str, Any]] = []
+    target_names = sess_dps or [partner_name]
+    for p in target_names:
+        c = None
+        if session_id:
+            try:
+                c = db.get_contact(session_id, p)
+            except Exception:
+                c = None
+        if not c:
+            c = {"name": p}
+        partner_contacts.append(c)
+
+    primary_contact = partner_contacts[0] if partner_contacts else {"name": partner_name}
+
+    act_class = classify_intimate_act(
+        action_str=action_str,
+        intimate_contact_str=str(physical_state.get("intimate_contact") or ""),
+        player_name=player_name,
+        partner_name=partner_name,
+        partner_contact=primary_contact,
+    )
+
+    act_type = act_class.get("act_type", "none")
+    is_genital_or_escalated = act_type in (
+        "oral_give", "oral_receive", "oral_mutual", "manual_give",
+        "manual_receive", "penetrative", "anal_give", "anal_receive"
+    )
+
+    # Displace clothing for participating actors when check succeeds
+    if is_genital_or_escalated and is_check_success:
+        actors_dict = physical_state.setdefault("actors", {})
+        participating_names = [player_name] + [c.get("name") for c in partner_contacts if c.get("name")]
+        for p_n in participating_names:
+            if not p_n:
+                continue
+            matched_k = next(
+                (ak for ak in actors_dict.keys() if p_n.lower() in ak.lower() or ak.lower() in p_n.lower()),
+                None,
+            )
+            if not matched_k:
+                matched_k = p_n
+                actors_dict[matched_k] = {
+                    "clothing": {"top": "Clothed", "bottom": "Clothed", "under_top": "Worn", "under_bottom": "Worn"}
+                }
+            actor_data = actors_dict[matched_k]
+            cloth = actor_data.setdefault("clothing", {
+                "top": "Clothed", "bottom": "Clothed", "under_top": "Worn", "under_bottom": "Worn"
+            })
+            for slot in ("bottom", "under_bottom"):
+                curr_val = str(cloth.get(slot, "")).strip().lower()
+                if not curr_val or any(k in curr_val for k in ("none", "commando", "off", "removed", "stripped", "displaced")):
+                    continue
+                cloth[slot] = "Displaced"
+            if act_type in ("penetrative", "anal_give", "anal_receive", "oral_mutual"):
+                for slot in ("top", "under_top"):
+                    curr_val = str(cloth.get(slot, "")).strip().lower()
+                    if not curr_val or any(k in curr_val for k in ("none", "n/a", "off", "removed", "stripped", "displaced")):
+                        continue
+                    cloth[slot] = "Disheveled"
+
+    is_erotic = is_erotic_intimate_contact(physical_state.get("intimate_contact", "")) or (act_type not in ("none", "") and is_check_success)
+    excitement_res = None
+    directives: List[str] = []
+
+    if is_erotic:
+        excitement_res = compute_excitement_step(
+            physical_state=physical_state,
+            action_str=action_str,
+            player_char=player_char,
+            partner_contact=primary_contact,
+            session=session,
+            narrative_str="",
+            partner_contacts=partner_contacts,
+        )
+        session["_pre_turn_excitement_res"] = excitement_res
+
+        if excitement_res:
+            if excitement_res.get("player_climaxed"):
+                directives.append(
+                    f"[MANDATORY CLIMAX DIRECTIVE]: Player character {player_name} has deterministically reached climax (meter at {excitement_res.get('player_meter', 100)}%). Narrate {player_name}'s peak/release vividly and authentically."
+                )
+            if excitement_res.get("partner_climaxed"):
+                newly_climaxes = [k for k, v in (excitement_res.get("partner_climaxes") or {}).items() if v]
+                p_clim_str = ", ".join(newly_climaxes) if newly_climaxes else partner_name
+                directives.append(
+                    f"[MANDATORY CLIMAX DIRECTIVE]: {p_clim_str} has deterministically reached climax (meter at 100%). Narrate their peak/release vividly and authentically."
+                )
+
+    return {
+        "action_classified": act_class,
+        "excitement_res": excitement_res,
+        "physical_state": physical_state,
+        "directives": directives,
     }
 

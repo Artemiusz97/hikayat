@@ -5,6 +5,7 @@ export const useGameSession = (user, character) => {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [processingTurn, setProcessingTurn] = useState(false);
+  const [pendingAction, setPendingAction] = useState(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingNarrative, setStreamingNarrative] = useState(null);
   const [streamingState, setStreamingState] = useState(null);
@@ -14,16 +15,26 @@ export const useGameSession = (user, character) => {
   const [partyChatMessages, setPartyChatMessages] = useState([]);
   const [onlineUserIds, setOnlineUserIds] = useState([]);
   const [pausedOnDashboard, setPausedOnDashboard] = useState(false);
+  const [actionError, setActionError] = useState(null);
 
   const socketRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
 
-  const fetchActiveSession = useCallback(async () => {
+  const isInitialLoadRef = useRef(true);
+
+  const fetchActiveSession = useCallback(async (options = {}) => {
+    const isInitial = isInitialLoadRef.current;
+    const silent = options?.silent ?? !isInitial;
     if (!user) {
       setSession(null);
       setLoading(false);
+      isInitialLoadRef.current = false;
       return;
     }
     try {
+      if (!silent) {
+        setLoading(true);
+      }
       const data = await apiCall(`/api/adventure/active-session/${user.user_id}`);
       if (data && data.session) {
         setSession(data.session);
@@ -34,20 +45,25 @@ export const useGameSession = (user, character) => {
     } catch (e) {
       setSession(null);
     } finally {
-      setLoading(false);
+      isInitialLoadRef.current = false;
+      if (!silent) {
+        setLoading(false);
+      }
     }
-  }, [user, character?.id]);
+  }, [user?.user_id, character?.id]);
 
   useEffect(() => {
     fetchActiveSession();
     return () => {
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       if (socketRef.current) {
         socketRef.current.close();
       }
     };
   }, [fetchActiveSession]);
 
-  const connectWebSocket = (sessionId) => {
+  const connectWebSocket = useCallback((sessionId) => {
+    if (!sessionId || !user?.user_id) return;
     if (
       socketRef.current &&
       socketRef.current._sessionId === sessionId &&
@@ -55,7 +71,11 @@ export const useGameSession = (user, character) => {
     ) {
       return;
     }
-    if (socketRef.current) socketRef.current.close();
+    if (socketRef.current) {
+      try {
+        socketRef.current.close();
+      } catch (e) {}
+    }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/session/${sessionId}?user_id=${user.user_id}`;
@@ -63,6 +83,13 @@ export const useGameSession = (user, character) => {
     const ws = new WebSocket(wsUrl);
     ws._sessionId = sessionId;
     socketRef.current = ws;
+
+    ws.onopen = () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+    };
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -107,8 +134,13 @@ export const useGameSession = (user, character) => {
         setWaitingForParty(false);
         setProcessingTurn(false);
         setLastSyncTimestamp(data.sync_timestamp || Date.now());
+      } else if (data.type === 'HEARTBEAT') {
+        // Keepalive acknowledged from backend turn engine
       } else if (data.type === 'UPDATE_SCENE') {
-        setSession(data.session);
+        setSession(prev => ({
+          ...data.session,
+          scene_image_url: data.session?.scene_image_url || prev?.scene_image_url || null
+        }));
         setLastSyncTimestamp(data.sync_timestamp || Date.now());
       } else if (data.type === 'PICK_LOCKED') {
         setPartyStatus({
@@ -117,7 +149,22 @@ export const useGameSession = (user, character) => {
           waitingCount: data.waiting_count
         });
       } else if (data.type === 'SCENE_IMAGE') {
-        setSession(prev => prev ? { ...prev, scene_image_url: data.image_url } : prev);
+        setSession(prev => {
+          if (!prev) return prev;
+          const hist = Array.isArray(prev.history) ? [...prev.history] : [];
+          if (hist.length > 0 && typeof hist[hist.length - 1] === 'object') {
+            hist[hist.length - 1] = {
+              ...hist[hist.length - 1],
+              scene_image_url: data.image_url,
+              scene_image_orientation: data.orientation || 'portrait'
+            };
+          }
+          return {
+            ...prev,
+            scene_image_url: data.image_url,
+            history: hist
+          };
+        });
       } else if (data.type === 'CHAT_MESSAGE') {
         setPartyChatMessages(prev => [
           ...prev.slice(-49),
@@ -143,8 +190,23 @@ export const useGameSession = (user, character) => {
       }
     }, 15000);
 
-    ws.onclose = () => clearInterval(interval);
-  };
+    ws.onclose = (event) => {
+      clearInterval(interval);
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      // Auto-reconnect if session still exists and not cleanly closed
+      if (!event.wasClean) {
+        reconnectTimeoutRef.current = setTimeout(() => {
+          connectWebSocket(sessionId);
+        }, 2000);
+      }
+    };
+
+    ws.onerror = () => {
+      try {
+        ws.close();
+      } catch (e) {}
+    };
+  }, [user?.user_id]);
 
   const sendPartyChat = useCallback((messageText, senderName) => {
     const clean = (messageText || '').trim();
@@ -212,6 +274,15 @@ export const useGameSession = (user, character) => {
   const submitAction = async (actionData) => {
     if (processingTurn) return;
     setProcessingTurn(true);
+    setPendingAction(actionData);
+    setActionError(null);
+
+    const safetyTimer = setTimeout(() => {
+      console.warn('Action processing exceeded safety window (60s), releasing lock.');
+      setProcessingTurn(false);
+      setPendingAction(null);
+    }, 60000);
+
     try {
       const payload = {
         session_id: session.id,
@@ -233,22 +304,46 @@ export const useGameSession = (user, character) => {
           lockedCount: data.locked_picks,
           total: data.total
         });
-        setProcessingTurn(false);
       } else {
-        setSession(data.session);
+        setSession(prev => ({
+          ...data.session,
+          scene_image_url: data.session?.scene_image_url || prev?.scene_image_url || null
+        }));
         setWaitingForParty(false);
         setIsStreaming(false);
         setStreamingNarrative(null);
         setStreamingState(null);
-        setProcessingTurn(false);
         setLastSyncTimestamp(Date.now());
       }
     } catch (e) {
+      console.warn('Action API error or timeout, checking active session recovery...', e);
+      const errMsg = e?.detail || e?.message || 'The action could not be completed. Please try again.';
+      setActionError(errMsg);
+      try {
+        const recoveryData = await apiCall(`/api/adventure/active-session/${user.user_id}`);
+        if (recoveryData && recoveryData.session) {
+          setSession(prev => ({
+            ...recoveryData.session,
+            scene_image_url: recoveryData.session?.scene_image_url || prev?.scene_image_url || null
+          }));
+          setWaitingForParty(false);
+          setIsStreaming(false);
+          setStreamingNarrative(null);
+          setStreamingState(null);
+          setLastSyncTimestamp(Date.now());
+          return;
+        }
+      } catch (recErr) {
+        console.error('State recovery check failed:', recErr);
+      }
       setIsStreaming(false);
       setStreamingNarrative(null);
       setStreamingState(null);
-      setProcessingTurn(false);
       throw e;
+    } finally {
+      clearTimeout(safetyTimer);
+      setProcessingTurn(false);
+      setPendingAction(null);
     }
   };
 
@@ -304,12 +399,52 @@ export const useGameSession = (user, character) => {
     }
   };
 
+  const [rerollingImage, setRerollingImage] = useState(false);
+
+  const rerollImage = async () => {
+    if (!session?.id || !user?.user_id || rerollingImage) return null;
+    setRerollingImage(true);
+    try {
+      const data = await apiCall('/api/adventure/reroll_image', {
+        method: 'POST',
+        body: JSON.stringify({
+          session_id: session.id,
+          user_id: user.user_id
+        })
+      });
+      if (data?.image_url) {
+        setSession(prev => {
+          if (!prev) return prev;
+          const hist = Array.isArray(prev.history) ? [...prev.history] : [];
+          if (hist.length > 0 && typeof hist[hist.length - 1] === 'object') {
+            hist[hist.length - 1] = {
+              ...hist[hist.length - 1],
+              scene_image_url: data.image_url
+            };
+          }
+          return {
+            ...prev,
+            scene_image_url: data.image_url,
+            history: hist
+          };
+        });
+      }
+      return data;
+    } catch (err) {
+      console.error('Reroll image failed:', err);
+      throw err;
+    } finally {
+      setRerollingImage(false);
+    }
+  };
+
   return {
     session,
     setSession,
     pausedOnDashboard,
     loading,
     processingTurn,
+    pendingAction,
     isStreaming,
     streamingNarrative,
     streamingState,
@@ -326,6 +461,10 @@ export const useGameSession = (user, character) => {
     resumeSession,
     endSession,
     retryGeneration,
-    refreshSession: fetchActiveSession
+    rerollImage,
+    rerollingImage,
+    actionError,
+    clearActionError: () => setActionError(null),
+    refreshSession: useCallback(() => fetchActiveSession({ silent: true }), [fetchActiveSession])
   };
 };

@@ -198,15 +198,95 @@ def test_max_save_slots_limit():
         dialogue_mode="balanced", image_gen_enabled=False, scenario="fantasy"
     )
 
-    for i in range(1, 11):
+    for i in range(1, 7):
         db.save_adventure_slot(uid, f"Slot {i}")
 
     saves = db.list_adventure_saves(uid)
-    assert len(saves) == 10
+    assert len(saves) == 6
 
-    # 11th save should fail
+    # 7th save should fail (limit 6 per character)
     with pytest.raises(ValueError, match="Maximum save slots reached"):
-        db.save_adventure_slot(uid, "Slot 11")
+        db.save_adventure_slot(uid, "Slot 7")
+
+    db.delete_character(uid)
+
+
+def test_character_save_isolation_multi_character():
+    """Verify that multiple characters owned by the same user have strictly isolated save slots (up to 6 each)."""
+    uid = 999990008
+    db.delete_character(uid)
+
+    # 1. Create Character A
+    char_a = db.create_character(uid, "AlphaHero", "Warrior", "Frontline fighter")
+    sess_a = db.create_session(
+        host_user_id=uid, mode="turn", capacity=1, verbosity="normal",
+        dialogue_mode="balanced", image_gen_enabled=False, scenario="fantasy"
+    )
+    db.save_session_scene(
+        sess_a,
+        scene_title="Alpha's Beginning",
+        narrative="Alpha enters the ancient gate.",
+        choices=[{"text": "Proceed forward"}],
+        history=[],
+        location="Ancient Gate"
+    )
+
+    # Save checkpoint for Alpha
+    res_a = db.save_adventure_slot(uid, "Checkpoint Alpha")
+    assert res_a["status"] == "saved"
+    assert db.count_character_adventure_saves(char_a["id"]) == 1
+
+    saves_a = db.list_adventure_saves(uid)
+    assert len(saves_a) == 1
+    assert saves_a[0]["slot_name"] == "Checkpoint Alpha"
+
+    # 2. Create Character B and switch to it
+    char_b = db.create_character(uid, "BetaHero", "Mage", "Arcane scholar")
+    sess_b = db.create_session(
+        host_user_id=uid, mode="turn", capacity=1, verbosity="normal",
+        dialogue_mode="balanced", image_gen_enabled=False, scenario="cyberpunk"
+    )
+    db.save_session_scene(
+        sess_b,
+        scene_title="Beta's Neon Start",
+        narrative="Beta hacks into the mainframe.",
+        choices=[{"text": "Jack in"}],
+        history=[],
+        location="Cyber Deck"
+    )
+
+    # Beta's save list should be empty (0 saves for Beta)
+    saves_b = db.list_adventure_saves(uid)
+    assert len(saves_b) == 0
+    assert db.count_character_adventure_saves(char_b["id"]) == 0
+
+    # Beta attempts to load Alpha's checkpoint -> must raise ValueError
+    with pytest.raises(ValueError, match="No save slot found named"):
+        db.load_adventure_slot(uid, "Checkpoint Alpha")
+
+    # Beta saves their own checkpoint, even with a slot named "Shared Slot"
+    db.save_adventure_slot(uid, "Shared Slot")
+    assert db.count_character_adventure_saves(char_b["id"]) == 1
+
+    # Switch back to Alpha
+    db.switch_character(uid, "AlphaHero")
+    saves_a_after = db.list_adventure_saves(uid)
+    assert len(saves_a_after) == 1
+    assert saves_a_after[0]["slot_name"] == "Checkpoint Alpha"
+
+    # Alpha attempts to load Beta's "Shared Slot" -> should fail because Alpha doesn't have it
+    with pytest.raises(ValueError, match="No save slot found named"):
+        db.load_adventure_slot(uid, "Shared Slot")
+
+    # Alpha can also create their own "Shared Slot" without colliding with Beta's
+    db.save_adventure_slot(uid, "Shared Slot")
+    saves_a_final = db.list_adventure_saves(uid)
+    assert len(saves_a_final) == 2
+
+    # Switch back to Beta and verify Beta still has only 1 save ("Shared Slot")
+    db.switch_character(uid, "BetaHero")
+    saves_b_final = db.list_adventure_saves(uid)
+    assert len(saves_b_final) == 1
 
     db.delete_character(uid)
 
@@ -231,3 +311,77 @@ async def test_async_adb_save_load():
 
     db.delete_character(uid)
 
+def test_save_load_household_foreign_key_and_old_session_delete():
+    """Verify that saving and loading a session with normalized households remaps household_id foreign keys,
+    updates household_key with new session ID, and allows safe deletion of the old session without Foreign Key IntegrityError."""
+    uid = 999990007
+    db.delete_character(uid)
+    char = db.create_character(uid, "HouseholdHero", "Mage", "Scholar")
+    char_id = char["id"]
+
+    sess_a = db.create_session(
+        host_user_id=uid, mode="turn", capacity=1, verbosity="normal",
+        dialogue_mode="balanced", image_gen_enabled=False, scenario="fantasy"
+    )
+
+    # Create a household in session A
+    father = {"relation": "Father", "name": "George Vance", "first_name": "George", "surname": "Vance", "race": "human", "gender": "male", "status": "Alive", "occupation": "Guildmaster", "features": "Blue eyes"}
+    mother = {"relation": "Mother", "name": "Evelyn Vance", "first_name": "Evelyn", "surname": "Vance", "race": "human", "gender": "female", "status": "Alive", "occupation": "Merchant", "features": "Hazel eyes"}
+    hh_a_id = db.create_household(
+        session_id=sess_a,
+        household_key=f"vance_household_{sess_a}",
+        surname="Vance",
+        father=father,
+        mother=mother,
+        narrative_siblings=[]
+    )
+    assert hh_a_id > 0
+
+    # Create a contact in session A linked to the household
+    c_a = db.upsert_contact(
+        session_id=sess_a,
+        npc_id="su_bin_vance",
+        name="Su-bin Vance",
+        character_id=char_id
+    )
+    db.assign_contact_household(sess_a, c_a["id"], hh_a_id)
+
+    # Verify contact in session A points to hh_a_id
+    c_check_a = db.get_contact(sess_a, "su_bin_vance")
+    assert c_check_a["household_id"] == hh_a_id
+
+    # Save to slot
+    res = db.save_adventure_slot(uid, "HouseholdCheckpoint")
+    assert res["status"] == "saved"
+
+    # Load from slot into new session B
+    sess_b_dict = db.load_adventure_slot(uid, "HouseholdCheckpoint")
+    sess_b = sess_b_dict["id"]
+    assert sess_b != sess_a
+
+    # Verify session B has its own household with new ID and remapped household_key
+    hh_b = db.get_household_by_key(sess_b, f"vance_household_{sess_b}")
+    assert hh_b is not None
+    assert hh_b["id"] != hh_a_id
+    assert hh_b["session_id"] == sess_b
+
+    # Verify contact in session B has household_id remapped to hh_b["id"]
+    c_check_b = db.get_contact(sess_b, "su_bin_vance")
+    assert c_check_b is not None
+    assert c_check_b["household_id"] == hh_b["id"]
+
+    # Delete old session A entirely from DB (should NOT throw sqlite3.IntegrityError: FOREIGN KEY constraint failed)
+    with db.get_conn() as conn:
+        db.core._delete_session_records(conn, sess_a)
+
+    # Verify session B's records are completely intact
+    hh_b_still_there = db.get_household_by_id(hh_b["id"])
+    assert hh_b_still_there is not None
+    c_b_still_there = db.get_contact(sess_b, "su_bin_vance")
+    assert c_b_still_there["household_id"] == hh_b["id"]
+
+    # Cleanup
+    with db.get_conn() as conn:
+        db.core._delete_session_records(conn, sess_b)
+    db.delete_adventure_save(uid, "HouseholdCheckpoint")
+    db.delete_character(uid)

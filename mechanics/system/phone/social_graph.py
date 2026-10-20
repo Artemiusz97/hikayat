@@ -3,6 +3,7 @@ from __future__ import annotations
 Social graph connections, profile lookup, friend request resolution, and peer discovery for Hikayat.
 """
 import random
+import json
 import db
 from skill_check import resolve_check
 
@@ -32,6 +33,20 @@ def get_mutual_friends_and_ties(session_id: int, user_id: int, target_dict: dict
     for cf in shared_club_friends:
         if cf not in mutuals:
             mutuals.append(cf)
+
+    # Query normalized social graph for true mutual friends
+    try:
+        import mechanics.social.relationship_graph as rg
+        if char:
+            p_key = rg.player_person_key(char.get("id", 0))
+            t_key = rg.canonical_person_key(target_dict.get("name", ""))
+            graph_mutuals = rg.get_mutual_friends(session_id, p_key, t_key)
+            for gm in graph_mutuals:
+                gm_name = gm.get("name")
+                if gm_name and gm_name not in mutuals:
+                    mutuals.append(gm_name)
+    except Exception:
+        pass
 
     return {
         "is_sibling_friend": is_sibling_friend,
@@ -188,12 +203,40 @@ def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dic
     contact_npc_id = str(target_rec.get("npc_id") or name).strip().lower().replace(" ", "_").replace(".", "")
     existing_contact = db.get_contact(session_id, contact_npc_id, character_id=char.get("id", 0)) if char else None
 
+    # Determine whether they are already an unlocked friend in smartphone Line/DMs
+    from mechanics.social.relationships import is_unlocked_contact
+    party_npcs = db.get_session_party_npcs(session_id)
+    party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
+    is_connected = bool(existing_contact and is_unlocked_contact(existing_contact, party_names))
+
     # Check cooldown
     state = db.get_phone_social_state(session_id) or {}
     cds = state.get("friend_request_cooldowns", {})
-    expire_turn = cds.get(contact_npc_id, 0)
+    entry = cds.get(contact_npc_id) or cds.get(name.lower().strip())
+    clean_first = name.lower().strip().split()[0] if name else ""
+    if not entry and clean_first and len(clean_first) >= 3:
+        for k, v in cds.items():
+            if k == clean_first or k.startswith(clean_first) or clean_first in k:
+                entry = v
+                break
+
+    s_row = db.get_session(session_id) if session_id else None
+    curr_day = int((session.get("current_day") if session else None) or (s_row.get("current_day") if s_row else 1) or 1)
     turn_count = len(session.get("history", [])) if session else 0
-    turns_left = max(0, expire_turn - turn_count)
+
+    on_cooldown = False
+    turns_left = 0
+    if entry:
+        if isinstance(entry, dict):
+            until_day = entry.get("until_day")
+            if until_day is not None:
+                on_cooldown = curr_day < int(until_day)
+            else:
+                on_cooldown = turn_count < entry.get("expire_turn", 0)
+            turns_left = 5 if on_cooldown else 0
+        elif isinstance(entry, (int, float)):
+            turns_left = max(0, int(entry) - turn_count)
+            on_cooldown = turns_left > 0
 
     ties = get_mutual_friends_and_ties(session_id, user_id, target_rec)
 
@@ -217,8 +260,9 @@ def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dic
         "personality": desc,
         "is_eligible": is_eligible,
         "is_faculty": not is_eligible,
-        "is_already_contact": bool(existing_contact),
+        "is_already_contact": is_connected,
         "cooldown_turns_left": turns_left,
+        "on_cooldown": on_cooldown,
         "npc_id": contact_npc_id,
         "mutual_friends": ties["mutual_friends"],
         "is_sibling_friend": ties["is_sibling_friend"],
@@ -248,12 +292,38 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
             "message": f"👥 **{name}** is already in your Contacts!"
         }
 
-    if profile.get("cooldown_turns_left", 0) > 0:
+    # Check cooldown
+    state = db.get_phone_social_state(session_id) or {}
+    cds = state.setdefault("friend_request_cooldowns", {})
+    entry = cds.get(npc_id) or cds.get(name.lower().strip())
+    clean_first = name.lower().strip().split()[0] if name else ""
+    if not entry and clean_first and len(clean_first) >= 3:
+        for k, v in cds.items():
+            if k == clean_first or k.startswith(clean_first) or clean_first in k:
+                entry = v
+                break
+
+    s_row = db.get_session(session_id) if session_id else None
+    curr_day = int((session.get("current_day") if session else None) or (s_row.get("current_day") if s_row else 1) or 1)
+    turn_count = len(session.get("history", [])) if session else 0
+
+    on_cooldown = False
+    if entry:
+        if isinstance(entry, dict):
+            until_day = entry.get("until_day")
+            if until_day is not None:
+                on_cooldown = curr_day < int(until_day)
+            else:
+                on_cooldown = turn_count < entry.get("expire_turn", 0)
+        elif isinstance(entry, (int, float)):
+            on_cooldown = turn_count < int(entry)
+
+    if on_cooldown or profile.get("cooldown_turns_left", 0) > 0:
         return {
             "accepted": False,
             "on_cooldown": True,
-            "turns_left": profile["cooldown_turns_left"],
-            "message": f"⏳ **Recent Request Pending/Declined:** {name} hasn't responded. You can try sending another request in **{profile['cooldown_turns_left']} turn(s)**."
+            "turns_left": profile.get("cooldown_turns_left", 5),
+            "message": f"⏳ **Recent Request Pending/Declined:** {name} hasn't responded. You can try sending another request tomorrow."
         }
 
     # Dynamic Modifier Calculation
@@ -297,11 +367,28 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
     cds = state.setdefault("friend_request_cooldowns", {})
 
     if check["succeeded"]:
-        # Hydrate contact
+        # Hydrate contact and unlock in smartphone
         scen_key = session.get("scenario", "fantasy")
         if "school" in scen_key or "high_school" in scen_key:
             from mechanics.social.school_roster import hydrate_school_character
-            hydrate_school_character(session_id, profile["raw_record"])
+            hydrate_school_character(session_id, profile.get("raw_record") or profile)
+            c = db.get_contact(session_id, npc_id)
+            if c:
+                b_info = c.get("basic_info") or {}
+                if isinstance(b_info, str):
+                    try:
+                        b_info = json.loads(b_info)
+                    except Exception:
+                        b_info = {}
+                b_info["contact_added"] = True
+                b_info["is_contact"] = True
+                db.upsert_contact(
+                    session_id=session_id,
+                    npc_id=npc_id,
+                    name=name,
+                    character_id=char.get("id", 0) if char else 0,
+                    basic_info=b_info,
+                )
         else:
             db.upsert_contact(
                 session_id=session_id,
@@ -311,7 +398,9 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
                 delta_score=5,
                 basic_info={
                     "role": profile.get("role", "Contact"),
-                    "description": profile.get("personality", "")
+                    "description": profile.get("personality", ""),
+                    "contact_added": True,
+                    "is_contact": True
                 },
                 track="platonic"
             )
@@ -324,17 +413,33 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
             "message": f"✅ **Friend Request Accepted!**\n**{name}** added you back! You can now message them via Direct Messages."
         }
     else:
-        # Set 5-turn cooldown
-        cds[npc_id] = turn_count + 5
+        # Day-based cooldown: strictly once per day per character, cannot add again until the next day
+        until_day = curr_day + 1
+        cd_data = {
+            "failed_day": curr_day,
+            "until_day": until_day,
+            "expire_turn": turn_count + 5,
+        }
+        cds[npc_id] = cd_data
+        clean_name = name.lower().strip()
+        if clean_name != npc_id:
+            cds[clean_name] = cd_data
+        clean_first = clean_name.split()[0] if clean_name else ""
+        if clean_first and clean_first != clean_name and len(clean_first) >= 3:
+            cds[clean_first] = cd_data
+
         db.update_phone_social_state(session_id, state)
         profile["cooldown_turns_left"] = 5
+        profile["on_cooldown"] = True
         return {
             "accepted": False,
             "check": check,
             "bonus": bonus,
             "mod_reasons": mod_reasons,
             "turns_cooldown": 5,
-            "message": f"❌ **Request Left on Delivered:**\n**{name}** didn't accept your friend request. You can send another request in 5 turns."
+            "cooldown_until_day": until_day,
+            "on_cooldown": True,
+            "message": f"❌ **Request Left on Delivered:**\n**{name}** didn't accept your friend request. You can send another request tomorrow."
         }
 
 
@@ -366,3 +471,200 @@ def discover_suggested_peer(session_id: int, user_id: int) -> dict:
         chosen = generate_dynamic_student_peer(session_id, scen_key=scen_key)
 
     return lookup_social_profile(session_id, user_id, chosen["name"])
+
+
+def get_suggested_peers(session_id: int, user_id: int, limit: int = 12) -> list[dict]:
+    """
+    Returns a prioritized list of suggested peer profiles for the PeerPulse social graph app.
+    
+    Priority order:
+    1. Known student/peers from the current scene & session history who are NOT yet unlocked contacts
+       (e.g. classmates in Homeroom like Henry Sterling, Diana Yamada, Kayo Yamamoto, Raphaël Ito).
+    2. Other students who share sibling bonds or club affiliations with known contacts.
+    3. Other eligible student peers from the school directory.
+    
+    Excludes:
+    - Faculty, staff, and adult authority figures (who cannot be added to student friend circles).
+    - Characters who are already unlocked contacts (relationship_score >= 100 or contact_added).
+    """
+    session = db.get_session(session_id) or {}
+    char = db.get_character(user_id)
+    char_name = str(char.get("name", "")).strip().lower() if char else ""
+    party_npcs = db.get_session_party_npcs(session_id)
+    party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
+
+    contacts = db.get_contacts(session_id, character_id=char.get("id", 0)) if char else []
+    from mechanics.social.relationships import is_unlocked_contact
+    unlocked_contact_names = {c["name"].lower().strip() for c in contacts if is_unlocked_contact(c, party_names)}
+
+    seen_names = set(unlocked_contact_names)
+    if char_name:
+        seen_names.add(char_name)
+
+    suggested_names = []
+
+    # 1. Known peers in current scene
+    for n in (session.get("current_npcs") or []):
+        name = n.get("name") if isinstance(n, dict) else str(n)
+        clean_n = str(name or "").strip()
+        if clean_n and clean_n.lower() not in seen_names:
+            suggested_names.append(clean_n)
+            seen_names.add(clean_n.lower())
+
+    # 2. Known peers in turn history (witnesses, dialogue partners)
+    for h in reversed(session.get("history") or []):
+        if not isinstance(h, dict):
+            continue
+        for w in (h.get("witnessed_by") or []):
+            if w and isinstance(w, str):
+                cw = w.strip()
+                if cw and cw.lower() not in seen_names:
+                    suggested_names.append(cw)
+                    seen_names.add(cw.lower())
+        dp = h.get("dialogue_partner")
+        if dp and isinstance(dp, str):
+            cdp = dp.strip()
+            if cdp and cdp.lower() not in seen_names:
+                suggested_names.append(cdp)
+                seen_names.add(cdp.lower())
+
+    # 3. Known peers in contacts table who are not yet unlocked
+    for c in contacts:
+        name = str(c.get("name") or "").strip()
+        if name and name.lower() not in seen_names:
+            suggested_names.append(name)
+            seen_names.add(name.lower())
+
+    # 4. Fill remaining slots with school directory students
+    roster = db.get_school_roster(session_id) or []
+    for r in roster:
+        if len(suggested_names) >= limit:
+            break
+        r_name = str(r.get("name") or "").strip()
+        grade = str(r.get("grade", "")).strip().lower()
+        if r_name and r_name.lower() not in seen_names and grade != "faculty":
+            suggested_names.append(r_name)
+            seen_names.add(r_name.lower())
+
+    # Convert names into full PeerPulse social profiles
+    profiles = []
+    for name in suggested_names:
+        prof = lookup_social_profile(session_id, user_id, name)
+        if prof and prof.get("is_eligible") and not prof.get("is_faculty"):
+            if not prof.get("is_already_contact"):
+                profiles.append(prof)
+        if len(profiles) >= limit:
+            break
+
+    return profiles
+
+
+def evaluate_pre_turn_witness_detection(
+    session: dict,
+    actions: list,
+    player_name: str = "Player",
+    target_npc: str = "",
+    location_str: str = "",
+) -> dict:
+    """
+    Deterministic pre-turn witness detection & procedural gossip propagation.
+    Checks if a romantic, intimate, or illicit action occurs in a semi-public/public node,
+    identifies witnesses or rolls public passerby chance, and queues a 0ms gossip post.
+    """
+    from mechanics.system.phone.gossip_feed import queue_witness_gossip_post
+
+    action_str = ""
+    if actions:
+        fa = actions[0]
+        action_str = str(fa.get("label") or fa.get("action") or "") if isinstance(fa, dict) else str(fa or "")
+    act_low = action_str.lower()
+
+    is_illicit = any(kw in act_low for kw in ("steal", "pick lock", "pickpocket", "sabotage", "trespass", "break in", "pry open", "sneak into", "plant evidence"))
+    is_romantic_or_intimate = any(kw in act_low for kw in (
+        "kiss", "caress", "undress", "touch", "embrace", "cuddle", "grope", "stroke",
+        "intimate", "thrust", "penetrat", "oral", "handjob", "blowjob", "sex", "make out",
+        "strip", "fingering", "fondle"
+    ))
+
+    session_id = session.get("id") or 0
+    loc_display = str(location_str or session.get("current_location", "")).strip()
+
+    # Check for Public Indecency / Exposure (Invariant 4)
+    from mechanics.social.physical_state import check_venue_indecency_exposure, find_player_actor_key
+    phys_st = session.get("physical_state") or (db.get_session_physical_state(session_id) if session_id else {})
+    is_public_exposure = False
+    exposure_type = "none"
+    if phys_st and isinstance(phys_st, dict):
+        actors_map = phys_st.get("actors") or {}
+        p_key = find_player_actor_key(actors_map, session_id=session_id)
+        if p_key and p_key in actors_map:
+            p_cloth = actors_map[p_key].get("clothing") or {}
+            exp_info = check_venue_indecency_exposure(p_cloth, loc_display)
+            if exp_info.get("requires_reaction"):
+                is_public_exposure = True
+                exposure_type = exp_info.get("exposure_type", "exposed")
+
+    if not is_illicit and not is_romantic_or_intimate and not is_public_exposure:
+        return {"witness_spotted": False}
+
+    # Cover / Concealment check
+    focal_point = str(session.get("focal_point") or "").lower()
+    if any(cover in focal_point for cover in ("behind", "under", "hidden", "private", "curtain", "bleacher", "stall", "secluded", "alcove", "closet")):
+        return {"witness_spotted": False, "covered": True}
+
+    loc_low = loc_display.lower()
+    if any(k in loc_low for k in ("bedroom", "private bath", "dorm room", "personal quarters", "safehouse")):
+        return {"witness_spotted": False, "private": True}
+
+    # Candidate witness extraction
+    stage_npcs = session.get("pre_turn_stage_npcs") or session.get("current_stage_npcs") or session.get("current_npcs") or []
+    candidate_witnesses = []
+    for n in stage_npcs:
+        n_name = (n.get("name") if isinstance(n, dict) else str(n)).strip()
+        is_partner_in_act = (n_name.lower() == target_npc.lower()) and not is_public_exposure
+        if n_name and not is_partner_in_act and n_name.lower() != player_name.lower():
+            candidate_witnesses.append(n_name)
+
+    if is_public_exposure:
+        event_kind = "scandal" if exposure_type in ("fully_naked", "bottomless") else "indecency"
+    elif is_romantic_or_intimate:
+        event_kind = "intimate"
+    else:
+        event_kind = "illicit"
+
+    witness_name = None
+    if candidate_witnesses:
+        witness_name = candidate_witnesses[0]
+    elif is_public_exposure:
+        witness_name = "Shocked Bystander"
+    elif any(k in loc_low for k in ("hallway", "corridor", "courtyard", "cafeteria", "plaza", "street", "quad", "library", "park", "campus", "classroom")):
+        # 35% passerby chance in public areas
+        if random.random() < 0.35:
+            witness_name = "Passerby Student"
+
+    if not witness_name:
+        return {"witness_spotted": False}
+
+    post = queue_witness_gossip_post(
+        session_id=session_id,
+        witness_name=witness_name,
+        player_name=player_name,
+        partner_name=target_npc or "Someone",
+        location_display=loc_display,
+        event_kind=event_kind,
+    )
+
+    directive = (
+        f"[STAGE DIRECTION: PUBLIC INDECENCY]: {player_name} is visibly {exposure_type} at {loc_display or 'the scene'}! {witness_name} and nearby bystanders are startled and scandalized."
+        if is_public_exposure
+        else f"[STAGE DIRECTION — WITNESS REACTION]: {witness_name} spotted the interaction at {loc_display or 'the scene'}! Briefly note their startled glance or reaction."
+    )
+
+    return {
+        "witness_spotted": True,
+        "witness_name": witness_name,
+        "event_kind": event_kind,
+        "post": post,
+        "directive": directive,
+    }
+

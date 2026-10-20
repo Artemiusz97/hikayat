@@ -85,6 +85,7 @@ def get_session(session_id: int):
         d["confession_cooldowns"] = json.loads(d.pop("confession_cooldowns_json", None) or "{}")
         d["phone_social_state"] = json.loads(d.pop("phone_social_state_json", None) or "{}")
         d["scenario"] = d.get("scenario") or "fantasy"
+        d["dialogue_partners"] = []
         raw_dp = d.get("dialogue_partner")
         if raw_dp:
             try:
@@ -97,9 +98,19 @@ def get_session(session_id: int):
                     d["dialogue_partners"] = [str(raw_dp)]
             except Exception:
                 d["dialogue_partners"] = [str(raw_dp)]
-        else:
-            d["dialogue_partners"] = []
         d["dialogue_partner"] = d["dialogue_partners"][0] if d["dialogue_partners"] else None
+
+        # Enrich with Spatial Graph Node data
+        node_id = d.get("current_node_id")
+        if node_id:
+            from .world import get_world_node, get_node_ancestors
+            node = get_world_node(session_id, node_id)
+            if node:
+                d["current_world_node"] = node
+                if not d.get("current_location"):
+                    ancestors = get_node_ancestors(session_id, node_id)
+                    chain = [a["name"] for a in reversed(ancestors)] + [node["name"]]
+                    d["current_location"] = " ➔ ".join(chain)
 
         if "extra_json" in d:
             extra_raw = d.pop("extra_json", None) or "{}"
@@ -147,7 +158,10 @@ def get_active_session_id_for_user(user_id: int):
 def save_session_scene(session_id: int, scene_title: str, narrative: str, choices: list, history: list,
                         location: str = None, nearby_enemies: list = None, current_npcs: list = None,
                         physical_state: dict = None,
-                        dialogue_partner: str = "__NOOP__"):
+                        dialogue_partner: str = "__NOOP__",
+                        current_node_id: str = None,
+                        focal_point: str = None,
+                        scene_image_url: str = None):
     clean_narrative = _to_str(narrative)
     if clean_narrative:
         from game_engine.keywords import sanitize_meta_objective_leaks
@@ -158,8 +172,22 @@ def save_session_scene(session_id: int, scene_title: str, narrative: str, choice
         "narrative": clean_narrative,
         "choices_json": json.dumps(choices, default=str) if not isinstance(choices, str) else choices,
         "history_json": json.dumps(history, default=str) if not isinstance(history, str) else history,
+        "scene_image_url": scene_image_url,
         "updated_at": time.time(),
     }
+
+    if current_node_id:
+        fields["current_node_id"] = current_node_id
+        if location is None:
+            from .world import get_world_node, get_node_ancestors
+            node = get_world_node(session_id, current_node_id)
+            if node:
+                ancestors = get_node_ancestors(session_id, current_node_id)
+                chain = [a["name"] for a in reversed(ancestors)] + [node["name"]]
+                fields["current_location"] = " ➔ ".join(chain)
+
+    if focal_point is not None:
+        fields["focal_point"] = _to_str(focal_point)
 
     if location is not None:
         clean_loc = _to_str(location)
@@ -171,6 +199,7 @@ def save_session_scene(session_id: int, scene_title: str, narrative: str, choice
             except Exception:
                 pass
         fields["current_location"] = clean_loc
+
     if nearby_enemies is not None:
         json_str = json.dumps(nearby_enemies, default=str) if not isinstance(nearby_enemies, str) else nearby_enemies
         fields["nearby_enemies_json"] = json_str
@@ -223,6 +252,8 @@ def update_session(session_id: int, **kwargs):
         "current_npcs": "current_npcs_json",
         "nearby_enemies": "nearby_enemies_json",
         "location": "current_location",
+        "node_id": "current_node_id",
+        "focal_point": "focal_point",
         "physical_state": "physical_state_json",
         "party_npcs": "party_npcs_json",
         "last_turn_snapshot": "last_turn_snapshot_json",
@@ -299,19 +330,55 @@ def set_turn_snapshot(session_id: int, snapshot: dict):
     update_session(session_id, last_turn_snapshot=snapshot)
 
 def get_session_physical_state(session_id: int) -> dict:
+    if not session_id:
+        return {}
     with get_conn() as conn:
         row = conn.execute("SELECT physical_state_json FROM sessions WHERE id=?", (session_id,)).fetchone()
-        if not row or not row["physical_state_json"]:
-            return {}
-        try:
-            return json.loads(row["physical_state_json"])
-        except Exception:
-            return {}
+        raw_json = row["physical_state_json"] if row else None
+        data = None
+        if raw_json:
+            try:
+                data = json.loads(raw_json)
+            except Exception:
+                data = None
 
-def update_session_physical_state(session_id: int, physical_state: dict):
+        import mechanics.social.physical_state as ps
+        if not data:
+            # Check if normalized tables have state to materialize
+            cnt = conn.execute("SELECT COUNT(*) FROM actor_physical_states WHERE session_id=?", (session_id,)).fetchone()
+            if cnt and cnt[0] > 0:
+                return ps.materialize_session_physical_state(session_id, conn=conn)
+            return {}
+        else:
+            # If JSON exists, ensure normalized tables are hydrated
+            ps.ensure_lazy_migration(session_id, legacy_state=data, conn=conn)
+            return data
+
+def update_session_physical_state(session_id: int, physical_state: dict, sync_tables: bool = True):
     with get_conn() as conn:
         conn.execute("UPDATE sessions SET physical_state_json=?, updated_at=? WHERE id=?",
                      (json.dumps(physical_state) if isinstance(physical_state, dict) else str(physical_state), time.time(), session_id))
+        if sync_tables and isinstance(physical_state, dict) and session_id:
+            try:
+                import mechanics.social.physical_state as ps
+                ps.sync_state_dict_to_db(session_id, physical_state, conn=conn)
+            except Exception:
+                pass
+
+def get_actor_physical_state(session_id: int, canonical_key: str) -> Optional[dict]:
+    """Returns normalized physical state dict for an actor including garments."""
+    import mechanics.social.physical_state as ps
+    return ps.get_actor_physical_state(session_id, canonical_key)
+
+def get_all_actor_physical_states(session_id: int) -> list[dict]:
+    """Returns all normalized actor physical states for a session."""
+    import mechanics.social.physical_state as ps
+    return ps.get_all_actor_physical_states(session_id)
+
+def get_actor_garments(session_id: int, actor_key: str) -> list[dict]:
+    """Returns garments for a specific actor in a session."""
+    import mechanics.social.physical_state as ps
+    return ps.get_actor_garments(session_id, actor_key)
 
 def get_session_time(session_id: int) -> tuple[int, int, int]:
     """Returns (current_day, current_minute, consecutive_days_awake)."""
@@ -408,6 +475,64 @@ def remove_session_party_npc(session_id: int, npc_name: str) -> dict | None:
     if removed is not None:
         set_session_party_npcs(session_id, new_party)
     return removed
+
+def get_temporary_companions(session_id: int) -> list[dict]:
+    """Returns the list of active temporary hangout/walking companions (max 3)."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT temporary_companions_json FROM sessions WHERE id=?", (session_id,)).fetchone()
+        if not row or not row["temporary_companions_json"]:
+            return []
+        try:
+            return json.loads(row["temporary_companions_json"])
+        except Exception:
+            return []
+
+def set_temporary_companions(session_id: int, companions: list[dict]):
+    """Saves the list of temporary hangout/walking companions."""
+    with get_conn() as conn:
+        conn.execute("UPDATE sessions SET temporary_companions_json=?, updated_at=? WHERE id=?",
+                     (json.dumps(companions or []), time.time(), session_id))
+
+def add_temporary_companion(session_id: int, npc_info: dict | str, activity: str = "walking_together") -> bool:
+    """Adds an NPC to temporary_companions if under the 3-companion cap."""
+    comps = get_temporary_companions(session_id)
+    if len(comps) >= 3:
+        return False
+    if isinstance(npc_info, str):
+        npc_name = npc_info.strip()
+        comp_obj = {"name": npc_name, "activity": activity, "joined_at": time.time()}
+    else:
+        npc_name = str(npc_info.get("name", "")).strip()
+        comp_obj = dict(npc_info)
+        comp_obj.setdefault("activity", activity)
+        comp_obj.setdefault("joined_at", time.time())
+    if not npc_name:
+        return False
+    name_clean = npc_name.lower()
+    if any(str(c.get("name", "")).strip().lower() == name_clean for c in comps):
+        return True
+    comps.append(comp_obj)
+    set_temporary_companions(session_id, comps)
+    return True
+
+def remove_temporary_companion(session_id: int, npc_name: str) -> dict | None:
+    """Removes a specific temporary companion by name."""
+    comps = get_temporary_companions(session_id)
+    name_clean = str(npc_name).strip().lower()
+    removed = None
+    new_comps = []
+    for c in comps:
+        if str(c.get("name", "")).strip().lower() == name_clean and removed is None:
+            removed = c
+        else:
+            new_comps.append(c)
+    if removed is not None:
+        set_temporary_companions(session_id, new_comps)
+    return removed
+
+def clear_temporary_companions(session_id: int):
+    """Clears all temporary companions (e.g. at end of day, parting ways, or private rendezvous)."""
+    set_temporary_companions(session_id, [])
 
 def advance_turn(session_id: int):
     session = db.get_session(session_id)

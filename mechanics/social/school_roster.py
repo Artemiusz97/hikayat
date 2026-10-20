@@ -296,20 +296,23 @@ STUDENT_SENSORY_QUIRKS: List[str] = [
 ]
 
 
-def _generate_unique_name(first_candidates: list[str], last_name: str, used_names: set[str], seed_offset: int) -> str:
+def _generate_unique_name(first_candidates: list[str], last_name: str, used_names: set[str], seed_offset: int, gender: str = "") -> str:
+    eff_last = namegen.format_cultural_full_name(
+        "X", last_name, first_culture="english", gender=gender, use_patronymic=False
+    ).split()[-1] if last_name else last_name
     for idx in range(len(first_candidates)):
         first = first_candidates[(seed_offset + idx) % len(first_candidates)]
-        cand = f"{first} {last_name}".strip()
+        cand = f"{first} {eff_last}".strip()
         if cand.lower() not in used_names:
             used_names.add(cand.lower())
             return cand
     for idx in range(len(first_candidates)):
         first = first_candidates[idx % len(first_candidates)]
-        cand = f"{first} {last_name} {idx + 1}".strip()
+        cand = f"{first} {eff_last} {idx + 1}".strip()
         if cand.lower() not in used_names:
             used_names.add(cand.lower())
             return cand
-    cand = f"Student {seed_offset} {last_name}".strip()
+    cand = f"Student {seed_offset} {eff_last}".strip()
     used_names.add(cand.lower())
     return cand
 
@@ -396,7 +399,7 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
         })
 
     # 2. Homeroom Classmates (12)
-    homeroom_fac = f"{school_name} ➔ {classroom_name} ➔ Main Area"
+    homeroom_fac = f"{school_name} ➔ {classroom_name} ➔ Student Desks Cluster"
     secondary_courtyard = f"{commons_name} ➔ Central Courtyard ➔ Courtyard Fountain"
     for idx, h_tmpl in enumerate(HOMEROOM_TEMPLATES):
         is_female = (idx % 2 == 1)
@@ -411,7 +414,7 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
             last_pool = [l for l in raw_last_pool if l not in sibling_surnames] or raw_last_pool
             last = last_pool[(idx + 3) % len(last_pool)]
         
-        full_name = _generate_unique_name(first_pool, last, used_names, seed_val + 50 + idx * 11)
+        full_name = _generate_unique_name(first_pool, last, used_names, seed_val + 50 + idx * 11, gender=g)
 
         drive = STUDENT_CORE_DRIVES[(seed_val + 50 + idx * 7) % len(STUDENT_CORE_DRIVES)]
         friction = STUDENT_FRICTIONS[(seed_val + 50 + idx * 11 + 3) % len(STUDENT_FRICTIONS)]
@@ -453,7 +456,7 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
             last_pool = [l for l in raw_last_pool if l not in sibling_surnames] or raw_last_pool
             last = last_pool[idx % len(last_pool)]
 
-        full_name = _generate_unique_name(first_pool, last, used_names, seed_val + 100 + idx * 13)
+        full_name = _generate_unique_name(first_pool, last, used_names, seed_val + 100 + idx * 13, gender=g)
 
         drive = STUDENT_CORE_DRIVES[(seed_val + 100 + idx * 7 + 2) % len(STUDENT_CORE_DRIVES)]
         friction = STUDENT_FRICTIONS[(seed_val + 100 + idx * 11 + 5) % len(STUDENT_FRICTIONS)]
@@ -496,7 +499,7 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
             last_pool = [l for l in raw_last_pool if l not in sibling_surnames] or raw_last_pool
             last = last_pool[idx % len(last_pool)]
 
-        full_name = _generate_unique_name(first_pool, last, used_names, seed_val + 200 + idx * 17)
+        full_name = _generate_unique_name(first_pool, last, used_names, seed_val + 200 + idx * 17, gender=g)
 
         drive = STUDENT_CORE_DRIVES[(seed_val + 200 + idx * 7 + 4) % len(STUDENT_CORE_DRIVES)]
         friction = STUDENT_FRICTIONS[(seed_val + 200 + idx * 11 + 7) % len(STUDENT_FRICTIONS)]
@@ -530,7 +533,11 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
     # using sibling_surnames. Only link these explicitly seeded pairs to avoid falsely pairing
     # unrelated students who happen to share common scenario surnames (e.g. Ito, Yamamoto).
     for s_name in sibling_surnames[:5]:
-        members = [e for e in directory if e["grade"] != "Faculty" and e["name"].split()[-1].lower() == s_name.lower()]
+        members = [
+            e for e in directory
+            if e["grade"] != "Faculty"
+            and namegen.normalize_base_surname(namegen.extract_first_and_last_name(e["name"])[1]).lower() == s_name.lower()
+        ]
         if len(members) == 2:
             m1, m2 = members[0], members[1]
             m1["sibling_name"] = m2["name"]
@@ -676,7 +683,8 @@ def generate_sibling_student_peer(
     npc_id = clean_name.lower().replace(" ", "_").replace(".", "")
 
     from mechanics.social.races import normalize_race
-    char_race = c_race or normalize_race("", scen_key, seed=f"{session_id}:family:{clean_name.split()[-1].lower()}")
+    _sib_base_last = namegen.normalize_base_surname(namegen.extract_first_and_last_name(clean_name)[1]) or clean_name.split()[-1]
+    char_race = c_race or normalize_race("", scen_key, seed=f"{session_id}:family:{_sib_base_last.lower()}")
 
     final_role = role_override if (role_override and role_override.lower() != "student") else chosen["role"]
     final_club = club_override if club_override else chosen["club"]
@@ -696,7 +704,7 @@ def generate_sibling_student_peer(
         "grade": fam_grade,
         "club": final_club,
         "clique": chosen["clique"],
-        "primary_facility": f"{school_name} ➔ {classroom_name} ➔ Main Area",
+        "primary_facility": f"{school_name} ➔ {classroom_name} ➔ Student Desks Cluster",
         "secondary_facility": "School Grounds & Athletics ➔ Central Courtyard ➔ Courtyard Fountain",
         "sibling_name": c_name,
         "personality_summary": chosen["summary"],
@@ -827,12 +835,17 @@ def hydrate_school_character(session_id: int, char_dict: dict) -> bool:
             track="platonic"
         )
     
-    # Also ensure entry exists in lorebook
+    # Also ensure entry exists in lorebook with appearance, mannerisms, and traits
     db.upsert_lorebook_entity(
         session_id=session_id,
         entity_type="person",
         name=name,
-        description=full_desc
+        description=full_desc,
+        traits=char_dict.get("traits", []),
+        mannerisms=mannerisms_val,
+        race=char_race,
+        gender=char_gender,
+        appearance=char_app
     )
     db.mark_school_character_hydrated(session_id, npc_id)
     return True

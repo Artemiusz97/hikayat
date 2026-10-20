@@ -375,8 +375,7 @@ class TestNarrativeSimulation:
         )
 
     def test_state_facts_extraction_handles_hp_and_gold_delta(self):
-        """Verify _extract_state_facts catches hp_delta and gold_delta when hp_change/gold_change are 0."""
-        from game_engine.auditor import _extract_state_facts
+        from tests.simulators.narrative.auditor import _extract_state_facts
         outcome = {
             "character_outcomes": [
                 {

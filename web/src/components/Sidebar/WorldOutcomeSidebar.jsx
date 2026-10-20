@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { getOutcomeTierTheme } from '../StoryFeed/HistoryCard';
 import { StatusEffectBadge } from './CharacterSheet';
+import { getRelationshipTier } from './CodexPanel';
 
 const parseLocationTiers = (rawLocation, fallbackTitle) => {
   const loc = String(rawLocation || fallbackTitle || 'Local Region').trim();
@@ -218,10 +219,30 @@ const WorldOutcomeSidebar = ({
 
   const npcs = Array.isArray(session?.current_npcs) ? session.current_npcs : [];
   const dialoguePartners = new Set(
-    (Array.isArray(session?.dialogue_partners)
-      ? session.dialogue_partners
-      : (session?.dialogue_partner ? [session.dialogue_partner] : [])
-    ).map(n => String(n || '').toLowerCase().trim()).filter(Boolean)
+    (() => {
+      let list = [];
+      if (Array.isArray(session?.dialogue_partners) && session.dialogue_partners.length > 0) {
+        list = session.dialogue_partners;
+      } else if (session?.dialogue_partner) {
+        const dp = session.dialogue_partner;
+        if (Array.isArray(dp)) {
+          list = dp;
+        } else if (typeof dp === 'string') {
+          const trimmed = dp.trim();
+          if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+            try {
+              const parsed = JSON.parse(trimmed);
+              list = Array.isArray(parsed) ? parsed : [dp];
+            } catch {
+              list = [dp];
+            }
+          } else {
+            list = [dp];
+          }
+        }
+      }
+      return list;
+    })().map(n => String(n || '').toLowerCase().trim()).filter(Boolean)
   );
 
   // Extract turn outcomes chronologically with persistent deduplication, then display newest first
@@ -249,30 +270,30 @@ const WorldOutcomeSidebar = ({
     <div className="flex flex-col h-full bg-fantasy-panel text-gray-200 select-none">
       {/* SECTION 1: World & Scene Context (Location, Map, Day/Time, Present NPCs) - Desktop only (hidden in mobile drawer) */}
       {!isMobileDrawer && (
-        <div className="p-3.5 border-b border-fantasy-border bg-black/40 space-y-3 shrink-0">
+        <div className="p-3.5 sm:p-4 border-b border-fantasy-border bg-black/40 space-y-3 shrink-0">
           {/* Header Row: Region & Day/Time */}
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-xs font-rpg font-bold uppercase tracking-wider text-fantasy-accent">
-              <Compass size={15} />
+            <div className="flex items-center gap-2 text-xs sm:text-sm font-rpg font-bold uppercase tracking-wider text-fantasy-accent">
+              <Compass size={16} />
               <span>{t('scene.title', 'Scene & World')}</span>
             </div>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-950/60 border border-amber-600/50 text-[11px] font-mono text-amber-300 shadow-sm">
-              <Calendar size={11} className="text-amber-400" />
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-950/70 border border-amber-600/60 text-[11px] font-mono font-bold text-amber-300 shadow-sm">
+              <Calendar size={12} className="text-amber-400" />
               <span>{localizedTime}</span>
             </span>
           </div>
 
           {/* Location Card + World Map Button */}
-          <div className="p-2.5 rounded-lg bg-black/60 border border-fantasy-border/80 space-y-2 shadow-inner">
+          <div className="p-3 rounded-xl bg-gradient-to-b from-black/70 to-black/90 border border-fantasy-border/90 space-y-2.5 shadow-md">
             <div className="flex items-start gap-2">
-              <MapPin size={15} className="text-fantasy-accent shrink-0 mt-0.5" />
+              <MapPin size={16} className="text-fantasy-accent shrink-0 mt-0.5" />
               <div className="min-w-0 flex-1">
                 {parentRegions.length > 0 && (
                   <div className="text-[11px] font-mono text-gray-400 truncate mb-0.5">
                     {parentRegions.join(' ➔ ')}
                   </div>
                 )}
-                <div className="text-sm font-bold text-gray-100 leading-snug break-words">
+                <div className="text-sm sm:text-base font-rpg font-bold text-amber-100 leading-snug break-words">
                   {currentPlace}
                 </div>
               </div>
@@ -282,9 +303,9 @@ const WorldOutcomeSidebar = ({
               <button
                 type="button"
                 onClick={onOpenWorldMap}
-                className="w-full py-1.5 px-3 rounded-lg bg-fantasy-accent/15 hover:bg-fantasy-accent/25 border border-fantasy-accent/40 hover:border-fantasy-accent text-fantasy-accent text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-[0.99]"
+                className="w-full py-2 px-3 rounded-lg bg-fantasy-accent/20 hover:bg-fantasy-accent/30 border border-fantasy-accent/50 hover:border-fantasy-accent text-fantasy-accent text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-[0.99]"
               >
-                <Map size={13} />
+                <Map size={14} />
                 <span>{t('scene.open_map', 'Open World Map & Fast Travel')}</span>
               </button>
             )}
@@ -292,62 +313,165 @@ const WorldOutcomeSidebar = ({
 
           {/* Present NPCs in Scene */}
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-gray-300">
+            <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-gray-300">
               <span className="flex items-center gap-1.5">
-                <Users size={12} className="text-fantasy-accent/80" />
+                <Users size={14} className="text-fantasy-accent/90" />
                 <span>{t('scene.present', 'Present in Scene')}</span>
               </span>
-              <span className="px-1.5 py-0.2 rounded bg-black/60 border border-fantasy-border text-[10px] text-gray-300 font-bold">
+              <span className="px-1.5 py-0.2 rounded bg-black/70 border border-fantasy-border text-[11px] text-gray-200 font-bold">
                 {npcs.length}
               </span>
             </div>
 
             {npcs.length > 0 ? (
-              <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto custom-scrollbar pr-0.5">
+              <div className="flex flex-col gap-1.5 max-h-64 sm:max-h-72 overflow-y-auto custom-scrollbar pr-0.5">
                 {npcs.map((npc, idx) => {
                   const name = typeof npc === 'string' ? npc : (npc?.name || 'Unknown');
                   const isPartner = dialoguePartners.has(name.toLowerCase().trim());
                   const clothing = typeof npc === 'object' ? npc?.clothing_status : null;
                   const statusEffects = (typeof npc === 'object' && Array.isArray(npc?.status_effects) ? npc.status_effects : []).filter(eff => {
                     const str = (typeof eff === 'string' ? eff : (eff?.name || '')).trim();
-                    return str && str !== '[]' && str !== '{}' && str !== '""' && str !== "''" && str.toLowerCase() !== 'none' && str.toLowerCase() !== 'null';
+                    const low = str.toLowerCase();
+                    return str && str !== '[]' && str !== '{}' && str !== '""' && str !== "''" && low !== 'none' && low !== 'null' && low !== 'present' && low !== 'absent' && low !== 'nearby';
                   });
+
+                  // 1. Affinity Meter resolution
+                  const score = npc?.relationship_score ?? npc?.affinity ?? 0;
+                  const isRomantic = (npc?.track === 'romantic') || (npc?.relations?.track === 'romantic');
+                  const tier = getRelationshipTier(score, isRomantic ? 'romantic' : 'platonic', t);
+
+                  // 2. Excitement Meter resolution (when applicable)
+                  const physExc = session?.physical_state?.excitement;
+                  const physActors = (physExc?.actors && typeof physExc.actors === 'object') ? physExc.actors : {};
+                  let actorExc = (npc?.excitement_meter !== undefined && npc?.excitement_meter !== null) ? {
+                    meter: Number(npc.excitement_meter),
+                    status: npc.excitement_status,
+                    climaxed: npc.excitement_climaxed,
+                    active: npc.excitement_active
+                  } : null;
+
+                  if (!actorExc && physActors) {
+                    const cleanN = name.toLowerCase().trim();
+                    for (const [k, v] of Object.entries(physActors)) {
+                      const cleanK = String(k || '').toLowerCase().trim();
+                      if (cleanK && (cleanK === cleanN || cleanN.includes(cleanK) || cleanK.includes(cleanN))) {
+                        actorExc = v;
+                        break;
+                      }
+                    }
+                  }
+
+                  if (!actorExc) {
+                    const latestTurn = turnOutcomes[0];
+                    const intUp = latestTurn?.intimateUpdate;
+                    if (intUp?.active) {
+                      const cleanN = name.toLowerCase().trim();
+                      const pMatch = (intUp.partner_meters || []).find(pm => {
+                        const pName = String(pm?.name || '').toLowerCase().trim();
+                        return pName && (pName === cleanN || cleanN.includes(pName) || pName.includes(cleanN));
+                      });
+                      if (pMatch) {
+                        actorExc = pMatch;
+                      } else if (intUp.partner_meter !== undefined && isPartner) {
+                        actorExc = {
+                          meter: intUp.partner_meter,
+                          status: intUp.act_type,
+                          climaxed: intUp.simultaneous_partner_climax
+                        };
+                      }
+                    }
+                  }
+
+                  const excMeter = actorExc?.meter !== undefined && actorExc?.meter !== null ? Number(actorExc.meter) : null;
+                  const isExcActive = Boolean(actorExc?.active || physExc?.active || (excMeter !== null && excMeter > 0));
+                  const showExcitement = isExcActive && excMeter !== null;
+
                   return (
                     <div
                       key={`${name}-${idx}`}
-                      className={`flex flex-col gap-1 p-1.5 rounded-lg border text-[11px] transition-colors ${
+                      className={`flex flex-col gap-1.5 p-2 rounded-lg border text-xs transition-all shadow-sm ${
                         isPartner
-                          ? 'bg-purple-950/40 border-purple-500/50'
-                          : 'bg-black/40 border-neutral-800/80 hover:border-neutral-700'
+                          ? 'bg-purple-950/45 border-purple-500/60 shadow-purple-950/40'
+                          : 'bg-black/50 border-neutral-800/90 hover:border-neutral-700 hover:bg-black/70'
                       }`}
                     >
+                      {/* Row 1: Dot + Character Name + Talking Badge + Clothing Status */}
                       <div className="flex items-center justify-between gap-1.5">
                         <button
                           type="button"
                           onClick={() => onSelectContact && onSelectContact(name)}
-                          className={`inline-flex items-center gap-1.5 font-medium transition-colors text-left truncate ${
+                          className={`inline-flex items-center gap-1.5 font-bold transition-colors text-left truncate ${
                             isPartner
-                              ? 'text-purple-200 hover:text-purple-100 font-semibold'
-                              : 'text-gray-200 hover:text-fantasy-accent'
+                              ? 'text-purple-200 hover:text-purple-100'
+                              : 'text-gray-100 hover:text-fantasy-accent'
                           }`}
                           title={onSelectContact ? `View ${name} in Codex` : name}
                         >
-                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isPartner ? 'bg-purple-400 animate-pulse' : 'bg-emerald-400/80'}`} />
-                          <span className="truncate max-w-[140px]">{name}</span>
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${isPartner ? 'bg-purple-400 animate-pulse' : 'bg-emerald-400'}`} />
+                          <span className="truncate max-w-[150px] text-xs">{name}</span>
                           {isPartner && (
-                            <span className="text-[8.5px] font-mono uppercase px-1 py-0.2 rounded bg-purple-900/80 text-purple-300 font-semibold shrink-0">
+                            <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded bg-purple-900/90 text-purple-200 font-bold shrink-0">
                               {t('scene.talking', 'Talking')}
                             </span>
                           )}
                         </button>
                         {clothing && (
-                          <span className="text-[9.5px] font-mono px-1.5 py-0.2 rounded bg-neutral-900/90 border border-neutral-700/80 text-gray-300 font-normal shrink-0">
+                          <span className="text-[10px] font-mono px-2 py-0.2 rounded bg-neutral-900/95 border border-neutral-700 text-gray-300 font-normal shrink-0">
                             {clothing}
                           </span>
                         )}
                       </div>
+
+                      {/* Row 2: Affinity Meter Bar */}
+                      <div className="space-y-0.5 pt-1 border-t border-fantasy-border/25">
+                        <div className="flex items-center justify-between text-[10px]">
+                          <span className={`font-semibold ${tier.color}`}>
+                            {tier.label}
+                          </span>
+                          <span className="font-mono font-bold text-gray-300">
+                            {score > 0 ? `+${score}` : score}
+                          </span>
+                        </div>
+                        <div className="h-1.5 w-full bg-black/80 rounded-full overflow-hidden border border-fantasy-border/40">
+                          <div 
+                            className={`h-full ${tier.bg} transition-all duration-300`}
+                            style={{ width: `${Math.max(5, Math.min(100, ((score + 100) / 400) * 100))}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Row 3: Excitement Meter (When Applicable) */}
+                      {showExcitement && (
+                        <div className="space-y-0.5 pt-1 border-t border-rose-900/40">
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="font-semibold text-rose-300 flex items-center gap-1">
+                              <span>💋</span>
+                              <span>{t('scene.excitement', 'Excitement')}</span>
+                              {actorExc?.climaxed && <span className="text-amber-300 font-bold ml-0.5">💥</span>}
+                              {actorExc?.status && (
+                                <span className="text-[9px] font-mono font-normal text-rose-400 ml-0.5">
+                                  ({actorExc.status})
+                                </span>
+                              )}
+                            </span>
+                            <span className="font-mono font-bold text-rose-300">
+                              {excMeter}%
+                            </span>
+                          </div>
+                          <div className="h-1.5 w-full bg-neutral-900/90 rounded-full overflow-hidden border border-rose-900/60 p-0.5">
+                            <div 
+                              className={`h-full rounded-full transition-all duration-500 bg-gradient-to-r from-rose-500 via-pink-500 to-red-500 ${
+                                excMeter >= 80 ? 'animate-pulse' : ''
+                              }`}
+                              style={{ width: `${Math.min(100, Math.max(0, excMeter))}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Row 4: Active Status Effects */}
                       {statusEffects && statusEffects.length > 0 && (
-                        <div className="flex flex-wrap gap-1 pt-0.5">
+                        <div className="flex flex-wrap gap-1 pt-1 border-t border-fantasy-border/20">
                           {statusEffects.map((eff, eIdx) => (
                             <StatusEffectBadge key={eIdx} effect={eff} />
                           ))}
@@ -358,7 +482,7 @@ const WorldOutcomeSidebar = ({
                 })}
               </div>
             ) : (
-              <div className="text-[11px] text-gray-500 italic px-1">
+              <div className="p-3 rounded-lg bg-black/40 border border-neutral-800 text-center text-xs text-gray-400 italic">
                 {t('scene.no_npcs', 'No other characters in the immediate area.')}
               </div>
             )}
@@ -372,18 +496,21 @@ const WorldOutcomeSidebar = ({
           <ScrollText size={14} />
           <span>{t('scene.outcomes_title', 'Outcomes & Changes')}</span>
         </div>
-        <span className="text-[10px] font-mono text-gray-300 bg-black/60 px-2 py-0.5 rounded border border-fantasy-border">
+        <span className="text-[11px] font-mono font-bold text-gray-300 bg-black/70 px-2 py-0.5 rounded border border-fantasy-border">
           {turnOutcomes.length === 1
             ? t('scene.turns_count_one', { count: 1, defaultValue: '1 Turn' })
             : t('scene.turns_count_other', { count: turnOutcomes.length, defaultValue: `${turnOutcomes.length} Turns` })}
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2.5">
         {turnOutcomes.length === 0 ? (
-          <div className="text-center py-12 px-4 text-xs text-gray-500 space-y-2">
-            <Sparkles size={20} className="mx-auto text-fantasy-accent/50" />
-            <p className="font-semibold text-gray-300 text-sm">{t('scene.no_outcomes_title', 'No Turn Outcomes Yet')}</p>
+          /* Clean & balanced empty state that does not force a scrollbar */
+          <div className="text-center py-10 px-4 text-xs text-gray-400 space-y-2.5">
+            <div className="w-10 h-10 rounded-xl bg-fantasy-dark border border-fantasy-accent/40 flex items-center justify-center mx-auto shadow-md">
+              <Sparkles size={18} className="text-fantasy-accent" />
+            </div>
+            <p className="font-semibold text-gray-200 text-sm">{t('scene.no_outcomes_title', 'No Turn Outcomes Yet')}</p>
             <p className="text-xs text-gray-400 leading-relaxed max-w-xs mx-auto">
               {t('scene.no_outcomes_desc', 'Skill check rolls, EXP gains, combat logs, loot, and newly discovered clues will appear here as your story unfolds.')}
             </p>
@@ -409,7 +536,7 @@ const WorldOutcomeSidebar = ({
                     className={`rounded-lg cursor-pointer transition-all ${
                       isLatest
                         ? 'p-2.5 bg-gradient-to-b from-amber-950/30 to-black/85 border border-fantasy-accent/60 hover:border-fantasy-accent'
-                        : 'p-2 bg-black/45 border border-fantasy-border/50 hover:border-fantasy-border hover:bg-black/60'
+                        : 'p-2 bg-black/50 border border-fantasy-border/60 hover:border-fantasy-border hover:bg-black/70'
                     }`}
                     title="Click to expand turn details"
                   >
@@ -424,12 +551,12 @@ const WorldOutcomeSidebar = ({
                             {t('scene.turn_number', { number: item.turnNumber, defaultValue: `Turn #${item.turnNumber}` })}
                           </span>
                         )}
-                        <span className="text-xs text-gray-300 truncate font-medium">
+                        <span className="text-xs text-gray-200 truncate font-medium">
                           {item.label}
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <span className={`inline-flex items-center gap-1 rounded-full border font-mono font-bold uppercase px-2 py-0.5 text-[9px] ${theme.badgeClass}`}>
+                        <span className={`inline-flex items-center gap-1 rounded-full border font-mono font-bold uppercase px-2 py-0.5 text-[10px] ${theme.badgeClass}`}>
                           <span>{theme.icon}</span>
                           <span>{tierText}</span>
                         </span>
@@ -442,8 +569,8 @@ const WorldOutcomeSidebar = ({
                   <div
                     className={`rounded-xl transition-all ${
                       isLatest
-                        ? 'p-3.5 sm:p-4 bg-gradient-to-b from-amber-950/25 via-black/85 to-fantasy-panel/95 border-2 border-fantasy-accent/80 shadow-[0_0_20px_rgba(217,119,6,0.18)] ring-1 ring-fantasy-accent/40 space-y-2.5 relative overflow-hidden'
-                        : 'p-2.5 bg-black/45 border border-fantasy-border/60 hover:border-fantasy-border hover:bg-black/60 space-y-2'
+                        ? 'p-3.5 bg-gradient-to-b from-amber-950/25 via-black/85 to-fantasy-panel/95 border-2 border-fantasy-accent/80 shadow-[0_0_20px_rgba(217,119,6,0.18)] ring-1 ring-fantasy-accent/40 space-y-2.5 relative overflow-hidden'
+                        : 'p-2.5 bg-black/50 border border-fantasy-border/70 hover:border-fantasy-border hover:bg-black/70 space-y-2'
                     }`}
                   >
                     {/* Turn Header & Check Result Badge */}
@@ -459,7 +586,7 @@ const WorldOutcomeSidebar = ({
                           </span>
                         </div>
                       ) : (
-                        <span className="text-[10px] font-mono uppercase tracking-wider text-gray-400 font-medium">
+                        <span className="text-[10px] font-mono uppercase tracking-wider text-gray-400 font-semibold">
                           {t('scene.turn_number', { number: item.turnNumber, defaultValue: `Turn #${item.turnNumber}` })}
                         </span>
                       )}
@@ -467,7 +594,7 @@ const WorldOutcomeSidebar = ({
                       <div className="flex items-center gap-1.5">
                         <span
                           className={`inline-flex items-center gap-1 rounded-full border font-mono font-bold uppercase shadow-sm ${
-                            isLatest ? 'px-2.5 py-0.5 text-[11px]' : 'px-2 py-0.5 text-[9.5px]'
+                            isLatest ? 'px-2.5 py-0.5 text-[11px]' : 'px-2 py-0.5 text-[10px]'
                           } ${theme.badgeClass}`}
                         >
                           <span>{theme.icon}</span>
@@ -488,8 +615,8 @@ const WorldOutcomeSidebar = ({
                     <div
                       className={`font-semibold leading-snug ${
                         isLatest
-                          ? 'text-sm md:text-[14px] text-white pl-2.5 py-0.5 bg-white/[0.04] border-l-4 border-fantasy-accent rounded-r'
-                          : 'text-xs text-gray-300 pl-2 py-0.5 border-l-2 border-fantasy-accent/40'
+                          ? 'text-xs sm:text-sm text-white pl-2.5 py-0.5 bg-white/[0.05] border-l-4 border-fantasy-accent rounded-r'
+                          : 'text-xs text-gray-200 pl-2 py-0.5 border-l-2 border-fantasy-accent/40'
                       }`}
                     >
                       {item.label}
@@ -499,8 +626,8 @@ const WorldOutcomeSidebar = ({
                     <div className="flex flex-wrap gap-1 pt-0.5">
                       {item.xpGained > 0 && (
                         <span
-                          className={`inline-flex items-center gap-1 rounded bg-amber-950/60 border border-amber-600/50 text-amber-300 font-mono font-semibold ${
-                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[9.5px]'
+                          className={`inline-flex items-center gap-1 rounded bg-amber-950/70 border border-amber-600/60 text-amber-300 font-mono font-bold ${
+                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
                           }`}
                         >
                           ✨ +{item.xpGained} EXP
@@ -509,8 +636,8 @@ const WorldOutcomeSidebar = ({
 
                       {item.levelsGained.length > 0 && (
                         <span
-                          className={`inline-flex items-center gap-1 rounded bg-yellow-500/25 border border-yellow-400 text-yellow-300 font-mono font-bold animate-pulse ${
-                            isLatest ? 'px-2.5 py-0.5 text-xs' : 'px-2 py-0.5 text-[9.5px]'
+                          className={`inline-flex items-center gap-1 rounded bg-yellow-500/30 border border-yellow-400 text-yellow-300 font-mono font-extrabold animate-pulse ${
+                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
                           }`}
                         >
                           🎉 {t('outcomes.level_up', 'LEVEL UP')} (Lv.{item.levelsGained[item.levelsGained.length - 1]})
@@ -519,12 +646,12 @@ const WorldOutcomeSidebar = ({
 
                       {item.hpDelta !== 0 && (
                         <span
-                          className={`inline-flex items-center gap-1 rounded border font-mono font-semibold ${
-                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[9.5px]'
+                          className={`inline-flex items-center gap-1 rounded border font-mono font-bold ${
+                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
                           } ${
                             item.hpDelta > 0
-                              ? 'bg-emerald-950/60 border-emerald-700/50 text-emerald-300'
-                              : 'bg-red-950/70 border-red-700/60 text-red-300'
+                              ? 'bg-emerald-950/70 border-emerald-700/60 text-emerald-300'
+                              : 'bg-red-950/80 border-red-700/70 text-red-300'
                           }`}
                         >
                           <Heart size={isLatest ? 11 : 9} />
@@ -534,12 +661,12 @@ const WorldOutcomeSidebar = ({
 
                       {item.mpDelta !== 0 && (
                         <span
-                          className={`inline-flex items-center gap-1 rounded border font-mono font-semibold ${
-                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[9.5px]'
+                          className={`inline-flex items-center gap-1 rounded border font-mono font-bold ${
+                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
                           } ${
                             item.mpDelta > 0
-                              ? 'bg-blue-950/60 border-blue-700/50 text-blue-300'
-                              : 'bg-indigo-950/70 border-indigo-700/60 text-indigo-300'
+                              ? 'bg-blue-950/70 border-blue-700/60 text-blue-300'
+                              : 'bg-indigo-950/80 border-indigo-700/70 text-indigo-300'
                           }`}
                         >
                           💧 {item.mpDelta > 0 ? `+${item.mpDelta}` : item.mpDelta} MP
@@ -548,12 +675,12 @@ const WorldOutcomeSidebar = ({
 
                       {item.goldDelta !== 0 && (
                         <span
-                          className={`inline-flex items-center gap-1 rounded border font-mono font-semibold ${
-                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[9.5px]'
+                          className={`inline-flex items-center gap-1 rounded border font-mono font-bold ${
+                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
                           } ${
                             item.goldDelta > 0
-                              ? 'bg-amber-950/70 border-amber-600/50 text-amber-300'
-                              : 'bg-orange-950/70 border-orange-700/50 text-orange-300'
+                              ? 'bg-amber-950/80 border-amber-600/60 text-amber-300'
+                              : 'bg-orange-950/80 border-orange-700/60 text-orange-300'
                           }`}
                         >
                           <Coins size={isLatest ? 11 : 9} />
@@ -564,8 +691,8 @@ const WorldOutcomeSidebar = ({
                       {item.itemsGained.map((it, iIdx) => (
                         <span
                           key={`gain-${iIdx}`}
-                          className={`inline-flex items-center gap-1 rounded bg-cyan-950/60 border border-cyan-700/50 text-cyan-200 font-medium ${
-                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[9.5px]'
+                          className={`inline-flex items-center gap-1 rounded bg-cyan-950/70 border border-cyan-700/60 text-cyan-200 font-semibold ${
+                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
                           }`}
                         >
                           <Gift size={isLatest ? 11 : 9} /> +{it}
@@ -576,7 +703,7 @@ const WorldOutcomeSidebar = ({
                         <span
                           key={`lost-${iIdx}`}
                           className={`inline-flex items-center gap-1 rounded bg-neutral-900 border border-neutral-700 text-gray-400 line-through ${
-                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[9.5px]'
+                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
                           }`}
                         >
                           -{it}
@@ -586,8 +713,8 @@ const WorldOutcomeSidebar = ({
                       {item.statusEffects.map((st, sIdx) => (
                         <span
                           key={`st-${sIdx}`}
-                          className={`inline-flex items-center gap-1 rounded bg-rose-950/60 border border-rose-700/50 text-rose-200 font-medium ${
-                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[9.5px]'
+                          className={`inline-flex items-center gap-1 rounded bg-rose-950/70 border border-rose-700/60 text-rose-200 font-semibold ${
+                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
                           }`}
                         >
                           <ShieldAlert size={isLatest ? 11 : 9} /> {st}
@@ -601,8 +728,8 @@ const WorldOutcomeSidebar = ({
                         return (
                           <span
                             key={`rel-${rIdx}`}
-                            className={`inline-flex items-center gap-1 rounded bg-pink-950/60 border border-pink-700/50 text-pink-200 ${
-                              isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[9.5px]'
+                            className={`inline-flex items-center gap-1 rounded bg-pink-950/70 border border-pink-700/60 text-pink-200 font-semibold ${
+                              isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
                             }`}
                           >
                             💕 {label}
@@ -617,8 +744,8 @@ const WorldOutcomeSidebar = ({
                         return (
                           <span
                             key={`fac-${fIdx}`}
-                            className={`inline-flex items-center gap-1 rounded bg-purple-950/60 border border-purple-700/50 text-purple-200 ${
-                              isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[9.5px]'
+                            className={`inline-flex items-center gap-1 rounded bg-purple-950/70 border border-purple-700/60 text-purple-200 font-semibold ${
+                              isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
                             }`}
                           >
                             🚩 {label}
@@ -629,9 +756,9 @@ const WorldOutcomeSidebar = ({
 
                     {/* Refractory Recovery Banner */}
                     {item.refractoryNotice && (
-                      <div className="rounded-lg p-2 bg-emerald-950/40 border border-emerald-600/50 text-emerald-300 text-xs flex items-center gap-2">
+                      <div className="rounded-lg p-2 bg-emerald-950/50 border border-emerald-600/60 text-emerald-300 text-xs flex items-center gap-1.5">
                         <span className="text-sm">⚡</span>
-                        <span className="font-medium">{item.refractoryNotice}</span>
+                        <span className="font-semibold">{item.refractoryNotice}</span>
                       </div>
                     )}
 
@@ -640,27 +767,27 @@ const WorldOutcomeSidebar = ({
                       <div
                         className={`rounded-lg space-y-1.5 border ${
                           isLatest
-                            ? 'p-2.5 bg-rose-950/40 border-pink-600/50 text-xs'
-                            : 'p-2 bg-rose-950/25 border-pink-800/30 text-[10px]'
+                            ? 'p-2.5 bg-rose-950/45 border-pink-600/60 text-xs shadow-sm'
+                            : 'p-2 bg-rose-950/30 border-pink-800/40 text-[10px]'
                         }`}
                       >
-                        <div className="flex items-center justify-between font-semibold text-pink-300">
+                        <div className="flex items-center justify-between font-bold text-pink-300">
                           <span className="flex items-center gap-1">
                             <span>💋</span> Intimate Excitement & Arousal
                           </span>
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1">
                             {item.intimateUpdate.mutual_group_climax && (
-                              <span className="text-[9px] uppercase font-bold font-mono tracking-wider px-1.5 py-0.5 rounded bg-amber-500/30 text-amber-200 border border-amber-400/40 animate-pulse">
+                              <span className="text-[9px] uppercase font-bold font-mono tracking-wider px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200 border border-amber-400/50 animate-pulse">
                                 ✨ Group Climax
                               </span>
                             )}
                             {!item.intimateUpdate.mutual_group_climax && item.intimateUpdate.simultaneous_partner_climax && (
-                              <span className="text-[9px] uppercase font-bold font-mono tracking-wider px-1.5 py-0.5 rounded bg-rose-500/30 text-rose-200 border border-rose-400/40 animate-pulse">
+                              <span className="text-[9px] uppercase font-bold font-mono tracking-wider px-1.5 py-0.2 rounded bg-rose-500/30 text-rose-200 border border-rose-400/50 animate-pulse">
                                 {item.intimateUpdate.partner_meters?.filter(p => p.climaxed).length > 2 ? '💥 Multi Climax' : '💥 Dual Climax'}
                               </span>
                             )}
                             {item.intimateUpdate.act_type && (
-                              <span className="text-[9px] uppercase font-mono tracking-wider px-1.5 py-0.5 rounded bg-pink-900/50 text-pink-200">
+                              <span className="text-[9px] uppercase font-mono font-bold tracking-wider px-1.5 py-0.2 rounded bg-pink-900/60 text-pink-200">
                                 {item.intimateUpdate.act_type === 'foreplay_nongenital' ? 'Foreplay' : item.intimateUpdate.act_type.replace(/_/g, ' ')}
                               </span>
                             )}
@@ -670,10 +797,10 @@ const WorldOutcomeSidebar = ({
                         {/* Player Progress Bar */}
                         <div className="space-y-0.5">
                           <div className="flex justify-between items-center text-[10px]">
-                            <span className="font-medium text-pink-100">
+                            <span className="font-semibold text-pink-100">
                               {item.characterName} (You)
                               {item.intimateUpdate.player_climaxed && (
-                                <span className="text-[9px] font-bold text-amber-300 ml-1">💥</span>
+                                <span className="text-[10px] font-bold text-amber-300 ml-1">💥</span>
                               )}
                             </span>
                             <span className="font-mono text-pink-300 font-bold">
@@ -685,7 +812,7 @@ const WorldOutcomeSidebar = ({
                               )}
                             </span>
                           </div>
-                          <div className="w-full bg-neutral-900/80 rounded-full h-1.5 overflow-hidden border border-pink-900/50">
+                          <div className="w-full bg-neutral-900/90 rounded-full h-1.5 sm:h-2 overflow-hidden border border-pink-900/60 p-0.5">
                             <div
                               className={`h-full rounded-full transition-all duration-500 bg-gradient-to-r from-pink-500 via-rose-500 to-red-500 ${
                                 item.intimateUpdate.player_meter >= 80 ? 'animate-pulse' : ''
@@ -706,13 +833,13 @@ const WorldOutcomeSidebar = ({
                         ).map((p, pIdx) => (
                           <div key={`partner-meter-${pIdx}`} className="space-y-0.5">
                             <div className="flex justify-between items-center text-[10px]">
-                              <span className="font-medium text-pink-100">
+                              <span className="font-semibold text-pink-100">
                                 {p.name || 'Partner'}
                                 {p.climaxed && (
-                                  <span className="text-[9px] font-bold text-amber-300 ml-1">💥</span>
+                                  <span className="text-[10px] font-bold text-amber-300 ml-1">💥</span>
                                 )}
                                 {!p.climaxed && (p.status?.includes('Recoiling') || p.status?.includes('Turned Off')) && (
-                                  <span className="text-[9px] font-bold text-amber-400 ml-1" title={p.status}>⚠️</span>
+                                  <span className="text-[10px] font-bold text-amber-400 ml-1" title={p.status}>⚠️</span>
                                 )}
                               </span>
                               <span className="font-mono text-rose-300 font-bold">
@@ -724,7 +851,7 @@ const WorldOutcomeSidebar = ({
                                 )}
                               </span>
                             </div>
-                            <div className="w-full bg-neutral-900/80 rounded-full h-1.5 overflow-hidden border border-rose-900/50">
+                            <div className="w-full bg-neutral-900/90 rounded-full h-1.5 sm:h-2 overflow-hidden border border-rose-900/60 p-0.5">
                               <div
                                 className={`h-full rounded-full transition-all duration-500 bg-gradient-to-r from-rose-500 via-pink-500 to-red-500 ${
                                   p.meter >= 80 ? 'animate-pulse' : ''
@@ -737,24 +864,24 @@ const WorldOutcomeSidebar = ({
 
                         {/* Sensitive Spot Notification */}
                         {item.intimateUpdate.sensitive_spot_matched && item.intimateUpdate.matched_spot && (
-                          <div className="text-[9px] text-amber-300 font-medium pt-0.5 flex items-center gap-1">
+                          <div className="text-[10px] text-amber-300 font-semibold pt-0.5 flex items-center gap-1">
                             <span>✨</span> Sensitive Spot Triggered: {item.intimateUpdate.matched_spot} (+6% bonus!)
                           </div>
                         )}
 
                         {/* Climax & Refractory Alerts */}
                         {item.intimateUpdate.mutual_group_climax && (
-                          <div className="text-[9px] text-pink-300 font-medium pt-0.5 flex items-center gap-1">
+                          <div className="text-[10px] text-pink-300 font-semibold pt-0.5 flex items-center gap-1">
                             <span>✨</span> Mutual Group Climax! Shared peak in passionate release.
                           </div>
                         )}
                         {!item.intimateUpdate.mutual_group_climax && item.intimateUpdate.simultaneous_partner_climax && (
-                          <div className="text-[9px] text-pink-300 font-medium pt-0.5 flex items-center gap-1">
+                          <div className="text-[10px] text-pink-300 font-semibold pt-0.5 flex items-center gap-1">
                             <span>✨</span> Simultaneous Climax! Multiple partners peak together.
                           </div>
                         )}
                         {item.intimateUpdate.premature_finish && (
-                          <div className="text-[9px] text-amber-300 font-medium pt-0.5 flex items-center gap-1">
+                          <div className="text-[10px] text-amber-300 font-semibold pt-0.5 flex items-center gap-1">
                             <span>⚠️</span> Spent: Stamina depleted while {
                               item.intimateUpdate.unsatisfied_partners && item.intimateUpdate.unsatisfied_partners.length >= 2
                                 ? `${item.intimateUpdate.unsatisfied_partners.slice(0, -1).join(', ')} and ${item.intimateUpdate.unsatisfied_partners.slice(-1)} remain unsatisfied.`
@@ -770,8 +897,8 @@ const WorldOutcomeSidebar = ({
                       <div
                         className={`rounded-lg space-y-1.5 border ${
                           isLatest
-                            ? 'p-2.5 bg-emerald-950/35 border-emerald-600/50 text-xs'
-                            : 'p-2 bg-emerald-950/20 border-emerald-800/30 text-[10px]'
+                            ? 'p-2.5 bg-emerald-950/40 border-emerald-600/60 text-xs shadow-sm'
+                            : 'p-2 bg-emerald-950/25 border-emerald-800/40 text-[10px]'
                         }`}
                       >
                         {item.questUpdates.map((q, qIdx) => (
@@ -779,13 +906,13 @@ const WorldOutcomeSidebar = ({
                             <div className="flex items-center justify-between gap-1.5 font-bold text-emerald-300">
                               <span className="truncate">📜 {q.title || q.quest_id || 'Quest Updated'}</span>
                               {q.status && (
-                                <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-emerald-900/70 border border-emerald-500/50 shadow-sm shrink-0">
+                                <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded bg-emerald-900/80 border border-emerald-500/60 shadow-sm shrink-0">
                                   {q.status}
                                 </span>
                               )}
                             </div>
                             {Array.isArray(q.completed_sub_quest_ids) && q.completed_sub_quest_ids.length > 0 && (
-                              <div className={`text-emerald-200 font-medium ${isLatest ? 'text-xs' : 'text-[9.5px]'}`}>
+                              <div className={`text-emerald-200 font-semibold ${isLatest ? 'text-xs' : 'text-[10px]'}`}>
                                 ✅ Sub-objective #{q.completed_sub_quest_ids.join(', #')} completed!
                               </div>
                             )}
@@ -796,8 +923,8 @@ const WorldOutcomeSidebar = ({
                                     key={`clue-${cIdx}`}
                                     className={`rounded border flex items-start gap-1.5 ${
                                       isLatest
-                                        ? 'p-2 bg-amber-950/35 border-amber-500/50 text-amber-100 text-xs shadow-sm'
-                                        : 'p-1.5 bg-amber-950/20 border-amber-700/30 text-amber-200 text-[10px]'
+                                        ? 'p-2 bg-amber-950/40 border-amber-500/60 text-amber-100 text-xs shadow-sm'
+                                        : 'p-1.5 bg-amber-950/25 border-amber-700/40 text-amber-200 text-[10px]'
                                     }`}
                                   >
                                     <Sparkles size={isLatest ? 13 : 11} className="text-amber-400 shrink-0 mt-0.5" />
@@ -819,16 +946,16 @@ const WorldOutcomeSidebar = ({
                     {/* Combat Log Block */}
                     {item.combatLines.length > 0 && (
                       <div
-                        className={`rounded-lg bg-red-950/30 border border-red-800/40 space-y-1 font-mono text-red-200 ${
+                        className={`rounded-lg bg-red-950/35 border border-red-800/50 space-y-1 font-mono text-red-200 shadow-sm ${
                           isLatest ? 'p-2.5 text-xs' : 'p-2 text-[10px]'
                         }`}
                       >
-                        <div className="flex items-center gap-1 text-red-300 font-bold uppercase tracking-wider">
+                        <div className="flex items-center gap-1.5 text-red-300 font-bold uppercase tracking-wider">
                           <Swords size={isLatest ? 12 : 10} />
                           <span>Combat Log</span>
                         </div>
                         {item.combatLines.map((line, lIdx) => (
-                          <div key={`c-${lIdx}`} className="leading-relaxed text-gray-300">
+                          <div key={`c-${lIdx}`} className="leading-relaxed text-gray-200">
                             • {line}
                           </div>
                         ))}
@@ -841,7 +968,7 @@ const WorldOutcomeSidebar = ({
                 {isLatest && turnOutcomes.length > 1 && (
                   <div className="flex items-center gap-2 pt-1 pb-0.5">
                     <div className="h-px bg-fantasy-border/70 flex-1" />
-                    <span className="text-[9.5px] font-mono uppercase tracking-wider text-gray-400 font-semibold px-2 py-0.5 rounded-full bg-black/70 border border-fantasy-border/70 shadow-sm">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-gray-400 font-semibold px-2 py-0.2 rounded-full bg-black/70 border border-fantasy-border/70 shadow-sm">
                       Previous Turns ({turnOutcomes.length - 1})
                     </span>
                     <div className="h-px bg-fantasy-border/70 flex-1" />

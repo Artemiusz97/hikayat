@@ -133,7 +133,26 @@ export const usePhone = (sessionId, user) => {
         profile,
       }),
     });
-    if (data?.contacts) {
+    if (data?.accepted) {
+      setPhoneData(prev => ({
+        ...(prev || {}),
+        contacts: data.contacts || prev?.contacts,
+        suggested_peers: (prev?.suggested_peers || []).map(p =>
+          (p.name === profile.name || p.handle === profile.handle)
+            ? { ...p, is_already_contact: true }
+            : p
+        )
+      }));
+    } else if (data?.cooldown_turns) {
+      setPhoneData(prev => ({
+        ...(prev || {}),
+        suggested_peers: (prev?.suggested_peers || []).map(p =>
+          (p.name === profile.name || p.handle === profile.handle)
+            ? { ...p, cooldown_turns_left: data.cooldown_turns }
+            : p
+        )
+      }));
+    } else if (data?.contacts) {
       setPhoneData(prev => ({
         ...(prev || {}),
         contacts: data.contacts,
@@ -157,9 +176,11 @@ export const usePhone = (sessionId, user) => {
     gossipFeed: phoneData?.gossip_feed || [],
     mediaGallery: phoneData?.media_gallery || [],
     contacts: phoneData?.contacts || [],
+    suggestedPeers: phoneData?.suggested_peers || [],
     socialState: phoneData?.social_state || { charges: 3, turn_count: 0 },
     loading,
     refreshPhone: fetchPhoneState,
+    refreshPhoneData: fetchPhoneState,
     refreshFeed,
     scourFeed,
     discoverPeer,

@@ -916,10 +916,14 @@ def format_llm_faction_context(factions: List[Dict[str, Any]], max_items: int = 
             l_race = f" ({format_race_display(l_mem['race'])})" if l_mem.get("race") else ""
             leader_str = f"|Leader:{l_mem['name']}{l_race}"
         sub_officers = []
-        for r in roster:
-            if r.get("rank") in (3, 2) and r.get("name") and not r.get("is_player") and not r.get("is_vacant"):
-                r_race = f", {format_race_display(r['race'])}" if r.get("race") else ""
-                sub_officers.append(f"{r['name']} ({r.get('title', 'Officer')}{r_race})")
+        # Sort roster entries deterministically by rank desc, then name asc
+        sorted_roster = sorted(
+            [r for r in roster if r.get("rank") in (3, 2) and r.get("name") and not r.get("is_player") and not r.get("is_vacant")],
+            key=lambda x: (-int(x.get("rank", 0)), str(x.get("name", "")).lower())
+        )
+        for r in sorted_roster:
+            r_race = f", {format_race_display(r['race'])}" if r.get("race") else ""
+            sub_officers.append(f"{r['name']} ({r.get('title', 'Officer')}{r_race})")
         if sub_officers:
             officers_str = "|Officers:" + ", ".join(sub_officers[:2])
 
@@ -1309,6 +1313,10 @@ def sync_faction_rosters_with_contacts(session_id: int) -> list[dict]:
                     c_match = next((c for c in contacts if c.get("name", "").strip().lower() == m_low), None)
                     if c_match and c_match.get("race"):
                         r_entry["race"] = c_match["race"]
+                    else:
+                        from mechanics.social.races import normalize_race
+                        r_entry["race"] = normalize_race("", scen_key=scen_key, seed=f"{session_id}:officer:{m_low}")
+                roster_modified = True
             r_title = r_entry.get("title", "Member")
             generic_desc = f"{r_title} of {fac_name_orig}."
 
@@ -1335,13 +1343,16 @@ def sync_faction_rosters_with_contacts(session_id: int) -> list[dict]:
 
             if roster_modified or should_update_lb:
                 try:
+                    from mechanics.social.persona import infer_contact_gender
+                    m_gender = r_entry.get("gender") or (matched_c.get("gender") if matched_c else None) or infer_contact_gender({"name": m_name}) or "female"
                     db.upsert_lorebook_entity(
                         session_id=session_id,
                         entity_type="person",
                         name=m_name,
                         description=desc_to_write,
                         disposition=disp_to_write,
-                        faction=fac_name_orig
+                        faction=fac_name_orig,
+                        gender=m_gender
                     )
                 except Exception:
                     pass
@@ -1354,10 +1365,20 @@ def sync_faction_rosters_with_contacts(session_id: int) -> list[dict]:
                 c_role_str = str(b_info.get("role") or r_title).strip()
                 c_fac_loc = str(b_info.get("location") or f.get("hq_location_id") or "").strip()
                 c_desc_str = str(b_info.get("description") or generic_desc).strip()
+                from mechanics.social.persona import infer_contact_gender
+                from mechanics.social.races import normalize_race
+                m_gender = r_entry.get("gender") or (matched_c.get("gender") if matched_c else None) or (b_info.get("gender") if b_info else None) or infer_contact_gender({"name": m_name}) or "female"
+                m_race = r_entry.get("race") or (matched_c.get("race") if matched_c else None) or (b_info.get("race") if b_info else None)
+                if not m_race:
+                    m_race = normalize_race("", scen_key=scen_key, seed=f"{session_id}:officer:{m_low}")
+                else:
+                    m_race = normalize_race(m_race, scen_key=scen_key, seed=f"{session_id}:officer:{m_low}")
                 new_rec = {
                     "session_id": session_id,
                     "npc_id": m_low.replace(" ", "_"),
                     "name": m_name,
+                    "gender": m_gender,
+                    "race": m_race,
                     "role": c_role_str,
                     "grade": c_grade,
                     "club": fac_name_orig,
@@ -1441,6 +1462,10 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
 
         if not roster:
             roster = generate_procedural_leadership_roster(template, scen_key)
+            from mechanics.social.races import normalize_race
+            for r in roster:
+                if not r.get("race") and r.get("name"):
+                    r["race"] = normalize_race("", scen_key=scen_key, seed=f"{session_id}:officer:{r['name'].lower()}")
 
         db.upsert_faction(
             session_id=session_id,
@@ -1462,11 +1487,18 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
             member_title = member.get("title", "")
             description = f"{member_title} of {name}." if member_title else f"Member of {name}."
             from mechanics.social.races import normalize_race
+            from mechanics.social.persona import infer_contact_gender
+            from mechanics.social.persona.intimacy.appearance import normalize_appearance
+
             if member.get("race"):
                 member_race = normalize_race(member["race"], scen_key=scen_key, seed=member_name)
             else:
                 fallback_race = normalize_race("", scen_key=scen_key, seed=member_name)
                 member_race = fallback_race if fallback_race != "human" else ""
+
+            member_gender = member.get("gender") or infer_contact_gender({"name": member_name}) or "female"
+            member_app = normalize_appearance({}, gender=member_gender, race=member_race, scen_key=scen_key, desc=description)
+
             try:
                 db.upsert_lorebook_entity(
                     session_id=session_id,
@@ -1479,7 +1511,8 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
                     motivation="",
                     mannerisms="",
                     race=member_race,
-                    appearance={},
+                    gender=member_gender,
+                    appearance=member_app,
                 )
             except Exception:
                 pass

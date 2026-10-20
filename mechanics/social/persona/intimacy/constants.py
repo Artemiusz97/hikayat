@@ -1,10 +1,105 @@
-EYE_COLORS = {'black', 'gold', 'green', 'silver', 'blue', 'glowing_blue', 'hazel', 'brown', 'amber', 'glowing_red', 'red', 'violet'}
-HAIR_COLORS = {'black', 'green', 'brunette', 'auburn', 'purple', 'silver', 'blonde', 'red', 'white', 'pink', 'dark_blue', 'brown'}
-HAIR_LENGTHS = {'pixie', 'waist_length', 'shoulder_length', 'medium', 'short', 'long', 'bald'}
-HAIR_STYLES = {'messy', 'curly', 'bob', 'bun', 'straight', 'afro', 'wavy', 'braided', 'spiky', 'ponytail'}
-STATURES = {'dwarf', 'short', 'towering', 'average', 'petite', 'gigantic', 'tall'}
-BREAST_SIZES = {'huge', 'flat', 'small', 'medium', 'large', 'hyper'}
-PENIS_SIZES = {'tiny', 'huge', 'small', 'average', 'large'}
+from ..core import (
+    EYE_COLORS, HAIR_COLORS, HAIR_LENGTHS, HAIR_STYLES,
+    STATURE_TIERS, STATURES,
+    BREAST_SIZES, PENIS_SIZES,
+    DIVERSE_BEASTFOLK_COATS, DIVERSE_BEASTFOLK_SCALES, DIVERSE_BEASTFOLK_EYES, COLOR_FAMILIES,
+    SPECIES_TEMPLATES, DIVERSE_FEMALE_HAIR_STYLES, DIVERSE_MALE_HAIR_STYLES,
+    DIVERSE_HAIR_LENGTHS_FEMALE, DIVERSE_HAIR_LENGTHS_MALE,
+    PHYSIQUE_FEMALE_TEMPLATES, PHYSIQUE_MALE_TEMPLATES,
+    UNDERGARMENT_COLOR_PALETTES,
+    FEMALE_BRA_STYLES_PRUDE, FEMALE_BRA_STYLES_MODERATE, FEMALE_BRA_STYLES_BOLD,
+    FEMALE_UNDERWEAR_STYLES_PRUDE, FEMALE_UNDERWEAR_STYLES_MODERATE, FEMALE_UNDERWEAR_STYLES_BOLD,
+    MALE_UNDERWEAR_STYLES_PRUDE, MALE_UNDERWEAR_STYLES_MODERATE, MALE_UNDERWEAR_STYLES_BOLD,
+    TRAIT_TEMPLATES, MANNERISM_TEMPLATES,
+    IMMUTABLE_PHYSICAL_APPEARANCE_KEYS,
+    PREFERENCE_KEYWORDS, DISLIKE_KEYWORDS, LIKE_KEYWORDS
+)
+
+STATURE_WEIGHTS_MINIATURE = {
+    'short': 1.0,
+    'below_average': 0.0,
+    'average': 0.0,
+    'tall': 0.0,
+    'towering': 0.0
+}
+
+# Male Stature Distributions
+STATURE_WEIGHTS_MALE_STANDARD = {
+    'short': 0.05,
+    'below_average': 0.15,
+    'average': 0.50,
+    'tall': 0.25,
+    'towering': 0.05
+}
+
+STATURE_WEIGHTS_MALE_LARGE_BEASTFOLK = {
+    'short': 0.01,
+    'below_average': 0.04,
+    'average': 0.25,
+    'tall': 0.45,
+    'towering': 0.25
+}
+
+STATURE_WEIGHTS_MALE_SMALL_BEASTFOLK = {
+    'short': 0.10,
+    'below_average': 0.30,
+    'average': 0.43,
+    'tall': 0.15,
+    'towering': 0.02
+}
+
+STATURE_WEIGHTS_MALE_TINY_BEASTFOLK = {
+    'short': 0.34,
+    'below_average': 0.45,
+    'average': 0.15,
+    'tall': 0.05,
+    'towering': 0.01
+}
+
+# Female Stature Distributions
+STATURE_WEIGHTS_FEMALE_STANDARD = {
+    'short': 0.10,
+    'below_average': 0.34,
+    'average': 0.45,
+    'tall': 0.10,
+    'towering': 0.01
+}
+
+STATURE_WEIGHTS_FEMALE_LARGE_BEASTFOLK = {
+    'short': 0.01,
+    'below_average': 0.14,
+    'average': 0.55,
+    'tall': 0.20,
+    'towering': 0.10
+}
+
+STATURE_WEIGHTS_FEMALE_SMALL_BEASTFOLK = {
+    'short': 0.15,
+    'below_average': 0.45,
+    'average': 0.34,
+    'tall': 0.05,
+    'towering': 0.01
+}
+
+STATURE_WEIGHTS_FEMALE_TINY_BEASTFOLK = {
+    'short': 0.55,
+    'below_average': 0.35,
+    'average': 0.07,
+    'tall': 0.02,
+    'towering': 0.01
+}
+
+# Backwards compatibility aliases
+STATURE_WEIGHTS_STANDARD = STATURE_WEIGHTS_MALE_STANDARD
+STATURE_WEIGHTS_LARGE_BEASTFOLK = STATURE_WEIGHTS_MALE_LARGE_BEASTFOLK
+STATURE_WEIGHTS_SMALL_BEASTFOLK = STATURE_WEIGHTS_MALE_SMALL_BEASTFOLK
+STATURE_WEIGHTS_TINY_BEASTFOLK = STATURE_WEIGHTS_MALE_TINY_BEASTFOLK
+
+STATURE_INCOMPATIBLE_PHYSIQUES = {
+    'tall': {'Petite & Soft'},
+    'towering': {'Petite & Soft'}
+}
+
 ASSET_SIZE_TIERS = ('flat', 'small', 'average', 'large', 'huge')
 
 FEMALE_ASSET_TEXTURE_TEMPLATES = [
@@ -119,33 +214,6 @@ TIER_INCOMPATIBLE_TEXTURES = {
     }
 }
 
-DIVERSE_BEASTFOLK_COATS = ['Snow White Fur', 'Midnight Black Fur', 'Pastel Pink Fur', 'Cerulean Blue Fur', 'Golden-Cream Fur', 'Lavender Fur', 'Silky Silver-Gray Fur', 'Bright Orange Fur', 'Smoky Charcoal Fur', 'Crimson-Tipped Fur', 'Calico Fur', 'Rose-Gold Fur', 'Glossy Midnight Feathers', 'Snow-White Swan Plumage', 'Iridescent Blue Feathers']
-DIVERSE_BEASTFOLK_SCALES = ['Shiny Smooth Emerald Scales', 'Shiny Smooth Cerulean Scales', 'Shiny Smooth Obsidian Scales', 'Shiny Smooth Ruby Scales', 'Shiny Smooth Sapphire Scales', 'Shiny Smooth Gilded Scales', 'Gecko-Like Pale Mint Scales', 'Gecko-Like Dusty Sand Scales', 'Gecko-Like Mottled Amber Scales', 'Gecko-Like Soft Olive Scales', 'Flame-Red Dragon Scales', 'Vibrant Flame-Red Scales', 'Smoldering Crimson Scales', 'Molten Copper Scales', 'Shiny Blue Cerulean Scales', 'Iridescent Cobalt Scales', 'Shimmering Prismatic Scales', 'Pearlescent Opal Scales', 'Diamond-Bright Silver Scales', 'Matte Charcoal Armored Scales', 'Glistening Jade Scales', 'Deep Obsidian Scales', 'Sunburst Topaz Scales', 'Metallic Bronze Scales']
-DIVERSE_BEASTFOLK_EYES = ['Sapphire Blue', 'Emerald Green', 'Amethyst Purple', 'Ruby Red', 'Heterochromatic Blue-Green', 'Golden-Yellow', 'Violet', 'Crimson', 'Glistening Amber', 'Silver-Gray', 'Luminous Topaz', 'Hypnotic Slit-Amber', 'Emerald Slit', 'Smoldering Molten-Gold']
-COLOR_FAMILIES = {'blonde': {'gold', 'honey', 'wheat', 'flaxen', 'blonde', 'golden', 'champagne', 'sandy', 'cream', 'apricot', 'straw', 'topaz', 'citrine'}, 'red': {'flame', 'ember', 'auburn', 'cinnamon', 'copper', 'orange', 'ginger', 'rust', 'ochre', 'ruby', 'crimson', 'red'}, 'black': {'black', 'slate', 'obsidian', 'shadow', 'onyx', 'jet', 'charcoal', 'ebony', 'midnight'}, 'brown': {'coffee', 'chocolate', 'umber', 'caramel', 'walnut', 'chestnut', 'sepia', 'hazel', 'tawny', 'brown'}, 'white': {'frost', 'pearl', 'silver', 'ivory', 'opal', 'white', 'ash', 'platinum', 'pale', 'diamond', 'snow'}, 'unnatural': {'rose', 'jade', 'emerald', 'mint', 'cyan', 'pastel', 'blue', 'lavender', 'teal', 'pink', 'cobalt', 'magenta', 'green', 'purple', 'sapphire', 'cerulean', 'azure', 'crimson', 'violet'}}
-SPECIES_TEMPLATES = {'cat': {'eyes': ['Emerald Green', 'Slit Amber', 'Sapphire Blue', 'Glistening Topaz', 'Jade Green', 'Dichroic Violet-Gold', 'Amethyst'], 'hair': ['Sleek Glossy Black', 'Soft Cream Blonde', 'Silver-Gray', 'Warm Auburn', 'Silky Charcoal', 'Pastel Calico'], 'coats': ['Silky Midnight-Black Fur', 'Snow-White Fur', 'Calico Pattern Fur', 'Golden Tabby Fur', 'Silver-Gray Mackerel Fur', 'Smoky Charcoal Fur', 'Cream Pointed Fur'], 'beastfolk_features': ['Feline Tail & Pointed Cat Ears', 'Sleek Black Feline Tail & Twitching Ears', 'Fluffy Calico Tail & Cat Ears', 'Striped Cat Tail & Soft Ears'], 'hybrid_features': ['Soft White Cat Ears & Matching Sleek White Tail', 'Midnight-Black Cat Ears & Long Sleek Black Tail', 'Golden Tabby Cat Ears & Matching Striped Feline Tail', 'Calico-Spotted Cat Ears & Matching Calico Tail', 'Silver-Gray Cat Ears & Slender Silver Tail', 'Pastel Pink Cat Ears & Matching Soft Pink Tail'], 'mannerisms': ['Swishes tail subtly when amused and speaks in a calm, melodic tone', 'Tilts head with one ear swiveling towards subtle sounds', 'Gives a soft, barely audible purr when completely relaxed', 'Gracefully stretches with a delicate feline yawn', 'Kneads fingers gently against their palm when content']}, 'wolf': {'eyes': ['Piercing Amber', 'Ice Blue', 'Silver-Gray', 'Golden-Yellow', 'Fierce Hazel', 'Deep Slate Blue'], 'hair': ['Wild Ash-Gray', 'Coarse Midnight Black', 'Silver-White Shag', 'Dark Slate', 'Tawny Brown', 'Frost Silver'], 'coats': ['Dense Ash-Gray Fur', 'Midnight Timber Black Fur', 'Frost White Fur', 'Grizzled Silver-Black Fur', 'Warm Tawny Wolf Fur'], 'beastfolk_features': ['Wolf Tail & Pointed Ears', 'Thick Gray Wolf Tail & Alert Ears', 'Bushy Timber Wolf Tail & Broad Ears'], 'hybrid_features': ['Ash-Gray Wolf Ears & Matching Bushy Gray Tail', 'Midnight-Black Wolf Ears & Matching Sleek Black Timber Tail', 'Frost-White Wolf Ears & Matching Thick White Tail', 'Silver-Grizzled Wolf Ears & Matching Sturdy Silver Tail', 'Warm Tawny Wolf Ears & Matching Tawny Tail'], 'mannerisms': ['Taps finger thoughtfully on chin and tilts head with perked ears when listening', 'Subtly sniffs the air when assessing an unfamiliar room or mood', 'Stands in a protective stance with their tail brushing against their leg', 'Low rumble in their throat when sensing potential hostility', 'Ears perk up sharply at sudden movements']}, 'fox': {'eyes': ['Bright Amber', 'Glistening Emerald', 'Amethyst Purple', 'Warm Honey', 'Ruby Red', 'Sunburst Gold'], 'hair': ['Flame Auburn', 'Silky Snow White', 'Golden Apricot', 'Midnight with Silver Highlights', 'Pastel Copper', 'Rose-Gold'], 'coats': ['Vibrant Rust-Red Fur', 'Snow-White Kitsune Fur', 'Silver-Tipped Black Fur', 'Golden-Cream Fur', 'Pastel Rose-Gold Fur'], 'beastfolk_features': ['Fluffy Fox Tail & Twitching Ears', 'Bushy White-Tipped Fox Tail & Alert Ears', 'Golden-Cream Fox Tail & Soft Ears'], 'hybrid_features': ['Snow-White Fox Ears & Matching Bushy White Fox Tail', 'Rust-Red Fox Ears & Matching Fluffy Rust-Red Tail with White Tip', 'Golden Fox Ears & Matching Fluffy Golden Tail with White Tip', 'Midnight-Black Fox Ears & Matching Silky Black Tail with Silver Tip', 'Rose-Gold Fox Ears & Matching Bushy Rose-Gold Tail'], 'mannerisms': ['Twitches ears when excited and curls fluffy tail playfully around their waist', 'Playful flick of the tail accompanied by an inquisitive smirk', 'Tilts head with one ear tilted down in mischievous amusement', 'Hides the lower half of their face behind a sleeve when flustered', 'Winks playfully while their tail swishes in rhythmic beats']}, 'rabbit': {'eyes': ['Ruby Red', 'Warm Chestnut Brown', 'Soft Pastel Pink', 'Amethyst', 'Sky Blue', 'Glistening Berry'], 'hair': ['Silky Platinum Blonde', 'Soft Chestnut Brown', 'Pastel Pink', 'Snow White', 'Honey Caramel', 'Silver Fawn'], 'coats': ['Velvety Snow-White Fur', 'Soft Ash-Brown Fur', 'Pastel Cream Fur', 'Dutch Spotted Fur', 'Warm Caramel Fur'], 'beastfolk_features': ['Long Bunny Ears & Soft Puff Tail', 'Velvety Lop Ears & Fluffy Cotton Tail', 'Spotted Rabbit Ears & Soft Tail'], 'hybrid_features': ['Snow-White Bunny Ears & Matching Fluffy White Cotton Tail', 'Ash-Brown Rabbit Ears & Matching Soft Brown Puff Tail', 'Pastel Cream Bunny Ears & Matching Fluffy Cream Tail', 'Spotted Black-and-White Rabbit Ears & Matching Spotted Puff Tail', 'Pastel Pink Bunny Ears & Matching Soft Pink Tail'], 'mannerisms': ['Rapidly twitches nose and perches alert ears upright when curious', 'Thumps foot lightly against the ground when flustered or impatient', 'Gently grooms ear tips with both hands when nervous', 'Takes small, cautious steps before relaxing into a cheerful smile', 'Ears fold back bashfully when receiving unexpected compliments']}, 'bear': {'eyes': ['Deep Honey Brown', 'Dark Amber', 'Forest Hazel', 'Warm Caramel', 'Rich Molasses'], 'hair': ['Thick Chestnut Waves', 'Shaggy Charcoal Brown', 'Frost Blonde', 'Coarse Dark Chocolate', 'Warm Umber'], 'coats': ['Dense Cinnamon Brown Fur', 'Deep Charcoal Grizzly Fur', 'Polar White Fur', 'Warm Golden-Brown Fur', 'Dark Chocolate Fur'], 'beastfolk_features': ['Rounded Bear Ears & Stubby Bear Tail', 'Broad Furry Ears & Short Fuzzy Tail', 'Grizzly Bear Ears & Thick Short Tail'], 'hybrid_features': ['Cinnamon-Brown Bear Ears & Matching Short Fuzzy Brown Tail', 'Charcoal Grizzly Ears & Matching Short Charcoal Tail', 'Polar-White Bear Ears & Matching Stubby White Tail', 'Golden-Brown Bear Ears & Matching Short Golden Tail', 'Dark Chocolate Bear Ears & Matching Fuzzy Dark Brown Tail'], 'mannerisms': ['Rests heavy hands comfortably on their waist while ears twitch lazily', 'Gives an easygoing deep rumble in their chest when pleased', 'Rubs the back of their neck with broad, unhurried movements', 'Chuckles with a hearty, grounding warmth that eases tension', 'Leans against nearby furniture with relaxed, immovable presence']}, 'tiger': {'eyes': ['Burning Copper', 'Fierce Amber-Gold', 'Jade Green', 'Luminous Topaz', 'Deep Smoldering Bronze', 'Ice Blue'], 'hair': ['Wild Black-Striped Orange', 'Flame Auburn with Dark Streaks', 'Pure Snow-White with Slate Tips', 'Coarse Golden-Amber', 'Raven Black'], 'coats': ['Flame-Orange Fur with Black Stripes', 'Snow-White Fur with Charcoal Stripes', 'Golden Tabby Striped Fur', 'Midnight Black with Shadow Stripes', 'Amber-Ochre Striped Fur'], 'beastfolk_features': ['Striped Tiger Ears & Powerful Ringed Tail', 'Ringed Tiger Tail & Twitching Striped Ears', 'Broad Tiger Ears & Sleek Striped Tail'], 'hybrid_features': ['Flame-Orange Striped Tiger Ears & Matching Ringed Tiger Tail', 'Snow-White Striped Tiger Ears & Matching White-and-Charcoal Ringed Tail', 'Golden Striped Tiger Ears & Matching Ringed Golden Tail', 'Midnight-Black Shadow-Striped Tiger Ears & Matching Sleek Striped Tail', 'Amber-Ochre Striped Tiger Ears & Matching Ringed Amber Tail'], 'mannerisms': ['Slowly swishes heavy striped tail in rhythmic concentration', 'Gives a low, resonant chuff of greeting or quiet approval', 'Flexes fingers rhythmically with focused feline intensity', 'Glares with an unblinking, predatory golden stare before answering', 'Rolls shoulders smoothly with feline grace when preparing for action']}, 'lion': {'eyes': ['Rich Golden-Amber', 'Sunburst Topaz', 'Tawny Hazel', 'Warm Copper', 'Luminous Honey'], 'hair': ['Thick Voluminous Golden Mane', 'Sun-Bleached Tawny Waves', 'Coarse Sandy Blonde', 'Rich Golden Amber Locks', 'Tawny Caramel'], 'coats': ['Sun-Drenched Golden Fur', 'Sandy Tawny Coat', 'Desert Cream Fur', 'Pale Ash-Gold Fur', 'Warm Tawny Ochre Fur'], 'beastfolk_features': ['Rounded Lion Ears & Majestic Tufted Tail', 'Proud Lion Ears & Fluffy Tufted Golden Tail', 'Tawny Lion Ears & Long Tufted Tail'], 'hybrid_features': ['Golden Lion Ears & Matching Tufted Golden Lion Tail', 'Tawny Sand Lion Ears & Matching Tufted Tawny Tail', 'Desert Cream Lion Ears & Matching Tufted Cream Tail', 'Sun-Bleached Blonde Lion Ears & Matching Tufted Blonde Tail', 'Rich Amber Lion Ears & Matching Tufted Amber Tail'], 'mannerisms': ['Proudly tosses hair and swishes tufted tail with regal composure', 'Stretches languidly with a relaxed feline yawn before focusing', 'Raises chin with calm dignity while ears flick attentively', 'Rumbles a deep, confident chuckle in their chest', 'Basks comfortably in warm sunlight or spotlight without hesitation']}, 'cheetah': {'eyes': ['Glistening Amber', 'Sleek Honey-Gold', 'Tear-Tracked Ochre', 'Bright Topaz', 'Clear Hazel'], 'hair': ['Sleek Spotted Ochre', 'Aerodynamic Tawny Mane', 'Dust-Blonde with Dark Tips', 'Sleek Amber Locks', 'Tawny Streaked Blonde'], 'coats': ['Tawny Fur with Crisp Black Spots', 'Golden Coat with Distinct Spot Patterns', 'Pale Cream with Cheetah Spots', 'Warm Amber Spotted Fur', 'Sand-Gold Spotted Fur'], 'beastfolk_features': ['Spotted Cheetah Ears & Long Sleek Balancing Tail', 'Tear-Stripe Markings & Spotted Cheetah Tail', 'Aerodynamic Cheetah Ears & Long Spotted Tail'], 'hybrid_features': ['Spotted Tawny Cheetah Ears & Matching Long Spotted Balancing Tail', 'Pale Cream Spotted Cheetah Ears & Matching Spotted Tail', 'Golden Spotted Cheetah Ears & Matching Sleek Spotted Cheetah Tail', 'Sand-Gold Spotted Cheetah Ears & Matching Long Spotted Balancing Tail'], 'mannerisms': ['Paces with light-footed, restless athletic energy', 'Flicks sleek balancing tail rapidly while scanning their surroundings', 'Twitches spotted ears at the faintest sound with pinpoint accuracy', 'Taps foot with lightning-fast impatience when forced to wait', 'Darts a quick, razor-sharp glance across the room before speaking']}, 'fennec': {'eyes': ['Large Bright Amber', 'Luminous Desert Topaz', 'Warm Sand Hazel', 'Inquisitive Obsidian', 'Golden-Ochre'], 'hair': ['Soft Pale Sand Blonde', 'Creamy Fawn', 'Silky Desert Peach', 'Fluffy Pale Apricot', 'Fine Champagne Blonde'], 'coats': ['Pale Sandy Cream Fur', 'Soft Fawn Fur', 'Silky Pale Apricot Fur', 'Desert Dune Cream Fur', 'Warm Sand-Gold Fur'], 'beastfolk_features': ['Enormous Alert Fennec Ears & Bushy Sand-Cream Tail', 'Oversized Feathered Fennec Ears & Soft Bushy Tail', 'Large Fluffy Fennec Ears & Pale Fawn Tail'], 'hybrid_features': ['Oversized Sandy-Cream Fennec Ears & Matching Bushy Sandy-Cream Tail', 'Large Pale Fawn Fennec Ears & Matching Fluffy Fawn Tail', 'Feathered Apricot Fennec Ears & Matching Bushy Apricot Tail', 'Soft Dune-Cream Fennec Ears & Matching Bushy Cream Tail'], 'mannerisms': ['Large ears pivot independently to catch distant murmurs across the room', 'Fidgets eagerly with a rapid, fluttering tail wag', 'Hides shyly behind oversized fluffy ears when complimented', 'Tilts head with wide, intensely curious eyes at every new detail', 'Bounces on their toes with bubbly enthusiasm when excited']}, 'mouse': {'eyes': ['Large Glossy Onyx', 'Bright Ruby', 'Bead-Like Obsidian', 'Warm Chestnut', 'Deep Currant', 'Glittering Dark Hazel'], 'hair': ['Silky Ash Brown', 'Slate Gray Bob', 'Fine Chestnut Locks', 'Soft Cocoa Brown', 'Dusty Gray-Blonde'], 'coats': ['Soft Ash-Gray Fur', 'Silky Chestnut-Brown Fur', 'Warm Mouse-Brown Fur', 'Slate-Blue Fur', 'Dusty Cocoa Fur'], 'beastfolk_features': ['Round Mouse Ears & Slender Pinkish Tail', 'Large Rounded Ears & Whiskered Cheeks', 'Soft Gray Mouse Ears & Long Flexible Tail'], 'hybrid_features': ['Soft Ash-Gray Mouse Ears & Matching Slender Gray-Pink Tail', 'Chestnut-Brown Mouse Ears & Matching Slender Brown Tail', 'Slate-Gray Mouse Ears & Matching Long Flexible Slate Tail', 'Warm Cocoa Mouse Ears & Matching Slender Pinkish-Brown Tail'], 'mannerisms': ['Nose twitches in quick, inquisitive rhythm when inspecting something new', 'Tucks sleek tail close to their side with a cautious startle', 'Darts skittish, observant glances around before speaking in a soft voice', 'Rapidly smooths hair and ears with small, delicate hand motions', 'Nibbles thoughtfully on snacks or pencil tips during deep thought']}, 'reptile': {'eyes': ['Golden Slit Pupils', 'Emerald Green Slit', 'Amber-Ochre Slit', 'Ruby Red Slit', 'Glistening Citrine', 'Luminous Topaz', 'Copper Slit', 'Jade Green'], 'hair': ['Silky Emerald Green', 'Sleek Glossy Obsidian', 'Glossy Jade Waves', 'Forest Green Locks', 'Midnight Slate', 'Ash Silver', 'Dusky Olive'], 'coats': ['Shiny Smooth Emerald Scales', 'Gecko-Like Pale Mint Scales', 'Shiny Smooth Jade Scales', 'Iridescent Shimmering Blue Scales', 'Smooth Sleek Obsidian Scales', 'Dusky Olive Matte Scales', 'Pearlescent Ivory Scales', 'Vibrant Flame-Red Scales', 'Metallic Bronze Scales', 'Sunburst Gold Scales', 'Mottled Forest Green Scales'], 'scales': ['Shiny Smooth Emerald Scales', 'Gecko-Like Pale Mint Scales', 'Shiny Smooth Jade Scales', 'Iridescent Shimmering Blue Scales', 'Smooth Sleek Obsidian Scales', 'Dusky Olive Matte Scales', 'Pearlescent Ivory Scales', 'Vibrant Flame-Red Scales', 'Metallic Bronze Scales', 'Sunburst Gold Scales', 'Mottled Forest Green Scales'], 'beastfolk_features': ['Reptilian Horns & Sleek Scaled Tail', 'Tapered Scaled Tail & Slit-Pupil Eyes', 'Ridge-Crested Scaled Tail & Sleek Horns', 'Flexible Scaled Tail & Smooth Horn Crests', 'Slender Reptilian Tail & Scaled Cheeks'], 'hybrid_features': ['Emerald Horn Crests & Matching Sleek Emerald Scaled Tail', 'Shiny Blue Horns & Matching Iridescent Scaled Tail', 'Flame-Red Hornlets & Matching Scaled Flame Tail', 'Gecko-Like Horn Buds & Matching Soft Pale Mint Tail', 'Obsidian Horns & Matching Sleek Black Scaled Tail', 'Sunburst Gold Horn Crests & Matching Gold Scaled Tail'], 'mannerisms': ['Blinks slowly with horizontal nictitating membrane and tilts head in calm calculation', 'Swishes sleek scaled tail in measured, serpentine rhythm when pondering', 'Basks contentedly in sunny or warm spots, letting out a relaxed sigh', 'Slowly curls scaled tail around ankles or chair leg while observing silently', 'Flicks tongue subtly when testing the atmosphere or scenting tension in the air', 'Tilts head with quiet, unblinking focus before offering a deliberate response']}, 'dragon': {'eyes': ['Smoldering Ruby Red', 'Burning Molten Gold', 'Luminous Sapphire Blue', 'Draconic Topaz', 'Glowing Violet', 'Prismatic Amethyst', 'Fierce Smoldering Copper'], 'hair': ['Fiery Crimson Mane', 'Shimmering Platinum Silver', 'Smoldering Ember-Auburn', 'Sleek Midnight Black', 'Royal Azure Blue', 'Burnished Gold Locks'], 'coats': ['Flame-Red Dragon Scales', 'Shiny Blue Cerulean Scales', 'Glistening Molten-Gold Scales', 'Shiny Smooth Diamond-Bright Scales', 'Iridescent Prismatic Scales', 'Smoldering Obsidian Scales', 'Deep Crimson Armored Scales', 'Radiant Frost-Silver Scales', 'Lustrous Emerald Drake Scales', 'Midnight Abyssal Scales'], 'scales': ['Flame-Red Dragon Scales', 'Shiny Blue Cerulean Scales', 'Glistening Molten-Gold Scales', 'Shiny Smooth Diamond-Bright Scales', 'Iridescent Prismatic Scales', 'Smoldering Obsidian Scales', 'Deep Crimson Armored Scales', 'Radiant Frost-Silver Scales', 'Lustrous Emerald Drake Scales', 'Midnight Abyssal Scales'], 'beastfolk_features': ['Draconic Horns & Heavy Spined Dragon Tail', 'Curved Dragon Horns & Scaled Drake Tail with Back Ridge', 'Majestic Dragon Horns & Powerful Scaled Tail', 'Swept-Back Draconic Horns & Sleek Spaded Dragon Tail'], 'hybrid_features': ['Flame-Red Dragon Horns & Matching Spined Flame Tail', 'Shiny Blue Dragon Horns & Matching Sleek Cerulean Tail', 'Platinum Horns & Matching Radiant Silver Dragon Tail', 'Smoldering Obsidian Horns & Matching Dark Spined Tail', 'Molten-Gold Horns & Matching Heavy Gilded Dragon Tail'], 'mannerisms': ['Exhales a warm puff of breath with a proud, resonant rumble in chest', 'Slowly curves heavy spined tail with commanding, regal poise', 'Crosses arms and tilts head back with an aura of unshakeable draconic pride', 'Eyes flare with a faint inner ember when challenged or deeply amused', 'Restlessly adjusts posture with a sharp, disciplined flick of their spined tail']}, 'snake': {'eyes': ['Hypnotic Golden Slit', 'Ruby Viper Slit', 'Luminous Amber Slit', 'Emerald Venom Slit', 'Deep Amethyst Slit', 'Topaz Slit Pupils'], 'hair': ['Long Sleek Serpentine Black', 'Glossy Emerald Waves', 'Silky Platinum', 'Wine Red Silk Locks', 'Iridescent Violet Waves'], 'coats': ['Shiny Smooth Coral-Red Scales', 'Gecko-Like Soft Scaled Pattern', 'Iridescent Diamondback Scales', 'Glossy Viper-Green Scales', 'Shiny Royal-Blue Scales', 'Velvety Matte-Black Scales', 'Sunburst Yellow-Banded Scales', 'Pearlescent Opal Scales'], 'scales': ['Shiny Smooth Coral-Red Scales', 'Gecko-Like Soft Scaled Pattern', 'Iridescent Diamondback Scales', 'Glossy Viper-Green Scales', 'Shiny Royal-Blue Scales', 'Velvety Matte-Black Scales', 'Sunburst Yellow-Banded Scales', 'Pearlescent Opal Scales'], 'beastfolk_features': ['Long Serpentine Tail & Scaled Jawline Accents', 'Prehensile Scaled Tail & Slit-Pupil Viper Eyes', 'Diamond-Patterned Scaled Tail & Hood Crest', 'Sleek Scaled Tail & Subtle Fang Dimples'], 'hybrid_features': ['Glossy Emerald Scale Accents & Matching Long Emerald Snake Tail', 'Coral-Red Scale Crest & Matching Banded Red Serpent Tail', 'Shiny Blue Scale Accents & Matching Sleek Blue Serpent Tail', 'Matte-Black Scale Accents & Matching Sleek Obsidian Snake Tail', 'Opal Iridescent Accents & Matching Pearlescent Serpent Tail'], 'mannerisms': ['Sways subtly in place with mesmerizing, fluid serpentine poise', 'Curls prehensile tail gracefully around nearby objects when speaking softly', 'Subtly tilts chin down with a slow, hypnotic gaze from slit pupils', 'Speaks with a soft, melodic drawl that lingers delicately on sibilants', 'Draws shoulders close and rests chin on hand with quiet, predator-like calm']}, 'bird': {'eyes': ['Golden Amber', 'Sharp Topaz', 'Piercing Ruby', 'Brilliant Sapphire', 'Obsidian Bead'], 'hair': ['Feathered Midnight Black', 'Silky Snow White', 'Glossy Raven-Blue', 'Warm Tawny Brown', 'Silver-Gray Feathered Crest'], 'coats': ['Glossy Midnight Raven Feathers', 'Snow-White Swan Feathers', 'Tawny Hawk Feathers', 'Iridescent Blue Feathers', 'Warm Golden-Brown Feathers', 'Mottled Falcon Feathers'], 'beastfolk_features': ['Feathered Avian Wings & Plumage Accents', 'Large Sleek Feathered Wings & Fan-Tailed Plumage', 'Swept-Back Feathered Wings & Sharp Taloned Accents', 'Soft Feather Crest & Matching Plumaged Tail'], 'hybrid_features': ['Midnight Feather Crests & Matching Raven-Wing Feathered Tail', 'Snow-White Wing Accents & Matching Sleek White Plumage Tail', 'Golden-Hawk Feather Crests & Matching Tapered Feather Tail', 'Tawny Falcon Wing Accents & Matching Feathered Plumage Tail'], 'mannerisms': ['Tilts head with rapid, bird-like precision to inspect their surroundings', 'Subtly flutters feathered wingtips when startled or pleased', 'Perches lightly on the balls of their feet, ready to take flight', 'Smoothes down loose plumage with quick, meticulous hand gestures', 'Emits a soft, melodious trill under their breath when content']}}
-DIVERSE_FEMALE_HAIR_STYLES = ['ponytail with side bangs', 'twin braids', 'messy bun', 'loose wavy locks', 'curtain bangs with soft waves', 'bob cut', 'braided side plait', 'half-up half-down', 'straight with blunt fringe', 'layered shag', 'low twin tails', 'short pixie with feathered bangs', 'wavy tresses with a headband', 'asymmetrical bob', 'high ponytail with ribbons']
-DIVERSE_MALE_HAIR_STYLES = ['short textured crop', 'undercut with swept-back top', 'tousled messy fringe', 'side-parted clean cut', 'wild layered shag', 'fade with spiky top', 'middle-part curtains', 'neat crew cut', 'shaggy mop with stray bangs', 'short slicked back']
-DIVERSE_HAIR_LENGTHS_FEMALE = ['shoulder-length', 'long', 'waist-length', 'short', 'medium-long', 'chin-length']
-DIVERSE_HAIR_LENGTHS_MALE = ['short', 'cropped', 'medium-length tousled', 'ear-length', 'short taper']
-PHYSIQUE_FEMALE_TEMPLATES = ['Soft & Curved', 'Toned & Athletic', 'Hourglass & Slender', 'Petite & Soft', 'Full-Figured & Voluptuous']
-PHYSIQUE_MALE_TEMPLATES = ['Broad Shoulders & Lean', 'Toned & Athletic', 'Muscular & Tall', 'Slender & Lanky']
-UNDERGARMENT_COLOR_PALETTES = ['Black', 'White', 'Baby Pink', 'Crimson', 'Midnight Navy', 'Emerald Green', 'Pastel Lavender', 'Charcoal Grey', 'Beige / Skin-Tone', 'Royal Purple', 'Wine Red', 'Powder Blue']
-FEMALE_BRA_STYLES_PRUDE = ['soft cotton bralette', 'wireless seamless bra', 'simple white t-shirt bra', 'pastel ribbed crop bralette', 'full-coverage beige comfort bra', 'unpadded modal triangle bra']
-FEMALE_BRA_STYLES_MODERATE = ['lace-trimmed plunge bra', 'demi-cup balcony bra', 'sporty racerback bralette', 'smooth microfiber push-up bra', 'satin contour bra with delicate bows', 'scalloped lace t-shirt bra']
-FEMALE_BRA_STYLES_BOLD = ['sheer floral lace balcony bra', 'strappy black satin plunge bra', 'unlined mesh peekaboo bra', 'crimson silk corset-style bra', 'low-cut halter lace bralette', 'translucent silk underwire bra', 'scant lace quarter-cup bra']
-FEMALE_UNDERWEAR_STYLES_PRUDE = ['full-coverage cotton briefs', 'soft pastel hipster panties', 'seamless stretch boyshorts', 'ribbed white cotton panties', 'classic low-rise modal briefs']
-FEMALE_UNDERWEAR_STYLES_MODERATE = ['lace-trimmed bikini panties', 'satin cheekies with side lace', 'low-rise seamless stretch briefs', 'stretch modal hipster panties', 'delicate lace-trimmed thong', 'soft microfiber boyshorts']
-FEMALE_UNDERWEAR_STYLES_BOLD = ['sheer black lace thong', 'strappy satin G-string', 'micro lace thong', 'silk peekaboo briefs', 'low-slung Brazilian-cut lace cheeky', 'translucent mesh thong', 'open-back lace thong']
-MALE_UNDERWEAR_STYLES_PRUDE = ['classic grey cotton boxer briefs', 'navy knit relaxed boxers', 'white ribbed athletic briefs', 'relaxed fit plaid cotton boxers', 'soft modal everyday boxer briefs']
-MALE_UNDERWEAR_STYLES_MODERATE = ['fitted black modal boxer briefs', 'athletic compression trunks', 'low-rise charcoal trunks', 'seamless stretch boxer briefs', 'navy performance trunks']
-MALE_UNDERWEAR_STYLES_BOLD = ['low-rise black silk boxer briefs', 'snug athletic micro trunks', 'sheer performance trunks', 'fitted crimson satin boxers', 'body-hugging low-waist trunks']
-TRAIT_TEMPLATES = [['Observant', 'Analytic', 'Competitive', 'Secretly Lonely'], ['Sensitive', 'Studious', 'Easily Flustered'], ['Manipulative', 'Charismatic', 'Judgmental'], ['Mysterious', 'Determined', 'Inquisitive'], ['Protective', 'Loyal', 'Perfectionist', 'Sarcastic'], ['Playful', 'Energetic', 'Impulsive', 'Kindhearted'], ['Stoic', 'Resourceful', 'Cynical', 'Duty-Bound']]
-MANNERISM_TEMPLATES = ['Adjusts glasses when thinking', 'Twirls hair when nervous', 'Crosses arms and scowls when challenged', 'Fidgets with hoodie strings', 'Speaks in a quiet, measured tone', 'Twitches ears when excited', 'Taps finger impatiently on cheek', 'Smiles faintly before answering']
-IMMUTABLE_PHYSICAL_APPEARANCE_KEYS = {'marks', 'hair_style', 'eyes', 'eye_color', 'breast_size', 'asset_texture', 'stature', 'feather_color', 'predetermined_intercourse', 'features', 'openness', 'skin_color', 'hair_length', 'intimate_dynamic', 'coat', 'scale_color', 'penis_size', 'skin', 'bra', 'coat_color', 'erotic_openness', 'fur_color', 'underwear', 'skin_type', 'hair', 'coat_type', 'distinctive_features', 'intimate_demeanor', 'physique', 'undergarments', 'height', 'hair_color', 'anal_experience'}
-PREFERENCE_KEYWORDS = ('like', 'likes', 'dislike', 'dislikes', 'prefer', 'prefers', 'preference', 'enjoy', 'enjoys', 'hate', 'hates', 'fond', 'afraid', 'fearful', 'fear', 'value', 'values', 'respect', 'respects', 'trust', 'trusts', 'rely', 'relies', 'willing', 'reluctant', 'candid', 'protective', 'awed', 'responds')
-DISLIKE_KEYWORDS = ('dislike', 'dislikes', 'hate', 'hates', 'fears', 'fear', 'afraid', 'avoid', 'avoids', 'detest', 'detests', 'loathe', 'loathes', 'allergic', 'cannot stand', "can't stand", 'intolerant', 'annoyed by', 'averse', 'despise', 'despises', 'disdains', 'disdain', 'resents', 'resent', 'resists', 'resist', 'repulsed', 'disgusted', 'exasperated', 'angered', 'frustrated', 'aversion', 'dread', 'contempt', 'hatred')
-LIKE_KEYWORDS = ('like', 'likes', 'prefer', 'prefers', 'love', 'loves', 'enjoy', 'enjoys', 'fond of', 'appreciates', 'values', 'fascinated by', 'adores', 'favors', 'favor')
 VALID_MILESTONE_EVENTS = {'oral_receive', 'manual_receive', 'kiss', 'oral_give', 'date', 'first_kiss', 'manual_give', 'anal_give', 'anal_receive', 'anal', 'none', 'intercourse', 'confession'}
 NSFW_SCENARIOS = {'nsfw_high_school_drama'}
 INTIMATE_DEMEANOR_FEMALE_TEMPLATES = ['Playful & Bantering, teases warmly and laughs softly between kisses', 'Soft & Deeply Affectionate, tender whispers, warm lingering touch and emotional closeness', 'Poised & Articulate, calm, deliberate with a low, husky seductive tone', 'Passionate & Vocal, deeply expressive, breathless gasps and uninhibited praise', 'Blunt & Teasing, energetic directness, honest reactions and confident remarks', 'Hesitant & Flustered, flustered pauses, earnest sincerity and endearing shyness']
@@ -334,7 +402,15 @@ ANAL_RECEIVE_MEMORY_KEYWORDS = (
 )
 
 __all__ = [
-    'EYE_COLORS', 'HAIR_COLORS', 'HAIR_LENGTHS', 'HAIR_STYLES', 'STATURES', 'BREAST_SIZES', 'PENIS_SIZES',
+    'EYE_COLORS', 'HAIR_COLORS', 'HAIR_LENGTHS', 'HAIR_STYLES', 'STATURES', 'STATURE_TIERS',
+    'STATURE_WEIGHTS_MINIATURE', 'STATURE_WEIGHTS_TINY_BEASTFOLK', 'STATURE_WEIGHTS_SMALL_BEASTFOLK',
+    'STATURE_WEIGHTS_LARGE_BEASTFOLK', 'STATURE_WEIGHTS_STANDARD',
+    'STATURE_WEIGHTS_MALE_STANDARD', 'STATURE_WEIGHTS_FEMALE_STANDARD',
+    'STATURE_WEIGHTS_MALE_LARGE_BEASTFOLK', 'STATURE_WEIGHTS_FEMALE_LARGE_BEASTFOLK',
+    'STATURE_WEIGHTS_MALE_SMALL_BEASTFOLK', 'STATURE_WEIGHTS_FEMALE_SMALL_BEASTFOLK',
+    'STATURE_WEIGHTS_MALE_TINY_BEASTFOLK', 'STATURE_WEIGHTS_FEMALE_TINY_BEASTFOLK',
+    'STATURE_INCOMPATIBLE_PHYSIQUES',
+    'BREAST_SIZES', 'PENIS_SIZES',
     'DIVERSE_BEASTFOLK_COATS', 'DIVERSE_BEASTFOLK_SCALES', 'DIVERSE_BEASTFOLK_EYES', 'COLOR_FAMILIES',
     'SPECIES_TEMPLATES', 'DIVERSE_FEMALE_HAIR_STYLES', 'DIVERSE_MALE_HAIR_STYLES', 'DIVERSE_HAIR_LENGTHS_FEMALE',
     'DIVERSE_HAIR_LENGTHS_MALE', 'PHYSIQUE_FEMALE_TEMPLATES', 'PHYSIQUE_MALE_TEMPLATES', 'UNDERGARMENT_COLOR_PALETTES',

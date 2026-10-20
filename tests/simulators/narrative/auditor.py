@@ -23,8 +23,51 @@ from typing import Dict, Any, List, Optional, Set
 
 import db
 import namegen
-from game_engine.auditor import _extract_state_facts, _state_preserved
 from game_engine.state.constants import _ITEM_GRANT_RE, _ITEM_BLOCKLIST
+
+def _extract_state_facts(outcome_dict: dict) -> list[str]:
+    """Extract key nouns/numbers from the mechanical state to guard against deletion."""
+    facts = []
+    for co in outcome_dict.get("character_outcomes") or []:
+        for item in (co.get("items_gained") or []) + (co.get("items_lost") or []):
+            if isinstance(item, str) and len(item.strip()) >= 2:
+                facts.append(item.strip().lower())
+        hp = co.get("hp_change", 0)
+        if hp == 0:
+            hp = co.get("hp_delta", 0)
+        if hp != 0:
+            facts.append(str(abs(hp)))
+        gold = co.get("gold_change", 0)
+        if gold == 0:
+            gold = co.get("gold_delta", 0)
+        if gold != 0:
+            facts.append(str(abs(gold)))
+    for qu in outcome_dict.get("quest_updates") or []:
+        if qu.get("title") and len(str(qu["title"]).strip()) >= 3:
+            facts.append(str(qu["title"]).strip().lower())
+    for dec in outcome_dict.get("deceased_characters") or []:
+        if dec and len(str(dec).strip()) >= 2:
+            facts.append(str(dec).strip().lower())
+    for enemy in outcome_dict.get("nearby_enemies") or []:
+        e_name = enemy.get("name") if isinstance(enemy, dict) else getattr(enemy, "name", None)
+        if e_name and len(str(e_name).strip()) >= 2:
+            facts.append(str(e_name).strip().lower())
+    for entity in outcome_dict.get("new_entities") or []:
+        ent_name = entity.get("name") if isinstance(entity, dict) else getattr(entity, "name", None)
+        if ent_name and len(str(ent_name).strip()) >= 2:
+            facts.append(str(ent_name).strip().lower())
+    return facts
+
+def _state_preserved(original: str, rewritten: str, outcome_dict: dict) -> bool:
+    """Hard Guard: Ensure no key mechanical facts were excised."""
+    orig_lower = original.lower()
+    rewr_lower = rewritten.lower()
+    facts = _extract_state_facts(outcome_dict)
+    for fact in facts:
+        pattern = rf"\b{re.escape(fact)}\b"
+        if re.search(pattern, orig_lower) and not re.search(pattern, rewr_lower):
+            return False
+    return True
 
 TITLE_AND_ARTICLE_PREFIXES = frozenset({
     "the", "a", "an", "sir", "lady", "lord", "mr", "mrs", "ms", "miss",
@@ -622,7 +665,7 @@ class NarrativeInvariantAuditor:
         if not session:
             return violations
 
-        from game_engine.npcs import is_dialogue_partner, can_chime_in_to_dialogue, is_npc_invited_in_action
+        from game_engine.npcs import is_dialogue_partner, evaluate_scene_attention_transition, is_npc_invited_in_action
         from game_engine.core import _get_npc_name
         from game_engine.choices_cleaner import is_exempt_free_action
         from mechanics.world.locations import get_primary_location_name
@@ -675,7 +718,7 @@ class NarrativeInvariantAuditor:
                 if not cp:
                     continue
                 if not any(is_dialogue_partner(cp, [pp]) for pp in prev_partners):
-                    can_chime = can_chime_in_to_dialogue(
+                    can_chime = evaluate_scene_attention_transition(
                         cp,
                         retained_partners=prev_partners,
                         actions=actions,

@@ -129,14 +129,14 @@ class TestTagsScenariosRefactor(unittest.TestCase):
         self.assertEqual(len(get_class_templates("slice_of_life")), 6)
         self.assertEqual(len(get_class_templates("space")), 6)
         self.assertEqual(len(get_class_templates("isekai")), 6)
-        self.assertEqual(len(get_class_templates("high_school")), 6)
+        self.assertEqual(len(get_class_templates("high_school")), 14)
 
         # Starting weapons resolution
         self.assertEqual(len(get_starting_weapons("dark_fantasy")), 6)
         self.assertEqual(len(get_starting_weapons("slice_of_life")), 6)
         self.assertEqual(len(get_starting_weapons("space")), 6)
         self.assertEqual(len(get_starting_weapons("isekai")), 6)
-        self.assertEqual(len(get_starting_weapons("high_school")), 6)
+        self.assertEqual(len(get_starting_weapons("high_school")), 0)
 
     def test_mechanics_tag_checks(self):
         # Contacts

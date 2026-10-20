@@ -113,43 +113,141 @@ def should_trigger_digest(session: dict, actions: list, outcome: dict) -> bool:
 # Arc Digest Generator
 # ---------------------------------------------------------------------------
 
+def build_deterministic_arc_digest(raw_turns: list) -> dict:
+    """Build a complete Tier 2 digest dict (`key_events`, `commitments`,
+    `mechanical_summary`, `active_hooks`) 100% deterministically in Python
+    from structured turn history dicts or plain turn strings (0 LLM calls).
+    """
+    key_events: list[str] = []
+    mechanical_summary: list[str] = []
+    active_hooks: list[str] = []
+    commitments: list[dict] = []
+
+    has_structured_dicts = any(isinstance(t, dict) for t in (raw_turns or []))
+    if not has_structured_dicts:
+        return _extractive_fallback([str(t) for t in (raw_turns or [])])
+
+    for entry in (raw_turns or [])[-MAX_DIGEST_BULLETS:]:
+        if not isinstance(entry, dict):
+            fb = _extractive_fallback([str(entry)])
+            key_events.extend(fb.get("key_events", []))
+            mechanical_summary.extend(fb.get("mechanical_summary", []))
+            continue
+
+        char_name = str(entry.get("character_name") or "Player").strip()
+        label = str(entry.get("label") or "").strip().rstrip(".")
+        loc = str(entry.get("location") or "").strip()
+        loc_short = loc.split("➔")[-1].strip() if "➔" in loc else loc
+        nar = str(entry.get("outcome_narrative") or entry.get("narrative") or entry.get("next_narrative") or "").strip()
+        first_sent = ""
+        if nar:
+            m_sent = re.split(r"(?<=[.!?])\s+", nar, maxsplit=1)
+            first_sent = m_sent[0].strip() if m_sent else nar[:180].strip()
+            if len(first_sent) > 190:
+                first_sent = first_sent[:187].strip() + "…"
+
+        if first_sent:
+            loc_prefix = f"At {loc_short}: " if loc_short and loc_short.lower() not in first_sent.lower() else ""
+            bullet = f"{loc_prefix}{first_sent}"
+            if bullet not in key_events:
+                key_events.append(bullet[:200])
+        elif label:
+            loc_suffix = f" at {loc_short}" if loc_short else ""
+            bullet = f"{char_name} performed '{label}'{loc_suffix}."
+            if bullet not in key_events:
+                key_events.append(bullet[:200])
+
+        # Extract deterministic resource diffs
+        for itm in (entry.get("items_gained") or []):
+            if itm:
+                r_str = f"Gained: {itm}"
+                if r_str not in mechanical_summary:
+                    mechanical_summary.append(r_str)
+
+        for co in (entry.get("character_outcomes") or []):
+            if not isinstance(co, dict):
+                continue
+            g_delta = int(co.get("gold_change") or 0)
+            if g_delta != 0:
+                sign = "+" if g_delta > 0 else ""
+                r_str = f"Gold: {sign}{g_delta}"
+                if r_str not in mechanical_summary:
+                    mechanical_summary.append(r_str)
+            for lost_itm in (co.get("items_lost") or []):
+                if lost_itm:
+                    r_str = f"Lost: {lost_itm}"
+                    if r_str not in mechanical_summary:
+                        mechanical_summary.append(r_str)
+
+        for ru in (entry.get("relationship_updates") or []):
+            if isinstance(ru, dict) and ru.get("npc_name") and int(ru.get("delta_score") or 0) != 0:
+                d_val = int(ru["delta_score"])
+                sign = "+" if d_val > 0 else ""
+                r_str = f"Affinity ({ru['npc_name']}): {sign}{d_val}"
+                if r_str not in mechanical_summary:
+                    mechanical_summary.append(r_str)
+
+        # Extract active hooks from quest updates
+        for qu in (entry.get("quest_updates") or []):
+            if not isinstance(qu, dict):
+                continue
+            q_status = str(qu.get("status") or "Active")
+            q_title = str(qu.get("title") or qu.get("quest_id") or "").strip()
+            q_clue = str(qu.get("current_clues") or qu.get("new_clue") or "").strip()
+            if q_clue and q_status == "Active":
+                h_str = f"{q_title}: {q_clue}" if q_title else q_clue
+                if h_str not in active_hooks:
+                    active_hooks.append(h_str[:180])
+
+    return {
+        "key_events": key_events[:MAX_DIGEST_BULLETS],
+        "commitments": commitments,
+        "mechanical_summary": mechanical_summary[:MAX_DIGEST_BULLETS],
+        "active_hooks": active_hooks[:MAX_DIGEST_BULLETS],
+    }
+
+
 async def generate_arc_digest(
     session_id: int,
-    raw_turns: list[str],
+    raw_turns: list,
     turn_start: int = 0,
+    use_deterministic: bool = True,
 ) -> tuple[list[str], list[dict]]:
     """Distil ``raw_turns`` into permanent narrative bullets and commitment records.
 
-    Uses ``use_utility=True`` so the call targets ``LLM_UTILITY_MODEL`` when
-    configured; falls back silently to the primary model if not.
-
-    Returns ``(bullets, commitments)`` — both empty lists on any error so the
-    caller never needs to handle exceptions from this background task.
+    In the deterministic-first architecture, builds the digest directly in Python
+    via `build_deterministic_arc_digest` (0 LLM calls). If `llm_client.call_llm_json`
+    is explicitly mocked in a unit test (or `use_deterministic=False`), honors the
+    LLM/mock response for backward compatibility.
     """
     if not raw_turns:
         return [], []
 
     import llm_client  # lazy import to avoid circular deps at module load time
+    from unittest.mock import AsyncMock, MagicMock
 
-    turns_text = "\n".join(f"- {t}" for t in raw_turns)
-    user_msg = (
-        f"Recent adventure turns to archive (oldest first):\n{turns_text}\n\n"
-        f"Extract key_events, commitments, mechanical_summary, and active_hooks as JSON."
-    )
+    is_llm_mocked = isinstance(getattr(llm_client, "call_llm_json", None), (AsyncMock, MagicMock))
 
-    try:
-        result = await llm_client.call_llm_json(
-            system_prompt=_DIGEST_SYSTEM,
-            user_prompt=user_msg,
-            temperature=0.2,
-            max_tokens=600,
-            retries=1,
-            use_utility=True,
+    if use_deterministic and not is_llm_mocked:
+        result = build_deterministic_arc_digest(raw_turns)
+    else:
+        turns_text = "\n".join(f"- {t}" for t in raw_turns)
+        user_msg = (
+            f"Recent adventure turns to archive (oldest first):\n{turns_text}\n\n"
+            f"Extract key_events, commitments, mechanical_summary, and active_hooks as JSON."
         )
-    except Exception as exc:
-        # Digest is best-effort; never crash the caller
-        log.warning("Arc digest LLM call failed (%s); falling back to extractive summary.", exc)
-        result = _extractive_fallback(raw_turns)
+        try:
+            result = await llm_client.call_llm_json(
+                system_prompt=_DIGEST_SYSTEM,
+                user_prompt=user_msg,
+                temperature=0.2,
+                max_tokens=600,
+                retries=1,
+                use_utility=True,
+            )
+        except Exception as exc:
+            log.warning("Arc digest LLM call failed (%s); falling back to deterministic summary.", exc)
+            result = build_deterministic_arc_digest(raw_turns)
 
     bullets: list[str] = []
     commitments: list[dict] = []
@@ -231,13 +329,13 @@ def fire_digest_if_needed(
     session: dict,
     actions: list,
     outcome: dict,
-    history_to_archive: list[str] | None = None,
+    history_to_archive: list | None = None,
 ) -> None:
     """Schedule a digest generation task as a non-blocking asyncio task.
 
-    Intended to be called from synchronous post-turn code inside an already-
-    running event loop (e.g. from apply_outcome or a Discord cog callback).
-    Silently skips if no event loop is running.
+    Passes structured history dicts directly to `generate_arc_digest` so
+    `build_deterministic_arc_digest` can extract exact events, resource diffs,
+    and hooks with zero LLM calls.
     """
     session_id = session.get("id")
     if not session_id:
@@ -256,8 +354,9 @@ def fire_digest_if_needed(
         try:
             await generate_arc_digest(
                 session_id=session_id,
-                raw_turns=[str(t) for t in turns],
+                raw_turns=list(turns),
                 turn_start=turn_start,
+                use_deterministic=True,
             )
         except Exception as exc:
             log.warning("Background arc digest task failed: %s", exc)

@@ -283,8 +283,89 @@ class TestMultiNPCDialogueAndPresenceValidation(unittest.TestCase):
         cleaned_dialogue = game_engine.sanitize_absent_npc_hallucinations(dialogue_prose, session)
         self.assertIn("Did Yuki say anything", cleaned_dialogue)
 
+    def test_actor_poses_unnamed_role_reconciled_into_npcs_present(self):
+        """Verifies that an actor in actor_poses (e.g. Unnamed Fox Club Rep) is reconciled into present NPCs."""
+        session = {
+            "id": self.test_session_id,
+            "current_npcs": [{"name": "Lucas Nakamura"}],
+            "current_location": "Sakuragaoka Academy ➔ School Main Gates ➔ Gate Checkpoint",
+            "scenario": "nsfw_furry_high_school_drama"
+        }
+        result = {
+            "actor_poses": {
+                "Unnamed Fox Club Rep": {"posture": "leaning", "holding": "Drama Club Banner"}
+            },
+            "npcs_present": [{"name": "Lucas Nakamura"}]
+        }
+        reconciled = game_engine.process_scene_npcs(
+            result, session,
+            new_loc="Sakuragaoka Academy ➔ School Main Gates ➔ Gate Checkpoint",
+            old_loc="Sakuragaoka Academy ➔ School Main Gates ➔ Gate Checkpoint",
+            actions=[]
+        )
+        names = [game_engine._get_npc_name(n) for n in reconciled]
+        self.assertIn("Lucas Nakamura", names)
+        # The actor from actor_poses must be present in reconciled npcs
+        self.assertTrue(any("Fox" in n or "Rep" in n or len(n) > 3 for n in names if n != "Lucas Nakamura"))
+
+    def test_pronoun_consistency_preserves_plural_and_female_dialogue_in_male_scene(self):
+        """Verifies that plural expressions and female dialogue are not corrupted when only male characters are registered."""
+        session = {
+            "id": self.test_session_id,
+            "current_npcs": [{"name": "Lucas Nakamura", "gender": "male"}],
+            "lead_character_name": "Artemiusz",
+            "lead_character_gender": "male"
+        }
+        text = (
+            "A group of students from the Occult & Mystery Club passes by, their voices low and hurried. "
+            "One of them glances toward Artemiusz and Lucas, his eyes lingering for a heartbeat.\n\n"
+            "The student representative stops her work, leaning one hip against the stand. "
+            "She crosses her arms over her chest, her tail giving a sharp flick. "
+            "Around him, other students are beginning to trickle in, their hushed whispers creating a buzz. "
+            "'Most people are keeping their heads down today.'"
+        )
+        cleaned = game_engine.sanitize_npc_pronoun_consistency(text, session=session)
+        # Plural phrases must be preserved
+        self.assertIn("their voices", cleaned)
+        self.assertIn("One of them", cleaned)
+        self.assertIn("their heads down", cleaned)
+        self.assertIn("their hushed whispers", cleaned)
+        self.assertNotIn("his voices", cleaned)
+        self.assertNotIn("one of him", cleaned)
+        # Female actions/dialogue must not be corrupted to masculine
+        self.assertIn("stops her work", cleaned)
+        self.assertIn("She crosses her arms", cleaned)
+
+
+    def test_accompanied_dialogue_partner_travels_to_new_location(self):
+        """Verifies that an active dialogue partner being escorted or helped carries over to destination."""
+        session = {
+            "id": self.test_session_id,
+            "scenario": "nsfw_furry_high_school_drama",
+            "current_location": "Ravenwood Institute ➔ School Main Gates ➔ Gate Checkpoint",
+            "dialogue_partner": "Ayane Vance",
+            "current_npcs": [
+                {"name": "Ayane Vance", "role": "Theater Set Painter", "gender": "female"},
+                {"name": "Lucas Nakamura", "role": "Drama Senior Director", "gender": "male"}
+            ]
+        }
+        actions = [{"label": "Offer to help carry her things to Class 1-A", "target_npc": "Ayane Vance"}]
+
+        traveling, left_behind = game_engine.classify_scene_npcs(
+            session, actions,
+            old_primary="School Main Gates",
+            dest_primary="Class 1-A (Homeroom)"
+        )
+        traveling_names = [c.get("name") for c in traveling]
+        left_behind_names = [c.get("name") for c in left_behind]
+
+        self.assertIn("Ayane Vance", traveling_names)
+        self.assertNotIn("Ayane Vance", left_behind_names)
+        self.assertIn("Lucas Nakamura", left_behind_names)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

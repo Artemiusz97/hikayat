@@ -67,6 +67,8 @@ class TestMemorySeparationAndMultiAct(unittest.TestCase):
     def test_contact_memory_separation_and_auto_migration(self):
         sess_id = 999123
         char_id = 101
+        with db.get_conn() as conn:
+            db.core._delete_session_records(conn, sess_id)
 
         # 1. Upsert contact with non-romantic memory
         c1 = db.upsert_contact(

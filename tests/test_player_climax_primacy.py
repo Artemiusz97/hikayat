@@ -9,10 +9,9 @@ from mechanics.social.physical_state import (
     build_physical_prompt_block,
     merge_physical_state_updates,
     is_erotic_intimate_contact,
-    detect_partner_climax,
-    detect_player_climax,
     detect_intimate_disengagement,
 )
+from mechanics.social.intimate_excitement import compute_excitement_step
 from mechanics.social.persona.intimacy.formatting import format_dynamic_prompt_directive
 from game_engine.turn.dialogue import _build_dialogue_prompt_block
 from game_engine.turn_context import TurnContext
@@ -67,23 +66,51 @@ class TestPlayerClimaxPrimacy(unittest.TestCase):
             self.assertIn("DOES NOT stop", dir_text)
 
     def test_climax_detection_helpers(self):
-        """Verify linguistic detection of partner climax, player climax, and disengagement."""
-        # Partner climax
-        self.assertTrue(detect_partner_climax("Kana shuddered as her climax took her.", partner_name="Kana"))
-        self.assertTrue(detect_partner_climax("Elena cried out in ecstasy, arching her back as her walls clenched around him.", partner_name="Elena"))
-        self.assertTrue(detect_partner_climax("The intense friction sent her over the edge."))
-        self.assertFalse(detect_partner_climax("She kissed him gently on the forehead."))
-
-        # Player climax
-        self.assertTrue(detect_player_climax("He spilled inside her with a ragged gasp."))
-        self.assertTrue(detect_player_climax("Artemiusz reached his own climax, filling her completely.", player_name="Artemiusz"))
-        self.assertTrue(detect_player_climax("Pushed over the edge to finish together inside."))
-        self.assertFalse(detect_player_climax("He stroked her hair and whispered softly."))
-
+        """Verify disengagement detection and deterministic gauge-based climax triggering."""
         # Disengagement
         self.assertTrue(detect_intimate_disengagement([{"label": "Slow your rhythm, gently withdraw, and hold Kana close in aftercare"}]))
         self.assertTrue(detect_intimate_disengagement(["Step back and break contact with her"]))
         self.assertFalse(detect_intimate_disengagement([{"label": "Maintain a steady rhythm and thrust deeper"}]))
+
+        # Gauge-based partner climax
+        phys_partner = {
+            "intimate_contact": "Intimate encounter with Kana (intercourse)",
+            "excitement": {
+                "active": True,
+                "actors": {
+                    "Artemiusz": {"meter": 50, "max": 100, "status": "Building", "endurance": 5},
+                    "Kana": {"meter": 85, "max": 100, "status": "Building", "endurance": 5},
+                }
+            }
+        }
+        res_p = compute_excitement_step(
+            physical_state=phys_partner,
+            action_str="Push Kana over the edge into climax",
+            player_char=self.player_char,
+            partner_contact={"name": "Kana"},
+            session={"id": self.session_id},
+        )
+        self.assertTrue(res_p.get("partner_climaxed"))
+
+        # Gauge-based player climax
+        phys_player = {
+            "intimate_contact": "Intimate encounter with Kana (intercourse)",
+            "excitement": {
+                "active": True,
+                "actors": {
+                    "Artemiusz": {"meter": 85, "max": 100, "status": "Building", "endurance": 5},
+                    "Kana": {"meter": 50, "max": 100, "status": "Building", "endurance": 5},
+                }
+            }
+        }
+        res_player = compute_excitement_step(
+            physical_state=phys_player,
+            action_str="Thrust deeper toward your own release and finish inside",
+            player_char=self.player_char,
+            partner_contact={"name": "Kana"},
+            session={"id": self.session_id},
+        )
+        self.assertTrue(res_player.get("player_climaxed"))
 
     def test_physical_prompt_block_anchors_climax_primacy(self):
         """Verify build_physical_prompt_block injects active continuation anchor when partner has peaked."""
@@ -134,6 +161,13 @@ class TestPlayerClimaxPrimacy(unittest.TestCase):
             },
             "intimate_contact": "Intimate encounter with Kana (intercourse)",
             "climax_state": {"partner_climaxed": False, "player_climaxed": False},
+            "excitement": {
+                "active": True,
+                "actors": {
+                    "Artemiusz": {"meter": 50, "max": 100, "status": "Building"},
+                    "Kana": {"meter": 85, "max": 100, "status": "On the Brink"},
+                }
+            }
         }
         db.update_session_physical_state(self.session_id, initial_phys)
         session = db.get_session(self.session_id)
@@ -145,12 +179,9 @@ class TestPlayerClimaxPrimacy(unittest.TestCase):
             "next_narrative": "She panting against his chest as the intense sensations slowly subsided.",
             "dialogue_partner": "Kana",
             "relationship_updates": [{"npc_name": "Kana", "milestone_event": "intercourse"}],
-            "physical_updates": {
-                "actors": {
-                    "Artemiusz": {"posture": "Lying down spent"},
-                    "Kana": {"posture": "Sleeping beside him"},
-                },
-                "intimate_contact": "none",
+            "actor_poses": {
+                "Artemiusz": {"posture": "Lying down spent"},
+                "Kana": {"posture": "Sleeping beside him"},
             }
         }
         actions = [{"label": "Thrust deeply and bring Kana over the edge"}]
@@ -179,7 +210,14 @@ class TestPlayerClimaxPrimacy(unittest.TestCase):
                 "Kana": {"posture": "Trembling from aftershocks", "clothing": {"top": "off", "bottom": "off"}},
             },
             "intimate_contact": "Intimate encounter with Kana (intercourse - partner reached climax, ongoing for player)",
-            "climax_state": {"partner_climaxed": True, "player_climaxed": False},
+            "climax_state": {"partner_climaxed": True, "player_climaxed": False, "partner_climaxes": {"Kana": True}},
+            "excitement": {
+                "active": True,
+                "actors": {
+                    "Artemiusz": {"meter": 85, "max": 100, "status": "Building"},
+                    "Kana": {"meter": 100, "max": 100, "status": "Climax Reached"},
+                }
+            }
         }
         db.update_session_physical_state(self.session_id, ongoing_phys)
         session = db.get_session(self.session_id)

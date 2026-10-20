@@ -12,166 +12,15 @@ logger = logging.getLogger(__name__)
 
 class GameLoopMixin:
     async def _resolve_pick(self, session: dict, user_id: int, pick: dict) -> dict:
-            """Turns a recorded pick (choice_index, direct_choice, or custom_text) into an
-            action dict for game_engine.resolve_turn, spending MP as needed."""
-            char, inventory = await asyncio.gather(
-                adb(db.get_character, user_id),
-                adb(db.get_inventory, user_id),
-            )
-
-            choice = {}
-            action_cat = ""
-            if pick.get("direct_choice"):
-                choice = pick["direct_choice"]
-                stat = choice.get("stat", "STR")
-                requirement = choice.get("requirement", 0)
-                mp_cost = choice.get("mp_cost", 0)
-                label = choice.get("label", "Action")
-                action_cat = choice.get("action_category", "")
-            elif "choice_index" in pick:
-                choices_list = session.get("choices") or []
-                idx = pick["choice_index"]
-                if isinstance(choices_list, list) and 0 <= idx < len(choices_list):
-                    choice = choices_list[idx]
-                elif isinstance(choices_list, list) and choices_list:
-                    choice = choices_list[0]
-                else:
-                    choice = {"stat": "PER", "requirement": 6, "mp_cost": 0, "label": "Proceed forward"}
-                stat, requirement, mp_cost, label = (choice.get("stat", "PER"), choice.get("requirement", 6),
-                                                       choice.get("mp_cost", 0), choice.get("label", "Proceed forward"))
-                action_cat = choice.get("action_category", "")
-            elif pick.get("is_item_action") or pick.get("stat") == "ITEM":
-                stat = "ITEM"
-                requirement = 0
-                mp_cost = 0
-                label = pick.get("custom_text", "Use item")
-                action_cat = "item"
-            else:
-                classification = await game_engine.classify_custom_action(session, char, inventory,
-                                                                            pick["custom_text"])
-                stat, requirement, mp_cost, label = (classification["stat"], classification["requirement"],
-                                                       classification["mp_cost"], pick["custom_text"])
-                action_cat = "custom"
-
-            if mp_cost > char["mp"]:
-                label += " (couldn't afford the full effort, improvised instead)"
-                mp_cost = 0
-
-            if mp_cost:
-                await adb(db.apply_hp_mp_delta, user_id, hp_delta=0, mp_delta=-mp_cost)
-                char = await adb(db.get_character, user_id)
-
-            actor_settings = await adb(db.get_settings, user_id)
-            check_mode = actor_settings.get("debug_check_mode", "off")
-            target_item_name = pick.get("item_name") or choice.get("item_name")
-            target_item_obj = pick.get("item") or choice.get("item")
-            item_was_consumed = False
-
-            if stat == "ITEM":
-                if not target_item_name and not target_item_obj:
-                    # Detect from action label / custom text against user's carried inventory
-                    label_lower = label.lower()
-                    for inv_item in inventory:
-                        iname = inv_item.get("name", "")
-                        if iname and iname.lower() in label_lower:
-                            target_item_name = iname
-                            target_item_obj = inv_item
-                            break
-                if not target_item_name and target_item_obj:
-                    target_item_name = target_item_obj.get("name")
-                if not target_item_obj and target_item_name:
-                    target_item_obj = next((i for i in inventory if i.get("name", "").lower() == target_item_name.lower()), None)
-
-                check = CheckResult(chance=100, roll=100.0, tier="success", tier_label="Item Used", succeeded=True, requirement=requirement)
-                if target_item_name:
-                    await adb(db.remove_item_by_name, user_id, target_item_name)
-                    item_was_consumed = True
-            elif action_cat in ("attack", "magic"):
-                hit_chance = choice.get("hit_chance", 75)
-                roll = random.uniform(0.01, 100.0)
-                p_luk = char.get("luk", 3)
-                crit_threshold = max(5, min(30, 5 + p_luk * 2))
-
-                if check_mode == "always_crit_success":
-                    tier = "crit_success"
-                    succeeded = True
-                elif check_mode == "always_success":
-                    tier = "success"
-                    succeeded = True
-                elif check_mode == "always_fail":
-                    tier = "fail"
-                    succeeded = False
-                elif check_mode == "always_crit_fail":
-                    tier = "crit_fail"
-                    succeeded = False
-                elif roll <= crit_threshold:
-                    tier = "crit_success"
-                    succeeded = True
-                elif roll <= hit_chance:
-                    tier = "success"
-                    succeeded = True
-                else:
-                    tier = "fail"
-                    succeeded = False
-
-                tier_label = "Critical Hit!" if tier == "crit_success" else ("Hit!" if tier == "success" else "Missed")
-                check = CheckResult(chance=hit_chance, roll=roll, tier=tier, tier_label=tier_label, succeeded=succeeded, requirement=requirement)
-            elif stat in ("NONE", "FREE") or requirement <= 0:
-                check = CheckResult(chance=100, roll=100.0, tier="success", tier_label="Success", succeeded=True, requirement=requirement)
-            else:
-                stat_col = STAT_COLUMN.get(stat, "agi_")
-                req = requirement
-                from mechanics.world.mobility import get_session_dialogue_partners
-                sess_dp = get_session_dialogue_partners(session) if isinstance(session, dict) else []
-                explicit_target = choice.get("target_npc")
-                if not explicit_target:
-                    named_dps = [dp for dp in sess_dp if dp and (dp.lower() in label.lower() or (len(dp.split()[0]) >= 3 and dp.split()[0].lower() in label.lower()))]
-                    if len(named_dps) == 1:
-                        explicit_target = named_dps[0]
-                target_candidates = [explicit_target] if explicit_target else list(sess_dp)
-                if target_candidates and isinstance(session, dict) and session.get("id"):
-                    from mechanics.combat.traits import get_combined_dc_modifiers
-                    for dp_name in target_candidates:
-                        if dp_name:
-                            c_rec = db.get_contact(session["id"], str(dp_name).lower().replace(" ", "_"), char.get("id", 0))
-                            if c_rec:
-                                c_traits = c_rec.get("unlocked_traits") or c_rec.get("traits") or []
-                                t_mods = get_combined_dc_modifiers(c_traits)
-                                req += t_mods.get(stat, 0)
-                                app_rec = c_rec.get("appearance", {})
-                                if isinstance(app_rec, dict):
-                                    from mechanics.social.persona import calculate_intimate_action_dc_modifier
-                                    req += calculate_intimate_action_dc_modifier(label, app_rec)
-                req = max(1, req)
-                check = resolve_check(char.get(stat_col, 5), req, char.get("luk", 3), check_mode=check_mode)
-            final_action_cat = classification.get("action_category", action_cat) if action_cat == "custom" and isinstance(classification, dict) else action_cat
-            final_target_npc = choice.get("target_npc") or (classification.get("target_npc") if action_cat == "custom" and isinstance(classification, dict) else None)
-            if not final_action_cat:
-                from mechanics.narrative.intent import classify_action_intent
-                parsed_c = classify_action_intent(label)
-                final_action_cat = parsed_c.category.value
-                if not final_target_npc and parsed_c.target_entity:
-                    final_target_npc = parsed_c.target_entity
-
-            return {
-                "char": char,
-                "label": label,
-                "check": check,
-                "mp_spent": mp_cost,
-                "stat": stat,
-                "item_name": target_item_name,
-                "item": target_item_obj,
-                "item_consumed": item_was_consumed,
-                "is_quest_action": bool(choice.get("is_quest_action")),
-                "is_climax_action": bool(choice.get("is_climax_action")),
-                "quest_id": choice.get("quest_id", ""),
-                "sub_obj_id": choice.get("sub_obj_id"),
-                "stage_index": choice.get("stage_index"),
-                "contract_type": choice.get("contract_type", ""),
-                "action_category": final_action_cat,
-                "target_npc": final_target_npc,
-                "active_recall": classification.get("_active_recall") if action_cat == "custom" and isinstance(classification, dict) else None
-            }
+        """Turns a recorded pick (choice_index, direct_choice, or custom_text) into an
+        action dict via TurnService.prepare_and_roll_action."""
+        return await TurnService.prepare_and_roll_action(
+            session_id=session["id"],
+            user_id=user_id,
+            raw_pick=pick,
+            session=session,
+            enforce_explicit_mp=False,
+        )
 
     async def handle_action(self, interaction: discord.Interaction, session_id: int,
                                  choice_index: int | None = None, custom_text: str | None = None,
@@ -249,10 +98,14 @@ class GameLoopMixin:
                     raw_next_choices, next_narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
                         outcome, session=turn_response.session
                     )
-                    new_choices = self._clean_choices(
-                        raw_next_choices, scenario=scen_curr, location=loc_curr, char=new_char,
-                        dialogue_partner=partner_arg, current_npcs=npcs_arg, session_id=session_id
-                    )
+                    if isinstance(outcome, dict) and outcome.get("_hybrid_choices_built") and raw_next_choices:
+                        new_choices = list(raw_next_choices)
+                    else:
+                        new_choices = self._clean_choices(
+                            raw_next_choices, scenario=scen_curr, location=loc_curr, char=new_char,
+                            dialogue_partner=partner_arg, current_npcs=npcs_arg, session_id=session_id,
+                            departed_npcs=outcome.get("departed_characters") or outcome.get("departed_npcs"),
+                        )
                     outcome["next_narrative"] = next_narrative
                     outcome["scene_title"] = scene_title
 
@@ -266,7 +119,9 @@ class GameLoopMixin:
                                            next_narrative, new_choices, new_history,
                                            location=outcome.get("location"), nearby_enemies=outcome.get("nearby_enemies"),
                                            current_npcs=outcome.get("npcs_present", []),
-                                           dialogue_partner=partner_arg)
+                                           dialogue_partner=partner_arg,
+                                           current_node_id=outcome.get("current_node_id"),
+                                           focal_point=outcome.get("focal_point"))
                     merchant = _apply_merchant_encounter_result(session_id, outcome.get("merchant_encounter"))
 
                     result_display = session.get("result_display", "detailed")
@@ -316,12 +171,16 @@ class GameLoopMixin:
                     fresh_session = await adb(db.get_session, session_id)
                     next_turn_uid = db.current_turn_user_id(fresh_session)
                     next_actor_char = await adb(db.get_character, next_turn_uid)
-                    image_url = await self._maybe_generate_image(fresh_session, outcome.get("image_prompt"))
+                    image_url = await self._maybe_generate_image(fresh_session, outcome.get("image_prompt"), outcome=outcome)
 
                     next_embeds = scene_embed(fresh_session, next_actor_char, outcome.get("scene_title"),
                                               outcome.get("next_narrative"), new_choices, image_url)
                     next_view = ChoiceView(self, session_id, next_turn_uid, new_choices, next_actor_char, merchant)
-                    await self._safe_send(interaction, embeds=next_embeds, view=next_view)
+                    _, discord_file = prepare_discord_image(image_url)
+                    send_kwargs = {"embeds": next_embeds, "view": next_view}
+                    if discord_file:
+                        send_kwargs["file"] = discord_file
+                    await self._safe_send(interaction, **send_kwargs)
 
             except LockAcquisitionError:
                 try:
@@ -352,8 +211,21 @@ class GameLoopMixin:
                     inv = await adb(db.get_inventory, uid)
                     party = [(char, inv)]
                     
+                    history = session.get("history") or []
+
+                    # If Turn 0 (opening scene, no action history yet), regenerate opening scene
+                    if not history:
+                        await self.launch_opening_scene(interaction, session, use_followup=True)
+                        return
+
                     try:
                         turn_response = await TurnService.retry_narration(session_id, uid)
+                    except ValueError as ve:
+                        if "No completed snapshot available to retry" in str(ve):
+                            await self._safe_send(interaction, content="⚠️ No completed turn snapshot available to retry.")
+                        else:
+                            await self._safe_send(interaction, content=f"⚠️ The LLM failed to resolve this retry: {ve}")
+                        return
                     except Exception as e:
                         logger.error("Failed to retry narration for session %s: %s", session_id, e, exc_info=True)
                         await self._safe_send(interaction, content=f"⚠️ The LLM failed to resolve this retry: {e}")
@@ -372,7 +244,8 @@ class GameLoopMixin:
                     )
                     new_choices = self._clean_choices(
                         raw_next_choices, scenario=scen_curr, location=loc_curr, char=char,
-                        dialogue_partner=partner_arg, current_npcs=npcs_arg, session_id=session_id
+                        dialogue_partner=partner_arg, current_npcs=npcs_arg, session_id=session_id,
+                        departed_npcs=outcome.get("departed_characters") or outcome.get("departed_npcs"),
                     )
                     outcome["next_narrative"] = next_narrative
                     outcome["scene_title"] = scene_title
@@ -440,7 +313,7 @@ class GameLoopMixin:
                         await self._announce_levelup(interaction, uid, levels_gained)
 
                     fresh_session = await adb(db.get_session, session_id)
-                    image_url = await self._maybe_generate_image(fresh_session, outcome.get("image_prompt"))
+                    image_url = await self._maybe_generate_image(fresh_session, outcome.get("image_prompt"), outcome=outcome)
 
                     # Reconstruct view and sync embeds
                     if fresh_session["mode"] == "sync":
@@ -453,7 +326,11 @@ class GameLoopMixin:
                                                   outcome.get("next_narrative"), new_choices, image_url)
                         next_view = ChoiceView(self, session_id, uid, new_choices, char, merchant)
                     
-                    await self._safe_send(interaction, embeds=next_embeds, view=next_view)
+                    _, discord_file = prepare_discord_image(image_url)
+                    send_kwargs = {"embeds": next_embeds, "view": next_view}
+                    if discord_file:
+                        send_kwargs["file"] = discord_file
+                    await self._safe_send(interaction, **send_kwargs)
 
             except LockAcquisitionError:
                 try:
@@ -514,7 +391,24 @@ class GameLoopMixin:
             else:
                 pick = {"custom_text": custom_text}
 
-            await adb(db.set_pending_pick, session_id, user_id, pick)
+            try:
+                resolved_pick = await self._resolve_pick(session, user_id, pick)
+                chk = resolved_pick.get("check")
+                if chk is not None and not isinstance(chk, dict):
+                    resolved_pick = dict(resolved_pick)
+                    resolved_pick["check"] = {
+                        "chance": getattr(chk, "chance", 100),
+                        "roll": getattr(chk, "roll", 100.0),
+                        "tier": getattr(chk, "tier", "success"),
+                        "tier_label": getattr(chk, "tier_label", "Success"),
+                        "succeeded": getattr(chk, "succeeded", True),
+                        "requirement": getattr(chk, "requirement", resolved_pick.get("requirement", 0)),
+                    }
+                pick_to_store = resolved_pick
+            except Exception:
+                pick_to_store = pick
+
+            await adb(db.set_pending_pick, session_id, user_id, pick_to_store)
             session = await adb(db.get_session, session_id)
             waiting_on = [uid for uid in member_ids if str(uid) not in session["pending_picks"]]
 
@@ -562,10 +456,6 @@ class GameLoopMixin:
 
                     mp_already_spent = {a["char"]["user_id"]: a["mp_spent"] for a in actions}
                     items_gained_by_user = game_engine.apply_outcome(session_id, party, outcome, mp_already_spent, actions=actions)
-                    try:
-                        game_engine.apply_quest_update(session_id, outcome)
-                    except Exception as e:
-                        logger.warning("apply_quest_update failed during party sync (non-fatal): %s", e)
 
                     summaries, all_levels = [], []
                     xp_by_name = {}
@@ -600,10 +490,17 @@ class GameLoopMixin:
                     loc_curr = outcome.get("location") or session.get("current_location", "")
                     first_char = party[0][0] if party and party[0] else None
 
-                    history_entry = "; ".join(
-                        f"[{a['check'].tier_label}] {a['char']['name']}: {a['label']}" for a in actions)
+                    action_summary_str = "; ".join(
+                        f"[{a['check'].tier_label}] {a['char']['name']}: {a['label']}" for a in actions
+                    )
                     outcome_nar = outcome.get("outcome_narrative", "")
-                    history_entry += f" -> {self._compact_summary(outcome_nar, max_chars=500)}"
+                    next_nar_hist = outcome.get("next_narrative") or outcome.get("narrative") or ""
+                    history_entry = {
+                        "action": action_summary_str,
+                        "outcome": outcome_nar,
+                        "next": next_nar_hist,
+                        "summary": f"{action_summary_str} -> {self._compact_summary(outcome_nar, max_chars=500)}",
+                    }
             
                     from mechanics.world.mobility import get_session_dialogue_partners; has_partner = bool(get_session_dialogue_partners(outcome))
                     dyn_limit = 12 if has_partner else 4
@@ -612,10 +509,13 @@ class GameLoopMixin:
                     raw_next_choices, next_narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
                         outcome, session=session
                     )
-                    new_choices = self._clean_choices(
-                        raw_next_choices, scenario=scen_curr, location=loc_curr, char=first_char,
-                        dialogue_partner=partner_arg, current_npcs=npcs_arg, session_id=session_id
-                    )
+                    if isinstance(outcome, dict) and outcome.get("_hybrid_choices_built") and raw_next_choices:
+                        new_choices = list(raw_next_choices)
+                    else:
+                        new_choices = self._clean_choices(
+                            raw_next_choices, scenario=scen_curr, location=loc_curr, char=first_char,
+                            dialogue_partner=partner_arg, current_npcs=npcs_arg, session_id=session_id
+                        )
                     outcome["next_narrative"] = next_narrative
                     outcome["scene_title"] = scene_title
 
@@ -680,13 +580,17 @@ class GameLoopMixin:
                         *[(asyncio.gather(adb(db.get_character, uid), adb(db.get_inventory, uid)))
                           for uid in member_ids]
                     ))
-                    image_url = await self._maybe_generate_image(fresh_session, outcome.get("image_prompt"))
+                    image_url = await self._maybe_generate_image(fresh_session, outcome.get("image_prompt"), outcome=outcome)
 
                     next_embeds = sync_scene_embed(fresh_session, fresh_party, outcome.get("scene_title"),
                                                    outcome.get("next_narrative"), new_choices, waiting_on=[],
                                                    image_url=image_url)
                     next_view = SyncChoiceView(self, session_id, member_ids, new_choices, fresh_party, merchant)
-                    await self._safe_send(interaction, embeds=next_embeds, view=next_view)
+                    _, discord_file = prepare_discord_image(image_url)
+                    send_kwargs = {"embeds": next_embeds, "view": next_view}
+                    if discord_file:
+                        send_kwargs["file"] = discord_file
+                    await self._safe_send(interaction, **send_kwargs)
 
             except LockAcquisitionError:
                 try:

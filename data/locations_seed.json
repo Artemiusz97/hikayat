@@ -14,6 +14,11 @@
             "name": "Homeroom Classroom",
             "sub_locations": [
               {
+                "id": "sub_homeroom_classroom_entrance",
+                "name": "Classroom Sliding Door Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_player_desk",
                 "name": "Player's Desk"
               },
@@ -35,6 +40,11 @@
             "id": "loc_empty_class",
             "name": "Empty Classroom",
             "sub_locations": [
+              {
+                "id": "sub_empty_classroom_entrance",
+                "name": "Classroom Doorway Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_front_desks",
                 "name": "Front Row Desks"
@@ -68,6 +78,11 @@
             "name": "Teachers' Staff Room",
             "sub_locations": [
               {
+                "id": "sub_teachers_staff_room_entrance",
+                "name": "Staff Room Entrance Doorway",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_homeroom_teacher_desk",
                 "name": "Homeroom Teacher's Desk"
               },
@@ -85,6 +100,11 @@
             "id": "loc_library",
             "name": "School Library",
             "sub_locations": [
+              {
+                "id": "sub_school_library_entrance",
+                "name": "Library Entrance Turnstiles",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_study_tables",
                 "name": "Study Tables"
@@ -104,6 +124,11 @@
             "name": "Chemistry & Science Lab",
             "sub_locations": [
               {
+                "id": "sub_chemistry_science_lab_entrance",
+                "name": "Lab Entrance & Safety Station",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_lab_workbenches",
                 "name": "Lab Workbenches"
               },
@@ -121,6 +146,11 @@
             "id": "loc_rooftop",
             "name": "School Rooftop",
             "sub_locations": [
+              {
+                "id": "sub_school_rooftop_entrance",
+                "name": "Rooftop Heavy Access Door",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_roof_benches",
                 "name": "Rooftop Benches"
@@ -190,6 +220,11 @@
             "name": "Main Gymnasium",
             "sub_locations": [
               {
+                "id": "sub_main_gymnasium_entrance",
+                "name": "Gymnasium Double Doors Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_basketball_court",
                 "name": "Basketball Court"
               },
@@ -211,6 +246,11 @@
             "id": "loc_sports_field",
             "name": "Athletic Field",
             "sub_locations": [
+              {
+                "id": "sub_athletic_field_entrance",
+                "name": "Athletic Field Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_track",
                 "name": "Running Track"
@@ -234,6 +274,11 @@
             "name": "Swimming Pool Facility",
             "sub_locations": [
               {
+                "id": "sub_swimming_pool_facility_entrance",
+                "name": "Pool Facility Entrance & Footbath",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_poolside",
                 "name": "Poolside Deck"
               },
@@ -252,6 +297,11 @@
             "name": "Martial Arts Dojo",
             "sub_locations": [
               {
+                "id": "sub_martial_arts_dojo_entrance",
+                "name": "Dojo Sliding Doors Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_tatami_mat",
                 "name": "Central Tatami Mat"
               },
@@ -269,6 +319,11 @@
             "id": "loc_behind_gym_sheds",
             "name": "Behind Gym Storage Sheds",
             "sub_locations": [
+              {
+                "id": "sub_behind_gym_storage_sheds_entrance",
+                "name": "Gymnasium Double Doors Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_brawler_benches",
                 "name": "Brawler Hangout Benches"
@@ -298,6 +353,11 @@
             "name": "Central Courtyard",
             "sub_locations": [
               {
+                "id": "sub_central_courtyard_entrance",
+                "name": "Courtyard Archway Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_fountain",
                 "name": "Courtyard Fountain"
               },
@@ -315,6 +375,11 @@
             "id": "loc_cafeteria",
             "name": "Campus Dining Hall & Cafeteria",
             "sub_locations": [
+              {
+                "id": "sub_campus_dining_hall_cafeteria_entrance",
+                "name": "Dining Hall Double Doors Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_meal_counter",
                 "name": "Hot Lunch Order Counter"
@@ -334,6 +399,11 @@
             "name": "Vending Machine Pavilion",
             "sub_locations": [
               {
+                "id": "sub_vending_machine_pavilion_entrance",
+                "name": "Pavilion Entrance Walkway",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_vending_machines",
                 "name": "Vending Machines Area"
               },
@@ -351,6 +421,11 @@
             "id": "loc_greenhouse",
             "name": "Botanical Glasshouse",
             "sub_locations": [
+              {
+                "id": "sub_botanical_glasshouse_entrance",
+                "name": "Glasshouse Double Doors Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_orchid_nursery",
                 "name": "Orchid Nursery & Planter Beds"
@@ -380,6 +455,11 @@
             "name": "Student Council Office",
             "sub_locations": [
               {
+                "id": "sub_student_council_office_entrance",
+                "name": "Council Office Entrance Doorway",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_pres_desk",
                 "name": "President's Desk"
               },
@@ -397,6 +477,11 @@
             "id": "loc_auditorium_stage",
             "name": "School Auditorium Stage",
             "sub_locations": [
+              {
+                "id": "sub_school_auditorium_stage_entrance",
+                "name": "Auditorium Double Doors Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_auditorium_stage",
                 "name": "Auditorium Stage"
@@ -416,6 +501,11 @@
             "name": "Old East Wing Music Room",
             "sub_locations": [
               {
+                "id": "sub_old_east_wing_music_room_entrance",
+                "name": "Music Room Entrance Door",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_piano_alcove",
                 "name": "Upright Piano Alcove"
               },
@@ -433,6 +523,11 @@
             "id": "loc_fine_arts_studio",
             "name": "Fine Arts Studio",
             "sub_locations": [
+              {
+                "id": "sub_fine_arts_studio_entrance",
+                "name": "Fine Arts Studio Entrance Doorway",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_easels",
                 "name": "Easel & Drafting Desks"
@@ -452,6 +547,11 @@
             "name": "Campus Media & Broadcasting Room",
             "sub_locations": [
               {
+                "id": "sub_campus_media_broadcasting_room_entrance",
+                "name": "Studio Sound-Lock Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_pa_console",
                 "name": "PA Announcement Console"
               },
@@ -469,6 +569,11 @@
             "id": "loc_clubroom_corridor",
             "name": "Student Clubroom Corridor",
             "sub_locations": [
+              {
+                "id": "sub_student_clubroom_corridor_entrance",
+                "name": "Club Corridor Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_club_101",
                 "name": "Club Meeting Room 101"
@@ -498,6 +603,11 @@
             "name": "Local Café",
             "sub_locations": [
               {
+                "id": "sub_local_café_entrance",
+                "name": "Café Front Glass Door",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_window_seat",
                 "name": "Window Seat Table"
               },
@@ -516,6 +626,11 @@
             "name": "Game Arcade",
             "sub_locations": [
               {
+                "id": "sub_game_arcade_entrance",
+                "name": "Arcade Neon Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_fighting_games",
                 "name": "Fighting Game Cabinets"
               },
@@ -533,6 +648,11 @@
             "id": "loc_karaoke",
             "name": "Karaoke Lounge",
             "sub_locations": [
+              {
+                "id": "sub_karaoke_lounge_entrance",
+                "name": "Lounge Reception Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_room_4",
                 "name": "Private Karaoke Room"
@@ -598,6 +718,11 @@
             "name": "Neighborhood Park",
             "sub_locations": [
               {
+                "id": "sub_neighborhood_park_entrance",
+                "name": "Park Entrance Arch",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_park_swings",
                 "name": "Swing Set"
               },
@@ -626,6 +751,11 @@
             "name": "Sandy Beach & Coastline",
             "sub_locations": [
               {
+                "id": "sub_sandy_beach_coastline_entrance",
+                "name": "Beach Access Boardwalk",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_towel_spot",
                 "name": "Beach Towel Spot"
               },
@@ -644,6 +774,11 @@
             "name": "Boardwalk Pier & Lighthouse",
             "sub_locations": [
               {
+                "id": "sub_boardwalk_pier_lighthouse_entrance",
+                "name": "Front Door & Genkan Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_pier_railings",
                 "name": "Pier Railing Lookout"
               },
@@ -657,6 +792,11 @@
             "id": "loc_seaside_cafe",
             "name": "Seaside Beach Shack",
             "sub_locations": [
+              {
+                "id": "sub_seaside_beach_shack_entrance",
+                "name": "Beach Access Boardwalk",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_patio_table",
                 "name": "Open-Air Patio Table"
@@ -695,6 +835,11 @@
             "name": "Mountain Lake Pier",
             "sub_locations": [
               {
+                "id": "sub_mountain_lake_pier_entrance",
+                "name": "Pier Entrance Ramp",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_boat_dock",
                 "name": "Rowboat Dock"
               },
@@ -708,6 +853,11 @@
             "id": "loc_summit_lookout",
             "name": "Mountain Summit Lookout",
             "sub_locations": [
+              {
+                "id": "sub_mountain_summit_lookout_entrance",
+                "name": "Mountain Summit Lookout Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_lookout_telescope",
                 "name": "Viewfinder Telescope"
@@ -732,6 +882,11 @@
             "name": "Old Storage Room 3-B",
             "sub_locations": [
               {
+                "id": "sub_old_storage_room_3_b_entrance",
+                "name": "Old Storage Room 3-B Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_club_table",
                 "name": "Club Meeting Table"
               },
@@ -749,6 +904,11 @@
             "id": "loc_derelict_gym",
             "name": "Derelict Old Gymnasium",
             "sub_locations": [
+              {
+                "id": "sub_derelict_old_gymnasium_entrance",
+                "name": "Gymnasium Double Doors Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_collapsed_stage",
                 "name": "Rotting Wooden Stage"
@@ -768,6 +928,11 @@
             "name": "Decaying Clock Tower",
             "sub_locations": [
               {
+                "id": "sub_decaying_clock_tower_entrance",
+                "name": "Arched Tower Doorway",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_gearworks",
                 "name": "Attic Gearworks Chamber"
               },
@@ -786,6 +951,11 @@
             "name": "Boarded Old Infirmary",
             "sub_locations": [
               {
+                "id": "sub_boarded_old_infirmary_entrance",
+                "name": "Boarded Old Infirmary Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_rusted_gurney",
                 "name": "Rusted Gurney Beds"
               },
@@ -803,6 +973,11 @@
             "id": "loc_ruined_hallway",
             "name": "Overgrown Hallway Wing",
             "sub_locations": [
+              {
+                "id": "sub_overgrown_hallway_wing_entrance",
+                "name": "Overgrown Hallway Wing Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_broken_lockers",
                 "name": "Rusted Lockers"
@@ -826,6 +1001,11 @@
             "id": "loc_manor_foyer",
             "name": "Grand Dusty Foyer",
             "sub_locations": [
+              {
+                "id": "sub_grand_dusty_foyer_entrance",
+                "name": "Grand Dusty Foyer Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_winding_staircase",
                 "name": "Winding Mahogany Staircase"
@@ -869,6 +1049,11 @@
             "name": "Adventurers' Guild Hall",
             "sub_locations": [
               {
+                "id": "sub_adventurers_guild_hall_entrance",
+                "name": "Adventurers' Guild Hall Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_quest_board",
                 "name": "Quest Notice Board"
               },
@@ -887,6 +1072,11 @@
             "name": "Cobblestone Market Plaza",
             "sub_locations": [
               {
+                "id": "sub_cobblestone_market_plaza_entrance",
+                "name": "Courtyard Archway Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_blacksmith",
                 "name": "Blacksmith Forge"
               },
@@ -904,6 +1094,11 @@
             "id": "loc_imperial_palace",
             "name": "Imperial Palace Grounds",
             "sub_locations": [
+              {
+                "id": "sub_imperial_palace_grounds_entrance",
+                "name": "Castle Great Gate",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_throne_room",
                 "name": "Grand Throne Room"
@@ -928,6 +1123,11 @@
             "name": "Lumbermill & Timber Camp",
             "sub_locations": [
               {
+                "id": "sub_lumbermill_timber_camp_entrance",
+                "name": "Campground Trailhead Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_sawmill_shed",
                 "name": "Sawmill Shed"
               },
@@ -946,6 +1146,11 @@
             "name": "Hunter's Trail & Outpost",
             "sub_locations": [
               {
+                "id": "sub_hunters_trail_outpost_entrance",
+                "name": "Hunter's Trail & Outpost Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_trailhead_clearing",
                 "name": "Trailhead Clearing"
               },
@@ -963,6 +1168,11 @@
             "id": "loc_forest_clearing",
             "name": "Sunlit Forest Clearing",
             "sub_locations": [
+              {
+                "id": "sub_sunlit_forest_clearing_entrance",
+                "name": "Sunlit Forest Clearing Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_grassy_meadow",
                 "name": "Grassy Meadow"
@@ -991,6 +1201,11 @@
             "name": "Druidic Tree Sanctuary",
             "sub_locations": [
               {
+                "id": "sub_druidic_tree_sanctuary_entrance",
+                "name": "Sanctuary Grand Archway",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_moonwell",
                 "name": "Sacred Moonwell"
               },
@@ -1004,6 +1219,11 @@
             "id": "loc_gnarled_archway",
             "name": "Gnarled Root Archway",
             "sub_locations": [
+              {
+                "id": "sub_gnarled_root_archway_entrance",
+                "name": "Gnarled Root Archway Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_intertwined_arch",
                 "name": "Arch of Intertwined Roots"
@@ -1047,6 +1267,11 @@
             "name": "Farming Village",
             "sub_locations": [
               {
+                "id": "sub_farming_village_entrance",
+                "name": "Farming Village Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_village_square",
                 "name": "Village Well Square"
               },
@@ -1060,6 +1285,11 @@
             "id": "loc_grain_windmills",
             "name": "Highland Windmills",
             "sub_locations": [
+              {
+                "id": "sub_highland_windmills_entrance",
+                "name": "Highland Windmills Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_mill_grindstone",
                 "name": "Great Grindstone"
@@ -1086,6 +1316,11 @@
             "name": "Harbor Docks & Quays",
             "sub_locations": [
               {
+                "id": "sub_harbor_docks_quays_entrance",
+                "name": "Pier Entrance Ramp",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_pier_master",
                 "name": "Harbormaster's Office"
               },
@@ -1099,6 +1334,11 @@
             "id": "loc_sailor_tavern",
             "name": "Sailor's Haven Tavern",
             "sub_locations": [
+              {
+                "id": "sub_sailors_haven_tavern_entrance",
+                "name": "Tavern Heavy Oak Door",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_rum_bar",
                 "name": "Spiced Rum Bar"
@@ -1139,6 +1379,11 @@
             "name": "Treacherous Mountain Pass",
             "sub_locations": [
               {
+                "id": "sub_treacherous_mountain_pass_entrance",
+                "name": "Treacherous Mountain Pass Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_rope_bridge",
                 "name": "Chasm Rope Bridge"
               },
@@ -1163,6 +1408,11 @@
             "name": "Stilt-Walker Settlement",
             "sub_locations": [
               {
+                "id": "sub_stilt_walker_settlement_entrance",
+                "name": "Stilt-Walker Settlement Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_stilt_pier",
                 "name": "Canoe Pier"
               },
@@ -1176,6 +1426,11 @@
             "id": "loc_sunken_ruins",
             "name": "Sunken Temple Ruins",
             "sub_locations": [
+              {
+                "id": "sub_sunken_temple_ruins_entrance",
+                "name": "Sanctuary Grand Archway",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_submerged_altar",
                 "name": "Partially Submerged Altar"
@@ -1201,6 +1456,11 @@
             "id": "loc_oasis_bazaar",
             "name": "Palm Oasis Bazaar",
             "sub_locations": [
+              {
+                "id": "sub_palm_oasis_bazaar_entrance",
+                "name": "Palm Oasis Bazaar Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_spring_pool",
                 "name": "Crystal Spring Pool"
@@ -1241,6 +1501,11 @@
             "name": "Frontier Hunter Camp",
             "sub_locations": [
               {
+                "id": "sub_frontier_hunter_camp_entrance",
+                "name": "Campground Trailhead Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_fur_yurt",
                 "name": "Heavy Fur Yurt"
               },
@@ -1254,6 +1519,11 @@
             "id": "loc_ice_cavern",
             "name": "Glacial Ice Caverns",
             "sub_locations": [
+              {
+                "id": "sub_glacial_ice_caverns_entrance",
+                "name": "Cavern Mouth Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_frozen_chasm",
                 "name": "Deep Frost Chasm"
@@ -1280,6 +1550,11 @@
             "name": "Obsidian Watchpost",
             "sub_locations": [
               {
+                "id": "sub_obsidian_watchpost_entrance",
+                "name": "Obsidian Watchpost Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_magma_overlook",
                 "name": "Magma River Overlook"
               },
@@ -1293,6 +1568,11 @@
             "id": "loc_caldera_core",
             "name": "Great Caldera Crater",
             "sub_locations": [
+              {
+                "id": "sub_great_caldera_crater_entrance",
+                "name": "Great Caldera Crater Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_lava_lake",
                 "name": "Lava Lake Rim"
@@ -1318,6 +1598,11 @@
             "name": "Necromancer's Ruined Keep",
             "sub_locations": [
               {
+                "id": "sub_necromancers_ruined_keep_entrance",
+                "name": "Stone Chamber Threshold",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_dark_altar",
                 "name": "Obsidian Altar of Souls"
               },
@@ -1341,6 +1626,11 @@
             "id": "loc_subterranean_city",
             "name": "Deep Underworld Enclave",
             "sub_locations": [
+              {
+                "id": "sub_deep_underworld_enclave_entrance",
+                "name": "Deep Underworld Enclave Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_fungal_bazaar",
                 "name": "Luminescent Fungal Market"
@@ -1366,6 +1656,11 @@
             "name": "Dungeon Grand Antechamber",
             "sub_locations": [
               {
+                "id": "sub_dungeon_grand_antechamber_entrance",
+                "name": "Stone Chamber Threshold",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_iron_gate_entrance",
                 "name": "Heavy Iron Portcullis"
               },
@@ -1379,6 +1674,11 @@
             "id": "loc_boss_chamber",
             "name": "Depths Boss Chamber",
             "sub_locations": [
+              {
+                "id": "sub_depths_boss_chamber_entrance",
+                "name": "Depths Boss Chamber Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_treasury_chest",
                 "name": "Gilded Treasure Dais"
@@ -1403,6 +1703,11 @@
             "id": "loc_crystal_grotto",
             "name": "Crystal Geode Grotto",
             "sub_locations": [
+              {
+                "id": "sub_crystal_geode_grotto_entrance",
+                "name": "Crystal Geode Grotto Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_geode_cluster",
                 "name": "Giant Amethyst Cluster"
@@ -1432,6 +1737,11 @@
             "name": "Adventurers' Guild Hall",
             "sub_locations": [
               {
+                "id": "sub_adventurers_guild_hall_entrance",
+                "name": "Adventurers' Guild Hall Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_quest_board_isekai",
                 "name": "Quest Notice Board"
               },
@@ -1450,6 +1760,11 @@
             "name": "Royal Summoning Chamber",
             "sub_locations": [
               {
+                "id": "sub_royal_summoning_chamber_entrance",
+                "name": "Royal Summoning Chamber Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_summoning_circle",
                 "name": "Glowing Magic Circle"
               },
@@ -1463,6 +1778,11 @@
             "id": "loc_market_district_isekai",
             "name": "Cobblestone Market Plaza",
             "sub_locations": [
+              {
+                "id": "sub_cobblestone_market_plaza_entrance",
+                "name": "Courtyard Archway Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_blacksmith_isekai",
                 "name": "Blacksmith Forge"
@@ -1487,6 +1807,11 @@
             "name": "Lumbermill & Timber Camp",
             "sub_locations": [
               {
+                "id": "sub_lumbermill_timber_camp_entrance",
+                "name": "Campground Trailhead Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_sawmill_shed_isekai",
                 "name": "Sawmill Shed"
               },
@@ -1500,6 +1825,11 @@
             "id": "loc_hunters_trail_isekai",
             "name": "Hunter's Trail & Outpost",
             "sub_locations": [
+              {
+                "id": "sub_hunters_trail_outpost_entrance",
+                "name": "Hunter's Trail & Outpost Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_trailhead_clearing_isekai",
                 "name": "Trailhead Clearing"
@@ -1524,6 +1854,11 @@
             "name": "Elven Tree Sanctuary",
             "sub_locations": [
               {
+                "id": "sub_elven_tree_sanctuary_entrance",
+                "name": "Sanctuary Grand Archway",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_moonwell_isekai",
                 "name": "Sacred Moonwell"
               },
@@ -1537,6 +1872,11 @@
             "id": "loc_gnarled_archway_isekai",
             "name": "Gnarled Root Archway",
             "sub_locations": [
+              {
+                "id": "sub_gnarled_root_archway_entrance",
+                "name": "Gnarled Root Archway Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_intertwined_arch_isekai",
                 "name": "Arch of Intertwined Roots"
@@ -1561,6 +1901,11 @@
             "id": "loc_farming_village_isekai",
             "name": "Farming Village",
             "sub_locations": [
+              {
+                "id": "sub_farming_village_entrance",
+                "name": "Farming Village Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_village_square_isekai",
                 "name": "Village Well Square"
@@ -1612,6 +1957,11 @@
             "name": "Palm Oasis Bazaar",
             "sub_locations": [
               {
+                "id": "sub_palm_oasis_bazaar_entrance",
+                "name": "Palm Oasis Bazaar Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_spring_pool_isekai",
                 "name": "Crystal Spring Pool"
               }
@@ -1656,6 +2006,11 @@
             "name": "10th Floor Safe Zone",
             "sub_locations": [
               {
+                "id": "sub_10th_floor_safe_zone_entrance",
+                "name": "10th Floor Safe Zone Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_teleport_crystal",
                 "name": "Warp Waypoint Crystal"
               },
@@ -1684,6 +2039,11 @@
             "name": "Torturer's Dungeon Keep",
             "sub_locations": [
               {
+                "id": "sub_torturers_dungeon_keep_entrance",
+                "name": "Stone Chamber Threshold",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_iron_maiden_hall",
                 "name": "Iron Maiden Chamber"
               },
@@ -1697,6 +2057,11 @@
             "id": "loc_stained_nave",
             "name": "Shattered Stained-Glass Nave",
             "sub_locations": [
+              {
+                "id": "sub_shattered_stained_glass_nave_entrance",
+                "name": "Shattered Stained-Glass Nave Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_desecrated_pulpit",
                 "name": "Desecrated High Pulpit"
@@ -1722,6 +2087,11 @@
             "name": "Sunken Bone Chapel",
             "sub_locations": [
               {
+                "id": "sub_sunken_bone_chapel_entrance",
+                "name": "Sanctuary Grand Archway",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_sacrifice_altar",
                 "name": "Blood-Stained Altar"
               },
@@ -1735,6 +2105,11 @@
             "id": "loc_witch_coven",
             "name": "Witch-Tree Coven Hollow",
             "sub_locations": [
+              {
+                "id": "sub_witch_tree_coven_hollow_entrance",
+                "name": "Witch-Tree Coven Hollow Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_effigy_grove",
                 "name": "Wicker Effigy Grove"
@@ -1760,6 +2135,11 @@
             "name": "The Weeping Hound Tavern",
             "sub_locations": [
               {
+                "id": "sub_the_weeping_hound_tavern_entrance",
+                "name": "Tavern Heavy Oak Door",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_dark_hearth",
                 "name": "Smoky Hearth"
               },
@@ -1773,6 +2153,11 @@
             "id": "loc_town_square",
             "name": "Hanging Tree Square",
             "sub_locations": [
+              {
+                "id": "sub_hanging_tree_square_entrance",
+                "name": "Hanging Tree Square Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_gibbet_tree",
                 "name": "The Great Hanging Tree"
@@ -1798,6 +2183,11 @@
             "name": "Grand Ossuary Hall",
             "sub_locations": [
               {
+                "id": "sub_grand_ossuary_hall_entrance",
+                "name": "Grand Ossuary Hall Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_skull_pillar",
                 "name": "Monumental Skull Pillar"
               },
@@ -1822,6 +2212,11 @@
             "id": "loc_crag_watchpost",
             "name": "Ruined Sentinel Watchpost",
             "sub_locations": [
+              {
+                "id": "sub_ruined_sentinel_watchpost_entrance",
+                "name": "Stone Chamber Threshold",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_signal_beacon",
                 "name": "Extinguished Signal Brazier"
@@ -1871,6 +2266,11 @@
             "name": "Corrupted Hunter Encampment",
             "sub_locations": [
               {
+                "id": "sub_corrupted_hunter_encampment_entrance",
+                "name": "Campground Trailhead Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_bone_totem",
                 "name": "Bleached Bone Totem"
               },
@@ -1913,6 +2313,11 @@
             "name": "Overseer's Command Office",
             "sub_locations": [
               {
+                "id": "sub_overseers_command_office_entrance",
+                "name": "Council Office Entrance Doorway",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_terminal_desk",
                 "name": "Mainframe Terminal Desk"
               },
@@ -1937,6 +2342,11 @@
             "name": "Barter Market Plaza",
             "sub_locations": [
               {
+                "id": "sub_barter_market_plaza_entrance",
+                "name": "Courtyard Archway Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_water_purifier",
                 "name": "Water Purifier Rig"
               },
@@ -1954,6 +2364,11 @@
             "id": "loc_saloon",
             "name": "Rusty Canteen Saloon",
             "sub_locations": [
+              {
+                "id": "sub_rusty_canteen_saloon_entrance",
+                "name": "Dining Hall Double Doors Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_oil_drum_bar",
                 "name": "Oil-Drum Counter"
@@ -1980,6 +2395,11 @@
             "name": "Ground Zero Crater Rim",
             "sub_locations": [
               {
+                "id": "sub_ground_zero_crater_rim_entrance",
+                "name": "Ground Zero Crater Rim Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_slurry_pool",
                 "name": "Glowing Toxic Slurry Pool"
               },
@@ -2003,6 +2423,11 @@
             "id": "loc_overpass_camp",
             "name": "Highway Overpass Outpost",
             "sub_locations": [
+              {
+                "id": "sub_highway_overpass_outpost_entrance",
+                "name": "Highway Overpass Outpost Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_sniper_nest",
                 "name": "Billboard Sniper Nest"
@@ -2052,6 +2477,11 @@
             "name": "Scrap-Metal Gladiator Pit",
             "sub_locations": [
               {
+                "id": "sub_scrap_metal_gladiator_pit_entrance",
+                "name": "Scrap-Metal Gladiator Pit Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_overboss_throne",
                 "name": "Overboss Scrap Throne"
               },
@@ -2076,6 +2506,11 @@
             "id": "loc_refinery_rig",
             "name": "Submerged Refinery Rig",
             "sub_locations": [
+              {
+                "id": "sub_submerged_refinery_rig_entrance",
+                "name": "Submerged Refinery Rig Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_pipe_walkway",
                 "name": "Rusted Catwalk"
@@ -2119,6 +2554,11 @@
             "name": "Sky High VIP Lounge",
             "sub_locations": [
               {
+                "id": "sub_sky_high_vip_lounge_entrance",
+                "name": "Sky High VIP Lounge Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_bar_terrace",
                 "name": "Observation Terrace"
               },
@@ -2143,6 +2583,11 @@
             "name": "Commercial Plaza Center",
             "sub_locations": [
               {
+                "id": "sub_commercial_plaza_center_entrance",
+                "name": "Courtyard Archway Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_holo_fountain",
                 "name": "Holographic Fountain"
               },
@@ -2156,6 +2601,11 @@
             "id": "loc_nightclub",
             "name": "Neon Pulse Nightclub",
             "sub_locations": [
+              {
+                "id": "sub_neon_pulse_nightclub_entrance",
+                "name": "Neon Pulse Nightclub Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_dance_floor",
                 "name": "Holo-Laser Dance Floor"
@@ -2179,6 +2629,11 @@
             "id": "loc_luxury_penthouse",
             "name": "Luxury Penthouse Suite",
             "sub_locations": [
+              {
+                "id": "sub_luxury_penthouse_suite_entrance",
+                "name": "Front Door & Genkan Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_penthouse_balcony",
                 "name": "Glass Balcony Lookout"
@@ -2204,6 +2659,11 @@
             "name": "Street Noodle Bar",
             "sub_locations": [
               {
+                "id": "sub_street_noodle_bar_entrance",
+                "name": "Street Noodle Bar Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_bar_counter",
                 "name": "Neon Counter Stool"
               },
@@ -2218,6 +2678,11 @@
             "name": "Ripperdoc Clinic",
             "sub_locations": [
               {
+                "id": "sub_ripperdoc_clinic_entrance",
+                "name": "Ripperdoc Clinic Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_operating_chair",
                 "name": "Cybernetic Operating Chair"
               },
@@ -2231,6 +2696,11 @@
             "id": "loc_neon_alley",
             "name": "Backstreet Neon Alley",
             "sub_locations": [
+              {
+                "id": "sub_backstreet_neon_alley_entrance",
+                "name": "Backstreet Neon Alley Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_dumpster",
                 "name": "Behind the Dumpster"
@@ -2256,6 +2726,11 @@
             "name": "Automated Cargo Terminal",
             "sub_locations": [
               {
+                "id": "sub_automated_cargo_terminal_entrance",
+                "name": "Automated Cargo Terminal Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_container_stack",
                 "name": "Shipping Container Maze"
               },
@@ -2280,6 +2755,11 @@
             "name": "Nomad Clan Encampment",
             "sub_locations": [
               {
+                "id": "sub_nomad_clan_encampment_entrance",
+                "name": "Campground Trailhead Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_nomad_garage",
                 "name": "Vehicle Tuning Garage"
               },
@@ -2303,6 +2783,11 @@
             "name": "Highway Roadside Diner",
             "sub_locations": [
               {
+                "id": "sub_highway_roadside_diner_entrance",
+                "name": "Highway Roadside Diner Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_diner_booth",
                 "name": "Corner Diner Booth"
               },
@@ -2325,6 +2810,11 @@
             "id": "loc_dome_pavilion",
             "name": "Bio-Dome Central Pavilion",
             "sub_locations": [
+              {
+                "id": "sub_bio_dome_central_pavilion_entrance",
+                "name": "Pavilion Entrance Walkway",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_waterfall_deck",
                 "name": "Artificial Waterfall Deck"
@@ -2354,6 +2844,11 @@
             "name": "Airship Docking Terminal",
             "sub_locations": [
               {
+                "id": "sub_airship_docking_terminal_entrance",
+                "name": "Pier Entrance Ramp",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_airship_dock",
                 "name": "Airship Docking Mast"
               },
@@ -2368,6 +2863,11 @@
             "name": "Alchemists' Guild Hall",
             "sub_locations": [
               {
+                "id": "sub_alchemists_guild_hall_entrance",
+                "name": "Alchemists' Guild Hall Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_brewing_station",
                 "name": "Brewing Station"
               },
@@ -2381,6 +2881,11 @@
             "id": "loc_mechanist_vaults",
             "name": "Mechanists' Archive Vaults",
             "sub_locations": [
+              {
+                "id": "sub_mechanists_archive_vaults_entrance",
+                "name": "Stone Chamber Threshold",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_blueprint_hall",
                 "name": "Classified Blueprint Hall"
@@ -2406,6 +2911,11 @@
             "name": "Command Bridge & Pilot Helm",
             "sub_locations": [
               {
+                "id": "sub_command_bridge_pilot_helm_entrance",
+                "name": "Command Bridge & Pilot Helm Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_helm_wheel",
                 "name": "Brass Steering Helm"
               },
@@ -2424,6 +2934,11 @@
             "name": "Panoramic Observation Deck",
             "sub_locations": [
               {
+                "id": "sub_panoramic_observation_deck_entrance",
+                "name": "Panoramic Observation Deck Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_glass_deck_railing",
                 "name": "Bow Observation Railing"
               },
@@ -2437,6 +2952,11 @@
             "id": "loc_airship_engine_room",
             "name": "Engine & Boiler Room",
             "sub_locations": [
+              {
+                "id": "sub_engine_boiler_room_entrance",
+                "name": "Engine & Boiler Room Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_steam_piston_core",
                 "name": "Twin Steam Turbines"
@@ -2452,6 +2972,11 @@
             "name": "Grand Passenger Salon & Dining Hall",
             "sub_locations": [
               {
+                "id": "sub_grand_passenger_salon_dining_hall_entrance",
+                "name": "Dining Hall Double Doors Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_dining_table",
                 "name": "Crystal Chandelier Banquet Table"
               },
@@ -2466,6 +2991,11 @@
             "name": "Cargo Bay & Armory Hold",
             "sub_locations": [
               {
+                "id": "sub_cargo_bay_armory_hold_entrance",
+                "name": "Cargo Bay & Armory Hold Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_harpoon_cannon",
                 "name": "Pneumatic Harpoon Battery"
               },
@@ -2479,6 +3009,11 @@
             "id": "loc_bow_lookout",
             "name": "Bow Lookout Platform",
             "sub_locations": [
+              {
+                "id": "sub_bow_lookout_platform_entrance",
+                "name": "Bow Lookout Platform Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_spotlight_rig",
                 "name": "Heavy Arc Spotlight"
@@ -2502,6 +3037,11 @@
             "id": "loc_gentlemans_club",
             "name": "Inventors' Society Club",
             "sub_locations": [
+              {
+                "id": "sub_inventors_society_club_entrance",
+                "name": "Inventors' Society Club Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_smoking_room",
                 "name": "Leather Smoking Room"
@@ -2527,6 +3067,11 @@
             "name": "Great Blast Furnace",
             "sub_locations": [
               {
+                "id": "sub_great_blast_furnace_entrance",
+                "name": "Great Blast Furnace Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_lower_valve_basin",
                 "name": "Lower Valve Basin"
               },
@@ -2549,6 +3094,11 @@
             "id": "loc_smuggler_dock",
             "name": "Hidden Waterway Pier",
             "sub_locations": [
+              {
+                "id": "sub_hidden_waterway_pier_entrance",
+                "name": "Pier Entrance Ramp",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_clandestine_dock",
                 "name": "Smuggler Canal Pier"
@@ -2574,6 +3124,11 @@
             "name": "Scrap-Titan Graveyard",
             "sub_locations": [
               {
+                "id": "sub_scrap_titan_graveyard_entrance",
+                "name": "Scrap-Titan Graveyard Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_titan_cockpit",
                 "name": "Hollowed Titan Hull"
               },
@@ -2597,6 +3152,11 @@
             "id": "loc_moor_mine",
             "name": "Abandoned Coal Mine Colliery",
             "sub_locations": [
+              {
+                "id": "sub_abandoned_coal_mine_colliery_entrance",
+                "name": "Cavern Mouth Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_mine_shaft",
                 "name": "Dark Mine Shaft Entry"
@@ -2664,6 +3224,11 @@
             "name": "Command Bridge",
             "sub_locations": [
               {
+                "id": "sub_command_bridge_entrance",
+                "name": "Command Bridge Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_captains_chair",
                 "name": "Captain's Chair"
               },
@@ -2677,6 +3242,11 @@
             "id": "loc_engineering",
             "name": "Engineering Bay",
             "sub_locations": [
+              {
+                "id": "sub_engineering_bay_entrance",
+                "name": "Engineering Bay Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_hyperdrive_core",
                 "name": "Hyperdrive Core"
@@ -2702,6 +3272,11 @@
             "name": "Planetary Senate Plaza",
             "sub_locations": [
               {
+                "id": "sub_planetary_senate_plaza_entrance",
+                "name": "Courtyard Archway Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_senate_chamber",
                 "name": "Grand Assembly Chamber"
               },
@@ -2715,6 +3290,11 @@
             "id": "loc_spaceport_central",
             "name": "Planetary Gateway Spaceport",
             "sub_locations": [
+              {
+                "id": "sub_planetary_gateway_spaceport_entrance",
+                "name": "Planetary Gateway Spaceport Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_customs_terminal",
                 "name": "Interstellar Customs Terminal"
@@ -2741,6 +3321,11 @@
             "name": "Crawler Mining Outpost",
             "sub_locations": [
               {
+                "id": "sub_crawler_mining_outpost_entrance",
+                "name": "Crawler Mining Outpost Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_harvester_deck",
                 "name": "Crawler Extraction Deck"
               },
@@ -2766,6 +3351,11 @@
             "name": "Cryo Research Station",
             "sub_locations": [
               {
+                "id": "sub_cryo_research_station_entrance",
+                "name": "Cryo Research Station Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_thermal_dome",
                 "name": "Headed Habitat Dome"
               },
@@ -2789,6 +3379,11 @@
             "id": "loc_canopy_platform",
             "name": "Canopy Research Platform",
             "sub_locations": [
+              {
+                "id": "sub_canopy_research_platform_entrance",
+                "name": "Canopy Research Platform Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_observation_kiosk",
                 "name": "Bio-Scanner Station"
@@ -2815,6 +3410,11 @@
             "name": "Geothermal Core Refinery",
             "sub_locations": [
               {
+                "id": "sub_geothermal_core_refinery_entrance",
+                "name": "Geothermal Core Refinery Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_lava_catwalk",
                 "name": "Shielded Catwalk"
               },
@@ -2840,6 +3440,11 @@
             "name": "Floating Platform City",
             "sub_locations": [
               {
+                "id": "sub_floating_platform_city_entrance",
+                "name": "Floating Platform City Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_submersible_dock",
                 "name": "Deep-Sea Submersible Bay"
               },
@@ -2863,6 +3468,11 @@
             "id": "loc_asteroid_colony",
             "name": "Hollow Asteroid Hab",
             "sub_locations": [
+              {
+                "id": "sub_hollow_asteroid_hab_entrance",
+                "name": "Hollow Asteroid Hab Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_zero_g_dock",
                 "name": "Magnetic Clamping Berth"
@@ -2892,6 +3502,11 @@
             "name": "Roastery & Artisanal Café",
             "sub_locations": [
               {
+                "id": "sub_roastery_artisanal_café_entrance",
+                "name": "Café Front Glass Door",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_sol_window_booth",
                 "name": "Window Corner Booth"
               },
@@ -2910,6 +3525,11 @@
             "name": "Secondhand Bookstore & Vinyl Shop",
             "sub_locations": [
               {
+                "id": "sub_secondhand_bookstore_vinyl_shop_entrance",
+                "name": "Shop Front Entrance Door",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_sol_listening_station",
                 "name": "Turntable Listening Corner"
               },
@@ -2924,6 +3544,11 @@
             "name": "Late-Night Ramen & Izakaya Counter",
             "sub_locations": [
               {
+                "id": "sub_late_night_ramen_izakaya_counter_entrance",
+                "name": "Late-Night Ramen & Izakaya Counter Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_sol_chef_bar",
                 "name": "Steam-Filled Counter Stools"
               },
@@ -2937,6 +3562,11 @@
             "id": "loc_sol_cowork_loft",
             "name": "Creative Studio & Co-Working Loft",
             "sub_locations": [
+              {
+                "id": "sub_creative_studio_co_working_loft_entrance",
+                "name": "Creative Studio & Co-Working Loft Entrance Doorway",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_sol_editing_desk",
                 "name": "Media & Photography Desk"
@@ -2962,6 +3592,11 @@
             "name": "Walk-Up Studio Apartments",
             "sub_locations": [
               {
+                "id": "sub_walk_up_studio_apartments_entrance",
+                "name": "Walk-Up Studio Apartments Entrance Doorway",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_sol_player_studio",
                 "name": "Player's Studio Loft"
               },
@@ -2975,6 +3610,11 @@
             "id": "loc_sol_konbini",
             "name": "24-Hour Corner Convenience Store",
             "sub_locations": [
+              {
+                "id": "sub_24_hour_corner_convenience_store_entrance",
+                "name": "Shop Front Entrance Door",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_sol_magazine_rack",
                 "name": "Magazine & Snack Aisle"
@@ -2990,6 +3630,11 @@
             "name": "Neighborhood Coin Laundry",
             "sub_locations": [
               {
+                "id": "sub_neighborhood_coin_laundry_entrance",
+                "name": "Neighborhood Coin Laundry Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_sol_dryer_row",
                 "name": "Spinning Dryer Row"
               },
@@ -3003,6 +3648,11 @@
             "id": "loc_sol_hilltop_shrine",
             "name": "Local Hilltop Shrine & Park",
             "sub_locations": [
+              {
+                "id": "sub_local_hilltop_shrine_park_entrance",
+                "name": "Park Entrance Arch",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_sol_shrine_steps",
                 "name": "Lantern-Lit Stone Steps"
@@ -3028,6 +3678,11 @@
             "name": "Basement Jazz & Cocktail Bar",
             "sub_locations": [
               {
+                "id": "sub_basement_jazz_cocktail_bar_entrance",
+                "name": "Basement Jazz & Cocktail Bar Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_sol_mahogany_bar",
                 "name": "Mahogany Bar Counter"
               },
@@ -3041,6 +3696,11 @@
             "id": "loc_sol_live_house",
             "name": "Underground Indie Live House",
             "sub_locations": [
+              {
+                "id": "sub_underground_indie_live_house_entrance",
+                "name": "Front Door & Genkan Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_sol_crowd_floor",
                 "name": "Front Stage Floor"
@@ -3056,6 +3716,11 @@
             "name": "24-Hour Arcade & Billiards Hall",
             "sub_locations": [
               {
+                "id": "sub_24_hour_arcade_billiards_hall_entrance",
+                "name": "Arcade Neon Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_sol_pool_tables",
                 "name": "Back-Room Pool Tables"
               },
@@ -3070,6 +3735,11 @@
             "name": "Neighborhood Boxing & Martial Arts Gym",
             "sub_locations": [
               {
+                "id": "sub_neighborhood_boxing_martial_arts_gym_entrance",
+                "name": "Gymnasium Double Doors Entrance",
+                "is_entrance": 1
+              },
+              {
                 "id": "sub_sol_sparring_ring",
                 "name": "Roped Sparring Ring"
               },
@@ -3083,6 +3753,11 @@
             "id": "loc_sol_neon_alley",
             "name": "Neon Back-Alley",
             "sub_locations": [
+              {
+                "id": "sub_neon_back_alley_entrance",
+                "name": "Neon Back-Alley Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_sol_dead_end",
                 "name": "Rain-Slicked Dead End"
@@ -3107,6 +3782,11 @@
             "id": "loc_sol_boardwalk",
             "name": "Waterfront Boardwalk & Night Market",
             "sub_locations": [
+              {
+                "id": "sub_waterfront_boardwalk_night_market_entrance",
+                "name": "Waterfront Boardwalk & Night Market Entrance",
+                "is_entrance": 1
+              },
               {
                 "id": "sub_sol_sea_railing",
                 "name": "Bayview Promenade Railing"

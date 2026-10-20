@@ -185,8 +185,10 @@ def _build_quest_and_bounty_directives(session: dict, ctx) -> tuple[str, str]:
 
 def _is_social_or_non_combat_action(a: dict, session: dict | None = None) -> bool:
     """Evaluate whether an action is conversational, social, intimate, or set in a non-combat scenario."""
-    if session and scenario_data.is_non_combat_scenario(session.get("scenario")):
-        return True
+    if session:
+        scen = session.get("scenario") or session.get("scenario_key")
+        if scenario_data.is_non_combat_scenario(scen):
+            return True
 
     cat = str(a.get("action_category") or "").lower()
     if cat in ("dialogue", "disclosure_inquiry", "affection", "social_invite", "romantic_confession", "party_recruit", "social", "conversation", "chat", "flirt"):
@@ -211,6 +213,12 @@ def _is_social_or_non_combat_action(a: dict, session: dict | None = None) -> boo
     if stat == "CHA" and not any(kw in lbl for kw in ("rally", "battle", "war", "intimidate monster", "roar", "provoke")):
         return True
 
+    # Investigative / observation checks outside combat
+    if stat in ("PER", "INT", "LUK") and not any(kw in lbl for kw in ("trap", "hazard", "ambush", "defuse", "disarm", "dodge", "evade", "parry", "attack")):
+        active_enemies = (game_engine.get_active_enemies(session) if isinstance(session, dict) else [])
+        if not active_enemies:
+            return True
+
     return False
 
 def _build_player_actions_text(actions: list, session: dict | None = None) -> str:
@@ -218,24 +226,25 @@ def _build_player_actions_text(actions: list, session: dict | None = None) -> st
     action_lines = []
     for a in actions:
 
-        mp_note = f" (spent {a['mp_spent']} MP)" if a["mp_spent"] else ""
+        mp_val = a.get("mp_spent") if isinstance(a, dict) else 0
+        mp_note = f" (spent {mp_val} MP)" if mp_val else ""
 
-        stat = a.get("stat")
+        stat = a.get("stat") if isinstance(a, dict) else None
+        check_obj = a.get("check") if isinstance(a, dict) else None
+        tier = getattr(check_obj, "tier", None) if check_obj else (check_obj.get("tier") if isinstance(check_obj, dict) else "success")
+        chance = getattr(check_obj, "chance", 100) if check_obj else (check_obj.get("chance", 100) if isinstance(check_obj, dict) else 100)
 
-        tier = a["check"].tier
-
-        if stat in ("NONE", "FREE") or (a["check"].chance == 100 and tier == "success"):
-
+        if stat in ("NONE", "FREE") or check_obj is None or (chance == 100 and tier == "success"):
             tier_directive = "Free Action / Standard Choice (Clean execution, no roll check needed)"
 
         elif tier == "crit_fail":
 
             if _is_social_or_non_combat_action(a, session):
                 tier_directive = (
-                    f"Critical Failure (FAIL FORWARD: Severe social blunder, major embarrassment, or dramatic confrontation; flips social stakes). "
-                    f"[NON-COMBAT / SOCIAL RULE]: Do NOT inflict physical HP damage (hp_change MUST be 0)! "
+                    f"Critical Failure (FAIL FORWARD: Severe social blunder, major embarrassment, dramatic confrontation, or critical clue blunder; flips scene stakes). "
+                    f"[NON-COMBAT / SOCIAL RULE]: Do NOT inflict physical HP damage (hp_change MUST be 0)! Do NOT inflict MP loss or Gold deductions (mp_change MUST be 0, gold_change MUST be 0)! "
                     f"Express failure through relationship affinity loss in relationship_updates (delta_score: -3 to -6), "
-                    f"reputation loss in faction_updates, NPC walking away/cooling off, or intense emotional mood tags in status_effects (e.g. 'Humiliated', 'Mortified', 'Flustered')."
+                    f"reputation loss in faction_updates, NPC suspicion/walking away, narrative complications, or intense emotional mood tags in status_effects (e.g. 'Humiliated', 'Mortified', 'Flustered')."
                 )
             else:
                 from skill_check import calculate_hazard_damage
@@ -257,9 +266,9 @@ def _build_player_actions_text(actions: list, session: dict | None = None) -> st
             if _is_social_or_non_combat_action(a, session):
                 tier_directive = (
                     f"Failure (FAIL FORWARD: Suffer a complication, escalation, or success-at-a-cost; keep momentum moving!). "
-                    f"[NON-COMBAT / SOCIAL RULE]: Do NOT inflict physical HP damage (hp_change MUST be 0)! "
+                    f"[NON-COMBAT / SOCIAL RULE]: Do NOT inflict physical HP damage (hp_change MUST be 0)! Do NOT inflict MP loss or Gold deductions (mp_change MUST be 0, gold_change MUST be 0)! "
                     f"Express failure through relationship affinity penalties in relationship_updates (delta_score: -1 to -3), "
-                    f"conversational awkwardness, defensive NPC reactions, or emotional mood tags in status_effects (e.g. 'Flustered', 'Awkward', 'Embarrassed')."
+                    f"conversational awkwardness, defensive NPC reactions, clue ambiguity, or emotional mood tags in status_effects (e.g. 'Flustered', 'Awkward', 'Embarrassed')."
                 )
             else:
                 from skill_check import calculate_hazard_damage
@@ -312,16 +321,13 @@ def _build_player_actions_text(actions: list, session: dict | None = None) -> st
 
 
 
+        check_obj = a.get("check")
+        chance_note = f" (success chance was {check_obj.chance}%)" if check_obj and hasattr(check_obj, "chance") else ""
+        c_name = a["char"]["name"] if isinstance(a.get("char"), dict) and a["char"].get("name") else "You"
         action_lines.append(
-
-            f"- {a['char']['name']} chose to: \"{action_lbl}\"{mp_note} -> "
-
-            f"Outcome (already determined, do not contradict): {tier_directive} "
-
-            f"(success chance was {a['check'].chance}%)"
-
+            f"- {c_name} chose to: \"{action_lbl}\"{mp_note} -> "
+            f"Outcome (already determined, do not contradict): {tier_directive}{chance_note}"
         )
-
     actions_text = "\n".join(action_lines)
     return "\n".join(action_lines)
 

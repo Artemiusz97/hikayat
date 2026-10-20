@@ -1,279 +1,133 @@
 """
-tests/test_narrative_leakage.py — Unit tests for the Narrative Leakage Guard
-=============================================================================
-Tests cover:
-  - Gold gain / gold loss detection from narrative prose
-  - Non-combat damage detection (fail / crit_fail only)
-  - Item grant detection with blocklist filtering
-  - Combat passthrough (guard must not touch combat outcomes)
-  - Zero-leakage passthrough (no prose, or prose with no transactions)
-  - Character_outcomes entry creation when LLM omitted it entirely
-  - Safety caps (MAX_GOLD_LEAKAGE_PATCH, damage sanity bounds)
+tests/test_narrative_leakage.py — Unit tests for Deterministic Pre-Turn Vitals & Resources Engine
+================================================================================================
+Replaces retired post-hoc narrative leakage regex scraper with deterministic pre-turn checks:
+  - Gold spending deduction on successful check (ActionCommand.gold_spent)
+  - Procedural loot roll when ActionCommand.triggers_loot_roll is set on success
+  - Bounded hazard HP damage on failed STR/AGI/END physical checks in combat-capable scenarios
+  - Complete suppression of hazard HP damage in non-combat/social scenarios
+  - Combat turns bypass (combat is handled by precompute_combat_turn)
 """
-import sys
-import os
 import unittest
-from unittest.mock import patch, MagicMock
-from dataclasses import dataclass
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from skill_check import CheckResult
+from game_engine.state.core import resolve_pre_turn_vitals_and_resources
 
 
-# ---------------------------------------------------------------------------
-# Stub for CheckResult so we can fake check tiers without full skill_check import
-# ---------------------------------------------------------------------------
-@dataclass
-class _FakeCheck:
-    tier: str
-    succeeded: bool = True
-
-
-def _make_party(name: str = "Aria", hp: int = 50, gold: int = 100) -> list:
-    char = {"name": name, "user_id": 1, "hp": hp, "max_hp": 100, "gold": gold}
-    return [(char, {})]
-
-
-def _make_action(tier: str = "success") -> dict:
-    return {"label": "Do something", "check": _FakeCheck(tier=tier)}
-
-
-# ---------------------------------------------------------------------------
-# Patch game_engine.get_active_enemies to always return [] (non-combat default)
-# ---------------------------------------------------------------------------
-import game_engine as _ge_module  # noqa: E402  (needed for patch target)
-
-
-class TestLeakageGuardGold(unittest.TestCase):
-    """Gold gain and loss leakage detection."""
-
-    def _run(self, outcome: dict, actions=None, party=None):
-        from game_engine.state import reconcile_narrative_leakage
-        party = party or _make_party()
-        actions = actions or [_make_action("success")]
-        with patch.object(_ge_module, "get_active_enemies", return_value=[]):
-            return reconcile_narrative_leakage(outcome, party, actions)
-
-    def test_gold_gain_patched(self):
-        outcome = {
-            "outcome_narrative": "The merchant rewards you with 50 gold for your troubles.",
-            "character_outcomes": [],
+class TestPreTurnVitalsAndResources(unittest.TestCase):
+    def setUp(self):
+        self.char = {
+            "name": "Aria",
+            "user_id": 1,
+            "hp": 80,
+            "max_hp": 100,
+            "gold": 150,
+            "level": 2
         }
-        result = self._run(outcome)
-        co = result["character_outcomes"][0]
-        self.assertEqual(co["gold_change"], 50)
+        self.party = [self.char]
+        self.session_fantasy = {"id": 1, "scenario": "fantasy", "nearby_enemies": []}
+        self.session_school = {"id": 2, "scenario": "high_school", "nearby_enemies": []}
 
-    def test_gold_gain_variant_phrases(self):
-        for phrase in [
-            "You earned 200 gold.",
-            "The chest contained 75 coins.",
-            "You received 10 credits.",
-            "She awarded you 30 gold for your service.",
-        ]:
-            outcome = {"outcome_narrative": phrase, "character_outcomes": []}
-            result = self._run(outcome)
-            co = result["character_outcomes"][0]
-            self.assertGreater(co["gold_change"], 0, f"Should detect gold gain in: {phrase!r}")
-
-    def test_gold_loss_patched(self):
-        outcome = {
-            "outcome_narrative": "You paid 20 gold to the innkeeper.",
-            "character_outcomes": [],
+    def test_gold_spending_deducted_on_success(self):
+        """ActionCommand.gold_spent is deducted deterministically when check succeeds."""
+        action = {
+            "char": self.char,
+            "label": "Pay 50 gold to bribe the guard",
+            "gold_spent": 50,
+            "check": CheckResult(chance=80, roll=20, tier="success", tier_label="Success", succeeded=True, requirement=8)
         }
-        result = self._run(outcome)
-        co = result["character_outcomes"][0]
-        self.assertEqual(co["gold_change"], -20)
+        res = resolve_pre_turn_vitals_and_resources(self.session_fantasy, self.party, [action])
+        outcomes = res["character_outcomes"]
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0]["gold_change"], -50)
+        self.assertTrue(any("spent 50 Gold" in d for d in res["stage_directives"]))
 
-    def test_gold_not_patched_when_already_set(self):
-        """If character_outcomes already has a gold_change, the guard must not overwrite it."""
-        outcome = {
-            "outcome_narrative": "You received 100 gold.",
-            "character_outcomes": [{"name": "Aria", "gold_change": 30, "hp_change": 0, "items_gained": []}],
+    def test_gold_spending_not_deducted_on_failure(self):
+        """Gold is not deducted if the transaction check failed."""
+        action = {
+            "char": self.char,
+            "label": "Attempt to purchase the contraband",
+            "gold_spent": 40,
+            "check": CheckResult(chance=40, roll=85, tier="fail", tier_label="Failure", succeeded=False, requirement=12)
         }
-        result = self._run(outcome)
-        co = result["character_outcomes"][0]
-        self.assertEqual(co["gold_change"], 30, "Pre-set gold_change must not be overwritten")
+        res = resolve_pre_turn_vitals_and_resources(self.session_fantasy, self.party, [action])
+        self.assertEqual(len(res["character_outcomes"]), 0)
 
-    def test_gold_safety_cap(self):
-        """Gold patch is capped at MAX_GOLD_LEAKAGE_PATCH."""
-        outcome = {
-            "outcome_narrative": "You found 99999 gold in the treasury.",
-            "character_outcomes": [],
+    def test_procedural_loot_roll_on_success(self):
+        """ActionCommand.triggers_loot_roll deterministically rolls consumable loot on success outside combat."""
+        action = {
+            "char": self.char,
+            "label": "Rummage through the abandoned supply crates",
+            "triggers_loot_roll": True,
+            "stat": "PER",
+            "check": CheckResult(chance=85, roll=15, tier="success", tier_label="Success", succeeded=True, requirement=7)
         }
-        result = self._run(outcome)
-        co = result["character_outcomes"][0]
-        self.assertLessEqual(co["gold_change"], 5000, "Gold patch must be capped at MAX_GOLD_LEAKAGE_PATCH")
+        res = resolve_pre_turn_vitals_and_resources(self.session_fantasy, self.party, [action])
+        outcomes = res["character_outcomes"]
+        self.assertEqual(len(outcomes), 1)
+        self.assertTrue(len(outcomes[0]["items_gained"]) > 0)
+        self.assertTrue(len(res["loot_items_rolled"]) > 0)
+        self.assertTrue(any("STAGE DIRECTION — LOOT DISCOVERED" in d for d in res["stage_directives"]))
 
-    def test_no_false_positive_on_year_numbers(self):
-        """Prose like 'in 1050 BCE' must not be detected as gold."""
-        outcome = {
-            "outcome_narrative": "This artifact dates back to the year 1050.",
-            "character_outcomes": [],
+    def test_physical_hazard_damage_on_failed_str_in_fantasy(self):
+        """Failed physical STR checks in fantasy scenario apply bounded hazard damage (5% on fail, 10% on crit_fail)."""
+        # Regular failure -> 5% of 100 max_hp = -5 HP
+        action_fail = {
+            "char": self.char,
+            "label": "Try to force open the rusted iron portcullis",
+            "stat": "STR",
+            "check": CheckResult(chance=50, roll=70, tier="fail", tier_label="Failure", succeeded=False, requirement=10)
         }
-        result = self._run(outcome)
-        co = result["character_outcomes"][0]
-        self.assertEqual(co["gold_change"], 0, "Year numbers must not trigger gold detection")
+        res_fail = resolve_pre_turn_vitals_and_resources(self.session_fantasy, self.party, [action_fail])
+        self.assertEqual(res_fail["character_outcomes"][0]["hp_change"], -5)
 
-
-class TestLeakageGuardDamage(unittest.TestCase):
-    """Non-combat damage leakage detection."""
-
-    def _run(self, outcome, tier="fail", party=None):
-        from game_engine.state import reconcile_narrative_leakage
-        party = party or _make_party()
-        actions = [_make_action(tier)]
-        with patch.object(_ge_module, "get_active_enemies", return_value=[]):
-            return reconcile_narrative_leakage(outcome, party, actions)
-
-    def test_damage_patched_on_fail(self):
-        outcome = {
-            "outcome_narrative": "The trap triggers, dealing 15 damage to Aria.",
-            "character_outcomes": [],
+        # Critical failure -> 10% of 100 max_hp = -10 HP
+        action_crit_fail = {
+            "char": self.char,
+            "label": "Leap across the crumbling chasm",
+            "stat": "AGI",
+            "check": CheckResult(chance=30, roll=98, tier="crit_fail", tier_label="Critical Failure", succeeded=False, requirement=14)
         }
-        result = self._run(outcome, tier="fail")
-        co = result["character_outcomes"][0]
-        self.assertEqual(co["hp_change"], -15)
+        res_crit = resolve_pre_turn_vitals_and_resources(self.session_fantasy, self.party, [action_crit_fail])
+        self.assertEqual(res_crit["character_outcomes"][0]["hp_change"], -10)
 
-    def test_damage_patched_on_crit_fail(self):
-        outcome = {
-            "outcome_narrative": "Aria suffers 30 points of damage from the collapsing floor.",
-            "character_outcomes": [],
+    def test_hazard_damage_suppressed_in_non_combat_scenario(self):
+        """Non-combat scenarios (e.g. high_school) must never deduct HP on failed checks."""
+        action = {
+            "char": self.char,
+            "label": "Sprint down the stairs before class starts",
+            "stat": "AGI",
+            "check": CheckResult(chance=40, roll=80, tier="fail", tier_label="Failure", succeeded=False, requirement=10)
         }
-        result = self._run(outcome, tier="crit_fail")
-        co = result["character_outcomes"][0]
-        self.assertEqual(co["hp_change"], -30)
+        res = resolve_pre_turn_vitals_and_resources(self.session_school, self.party, [action])
+        self.assertEqual(len(res["character_outcomes"]), 0)
 
-    def test_damage_not_patched_on_success(self):
-        """On a successful action, damage prose must NOT be patched (could be enemy HP description)."""
-        outcome = {
-            "outcome_narrative": "Your blade deals 25 damage to the goblin.",
-            "character_outcomes": [],
+    def test_hazard_damage_suppressed_on_social_and_cha_actions(self):
+        """Social/conversational actions (CHA stat or dialogue intent) must never inflict physical hazard damage."""
+        action = {
+            "char": self.char,
+            "label": "Attempt an intense standoff debate",
+            "stat": "CHA",
+            "intent": "dialogue",
+            "check": CheckResult(chance=40, roll=80, tier="fail", tier_label="Failure", succeeded=False, requirement=10)
         }
-        result = self._run(outcome, tier="success")
-        co = result["character_outcomes"][0]
-        self.assertEqual(co.get("hp_change", 0), 0, "Damage must not be patched on success tier")
+        res = resolve_pre_turn_vitals_and_resources(self.session_fantasy, self.party, [action])
+        self.assertEqual(len(res["character_outcomes"]), 0)
 
-    def test_damage_not_patched_when_already_set(self):
-        outcome = {
-            "outcome_narrative": "Aria takes 20 damage.",
-            "character_outcomes": [{"name": "Aria", "hp_change": -5, "gold_change": 0, "items_gained": []}],
+    def test_combat_turns_bypassed(self):
+        """Active combat turns are bypassed by resolve_pre_turn_vitals_and_resources."""
+        session_combat = {
+            "id": 3,
+            "scenario": "fantasy",
+            "nearby_enemies": [{"name": "Goblin", "hp": 20}]
         }
-        result = self._run(outcome, tier="fail")
-        co = result["character_outcomes"][0]
-        self.assertEqual(co["hp_change"], -5, "Pre-set hp_change must not be overwritten")
-
-    def test_damage_sanity_bounds(self):
-        """Values over 200 must be ignored (likely NPC stats or false positive)."""
-        outcome = {
-            "outcome_narrative": "The ancient dragon takes 999 damage from the spell.",
-            "character_outcomes": [],
+        action = {
+            "char": self.char,
+            "label": "Swing axe",
+            "gold_spent": 10,
+            "check": CheckResult(chance=80, roll=10, tier="success", tier_label="Success", succeeded=True, requirement=8)
         }
-        result = self._run(outcome, tier="fail")
-        co = result["character_outcomes"][0]
-        self.assertEqual(co.get("hp_change", 0), 0, "Damage > 200 must be filtered by sanity bounds")
-
-
-class TestLeakageGuardItems(unittest.TestCase):
-    """Item grant leakage detection."""
-
-    def _run(self, outcome, party=None):
-        from game_engine.state import reconcile_narrative_leakage
-        party = party or _make_party()
-        actions = [_make_action("success")]
-        with patch.object(_ge_module, "get_active_enemies", return_value=[]):
-            return reconcile_narrative_leakage(outcome, party, actions)
-
-    def test_item_grant_detected(self):
-        outcome = {
-            "outcome_narrative": "The guard hands you a Silver Key.",
-            "character_outcomes": [],
-        }
-        result = self._run(outcome)
-        co = result["character_outcomes"][0]
-        self.assertIn("Silver Key", co.get("items_gained", []))
-
-    def test_item_not_duplicated_if_already_listed(self):
-        outcome = {
-            "outcome_narrative": "You received a Healing Potion.",
-            "character_outcomes": [{"name": "Aria", "hp_change": 0, "gold_change": 0,
-                                    "items_gained": ["Healing Potion"]}],
-        }
-        result = self._run(outcome)
-        co = result["character_outcomes"][0]
-        self.assertEqual(co["items_gained"].count("Healing Potion"), 1, "Duplicate item must not be added")
-
-    def test_blocklist_words_not_added(self):
-        """Common prose words in the blocklist must never be mistaken for items."""
-        for word in ["moment", "chance", "breath", "step"]:
-            outcome = {
-                "outcome_narrative": f"She gives you a {word} to think.",
-                "character_outcomes": [],
-            }
-            result = self._run(outcome)
-            co = result["character_outcomes"][0]
-            items = [i.lower() for i in co.get("items_gained", [])]
-            self.assertNotIn(word.lower(), items, f"Blocklist word '{word}' must not become an item")
-
-
-class TestLeakageGuardCombatPassthrough(unittest.TestCase):
-    """During combat, the guard must be a no-op."""
-
-    def test_combat_outcome_untouched(self):
-        from game_engine.state import reconcile_narrative_leakage
-        party = _make_party()
-        actions = [_make_action("fail")]
-        outcome = {
-            "outcome_narrative": "You received 100 gold and took 50 damage.",
-            "_combat_log": [{"msg": "combat"}],
-            "character_outcomes": [],
-        }
-        # get_active_enemies must return something to trigger combat guard
-        with patch.object(_ge_module, "get_active_enemies", return_value=[{"name": "Goblin"}]):
-            result = reconcile_narrative_leakage(outcome, party, actions)
-
-        co_list = result.get("character_outcomes", [])
-        # Either empty or unchanged — the guard must not have created or patched any entry
-        for co in co_list:
-            self.assertEqual(co.get("gold_change", 0), 0, "Combat gold must not be patched by leakage guard")
-            self.assertEqual(co.get("hp_change", 0), 0, "Combat damage must not be patched by leakage guard")
-
-
-class TestLeakageGuardPassthrough(unittest.TestCase):
-    """Edge cases: empty narrative, no party, etc."""
-
-    def test_empty_narrative_is_noop(self):
-        from game_engine.state import reconcile_narrative_leakage
-        party = _make_party()
-        outcome = {"character_outcomes": []}
-        with patch.object(_ge_module, "get_active_enemies", return_value=[]):
-            result = reconcile_narrative_leakage(outcome, party, [])
-        # Should return outcome unchanged
-        self.assertEqual(result.get("character_outcomes"), [])
-
-    def test_empty_party_is_noop(self):
-        from game_engine.state import reconcile_narrative_leakage
-        outcome = {
-            "outcome_narrative": "You received 50 gold.",
-            "character_outcomes": [],
-        }
-        with patch.object(_ge_module, "get_active_enemies", return_value=[]):
-            result = reconcile_narrative_leakage(outcome, [], [])
-        # No party → can't determine acting character → no patch
-        self.assertEqual(result["character_outcomes"], [])
-
-    def test_new_co_entry_created_when_missing(self):
-        """Guard must create a character_outcome entry when LLM omitted it entirely."""
-        from game_engine.state import reconcile_narrative_leakage
-        party = _make_party("Torvin")
-        outcome = {
-            "outcome_narrative": "Torvin received 40 gold from the bounty board.",
-            "character_outcomes": [],  # LLM provided no entry at all
-        }
-        with patch.object(_ge_module, "get_active_enemies", return_value=[]):
-            result = reconcile_narrative_leakage(outcome, party, [_make_action("success")])
-        co_list = result.get("character_outcomes", [])
-        self.assertTrue(len(co_list) > 0, "Guard must create a character_outcome entry if absent")
-        co = co_list[0]
-        self.assertEqual(co["gold_change"], 40)
+        res = resolve_pre_turn_vitals_and_resources(session_combat, self.party, [action])
+        self.assertEqual(len(res["character_outcomes"]), 0)
 
 
 if __name__ == "__main__":

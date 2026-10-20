@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import hashlib
+import random
 import re
 from typing import Dict, Any, List, Optional
 
@@ -13,7 +14,8 @@ HAIR_LENGTHS = {"short", "medium", "long", "shoulder_length", "bald", "waist_len
 
 HAIR_STYLES = {"straight", "wavy", "curly", "braided", "ponytail", "messy", "afro", "bob", "bun", "spiky"}
 
-STATURES = {"petite", "short", "average", "tall", "towering", "gigantic", "dwarf"}
+STATURE_TIERS = ("short", "below_average", "average", "tall", "towering")
+STATURES = {"short", "below_average", "average", "tall", "towering", "gigantic", "dwarf", "petite"}
 
 BREAST_SIZES = {"flat", "small", "medium", "large", "huge", "hyper"}
 
@@ -100,12 +102,42 @@ DIVERSE_BEASTFOLK_EYES = [
 ]
 
 COLOR_FAMILIES = {
-    "blonde": {"blonde", "gold", "golden", "honey", "wheat", "cream", "champagne", "apricot", "flaxen", "straw", "sandy", "citrine", "topaz"},
-    "red": {"red", "rust", "auburn", "copper", "ginger", "cinnamon", "orange", "flame", "ochre", "crimson", "ruby", "ember"},
-    "black": {"black", "obsidian", "jet", "charcoal", "midnight", "slate", "ebony", "shadow", "onyx"},
-    "brown": {"brown", "chestnut", "chocolate", "hazel", "umber", "caramel", "tawny", "walnut", "sepia", "coffee"},
-    "white": {"white", "snow", "platinum", "silver", "ash", "frost", "pale", "ivory", "pearl", "diamond", "opal"},
-    "unnatural": {"blue", "green", "pink", "purple", "violet", "teal", "cyan", "magenta", "crimson", "lavender", "rose", "pastel", "emerald", "jade", "cerulean", "azure", "cobalt", "sapphire", "mint"}
+    "blue": {
+        "blue", "azure", "cobalt", "cerulean", "sapphire", "cyan", "sky", "indigo", "navy",
+        "ice", "teal", "turquoise", "periwinkle", "denim", "aquamarine", "ultramarine"
+    },
+    "green": {
+        "green", "emerald", "jade", "mint", "olive", "forest", "seafoam", "sage", "moss",
+        "lime", "chartreuse", "pine", "fern", "pistachio"
+    },
+    "pink": {
+        "pink", "rose", "sakura", "magenta", "bubblegum", "coral", "blush", "salmon",
+        "fuchsia", "carnation", "peony"
+    },
+    "purple": {
+        "purple", "violet", "lavender", "amethyst", "plum", "lilac", "orchid", "mauve",
+        "grape", "mulberry", "iris"
+    },
+    "red": {
+        "red", "crimson", "ruby", "scarlet", "vermilion", "cherry", "rust", "auburn",
+        "copper", "ginger", "cinnamon", "orange", "flame", "amber", "ember", "brick", "maroon", "burgundy"
+    },
+    "blonde": {
+        "blonde", "blond", "gold", "golden", "honey", "wheat", "cream", "champagne",
+        "apricot", "flaxen", "straw", "sandy", "fawn", "citrine", "topaz"
+    },
+    "brown": {
+        "brown", "chestnut", "chocolate", "hazel", "umber", "caramel", "tawny",
+        "walnut", "sepia", "cocoa", "espresso", "brunette", "coffee", "mocha"
+    },
+    "black": {
+        "black", "obsidian", "jet", "charcoal", "midnight", "slate", "ebony",
+        "shadow", "onyx", "raven", "coal"
+    },
+    "white": {
+        "white", "snow", "platinum", "silver", "ash", "frost", "pale",
+        "ivory", "pearl", "alabaster"
+    }
 }
 
 def get_color_families(text: str) -> set[str]:
@@ -124,7 +156,8 @@ def get_color_families(text: str) -> set[str]:
 def is_contrasting_shade(coat_color: str, hair_color: str) -> bool:
     """
     Checks if a beastfolk character's hair color is a contrasting shade to their fur/coat/scales.
-    Contrasting shades (e.g. golden-blonde coat with black hair) indicate dyed hair.
+    Contrasting shades (e.g. golden-blonde coat with black hair, or blue fur with red hair) indicate dyed hair.
+    Matching or harmonious shades (e.g. blue fur with blue hair, or pink fur with pink hair) indicate natural hair.
     """
     if not coat_color or not hair_color:
         return False
@@ -132,14 +165,11 @@ def is_contrasting_shade(coat_color: str, hair_color: str) -> bool:
     hair_fams = get_color_families(hair_color)
     if not coat_fams or not hair_fams:
         return False
-    # If hair is an unnatural/vibrant color (blue, pink, purple, etc.), it's always dyed
-    if "unnatural" in hair_fams:
-        return True
-    # If they share any family, they are not contrasting
+    # If they share any family, they are harmonious/matching, not contrasting
     if coat_fams & hair_fams:
         return False
 
-    # Check compatible cross-family nuances
+    # Check compatible cross-family nuances (natural multi-tonal mammalian coats/hair)
     if ("blonde" in coat_fams and "red" in hair_fams) or ("red" in coat_fams and "blonde" in hair_fams):
         return False
     if ("brown" in coat_fams and "red" in hair_fams) or ("red" in coat_fams and "brown" in hair_fams):
@@ -147,6 +177,8 @@ def is_contrasting_shade(coat_color: str, hair_color: str) -> bool:
     if ("brown" in coat_fams and "black" in hair_fams) or ("black" in coat_fams and "brown" in hair_fams):
         return False
     if ("blonde" in coat_fams and "brown" in hair_fams) or ("brown" in coat_fams and "blonde" in hair_fams):
+        return False
+    if ("white" in coat_fams and "blonde" in hair_fams) or ("blonde" in coat_fams and "white" in hair_fams):
         return False
 
     return True
@@ -190,16 +222,23 @@ def infer_natural_hair_color_from_coat(coat_color: str, race: str = "") -> str:
 SPECIES_TEMPLATES = {
     "cat": {
         "eyes": ["Emerald Green", "Slit Amber", "Sapphire Blue", "Glistening Topaz", "Jade Green", "Dichroic Violet-Gold", "Amethyst"],
-        "hair": ["Sleek Glossy Black", "Soft Cream Blonde", "Silver-Gray", "Warm Auburn", "Silky Charcoal", "Pastel Calico"],
-        "coats": ["Silky Midnight-Black Fur", "Snow-White Fur", "Calico Pattern Fur", "Golden Tabby Fur", "Silver-Gray Mackerel Fur", "Smoky Charcoal Fur", "Cream Pointed Fur"],
-        "beastfolk_features": ["Feline Tail & Pointed Cat Ears", "Sleek Black Feline Tail & Twitching Ears", "Fluffy Calico Tail & Cat Ears", "Striped Cat Tail & Soft Ears"],
+        "hair": ["Sleek Glossy Black", "Soft Cream Blonde", "Silver-Gray", "Warm Auburn", "Silky Charcoal", "Pastel Calico", "Pastel Sakura-Pink", "Azure Blue", "Lavender Silk"],
+        "coats": [
+            "Silky Midnight-Black Fur", "Snow-White Fur", "Calico Pattern Fur", "Golden Tabby Fur",
+            "Silver-Gray Mackerel Fur", "Smoky Charcoal Fur", "Cream Pointed Fur",
+            "Pastel Sakura-Pink Fur", "Vibrant Azure-Blue Fur", "Soft Mint-Green Fur",
+            "Silky Lavender Fur", "Midnight-Violet Fur"
+        ],
+        "beastfolk_features": ["Feline Tail & Pointed Cat Ears", "Sleek Feline Tail & Twitching Ears", "Fluffy Plumed Tail & Cat Ears", "Long Slender Tail & Soft Pointed Ears"],
         "hybrid_features": [
             "Soft White Cat Ears & Matching Sleek White Tail",
             "Midnight-Black Cat Ears & Long Sleek Black Tail",
             "Golden Tabby Cat Ears & Matching Striped Feline Tail",
             "Calico-Spotted Cat Ears & Matching Calico Tail",
             "Silver-Gray Cat Ears & Slender Silver Tail",
-            "Pastel Pink Cat Ears & Matching Soft Pink Tail"
+            "Pastel Pink Cat Ears & Matching Soft Pink Tail",
+            "Pastel Blue Cat Ears & Matching Sleek Blue Tail",
+            "Lavender Cat Ears & Matching Fluffy Purple Tail"
         ],
         "mannerisms": [
             "Swishes tail subtly when amused and speaks in a calm, melodic tone",
@@ -211,15 +250,21 @@ SPECIES_TEMPLATES = {
     },
     "wolf": {
         "eyes": ["Piercing Amber", "Ice Blue", "Silver-Gray", "Golden-Yellow", "Fierce Hazel", "Deep Slate Blue"],
-        "hair": ["Wild Ash-Gray", "Coarse Midnight Black", "Silver-White Shag", "Dark Slate", "Tawny Brown", "Frost Silver"],
-        "coats": ["Dense Ash-Gray Fur", "Midnight Timber Black Fur", "Frost White Fur", "Grizzled Silver-Black Fur", "Warm Tawny Wolf Fur"],
-        "beastfolk_features": ["Wolf Tail & Pointed Ears", "Thick Gray Wolf Tail & Alert Ears", "Bushy Timber Wolf Tail & Broad Ears"],
+        "hair": ["Wild Ash-Gray", "Coarse Midnight Black", "Silver-White Shag", "Dark Slate", "Tawny Brown", "Frost Silver", "Midnight Cobalt", "Ghostly Lilac"],
+        "coats": [
+            "Dense Ash-Gray Fur", "Midnight Timber Black Fur", "Frost White Fur",
+            "Grizzled Silver-Black Fur", "Warm Tawny Wolf Fur",
+            "Midnight Cobalt-Blue Fur", "Frost-Cyan Fur", "Ghostly Lilac Fur", "Deep Indigo Timber Fur"
+        ],
+        "beastfolk_features": ["Wolf Tail & Pointed Ears", "Thick Bushy Wolf Tail & Alert Ears", "Sturdy Timber Wolf Tail & Broad Ears"],
         "hybrid_features": [
             "Ash-Gray Wolf Ears & Matching Bushy Gray Tail",
             "Midnight-Black Wolf Ears & Matching Sleek Black Timber Tail",
             "Frost-White Wolf Ears & Matching Thick White Tail",
             "Silver-Grizzled Wolf Ears & Matching Sturdy Silver Tail",
-            "Warm Tawny Wolf Ears & Matching Tawny Tail"
+            "Warm Tawny Wolf Ears & Matching Tawny Tail",
+            "Cobalt-Blue Wolf Ears & Matching Bushy Blue Tail",
+            "Ghostly Lilac Wolf Ears & Matching Fluffy Lilac Tail"
         ],
         "mannerisms": [
             "Taps finger thoughtfully on chin and tilts head with perked ears when listening",
@@ -231,15 +276,22 @@ SPECIES_TEMPLATES = {
     },
     "fox": {
         "eyes": ["Bright Amber", "Glistening Emerald", "Amethyst Purple", "Warm Honey", "Ruby Red", "Sunburst Gold"],
-        "hair": ["Flame Auburn", "Silky Snow White", "Golden Apricot", "Midnight with Silver Highlights", "Pastel Copper", "Rose-Gold"],
-        "coats": ["Vibrant Rust-Red Fur", "Snow-White Kitsune Fur", "Silver-Tipped Black Fur", "Golden-Cream Fur", "Pastel Rose-Gold Fur"],
-        "beastfolk_features": ["Fluffy Fox Tail & Twitching Ears", "Bushy White-Tipped Fox Tail & Alert Ears", "Golden-Cream Fox Tail & Soft Ears"],
+        "hair": ["Flame Auburn", "Silky Snow White", "Golden Apricot", "Midnight with Silver Highlights", "Pastel Copper", "Rose-Gold", "Sky-Blue Silk", "Luminous Violet"],
+        "coats": [
+            "Vibrant Rust-Red Fur", "Snow-White Kitsune Fur", "Silver-Tipped Black Fur",
+            "Golden-Cream Fur", "Pastel Rose-Gold Fur",
+            "Ethereal Sky-Blue Fox Fur", "Pastel Sakura-Pink Fur", "Luminous Violet Fox Fur",
+            "Jade-Green Kitsune Fur", "Frost-Cyan Fox Fur"
+        ],
+        "beastfolk_features": ["Fluffy Fox Tail & Twitching Ears", "Bushy Plumed Fox Tail & Alert Ears", "Tapered Brush Fox Tail & Soft Ears"],
         "hybrid_features": [
             "Snow-White Fox Ears & Matching Bushy White Fox Tail",
             "Rust-Red Fox Ears & Matching Fluffy Rust-Red Tail with White Tip",
             "Golden Fox Ears & Matching Fluffy Golden Tail with White Tip",
             "Midnight-Black Fox Ears & Matching Silky Black Tail with Silver Tip",
-            "Rose-Gold Fox Ears & Matching Bushy Rose-Gold Tail"
+            "Rose-Gold Fox Ears & Matching Bushy Rose-Gold Tail",
+            "Sky-Blue Fox Ears & Matching Fluffy Blue Fox Tail",
+            "Pastel Pink Fox Ears & Matching Soft Pink Tail"
         ],
         "mannerisms": [
             "Twitches ears when excited and curls fluffy tail playfully around their waist",
@@ -251,15 +303,21 @@ SPECIES_TEMPLATES = {
     },
     "rabbit": {
         "eyes": ["Ruby Red", "Warm Chestnut Brown", "Soft Pastel Pink", "Amethyst", "Sky Blue", "Glistening Berry"],
-        "hair": ["Silky Platinum Blonde", "Soft Chestnut Brown", "Pastel Pink", "Snow White", "Honey Caramel", "Silver Fawn"],
-        "coats": ["Velvety Snow-White Fur", "Soft Ash-Brown Fur", "Pastel Cream Fur", "Dutch Spotted Fur", "Warm Caramel Fur"],
-        "beastfolk_features": ["Long Bunny Ears & Soft Puff Tail", "Velvety Lop Ears & Fluffy Cotton Tail", "Spotted Rabbit Ears & Soft Tail"],
+        "hair": ["Silky Platinum Blonde", "Soft Chestnut Brown", "Pastel Pink", "Snow White", "Honey Caramel", "Silver Fawn", "Sky-Blue Angora", "Mint-Green"],
+        "coats": [
+            "Velvety Snow-White Fur", "Soft Ash-Brown Fur", "Pastel Cream Fur",
+            "Dutch Spotted Fur", "Warm Caramel Fur", "Silver Marten Fur",
+            "Pastel Cotton-Candy Pink Fur", "Sky-Blue Angora Fur", "Mint-Green Fur", "Lavender Lop Fur"
+        ],
+        "beastfolk_features": ["Long Bunny Ears & Soft Puff Tail", "Velvety Lop Ears & Fluffy Cotton Tail", "Upright Rabbit Ears & Soft Tufted Tail"],
         "hybrid_features": [
             "Snow-White Bunny Ears & Matching Fluffy White Cotton Tail",
             "Ash-Brown Rabbit Ears & Matching Soft Brown Puff Tail",
             "Pastel Cream Bunny Ears & Matching Fluffy Cream Tail",
             "Spotted Black-and-White Rabbit Ears & Matching Spotted Puff Tail",
-            "Pastel Pink Bunny Ears & Matching Soft Pink Tail"
+            "Pastel Pink Bunny Ears & Matching Soft Pink Tail",
+            "Sky-Blue Bunny Ears & Matching Fluffy Blue Cotton Tail",
+            "Mint-Green Bunny Ears & Matching Mint Puff Tail"
         ],
         "mannerisms": [
             "Rapidly twitches nose and perches alert ears upright when curious",
@@ -271,15 +329,21 @@ SPECIES_TEMPLATES = {
     },
     "bear": {
         "eyes": ["Deep Honey Brown", "Dark Amber", "Forest Hazel", "Warm Caramel", "Rich Molasses"],
-        "hair": ["Thick Chestnut Waves", "Shaggy Charcoal Brown", "Frost Blonde", "Coarse Dark Chocolate", "Warm Umber"],
-        "coats": ["Dense Cinnamon Brown Fur", "Deep Charcoal Grizzly Fur", "Polar White Fur", "Warm Golden-Brown Fur", "Dark Chocolate Fur"],
-        "beastfolk_features": ["Rounded Bear Ears & Stubby Bear Tail", "Broad Furry Ears & Short Fuzzy Tail", "Grizzly Bear Ears & Thick Short Tail"],
+        "hair": ["Thick Chestnut Waves", "Shaggy Charcoal Brown", "Frost Blonde", "Coarse Dark Chocolate", "Warm Umber", "Frost-Blue Shag"],
+        "coats": [
+            "Dense Cinnamon Brown Fur", "Deep Charcoal Grizzly Fur", "Polar White Fur",
+            "Warm Golden-Brown Fur", "Dark Chocolate Fur",
+            "Glacial Frost-Blue Fur", "Mossy Forest-Green Fur", "Twilight Violet Fur"
+        ],
+        "beastfolk_features": ["Rounded Bear Ears & Stubby Bear Tail", "Broad Furry Ears & Short Fuzzy Tail", "Sturdy Bear Ears & Thick Short Tail"],
         "hybrid_features": [
             "Cinnamon-Brown Bear Ears & Matching Short Fuzzy Brown Tail",
             "Charcoal Grizzly Ears & Matching Short Charcoal Tail",
             "Polar-White Bear Ears & Matching Stubby White Tail",
             "Golden-Brown Bear Ears & Matching Short Golden Tail",
-            "Dark Chocolate Bear Ears & Matching Fuzzy Dark Brown Tail"
+            "Dark Chocolate Bear Ears & Matching Fuzzy Dark Brown Tail",
+            "Frost-Blue Bear Ears & Matching Short Blue Tail",
+            "Forest-Green Bear Ears & Matching Short Green Tail"
         ],
         "mannerisms": [
             "Rests heavy hands comfortably on their waist while ears twitch lazily",
@@ -291,15 +355,21 @@ SPECIES_TEMPLATES = {
     },
     "tiger": {
         "eyes": ["Burning Copper", "Fierce Amber-Gold", "Jade Green", "Luminous Topaz", "Deep Smoldering Bronze", "Ice Blue"],
-        "hair": ["Wild Black-Striped Orange", "Flame Auburn with Dark Streaks", "Pure Snow-White with Slate Tips", "Coarse Golden-Amber", "Raven Black"],
-        "coats": ["Flame-Orange Fur with Black Stripes", "Snow-White Fur with Charcoal Stripes", "Golden Tabby Striped Fur", "Midnight Black with Shadow Stripes", "Amber-Ochre Striped Fur"],
-        "beastfolk_features": ["Striped Tiger Ears & Powerful Ringed Tail", "Ringed Tiger Tail & Twitching Striped Ears", "Broad Tiger Ears & Sleek Striped Tail"],
+        "hair": ["Wild Black-Striped Orange", "Flame Auburn with Dark Streaks", "Pure Snow-White with Slate Tips", "Coarse Golden-Amber", "Raven Black", "Ice-Blue Striped Mane"],
+        "coats": [
+            "Flame-Orange Fur with Black Stripes", "Snow-White Fur with Charcoal Stripes",
+            "Golden Tabby Striped Fur", "Midnight Black with Shadow Stripes", "Amber-Ochre Striped Fur",
+            "Ice-Blue Fur with Charcoal Stripes", "Amethyst-Violet Striped Fur", "Jade-Green Striped Fur"
+        ],
+        "beastfolk_features": ["Rounded Tiger Ears & Powerful Ringed Tail", "Ringed Tiger Tail & Twitching Ears", "Broad Tiger Ears & Sleek Ringed Tail"],
         "hybrid_features": [
             "Flame-Orange Striped Tiger Ears & Matching Ringed Tiger Tail",
             "Snow-White Striped Tiger Ears & Matching White-and-Charcoal Ringed Tail",
             "Golden Striped Tiger Ears & Matching Ringed Golden Tail",
             "Midnight-Black Shadow-Striped Tiger Ears & Matching Sleek Striped Tail",
-            "Amber-Ochre Striped Tiger Ears & Matching Ringed Amber Tail"
+            "Amber-Ochre Striped Tiger Ears & Matching Ringed Amber Tail",
+            "Ice-Blue Striped Tiger Ears & Matching Ringed Blue Tail",
+            "Violet Striped Tiger Ears & Matching Ringed Purple Tail"
         ],
         "mannerisms": [
             "Slowly swishes heavy striped tail in rhythmic concentration",
@@ -311,15 +381,21 @@ SPECIES_TEMPLATES = {
     },
     "lion": {
         "eyes": ["Rich Golden-Amber", "Sunburst Topaz", "Tawny Hazel", "Warm Copper", "Luminous Honey"],
-        "hair": ["Thick Voluminous Golden Mane", "Sun-Bleached Tawny Waves", "Coarse Sandy Blonde", "Rich Golden Amber Locks", "Tawny Caramel"],
-        "coats": ["Sun-Drenched Golden Fur", "Sandy Tawny Coat", "Desert Cream Fur", "Pale Ash-Gold Fur", "Warm Tawny Ochre Fur"],
-        "beastfolk_features": ["Rounded Lion Ears & Majestic Tufted Tail", "Proud Lion Ears & Fluffy Tufted Golden Tail", "Tawny Lion Ears & Long Tufted Tail"],
+        "hair": ["Thick Voluminous Golden Mane", "Sun-Bleached Tawny Waves", "Coarse Sandy Blonde", "Rich Golden Amber Locks", "Tawny Caramel", "Radiant Crimson Mane"],
+        "coats": [
+            "Sun-Drenched Golden Fur", "Sandy Tawny Coat", "Desert Cream Fur",
+            "Pale Ash-Gold Fur", "Warm Tawny Ochre Fur",
+            "Radiant Sunburst-Red Fur", "Sapphire-Blue Lion Fur", "Ember-Gold Fur"
+        ],
+        "beastfolk_features": ["Rounded Lion Ears & Majestic Tufted Tail", "Proud Lion Ears & Fluffy Tufted Tail", "Alert Lion Ears & Long Tufted Tail"],
         "hybrid_features": [
             "Golden Lion Ears & Matching Tufted Golden Lion Tail",
             "Tawny Sand Lion Ears & Matching Tufted Tawny Tail",
             "Desert Cream Lion Ears & Matching Tufted Cream Tail",
             "Sun-Bleached Blonde Lion Ears & Matching Tufted Blonde Tail",
-            "Rich Amber Lion Ears & Matching Tufted Amber Tail"
+            "Rich Amber Lion Ears & Matching Tufted Amber Tail",
+            "Sapphire-Blue Lion Ears & Matching Tufted Blue Tail",
+            "Sunburst-Red Lion Ears & Matching Tufted Red Tail"
         ],
         "mannerisms": [
             "Proudly tosses hair and swishes tufted tail with regal composure",
@@ -331,14 +407,20 @@ SPECIES_TEMPLATES = {
     },
     "cheetah": {
         "eyes": ["Glistening Amber", "Sleek Honey-Gold", "Tear-Tracked Ochre", "Bright Topaz", "Clear Hazel"],
-        "hair": ["Sleek Spotted Ochre", "Aerodynamic Tawny Mane", "Dust-Blonde with Dark Tips", "Sleek Amber Locks", "Tawny Streaked Blonde"],
-        "coats": ["Tawny Fur with Crisp Black Spots", "Golden Coat with Distinct Spot Patterns", "Pale Cream with Cheetah Spots", "Warm Amber Spotted Fur", "Sand-Gold Spotted Fur"],
-        "beastfolk_features": ["Spotted Cheetah Ears & Long Sleek Balancing Tail", "Tear-Stripe Markings & Spotted Cheetah Tail", "Aerodynamic Cheetah Ears & Long Spotted Tail"],
+        "hair": ["Sleek Spotted Ochre", "Aerodynamic Tawny Mane", "Dust-Blonde with Dark Tips", "Sleek Amber Locks", "Tawny Streaked Blonde", "Azure-Streaked Mane"],
+        "coats": [
+            "Tawny Fur with Crisp Black Spots", "Golden Coat with Distinct Spot Patterns",
+            "Pale Cream with Cheetah Spots", "Warm Amber Spotted Fur", "Sand-Gold Spotted Fur",
+            "Azure-Blue with Obsidian Spots", "Pastel Rose with Cheetah Spots"
+        ],
+        "beastfolk_features": ["Small Rounded Cheetah Ears & Long Sleek Balancing Tail", "Facial Tear-Line Contours & Slender Rudder Tail", "Aerodynamic Cheetah Ears & Long Counter-Balancing Tail"],
         "hybrid_features": [
             "Spotted Tawny Cheetah Ears & Matching Long Spotted Balancing Tail",
             "Pale Cream Spotted Cheetah Ears & Matching Spotted Tail",
             "Golden Spotted Cheetah Ears & Matching Sleek Spotted Cheetah Tail",
-            "Sand-Gold Spotted Cheetah Ears & Matching Long Spotted Balancing Tail"
+            "Sand-Gold Spotted Cheetah Ears & Matching Long Spotted Balancing Tail",
+            "Azure-Blue Spotted Cheetah Ears & Matching Long Blue Balancing Tail",
+            "Pastel Rose Spotted Cheetah Ears & Matching Spotted Tail"
         ],
         "mannerisms": [
             "Paces with light-footed, restless athletic energy",
@@ -350,14 +432,20 @@ SPECIES_TEMPLATES = {
     },
     "fennec": {
         "eyes": ["Large Bright Amber", "Luminous Desert Topaz", "Warm Sand Hazel", "Inquisitive Obsidian", "Golden-Ochre"],
-        "hair": ["Soft Pale Sand Blonde", "Creamy Fawn", "Silky Desert Peach", "Fluffy Pale Apricot", "Fine Champagne Blonde"],
-        "coats": ["Pale Sandy Cream Fur", "Soft Fawn Fur", "Silky Pale Apricot Fur", "Desert Dune Cream Fur", "Warm Sand-Gold Fur"],
-        "beastfolk_features": ["Enormous Alert Fennec Ears & Bushy Sand-Cream Tail", "Oversized Feathered Fennec Ears & Soft Bushy Tail", "Large Fluffy Fennec Ears & Pale Fawn Tail"],
+        "hair": ["Soft Pale Sand Blonde", "Creamy Fawn", "Silky Desert Peach", "Fluffy Pale Apricot", "Fine Champagne Blonde", "Sky-Blue Silk"],
+        "coats": [
+            "Pale Sandy Cream Fur", "Soft Fawn Fur", "Silky Pale Apricot Fur",
+            "Desert Dune Cream Fur", "Warm Sand-Gold Fur",
+            "Pastel Peach-Blush Fur", "Sky-Blue Desert Fur", "Soft Lilac Fur"
+        ],
+        "beastfolk_features": ["Enormous Alert Fennec Ears & Bushy Feathered Tail", "Oversized Fluffy Fennec Ears & Soft Bushy Tail", "Large Radiating Fennec Ears & Slender Brush Tail"],
         "hybrid_features": [
             "Oversized Sandy-Cream Fennec Ears & Matching Bushy Sandy-Cream Tail",
             "Large Pale Fawn Fennec Ears & Matching Fluffy Fawn Tail",
             "Feathered Apricot Fennec Ears & Matching Bushy Apricot Tail",
-            "Soft Dune-Cream Fennec Ears & Matching Bushy Cream Tail"
+            "Soft Dune-Cream Fennec Ears & Matching Bushy Cream Tail",
+            "Sky-Blue Fennec Ears & Matching Bushy Blue Tail",
+            "Lilac Fennec Ears & Matching Bushy Lilac Tail"
         ],
         "mannerisms": [
             "Large ears pivot independently to catch distant murmurs across the room",
@@ -369,14 +457,20 @@ SPECIES_TEMPLATES = {
     },
     "mouse": {
         "eyes": ["Large Glossy Onyx", "Bright Ruby", "Bead-Like Obsidian", "Warm Chestnut", "Deep Currant", "Glittering Dark Hazel"],
-        "hair": ["Silky Ash Brown", "Slate Gray Bob", "Fine Chestnut Locks", "Soft Cocoa Brown", "Dusty Gray-Blonde"],
-        "coats": ["Soft Ash-Gray Fur", "Silky Chestnut-Brown Fur", "Warm Mouse-Brown Fur", "Slate-Blue Fur", "Dusty Cocoa Fur"],
-        "beastfolk_features": ["Round Mouse Ears & Slender Pinkish Tail", "Large Rounded Ears & Whiskered Cheeks", "Soft Gray Mouse Ears & Long Flexible Tail"],
+        "hair": ["Silky Ash Brown", "Slate Gray Bob", "Fine Chestnut Locks", "Soft Cocoa Brown", "Dusty Gray-Blonde", "Powder-Blue Silk"],
+        "coats": [
+            "Soft Ash-Gray Fur", "Silky Chestnut-Brown Fur", "Warm Mouse-Brown Fur",
+            "Slate-Blue Fur", "Dusty Cocoa Fur",
+            "Powder-Blue Fur", "Pastel Rose-Pink Fur", "Lavender-Gray Fur"
+        ],
+        "beastfolk_features": ["Round Mouse Ears & Slender Whip Tail", "Large Rounded Ears & Whiskered Cheeks", "Delicate Cupped Mouse Ears & Long Flexible Tail"],
         "hybrid_features": [
             "Soft Ash-Gray Mouse Ears & Matching Slender Gray-Pink Tail",
             "Chestnut-Brown Mouse Ears & Matching Slender Brown Tail",
             "Slate-Gray Mouse Ears & Matching Long Flexible Slate Tail",
-            "Warm Cocoa Mouse Ears & Matching Slender Pinkish-Brown Tail"
+            "Warm Cocoa Mouse Ears & Matching Slender Pinkish-Brown Tail",
+            "Powder-Blue Mouse Ears & Matching Slender Blue Tail",
+            "Rose-Pink Mouse Ears & Matching Slender Pink Tail"
         ],
         "mannerisms": [
             "Nose twitches in quick, inquisitive rhythm when inspecting something new",
@@ -550,30 +644,275 @@ def is_half_beast_race(race_str: str) -> bool:
     r = str(race_str or "").lower().replace("-", "_")
     return any(k in r for k in ("half_beast", "halfbeast", "hybrid", "demi_human", "beastkin", "half_breed"))
 
+def is_beast_race(race_str: str) -> bool:
+    """Checks if a race string designates a beastfolk, anthro, half-beast, or scaly/feathered creature."""
+    r = str(race_str or "").lower().replace("-", "_")
+    if is_half_beast_race(r):
+        return True
+    return any(k in r for k in (
+        "beastfolk", "beast", "anthro", "furry", "fox", "cat", "wolf", "neko", "kitsune",
+        "rabbit", "bunny", "tiger", "lion", "bear", "mouse", "reptile", "dragon",
+        "snake", "bird", "avian", "lizard", "cheetah", "fennec"
+    )) or is_scaly_race(r)
+
+BEASTFOLK_COLOR_PATTERNS = [
+    (r'\bwhite[\s\-_]tipped\b', 'plumed'),
+    (r'\bcalico\b', 'plumed'),
+    (r'\bspotted\b', 'tufted'),
+    (r'\b(sleek\s+)?black\b', 'sleek'),
+    (r'\b(thick\s+)?gray\b', 'thick'),
+    (r'\b(thick\s+)?grey\b', 'thick'),
+    (r'\bwhite\b', 'soft'),
+    (r'\bgolden[\s\-_]cream\b', 'tapered'),
+    (r'\bgolden\b', 'proud'),
+    (r'\bcream\b', 'soft'),
+    (r'\bbrown\b', 'dense'),
+    (r'\bash[\s\-_]brown\b', 'velvety'),
+    (r'\brust[\s\-_]red\b', 'tapered'),
+    (r'\btawny\b', 'sturdy'),
+    (r'\bcharcoal\b', 'heavy'),
+    (r'\bsilver\b', 'sleek'),
+    (r'\bpinkish\b', 'flexible'),
+    (r'\bpink\b', 'soft'),
+    (r'\bamber\b', 'warm'),
+]
+
+def sanitize_beastfolk_features(text: str) -> str:
+    """Removes fur/coat color descriptors from beastfolk feature descriptions to prevent
+    contradictions with the character's body coat color."""
+    if not text or not isinstance(text, str):
+        return ""
+    import re
+    res = text
+    for pat, rep in BEASTFOLK_COLOR_PATTERNS:
+        res = re.sub(pat, rep, res, flags=re.IGNORECASE)
+    res = re.sub(r'\s+', ' ', res)
+    res = re.sub(r'\s*&\s*', ' & ', res)
+    res = re.sub(r'&\s*$', '', res)
+    res = re.sub(r'^\s*&', '', res)
+    words = res.strip().split()
+    clean_words = []
+    for w in words:
+        if w == '&':
+            clean_words.append('&')
+        elif '-' in w:
+            clean_words.append('-'.join(part.capitalize() for part in w.split('-')))
+        else:
+            clean_words.append(w.capitalize())
+    return " ".join(clean_words).strip()
+
+CULTURE_TO_GROUP = {
+    # Scandinavian / Nordic
+    "swedish": "scandinavian", "norwegian": "scandinavian", "danish": "scandinavian", "icelandic": "scandinavian",
+    # Slavic / Eastern European
+    "slavic": "slavic", "polish": "slavic", "russian": "slavic", "ukrainian": "slavic",
+    # Western European / Celtic / Germanic
+    "english": "celtic_germanic", "german": "celtic_germanic", "dutch": "celtic_germanic",
+    "irish": "celtic_germanic", "scottish": "celtic_germanic", "french": "celtic_germanic",
+    # Mediterranean / Southern European
+    "italian": "mediterranean", "greek": "mediterranean", "hispanic": "mediterranean", "portuguese": "mediterranean",
+    # East Asian
+    "japanese": "east_asian", "chinese": "east_asian", "korean": "east_asian",
+    # Southeast Asian
+    "malay": "southeast_asian", "vietnamese": "southeast_asian",
+    # South Asian
+    "indian": "south_asian",
+    # Middle Eastern
+    "arabic": "middle_eastern", "persian": "middle_eastern", "turkish": "middle_eastern",
+    # African
+    "african": "african",
+}
+
+CULTURE_SKIN_TONE_POOLS = {
+    "scandinavian": [
+        ("porcelain white", 35), ("pale white", 25), ("silky ivory", 20),
+        ("fair peach", 15), ("rosy pale", 5)
+    ],
+    "slavic": [
+        ("pale alabaster", 30), ("porcelain white", 30), ("cool ivory", 25),
+        ("fair peach", 15)
+    ],
+    "celtic_germanic": [
+        ("fair ivory", 35), ("pale peach", 25), ("rosy fair", 20),
+        ("light beige", 15), ("sun-freckled fair", 5)
+    ],
+    "mediterranean": [
+        ("warm olive", 35), ("sun-kissed bronze", 25), ("golden honey", 20),
+        ("warm tan", 15), ("light bronze", 5)
+    ],
+    "east_asian": [
+        ("porcelain ivory", 35), ("fair alabaster", 25), ("warm peach ivory", 20),
+        ("golden cream", 15), ("warm bisque", 5)
+    ],
+    "southeast_asian": [
+        ("warm golden tan", 35), ("amber bronze", 25), ("sun-kissed olive", 25),
+        ("warm honey brown", 15)
+    ],
+    "south_asian": [
+        ("warm caramel", 30), ("golden brown", 25), ("deep bronze", 20),
+        ("rich chestnut brown", 15), ("dusky amber", 10)
+    ],
+    "middle_eastern": [
+        ("warm olive", 35), ("golden almond", 30), ("sun-kissed bronze", 20),
+        ("light honey tan", 15)
+    ],
+    "african": [
+        ("rich dark brown", 30), ("deep espresso", 25), ("warm mahogany", 20),
+        ("dark cocoa", 15), ("radiant dark bronze", 10)
+    ],
+}
+
+GLOBAL_SKIN_TONE_POOL = [
+    ("porcelain white", 10),
+    ("fair ivory", 15),
+    ("pale peach", 10),
+    ("warm peach ivory", 10),
+    ("warm olive", 15),
+    ("golden honey", 10),
+    ("warm golden tan", 10),
+    ("warm caramel", 10),
+    ("rich dark brown", 10),
+]
+
+HUMANOID_RACE_SKIN_TONES = {
+    "dark_elf": [
+        ("ashen charcoal", 30), ("obsidian dusk", 25), ("slate gray", 20),
+        ("dusky violet-gray", 15), ("pale moon-silver", 10)
+    ],
+    "drow": [
+        ("ashen charcoal", 30), ("obsidian dusk", 25), ("slate gray", 20),
+        ("dusky violet-gray", 15), ("pale moon-silver", 10)
+    ],
+    "elf": [
+        ("porcelain white", 30), ("pale ivory", 25), ("silky alabaster", 20),
+        ("fair peach", 15), ("golden sun-kissed", 10)
+    ],
+    "dwarf": [
+        ("tanned bronze", 30), ("ruddy weather-beaten", 25), ("sun-baked tan", 20),
+        ("warm golden brown", 15), ("pale subterranean ivory", 10)
+    ],
+    "orc": [
+        ("olive-green", 35), ("dusty ash-gray", 25), ("dusky bronze", 20),
+        ("slate green-gray", 20)
+    ],
+    "goblin": [
+        ("mossy green", 40), ("pale olive", 30), ("yellow-ochre", 15),
+        ("dusky brown", 15)
+    ],
+    "halfling": [
+        ("warm peach", 35), ("sun-kissed tan", 30), ("rosy fair", 20),
+        ("golden honey", 15)
+    ],
+    "gnome": [
+        ("warm peach", 30), ("rosy fair", 25), ("pale ivory", 25),
+        ("sun-kissed tan", 20)
+    ],
+}
+
+def infer_humanoid_skin_color(race: str, name: str = "", seed: str = "") -> str:
+    """Infers human and fantasy humanoid skin tone using cultural name origin or race weighting.
+    - Fantasy races (Elf, Dwarf, Drow, Orc, etc.) roll from HUMANOID_RACE_SKIN_TONES.
+    - Humans and Half-Beasts roll: ~70% primary cultural palette based on name + ~30% global/mixed-heritage variance.
+    - Unmatched names roll from GLOBAL_SKIN_TONE_POOL.
+    - Uses deterministic pseudo-random hashing if seed or name is provided.
+    """
+    import hashlib, random
+    clean_race = str(race or "").strip().lower().replace("-", "_")
+
+    # 1. Fantasy humanoid races (sorted longest first to match dark_elf before elf)
+    for f_race, pool in sorted(HUMANOID_RACE_SKIN_TONES.items(), key=lambda x: len(x[0]), reverse=True):
+        if f_race in clean_race:
+            tones, weights = zip(*pool)
+            if seed:
+                h = int(hashlib.md5(f"{seed}_{f_race}_skin".encode("utf-8")).hexdigest(), 16)
+                rng = random.Random(h)
+                return rng.choices(tones, weights=weights, k=1)[0]
+            return random.choices(tones, weights=weights, k=1)[0]
+
+    # 2. Culture lookup from name (for humans and half-beasts)
+    cult_group = None
+    if name:
+        try:
+            import namegen
+            parts = name.strip().split()
+            first = parts[0].lower() if parts else ""
+            last = parts[-1].lower() if len(parts) > 1 else ""
+            raw_cult = namegen._SURNAME_TO_CULTURE.get(last) or namegen._FIRST_NAME_TO_CULTURE.get(first) or ""
+            cult_group = CULTURE_TO_GROUP.get(raw_cult)
+        except Exception:
+            cult_group = None
+
+    seed_key = f"{name}_{seed}_{race}_skin"
+    h = int(hashlib.md5(seed_key.encode("utf-8")).hexdigest(), 16) if (name or seed) else None
+    rng = random.Random(h) if h is not None else random
+
+    # ~70% primary cultural palette, ~30% global / mixed-heritage variance
+    use_global = rng.random() < 0.30 or not cult_group or cult_group not in CULTURE_SKIN_TONE_POOLS
+
+    if use_global:
+        tones, weights = zip(*GLOBAL_SKIN_TONE_POOL)
+        return rng.choices(tones, weights=weights, k=1)[0]
+    else:
+        pool = CULTURE_SKIN_TONE_POOLS[cult_group]
+        tones, weights = zip(*pool)
+        return rng.choices(tones, weights=weights, k=1)[0]
+
 def get_species_key_from_race(race_str: str, desc: str = "", seed: str = "") -> str | None:
     """Extracts the canonical animal/beastfolk sub-species key (cat, wolf, dragon, reptile, etc.) from race and description."""
-    text = (str(race_str or "") + " " + str(desc or "")).lower().replace("-", "_")
-    for sp in (
-        "dragon", "dragonkin", "draconoid", "draconic", "drake", "wyvern", "wyrm",
-        "snake", "serpent", "serpentine", "viper", "cobra", "naga",
-        "reptile", "reptilian", "lizard", "gecko", "chameleon", "alligator", "crocodile", "gator", "crocodilian",
-        "tiger", "tigress", "lion", "lioness", "cheetah", "fennec", "mouse", "rat", "rodent", "rabbit", "bunny",
-        "fox", "kitsune", "wolf", "cat", "neko", "bear", "ursine",
-        "bird", "avian", "raven", "crow", "hawk", "falcon", "eagle", "owl", "swan", "sparrow", "dove"
-    ):
-        if sp in text:
-            if sp in ("dragon", "dragonkin", "draconoid", "draconic", "drake", "wyvern", "wyrm"): return "dragon"
-            if sp in ("snake", "serpent", "serpentine", "viper", "cobra", "naga"): return "snake"
-            if sp in ("reptile", "reptilian", "lizard", "gecko", "chameleon", "alligator", "crocodile", "gator", "crocodilian"): return "reptile"
-            if sp in ("tiger", "tigress"): return "tiger"
-            if sp in ("lion", "lioness"): return "lion"
-            if sp in ("rabbit", "bunny"): return "rabbit"
-            if sp in ("fox", "kitsune"): return "fox"
-            if sp in ("cat", "neko"): return "cat"
-            if sp in ("mouse", "rat", "rodent"): return "mouse"
-            if sp in ("bear", "ursine"): return "bear"
-            if sp in ("bird", "avian", "raven", "crow", "hawk", "falcon", "eagle", "owl", "swan", "sparrow", "dove"): return "bird"
-            return sp
+    import re
+    clean_race = str(race_str or "").strip().lower().replace("-", "_")
+    
+    # Priority 1: Explicit sub-race tag (e.g. "beastfolk:cat", "half_beast:fox")
+    if ":" in clean_race:
+        sub = clean_race.split(":", 1)[1].strip()
+        if sub in ("dragon", "dragonkin", "draconoid", "draconic", "drake", "wyvern", "wyrm"): return "dragon"
+        if sub in ("snake", "serpent", "serpentine", "viper", "cobra", "naga"): return "snake"
+        if sub in ("reptile", "reptilian", "lizard", "gecko", "chameleon", "alligator", "crocodile", "gator", "crocodilian"): return "reptile"
+        if sub in ("tiger", "tigress"): return "tiger"
+        if sub in ("lion", "lioness"): return "lion"
+        if sub in ("cheetah",): return "cheetah"
+        if sub in ("fennec",): return "fennec"
+        if sub in ("rabbit", "bunny"): return "rabbit"
+        if sub in ("fox", "kitsune"): return "fox"
+        if sub in ("wolf",): return "wolf"
+        if sub in ("cat", "neko"): return "cat"
+        if sub in ("mouse", "rat", "rodent"): return "mouse"
+        if sub in ("bear", "ursine"): return "bear"
+        if sub in ("bird", "avian", "raven", "crow", "hawk", "falcon", "eagle", "owl", "swan", "sparrow", "dove"): return "bird"
+        if sub: return sub
+
+    species_order = (
+        ("dragon", ("dragon", "dragonkin", "draconoid", "draconic", "drake", "wyvern", "wyrm")),
+        ("snake", ("snake", "serpent", "serpentine", "viper", "cobra", "naga")),
+        ("reptile", ("reptile", "reptilian", "lizard", "gecko", "chameleon", "alligator", "crocodile", "gator", "crocodilian")),
+        ("tiger", ("tiger", "tigress")),
+        ("lion", ("lion", "lioness")),
+        ("cheetah", ("cheetah",)),
+        ("fennec", ("fennec",)),
+        ("rabbit", ("rabbit", "bunny")),
+        ("fox", ("fox", "kitsune")),
+        ("wolf", ("wolf",)),
+        ("cat", ("cat", "neko")),
+        ("mouse", ("mouse", "rat", "rodent")),
+        ("bear", ("bear", "ursine")),
+        ("bird", ("bird", "avian", "raven", "crow", "hawk", "falcon", "eagle", "owl", "swan", "sparrow", "dove")),
+    )
+
+    # Priority 2: Race string matching with word boundaries
+    search_race = clean_race.replace("_", " ")
+    for canonical, synonyms in species_order:
+        for syn in synonyms:
+            if re.search(rf"\b{re.escape(syn)}\b", search_race):
+                return canonical
+
+    # Priority 3: Description matching with word boundaries
+    clean_desc = str(desc or "").lower().replace("-", " ").replace("_", " ")
+    for canonical, synonyms in species_order:
+        for syn in synonyms:
+            if re.search(rf"\b{re.escape(syn)}\b", clean_desc):
+                return canonical
+
+    text = f"{clean_race} {clean_desc}"
 
     # General animal families fallback
     from mechanics.social.races import resolve_animal_family_species, resolve_generic_beastfolk_species
@@ -596,12 +935,281 @@ def get_species_key_from_race(race_str: str, desc: str = "", seed: str = "") -> 
 
     return None
 
+UNNATURAL_HAIR_KEYWORDS = {
+    "blue", "green", "pink", "purple", "violet", "teal", "cyan", "magenta",
+    "lavender", "lilac", "rose", "pastel", "neon", "emerald", "jade",
+    "cerulean", "azure", "cobalt", "sapphire", "mint", "turquoise",
+    "aquamarine", "periwinkle", "streaks", "highlights", "balayage", "tips"
+}
+
+def is_unnatural_hair_color(hair_color: str) -> bool:
+    """Checks if a hair color contains unnatural/vibrant dye pigments or highlights."""
+    if not hair_color:
+        return False
+    low = str(hair_color).lower()
+    words = re.findall(r'[a-z]+', low)
+    return any(w in UNNATURAL_HAIR_KEYWORDS for w in words)
+
+CULTURE_NATURAL_HAIR_POOLS = {
+    # East Asian (Japanese, Chinese, Korean)
+    "east_asian": [
+        ("silky jet-black", 40), ("soft raven-black", 30), ("deep espresso brown", 15),
+        ("dark charcoal brown", 10), ("warm dark chestnut", 5)
+    ],
+    # South Asian (Indian)
+    "south_asian": [
+        ("lustrous blue-black", 40), ("deep onyx black", 35), ("dark espresso", 15),
+        ("warm dark chocolate", 10)
+    ],
+    # Southeast Asian (Malay, Vietnamese)
+    "southeast_asian": [
+        ("silky midnight-black", 45), ("soft black", 30), ("dark chestnut brown", 15),
+        ("warm mocha brown", 10)
+    ],
+    # African
+    "african": [
+        ("deep onyx black", 45), ("rich midnight-black", 30), ("dark espresso brown", 15),
+        ("warm dark cocoa", 10)
+    ],
+    # Middle Eastern / West Asian (Arabic, Persian, Turkish)
+    "middle_eastern": [
+        ("glossy jet-black", 35), ("deep sable brown", 30), ("warm chestnut brown", 20),
+        ("dark chocolate", 10), ("rich hazelnut brown", 5)
+    ],
+    # Mediterranean / Southern European (Italian, Greek, Hispanic, Portuguese)
+    "mediterranean": [
+        ("dark espresso brown", 30), ("warm chestnut brown", 25), ("glossy soft black", 20),
+        ("golden amber brown", 15), ("rich chocolate brown", 10)
+    ],
+    # Celtic / Germanic / Western European (English, German, Dutch, Irish, Scottish, French)
+    "celtic_germanic": [
+        ("golden honey blonde", 20), ("rich chestnut brown", 20), ("dark chocolate brown", 15),
+        ("fiery copper red", 15), ("warm auburn", 10), ("strawberry blonde", 10),
+        ("dirty blonde", 10)
+    ],
+    # Scandinavian / Nordic (Swedish, Norwegian, Danish, Icelandic)
+    "scandinavian": [
+        ("platinum blonde", 30), ("Nordic pale blonde", 25), ("golden honey blonde", 20),
+        ("light ash blonde", 15), ("strawberry blonde", 5), ("soft golden brown", 5)
+    ],
+    # Slavic / Eastern European (Slavic, Polish, Russian, Ukrainian)
+    "slavic": [
+        ("dark ash blonde", 25), ("cool light brown", 25), ("warm chestnut", 20),
+        ("honey blonde", 15), ("soft raven-black", 10), ("strawberry blonde", 5)
+    ],
+}
+
+HUMANOID_RACE_NATURAL_HAIR_POOLS = {
+    # Dark Elves / Drow: Famously moon-silver and stark white, with slate and midnight darks
+    "dark_elf": [
+        ("pale moon-silver", 35), ("stark white", 30), ("ash-gray", 15),
+        ("platinum white", 10), ("midnight slate", 10)
+    ],
+    "drow": [
+        ("pale moon-silver", 35), ("stark white", 30), ("ash-gray", 15),
+        ("platinum white", 10), ("midnight slate", 10)
+    ],
+    # Elves: Ethereal blondes, silvers, rich black, chestnut, and fiery autumn copper
+    "elf": [
+        ("golden honey blonde", 25), ("silvery platinum", 20), ("glossy raven-black", 20),
+        ("fiery autumn copper", 15), ("rich chestnut brown", 10), ("flaxen pale blonde", 10)
+    ],
+    # Dwarves: Earthy, fiery, and dark tones
+    "dwarf": [
+        ("fiery copper red", 25), ("rich dark chocolate", 25), ("grizzled charcoal black", 20),
+        ("warm chestnut auburn", 15), ("sandy blonde", 10), ("iron gray", 5)
+    ],
+    # Orcs: Coarse darks and earthy tones
+    "orc": [
+        ("coarse jet-black", 40), ("deep charcoal", 25), ("dark chocolate brown", 20),
+        ("grizzled steel gray", 15)
+    ],
+    # Goblins: Dark earth tones
+    "goblin": [
+        ("sooty black", 35), ("muddy dark brown", 30), ("dark rust brown", 20),
+        ("dusky ash", 15)
+    ],
+    # Halflings & Gnomes: Warm curls and bright tones
+    "halfling": [
+        ("warm chestnut curls", 30), ("golden honey blonde", 25), ("rich caramel brown", 20),
+        ("strawberry blonde", 15), ("fiery ginger", 10)
+    ],
+    "gnome": [
+        ("warm chestnut curls", 25), ("golden honey blonde", 25), ("strawberry blonde", 25),
+        ("fiery copper red", 25)
+    ],
+}
+
+EXPANDED_HAIR_DYE_TEMPLATES = [
+    # Vibrant & Pastel Anime Dyes
+    "pastel pink", "bubblegum pink", "lavender violet", "electric neon blue",
+    "sky blue", "mint green", "emerald teal", "turquoise", "rose gold",
+    "sunset coral", "neon magenta", "amethyst purple", "periwinkle",
+    # Modern / Fashion Shades
+    "bleached platinum blonde", "smoky ash-silver", "vibrant fire-engine red",
+    "deep wine burgundy", "midnight navy blue",
+    # Two-Tone & Balayage Highlights
+    "black with frosted silver tips", "blonde with pastel pink streaks",
+    "dark brown with caramel balayage", "raven black with crimson underlayer",
+    "silver-white with lilac highlights", "ash brown with honey highlights"
+]
+
+def infer_natural_hair_color(
+    race: str,
+    name: str = "",
+    coat_color: str = "",
+    ear_tail_feature: str = "",
+    seed: str = ""
+) -> str:
+    """Infers natural biological hair color for any character:
+    - Full Beastfolk: derived from body coat color or species template.
+    - Half-Beast: 50% ear/tail fur color match, 50% human name culture match.
+    - Humans: derived from cultural name origin pool.
+    - Fantasy Humanoids: derived from race-weighted natural hair pool.
+    """
+    clean_race = str(race or "").strip().lower().replace("-", "_")
+    is_half = is_half_beast_race(clean_race)
+    is_full = is_beast_race(clean_race) and not is_half
+
+    seed_key = f"{name}_{seed}_{race}_hair"
+    h = int(hashlib.md5(seed_key.encode("utf-8")).hexdigest(), 16) if (name or seed) else None
+    rng = random.Random(h) if h is not None else random
+
+    # 1. Full Beastfolk: coat color takes precedence
+    if is_full:
+        if coat_color:
+            return infer_natural_hair_color_from_coat(coat_color, race=clean_race)
+        spec = get_species_key_from_race(clean_race)
+        if spec and spec in SPECIES_TEMPLATES:
+            coats = SPECIES_TEMPLATES[spec].get("coats", [])
+            if coats:
+                return infer_natural_hair_color_from_coat(coats[rng.randint(0, len(coats)-1)], race=clean_race)
+        return infer_natural_hair_color_from_coat("", race=clean_race)
+
+    # 2. Half-Beast: 50% chance to match ear/tail fur color, 50% chance to match human heritage
+    if is_half:
+        match_ear = rng.random() < 0.50
+        if match_ear and ear_tail_feature:
+            clean_ear = re.sub(
+                r'\b(ears?|tail|horns?|crest|wings?|matching|soft|puff|cotton|tufted|fur|furry|plumage|accents?)\b',
+                '',
+                str(ear_tail_feature),
+                flags=re.IGNORECASE
+            ).strip()
+            clean_ear = re.sub(r'\s+', ' ', clean_ear).strip(' -&')
+            if clean_ear:
+                ear_nat = infer_natural_hair_color_from_coat(clean_ear, race=clean_race)
+                if ear_nat and ear_nat != "natural":
+                    return ear_nat
+
+    # 3. Fantasy Humanoids: race-weighted pool
+    for f_race, pool in sorted(HUMANOID_RACE_NATURAL_HAIR_POOLS.items(), key=lambda x: len(x[0]), reverse=True):
+        if f_race in clean_race:
+            tones, weights = zip(*pool)
+            return rng.choices(tones, weights=weights, k=1)[0]
+
+    # 4. Humans (and Half-Beasts with human heritage expression)
+    cult_group = None
+    if name:
+        try:
+            import namegen
+            parts = name.strip().split()
+            first = parts[0].lower() if parts else ""
+            last = parts[-1].lower() if len(parts) > 1 else ""
+            raw_cult = namegen._SURNAME_TO_CULTURE.get(last) or namegen._FIRST_NAME_TO_CULTURE.get(first) or ""
+            cult_group = CULTURE_TO_GROUP.get(raw_cult)
+        except Exception:
+            cult_group = None
+
+    if cult_group and cult_group in CULTURE_NATURAL_HAIR_POOLS:
+        tones, weights = zip(*CULTURE_NATURAL_HAIR_POOLS[cult_group])
+        return rng.choices(tones, weights=weights, k=1)[0]
+    else:
+        # Default global/western natural palette fallback
+        tones, weights = zip(*CULTURE_NATURAL_HAIR_POOLS["celtic_germanic"])
+        return rng.choices(tones, weights=weights, k=1)[0]
+
+def roll_hair_color_and_dye(
+    race: str,
+    name: str = "",
+    coat_color: str = "",
+    ear_tail_feature: str = "",
+    seed: str = "",
+    force_dye: bool = False
+) -> tuple[str, bool, str]:
+    """Rolls hair color with a 35% dye rate across all archetypes (Humans, Beastfolk, Half-Beasts, Fantasy Humanoids).
+    Returns: (hair_color, is_dyed, natural_hair_color)
+    """
+    clean_race = str(race or "").strip().lower().replace("-", "_")
+    is_half = is_half_beast_race(clean_race)
+    is_full = is_beast_race(clean_race) and not is_half
+
+    seed_key = f"{name}_{seed}_{race}_hair_roll"
+    h = int(hashlib.md5(seed_key.encode("utf-8")).hexdigest(), 16) if (name or seed) else None
+    rng = random.Random(h) if h is not None else random
+
+    natural_color = infer_natural_hair_color(
+        clean_race, name=name, coat_color=coat_color, ear_tail_feature=ear_tail_feature, seed=seed
+    )
+
+    is_dyed = force_dye or (rng.random() < 0.35)
+
+    if is_dyed:
+        dye_candidates = list(EXPANDED_HAIR_DYE_TEMPLATES)
+        spec = get_species_key_from_race(clean_race)
+        if is_full and spec and spec in SPECIES_TEMPLATES:
+            for sh in SPECIES_TEMPLATES[spec].get("hair", []):
+                if is_contrasting_shade(coat_color, sh):
+                    dye_candidates.append(sh.lower())
+
+        # When character has a coat color (Full Beastfolk), dyed hair MUST be a contrasting shade to their coat!
+        if is_full and coat_color:
+            coat_fams = get_color_families(coat_color)
+            if coat_fams:
+                contrast_candidates = [
+                    d for d in dye_candidates
+                    if not (get_color_families(d) & coat_fams) and is_contrasting_shade(coat_color, d)
+                ]
+                if contrast_candidates:
+                    dye_candidates = contrast_candidates
+
+        hair_color = rng.choice(dye_candidates)
+
+        if is_full and coat_color:
+            coat_fams = get_color_families(coat_color)
+            if (get_color_families(hair_color) & coat_fams) or hair_color.lower() == natural_color.lower():
+                fallback_pool = [
+                    "crimson red", "midnight jet-black", "pastel sakura-pink",
+                    "electric neon blue", "emerald green", "platinum blonde", "royal violet"
+                ]
+                safe_fallbacks = [fb for fb in fallback_pool if not (get_color_families(fb) & coat_fams)]
+                hair_color = safe_fallbacks[rng.randint(0, len(safe_fallbacks) - 1)] if safe_fallbacks else "midnight jet-black"
+        else:
+            if hair_color.lower() == natural_color.lower():
+                hair_color = "pastel pink" if "pink" not in natural_color else "electric neon blue"
+
+        return hair_color, True, natural_color
+    else:
+        return natural_color, False, natural_color
+
 PHYSIQUE_FEMALE_TEMPLATES = [
-    "Soft & Curved", "Toned & Athletic", "Hourglass & Slender", "Petite & Soft", "Full-Figured & Voluptuous"
+    "Soft & Curved",
+    "Toned & Athletic",
+    "Hourglass & Slender",
+    "Petite & Soft",
+    "Full-Figured & Voluptuous",
+    "Thick & Curvy",
+    "Soft & Overweight"
 ]
 
 PHYSIQUE_MALE_TEMPLATES = [
-    "Broad Shoulders & Lean", "Toned & Athletic", "Muscular & Tall", "Slender & Lanky"
+    "Average & Proportionate",
+    "Broad Shoulders & Lean",
+    "Toned & Athletic",
+    "Muscular & Powerful",
+    "Slender & Lanky",
+    "Stocky & Thick",
+    "Heavy & Overweight"
 ]
 
 UNDERGARMENT_COLOR_PALETTES = [
@@ -935,6 +1543,7 @@ def infer_contact_gender(contact: Dict[str, Any]) -> str:
 IMMUTABLE_PHYSICAL_APPEARANCE_KEYS = {
     "eye_color", "eyes",
     "hair_color", "hair_style", "hair_length", "hair",
+    "is_dyed", "natural_hair_color", "natural_hair",
     "stature", "height",
     "physique",
     "coat_color", "fur_color", "coat", "scale_color", "feather_color",
@@ -947,7 +1556,7 @@ IMMUTABLE_PHYSICAL_APPEARANCE_KEYS = {
     "undergarments", "bra", "underwear",
 }
 
-def format_persona_summary(app_dict: Dict[str, Any], scen_key: str = "fantasy", mannerisms: str = "", traits: List[str] = None, revealed_flags: Dict[str, Any] = None, gender: str = "") -> str:
+def format_persona_summary(app_dict: Dict[str, Any], scen_key: str = "fantasy", mannerisms: str = "", traits: List[str] = None, revealed_flags: Dict[str, Any] = None, gender: str = "", include_intimate: bool = False, **kwargs) -> str:
     """Formats a concise persona summary (appearance, mannerisms, 3-4 traits) for LLM system prompt context."""
     if not app_dict:
         app_dict = {}
@@ -955,7 +1564,7 @@ def format_persona_summary(app_dict: Dict[str, Any], scen_key: str = "fantasy", 
     h_color = (app_dict.get("hair_color") or "").title()
     h_len = (app_dict.get("hair_length") or "").lower()
     h_style = (app_dict.get("hair_style") or "").lower()
-    stature = (app_dict.get("stature") or "").lower()
+    stature = (app_dict.get("stature") or "").lower().replace("_", " ")
     physique = (app_dict.get("physique") or "").strip()
     skin = (app_dict.get("skin_color") or "").title()
     coat = (app_dict.get("coat_color") or "").title()
@@ -991,9 +1600,17 @@ def format_persona_summary(app_dict: Dict[str, Any], scen_key: str = "fantasy", 
             stat_str += f" ({physique})"
         parts.append(stat_str)
     if coat:
-        parts.append(f"{coat}")
+        c_lower = coat.lower()
+        if any(term in c_lower for term in ("fur", "coat", "scales", "scale", "feather", "fleece", "pelt", "hide")):
+            parts.append(f"{coat}")
+        else:
+            parts.append(f"{coat} coat")
     elif skin:
-        parts.append(f"{skin} skin")
+        s_lower = skin.lower()
+        if "skin" in s_lower or "complexion" in s_lower:
+            parts.append(f"{skin}")
+        else:
+            parts.append(f"{skin} skin")
     if features:
         parts.append(f"{features}")
     if outfit:

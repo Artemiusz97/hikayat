@@ -8,8 +8,92 @@ import db
 from .seeds import *
 from .seeds import _load_seeds, _slugify, _SEED_PATH
 
-def format_llm_location_context(session_id: int, current_location_raw: str, scenario_key: str, char_name: str = "") -> str:
+def build_node_sensory_and_memory_block(session_id: int, curr_node: dict, current_day: int, current_minute: int, scen_key: str = "") -> str:
+    """Synthesizes indoor/outdoor time-of-day lighting, acoustics, curfew tension, and persistent room memory."""
+    from mechanics.world.schedules import get_time_block_key
+    from mechanics.world.locations.access_gate import is_curfew_active, get_node_effective_access_info
+    from mechanics.world.world_schedule import is_abandoned_school_node, is_weekend, is_high_school_setting
 
+    if not scen_key and session_id:
+        try:
+            sess_row = db.get_session(session_id)
+            scen_key = (sess_row or {}).get("scenario") or "high_school_drama"
+        except Exception:
+            scen_key = "high_school_drama"
+    elif not scen_key:
+        scen_key = "high_school_drama"
+
+    is_hs = is_high_school_setting(scen_key)
+    safe_min = int(current_minute or 0) % 1440
+    time_block = get_time_block_key(current_minute)
+    is_enc = int(curr_node.get("is_enclosed", 1))
+    is_academic = curr_node.get("category") == "academic"
+    is_after_hours_campus = is_hs and is_academic and not is_abandoned_school_node(curr_node) and (safe_min >= 1200 or safe_min < 420)
+    is_weekend_day = is_weekend(current_day)
+
+    # Time-of-day sensory profiles (respecting 20:00-07:00 campus lockdown & weekend quiet)
+    if is_after_hours_campus:
+        lighting = "Darkened interior illuminated only by pale moonlight or dim dawn light through glass and security fixtures" if is_enc else "Quiet campus grounds under dim twilight or pale early-dawn sky"
+        acoustics = "Hushed, empty after-hours stillness where every whisper and footstep reverberates" if is_enc else "Still, deserted campus air and distant town hum"
+    elif time_block == "morning":
+        lighting = "Crisp morning sunlight slanting through window panes onto dust motes" if is_enc else "Cool, refreshing morning air under bright early daylight"
+        if is_hs and is_academic and is_weekend_day:
+            acoustics = "Quiet, empty weekend stillness with only distant practice sounds outside" if is_enc else "Peaceful weekend morning breeze with sparse club activity in the distance"
+        else:
+            acoustics = "Quiet morning murmur with rhythmic hallway footsteps in the distance" if is_enc else "Chirping birds and gentle breeze blowing across open paths"
+    elif time_block == "lunch":
+        lighting = "Bright midday illumination casting sharp shadows" if is_enc else "Warm overhead sun shining brightly"
+        if is_hs and is_academic and is_weekend_day:
+            acoustics = "Calm weekend midday quiet indoors" if is_enc else "Relaxed weekend midday breeze and distant athletic training"
+        else:
+            acoustics = "Lively laughter, chatter, and clatter of lunch trays echoing throughout" if is_enc else "Bustling social activity and pleasant midday breeze"
+    elif time_block == "afternoon":
+        lighting = "Warm afternoon light turning golden along polished floors" if is_enc else "Warm golden rays and lengthening afternoon shadows"
+        acoustics = "Subtle hum of academic or club activities, turning pages, and focused dialogue" if is_enc else "Distant shouts from practice fields and rustling leaves"
+    elif time_block == "evening":
+        lighting = "Amber dusk glow outside fading into soft fluorescent corridor lighting" if is_enc else "Crimson-violet sunset twilight sky with streetlamps flickering on"
+        acoustics = "Footsteps of late departures echoing in increasingly quiet spaces" if is_enc else "Cooling evening breeze and ambient dusk quiet"
+    else:  # night
+        lighting = "Darkened interior illuminated only by pale moonlight through glass or dim security fixtures" if is_enc else "Dark night sky under stars, quiet moonlight casting long deep shadows"
+        acoustics = "Hushed, secretive acoustics where every whisper and footstep reverberates" if is_enc else "Nocturnal stillness, chilly night wind, and distant city hum"
+
+    lines = [
+        f"- Physical Environment & Atmosphere: {'Enclosed Interior' if is_enc else 'Open-Air Exterior'} | {lighting} | {acoustics}."
+    ]
+
+    # Curfew & After-Hours Trespassing tension check
+    c_start = curr_node.get("curfew_start_min")
+    c_end = curr_node.get("curfew_end_min")
+    if is_hs and is_abandoned_school_node(curr_node):
+        lines.append(
+            "- [ABANDONED SCHOOL BUILDING — UNRESTRICTED 24/7]: "
+            "Nobody bothers to lock the doors or patrol this derelict wing. It remains accessible at all hours."
+        )
+    elif is_hs and (is_curfew_active(c_start, c_end, current_minute) or safe_min >= 1200 or safe_min < 420) and is_academic:
+        lines.append(
+            "- [CAMPUS CURFEW & AFTER-HOURS TRESPASSING (20:00–07:00) — AFTER-HOURS TENSION]: "
+            "All students and teachers have returned home, main corridor lights are dark, exterior doors are locked from the outside (exit remains unobstructed), "
+            "and security footsteps echo down distant halls. Staying on campus during these hours is considered trespassing; maintain a hushed, illicit after-hours atmosphere."
+        )
+
+    # Room memory / scene residue check
+    access_info = get_node_effective_access_info(session_id, curr_node["node_id"], current_day=current_day, current_minute=current_minute, scen_key=scen_key)
+    res_log = access_info.get("scene_residue_log") or []
+    if res_log:
+        lines.append("- PERSISTENT ROOM MEMORY (Past Moments Recorded in this Space):")
+        for m in res_log:
+            lines.append(f"  * {m['text']}")
+        lines.append("  (Subtly weave this history or emotional residue into your narration when relevant.)")
+    elif access_info.get("scene_residue"):
+        lines.append(f"- PERSISTENT ROOM MEMORY: \"{access_info['scene_residue']}\" (Subtly acknowledge this history/atmosphere when relevant).")
+
+    if access_info.get("is_unlocked") and access_info.get("access_tier") in ("restricted", "private"):
+        lines.append("- ACCESS PERMISSION: Door unlocked (access granted for this session/day).")
+
+    return "\n".join(lines)
+
+
+def format_llm_location_context(session_id: int, current_location_raw: str, scenario_key: str, char_name: str = "") -> str:
     """Formats the location context string and real-time movement rules for the LLM prompt."""
 
     if not is_location_engine_enabled(scenario_key):
@@ -245,31 +329,53 @@ def format_llm_location_context(session_id: int, current_location_raw: str, scen
 
 
     nearby_dest_section = ""
-
     if nearby_blocks:
-
         nearby_dest_section = (
-
             "ESTABLISHED NEARBY DESTINATIONS (PREFER MATCHING THESE BEFORE CREATING NEW PLACES):\n"
-
             + "\n".join(nearby_blocks)
-
             + "\n\n"
-
         )
 
+    session = db.get_session(session_id) if session_id else None
+    curr_node_id = session.get("current_node_id") if session else None
+    curr_node = db.get_world_node(session_id, curr_node_id) if (session_id and curr_node_id) else None
+    curr_day, curr_min, _ = db.get_session_time(session_id) if session_id else (1, 480, "morning")
 
+    graph_section = ""
+    if session_id and curr_node:
+        outgoing = db.get_outgoing_edges(session_id, curr_node_id)
+        edge_lines = []
+        for e in outgoing:
+            to_id = e.get("to_node_id")
+            to_name = e.get("to_node_name") or to_id
+            t_min = e.get("travel_minutes", 1)
+            is_locked = e.get("is_locked", 0)
+            lock_desc = " [LOCKED]" if is_locked else ""
+            edge_lines.append(f"  * Node [{to_id}] '{to_name}' ({t_min}m travel{lock_desc})")
+
+        edges_text = "\n".join(edge_lines) if edge_lines else "  * (No outgoing paths; enclosed dead-end)"
+        sample_node_id = outgoing[0]['to_node_id'] if outgoing else 'node_id'
+        is_thub = db.is_node_or_parent_transit_hub(session_id, curr_node_id)
+        thub_note = " [Transit Hub Fast-Travel Enabled]" if is_thub else ""
+
+        sensory_memory_text = build_node_sensory_and_memory_block(session_id, curr_node, curr_day, curr_min, scen_key=scenario_key)
+
+        graph_section = (
+            f"SPATIAL GRAPH TOPOGRAPHY & DIRECTLY CONNECTED EDGES:\n"
+            f"- Current Spatial Node: [{curr_node['node_id']}] '{curr_node['name']}' (Type: {curr_node['node_type']}, Privacy: {curr_node.get('privacy_level', 'semi_private')}, Access: {curr_node.get('access_tier', 'open')}){thub_note}\n"
+            f"{sensory_memory_text}\n"
+            f"- Directly Traversable Adjacent Pathways (Edges):\n{edges_text}\n\n"
+            f"- SPATIAL MOVEMENT & DIALOGUE GATING RULE:\n"
+            f"  1. If the player's choice is a TRAVEL / MOVEMENT action: select one of the adjacent nodes above and output its node ID in `destination_node_id` (e.g. '{sample_node_id}').\n"
+            f"  2. If the player is NOT traveling (dialogue, social chat, skill check, observation, romantic/intimate encounter, sitting down): leave `destination_node_id` as null/empty, keep `location` identical, and update `focal_point` for micro-positioning (e.g. 'Leaning against the glass panes', 'At the teacher\\'s desk'). The macro location will strictly NOT change.\n\n"
+        )
 
     return (
-
         f"CURRENT SCENE LOCATION (Tiered 3-Level Spatial System):\n"
-
         f"- Current Position: {formatted_current}{env_text}\n"
-
         f"- Current Breakdown: [Tier 1: Zone/Biome] = '{zone}' | [Tier 2: Physical Place ({arch_label})] = '{primary}' | [Tier 3: Sub-Location/Spot] = '{sub}'\n\n"
-
+        f"{graph_section}"
         f"{regional_block}"
-
         f"{nearby_dest_section}"
 
         f"SPATIAL SYSTEM RULES:\n"
@@ -545,6 +651,84 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
             "quest_markers": zone_quest_markers,
             "quest_count": len(zone_quest_markers),
         })
+
+    if session_id:
+        try:
+            from mechanics.world.schedules import get_npc_scheduled_node_id
+            from mechanics.world.locations.access_gate import get_node_effective_access_info
+
+            curr_day, curr_min, _ = db.get_session_time(session_id)
+            contacts = db.get_contacts(session_id) or []
+            roster = db.get_school_roster(session_id) if hasattr(db, "get_school_roster") else []
+            all_nodes = db.get_session_world_nodes(session_id) or []
+
+            occ_by_node: dict[str, dict] = {}
+            def _get_occ(nid: str):
+                if nid not in occ_by_node:
+                    occ_by_node[nid] = {"known_npcs": [], "unmet_count": 0}
+                return occ_by_node[nid]
+
+            appts = []
+            if hasattr(db, "get_phone_appointments"):
+                appts = (db.get_phone_appointments(session_id, status="pending") or []) + (db.get_phone_appointments(session_id, status="arrived") or [])
+            for appt in appts:
+                tgt = appt.get("target_node_id")
+                if not tgt and appt.get("rendezvous_location"):
+                    tgt = db.resolve_node_id_from_location(session_id, appt["rendezvous_location"], prefer_facility=True)
+                if tgt:
+                    tgt_n = next((n for n in all_nodes if n["node_id"] == tgt), None)
+                    fac_id = tgt_n.get("parent_id") if (tgt_n and tgt_n.get("node_type") == "ROOM") else tgt
+                    if fac_id:
+                        occ = _get_occ(fac_id)
+                        an = appt.get("npc_name", "")
+                        if an and not any(kn["name"].lower() == an.lower() for kn in occ["known_npcs"]):
+                            occ["known_npcs"].append({"name": an, "status": "Rendezvous"})
+
+            c_names_lower = set()
+            for c in contacts:
+                cn = (c.get("name") or "").strip()
+                if not cn: continue
+                c_names_lower.add(cn.lower())
+                snid = get_npc_scheduled_node_id(c, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
+                if snid:
+                    sn = next((n for n in all_nodes if n["node_id"] == snid), None)
+                    fac_id = sn.get("parent_id") if (sn and sn.get("node_type") == "ROOM") else snid
+                    if fac_id:
+                        occ = _get_occ(fac_id)
+                        if not any(kn["name"].lower() == cn.lower() for kn in occ["known_npcs"]):
+                            occ["known_npcs"].append({"name": cn, "status": "Routine"})
+
+            for r in roster:
+                rn = (r.get("name") or "").strip()
+                if not rn or rn.lower() in c_names_lower: continue
+                snid = get_npc_scheduled_node_id(r, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
+                if snid:
+                    sn = next((n for n in all_nodes if n["node_id"] == snid), None)
+                    fac_id = sn.get("parent_id") if (sn and sn.get("node_type") == "ROOM") else snid
+                    if fac_id:
+                        _get_occ(fac_id)["unmet_count"] += 1
+
+            for z_item in summary_list:
+                z_nm = z_item["zone_name"]
+                for p_item in z_item.get("primary_locations", []):
+                    p_nm = p_item["name"]
+                    val_str = f"{z_nm} ➔ {p_nm}"
+                    pnid = db.resolve_node_id_from_location(session_id, val_str, prefer_facility=True)
+                    if pnid:
+                        acc = get_node_effective_access_info(session_id, pnid, current_day=curr_day, current_minute=curr_min, scen_key=scen_key)
+                        p_occ = occ_by_node.get(pnid, {"known_npcs": [], "unmet_count": 0})
+                        p_item["node_id"] = pnid
+                        p_item["access_tier"] = acc.get("access_tier", "open")
+                        p_item["access_badge"] = acc.get("status_badge", "Open")
+                        p_item["is_curfew_active"] = acc.get("curfew_active", False)
+                        p_item["schedule_locked"] = acc.get("schedule_locked", False)
+                        p_item["is_trespassing"] = acc.get("is_trespassing", False)
+                        p_item["is_unlocked"] = acc.get("is_unlocked", False)
+                        p_item["scene_residue"] = acc.get("scene_residue")
+                        p_item["known_npcs_here"] = p_occ["known_npcs"][:3]
+                        p_item["unmet_activity_count"] = p_occ["unmet_count"]
+        except Exception:
+            pass
 
     return summary_list
 

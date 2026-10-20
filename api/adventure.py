@@ -8,6 +8,7 @@ from db import adb
 import game_engine
 import skill_check
 from scenario_data import get_scenario_display_name
+from mechanics.social.relationships import is_contact_eligible
 from services.turn_service import TurnService
 from mechanics.system.concurrency import distributed_session_lock, distributed_user_lock
 from .deps import (
@@ -21,6 +22,7 @@ from .deps import (
     ActionRequest,
     EndAdventureRequest,
     RetryAdventureRequest,
+    RerollImageRequest,
     SaveSlotRequest,
     LoadSlotRequest,
 )
@@ -266,7 +268,7 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
     # Dynamic Clothing Status & Present NPC Enrichment
     try:
         import character_data as cd
-        from mechanics.social.physical_state import compute_clothing_summary_badge, _match_actor_key
+        from mechanics.social.physical_state import compute_clothing_summary_badge, _match_actor_key, find_player_actor_key
         phys_st = db.get_session_physical_state(session.get("id")) if session.get("id") else None
         phys_actors = (phys_st.get("actors") or {}) if isinstance(phys_st, dict) else {}
 
@@ -274,9 +276,9 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
         sess_char = session.get("character") if isinstance(session.get("character"), dict) else {}
         char_dict = dict(char) if char else sess_char
         char_name = char_dict.get("name") if isinstance(char_dict, dict) else ""
-        matched_p_key = _match_actor_key(char_name, phys_actors) if char_name else ""
+        matched_p_key = find_player_actor_key(phys_actors, party=[(char_dict, [])], session_id=session.get("id")) or (_match_actor_key(char_name, phys_actors) if char_name else "")
         if matched_p_key not in phys_actors and sess_char.get("name"):
-            alt_key = _match_actor_key(str(sess_char["name"]), phys_actors)
+            alt_key = find_player_actor_key(phys_actors, party=[(sess_char, [])], session_id=session.get("id")) or _match_actor_key(str(sess_char["name"]), phys_actors)
             if alt_key in phys_actors:
                 matched_p_key = alt_key
                 char_dict = sess_char
@@ -303,8 +305,18 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
 
         # 2. Present NPCs & Party Companions clothing status & status effects
         raw_npcs = session.get("current_npcs") or []
-        contacts_list = db.get_contacts(session.get("id")) or [] if session.get("id") else []
+        sess_id = session.get("id") or 0
+        contacts_list = db.get_contacts(sess_id) or [] if sess_id else []
         contacts_by_name = {str(c.get("name", "")).strip().lower(): c for c in contacts_list if isinstance(c, dict)}
+        lore_data = db.get_lorebook(sess_id) or {} if sess_id else {}
+        lore_characters = {}
+        if isinstance(lore_data, dict):
+            for l_cat in ("characters", "npcs", "people"):
+                for l_ent in (lore_data.get(l_cat) or []):
+                    if isinstance(l_ent, dict):
+                        l_name = str(l_ent.get("title") or l_ent.get("name") or "").strip().lower()
+                        if l_name:
+                            lore_characters[l_name] = l_ent
 
         def _enrich_npc_entry(npc_item):
             if isinstance(npc_item, str):
@@ -324,15 +336,104 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
             if not c_rec and contacts_by_name:
                 m_c_key = _match_actor_key(n_name, contacts_by_name)
                 c_rec = contacts_by_name.get(m_c_key)
+            if not c_rec and lore_characters:
+                c_rec = lore_characters.get(n_name.lower())
+                if not c_rec:
+                    m_l_key = _match_actor_key(n_name, lore_characters)
+                    c_rec = lore_characters.get(m_l_key)
             c_appr = (c_rec.get("appearance") or {}) if isinstance(c_rec, dict) else {}
             n_gender = (c_appr.get("gender") if isinstance(c_appr, dict) else None) or (c_rec.get("gender") if isinstance(c_rec, dict) else None) or n_dict.get("gender") or "Female"
             n_dict["clothing_status"] = compute_clothing_summary_badge(n_act_data.get("clothing"), gender=n_gender)
 
-            # Synchronize active status effects
-            if isinstance(c_rec, dict) and c_rec.get("status_effects") is not None:
-                n_dict["status_effects"] = cd.sanitize_status_effects(c_rec.get("status_effects") or [])
-            else:
-                n_dict["status_effects"] = cd.sanitize_status_effects(n_dict.get("status_effects") or [])
+            # 1. Synchronize active status effects from all sources
+            raw_effs = []
+            if isinstance(c_rec, dict):
+                c_effs = c_rec.get("status_effects")
+                if isinstance(c_effs, list):
+                    raw_effs.extend(c_effs)
+                elif isinstance(c_effs, str) and c_effs:
+                    try:
+                        raw_effs.extend(json.loads(c_effs))
+                    except Exception:
+                        raw_effs.append(c_effs)
+                b_effs = (c_rec.get("basic_info") or {}).get("status_effects")
+                if isinstance(b_effs, list):
+                    raw_effs.extend(b_effs)
+                m_effs = (c_rec.get("metadata") or {}).get("status_effects")
+                if isinstance(m_effs, list):
+                    raw_effs.extend(m_effs)
+            if isinstance(n_act_data, dict):
+                a_effs = n_act_data.get("status_effects")
+                if isinstance(a_effs, list):
+                    raw_effs.extend(a_effs)
+            if isinstance(n_dict.get("status_effects"), list):
+                raw_effs.extend(n_dict.get("status_effects"))
+            n_dict["status_effects"] = cd.sanitize_status_effects(raw_effs)
+
+            # 2. Synchronize affinity / relationship score & track
+            score = None
+            if isinstance(c_rec, dict):
+                score = c_rec.get("relationship_score")
+                if score is None:
+                    score = c_rec.get("affinity")
+                if score is None and isinstance(c_rec.get("metadata"), dict):
+                    score = c_rec["metadata"].get("relationship_score", c_rec["metadata"].get("affinity"))
+            if score is None:
+                score = n_dict.get("relationship_score", n_dict.get("affinity", 0))
+
+            n_dict["relationship_score"] = int(score or 0)
+            n_dict["affinity"] = int(score or 0)
+            n_dict["track"] = (c_rec.get("track") if isinstance(c_rec, dict) else None) or n_dict.get("track", "platonic")
+
+            # 3. Synchronize intimate excitement meter (when applicable)
+            exc_actors = (phys_st.get("excitement") or {}).get("actors") or {}
+            matched_exc_key = _match_actor_key(n_name, exc_actors) if exc_actors else ""
+            exc_data = exc_actors.get(matched_exc_key) or {}
+
+            partner_meter_data = None
+            hist_entries = session.get("history") or []
+            last_intimate = None
+            for h_entry in reversed(hist_entries[-3:]):
+                if isinstance(h_entry, dict) and h_entry.get("intimate_update"):
+                    last_intimate = h_entry["intimate_update"]
+                    break
+
+            if isinstance(last_intimate, dict) and last_intimate.get("active"):
+                p_meters = last_intimate.get("partner_meters") or []
+                for pm in p_meters:
+                    if isinstance(pm, dict) and _match_actor_key(n_name, {pm.get("name", ""): pm}):
+                        partner_meter_data = pm
+                        break
+                if not partner_meter_data and last_intimate.get("partner_meter") is not None:
+                    p_name = last_intimate.get("partner_name") or session.get("dialogue_partner") or ""
+                    if _match_actor_key(n_name, {p_name: True}):
+                        partner_meter_data = {
+                            "meter": last_intimate.get("partner_meter", 0),
+                            "status": last_intimate.get("act_type", ""),
+                            "climaxed": last_intimate.get("simultaneous_partner_climax", False),
+                        }
+
+            exc_meter = None
+            exc_status = ""
+            exc_climaxed = False
+            exc_active = False
+
+            if exc_data:
+                exc_meter = int(exc_data.get("meter", 0))
+                exc_status = str(exc_data.get("status") or "")
+                exc_climaxed = bool(exc_data.get("climaxed", False))
+                exc_active = bool((phys_st.get("excitement") or {}).get("active", False) or exc_meter > 0)
+            elif partner_meter_data:
+                exc_meter = int(partner_meter_data.get("meter", 0))
+                exc_status = str(partner_meter_data.get("status") or "")
+                exc_climaxed = bool(partner_meter_data.get("climaxed", False))
+                exc_active = True
+
+            if exc_active and exc_meter is not None:
+                n_dict["excitement_meter"] = exc_meter
+                n_dict["excitement_status"] = exc_status
+                n_dict["excitement_climaxed"] = exc_climaxed
+                n_dict["excitement_active"] = True
 
             return n_dict
 
@@ -358,32 +459,69 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
 
 async def _trigger_scene_image_broadcast(
     session_id: int,
-    scene_title: str,
-    narrative: str,
-    location: str,
-    scenario: str,
+    scene_title: str = "",
+    narrative: str = "",
+    location: str = "",
+    scenario: str = "",
     image_prompt: str | None = None,
-):
+    outcome: dict | None = None,
+    action: dict | None = None,
+    force: bool = False,
+) -> str | None:
     """Generates a scene illustration in the background and broadcasts SCENE_IMAGE via WebSocket."""
     try:
         import image_client
-        prompt = (image_prompt or "").strip()
-        if not prompt:
-            prompt = f"{scenario} RPG scene illustration. Location: {location or scene_title}. {(narrative or '')[:450]}"
-        model_override = None
+        from mechanics.narrative.image_prompt_composer import compose_turn_image_prompt
+
         sess = await adb(db.get_session, session_id)
-        if sess and sess.get("host_user_id"):
+        if not sess:
+            return None
+
+        # Check generation mode: auto (1, "auto", "1", True) vs on_demand (2, "on_demand", "2") vs disabled (0)
+        img_mode = sess.get("image_gen_enabled")
+        if not force and str(img_mode).lower() not in ("1", "auto", "true"):
+            return None
+
+        # Deterministically compose Danbooru / SDXL / Illustrious prompt and target aspect ratio
+        composed = compose_turn_image_prompt(sess, outcome=outcome, action=action)
+        prompt = (image_prompt.strip() if image_prompt and "masterpiece" in image_prompt else composed.prompt)
+        target_size = composed.size
+        negative_prompt = composed.negative_prompt
+
+        model_override = None
+        if sess.get("host_user_id"):
             user_settings = await adb(db.get_settings, sess["host_user_id"])
             model_override = user_settings.get("image_model") or None
-        image_url = await image_client.generate_scene_image(prompt, model=model_override)
+
+        image_url = await image_client.generate_scene_image(
+            prompt,
+            model=model_override,
+            session_id=session_id,
+            size=target_size,
+            negative_prompt=negative_prompt,
+        )
         if image_url:
+            local_web_url = getattr(image_url, "local_url", str(image_url))
+            await adb(db.update_session, session_id, scene_image_url=local_web_url)
+            fresh_s = await adb(db.get_session, session_id)
+            if fresh_s:
+                raw_hist = list(fresh_s.get("history") or [])
+                if raw_hist and isinstance(raw_hist[-1], dict):
+                    raw_hist[-1]["scene_image_url"] = local_web_url
+                    raw_hist[-1]["scene_image_orientation"] = composed.orientation
+                    import json
+                    await adb(db.update_session, session_id, history_json=json.dumps(raw_hist, default=str))
+
             await manager.broadcast(session_id, {
                 "type": "SCENE_IMAGE",
                 "session_id": session_id,
-                "image_url": image_url,
+                "image_url": local_web_url,
+                "orientation": composed.orientation,
             })
+            return local_web_url
     except Exception as e:
         logger.warning(f"Scene image generation failed for session {session_id}: {e}")
+        return None
 
 
 def _fetch_open_lobbies() -> list[dict]:
@@ -540,28 +678,75 @@ async def start_adventure(req: StartAdventureRequest):
             if isinstance(scene, dict) and "merchant_encounter" in scene:
                 from mechanics.combat.merchant import apply_merchant_encounter_result
                 await adb(apply_merchant_encounter_result, session_id, scene.get("merchant_encounter"))
-            raw_choices = scene.get("choices") or scene.get("next_choices") or []
+            raw_choices, narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
+                scene, session=session
+            )
             raw_choices = await adb(
                 game_engine.sanitize_and_diversify_choices,
                 raw_choices,
                 scenario=scenario_key,
                 location=scene.get("location") or "",
                 char=dict(char_row) if char_row else None,
-                dialogue_partner=None,
-                current_npcs=scene.get("npcs_present", []),
+                dialogue_partner=partner_arg,
+                current_npcs=npcs_arg,
                 session_id=session_id,
             )
             await adb(
                 db.save_session_scene,
                 session_id,
-                scene.get("scene_title", "Beginning"),
-                scene.get("narrative", ""),
+                scene_title,
+                narrative,
                 raw_choices,
                 [],
                 location=scene.get("location"),
                 nearby_enemies=scene.get("nearby_enemies"),
-                current_npcs=scene.get("npcs_present", [])
+                current_npcs=npcs_arg,
+                dialogue_partner=partner_arg,
+                current_node_id=scene.get("current_node_id"),
             )
+            char_id = char_row["id"] if char_row else 0
+            enemy_names = {game_engine._get_npc_name(e).lower() for e in scene.get("nearby_enemies", []) if e}
+            for npc in (npcs_arg or []):
+                n_name = game_engine._get_npc_name(npc)
+                if n_name and n_name.lower() not in enemy_names:
+                    b_info = dict(npc.get("basic_info") or {}) if isinstance(npc, dict) else {}
+                    if isinstance(npc, dict):
+                        if "role" in npc and not b_info.get("role"):
+                            b_info["role"] = npc.get("role", "")
+                        if "description" in npc and not b_info.get("description"):
+                            b_info["description"] = npc.get("description", "")
+                    if not b_info.get("location"):
+                        b_info["location"] = scene.get("location") or session.get("current_location", "")
+                    if is_contact_eligible(name=n_name, role=b_info.get("role", ""), description=b_info.get("description", ""), scenario=scenario_key, session_id=session_id):
+                        await adb(db.upsert_contact,
+                            session_id=session_id,
+                            character_id=char_id,
+                            npc_id=n_name,
+                            name=n_name,
+                            basic_info=b_info,
+                            delta_score=0,
+                            new_traits=npc.get("traits") if isinstance(npc, dict) else None,
+                            new_preferences=npc.get("preferences") if isinstance(npc, dict) else None,
+                            race=npc.get("race", "") if isinstance(npc, dict) else "",
+                            gender=npc.get("gender", "") if isinstance(npc, dict) else "",
+                            appearance=npc.get("appearance", {}) if isinstance(npc, dict) else None,
+                        )
+                    else:
+                        # Non-student characters are story figures only; track basic info in lorebook
+                        m_val = npc.get("mannerisms", "") if isinstance(npc, dict) else ""
+                        if not m_val and isinstance(b_info, dict):
+                            m_val = b_info.get("mannerisms", "")
+                        await adb(db.upsert_lorebook_entity,
+                            session_id=session_id,
+                            entity_type="person",
+                            name=n_name,
+                            description=b_info.get("description", "") or (npc.get("description", "") if isinstance(npc, dict) else ""),
+                            traits=npc.get("traits") if isinstance(npc, dict) else [],
+                            mannerisms=m_val,
+                            race=npc.get("race", "") if isinstance(npc, dict) else "",
+                            appearance=npc.get("appearance", {}) if isinstance(npc, dict) else {},
+                            gender=npc.get("gender", "") if isinstance(npc, dict) else "",
+                        )
         except Exception as e:
             logger.error(f"Error generating opening scene: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to generate scene: {str(e)}")
@@ -583,6 +768,8 @@ async def start_adventure(req: StartAdventureRequest):
                     updated_session.get("narrative", ""),
                     updated_session.get("current_location", ""),
                     scenario_key,
+                    image_prompt=None,
+                    outcome=scene,
                 )
             )
 
@@ -640,339 +827,27 @@ async def execute_action(req: ActionRequest):
             session_id=session.get("id"),
         )
 
-        # Normalize top-level or nested action payload from frontend
-        choice_index = req.choice_index
-        custom_action_text = req.custom_action_text
-        direct_choice = req.direct_choice
-        combat_target = req.combat_target
-        intent = getattr(req, "intent", None)
-        target_npc = getattr(req, "target_npc", None)
-        if isinstance(req.action, dict):
-            if choice_index is None and "choice_index" in req.action:
-                choice_index = req.action.get("choice_index")
-            if not custom_action_text:
-                custom_action_text = req.action.get("custom_action_text") or req.action.get("custom_text")
-            if direct_choice is None and isinstance(req.action.get("direct_choice"), dict):
-                direct_choice = req.action.get("direct_choice")
-            if not combat_target and req.action.get("combat_target"):
-                combat_target = req.action.get("combat_target")
-
-        action = None
-        if isinstance(direct_choice, dict) and direct_choice:
-            chosen = dict(direct_choice)
-            stat = str(chosen.get("stat", "STR") or "STR").upper()
-            req_val = int(chosen.get("requirement", 5) or 0)
-            mp_cost = int(chosen.get("mp_cost", 0) or 0)
-
-            if mp_cost > 0:
-                if char["mp"] < mp_cost:
-                    raise HTTPException(status_code=400, detail="Not enough MP for this action!")
-                await adb(db.apply_hp_mp_delta, req.user_id, mp_delta=-mp_cost)
-
-            user_settings = await adb(db.get_settings, req.user_id)
-            check_mode = user_settings.get("debug_check_mode", "off")
-            stat_col = db.STAT_COLUMN.get(stat, "str_")
-            hit_chance = chosen.get("hit_chance")
-            if chosen.get("choice_type") == "dialogue" or chosen.get("action_category") == "dialogue":
-                dialogue_mode = user_settings.get("dialogue_mode", "balanced")
-                if dialogue_mode == "casual":
-                    req_val = max(1, req_val - 2)
-                elif dialogue_mode == "challenging":
-                    req_val += 2
-
-            from mechanics.world.mobility import get_session_dialogue_partners
-            sess_dp = get_session_dialogue_partners(session) if isinstance(session, dict) else []
-            explicit_target = chosen.get("target_npc")
-            if not explicit_target:
-                act_lbl = (chosen.get("label") or chosen.get("text") or "").lower()
-                named_dps = [dp for dp in sess_dp if dp and (dp.lower() in act_lbl or (len(dp.split()[0]) >= 3 and dp.split()[0].lower() in act_lbl))]
-                if len(named_dps) == 1:
-                    explicit_target = named_dps[0]
-            target_candidates = [explicit_target] if explicit_target else list(sess_dp)
-            if target_candidates and isinstance(session, dict) and session.get("id"):
-                from mechanics.combat.traits import get_combined_dc_modifiers
-                from mechanics.social.persona import calculate_intimate_action_dc_modifier
-                for dp_name in target_candidates:
-                    if dp_name:
-                        c_rec = await adb(db.get_contact, session["id"], str(dp_name).lower().replace(" ", "_"), char.get("id", 0))
-                        if c_rec:
-                            c_traits = c_rec.get("unlocked_traits") or c_rec.get("traits") or []
-                            t_mods = get_combined_dc_modifiers(c_traits)
-                            req_val += t_mods.get(stat, 0)
-                            app_rec = c_rec.get("appearance", {})
-                            if isinstance(app_rec, dict):
-                                req_val += calculate_intimate_action_dc_modifier(chosen.get("label") or chosen.get("text") or "", app_rec)
-            req_val = max(1, req_val)
-            if hit_chance is not None:
-                import random
-                rate = hit_chance
-                roll = random.uniform(0, 100)
-                succeeded = roll <= rate
-                tier = "success" if succeeded else "fail"
-                if roll > 90 and succeeded: tier = "crit_success"
-                if roll < 10 and not succeeded: tier = "crit_fail"
-                res = skill_check.CheckResult(chance=rate, roll=roll, tier=tier, tier_label=tier.replace('_', ' ').title(), succeeded=succeeded, requirement=req_val)
-            elif stat in ("NONE", "FREE") or req_val <= 0:
-                res = skill_check.CheckResult(chance=100, roll=100.0, tier="success", tier_label="Success", succeeded=True)
-                rate = 100
-            else:
-                rate = skill_check.success_chance(char[stat_col], req_val, check_mode=check_mode)
-                res = skill_check.resolve_check(char[stat_col], req_val, char["luk"], check_mode=check_mode)
-
-            label_text = chosen.get("label") or chosen.get("text") or "Action"
-            act_cat = chosen.get("action_category", "")
-            act_intent = intent or chosen.get("intent")
-            act_target = target_npc or chosen.get("target_npc")
-            if not act_cat or not act_intent:
-                from mechanics.narrative.intent import classify_action_intent
-                parsed_i = classify_action_intent(label_text)
-                if not act_cat:
-                    act_cat = parsed_i.category.value
-                if not act_intent:
-                    act_intent = parsed_i.category.value
-                if not act_target and parsed_i.target_entity:
-                    act_target = parsed_i.target_entity
-            action = dict(chosen)
-            action.update({
-                "user_id": req.user_id,
-                "character_name": char["name"],
-                "char": dict(char),
-                "stat": stat,
-                "requirement": req_val,
-                "mp_cost": mp_cost,
-                "mp_spent": mp_cost,
-                "rate": rate,
-                "check": res,
-                "label": label_text,
-                "success": res.succeeded,
-                "tier": res.tier,
-                "crit": res.tier in ("crit_success", "crit_fail"),
-                "roll": res.roll,
-                "text": label_text,
-                "choice_type": chosen.get("choice_type", ""),
-                "action_category": act_cat,
-                "spell_id": chosen.get("spell_id", ""),
-                "combat_target": combat_target or chosen.get("combat_target"),
-                "is_quest_action": bool(chosen.get("is_quest_action")),
-                "is_climax_action": bool(chosen.get("is_climax_action")),
-                "quest_id": chosen.get("quest_id", ""),
-                "sub_obj_id": chosen.get("sub_obj_id"),
-                "stage_index": chosen.get("stage_index"),
-                "contract_type": chosen.get("contract_type", ""),
-                "item_name": chosen.get("item_name", ""),
-                "item": chosen.get("item"),
-                "item_consumed": chosen.get("item_consumed", False),
-                "intent": act_intent,
-                "target_npc": act_target,
-            })
-        elif choice_index is not None and 0 <= choice_index < len(choices):
-            chosen = choices[choice_index]
-            stat = str(chosen.get("stat", "STR") or "STR").upper()
-            req_val = int(chosen.get("requirement", 5) or 0)
-            mp_cost = int(chosen.get("mp_cost", 0) or 0)
-
-            if mp_cost > 0:
-                if char["mp"] < mp_cost:
-                    raise HTTPException(status_code=400, detail="Not enough MP for this action!")
-                await adb(db.apply_hp_mp_delta, req.user_id, mp_delta=-mp_cost)
-
-            user_settings = await adb(db.get_settings, req.user_id)
-            check_mode = user_settings.get("debug_check_mode", "off")
-            stat_col = db.STAT_COLUMN.get(stat, "str_")
-            hit_chance = chosen.get("hit_chance")
-            if chosen.get("choice_type") == "dialogue" or chosen.get("action_category") == "dialogue":
-                dialogue_mode = user_settings.get("dialogue_mode", "balanced")
-                if dialogue_mode == "casual":
-                    req_val = max(1, req_val - 2)
-                elif dialogue_mode == "challenging":
-                    req_val += 2
-
-            from mechanics.world.mobility import get_session_dialogue_partners
-            sess_dp = get_session_dialogue_partners(session) if isinstance(session, dict) else []
-            explicit_target = chosen.get("target_npc")
-            if not explicit_target:
-                act_lbl = (chosen.get("label") or chosen.get("text") or "").lower()
-                named_dps = [dp for dp in sess_dp if dp and (dp.lower() in act_lbl or (len(dp.split()[0]) >= 3 and dp.split()[0].lower() in act_lbl))]
-                if len(named_dps) == 1:
-                    explicit_target = named_dps[0]
-            target_candidates = [explicit_target] if explicit_target else list(sess_dp)
-            if target_candidates and isinstance(session, dict) and session.get("id"):
-                from mechanics.combat.traits import get_combined_dc_modifiers
-                from mechanics.social.persona import calculate_intimate_action_dc_modifier
-                for dp_name in target_candidates:
-                    if dp_name:
-                        c_rec = await adb(db.get_contact, session["id"], str(dp_name).lower().replace(" ", "_"), char.get("id", 0))
-                        if c_rec:
-                            c_traits = c_rec.get("unlocked_traits") or c_rec.get("traits") or []
-                            t_mods = get_combined_dc_modifiers(c_traits)
-                            req_val += t_mods.get(stat, 0)
-                            app_rec = c_rec.get("appearance", {})
-                            if isinstance(app_rec, dict):
-                                req_val += calculate_intimate_action_dc_modifier(chosen.get("label") or chosen.get("text") or "", app_rec)
-            req_val = max(1, req_val)
-            if hit_chance is not None:
-                import random
-                rate = hit_chance
-                roll = random.uniform(0, 100)
-                succeeded = roll <= rate
-                tier = "success" if succeeded else "fail"
-                if roll > 90 and succeeded: tier = "crit_success"
-                if roll < 10 and not succeeded: tier = "crit_fail"
-                res = skill_check.CheckResult(chance=rate, roll=roll, tier=tier, tier_label=tier.replace('_', ' ').title(), succeeded=succeeded, requirement=req_val)
-            elif stat in ("NONE", "FREE") or req_val <= 0:
-                res = skill_check.CheckResult(chance=100, roll=100.0, tier="success", tier_label="Success", succeeded=True, requirement=req_val)
-                rate = 100
-            else:
-                rate = skill_check.success_chance(char[stat_col], req_val, check_mode=check_mode)
-                res = skill_check.resolve_check(char[stat_col], req_val, char["luk"], check_mode=check_mode)
-
-            direct_cat = chosen.get("action_category", "")
-            direct_intent = intent or chosen.get("intent")
-            direct_target = target_npc or chosen.get("target_npc")
-            if not direct_cat or not direct_intent:
-                from mechanics.narrative.intent import classify_action_intent
-                parsed_d = classify_action_intent(chosen.get("label", ""))
-                if not direct_cat:
-                    direct_cat = parsed_d.category.value
-                if not direct_intent:
-                    direct_intent = parsed_d.category.value
-                if not direct_target and parsed_d.target_entity:
-                    direct_target = parsed_d.target_entity
-
-            action = {
-                "user_id": req.user_id,
-                "character_name": char["name"],
-                "char": dict(char),
-                "stat": stat,
-                "requirement": req_val,
-                "mp_cost": mp_cost,
-                "mp_spent": mp_cost,
-                "rate": rate,
-                "check": res,
-                "label": chosen.get("label", ""),
-                "success": res.succeeded,
-                "tier": res.tier,
-                "crit": res.tier in ("crit_success", "crit_fail"),
-                "roll": res.roll,
-                "text": chosen.get("label", ""),
-                "choice_type": chosen.get("choice_type", ""),
-                "action_category": direct_cat,
-                "spell_id": chosen.get("spell_id", ""),
-                "combat_target": combat_target or chosen.get("combat_target"),
-                "is_quest_action": bool(chosen.get("is_quest_action")),
-                "is_climax_action": bool(chosen.get("is_climax_action")),
-                "quest_id": chosen.get("quest_id", ""),
-                "sub_obj_id": chosen.get("sub_obj_id"),
-                "stage_index": chosen.get("stage_index"),
-                "contract_type": chosen.get("contract_type", ""),
-                "item_name": chosen.get("item_name", ""),
-                "item": chosen.get("item"),
-                "item_consumed": chosen.get("item_consumed", False),
-                "intent": direct_intent,
-                "target_npc": direct_target,
-            }
-        elif custom_action_text:
-            inventory = await adb(db.get_inventory, req.user_id)
-            classification = await game_engine.classify_custom_action(session, char, inventory, custom_action_text)
-            stat = classification["stat"]
-            req_val = classification["requirement"]
-            mp_cost = classification.get("mp_cost", 0)
-
-            if mp_cost > 0:
-                if char["mp"] < mp_cost:
-                    raise HTTPException(status_code=400, detail="Not enough MP for this action!")
-                await adb(db.apply_hp_mp_delta, req.user_id, mp_delta=-mp_cost)
-
-            user_settings = await adb(db.get_settings, req.user_id)
-            check_mode = user_settings.get("debug_check_mode", "off")
-            stat_col = db.STAT_COLUMN.get(stat, "str_")
-            hit_chance = classification.get("hit_chance") if isinstance(classification, dict) else None
-            if isinstance(classification, dict) and classification.get("action_category") in ("dialogue", "romantic_confession", "social_invite", "party_recruit", "affection", "disclosure_inquiry"):
-                dialogue_mode = user_settings.get("dialogue_mode", "balanced")
-                if dialogue_mode == "casual":
-                    req_val = max(1, req_val - 2)
-                elif dialogue_mode == "challenging":
-                    req_val += 2
-
-            from mechanics.world.mobility import get_session_dialogue_partners
-            sess_dp = get_session_dialogue_partners(session) if isinstance(session, dict) else []
-            explicit_target = (
-                combat_target
-                or (classification.get("target_npc") if isinstance(classification, dict) else None)
+        raw_pick = {
+            "choice_index": req.choice_index,
+            "custom_action_text": req.custom_action_text,
+            "direct_choice": req.direct_choice,
+            "combat_target": req.combat_target,
+            "intent": getattr(req, "intent", None),
+            "target_npc": getattr(req, "target_npc", None),
+            "action": req.action if isinstance(req.action, dict) else None,
+        }
+        try:
+            action = await TurnService.prepare_and_roll_action(
+                session_id=req.session_id,
+                user_id=req.user_id,
+                raw_pick=raw_pick,
+                session=session,
+                char=dict(char),
+                choices=choices,
+                enforce_explicit_mp=True,
             )
-            if not explicit_target:
-                act_lbl = str(custom_action_text or "").lower()
-                named_dps = [dp for dp in sess_dp if dp and (dp.lower() in act_lbl or (len(dp.split()[0]) >= 3 and dp.split()[0].lower() in act_lbl))]
-                if len(named_dps) == 1:
-                    explicit_target = named_dps[0]
-            target_candidates = [explicit_target] if explicit_target else list(sess_dp)
-            if target_candidates and isinstance(session, dict) and session.get("id"):
-                from mechanics.combat.traits import get_combined_dc_modifiers
-                from mechanics.social.persona import calculate_intimate_action_dc_modifier
-                for dp_name in target_candidates:
-                    if dp_name:
-                        c_rec = await adb(db.get_contact, session["id"], str(dp_name).lower().replace(" ", "_"), char.get("id", 0))
-                        if c_rec:
-                            c_traits = c_rec.get("unlocked_traits") or c_rec.get("traits") or []
-                            t_mods = get_combined_dc_modifiers(c_traits)
-                            req_val += t_mods.get(stat, 0)
-                            app_rec = c_rec.get("appearance", {})
-                            if isinstance(app_rec, dict):
-                                req_val += calculate_intimate_action_dc_modifier(custom_action_text, app_rec)
-            req_val = max(1, req_val)
-            if hit_chance is not None:
-                import random
-                rate = hit_chance
-                roll = random.uniform(0, 100)
-                succeeded = roll <= rate
-                tier = "success" if succeeded else "fail"
-                if roll > 90 and succeeded: tier = "crit_success"
-                if roll < 10 and not succeeded: tier = "crit_fail"
-                res = skill_check.CheckResult(chance=rate, roll=roll, tier=tier, tier_label=tier.replace('_', ' ').title(), succeeded=succeeded, requirement=req_val)
-            elif stat in ("NONE", "FREE") or req_val <= 0:
-                res = skill_check.CheckResult(chance=100, roll=100.0, tier="success", tier_label="Success", succeeded=True, requirement=req_val)
-                rate = 100
-            else:
-                rate = skill_check.success_chance(char[stat_col], req_val, check_mode=check_mode)
-                res = skill_check.resolve_check(char[stat_col], req_val, char["luk"], check_mode=check_mode)
-
-            action = {
-                "user_id": req.user_id,
-                "character_name": char["name"],
-                "char": dict(char),
-                "stat": stat,
-                "requirement": req_val,
-                "mp_cost": mp_cost,
-                "mp_spent": mp_cost,
-                "rate": rate,
-                "check": res,
-                "label": custom_action_text,
-                "success": res.succeeded,
-                "tier": res.tier,
-                "crit": res.tier in ("crit_success", "crit_fail"),
-                "roll": res.roll,
-                "text": custom_action_text,
-                "type": "custom",
-                "combat_target": combat_target,
-                "active_recall": classification.get("_active_recall") if isinstance(classification, dict) else None,
-                "action_category": classification.get("action_category", "") if isinstance(classification, dict) else "",
-                "intent": classification.get("intent") if isinstance(classification, dict) else None,
-                "target_npc": target_npc or (classification.get("target_npc") if isinstance(classification, dict) else None),
-                "is_quest_action": False,
-                "is_climax_action": False,
-                "quest_id": "",
-                "sub_obj_id": None,
-                "stage_index": None,
-                "contract_type": "",
-                "item_name": "",
-                "item": None,
-                "item_consumed": False,
-            }
-        else:
-            raise HTTPException(status_code=400, detail="Must provide choice_index, direct_choice, or custom_action_text")
-
-        if combat_target and not action.get("combat_target"):
-            action["combat_target"] = combat_target
+        except (PermissionError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         mode = session["mode"]
         try:
@@ -1028,7 +903,26 @@ async def execute_action(req: ActionRequest):
                 on_token._accepts_field = True
                 stream_callback = on_token
 
-            turn_response = await TurnService.resolve_action(req.session_id, req.user_id, action, mode=mode, stream_callback=stream_callback)
+            heartbeat_stop = asyncio.Event()
+            async def _stream_heartbeat():
+                while not heartbeat_stop.is_set():
+                    try:
+                        await asyncio.wait_for(heartbeat_stop.wait(), timeout=4.0)
+                    except asyncio.TimeoutError:
+                        await manager.broadcast(req.session_id, {
+                            "type": "HEARTBEAT",
+                            "status": "processing"
+                        })
+            hb_task = asyncio.create_task(_stream_heartbeat())
+
+            try:
+                turn_response = await TurnService.resolve_action(req.session_id, req.user_id, action, mode=mode, stream_callback=stream_callback)
+            finally:
+                heartbeat_stop.set()
+                try:
+                    await hb_task
+                except Exception:
+                    pass
 
             if started_streaming:
                 await flush_buffer()
@@ -1051,16 +945,18 @@ async def execute_action(req: ActionRequest):
                 if npcs_arg is None
                 else npcs_arg
             )
-            raw_choices = await adb(
-                game_engine.sanitize_and_diversify_choices,
-                raw_choices,
-                scenario=turn_response.session.get("scenario", "fantasy"),
-                location=outcome.get("location") or turn_response.session.get("current_location", ""),
-                char=dict(char) if char else None,
-                dialogue_partner=effective_partner,
-                current_npcs=effective_npcs,
-                session_id=req.session_id,
-            )
+            if not (isinstance(outcome, dict) and outcome.get("_hybrid_choices_built") and raw_choices):
+                raw_choices = await adb(
+                    game_engine.sanitize_and_diversify_choices,
+                    raw_choices,
+                    scenario=turn_response.session.get("scenario", "fantasy"),
+                    location=outcome.get("location") or turn_response.session.get("current_location", ""),
+                    char=dict(char) if char else None,
+                    dialogue_partner=effective_partner,
+                    current_npcs=effective_npcs,
+                    session_id=req.session_id,
+                    departed_npcs=outcome.get("departed_characters") or outcome.get("departed_npcs"),
+                )
             await adb(
                 db.save_session_scene,
                 req.session_id,
@@ -1071,7 +967,9 @@ async def execute_action(req: ActionRequest):
                 location=outcome.get("location"),
                 nearby_enemies=outcome.get("nearby_enemies"),
                 current_npcs=npcs_arg,
-                dialogue_partner=partner_arg
+                dialogue_partner=partner_arg,
+                current_node_id=outcome.get("current_node_id"),
+                focal_point=outcome.get("focal_point"),
             )
 
             if mode in ("turn", "multi"):
@@ -1115,14 +1013,6 @@ async def execute_action(req: ActionRequest):
             "sync_timestamp": time.time()
         })
 
-        # Dispatch Auditor Pass (Pass 4)
-        if outcome and outcome.get("_llm_system_prompt_list") and outcome.get("_llm_user_prompt"):
-            from scenario_data import uses_nsfw_model
-            is_nsfw_flag = uses_nsfw_model(session.get("scenario"))
-            sys_prompts = outcome.get("_llm_system_prompt_list")
-            user_prompt = outcome.get("_llm_user_prompt")
-            asyncio.create_task(_run_auditor_pass(req.session_id, req.user_id, sys_prompts, user_prompt, outcome, is_nsfw=is_nsfw_flag))
-
         if fresh_session.get("image_gen_enabled"):
             asyncio.create_task(
                 _trigger_scene_image_broadcast(
@@ -1131,6 +1021,9 @@ async def execute_action(req: ActionRequest):
                     fresh_session.get("narrative", ""),
                     fresh_session.get("current_location", ""),
                     fresh_session.get("scenario", "fantasy"),
+                    image_prompt=None,
+                    outcome=turn_response.outcome if isinstance(turn_response.outcome, dict) else None,
+                    action=action,
                 )
             )
 
@@ -1173,6 +1066,106 @@ async def retry_adventure_scene(req: RetryAdventureRequest):
 
         actor_char = party[0][0] if party else {"user_id": uid or 0, "name": "Adventurer", "max_hp": 100, "per_": 5, "luk": 5}
 
+        history = list(session.get("history") or [])
+        if not history:
+            # Turn 0: Opening scene retry
+            # Reset stale state from previous aborted attempts so stale NPCs/enemies never bleed into fresh scene rolls
+            session["current_npcs"] = []
+            session["dialogue_partner"] = None
+            session["nearby_enemies"] = []
+            try:
+                scene = await game_engine.generate_opening_scene(session, party)
+                if getattr(scene, "model_dump", None):
+                    scene = scene.model_dump(exclude_unset=False)
+                if not isinstance(scene, dict):
+                    scene = {}
+
+                raw_choices, next_narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
+                    scene, session=session
+                )
+                location = scene.get("location") or session.get("current_location", "")
+                raw_choices = await adb(
+                    game_engine.sanitize_and_diversify_choices,
+                    raw_choices,
+                    scenario=session.get("scenario", "fantasy"),
+                    location=location,
+                    char=dict(actor_char) if actor_char else None,
+                    dialogue_partner=partner_arg,
+                    current_npcs=npcs_arg,
+                    session_id=req.session_id,
+                )
+                init_node_id = await adb(db.resolve_node_id_from_location, req.session_id, location)
+                await adb(
+                    db.save_session_scene,
+                    req.session_id,
+                    scene_title,
+                    next_narrative,
+                    raw_choices,
+                    history=[],
+                    location=location,
+                    nearby_enemies=scene.get("nearby_enemies", []),
+                    current_npcs=npcs_arg,
+                    dialogue_partner=partner_arg,
+                    current_node_id=init_node_id,
+                    focal_point=scene.get("focal_point", ""),
+                )
+                char_id = actor_char.get("id", 0) if isinstance(actor_char, dict) else 0
+                enemy_names = {game_engine._get_npc_name(e).lower() for e in scene.get("nearby_enemies", []) if e}
+                for npc in (npcs_arg or []):
+                    n_name = game_engine._get_npc_name(npc)
+                    if n_name and n_name.lower() not in enemy_names:
+                        b_info = dict(npc.get("basic_info") or {}) if isinstance(npc, dict) else {}
+                        if isinstance(npc, dict):
+                            if "role" in npc and not b_info.get("role"):
+                                b_info["role"] = npc.get("role", "")
+                            if "description" in npc and not b_info.get("description"):
+                                b_info["description"] = npc.get("description", "")
+                        if not b_info.get("location"):
+                            b_info["location"] = location
+                        if is_contact_eligible(name=n_name, role=b_info.get("role", ""), description=b_info.get("description", ""), scenario=session.get("scenario", "fantasy"), session_id=req.session_id):
+                            await adb(db.upsert_contact,
+                                session_id=req.session_id,
+                                character_id=char_id,
+                                npc_id=n_name,
+                                name=n_name,
+                                basic_info=b_info,
+                                delta_score=0,
+                                new_traits=npc.get("traits") if isinstance(npc, dict) else None,
+                                new_preferences=npc.get("preferences") if isinstance(npc, dict) else None,
+                                race=npc.get("race", "") if isinstance(npc, dict) else "",
+                                gender=npc.get("gender", "") if isinstance(npc, dict) else "",
+                                appearance=npc.get("appearance", {}) if isinstance(npc, dict) else None,
+                            )
+                        else:
+                            # Non-student characters are story figures only; track basic info in lorebook
+                            m_val = npc.get("mannerisms", "") if isinstance(npc, dict) else ""
+                            if not m_val and isinstance(b_info, dict):
+                                m_val = b_info.get("mannerisms", "")
+                            await adb(db.upsert_lorebook_entity,
+                                session_id=req.session_id,
+                                entity_type="person",
+                                name=n_name,
+                                description=b_info.get("description", "") or (npc.get("description", "") if isinstance(npc, dict) else ""),
+                                traits=npc.get("traits") if isinstance(npc, dict) else [],
+                                mannerisms=m_val,
+                                race=npc.get("race", "") if isinstance(npc, dict) else "",
+                                appearance=npc.get("appearance", {}) if isinstance(npc, dict) else {},
+                                gender=npc.get("gender", "") if isinstance(npc, dict) else "",
+                            )
+            except Exception as e:
+                logger.error(f"Error retrying opening scene: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Failed to retry opening scene: {str(e)}")
+
+            updated_session = await adb(db.get_session, req.session_id)
+            enriched_session = await adb(_enrich_session_for_client, updated_session, uid)
+
+            await manager.broadcast(req.session_id, {
+                "type": "NEW_SCENE",
+                "session": enriched_session,
+                "sync_timestamp": time.time(),
+            })
+            return {"success": True, "session": enriched_session}
+
         try:
             turn_response = await TurnService.retry_narration(req.session_id, uid)
             outcome = turn_response.outcome
@@ -1203,6 +1196,7 @@ async def retry_adventure_scene(req: RetryAdventureRequest):
                 dialogue_partner=effective_partner,
                 current_npcs=effective_npcs,
                 session_id=req.session_id,
+                departed_npcs=outcome.get("departed_characters") or outcome.get("departed_npcs"),
             )
             
             # The history dict was already updated by retry_narration, so we just use the fresh one
@@ -1219,6 +1213,8 @@ async def retry_adventure_scene(req: RetryAdventureRequest):
                 nearby_enemies=outcome.get("nearby_enemies"),
                 current_npcs=npcs_arg,
                 dialogue_partner=partner_arg,
+                current_node_id=outcome.get("current_node_id"),
+                focal_point=outcome.get("focal_point"),
             )
         except Exception as e:
             logger.error(f"Error retrying adventure scene: {e}")
@@ -1238,7 +1234,46 @@ async def retry_adventure_scene(req: RetryAdventureRequest):
             "sync_timestamp": time.time(),
         })
 
+        if enriched_session.get("image_gen_enabled"):
+            asyncio.create_task(
+                _trigger_scene_image_broadcast(
+                    req.session_id,
+                    enriched_session.get("scene_title", ""),
+                    enriched_session.get("narrative", ""),
+                    enriched_session.get("current_location", ""),
+                    enriched_session.get("scenario", "fantasy"),
+                    image_prompt=None,
+                    outcome=outcome if isinstance(outcome, dict) else None,
+                )
+            )
+
         return {"success": True, "session": enriched_session}
+
+
+@router.post("/api/adventure/reroll_image")
+async def reroll_adventure_image(req: RerollImageRequest):
+    """Regenerates only the scene image for the active turn without touching the story narrative."""
+    session_row = await adb(db.get_session, req.session_id)
+    if not session_row:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session = dict(session_row)
+    if str(session.get("image_gen_enabled") or "0").lower() in ("0", "disabled", "false"):
+        raise HTTPException(status_code=400, detail="Image generation is disabled in settings")
+
+    # Extract last history outcome if available to rebuild accurate context
+    raw_hist = list(session.get("history") or [])
+    last_entry = raw_hist[-1] if (raw_hist and isinstance(raw_hist[-1], dict)) else {}
+
+    local_url = await _trigger_scene_image_broadcast(
+        req.session_id,
+        scene_title=session.get("scene_title", ""),
+        narrative=session.get("narrative", ""),
+        location=session.get("current_location", ""),
+        scenario=session.get("scenario", "fantasy"),
+        outcome=last_entry,
+        force=True,
+    )
+    return {"success": True, "image_url": local_url}
 
 
 # -----------------------------------------------------------------------------
@@ -1342,6 +1377,67 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
         if current_loc else ("", "", "")
     )
 
+    session = db.get_session(session_id)
+    curr_node_id = session.get("current_node_id") if session else None
+    curr_node = db.get_world_node(session_id, curr_node_id) if (session_id and curr_node_id) else None
+    all_nodes = db.get_session_world_nodes(session_id) if session_id else []
+    outgoing_edges = db.get_outgoing_edges(session_id, curr_node_id) if (session_id and curr_node_id) else []
+    adjacent_node_ids = {e["to_node_id"] for e in outgoing_edges}
+    player_at_transit_hub = db.is_node_or_parent_transit_hub(session_id, curr_node_id) if (session_id and curr_node_id) else False
+
+    from mechanics.world.schedules import get_npc_scheduled_node_id
+    from mechanics.world.locations.access_gate import get_node_effective_access_info
+
+    curr_day, curr_min, _ = db.get_session_time(session_id)
+    contacts = db.get_contacts(session_id) or []
+    roster = db.get_school_roster(session_id) if hasattr(db, "get_school_roster") else []
+
+    occupancy_by_node: dict[str, dict] = {}
+    def _get_occ_entry(nid: str):
+        if nid not in occupancy_by_node:
+            occupancy_by_node[nid] = {"known_npcs": [], "unmet_count": 0}
+        return occupancy_by_node[nid]
+
+    for appt in appts:
+        tgt = appt.get("target_node_id")
+        if not tgt and appt.get("rendezvous_location"):
+            tgt = db.resolve_node_id_from_location(session_id, appt["rendezvous_location"], prefer_facility=True)
+        if tgt:
+            tgt_node = next((n for n in all_nodes if n["node_id"] == tgt), None)
+            fac_id = tgt_node.get("parent_id") if (tgt_node and tgt_node.get("node_type") == "ROOM") else tgt
+            if fac_id:
+                occ = _get_occ_entry(fac_id)
+                a_nm = appt.get("npc_name", "")
+                if a_nm and not any(kn["name"].lower() == a_nm.lower() for kn in occ["known_npcs"]):
+                    occ["known_npcs"].append({"name": a_nm, "status": "Rendezvous"})
+
+    contact_names_lower = set()
+    for c in contacts:
+        c_nm = (c.get("name") or "").strip()
+        if not c_nm:
+            continue
+        contact_names_lower.add(c_nm.lower())
+        sched_nid = get_npc_scheduled_node_id(c, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
+        if sched_nid:
+            s_node = next((n for n in all_nodes if n["node_id"] == sched_nid), None)
+            fac_id = s_node.get("parent_id") if (s_node and s_node.get("node_type") == "ROOM") else sched_nid
+            if fac_id:
+                occ = _get_occ_entry(fac_id)
+                if not any(kn["name"].lower() == c_nm.lower() for kn in occ["known_npcs"]):
+                    occ["known_npcs"].append({"name": c_nm, "status": "Routine"})
+
+    for r in roster:
+        r_nm = (r.get("name") or "").strip()
+        if not r_nm or r_nm.lower() in contact_names_lower:
+            continue
+        sched_nid = get_npc_scheduled_node_id(r, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
+        if sched_nid:
+            s_node = next((n for n in all_nodes if n["node_id"] == sched_nid), None)
+            fac_id = s_node.get("parent_id") if (s_node and s_node.get("node_type") == "ROOM") else sched_nid
+            if fac_id:
+                occ = _get_occ_entry(fac_id)
+                occ["unmet_count"] += 1
+
     enriched_zones = []
     active_quest_destinations = []
     for z in zones_summary:
@@ -1351,10 +1447,47 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
         primaries = []
         for p in z_copy.get("primary_locations", []):
             p_copy = dict(p)
-            p_copy["travel_tag"] = "Instant Local" if is_same_zone else "Inter-Zone Travel"
             p_copy["is_current_place"] = bool(
                 is_same_zone and curr_p and curr_p.lower() == (p_copy.get("name") or "").lower()
             )
+
+            p_node_id = db.resolve_node_id_from_location(session_id, f"{z_name} ➔ {p_copy.get('name', '')}", prefer_facility=True)
+            node = next((n for n in all_nodes if n["node_id"] == p_node_id), None) if p_node_id else None
+            is_transit_hub = db.is_node_or_parent_transit_hub(session_id, p_node_id) if p_node_id else False
+            is_adjacent = bool(
+                p_node_id and (
+                    p_node_id in adjacent_node_ids or
+                    any(n.get("parent_id") == p_node_id and n["node_id"] in adjacent_node_ids for n in all_nodes)
+                )
+            )
+            can_travel = bool(p_copy["is_current_place"] or is_adjacent or (player_at_transit_hub and is_transit_hub) or not all_nodes)
+
+            if is_adjacent:
+                p_copy["travel_tag"] = "Adjacent Path"
+            elif player_at_transit_hub and is_transit_hub:
+                p_copy["travel_tag"] = "Transit Hub Fast-Travel"
+            elif is_same_zone:
+                p_copy["travel_tag"] = "Local Walk"
+            else:
+                p_copy["travel_tag"] = "Inter-Zone Travel"
+
+            access_info = get_node_effective_access_info(session_id, p_node_id, current_day=curr_day, current_minute=curr_min, scen_key=scen_key) if p_node_id else {}
+            occ_data = occupancy_by_node.get(p_node_id, {"known_npcs": [], "unmet_count": 0}) if p_node_id else {"known_npcs": [], "unmet_count": 0}
+
+            p_copy["node_id"] = p_node_id or ""
+            p_copy["is_transit_hub"] = is_transit_hub
+            p_copy["is_adjacent"] = is_adjacent
+            p_copy["can_travel"] = can_travel
+            p_copy["access_tier"] = access_info.get("access_tier", "open")
+            p_copy["access_badge"] = access_info.get("status_badge", "Open")
+            p_copy["is_curfew_active"] = access_info.get("curfew_active", False)
+            p_copy["schedule_locked"] = access_info.get("schedule_locked", False)
+            p_copy["is_trespassing"] = access_info.get("is_trespassing", False)
+            p_copy["is_unlocked"] = access_info.get("is_unlocked", False)
+            p_copy["scene_residue"] = access_info.get("scene_residue", "")
+            p_copy["known_npcs_here"] = occ_data["known_npcs"][:3]
+            p_copy["unmet_activity_count"] = occ_data["unmet_count"]
+
             primaries.append(p_copy)
             for qm in (p_copy.get("quest_markers") or []):
                 active_quest_destinations.append({
@@ -1364,6 +1497,8 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
                     "marker": qm,
                     "quest_tag": p_copy.get("quest_tag", ""),
                     "is_current_place": p_copy["is_current_place"],
+                    "is_transit_hub": is_transit_hub,
+                    "can_travel": can_travel,
                 })
         primaries.sort(
             key=lambda item: (
@@ -1387,6 +1522,10 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
         "session_id": session_id,
         "scenario": scen_key,
         "current_location": current_loc,
+        "current_node_id": curr_node_id or "",
+        "current_node": curr_node,
+        "player_at_transit_hub": player_at_transit_hub,
+        "outgoing_edges": outgoing_edges,
         "current_zone": curr_z,
         "current_primary": curr_p,
         "current_sub": curr_sub,
@@ -1411,60 +1550,3 @@ async def get_world_map_locations(session_id: int, user_id: int | None = None):
     payload = await adb(_build_locations_payload, session_id, scen_key, current_loc, char_name)
     return payload
 
-
-async def _run_auditor_pass(session_id: int, user_id: int, sys_prompts: list | str, user_prompt: str, draft_outcome: dict, is_nsfw: bool = False):
-    try:
-        from game_engine.auditor import AuditorEngine
-        from models.llm_schemas import TurnOutcome
-        import json
-        import time
-        from db import adb
-        import db
-        
-        draft_obj = TurnOutcome.model_validate(draft_outcome)
-        new_out, new_next, report = await AuditorEngine.audit_turn(sys_prompts, user_prompt, draft_obj, is_nsfw=is_nsfw)
-        
-        if report.get("prose_rewritten"):
-            logger.info(f"Auditor rewrote prose for session {session_id}. Broadcasting UPDATE_SCENE.")
-            async with distributed_session_lock(session_id):
-                session = await adb(db.get_session, session_id)
-                if not session:
-                    return
-
-                raw_hist = list(session.get("history") or [])
-                if raw_hist and isinstance(raw_hist[-1], dict) and raw_hist[-1].get("type") == "action":
-                    last_entry = dict(raw_hist[-1])
-                    
-                    # Staleness Guard: Ensure the user hasn't already advanced to another turn
-                    draft_out = str(draft_outcome.get("outcome_narrative") or "").strip()
-                    draft_nxt = str(draft_outcome.get("next_narrative") or draft_outcome.get("narrative") or "").strip()
-                    curr_out = str(last_entry.get("outcome_narrative") or "").strip()
-                    curr_nxt = str(last_entry.get("next_narrative") or "").strip()
-                    
-                    if curr_out != draft_out or curr_nxt != draft_nxt:
-                        logger.info(f"Auditor pass for session {session_id} skipped: session history has already advanced.")
-                        return
-
-                    last_entry["outcome_narrative"] = new_out
-                    last_entry["next_narrative"] = new_next
-                    last_entry["narrative"] = new_out or new_next
-                    raw_hist[-1] = last_entry
-
-                    await adb(
-                        db.update_session,
-                        session_id,
-                        history_json=json.dumps(raw_hist, default=str),
-                        narrative=new_next or new_out
-                    )
-
-                    fresh_session = await adb(db.get_session, session_id)
-                    fresh_session = await adb(_enrich_session_for_client, fresh_session, user_id)
-
-                    await manager.broadcast(session_id, {
-                        "type": "UPDATE_SCENE",
-                        "session": fresh_session,
-                        "sync_timestamp": time.time(),
-                        "auditor_report": report
-                    })
-    except Exception as e:
-        logger.error(f"Auditor background pass failed for session {session_id}: {e}")

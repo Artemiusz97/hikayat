@@ -8,11 +8,30 @@ from .trackers import (
 
 _VALID_STATS = {"STR", "PER", "END", "CHA", "INT", "AGI", "LUK", "ITEM", "NONE", "FREE"}
 
+_VALID_INTENTS = {
+    "romantic_confession", "intimate_act", "affection_touch", "disclosure_inquiry",
+    "gift_offer", "media_capture", "phone_comm", "phone_contact_exchange",
+    "dialogue_exit", "social_invite", "party_recruit", "merchant_trade",
+    "inspect_board", "area_scout", "investigate_clue", "rest_sleep",
+    "stealth_covert", "movement", "appointment_meetup", "dialogue_init",
+    "general_action"
+}
+
+_VALID_SUB_INTENTS = {
+    "", "kiss", "foreplay", "manual_give", "manual_receive",
+    "oral_give", "oral_receive", "oral_mutual", "intercourse",
+    "anal_give", "anal_receive", "aftercare", "lockpick", "pickpocket",
+    "hide", "eavesdrop", "combat_attack", "combat_magic", "combat_tactic", "combat_flee"
+}
+
 class Choice(BaseModel):
     label: str = Field(..., description="Concise, max 6-8 words")
     stat: str = Field(default="NONE")  # Accept any string; validated below
     requirement: int = Field(default=0, ge=0, le=20)
     mp_cost: int = Field(default=0)
+    intent: str = Field(default="general_action")
+    sub_intent: Optional[str] = Field(default="")
+    target_npc: Optional[str] = Field(default="")
 
     @field_validator("stat", mode="before")
     @classmethod
@@ -29,6 +48,22 @@ class Choice(BaseModel):
             return int(v)
         except (TypeError, ValueError):
             return 0
+
+    @field_validator("intent", mode="before")
+    @classmethod
+    def coerce_intent(cls, v: Any) -> str:
+        if not v:
+            return "general_action"
+        s = str(v).lower().strip()
+        return s if s in _VALID_INTENTS else "general_action"
+
+    @field_validator("sub_intent", "target_npc", mode="before")
+    @classmethod
+    def coerce_str_empty(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        s = str(v).strip()
+        return "" if s.lower() in ("none", "null", "undefined") else s
 
 class PropUpdate(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -299,6 +334,127 @@ class NarrationOutcome(DictAccessibleModel):
                 cleaned.append(item)
         return cleaned
 
+
+class CosmeticActorPose(BaseModel):
+    """Cosmetic-only actor pose update (posture and held prop). Mechanical clothing/intimacy/tether are Python-owned."""
+    model_config = ConfigDict(extra="ignore")
+    posture: Optional[str] = None
+    holding: Optional[str] = None
+
+    @field_validator("posture", "holding", mode="before")
+    @classmethod
+    def coerce_pose_str(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).replace("\x00", "").strip()[:100]
+        return s if s else None
+
+
+class DeterministicTurnNarration(DictAccessibleModel):
+    """Prose-first narrator schema for deterministic-first exploration, social, and intimate turns."""
+    model_config = ConfigDict(extra="allow")
+    scene_title: str = Field(default="")
+    outcome_narrative: str = Field(default="")
+    next_narrative: str = Field(default="")
+    next_choices: List[Choice] = Field(default_factory=list)
+    actor_poses: Dict[str, Union[CosmeticActorPose, Dict[str, Any]]] = Field(default_factory=dict)
+    episodic_memory: Optional[str] = Field(default=None)
+    image_prompt: Optional[str] = Field(default=None)
+
+    @field_validator("outcome_narrative", "next_narrative", "scene_title", mode="before")
+    @classmethod
+    def coerce_text_fields(cls, v: Any) -> str:
+        if not v:
+            return ""
+        if isinstance(v, str):
+            return v.strip()
+        if isinstance(v, list):
+            return "\n\n".join(str(x).strip() for x in v if str(x).strip())
+        return str(v).strip()
+
+    @field_validator("next_choices", mode="before")
+    @classmethod
+    def coerce_next_choices(cls, v: Any) -> List[Any]:
+        if not v or not isinstance(v, list):
+            return []
+        cleaned = []
+        for item in v:
+            if isinstance(item, str) and item.strip():
+                cleaned.append({"label": item.strip()})
+            elif isinstance(item, (dict, BaseModel)):
+                if isinstance(item, dict):
+                    valid_keys = [str(k).strip() for k in item.keys() if str(k).strip()]
+                    if not valid_keys or not str(item.get("label") or "").strip():
+                        continue
+                cleaned.append(item)
+        return cleaned
+
+    @field_validator("actor_poses", mode="before")
+    @classmethod
+    def coerce_actor_poses(cls, v: Any) -> Dict[str, Any]:
+        if not v or not isinstance(v, dict):
+            return {}
+        out = {}
+        for k, val in v.items():
+            k_str = str(k).strip()
+            if not k_str:
+                continue
+            if isinstance(val, str) and val.strip():
+                out[k_str] = {"posture": val.strip()}
+            elif isinstance(val, dict):
+                pose_dict = {}
+                if val.get("posture") is not None and str(val.get("posture")).strip():
+                    pose_dict["posture"] = str(val["posture"]).strip()[:100]
+                if val.get("holding") is not None and str(val.get("holding")).strip():
+                    pose_dict["holding"] = str(val["holding"]).strip()[:100]
+                out[k_str] = pose_dict
+            elif isinstance(val, BaseModel):
+                out[k_str] = val
+        return out
+
+    @field_validator("episodic_memory", "image_prompt", mode="before")
+    @classmethod
+    def coerce_optional_str(cls, v: Any) -> Optional[str]:
+        if not v:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            return None if s.lower() in ("none", "null", "n/a", "") else s[:300]
+        return None
+
+
+class DeterministicCombatNarration(DictAccessibleModel):
+    """Prose-first narrator schema for active combat turns (next_choices omitted; 100% Python-generated)."""
+    model_config = ConfigDict(extra="allow")
+    scene_title: str = Field(default="")
+    outcome_narrative: str = Field(default="")
+    next_narrative: str = Field(default="")
+    actor_poses: Dict[str, Union[CosmeticActorPose, Dict[str, Any]]] = Field(default_factory=dict)
+    episodic_memory: Optional[str] = Field(default=None)
+    image_prompt: Optional[str] = Field(default=None)
+
+    @field_validator("outcome_narrative", "next_narrative", "scene_title", mode="before")
+    @classmethod
+    def coerce_text_fields(cls, v: Any) -> str:
+        if not v:
+            return ""
+        if isinstance(v, str):
+            return v.strip()
+        if isinstance(v, list):
+            return "\n\n".join(str(x).strip() for x in v if str(x).strip())
+        return str(v).strip()
+
+    @field_validator("actor_poses", mode="before")
+    @classmethod
+    def coerce_actor_poses(cls, v: Any) -> Dict[str, Any]:
+        return DeterministicTurnNarration.coerce_actor_poses(v)
+
+    @field_validator("episodic_memory", "image_prompt", mode="before")
+    @classmethod
+    def coerce_optional_str(cls, v: Any) -> Optional[str]:
+        return DeterministicTurnNarration.coerce_optional_str(v)
+
+
 class TurnOutcome(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
     scene_title: str = Field(default="")
@@ -529,10 +685,49 @@ class SocialArbiterOutcome(DictAccessibleModel):
             cleaned.append(item)
         return cleaned
 
+    @field_validator("npc_memories", mode="before")
+    @classmethod
+    def coerce_npc_memories(cls, v: Any) -> List[Any]:
+        if not v or not isinstance(v, list):
+            return []
+        cleaned = []
+        for item in v:
+            if not isinstance(item, (dict, BaseModel)):
+                continue
+            if isinstance(item, dict):
+                n_name = str(item.get("npc_name") or "").strip()
+                fact = str(item.get("memory_fact") or item.get("fact") or "").strip()
+                if not n_name or not fact:
+                    continue
+                cleaned.append({
+                    "npc_name": n_name,
+                    "memory_fact": fact,
+                    "sentiment_delta": int(item.get("sentiment_delta", 0)),
+                    "importance": int(item.get("importance", 1)),
+                    "is_secret": bool(item.get("is_secret", False)),
+                    "emotional_tone": str(item.get("emotional_tone") or "").strip(),
+                    "open_thread": str(item.get("open_thread") or "").strip(),
+                })
+            else:
+                cleaned.append(item)
+        return cleaned
+
+_VALID_TACTICAL_ARCHETYPES = {
+    "", "environmental_hazard", "tactical_debuff", "combat_parley", "called_shot", "reposition"
+}
+
 class ActionClassification(DictAccessibleModel):
     stat: str = Field(default="NONE")
     requirement: int = Field(default=6, ge=0, le=20)
     mp_cost: int = Field(default=0)
+    intent: str = Field(default="general_action")
+    sub_intent: Optional[str] = Field(default="")
+    target_npc: Optional[str] = Field(default="")
+    target_location: Optional[str] = Field(default="")
+    combat_tactical_archetype: Optional[str] = Field(default="")
+    gold_spent: int = Field(default=0, ge=0)
+    spawns_npc_role: Optional[str] = Field(default="")
+    triggers_loot_roll: bool = Field(default=False)
     is_memory_recall: bool = Field(default=False)
     recall_query: Optional[str] = None
     reasoning: Optional[str] = None
@@ -542,6 +737,82 @@ class ActionClassification(DictAccessibleModel):
     def coerce_stat(cls, v: Any) -> str:
         s = str(v).upper().strip() if v else "NONE"
         return s if s in _VALID_STATS else "NONE"
+
+    @field_validator("intent", mode="before")
+    @classmethod
+    def coerce_intent(cls, v: Any) -> str:
+        if not v:
+            return "general_action"
+        s = str(v).lower().strip()
+        return s if s in _VALID_INTENTS else "general_action"
+
+    @field_validator("sub_intent", "target_npc", "target_location", "spawns_npc_role", mode="before")
+    @classmethod
+    def coerce_str_empty(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        s = str(v).strip()
+        return "" if s.lower() in ("none", "null", "undefined") else s
+
+    @field_validator("combat_tactical_archetype", mode="before")
+    @classmethod
+    def coerce_tactical_archetype(cls, v: Any) -> str:
+        if not v:
+            return ""
+        s = str(v).lower().strip()
+        return s if s in _VALID_TACTICAL_ARCHETYPES else ""
+
+    @field_validator("gold_spent", mode="before")
+    @classmethod
+    def coerce_gold_spent(cls, v: Any) -> int:
+        try:
+            return max(0, int(v or 0))
+        except (ValueError, TypeError):
+            return 0
+
+
+class ActionCommand(DictAccessibleModel):
+    """Unified pre-rolled player action command produced by TurnService.prepare_and_roll_action."""
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+    user_id: int = 0
+    character_name: str = ""
+    char: Dict[str, Any] = Field(default_factory=dict)
+    label: str = "Action"
+    text: str = "Action"
+    type: str = "choice"
+    choice_type: str = ""
+    action_category: str = "general_action"
+    intent: str = "general_action"
+    sub_intent: str = ""
+    stat: str = "NONE"
+    requirement: int = 0
+    mp_cost: int = 0
+    mp_spent: int = 0
+    gold_spent: int = 0
+    rate: int = 100
+    check: Any = None
+    success: bool = True
+    tier: str = "success"
+    crit: bool = False
+    roll: float = 100.0
+    target_npc: Optional[str] = None
+    target_location: str = ""
+    combat_target: Optional[str] = None
+    combat_tactical_archetype: str = ""
+    spawns_npc_role: str = ""
+    triggers_loot_roll: bool = False
+    spell_id: str = ""
+    is_quest_action: bool = False
+    is_climax_action: bool = False
+    quest_id: str = ""
+    sub_obj_id: Optional[str] = None
+    stage_index: Optional[int] = None
+    contract_type: str = ""
+    item_name: str = ""
+    item: Optional[Dict[str, Any]] = None
+    item_consumed: bool = False
+    active_recall: Optional[Any] = None
+
 
 class CampaignEndGoal(BaseModel):
     id: str
@@ -555,6 +826,8 @@ class OpeningScene(DictAccessibleModel):
     narrative: str = Field(default="")
     choices: List[Choice] = Field(default_factory=list)
     campaign_end_goals: List[CampaignEndGoal] = Field(default_factory=list)
+    story_quest_title: Optional[str] = Field(default=None)
+    story_quest_objective: Optional[str] = Field(default=None)
     new_entities: List[NewEntity] = Field(default_factory=list)
     npcs_present: List[TrackerEntity] = Field(default_factory=list)
     npc_departures: List[str] = Field(default_factory=list)

@@ -62,8 +62,11 @@ def _evaluate_npc_milestones(
     new_mem = None
     delta_boost = 0
 
+    import namegen
     npc_low = npc_name.lower().strip() if npc_name else ""
     npc_fst = npc_low.split()[0] if npc_low else ""
+    npc_gvn = namegen.extract_first_and_last_name(npc_name)[0].lower().strip() if npc_name else ""
+    npc_tokens = {t for t in (npc_fst, npc_gvn) if t and t not in namegen.NAME_PARTICLES_AND_HONORIFICS}
 
     from mechanics.world.mobility import get_session_dialogue_partners
     from mechanics.social.intimate_excitement import (
@@ -82,7 +85,7 @@ def _evaluate_npc_milestones(
     sess_dps = get_session_dialogue_partners(session) if isinstance(session, dict) else []
     other_dp_names = [
         dp for dp in sess_dps
-        if dp and dp.lower().strip() != npc_low and (dp.lower().split() or [""])[0] != npc_fst
+        if dp and dp.lower().strip() != npc_low and not (npc_tokens & {(dp.lower().split() or [""])[0], namegen.extract_first_and_last_name(dp)[0].lower().strip()})
     ]
     raw_actions_text = " ".join(str(a.get("label", "")) for a in (actions or []))
     npc_active_in_act = is_actively_targeted_in_action(npc_name, raw_actions_text) if npc_name else False
@@ -370,17 +373,24 @@ def _evaluate_npc_milestones(
 def _reduce_quests_and_waypoints(session_id: int, session: dict, party_uids: list, outcome: dict, actions: list, items_gained_by_user: dict):
     """Extracted Phase 2B Reducer for Quest and Waypoint Updates."""
     import db, game_engine
-      # Process quest_updates array from OUTCOME_SCHEMA (primary, reliable path)
-    quest_reward_notices = []
-    completed_sub_quests = []
+      # Process quest_updates array from OUTCOME_SCHEMA (preserving any pre-turn deterministic rewards/sub-quests)
+    quest_reward_notices = list(outcome.get("_quest_reward_notices") or [])
+    completed_sub_quests = list(outcome.get("_completed_sub_quests") or [])
     newly_discovered_clues = []
-    updated_quest_ids = set()
+    already_claimed_qids = {
+        str(rn.get("quest_id"))
+        for rn in quest_reward_notices
+        if isinstance(rn, dict) and rn.get("quest_id")
+    }
+    updated_quest_ids = set(already_claimed_qids)
     for qu in outcome.get("quest_updates") or []:
         if not isinstance(qu, dict):
             continue
         qid = qu.get("quest_id")
         if qid:
-            updated_quest_ids.add(qid)
+            updated_quest_ids.add(str(qid))
+            if str(qid) in already_claimed_qids:
+                continue
         notice = game_engine.apply_quest_update(session_id, qu, party_user_ids=party_uids, outcome=outcome, actions=actions)
         if notice:
             if notice.get("claimed"):
@@ -434,12 +444,18 @@ def _reduce_quests_and_waypoints(session_id: int, session: dict, party_uids: lis
     for rn in quest_reward_notices:
         ritem = rn.get("item")
         if ritem:
+            already_granted = bool(rn.get("_item_granted_in_db"))
             for uid in party_uids:
-                added_id = db.add_item(uid, ritem, "Quest Reward", "Reward from completed objective")
-                if added_id is not None:
-                    items_gained_by_user.setdefault(uid, []).append(ritem)
+                if already_granted:
+                    if ritem not in items_gained_by_user.get(uid, []):
+                        items_gained_by_user.setdefault(uid, []).append(ritem)
                 else:
-                    items_gained_by_user.setdefault(uid, []).append(f"{ritem} (Lost: Inventory Full!)")
+                    added_id = db.add_item(uid, ritem, "Quest Reward", "Reward from completed objective")
+                    if added_id is not None:
+                        items_gained_by_user.setdefault(uid, []).append(ritem)
+                    else:
+                        items_gained_by_user.setdefault(uid, []).append(f"{ritem} (Lost: Inventory Full!)")
+            rn["_item_granted_in_db"] = True
 
 def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, outcome: dict, mp_already_spent: dict, scen_key: str, is_combat: bool, items_gained_by_user: dict):
     """Extracted Phase 2B Reducer for Character HP/MP, Status Effects, and Loot."""
@@ -556,11 +572,24 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
           in_refr_check, refr_mins_check = is_in_refractory_cooldown(sess_row or {}, p_state or {})
           p_exc = (p_state or {}).get("excitement") if isinstance(p_state, dict) else {}
           p_climax_st = (p_state or {}).get("climax_state") if isinstance(p_state, dict) else {}
-          if isinstance(p_exc, dict) and p_exc.get("player_in_refractory") is not None:
-              pl_climaxed_flag = bool(p_exc.get("player_in_refractory"))
+          lead_user_id = (party[0][0]["user_id"] if isinstance(party[0], (tuple, list)) else party[0].get("user_id")) if party else None
+          is_lead_player = (user_id == lead_user_id) if lead_user_id is not None else True
+          if is_lead_player:
+              if isinstance(p_exc, dict) and p_exc.get("player_in_refractory") is not None:
+                  char_climaxed_flag = bool(p_exc.get("player_in_refractory"))
+              else:
+                  char_climaxed_flag = p_climax_st.get("player_climaxed", True) if isinstance(p_climax_st, dict) and p_climax_st else True
           else:
-              pl_climaxed_flag = p_climax_st.get("player_climaxed", True) if isinstance(p_climax_st, dict) and p_climax_st else True
-          if in_refr_check and refr_mins_check > 0 and pl_climaxed_flag:
+              part_climax_map = {
+                  **(p_climax_st.get("partner_climaxes") or {}),
+                  **(p_exc.get("refractory_partners") or {})
+              }
+              c_name = char.get("name", "") if isinstance(char, dict) else ""
+              from mechanics.social.intimate_excitement import _match_actor_key
+              m_k = _match_actor_key(c_name, part_climax_map) if part_climax_map else ""
+              char_climaxed_flag = bool(part_climax_map.get(m_k or c_name, False) or p_climax_st.get("partner_climaxed", False))
+
+          if in_refr_check and refr_mins_check > 0 and char_climaxed_flag:
               char_gen = char.get("gender", "Male") if isinstance(char, dict) else "Male"
               refr_tag = format_partner_recovery_status_tag(refr_mins_check, char_gen)
               cleaned_status = [
@@ -600,20 +629,27 @@ def _reduce_factions(session_id: int, session: dict, outcome: dict, party: list,
     _faction_scen_key = session.get("scenario", "fantasy") if session else "fantasy"
     from mechanics.social.factions import infer_default_hq_location
   
-    faction_updates_list = list(outcome.get("faction_updates", []) or [])
+    faction_updates_list = [
+        dict(f) for f in (outcome.get("faction_updates", []) or [])
+        if isinstance(f, dict)
+    ]
   
     # Auto-detect faction discovery when player interacts with an affiliated contact
     for ru in outcome.get("relationship_updates", []) or []:
+        if not isinstance(ru, dict):
+            continue
         c_name = str(ru.get("name") or ru.get("npc_name") or "").strip()
         if not c_name:
             continue
-        c = db.get_contact(session_id, c_name.lower().replace(" ", "_"))
+        c = db.get_contact(session_id, c_name, first_char_id) or db.get_contact(session_id, c_name.lower().replace(" ", "_"))
         if c:
             b = c.get("basic_info") or {}
             c_fac = str(b.get("faction") or b.get("faction_affiliation") or b.get("club") or c.get("faction") or "").strip()
             if c_fac and c_fac.lower() not in ("none", "unaligned", ""):
                 existing_fnames = [str(f.get("faction_name") or f.get("name") or "").lower() for f in faction_updates_list]
-                old_score = int(c.get("score", 0) or 0)
+                if c_fac.lower() in existing_fnames:
+                    continue
+                old_score = int(c.get("relationship_score", c.get("score", 0)) or 0)
                 ru_delta = int(ru.get("delta_score", 0) or 0)
                 new_score = old_score + ru_delta
   
@@ -755,7 +791,7 @@ def _reduce_factions(session_id: int, session: dict, outcome: dict, party: list,
         except Exception:
             pass
   
-    # Handle faction promotion result from LLM
+    # Handle faction promotion result from pre-turn engine or LLM
     faction_promotion_result = outcome.get("faction_promotion_result", "")
     if faction_promotion_result == "success":
         # Pull pending promotion info from session state (set when trial was initiated)
@@ -773,8 +809,14 @@ def _reduce_factions(session_id: int, session: dict, outcome: dict, party: list,
                     db.update_faction_leadership_roster(session_id, promo_faction_id, new_roster)
                     new_title = get_rank_title(promo_template, promo_target_rank)
                     db.set_character_faction_membership(first_char_id, promo_faction_id, promo_target_rank, new_title)
-                    # Clear pending promotion from session
-                    db.update_session(session_id, extra={"pending_promotion": None})
+            if isinstance(session, dict):
+                session["pending_promotion"] = None
+            db.update_session(session_id, extra={"pending_promotion": None})
+    elif faction_promotion_result == "failed":
+        if (session or {}).get("pending_promotion"):
+            if isinstance(session, dict):
+                session["pending_promotion"] = None
+            db.update_session(session_id, extra={"pending_promotion": None})
 
 def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dict, party_uids: list, actions: list):
     """Extracted Phase 2B Reducer for Deterministic Waypoint Triggers."""
@@ -783,15 +825,20 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
     # 1. Deterministic Arrival Triggers
     from mechanics.world.waypoints import try_advance_on_arrival, try_complete_on_skill_check
     current_location = outcome.get("location") or (session.get("current_location") if session else "") or ""
-    waypoint_notices = []
-    advanced_this_turn = set()  # Track (qid, so_id) to prevent multi-stage cascading in a single action
+    waypoint_notices = list(outcome.get("_waypoint_notices") or [])
+    pre_quest_info = (outcome.get("_pre_turn_quests") if isinstance(outcome, dict) else None) or {}
+    advanced_this_turn = {
+        ( k[0], k[1] )
+        for k in (pre_quest_info.get("advanced_keys") or [])
+        if isinstance(k, (tuple, list)) and len(k) == 2
+    }  # Track (qid, so_id) to prevent pre-turn + post-turn multi-stage cascading in a single turn
   
     # We need to check all active quests & sub-objectives against current location
     active_quests = db.get_session_quests(session_id, status="Active")
     for q in active_quests:
         qid = q["quest_id"]
-        # Check parent quest (e.g. Bounties)
-        n = try_advance_on_arrival(session_id, qid, None, current_location)
+        # Check parent quest (e.g. Bounties) if not already advanced pre-turn
+        n = try_advance_on_arrival(session_id, qid, None, current_location) if (qid, None) not in advanced_this_turn else None
         if n:
             waypoint_notices.append(n)
             advanced_this_turn.add((qid, None))
@@ -816,19 +863,28 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
                     outcome["_quest_reward_notices"].append(bounty_reward)
         
         # Check sub-objectives (allow any order, but max 1 completion per turn)
-        for so in q.get("sub_objectives", []):
-            if isinstance(so, dict) and not so.get("completed"):
-                so_id = so.get("id")
-                if so_id is not None:
-                    n = try_advance_on_arrival(session_id, qid, so_id, current_location)
-                    if n:
-                        waypoint_notices.append(n)
-                        advanced_this_turn.add((qid, so_id))
-                        break
+        if not any(k[0] == qid and k[1] is not None for k in advanced_this_turn):
+            for so in q.get("sub_objectives", []):
+                if isinstance(so, dict) and not so.get("completed"):
+                    so_id = so.get("id")
+                    if so_id is not None and (qid, so_id) not in advanced_this_turn:
+                        n = try_advance_on_arrival(session_id, qid, so_id, current_location)
+                        if n:
+                            waypoint_notices.append(n)
+                            advanced_this_turn.add((qid, so_id))
+                            break
   
-    # Advance phone meetup appointments to 'arrived' when player reaches rendezvous location
+    # Advance rendezvous appointments to 'arrived' when player reaches rendezvous location
     try:
         from mechanics.world.waypoints import check_location_matches_waypoint
+        from mechanics.system.commitments_engine import get_active_commitments, advance_rendezvous_to_arrived
+        active_commits = get_active_commitments(session_id, commitment_type="rendezvous")
+        for cm in active_commits:
+            if cm.get("status") in ("pending", "approaching"):
+                c_loc = cm.get("target_location", "")
+                if c_loc and check_location_matches_waypoint(current_location, c_loc):
+                    advance_rendezvous_to_arrived(session_id, cm["id"], "player")
+
         pending_appts = db.get_phone_appointments(session_id, status="pending")
         for appt in pending_appts:
             appt_loc = appt.get("rendezvous_location", "")
@@ -928,39 +984,40 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
                                             outcome["_quest_reward_notices"].append(bounty_reward)
                 
                 # Check sub-objectives (allow any order, but max 1 completion per turn)
-                for so in q.get("sub_objectives", []):
-                    if isinstance(so, dict) and not so.get("completed"):
-                        so_id = so.get("id")
-                        if so_id is not None and (qid, so_id) not in advanced_this_turn:
-                            active_wp = db.get_active_waypoint(session_id, qid, so_id)
-                            if active_wp:
-                                target_npc = (active_wp.get("target_npc") or "").strip().lower()
-                                # In active dialogue, un-tagged actions must not advance unrelated non-dialogue/environmental waypoints
-                                if in_active_dialogue and not is_quest_act:
-                                    if not target_npc or not any(target_npc in dp or dp in target_npc for dp in active_dp_names):
+                if not any(k[0] == qid and k[1] is not None for k in advanced_this_turn):
+                    for so in q.get("sub_objectives", []):
+                        if isinstance(so, dict) and not so.get("completed"):
+                            so_id = so.get("id")
+                            if so_id is not None and (qid, so_id) not in advanced_this_turn:
+                                active_wp = db.get_active_waypoint(session_id, qid, so_id)
+                                if active_wp:
+                                    target_npc = (active_wp.get("target_npc") or "").strip().lower()
+                                    # In active dialogue, un-tagged actions must not advance unrelated non-dialogue/environmental waypoints
+                                    if in_active_dialogue and not is_quest_act:
+                                        if not target_npc or not any(target_npc in dp or dp in target_npc for dp in active_dp_names):
+                                            continue
+                                    label_lower = (active_wp.get("stage_label") or "").lower()
+                                    is_combat_wp = any(k in label_lower for k in ("defeat", "battle", "kill", "fight", "slay", "destroy", "overcome"))
+                                    so_text_lower = (so.get("text") or "").lower()
+                                    requires_combat_or_delve = any(kw in so_text_lower for kw in ("survive", "defeat", "slay", "kill", "recover", "retrieve", "escape", "delve", "combat", "fight", "confront", "infiltrate"))
+      
+                                    if has_active_hostiles and requires_combat_or_delve:
                                         continue
-                                label_lower = (active_wp.get("stage_label") or "").lower()
-                                is_combat_wp = any(k in label_lower for k in ("defeat", "battle", "kill", "fight", "slay", "destroy", "overcome"))
-                                so_text_lower = (so.get("text") or "").lower()
-                                requires_combat_or_delve = any(kw in so_text_lower for kw in ("survive", "defeat", "slay", "kill", "recover", "retrieve", "escape", "delve", "combat", "fight", "confront", "infiltrate"))
-  
-                                if has_active_hostiles and requires_combat_or_delve:
-                                    continue
-                                if turn_count <= 1 and any(kw in so_text_lower for kw in ("survive", "recover the", "retrieve the", "slay the", "defeat the", "delve through")):
-                                    continue
-  
-                                if not is_combat or (is_combat_wp and outcome.get("_combat_resolved")):
-                                    n = try_complete_on_skill_check(
-                                        session_id, qid, so_id, current_location, True, check_tier,
-                                        action_text=action_text_combined, narrative=narr_text_combined,
-                                        sub_obj_text=so.get("text", ""),
-                                        is_quest_action=is_quest_act, action_quest_id=quest_action_qid,
-                                        action_sub_obj_id=quest_action_sub_id
-                                    )
-                                    if n:
-                                        waypoint_notices.append(n)
-                                        advanced_this_turn.add((qid, so_id))
-                                        break
+                                    if turn_count <= 1 and any(kw in so_text_lower for kw in ("survive", "recover the", "retrieve the", "slay the", "defeat the", "delve through")):
+                                        continue
+      
+                                    if not is_combat or (is_combat_wp and outcome.get("_combat_resolved")):
+                                        n = try_complete_on_skill_check(
+                                            session_id, qid, so_id, current_location, True, check_tier,
+                                            action_text=action_text_combined, narrative=narr_text_combined,
+                                            sub_obj_text=so.get("text", ""),
+                                            is_quest_action=is_quest_act, action_quest_id=quest_action_qid,
+                                            action_sub_obj_id=quest_action_sub_id
+                                        )
+                                        if n:
+                                            waypoint_notices.append(n)
+                                            advanced_this_turn.add((qid, so_id))
+                                            break
   
     if waypoint_notices:
         outcome["_waypoint_notices"] = waypoint_notices
@@ -974,21 +1031,70 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
         _infer_initial_undergarments_state
     )
 
+    def _extract_char_uid(entry, fallback_sess=None):
+        if not entry:
+            return None
+        char = entry[0] if isinstance(entry, (tuple, list)) else entry
+        if isinstance(char, dict):
+            uid = char.get("user_id") or char.get("id")
+            if uid:
+                return uid
+        if isinstance(entry, (tuple, list)) and len(entry) > 1 and isinstance(entry[1], int):
+            return entry[1]
+        if fallback_sess and isinstance(fallback_sess, dict):
+            t_order = fallback_sess.get("turn_order")
+            if t_order and isinstance(t_order, list) and t_order[0]:
+                return t_order[0]
+        return None
+
     first_char_id = 0
     if party and isinstance(party, list) and party[0]:
-        first_entry = party[0]
-        first_c = first_entry[0] if isinstance(first_entry, (tuple, list)) else first_entry
-        first_char_id = (first_c.get("id") if isinstance(first_c, dict) else None) or (first_c.get("user_id") if isinstance(first_c, dict) else None) or (first_entry[1] if isinstance(first_entry, (tuple, list)) and len(first_entry) > 1 else 0)
+        first_char_id = _extract_char_uid(party[0], session) or 0
     if not first_char_id and session:
         first_char_id = (session.get("turn_order") or [0])[0]
 
-    current_phys = db.get_session_physical_state(session_id)
-    phys_updates = (
+    pre_intimate_dict = outcome.get("_pre_turn_intimacy") if isinstance(outcome, dict) and isinstance(outcome.get("_pre_turn_intimacy"), dict) else {}
+    current_phys = (
+        (outcome.get("_physical_state") if isinstance(outcome, dict) and isinstance(outcome.get("_physical_state"), dict) and outcome.get("_physical_state") else None)
+        or (pre_intimate_dict.get("physical_state") if isinstance(pre_intimate_dict.get("physical_state"), dict) and pre_intimate_dict.get("physical_state") else None)
+        or (session.get("_physical_state") if isinstance(session, dict) and isinstance(session.get("_physical_state"), dict) and session.get("_physical_state") else None)
+        or db.get_session_physical_state(session_id)
+    )
+    cosmetic_actors = {}
+    raw_actor_poses = outcome.get("actor_poses") or {}
+    if isinstance(raw_actor_poses, dict):
+        for a_name, pose_val in raw_actor_poses.items():
+            if not a_name or not str(a_name).strip():
+                continue
+            if hasattr(pose_val, "model_dump"):
+                pose_val = pose_val.model_dump()
+            if isinstance(pose_val, dict):
+                entry_pose = {}
+                if pose_val.get("posture") is not None and str(pose_val.get("posture")).strip():
+                    entry_pose["posture"] = str(pose_val["posture"]).strip()[:100]
+                if pose_val.get("holding") is not None and str(pose_val.get("holding")).strip():
+                    entry_pose["holding"] = str(pose_val["holding"]).strip()[:100]
+                if entry_pose:
+                    cosmetic_actors[str(a_name).strip()] = entry_pose
+            elif isinstance(pose_val, str) and pose_val.strip():
+                cosmetic_actors[str(a_name).strip()] = {"posture": pose_val.strip()[:100]}
+
+    # Fallback to legacy keys if provided by test or legacy callers
+    legacy_updates = (
         outcome.get("physical_updates")
         or outcome.get("scene_state_updates")
         or outcome.get("physical_state_updates")
         or {}
     )
+    phys_updates = dict(legacy_updates) if isinstance(legacy_updates, dict) else {}
+    if cosmetic_actors:
+        existing_actors = dict(phys_updates.get("actors") or {})
+        for c_k, c_v in cosmetic_actors.items():
+            if c_k not in existing_actors:
+                existing_actors[c_k] = c_v
+            elif isinstance(existing_actors[c_k], dict):
+                existing_actors[c_k].update(c_v)
+        phys_updates["actors"] = existing_actors
 
     # 1. Location Transition: if location changed, transition the state FIRST
     # (purges old location-bound room props and resets travel postures before merging new scene state)
@@ -1062,10 +1168,15 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
 
     # 5. Combat vs Intimate mutual exclusion & Vitals synchronization
     import game_engine
-    is_combat = bool(outcome and (outcome.get("_combat_log") or outcome.get("_enemy_attack_notice") or game_engine.get_active_enemies(outcome) or game_engine.get_active_enemies(session)))
+    active_combat_enemies = game_engine.get_active_enemies(outcome) or game_engine.get_active_enemies(session)
+    is_combat = bool(outcome and (outcome.get("_combat_log") or outcome.get("_enemy_attack_notice") or active_combat_enemies))
     if is_combat:
         updated_phys["intimate_contact"] = "none"
         updated_phys["climax_state"] = {"partner_climaxed": False, "player_climaxed": False}
+        if active_combat_enemies and isinstance(active_combat_enemies[0], dict) and active_combat_enemies[0].get("name"):
+            updated_phys["combat_focus"] = f"Engaged with {active_combat_enemies[0]['name']}"
+        elif not updated_phys.get("combat_focus") or updated_phys.get("combat_focus") == "none":
+            updated_phys["combat_focus"] = "Active combat engagement"
     else:
         updated_phys["combat_focus"] = "none"
 
@@ -1073,8 +1184,6 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
     if not is_combat:
         from mechanics.social.physical_state import (
             is_erotic_intimate_contact,
-            detect_partner_climax,
-            detect_player_climax,
             detect_intimate_disengagement,
             _match_actor_key,
         )
@@ -1113,11 +1222,35 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
             if isinstance(p_char, dict) and p_char.get("name"):
                 player_name = p_char["name"]
 
-        def _sync_player_outcome_status(new_effs_list: list):
-            p_low_sync = player_name.lower().strip()
+        def _sync_char_outcome_status(char_name: str, new_effs_list: list):
+            c_low_sync = str(char_name).lower().strip()
             for co_item in (outcome.get("character_outcomes") or []):
-                if isinstance(co_item, dict) and str(co_item.get("name", "")).lower().strip() == p_low_sync:
+                if isinstance(co_item, dict) and str(co_item.get("name", "")).lower().strip() == c_low_sync:
                     co_item["status_effects"] = list(new_effs_list)
+
+        def _sync_player_outcome_status(new_effs_list: list):
+            _sync_char_outcome_status(player_name, new_effs_list)
+
+        def _sync_companion_party_status(partner_name: str, new_effs_list: list):
+            if not partner_name:
+                return
+            p_name_low = str(partner_name).lower().strip()
+            p_first = (p_name_low.split() or [""])[0]
+            s_dict = session or (db.get_session(session_id) if session_id else {}) or {}
+            for entry in (party or [])[1:]:
+                comp_c = entry[0] if isinstance(entry, (tuple, list)) else entry
+                if isinstance(comp_c, dict):
+                    c_name = str(comp_c.get("name", "")).lower().strip()
+                    c_first = (c_name.split() or [""])[0]
+                    if c_name == p_name_low or (len(p_first) >= 3 and c_first == p_first) or (p_name_low in c_name or c_name in p_name_low):
+                        comp_uid = _extract_char_uid(entry, s_dict)
+                        if comp_uid:
+                            try:
+                                db.set_status_effects(comp_uid, list(new_effs_list))
+                            except Exception:
+                                pass
+                        comp_c["status_effects"] = list(new_effs_list)
+                        _sync_char_outcome_status(comp_c.get("name", partner_name), new_effs_list)
 
         prev_climax_on_disengage = dict(
             (current_phys.get("climax_state") if isinstance(current_phys, dict) else None)
@@ -1289,7 +1422,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                 try:
                     for entry in (party or []):
                         ch_lead = entry[0] if isinstance(entry, (tuple, list)) else entry
-                        u_lead = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else (ch_lead.get("user_id") if isinstance(ch_lead, dict) else None)
+                        u_lead = _extract_char_uid(entry, sess_dict)
                         if u_lead:
                             char_rec = db.get_character(u_lead) if u_lead else None
                             cur_effs = char_rec.get("status_effects") if char_rec else []
@@ -1302,7 +1435,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                             db.set_status_effects(u_lead, cur_effs)
                             if isinstance(ch_lead, dict):
                                 ch_lead["status_effects"] = cur_effs
-                            _sync_player_outcome_status(cur_effs)
+                            _sync_char_outcome_status(ch_lead.get("name", player_name) if isinstance(ch_lead, dict) else player_name, cur_effs)
                     all_c_list = db.get_contacts(session_id) or [] if session_id else []
                     for c_full in all_c_list:
                         if isinstance(c_full, dict) and c_full.get("name"):
@@ -1311,6 +1444,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                 c_id = c_full.get("npc_id") or c_full.get("contact_id") or str(c_full.get("name")).lower().replace(" ", "_")
                                 c_effs = [s for s in c_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
                                 db.update_contact_status_effects(session_id, c_id, first_char_id, c_effs)
+                                _sync_companion_party_status(c_full.get("name"), c_effs)
                 except Exception as e:
                     log.debug("Could not clear refractory status on clock recovery: %s", e)
             else:
@@ -1323,27 +1457,33 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                             if exc_tick.get("player_in_refractory") is not None
                             else bool((updated_phys.get("climax_state") or {}).get("player_climaxed", False))
                         )
-                        if pl_in_refr_tick:
-                            for entry in (party or []):
-                                ch_lead = entry[0] if isinstance(entry, (tuple, list)) else entry
-                                u_lead = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else (ch_lead.get("user_id") if isinstance(ch_lead, dict) else None)
-                                if u_lead:
-                                    char_rec = db.get_character(u_lead) if u_lead else None
-                                    cur_effs = char_rec.get("status_effects") if char_rec else []
-                                    if isinstance(cur_effs, str):
-                                        try:
-                                            cur_effs = json.loads(cur_effs)
-                                        except Exception:
-                                            cur_effs = [cur_effs] if cur_effs else []
-                                    pl_gen_tick = (char_rec.get("gender") if char_rec else None) or (ch_lead.get("gender") if isinstance(ch_lead, dict) else "Male")
-                                    refr_tag_tick = format_partner_recovery_status_tag(refr_mins_tick, pl_gen_tick)
-                                    cur_effs = [s for s in cur_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
-                                    cur_effs.append(refr_tag_tick)
-                                    db.set_status_effects(u_lead, cur_effs)
-                                    if isinstance(ch_lead, dict):
-                                        ch_lead["status_effects"] = cur_effs
-                                    _sync_player_outcome_status(cur_effs)
                         refr_p_tick = exc_tick.get("refractory_partners") if isinstance(exc_tick.get("refractory_partners"), dict) else {}
+                        party_list_tick = party or []
+                        lead_user_id_tick = (party_list_tick[0][0]["user_id"] if isinstance(party_list_tick[0], (tuple, list)) else party_list_tick[0].get("user_id")) if party_list_tick else None
+                        for entry in party_list_tick:
+                            ch_lead = entry[0] if isinstance(entry, (tuple, list)) else entry
+                            u_lead = _extract_char_uid(entry, sess_dict)
+                            if u_lead:
+                                char_rec = db.get_character(u_lead) if u_lead else None
+                                cur_effs = char_rec.get("status_effects") if char_rec else []
+                                if isinstance(cur_effs, str):
+                                    try:
+                                        cur_effs = json.loads(cur_effs)
+                                    except Exception:
+                                        cur_effs = [cur_effs] if cur_effs else []
+                                is_lead = (u_lead == lead_user_id_tick)
+                                ch_name = ch_lead.get("name", "") if isinstance(ch_lead, dict) else ""
+                                m_k_t = _match_actor_key(ch_name, refr_p_tick) if refr_p_tick else ""
+                                ch_in_refr = pl_in_refr_tick if is_lead else bool(refr_p_tick.get(m_k_t or ch_name, False))
+                                cur_effs = [s for s in cur_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
+                                if ch_in_refr:
+                                    ch_gen_tick = (char_rec.get("gender") if char_rec else None) or (ch_lead.get("gender") if isinstance(ch_lead, dict) else ("Male" if is_lead else "Female"))
+                                    refr_tag_tick = format_partner_recovery_status_tag(refr_mins_tick, ch_gen_tick)
+                                    cur_effs.append(refr_tag_tick)
+                                db.set_status_effects(u_lead, cur_effs)
+                                if isinstance(ch_lead, dict):
+                                    ch_lead["status_effects"] = cur_effs
+                                _sync_char_outcome_status(ch_name or player_name, cur_effs)
                         all_c_tick = db.get_contacts(session_id) or [] if session_id else []
                         for c_full in all_c_tick:
                             if isinstance(c_full, dict) and c_full.get("name"):
@@ -1357,6 +1497,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                     c_effs = [s for s in c_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
                                     c_effs.append(p_rec_tag_t)
                                     db.update_contact_status_effects(session_id, c_id, first_char_id, c_effs)
+                                    _sync_companion_party_status(c_name_t, c_effs)
                 except Exception as e:
                     log.debug("Could not refresh refractory countdown on turn: %s", e)
 
@@ -1505,7 +1646,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                         party_list = party or []
                         lead_entry = party_list[0] if party_list else None
                         lead_c = lead_entry[0] if isinstance(lead_entry, (tuple, list)) else lead_entry
-                        u_id = lead_entry[1] if isinstance(lead_entry, (tuple, list)) and len(lead_entry) > 1 else ((lead_c.get("user_id") if isinstance(lead_c, dict) else None) or (sess_dict.get("turn_order", [None])[0] if sess_dict else None))
+                        u_id = _extract_char_uid(lead_entry, sess_dict)
                         if u_id:
                             char_rec = db.get_character(u_id) if u_id else None
                             cur_effs = char_rec.get("status_effects") if char_rec else []
@@ -1543,6 +1684,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                 pc_item["status_effects"] = npc_effs
                                 c_id = pc_item.get("npc_id") or pc_item.get("contact_id") or str(pc_item.get("name")).lower().replace(" ", "_")
                                 db.update_contact_status_effects(session_id, c_id, first_char_id, npc_effs)
+                                _sync_companion_party_status(pc_name_ac, npc_effs)
                 except Exception as e:
                     log.debug("Could not apply aftercare recovery status: %s", e)
             else:
@@ -1601,8 +1743,12 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                     target_label = (" and ".join(c.get("name", "") for c in partner_contacts if c.get("name"))) if (partner_contacts and len(partner_contacts) >= 2) else (partner or "partner")
                     updated_phys["intimate_contact"] = f"Intimate encounter with {target_label} ({act_label})"
 
-                excitement_res = None
-                if should_run_excitement:
+                excitement_res = (
+                    (outcome.get("_pre_turn_excitement_res") if isinstance(outcome, dict) else None)
+                    or pre_intimate_dict.get("excitement_res")
+                    or sess_dict.get("_pre_turn_excitement_res")
+                )
+                if excitement_res is None and should_run_excitement:
                     excitement_res = compute_excitement_step(
                         physical_state=updated_phys,
                         action_str=act_text,
@@ -1612,6 +1758,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                         narrative_str=narrative_text,
                         partner_contacts=partner_contacts,
                     )
+                if excitement_res:
                     outcome["intimate_update"] = excitement_res
                     if (
                         excitement_res
@@ -1668,7 +1815,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                         party_list = party or []
                         lead_entry = party_list[0] if party_list else None
                         lead_c = lead_entry[0] if isinstance(lead_entry, (tuple, list)) else lead_entry
-                        u_id = lead_entry[1] if isinstance(lead_entry, (tuple, list)) and len(lead_entry) > 1 else ((lead_c.get("user_id") if isinstance(lead_c, dict) else None) or (sess_dict.get("turn_order", [None])[0] if sess_dict else None))
+                        u_id = _extract_char_uid(lead_entry, sess_dict)
                         if u_id:
                             try:
                                 char_record = db.get_character(u_id)
@@ -1741,6 +1888,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                         db.update_contact_status_effects(session_id, c_id, first_char_id, pc_item["status_effects"])
                                     except Exception:
                                         pass
+                                    _sync_companion_party_status(pc_item.get("name"), pc_item["status_effects"])
                     elif excitement_res:
                         all_cooled = bool(excitement_res.get("all_cooled_down"))
                         exc_actors_map = (updated_phys.get("excitement") or {}).get("actors") or {}
@@ -1751,7 +1899,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                         party_list = party or []
                         lead_entry = party_list[0] if party_list else None
                         lead_c = lead_entry[0] if isinstance(lead_entry, (tuple, list)) else lead_entry
-                        u_id = lead_entry[1] if isinstance(lead_entry, (tuple, list)) and len(lead_entry) > 1 else ((lead_c.get("user_id") if isinstance(lead_c, dict) else None) or (sess_dict.get("turn_order", [None])[0] if sess_dict else None))
+                        u_id = _extract_char_uid(lead_entry, sess_dict)
                         if u_id:
                             try:
                                 char_record = db.get_character(u_id)
@@ -1802,12 +1950,13 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                         db.update_contact_status_effects(session_id, c_id, first_char_id, pc_item["status_effects"])
                                     except Exception:
                                         pass
+                                    _sync_companion_party_status(pc_item.get("name"), pc_item["status_effects"])
                 else:
                     # Tick down lingering Aroused [N turns] when excitement engine is inactive
                     party_list = party or []
                     lead_entry = party_list[0] if party_list else None
                     lead_c = lead_entry[0] if isinstance(lead_entry, (tuple, list)) else lead_entry
-                    u_id = lead_entry[1] if isinstance(lead_entry, (tuple, list)) and len(lead_entry) > 1 else ((lead_c.get("user_id") if isinstance(lead_c, dict) else None) or (sess_dict.get("turn_order", [None])[0] if sess_dict else None))
+                    u_id = _extract_char_uid(lead_entry, sess_dict)
                     if u_id:
                         try:
                             char_record = db.get_character(u_id)
@@ -1866,6 +2015,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                                 new_npc_effs.append(s)
                                         c_id = c_full.get("npc_id") or c_full.get("contact_id") or str(c_full.get("name")).lower().replace(" ", "_")
                                         db.update_contact_status_effects(session_id, c_id, first_char_id, new_npc_effs)
+                                        _sync_companion_party_status(c_full.get("name"), new_npc_effs)
                                         n_act_k = _match_actor_key(c_full.get("name", ""), exc_actors_map)
                                         if n_act_k and isinstance(exc_actors_map.get(n_act_k), dict):
                                             exc_actors_map[n_act_k]["aroused_turns"] = next_npc_t
@@ -1876,8 +2026,8 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                     has_player_climax = bool(excitement_res.get("player_climaxed"))
                     has_partner_climax = bool(excitement_res.get("partner_climaxed"))
                 else:
-                    has_player_climax = (phys_up_dict.get("player_climaxed") is True) or detect_player_climax(full_turn_text, player_name)
-                    has_partner_climax = (phys_up_dict.get("partner_climaxed") is True) or detect_partner_climax(full_turn_text, partner)
+                    has_player_climax = bool(phys_up_dict.get("player_climaxed") is True)
+                    has_partner_climax = bool(phys_up_dict.get("partner_climaxed") is True)
 
                 partner_climaxes_res = (excitement_res.get("partner_climaxes") if excitement_res else None) or {}
                 all_partners_climaxed = (
@@ -1932,7 +2082,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                 party_list = party or []
                                 lead_entry = party_list[0] if party_list else None
                                 lead_c = lead_entry[0] if isinstance(lead_entry, (tuple, list)) else lead_entry
-                                u_id = lead_entry[1] if isinstance(lead_entry, (tuple, list)) and len(lead_entry) > 1 else ((lead_c.get("user_id") if isinstance(lead_c, dict) else None) or (sess_dict.get("turn_order", [None])[0] if sess_dict else None))
+                                u_id = _extract_char_uid(lead_entry, sess_dict)
                                 if u_id:
                                     char_rec = db.get_character(u_id) if u_id else None
                                     cur_effs = char_rec.get("status_effects") if char_rec else []
@@ -1981,6 +2131,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                         db.update_contact_status_effects(session_id, c_id_pf, first_char_id, npc_effs_pf)
                                     except Exception:
                                         pass
+                                    _sync_companion_party_status(p_name_item, npc_effs_pf)
                     else:
                         # Mutual climax or partner was already satisfied -> aftercare
                         if partner_contacts and len(partner_contacts) >= 2:
@@ -2026,7 +2177,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                 party_list = party or []
                                 lead_entry = party_list[0] if party_list else None
                                 lead_c = lead_entry[0] if isinstance(lead_entry, (tuple, list)) else lead_entry
-                                u_id = lead_entry[1] if isinstance(lead_entry, (tuple, list)) and len(lead_entry) > 1 else ((lead_c.get("user_id") if isinstance(lead_c, dict) else None) or (sess_dict.get("turn_order", [None])[0] if sess_dict else None))
+                                u_id = _extract_char_uid(lead_entry, sess_dict)
                                 if u_id:
                                     char_rec = db.get_character(u_id) if u_id else None
                                     cur_effs = char_rec.get("status_effects") if char_rec else []
@@ -2057,6 +2208,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                         pc_item["status_effects"] = npc_effs
                                         c_id = pc_item.get("npc_id") or pc_item.get("contact_id") or str(pc_item.get("name")).lower().replace(" ", "_")
                                         db.update_contact_status_effects(session_id, c_id, first_char_id, npc_effs)
+                                        _sync_companion_party_status(pc_name_mc, npc_effs)
                         except Exception as e:
                             log.debug("Could not apply mutual climax recovery status: %s", e)
                 elif (was_erotic or is_erotic or is_genital_act) and has_partner_climax and not has_player_climax:
@@ -2114,6 +2266,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                         pc_item["status_effects"] = npc_effs
                                         c_id = pc_item.get("npc_id") or pc_item.get("contact_id") or str(p_name_item).lower().replace(" ", "_")
                                         db.update_contact_status_effects(session_id, c_id, first_char_id, npc_effs)
+                                        _sync_companion_party_status(p_name_item, npc_effs)
                                 except Exception as e:
                                     log.debug("Could not apply unilateral male partner refractory status: %s", e)
                     if c_matched and c_matched in actors:
@@ -2178,7 +2331,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                 try:
                     for entry in (party or []):
                         ch_lead = entry[0] if isinstance(entry, (tuple, list)) else entry
-                        u_lead = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else (ch_lead.get("user_id") if isinstance(ch_lead, dict) else None)
+                        u_lead = _extract_char_uid(entry, sess_for_clock)
                         if u_lead:
                             char_rec = db.get_character(u_lead) if u_lead else None
                             cur_effs = char_rec.get("status_effects") if char_rec else []
@@ -2191,7 +2344,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                             db.set_status_effects(u_lead, cur_effs)
                             if isinstance(ch_lead, dict):
                                 ch_lead["status_effects"] = cur_effs
-                            _sync_player_outcome_status(cur_effs)
+                            _sync_char_outcome_status(ch_lead.get("name", player_name) if isinstance(ch_lead, dict) else player_name, cur_effs)
                     all_c_list = db.get_contacts(session_id) or [] if session_id else []
                     for c_full in all_c_list:
                         if isinstance(c_full, dict) and c_full.get("name"):
@@ -2200,6 +2353,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                 c_id = c_full.get("npc_id") or c_full.get("contact_id") or str(c_full.get("name")).lower().replace(" ", "_")
                                 c_effs = [s for s in c_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
                                 db.update_contact_status_effects(session_id, c_id, first_char_id, c_effs)
+                                _sync_companion_party_status(c_full.get("name"), c_effs)
                 except Exception as e:
                     log.debug("Could not clear refractory status on disengagement recovery: %s", e)
             else:
@@ -2211,9 +2365,14 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                             pl_climaxed_dis = bool(exc_dis.get("player_in_refractory"))
                         else:
                             pl_climaxed_dis = bool(prev_climax_on_disengage.get("player_climaxed") or (updated_phys.get("climax_state") or {}).get("player_climaxed"))
+                        p_clim_map_dis = {
+                            **(prev_climax_on_disengage.get("partner_climaxes") or {}),
+                            **(exc_dis.get("refractory_partners") or {}),
+                        }
+                        lead_user_id = (party[0][0]["user_id"] if isinstance(party[0], (tuple, list)) else party[0].get("user_id")) if party else None
                         for entry in (party or []):
                             ch_lead = entry[0] if isinstance(entry, (tuple, list)) else entry
-                            u_lead = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else (ch_lead.get("user_id") if isinstance(ch_lead, dict) else None)
+                            u_lead = _extract_char_uid(entry, sess_for_clock)
                             if u_lead:
                                 char_rec = db.get_character(u_lead) if u_lead else None
                                 cur_effs = char_rec.get("status_effects") if char_rec else []
@@ -2223,18 +2382,18 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                     except Exception:
                                         cur_effs = [cur_effs] if cur_effs else []
                                 cur_effs = [s for s in cur_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
-                                if pl_climaxed_dis:
-                                    pl_gen = (char_rec.get("gender") if char_rec else None) or (ch_lead.get("gender") if isinstance(ch_lead, dict) else "Male")
-                                    refr_tag_dis = format_partner_recovery_status_tag(refr_mins_dis, pl_gen)
+                                is_lead_entry = (u_lead == lead_user_id)
+                                ch_name = ch_lead.get("name", "") if isinstance(ch_lead, dict) else ""
+                                m_k_ch = _match_actor_key(ch_name, p_clim_map_dis) if p_clim_map_dis else ""
+                                ch_clim_dis = pl_climaxed_dis if is_lead_entry else bool(p_clim_map_dis.get(m_k_ch or ch_name, False))
+                                if ch_clim_dis:
+                                    ch_gen = (char_rec.get("gender") if char_rec else None) or (ch_lead.get("gender") if isinstance(ch_lead, dict) else "Male")
+                                    refr_tag_dis = format_partner_recovery_status_tag(refr_mins_dis, ch_gen)
                                     cur_effs.append(refr_tag_dis)
                                 db.set_status_effects(u_lead, cur_effs)
                                 if isinstance(ch_lead, dict):
                                     ch_lead["status_effects"] = cur_effs
-                                _sync_player_outcome_status(cur_effs)
-                        p_clim_map_dis = {
-                            **(prev_climax_on_disengage.get("partner_climaxes") or {}),
-                            **(exc_dis.get("refractory_partners") or {}),
-                        }
+                                _sync_char_outcome_status(ch_name, cur_effs)
                         all_c_list = db.get_contacts(session_id) or [] if session_id else []
                         for c_full in all_c_list:
                             if isinstance(c_full, dict) and c_full.get("name"):
@@ -2256,7 +2415,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                     else:
                         for entry in (party or []):
                             ch_lead = entry[0] if isinstance(entry, (tuple, list)) else entry
-                            u_lead = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else (ch_lead.get("user_id") if isinstance(ch_lead, dict) else None)
+                            u_lead = _extract_char_uid(entry, sess_for_clock)
                             if u_lead:
                                 char_rec = db.get_character(u_lead) if u_lead else None
                                 cur_effs = char_rec.get("status_effects") if char_rec else []
@@ -2270,7 +2429,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                     db.set_status_effects(u_lead, cur_effs)
                                     if isinstance(ch_lead, dict):
                                         ch_lead["status_effects"] = cur_effs
-                                    _sync_player_outcome_status(cur_effs)
+                                    _sync_char_outcome_status(ch_lead.get("name", player_name) if isinstance(ch_lead, dict) else player_name, cur_effs)
                         all_c_list = db.get_contacts(session_id) or [] if session_id else []
                         for c_full in all_c_list:
                             if isinstance(c_full, dict) and c_full.get("name"):
@@ -2279,6 +2438,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                     c_id = c_full.get("npc_id") or c_full.get("contact_id") or str(c_full.get("name")).lower().replace(" ", "_")
                                     c_effs = [s for s in c_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("aroused", "breathless", "refractory", "satisfied", "spent"))]
                                     db.update_contact_status_effects(session_id, c_id, first_char_id, c_effs)
+                                    _sync_companion_party_status(c_full.get("name"), c_effs)
                 except Exception as e:
                     log.debug("Could not update refractory status on disengagement turn: %s", e)
 
@@ -2352,7 +2512,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
     is_redressing = False
     for a in actions:
         if isinstance(a, dict):
-            act_text = str(a.get("label") or a.get("action") or a.get("text") or "").lower()
+            act_text = f"{a.get('label', '')} {a.get('action', '')} {a.get('text', '')}".lower()
             if any(w in act_text for w in ("redress", "get dressed", "put on clothes", "don clothes")):
                 is_redressing = True
                 break
@@ -2363,12 +2523,12 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
     # 11. Handle putting down carried burden or breaking free from physical restraint
     lead_char = party[0][0] if party and isinstance(party[0], (tuple, list)) else (party[0] if party and isinstance(party[0], dict) else None)
     if lead_char and lead_char.get("name") and updated_phys.get("actors"):
-        from mechanics.social.physical_state import _match_actor_key
-        lead_key = _match_actor_key(lead_char["name"], updated_phys["actors"])
+        from mechanics.social.physical_state import _match_actor_key, find_player_actor_key
+        lead_key = find_player_actor_key(updated_phys["actors"], party=party, session_id=session_id) or _match_actor_key(lead_char["name"], updated_phys["actors"])
         if lead_key in updated_phys["actors"]:
             for a in actions:
                 if isinstance(a, dict):
-                    act_text = str(a.get("label") or a.get("action") or a.get("text") or "").lower()
+                    act_text = f"{a.get('label', '')} {a.get('action', '')} {a.get('text', '')}".lower()
                     # A. Putting down burden
                     if "put down" in act_text and any(w in act_text for w in ("carrying", "holding", "burden")):
                         old_tether = updated_phys["actors"][lead_key].pop("tether", None)
@@ -2379,12 +2539,14 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                 if matched_c in updated_phys["actors"]:
                                     updated_phys["actors"][matched_c]["posture"] = "Resting safely on the ground"
                                     updated_phys["actors"][matched_c].pop("tether", None)
-                    # B. Breaking free / slipping out of restraint on check success
-                    elif any(w in act_text for w in ("break free", "slip out", "struggle to break")):
+                    # B. Breaking free / slipping out of restraint on check success, or companion cutting bonds
+                    elif any(w in act_text for w in ("break free", "slip out", "struggle", "cut", "untie", "free bonds", "companion_free")):
                         a_check = a.get("check")
                         from .core import is_check_success
-                        if is_check_success(a_check, default_if_none=True):
+                        if any(w in act_text for w in ("companion", "cut", "untie", "help")) or is_check_success(a_check, default_if_none=True):
                             updated_phys["actors"][lead_key].pop("tether", None)
+                            updated_phys["actors"][lead_key]["tether_type"] = "none"
+                            updated_phys["actors"][lead_key]["tether_partner"] = ""
 
     db.update_session_physical_state(session_id, updated_phys)
     outcome["_physical_state"] = updated_phys
@@ -2489,15 +2651,24 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                     or (session.get("location") if isinstance(session, dict) else "")
                     or ""
                 )
-                _reconciled = clean_choices_impl(
-                    None,
-                    choices=[dict(c) if isinstance(c, dict) else c for c in _existing_choices],
-                    scenario=scen_key,
-                    location=_loc_now,
-                    char=lead_char,
-                    dialogue_partner=_dlg_p,
-                    session_id=session_id,
-                )
+                if outcome.get("_hybrid_choices_built"):
+                    _reconciled = game_engine.build_hybrid_turn_choices(
+                        [dict(c) if isinstance(c, dict) else c for c in _existing_choices],
+                        session=session,
+                        party=party,
+                        result=outcome,
+                        actions=actions,
+                    )
+                else:
+                    _reconciled = clean_choices_impl(
+                        None,
+                        choices=[dict(c) if isinstance(c, dict) else c for c in _existing_choices],
+                        scenario=scen_key,
+                        location=_loc_now,
+                        char=lead_char,
+                        dialogue_partner=_dlg_p,
+                        session_id=session_id,
+                    )
                 if _reconciled:
                     if "choices" in outcome:
                         outcome["choices"] = _reconciled
@@ -2658,22 +2829,59 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
             if name and isinstance(name, str):
                 bus.publish(NPCStatusChangedEvent(session_id=session_id, name=name.strip(), status="deceased"))
   
+    # ── Resolve NPC Episodic Memory from Slim Narrator Schema ────────────────
+    episodic_mem = outcome.get("episodic_memory")
+    if episodic_mem and isinstance(episodic_mem, str) and episodic_mem.strip():
+        from db.memory import add_npc_memory
+        from mechanics.world.mobility import get_session_dialogue_partners
+        current_turn = len(session.get("history") or []) if isinstance(session, dict) else 0
+        mem_targets = list(outcome.get("dialogue_partners") or (get_session_dialogue_partners(session) if isinstance(session, dict) else []) or [])
+        if not mem_targets and outcome.get("dialogue_partner"):
+            mem_targets = [str(outcome["dialogue_partner"]).strip()]
+        if not mem_targets:
+            for npc_item in (outcome.get("npcs_present") or (session.get("current_npcs") if isinstance(session, dict) else []) or []):
+                n_nm = npc_item.get("name") if isinstance(npc_item, dict) else str(npc_item)
+                if n_nm and str(n_nm).strip() and str(n_nm).strip().lower() != "none":
+                    mem_targets.append(str(n_nm).strip())
+                    break
+        for n_name in mem_targets[:2]:
+            if n_name and str(n_name).strip():
+                add_npc_memory(
+                    session_id=session_id,
+                    npc_name=str(n_name).strip(),
+                    turn_index=current_turn,
+                    memory_fact=episodic_mem.strip()[:300],
+                    sentiment_delta=0,
+                    importance=1,
+                    is_secret=False,
+                    emotional_tone="",
+                    open_thread="",
+                )
+
     # ── Resolve NPC Episodic Memories ────────────────────────────────────────
     npc_memories = outcome.get("npc_memories")
     if npc_memories and isinstance(npc_memories, list):
         from db.memory import add_npc_memory
+        from db.social import update_contact_open_thread
         current_turn = len(session.get("history") or [])
         for m in npc_memories:
             if isinstance(m, dict) and m.get("npc_name") and m.get("memory_fact"):
+                n_name = m["npc_name"].strip()
+                emo = str(m.get("emotional_tone") or "").strip()
+                thrd = str(m.get("open_thread") or "").strip()
                 add_npc_memory(
                     session_id=session_id,
-                    npc_name=m["npc_name"].strip(),
+                    npc_name=n_name,
                     turn_index=current_turn,
                     memory_fact=m["memory_fact"].strip(),
                     sentiment_delta=m.get("sentiment_delta", 0),
                     importance=m.get("importance", 1),
-                    is_secret=m.get("is_secret", False)
+                    is_secret=m.get("is_secret", False),
+                    emotional_tone=emo,
+                    open_thread=thrd,
                 )
+                if thrd or emo:
+                    update_contact_open_thread(session_id=session_id, npc_id=n_name, open_thread=thrd, emotional_tone=emo)
 
 def _reduce_entities_and_gifts(session_id: int, session: dict, outcome: dict, party: list, actions: list, is_combat: bool, scen_key: str):
     """Extracted Phase 2B Reducer for New Entities, Gifts, and Passive Regen."""
@@ -2681,8 +2889,19 @@ def _reduce_entities_and_gifts(session_id: int, session: dict, outcome: dict, pa
     from mechanics.social.persona import normalize_appearance
     from mechanics.social.races import normalize_race
     from game_engine import get_combined_narrative
-      # Check if player gifted an inventory item
-    if actions:
+    # 1. Process pre-turn resolved gifts first (single-source-of-truth)
+    pre_gifted = (outcome.get("_pre_turn_gifted") if isinstance(outcome, dict) else None) or []
+    if pre_gifted:
+        for g_entry in pre_gifted:
+            if isinstance(g_entry, dict) and g_entry.get("user_id") and g_entry.get("item_name"):
+                bus.publish(ItemGiftedEvent(
+                    session_id=session_id,
+                    user_id=g_entry["user_id"],
+                    npc_name=g_entry.get("npc_name") or "NPC",
+                    item_name=g_entry["item_name"],
+                ))
+    elif actions:
+        # Legacy fallback when called outside pre-turn pipeline
         from mechanics.narrative.intent import classify_action_intent, IntentCategory
         for act in actions:
             if not isinstance(act, dict):
@@ -2790,10 +3009,38 @@ def _reduce_media_capture(session_id: int, session: dict, party: list, outcome: 
     from mechanics.system.phone import scenario_has_smartphone
     from mechanics.narrative.intent import classify_action_intent, IntentCategory, IntentContext
     from mechanics.combat.items import create_digital_media_item
-      # Check if the player performed a Media Capture action (e.g. took a photo/selfie/video) that succeeded
-    if actions and scenario_has_smartphone(scen_key):
-        from mechanics.narrative.intent import classify_action_intent, IntentCategory, IntentContext
-        from mechanics.combat.items import create_digital_media_item
+    if not scenario_has_smartphone(scen_key):
+        return
+
+    pre_media = (outcome.get("_pre_turn_media_captured") if isinstance(outcome, dict) else None) or []
+    if pre_media:
+        for m_entry in pre_media:
+            if not isinstance(m_entry, dict):
+                continue
+            user_id = m_entry.get("user_id") or (party[0][0]["user_id"] if party else 0)
+            if not user_id:
+                continue
+            media_type = str(m_entry.get("media_type") or "photo")
+            subject = str(m_entry.get("subject") or "Scene")
+            already_added = any(subject.lower() in str(it).lower() for it in items_gained_by_user.get(user_id, []))
+            if not already_added:
+                outcome_nar = outcome.get("outcome_narrative") or outcome.get("next_narrative") or f"Captured {media_type} of {subject}"
+                caption_text = str(outcome_nar).split("\n")[0][:250].strip()
+                item_id = create_digital_media_item(
+                    user_id=user_id,
+                    contact_name=subject,
+                    media_type=media_type,
+                    caption=caption_text,
+                    subject=m_entry.get("location") or session.get("current_location", "Local Area"),
+                    tags=["misc", "digital", "story"],
+                )
+                if item_id:
+                    media_label = f"📸 Photo: {subject}" if "photo" in media_type else f"📹 Video: {subject}"
+                    items_gained_by_user.setdefault(user_id, []).append(f"{media_label} (Saved to Photo Vault)")
+        return
+
+    # Legacy fallback when called outside pre-turn pipeline
+    if actions:
         for act in actions:
             if not isinstance(act, dict):
                 continue

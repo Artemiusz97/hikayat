@@ -214,7 +214,7 @@ class TestRomanticBehavioralDiversity(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Intimate Dynamic: Eagerly Receptive", user_prompt)
             self.assertIn("INTIMATE VOICE & SPOKEN DEMEANOR (Sofia Anderson — Blunt & Teasing", user_prompt)
             self.assertIn("AUTONOMOUS INTIMATE RESPONSE (Sofia Anderson — Receptive & Yielding", user_prompt)
-            self.assertIn("melting into your touch, inviting you to take complete charge", user_prompt)
+            self.assertIn("craves the player taking complete charge", user_prompt)
             self.assertIn("ROMANTIC & INTIMATE BEHAVIORAL DIVERSITY", user_prompt)
             self.assertIn("Do NOT default to generic anime stuttering", user_prompt)
 

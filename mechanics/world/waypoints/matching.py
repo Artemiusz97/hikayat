@@ -9,13 +9,30 @@ import db
 from .templates import parse_zone_primary
 
 
-def check_location_matches_waypoint(current_location: str, target_location: str) -> bool:
+def check_location_matches_waypoint(
+    current_location: str,
+    target_location: str,
+    session_id: int = 0,
+    current_node_id: str = None,
+    target_node_id: str = None
+) -> bool:
     """Returns True if current_location matches the waypoint target.
+    If session_id is provided, checks strict spatial graph containment (is_descendant_of) first.
     Matches on Zone + Primary only. Empty target always matches.
     Robust to multi-tier inversion (e.g. Student Council Office inside Administration Wing).
     """
     if not target_location or not target_location.strip():
         return True
+
+    if session_id:
+        try:
+            curr_nid = current_node_id or (db.resolve_node_id_from_location(session_id, current_location) if current_location else None)
+            tgt_nid = target_node_id or (db.resolve_node_id_from_location(session_id, target_location) if target_location else None)
+            if curr_nid and tgt_nid:
+                return db.is_descendant_of(session_id, curr_nid, tgt_nid) or db.is_descendant_of(session_id, tgt_nid, curr_nid)
+        except Exception:
+            pass
+
     curr_zone, curr_primary = parse_zone_primary(current_location)
     tgt_zone, tgt_primary = parse_zone_primary(target_location)
 
@@ -56,18 +73,279 @@ def check_location_matches_waypoint(current_location: str, target_location: str)
     return False
 
 
+def is_hostile_or_lair_waypoint(wp: dict) -> bool:
+    """Returns True if the waypoint represents a hostile boss/outlaw/monster hideout stage."""
+    bp = str(wp.get("blueprint_id") or "").upper()
+    lbl = str(wp.get("stage_label") or "").lower()
+    target_npc = str(wp.get("target_npc") or "").strip().lower()
+    client_npc = str(wp.get("client_npc") or "").strip().lower()
+    if client_npc and target_npc == client_npc:
+        return False
+    if any(w in lbl for w in ("turn in", "deliver", "report to", "return to", "hand over")):
+        return False
+    if bp in ("NEUTRALIZATION", "EXPLORATION_HAZARD", "SITE_DEFENSE_RITUAL"):
+        return True
+    if any(w in lbl for w in ("confront", "eliminate", "slay", "assassinate", "capture", "defeat", "outlaw", "poacher", "smuggler", "bandit", "hideout", "lair")):
+        return True
+    return False
+
+
+def get_waypoint_npc_schedule_info(session_id: int, wp: dict, current_minute: Optional[int] = None) -> dict:
+    """
+    Resolves live NPC schedule routing and Nighttime Off-Duty Guard for a waypoint.
+    Returns:
+      {
+        "effective_location": str,
+        "static_location": str,
+        "is_off_duty": bool,
+        "schedule_phase": str,
+        "wait_until_morning_minutes": int,
+        "wake_clock": str,
+      }
+    """
+    from mechanics.system.time_engine import format_clock
+    static_loc = wp.get("static_target_location") or wp.get("target_location", "")
+    default_res = {
+        "effective_location": static_loc,
+        "static_location": static_loc,
+        "scheduled_location": static_loc,
+        "is_off_duty": False,
+        "schedule_phase": "",
+        "status_label": "On-Duty",
+        "wait_until_morning_minutes": 0,
+        "wake_clock": "07:30",
+        "wake_minute": 420,
+    }
+    if not wp.get("follow_npc_schedule") or not wp.get("target_npc") or not session_id:
+        return default_res
+    if is_hostile_or_lair_waypoint(wp):
+        return default_res
+
+    target_npc = str(wp.get("target_npc") or "").strip()
+    try:
+        curr_day, db_curr_min, _ = db.get_session_time(session_id)
+        curr_min = current_minute if current_minute is not None else db_curr_min
+        session = db.get_session(session_id) or {}
+        scen_key = str(session.get("scenario") or "fantasy")
+        from mechanics.world.world_schedule import get_scenario_wake_minute
+        from mechanics.world.npc_schedule import get_npc_scheduled_location, get_detailed_npc_time_phase
+        wake_min = int(get_scenario_wake_minute(scen_key) or 420)
+        safe_min = int(curr_min or 0) % 1440
+        phase_key = get_detailed_npc_time_phase(safe_min, current_day=curr_day, scen_key=scen_key)
+
+        contact = db.get_contact(session_id, target_npc)
+        affinity = int((contact or {}).get("relationship_score") or 0)
+
+        # Check if waypoint explicitly expects Night/Midnight
+        v_phases = [str(p).lower() for p in (wp.get("valid_time_phases") or [])]
+        night_allowed = any(p in ("night", "midnight") for p in v_phases)
+
+        is_night = (safe_min >= 1200 or safe_min < wake_min)
+        if is_night and not night_allowed and affinity < 40:
+            wait_mins = (wake_min - safe_min) % 1440
+            if wait_mins == 0:
+                wait_mins = 60
+            return {
+                "effective_location": static_loc,
+                "static_location": static_loc,
+                "scheduled_location": static_loc,
+                "is_off_duty": True,
+                "schedule_phase": "night",
+                "status_label": "Off-Duty: Sleeping",
+                "wait_until_morning_minutes": wait_mins,
+                "wake_clock": format_clock(wake_min),
+                "wake_minute": wake_min,
+            }
+
+        # Only override static_loc with dynamic schedule if contact exists in DB
+        if contact:
+            npc_dict = dict(contact)
+            if not npc_dict.get("name"):
+                npc_dict["name"] = target_npc
+            sched_loc = get_npc_scheduled_location(
+                npc_dict,
+                current_minute=safe_min,
+                scen_key=scen_key,
+                session_id=session_id,
+                current_day=curr_day,
+            )
+            if sched_loc and str(sched_loc).strip():
+                return {
+                    "effective_location": str(sched_loc).strip(),
+                    "static_location": static_loc,
+                    "scheduled_location": str(sched_loc).strip(),
+                    "is_off_duty": False,
+                    "schedule_phase": phase_key,
+                    "status_label": "On-Duty",
+                    "wait_until_morning_minutes": 0,
+                    "wake_clock": format_clock(wake_min),
+                    "wake_minute": wake_min,
+                }
+    except Exception:
+        pass
+
+    return default_res
+
+
+def resolve_effective_waypoint_location(session_id: int, wp: dict) -> str:
+    """Returns the effective live target location for a waypoint, resolving NPC schedule if tagged."""
+    info = get_waypoint_npc_schedule_info(session_id, wp)
+    return info["effective_location"]
+
+
+def resolve_waypoint_target_npc(session_id: int, wp: dict) -> str:
+    """
+    Returns the target NPC for a waypoint, resolving or inferring from stage_label/session if empty.
+    Checks:
+    1. Explicit wp.get('target_npc')
+    2. Active dialogue partner name mentioned in stage_label
+    3. Room present NPCs mentioned in stage_label
+    4. Known contacts mentioned in stage_label
+    """
+    t_npc = str((wp or {}).get("target_npc") or "").strip()
+    if t_npc:
+        return t_npc
+
+    stage_label = str((wp or {}).get("stage_label") or "")
+    if not stage_label or not session_id:
+        return ""
+
+    try:
+        session = db.get_session(session_id)
+        if not session:
+            return ""
+
+        stage_low = stage_label.lower()
+
+        from mechanics.world.mobility import get_session_dialogue_partners
+        dps = get_session_dialogue_partners(session) or []
+        for dp in dps:
+            dp_clean = str(dp).strip()
+            if dp_clean and len(dp_clean) >= 3 and dp_clean.lower() in stage_low:
+                return dp_clean
+
+        curr_npcs = session.get("current_npcs")
+        if curr_npcs:
+            if isinstance(curr_npcs, str):
+                import json
+                try:
+                    curr_npcs = json.loads(curr_npcs)
+                except Exception:
+                    curr_npcs = [curr_npcs]
+            if isinstance(curr_npcs, list):
+                for npc in curr_npcs:
+                    npc_name = (npc.get("name") if isinstance(npc, dict) else str(npc)).strip()
+                    if npc_name and len(npc_name) >= 3 and npc_name.lower() in stage_low:
+                        return npc_name
+
+        contacts = db.get_contacts(session_id) or []
+        for c in contacts:
+            c_name = str(c.get("name") or "").strip()
+            if c_name and len(c_name) >= 3 and c_name.lower() in stage_low:
+                return c_name
+    except Exception:
+        pass
+
+    return ""
+
+
+def is_waypoint_npc_present_in_scene(session_id: int, target_npc: str) -> bool:
+    """Returns True if target_npc is physically present at the player's current scene or active dialogue."""
+    if not session_id or not target_npc or not str(target_npc).strip():
+        return False
+
+    try:
+        session = db.get_session(session_id)
+        if not session:
+            return False
+
+        t_clean = str(target_npc).strip().lower()
+        t_words = [w for w in t_clean.split() if len(w) >= 3]
+
+        from mechanics.world.mobility import get_session_dialogue_partners
+        dps = get_session_dialogue_partners(session) or []
+        for dp in dps:
+            dp_low = str(dp).strip().lower()
+            if t_clean in dp_low or dp_low in t_clean or any(w in dp_low for w in t_words):
+                return True
+
+        curr_npcs = session.get("current_npcs")
+        if curr_npcs:
+            if isinstance(curr_npcs, str):
+                import json
+                try:
+                    curr_npcs = json.loads(curr_npcs)
+                except Exception:
+                    curr_npcs = [curr_npcs]
+            if isinstance(curr_npcs, list):
+                for npc in curr_npcs:
+                    npc_name = (npc.get("name") if isinstance(npc, dict) else str(npc)).strip().lower()
+                    if t_clean in npc_name or npc_name in t_clean or any(w in npc_name for w in t_words):
+                        return True
+    except Exception:
+        pass
+
+    return False
+
+
 # ---------------------------------------------------------------- Waypoint Stage Triggers
 
 def try_advance_on_arrival(session_id: int, quest_id: str, sub_obj_id: Optional[int], current_location: str) -> Optional[dict]:
     """Called every turn. Advances 'arrival' trigger stages when player reaches target,
-    or when player travels directly to the next stage's location past an 'arrival'-only scout stage."""
+    reaches the target NPC's live scheduled location, or encounters the NPC in the scene."""
     waypoint = db.get_active_waypoint(session_id, quest_id, sub_obj_id)
     if not waypoint:
         return None
     if waypoint.get("completion_trigger") != "arrival":
         return None
-    target_loc = waypoint.get("target_location", "")
-    if not check_location_matches_waypoint(current_location, target_loc):
+    # Spatial Graph & Hierarchy Matching
+    session = db.get_session(session_id)
+    curr_min = session.get("current_minute", 480) if session else 480
+    from mechanics.narrative.blueprints import evaluate_waypoint_time_window
+    time_eval = evaluate_waypoint_time_window(curr_min, waypoint.get("valid_time_phases"))
+    if not time_eval.get("is_valid", True):
+        return None
+
+    curr_node = session.get("current_node_id") if session else None
+    target_node = waypoint.get("target_node_id")
+    target_loc = resolve_effective_waypoint_location(session_id, waypoint)
+    static_target_loc = waypoint.get("static_target_location") or waypoint.get("target_location", "")
+    target_npc = resolve_waypoint_target_npc(session_id, waypoint) or waypoint.get("target_npc", "")
+
+    if not target_node and target_loc:
+        try:
+            target_node = db.resolve_node_id_from_location(session_id, target_loc)
+        except Exception:
+            target_node = None
+
+    matched = False
+    if curr_node and target_node:
+        matched = (
+            curr_node == target_node
+            or db.is_descendant_of(session_id, curr_node, target_node)
+            or db.is_descendant_of(session_id, target_node, curr_node)
+        )
+    if not matched and target_loc:
+        matched = check_location_matches_waypoint(current_location, target_loc)
+    if not matched and static_target_loc:
+        matched = check_location_matches_waypoint(current_location, static_target_loc)
+    if not matched and target_npc and is_waypoint_npc_present_in_scene(session_id, target_npc):
+        matched = True
+    elif not matched and not curr_node and not target_loc and not target_npc:
+        matched = True
+
+    # Spared deception guaranteed turn-in arrival check
+    if not matched:
+        quest = db.get_quest_by_id(session_id, quest_id)
+        if quest and quest.get("resolution_approach") == "spared_deception":
+            c_npc = quest.get("client_npc", "")
+            c_loc = quest.get("client_location", "")
+            if (c_loc and check_location_matches_waypoint(current_location, c_loc)) or (
+                c_npc and is_waypoint_npc_present_in_scene(session_id, c_npc)
+            ):
+                matched = True
+
+    if not matched:
         # Check if the player traveled directly to the immediately following stage's location,
         # bypassing an 'arrival'-only scouting waypoint.
         all_wps = db.get_quest_waypoints(session_id, quest_id, sub_obj_id) or []
@@ -75,7 +353,21 @@ def try_advance_on_arrival(session_id: int, quest_id: str, sub_obj_id: Optional[
             (w for w in all_wps if w.get("stage_index") == waypoint.get("stage_index", 1) + 1 and w.get("status") == "locked"),
             None
         )
-        if not next_stage or not check_location_matches_waypoint(current_location, next_stage.get("target_location", "")):
+        if not next_stage:
+            return None
+        next_target_node = next_stage.get("target_node_id")
+        next_target_loc = next_stage.get("target_location", "")
+        if not next_target_node and next_target_loc:
+            try:
+                next_target_node = db.resolve_node_id_from_location(session_id, next_target_loc)
+            except Exception:
+                next_target_node = None
+        next_matched = False
+        if curr_node and next_target_node:
+            next_matched = db.is_descendant_of(session_id, curr_node, next_target_node) or db.is_descendant_of(session_id, next_target_node, curr_node)
+        elif next_target_loc:
+            next_matched = check_location_matches_waypoint(current_location, next_target_loc)
+        if not next_matched:
             return None
 
     next_wp = db.advance_waypoint(session_id, quest_id, waypoint["stage_index"], sub_obj_id)
@@ -156,7 +448,7 @@ def check_action_matches_waypoint(
         if any(w in act_lower for w in t_npc_words):
             return True
         # Or if player action has interaction verbs and NPC is actively interacted with in narrative
-        interact_verbs = {"talk", "speak", "ask", "confront", "approach", "deliver", "give", "hand", "tell", "interrogate", "bribe", "persuade", "consult", "meet"}
+        interact_verbs = {"talk", "speak", "ask", "confront", "approach", "deliver", "give", "hand", "tell", "interrogate", "bribe", "persuade", "consult", "meet", "spare"}
         if any(v in act_lower for v in interact_verbs) and any(w in narr_lower for w in t_npc_words):
             return True
 
@@ -187,9 +479,6 @@ def check_action_matches_waypoint(
         return True
 
     # Priority B: Outcome narrative describes completing the stage.
-    # To prevent ambient setting nouns (e.g. "prototype", "airship") from falsely completing
-    # a stage when the player did a completely different action, the narrative must match
-    # at least one operative keyword from the stage label itself.
     if stage_keywords:
         if any(kw in narr_lower for kw in stage_keywords):
             return True
@@ -203,6 +492,70 @@ def check_action_matches_waypoint(
     return True
 
 
+def does_action_target_waypoint(
+    session_id: int, quest_id: str, sub_obj_id: Optional[int],
+    current_location: str, action_text: str = "", narrative: str = "", sub_obj_text: str = "",
+    is_quest_action: bool = False, action_quest_id: str = "", action_sub_obj_id: Optional[int] = None
+) -> Optional[dict]:
+    """
+    Checks if the player is at the active waypoint's location (or NPC present)
+    AND verifies that the action targets this waypoint.
+    Returns the active waypoint dict on match, or None.
+    """
+    waypoint = db.get_active_waypoint(session_id, quest_id, sub_obj_id)
+    if not waypoint:
+        return None
+    if waypoint.get("completion_trigger") not in ("skill_check", "inspect_prop", "talk_to_npc", "resource_progress", "defeat_target", "action"):
+        return None
+    target_node = waypoint.get("target_node_id")
+    target_loc = resolve_effective_waypoint_location(session_id, waypoint)
+    static_target_loc = waypoint.get("static_target_location") or waypoint.get("target_location", "")
+    target_npc = waypoint.get("target_npc", "")
+    session = db.get_session(session_id)
+    curr_node = session.get("current_node_id") if session else None
+
+    if not target_node and target_loc:
+        try:
+            target_node = db.resolve_node_id_from_location(session_id, target_loc)
+        except Exception:
+            target_node = None
+
+    matched = False
+    if curr_node and target_node:
+        matched = (
+            curr_node == target_node
+            or db.is_descendant_of(session_id, curr_node, target_node)
+            or db.is_descendant_of(session_id, target_node, curr_node)
+        )
+    if not matched and target_loc:
+        matched = check_location_matches_waypoint(current_location, target_loc)
+    if not matched and static_target_loc:
+        matched = check_location_matches_waypoint(current_location, static_target_loc)
+    if not matched and target_npc and is_waypoint_npc_present_in_scene(session_id, target_npc):
+        matched = True
+    elif not matched and not curr_node and not target_loc and not target_npc:
+        matched = True
+
+    if not matched:
+        return None
+
+    # 1. If this action was an explicit quest-bound action:
+    if is_quest_action:
+        if action_quest_id and str(action_quest_id) != str(quest_id):
+            return None
+        if action_sub_obj_id is not None and sub_obj_id is not None and int(action_sub_obj_id) != int(sub_obj_id):
+            return None
+        return waypoint
+
+    # 2. For un-tagged / custom / LLM actions:
+    stage_label = waypoint.get("stage_label", "")
+    target_npc = waypoint.get("target_npc", "")
+    if check_action_matches_waypoint(action_text, narrative, stage_label, sub_obj_text, target_npc):
+        return waypoint
+
+    return None
+
+
 def try_complete_on_skill_check(
     session_id: int, quest_id: str, sub_obj_id: Optional[int],
     current_location: str, check_success: bool, check_result_tier: str = "success",
@@ -210,31 +563,22 @@ def try_complete_on_skill_check(
     is_quest_action: bool = False, action_quest_id: str = "", action_sub_obj_id: Optional[int] = None
 ) -> Optional[dict]:
     """Called when a choice resolves. Advances 'skill_check' trigger stages on success at target."""
-    waypoint = db.get_active_waypoint(session_id, quest_id, sub_obj_id)
+    waypoint = does_action_target_waypoint(
+        session_id=session_id,
+        quest_id=quest_id,
+        sub_obj_id=sub_obj_id,
+        current_location=current_location,
+        action_text=action_text,
+        narrative=narrative,
+        sub_obj_text=sub_obj_text,
+        is_quest_action=is_quest_action,
+        action_quest_id=action_quest_id,
+        action_sub_obj_id=action_sub_obj_id,
+    )
     if not waypoint:
-        return None
-    if waypoint.get("completion_trigger") not in ("skill_check", "inspect_prop", "talk_to_npc", "resource_progress", "defeat_target"):
-        return None
-    target_loc = waypoint.get("target_location", "")
-    if not check_location_matches_waypoint(current_location, target_loc):
         return None
     if not check_success:
         return None
-
-    # 1. If this action was an explicit quest-bound action:
-    if is_quest_action:
-        # Must match this specific quest and sub_obj
-        if action_quest_id and str(action_quest_id) != str(quest_id):
-            return None
-        if action_sub_obj_id is not None and sub_obj_id is not None and int(action_sub_obj_id) != int(sub_obj_id):
-            return None
-        # Explicit quest action succeeded -> advance immediately (0% false negatives)
-    else:
-        # 2. For un-tagged / custom / LLM actions, apply strict keyword and NPC relevance checks
-        stage_label = waypoint.get("stage_label", "")
-        target_npc = waypoint.get("target_npc", "")
-        if not check_action_matches_waypoint(action_text, narrative, stage_label, sub_obj_text, target_npc):
-            return None
 
     resource_target = int(waypoint.get("resource_target", 0))
 

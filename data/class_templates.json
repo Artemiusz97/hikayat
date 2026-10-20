@@ -1712,13 +1712,13 @@
   },
   "high_school_drama": {
     "Delinquent": {
-      "description": "Rebellious student known for tough fights, intimidation, and fierce loyalty.",
+      "description": "Rebellious student known for tough spirit, defying strict dress codes, and fierce loyalty.",
       "starting_items": [
         [
-          "Biker Jacket",
-          "Armor",
-          "Tough leather jacket with customized badges.",
-          2
+          "Leather Wallet & Keychain",
+          "Quest",
+          "Heavy chain wallet with locker keys and bus pass.",
+          1
         ]
       ],
       "starter_gear": {
@@ -1727,29 +1727,25 @@
           "Slightly slouchy black knit beanie.",
           1
         ],
-        "Weapon": [
-          "Wooden Kendo Sword",
-          "Modified practice sword kept under the desk.",
-          2
-        ],
+        "Weapon": null,
         "Top": [
           "Unbuttoned Gakuran Jacket",
-          "Customized loose uniform jacket.",
-          2
+          "Customized loose uniform jacket worn over a casual shirt.",
+          1
         ],
         "Bottom": [
-          "Wide-Leg Uniform Trousers",
-          "Baggy pants favoured by troublemakers.",
+          "Pleated Plaid Skirt / Wide-Leg Uniform Trousers",
+          "Customized uniform bottoms favored by campus troublemakers.",
           1
         ],
         "Gloves": [
           "Fingerless Grip Gloves",
-          "Leather gloves used for street fights.",
+          "Leather gloves used for street fights and bike riding.",
           1
         ],
         "Shoes": [
           "Modified Sneakers",
-          "High-top sneakers built for quick action.",
+          "High-top sneakers built for quick action and rooftop hops.",
           1
         ],
         "Shield": null
@@ -1759,53 +1755,49 @@
       "description": "Energetic sports prodigy whose physical stamina, teamwork, and athletic reflexes dominate the field.",
       "starting_items": [
         [
-          "Championship Whistle",
+          "Championship Whistle & Stopwatch",
           "Quest",
-          "Loud sports whistle used to rally teammates and stun opponents.",
+          "Precision sports timer and whistle used during practice.",
           1
         ]
       ],
       "starter_gear": {
         "Head": [
           "Athletic Gym Sweatband",
-          "Breathable cotton sweatband embroidered with team logo.",
+          "Breathable cotton sweatband embroidered with school athletics logo.",
           1
         ],
-        "Weapon": [
-          "Aluminum Baseball Bat",
-          "Standard sports bat capable of delivering heavy impact swings.",
-          2
-        ],
+        "Weapon": null,
         "Top": [
           "Letterman Varsity Jacket",
-          "Thick wool and leather jacket emblazoned with school crest.",
-          2
+          "Thick wool and leather jacket emblazoned with the school sports crest.",
+          1
         ],
         "Bottom": [
-          "Tracksuit Athletic Pants",
-          "Comfortable, flexible sports training trousers.",
+          "Athletic Uniform Skirt / Tracksuit Athletic Pants",
+          "Comfortable, flexible sports training uniform bottoms.",
           1
         ],
         "Gloves": [
           "Athletic Batting Gloves",
-          "Padded grip gloves providing excellent shock absorption.",
+          "Padded grip gloves providing shock absorption.",
           1
         ],
         "Shoes": [
           "High-Traction Cleats",
-          "High-performance sneakers built for rapid sprints.",
+          "High-performance athletic sneakers built for rapid sprints.",
           1
         ],
         "Shield": null
       }
     },
     "Honor Student": {
-      "description": "Academic genius who excels at problem-solving, research, and test scores.",
+      "description": "Academic achiever who excels at problem-solving, research, and test scores.",
       "starting_items": [
         [
-          "Scientific Calculator",
+          "Scientific Calculator & Notebook",
           "Quest",
-          "Solves complex logical challenges.",
+          "Advanced graphing calculator and meticulously organized notes.",
           1
         ]
       ],
@@ -1815,59 +1807,51 @@
           "Tortoiseshell frames with blue-light filtering.",
           1
         ],
-        "Weapon": [
-          "Heavy Backpack",
-          "Full of dense textbooks, surprisingly effective weapon.",
-          1
-        ],
+        "Weapon": null,
         "Top": [
           "Neat School Cardigan",
-          "Cozy knitted sweater over buttoned shirt.",
+          "Cozy knitted sweater over a crisp buttoned uniform shirt.",
           1
         ],
         "Bottom": [
-          "Standard Uniform Pants",
-          "Clean and orderly school trousers.",
+          "Pleated School Skirt / Standard Uniform Pants",
+          "Clean and orderly school uniform bottoms.",
           1
         ],
         "Gloves": null,
         "Shoes": [
           "Standard School Loafers",
-          "Comfortable everyday school shoes.",
+          "Comfortable polished everyday school shoes.",
           1
         ],
         "Shield": null
       }
     },
     "Aspiring Actor": {
-      "description": "Expressive performer capable of intense emotions, dramatic flair, deception, and charm.",
+      "description": "Expressive performer capable of intense emotions, dramatic flair, deception, and theatrical charm.",
       "starting_items": [
         [
-          "Script Notebook",
+          "Script Notebook & Theater Pass",
           "Quest",
-          "Contains memorized lines and emotional cues.",
+          "Annotated script full of memorized lines and stage directions.",
           1
         ]
       ],
       "starter_gear": {
         "Head": [
           "Drama Club Beret",
-          "Chic black wool beret worn at a jaunty angle.",
+          "Chic wool beret worn at a jaunty angle.",
           1
         ],
-        "Weapon": [
-          "Stage Prop Dagger",
-          "Realistic prop useful for bluffing or dramatic flares.",
-          1
-        ],
+        "Weapon": null,
         "Top": [
-          "Stylish Custom Uniform",
-          "Tailored uniform with subtle flair.",
-          2
+          "Tailored Uniform Blazer",
+          "Fitted school blazer with tasteful custom lapel flair.",
+          1
         ],
         "Bottom": [
-          "Custom Fitted Pants",
-          "Fashionable trousers.",
+          "Pleated Plaid Skirt / Custom Fitted Slacks",
+          "Fashionable and tailored school uniform bottoms.",
           1
         ],
         "Gloves": [
@@ -1876,8 +1860,8 @@
           1
         ],
         "Shoes": [
-          "Stage Boots",
-          "Stylish leather boots suitable for performance.",
+          "Polished Stage Loafers",
+          "Stylish leather shoes suitable for rehearsals and performance.",
           1
         ],
         "Shield": null
@@ -1889,25 +1873,21 @@
         [
           "Press Badge & Voice Recorder",
           "Quest",
-          "Official newspaper credential and dictaphone full of interviews.",
+          "Official school newspaper credential and dictaphone full of interviews.",
           1
         ]
       ],
       "starter_gear": {
         "Head": [
           "Press Detective Cap",
-          "Newsboy tweed cap with press card tucked in band.",
+          "Newsboy tweed cap with press credential card tucked into the band.",
           1
         ],
-        "Weapon": [
-          "Heavy Camera Monopod",
-          "Sturdy metal camera pole that doubles as a defensive staff.",
-          1
-        ],
+        "Weapon": null,
         "Top": [
           "Reporter's Trench Blazer",
-          "Smart blazer over button-down shirt with pen slots.",
-          2
+          "Smart blazer over button-down shirt with pen slots and notebook pocket.",
+          1
         ],
         "Bottom": [
           "Pencil Skirt / Smart Slacks",
@@ -1933,7 +1913,7 @@
         [
           "Forbidden Campus Mythos Grimoire",
           "Quest",
-          "Handwritten binder detailing supernatural campus rumors.",
+          "Handwritten binder detailing supernatural campus rumors and tarot cards.",
           1
         ]
       ],
@@ -1943,15 +1923,11 @@
           "Cute velvet headband with pointed cat ears.",
           1
         ],
-        "Weapon": [
-          "Spiked Candelabra",
-          "Heavy metal candle holder repurposed for self-defense.",
-          1
-        ],
+        "Weapon": null,
         "Top": [
           "Goth-Altered School Blazer",
-          "Dark blazer adorned with occult pins, patches, and chains.",
-          2
+          "Dark blazer adorned with occult enamel pins and silver chain accents.",
+          1
         ],
         "Bottom": [
           "Pleated Plaid Skirt / Dark Trousers",
@@ -1966,6 +1942,310 @@
         "Shoes": [
           "Platform Creepers",
           "Heavy chunky black platform shoes.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Tech Prodigy": {
+      "description": "Computer whiz and AV specialist skilled at hardware tinkering, coding, digital audio, and school network diagnostics.",
+      "starting_items": [
+        [
+          "Pocket Diagnostic Toolkit & Flash Drive",
+          "Quest",
+          "Multi-bit precision screwdriver and encrypted high-capacity thumb drive.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Wireless Monitor Headphones",
+          "Noise-canceling over-ear headphones worn comfortably around the neck.",
+          1
+        ],
+        "Weapon": null,
+        "Top": [
+          "Zip-Up Uniform Hoodie",
+          "Oversized comfortable hoodie worn over school uniform collared shirt.",
+          1
+        ],
+        "Bottom": [
+          "Pleated Tech Skirt / School Trousers",
+          "Comfortable uniform bottoms equipped with extra cable loops.",
+          1
+        ],
+        "Gloves": [
+          "Touch-Screen Tech Gloves",
+          "Precision conductive fingertip gloves for rapid typing and soldering.",
+          1
+        ],
+        "Shoes": [
+          "Cushioned Runner Sneakers",
+          "Modern lightweight sneakers built for long hours at the workstation.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Artistic Soul": {
+      "description": "Creative illustrator and painter with an eye for aesthetics, quiet observation, and visual storytelling.",
+      "starting_items": [
+        [
+          "Hardbound Sketchbook & Micron Pens",
+          "Quest",
+          "Thick multimedia sketchbook filled with character sketches and observational drawings.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Artist's Slouchy Beret",
+          "Soft wool beret with subtle ink and paint smudges.",
+          1
+        ],
+        "Weapon": null,
+        "Top": [
+          "Oversized Knitted Cardigan",
+          "Pastel school cardigan with spacious pockets holding pens and markers.",
+          1
+        ],
+        "Bottom": [
+          "Pleated Plaid Skirt / Relaxed Uniform Slacks",
+          "Artfully relaxed school uniform bottoms.",
+          1
+        ],
+        "Gloves": [
+          "Digital Artist Drawing Glove",
+          "Two-finger drawing glove preventing tablet and paper smudges.",
+          1
+        ],
+        "Shoes": [
+          "Canvas Casual Low-Tops",
+          "Comfortable canvas sneakers decorated with hand-drawn doodles.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Campus Trendsetter": {
+      "description": "Fashion-forward social butterfly whose charisma, style, and popular gossip dictate school trends.",
+      "starting_items": [
+        [
+          "Compact Mirror & Social Planner",
+          "Quest",
+          "Gilded makeup compact and diary tracking birthdays and weekend party invites.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Designer Ribbon Headband",
+          "Silky designer hair accessory coordinating with school uniform colors.",
+          1
+        ],
+        "Weapon": null,
+        "Top": [
+          "Tailored Fitted School Blazer",
+          "Custom-tailored uniform blazer with rolled cuffs and silk pocket square.",
+          1
+        ],
+        "Bottom": [
+          "Pleated Tartan Mini Skirt / Slim-Fit Uniform Chinos",
+          "Trendy and modern tailored school uniform bottoms.",
+          1
+        ],
+        "Gloves": null,
+        "Shoes": [
+          "Designer Platform Loafers",
+          "Polished luxury loafers that stand out in the hallway crowd.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Band Musician": {
+      "description": "Passionate instrumentalist and songwriter with sharp rhythm, stage presence, and expressive energy.",
+      "starting_items": [
+        [
+          "Guitar Pick Tin & Sheet Music",
+          "Quest",
+          "Engraved tin containing custom picks and handwritten chord charts.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Studded Canvas Cap",
+          "Distressed peaked cap with musical clef pin.",
+          1
+        ],
+        "Weapon": null,
+        "Top": [
+          "Vintage Denim Vest over School Shirt",
+          "Custom denim outer vest worn over an unbuttoned school uniform shirt.",
+          1
+        ],
+        "Bottom": [
+          "Plaid Pleated Skirt / Black Uniform Denim",
+          "Rocker-styled school uniform bottoms.",
+          1
+        ],
+        "Gloves": [
+          "Leather Guitar Wristband",
+          "Soft leather wrist support for long chord practice sessions.",
+          1
+        ],
+        "Shoes": [
+          "High-Top Canvas Sneakers",
+          "Classic scuffed sneakers with custom laces.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Home Ec Specialist": {
+      "description": "Culinary talent and crafting expert skilled at baking gourmet treats, tailoring uniforms, and comforting friends.",
+      "starting_items": [
+        [
+          "Insulated Bento Box & Fresh Pastries",
+          "Quest",
+          "Two-tier bento packed with homemade treats and culinary recipe cards.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Gingham Kitchen Bandana",
+          "Neat checkered cloth bandana keeping hair tidy during cooking sessions.",
+          1
+        ],
+        "Weapon": null,
+        "Top": [
+          "Crisp Embroidered School Blouse / Pressed Uniform Shirt",
+          "Spotless white school uniform top with delicate floral embroidery on collar.",
+          1
+        ],
+        "Bottom": [
+          "Pleated School Apron-Skirt / Pressed Baker Slacks",
+          "Neat uniform bottoms equipped with deep pockets for culinary timers.",
+          1
+        ],
+        "Gloves": [
+          "Insulated Oven Mitts & Stitching Thimble",
+          "Heat-resistant prep gloves and precision sewing thimble.",
+          1
+        ],
+        "Shoes": [
+          "Slip-Resistant Kitchen Loafers",
+          "Comfortable cushioned shoes certified for culinary lab floors.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Quiet Bookworm": {
+      "description": "Avid reader and literary scholar with vast trivia knowledge, observant silence, and deep insight.",
+      "starting_items": [
+        [
+          "Vintage Paperback & Library Pass",
+          "Quest",
+          "Dog-eared classic novel with a personalized embossed leather bookmark.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Wire-Rimmed Reading Spectacles",
+          "Classic thin gold wire spectacles that add an intellectual aura.",
+          1
+        ],
+        "Weapon": null,
+        "Top": [
+          "Oversized Wool School Pullover",
+          "Soft and warm school knit pullover over collared shirt.",
+          1
+        ],
+        "Bottom": [
+          "Pleated Plaid Skirt / Pressed School Slacks",
+          "Orderly and modest school uniform bottoms.",
+          1
+        ],
+        "Gloves": null,
+        "Shoes": [
+          "Silent Rubber-Soled Loafers",
+          "Discreet shoes that make no sound on hardwood library floors.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Class Organizer": {
+      "description": "Resourceful coordinator and dependable planner skilled at mediating disputes and arranging school events.",
+      "starting_items": [
+        [
+          "Executive Event Planner & Stamp Kit",
+          "Quest",
+          "Color-coded agenda binder with school calendar and official approval stamp.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Clean School Hairclip / Minimalist Barrette",
+          "Orderly hair clip keeping hair neat and professional.",
+          1
+        ],
+        "Weapon": null,
+        "Top": [
+          "Pressed Academic Blazer",
+          "Crisp, impeccably ironed navy uniform blazer with school badge.",
+          1
+        ],
+        "Bottom": [
+          "Crisp Pleated Skirt / Tailored Uniform Trousers",
+          "Immaculate school uniform bottoms adhering perfectly to school standards.",
+          1
+        ],
+        "Gloves": null,
+        "Shoes": [
+          "Polished Black Uniform Loafers",
+          "Mirror-shine traditional school loafers.",
+          1
+        ],
+        "Shield": null
+      }
+    },
+    "Rooftop Daydreamer": {
+      "description": "Laid-back slacker and philosophical observer who knows every secret quiet spot and rooftop breeze.",
+      "starting_items": [
+        [
+          "Rooftop Access Key & Canned Coffee",
+          "Quest",
+          "Unmarked brass key and a cold can of sweet milk coffee.",
+          1
+        ]
+      ],
+      "starter_gear": {
+        "Head": [
+          "Relaxed Canvas Sun-Visor",
+          "Faded casual visor shading eyes from the midday rooftop sun.",
+          1
+        ],
+        "Weapon": null,
+        "Top": [
+          "Loose Untucked School Polo",
+          "Comfortable, breathable uniform polo shirt left casually untucked.",
+          1
+        ],
+        "Bottom": [
+          "Relaxed School Skirt / Casual Uniform Chinos",
+          "Comfortable, loose-fitting school uniform bottoms for lounging.",
+          1
+        ],
+        "Gloves": null,
+        "Shoes": [
+          "Slip-On Deck Shoes",
+          "Easy-on, easy-off canvas shoes perfect for taking naps on grass or benches.",
           1
         ],
         "Shield": null

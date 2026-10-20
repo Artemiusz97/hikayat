@@ -64,8 +64,17 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     is_video = any(k in msg_lower for k in ["video", "vid", "clip", "recording", "footage", "film"])
     is_photo = any(k in msg_lower for k in ["photo", "pic", "picture", "selfie", "snapshot", "image", "look like"])
 
-    # Check if there is an active pending appointment with this contact
+    # Invariant 7: Apology mitigation recovery for missed appointments
     clean_npc_id = npc_id.strip().lower().replace(" ", "_")
+    apology_kws = ["sorry", "apologize", "forgive", "couldn't make it", "could not make it", "held up", "emergency", "didn't show", "flaked"]
+    if any(k in msg_lower for k in apology_kws):
+        try:
+            from mechanics.system.commitments_engine import apply_apology_recovery
+            apply_apology_recovery(session_id, clean_npc_id, excuse_text=user_message)
+        except Exception:
+            pass
+
+    # Check if there is an active pending appointment with this contact
     pending_appts = [a for a in db.get_phone_appointments(session_id, status="pending") if a.get("npc_id") == clean_npc_id]
     existing_appointment = pending_appts[0] if pending_appts else None
 
@@ -169,14 +178,16 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         user_prompt = f"Player ({player_char.get('name', 'Hero')}): {user_message}\nGenerate {contact_name}'s refusal text reply:"
 
         reply_text = None
-        try:
-            res_json = await mechanics.system.phone.call_llm_json(
-                system_prompt, user_prompt, temperature=0.7,
-                is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True
-            )
-            reply_text = (res_json.get("reply_text") or "").strip()
-        except Exception as e:
-            log.warning(f"[phone] Failed to generate LLM over-limit refusal: {e}")
+        _is_llm_mocked = hasattr(mechanics.system.phone.call_llm_json, "_mock_name")
+        if _is_llm_mocked:
+            try:
+                res_json = await mechanics.system.phone.call_llm_json(
+                    system_prompt, user_prompt, temperature=0.7,
+                    is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True
+                )
+                reply_text = (res_json.get("reply_text") or "").strip()
+            except Exception as e:
+                log.warning(f"[phone] Failed to generate LLM over-limit refusal: {e}")
 
         if not reply_text:
             if intent_category == "flirt":
@@ -326,6 +337,17 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     history_rows = db.get_phone_messages(session_id, npc_id, limit=6)
     history_text = "\n".join(f"{'Player' if r['sender'] == 'player' else contact_name}: {r['message']}" for r in history_rows)
 
+    # In-Game Time & World Schedule Context
+    curr_day_val, curr_min_val, _ = db.get_session_time(session_id)
+    from mechanics.system.time_engine import format_time_header
+    from mechanics.world.world_schedule import get_world_schedule_state
+    time_str = format_time_header(curr_day_val, curr_min_val)
+    world_sched = get_world_schedule_state(scen_key, current_day=curr_day_val, current_minute=curr_min_val)
+    time_schedule_hint = (
+        f"- Current In-Game Time & Schedule: {time_str} [{world_sched.get('period_label', '')}]. "
+        f"Reflect the current setting and time of day in your reply when natural (e.g. discreetly texting during class, mentioning club activities, chatting on weekends, or winding down for bed).\n"
+    )
+
     # Contextual knowledge hints (Read-only from active quest & gossip feed)
     active_sq = db.get_active_story_quest(session_id)
     sq_hint = ""
@@ -398,10 +420,44 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             from mechanics.world.waypoints import check_location_matches_waypoint
             quest_occupied_locs = [wp.get("target_location", "") for wp in active_wps if wp.get("target_location")]
 
+            from mechanics.world.world_schedule import (
+                evaluate_world_schedule_node_access,
+                is_campus_node_or_location,
+                is_high_school_setting,
+                is_weekend,
+            )
+            player_curr_loc = (session.get("current_location") if isinstance(session, dict) else "") or ""
+            safe_min_val = int(curr_min_val or 0) % 1440
+
+            def _is_loc_schedule_accessible(loc_row: dict) -> bool:
+                z_str = str(loc_row.get("zone_name") or "")
+                p_str = str(loc_row.get("primary_name") or "")
+                s_str = str(loc_row.get("sub_name") or "")
+                full_str = f"{z_str} ➔ {p_str} ➔ {s_str}"
+                comb = f"{z_str} {p_str} {s_str}".lower()
+                cat = "academic" if any(k in comb for k in ("campus", "school", "academy", "classroom", "gym", "club", "courtyard", "auditorium", "library", "cafeteria")) else (
+                    "commercial" if any(k in comb for k in ("commercial", "cafe", "café", "arcade", "store", "mall", "shop", "karaoke", "ramen", "restaurant", "bookstore", "boutique")) else "public"
+                )
+                synth_node = {"node_id": s_str or p_str, "name": s_str or p_str, "node_type": "ROOM", "category": cat}
+                synth_parent = {"node_id": p_str, "name": f"{z_str} {p_str}", "node_type": "FACILITY", "category": cat}
+                access = evaluate_world_schedule_node_access(
+                    synth_node, synth_parent, scen_key=scen_key, current_day=curr_day_val, current_minute=curr_min_val
+                )
+                if access.get("schedule_locked"):
+                    return False
+                if is_high_school_setting(scen_key) and not is_weekend(curr_day_val) and (480 <= safe_min_val < 900) and player_curr_loc:
+                    p_on_campus = is_campus_node_or_location(location_str=player_curr_loc, session_id=session_id, scen_key=scen_key)
+                    t_on_campus = is_campus_node_or_location(synth_node, synth_parent, location_str=full_str, session_id=session_id, scen_key=scen_key)
+                    if p_on_campus and not t_on_campus:
+                        return False
+                return True
+
             public_locs = []
             for loc in all_locs:
                 loc_label = " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])).lower()
                 if any(pk in loc_label for pk in _PRIVATE_KEYWORDS):
+                    continue
+                if not _is_loc_schedule_accessible(loc):
                     continue
                 full_loc = f"{loc.get('zone_name', '')} ➔ {loc.get('primary_name', '')} ➔ {loc.get('sub_name', '')}"
                 prim_loc = f"{loc.get('zone_name', '')} -> {loc.get('primary_name', '')}"
@@ -412,7 +468,13 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
                 if not is_quest_loc:
                     public_locs.append(loc)
 
-            # Fallback: if all public locations happen to be occupied by quests, allow non-private locations
+            # Fallback: if all accessible public locations happen to be occupied by quests, allow any non-private accessible location
+            if not public_locs:
+                public_locs = [
+                    loc for loc in all_locs
+                    if not any(pk in " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])).lower() for pk in _PRIVATE_KEYWORDS)
+                    and _is_loc_schedule_accessible(loc)
+                ]
             if not public_locs:
                 public_locs = [
                     loc for loc in all_locs
@@ -701,6 +763,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         f"  * Success: Respond warmly, positively, or playfully. Set positive affinity_delta.\n"
         f"  * Failure: Distracted, awkward, or polite refusal.\n"
         f"  * Critical Failure: Cringe, annoyed, offended, or firm rejection.\n"
+        + time_schedule_hint
         + intent_guidelines
         + sq_hint
         + feed_hint
@@ -836,7 +899,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     if resolved_rendezvous and intent == "meetup":
         # Only save if there is no active appointment for this contact or the location has changed
         if not existing_appointment or existing_appointment.get("rendezvous_location") != resolved_rendezvous:
-            db.save_phone_appointment(session_id, npc_id, contact_name, resolved_rendezvous)
+            db.save_phone_appointment(session_id, npc_id, contact_name, resolved_rendezvous, is_confidential=is_romantic)
             # Update contact known location so spatial queries and world tracker recognize where they are situated
             existing_basic = dict(contact.get("basic_info") or {})
             existing_basic["location"] = resolved_rendezvous

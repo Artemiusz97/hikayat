@@ -193,34 +193,23 @@ class FactionMixin:
         party = [(db.get_character(uid), db.get_inventory(uid)) for uid in session["turn_order"]]
         
         async def background_task():
-            import game_engine
-            # Fake action string to prompt the LLM
+            from services.turn_service import TurnService
             user_action = f"Player initiates promotion trial:\n\n{directive}"
 
-            # Use game_engine.evaluate_action
             if not interaction.channel:
                 return
             await interaction.channel.send("*(The GM is setting up the promotion trial...)*")
             try:
-                outcome = await game_engine.evaluate_action(
+                action = await TurnService.prepare_and_roll_action(
                     session_id=session_id,
-                    user_action=user_action,
-                    party=party,
-                    current_location=session.get("current_location", ""),
-                    current_npcs=session.get("current_npcs", []),
-                    nearby_enemies=session.get("nearby_enemies", []),
-                    history_text=""
+                    user_id=interaction.user.id,
+                    raw_pick={"direct_choice": {"label": user_action, "stat": "NONE", "requirement": 0, "mp_cost": 0}},
+                    session=session,
+                    char=dict(actor_char) if actor_char else None,
+                    enforce_explicit_mp=False,
                 )
-                
-                # Apply outcome
-                db.update_session(
-                    session_id,
-                    narrative=outcome.get("outcome_narrative", ""),
-                    choices=outcome.get("choices", []),
-                    current_npcs=outcome.get("npcs_present", []),
-                    nearby_enemies=outcome.get("nearby_enemies", []),
-                    current_location=outcome.get("location", session.get("current_location", ""))
-                )
+                turn_res = await TurnService.resolve_action(session_id, interaction.user.id, action, mode="solo")
+                outcome = turn_res.outcome
                 
                 # Render next turn
                 from .embeds import sync_scene_embed, scene_embed

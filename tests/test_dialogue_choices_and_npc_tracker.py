@@ -60,7 +60,7 @@ class TestDialogueChoicesAndNPCTracker(unittest.TestCase):
         ]
 
         cleaned = AdventureCog._clean_choices(raw_choices, dialogue_partner="Maelin Voss")
-        self.assertEqual(len(cleaned), 2)
+        self.assertGreaterEqual(len(cleaned), 4)
         exit_choices = [c for c in cleaned if c["stat"] == "NONE"]
         self.assertEqual(len(exit_choices), 1)
 

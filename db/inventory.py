@@ -1,6 +1,7 @@
 import db
 import asyncio
 import json
+import logging
 import time
 from contextlib import contextmanager
 import re
@@ -9,6 +10,8 @@ from config import DB_PATH
 import character_data as cd
 from .core import *
 from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
+
+log = logging.getLogger(__name__)
 
 def get_learned_spells(user_id: int) -> list[str]:
     char = db.get_character(user_id)
@@ -282,6 +285,7 @@ def equip_item(user_id: int, item_id: int, slot: str) -> dict | None:
             conn.execute("UPDATE inventory SET equipped=0, slot=NULL WHERE id=?", (previous["id"],))
 
         conn.execute("UPDATE inventory SET equipped=1, slot=?, character_id=? WHERE id=?", (slot, char_id, item_id))
+    _sync_equipment_to_physical_state(user_id)
     return previous
 
 def unequip_slot(user_id: int, slot: str) -> dict | None:
@@ -297,7 +301,77 @@ def unequip_slot(user_id: int, slot: str) -> dict | None:
         if not row:
             return None
         conn.execute("UPDATE inventory SET equipped=0, slot=NULL WHERE id=?", (row["id"],))
+    _sync_equipment_to_physical_state(user_id)
     return dict(row)
+
+def _sync_equipment_to_physical_state(user_id: int) -> None:
+    """Invariant 5: Synchronizes equipped weapon holding and garment layers to active session physical state."""
+    try:
+        active_sid = db.get_active_session_id_for_user(user_id)
+        if not active_sid:
+            return
+        char = db.get_character(user_id)
+        if not char:
+            return
+        equipment = get_equipment(user_id)
+
+        main_w = equipment.get("Weapon")
+        off_w = equipment.get("Shield")
+        if main_w and off_w:
+            holding = f"{main_w['name']} & {off_w['name']}"
+        elif main_w:
+            holding = main_w["name"]
+        elif off_w:
+            holding = off_w["name"]
+        else:
+            holding = "Empty hands"
+
+        arm = equipment.get("Armor")
+        top = equipment.get("Top")
+        bot = equipment.get("Bottom")
+        shoes = equipment.get("Shoes")
+
+        garments = {}
+        if arm:
+            garments["outerwear"] = {"state": "worn", "item_name": arm.get("name", "")}
+        else:
+            garments["outerwear"] = {"state": "none", "item_name": ""}
+
+        if top:
+            garments["top"] = {"state": "worn", "item_name": top.get("name", "")}
+        else:
+            garments["top"] = {"state": "worn", "item_name": "Clothed"}
+
+        if bot:
+            garments["bottom"] = {"state": "worn", "item_name": bot.get("name", "")}
+        else:
+            garments["bottom"] = {"state": "worn", "item_name": "Clothed"}
+
+        if shoes:
+            garments["footwear"] = {"state": "worn", "item_name": shoes.get("name", "")}
+        else:
+            garments["footwear"] = {"state": "worn", "item_name": "Worn"}
+
+        import mechanics.social.physical_state as ps
+
+        player_name = char.get("name", "Hero")
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT actor_name FROM actor_physical_states WHERE session_id=? AND (actor_type='player' OR canonical_key='player')",
+                (active_sid,)
+            ).fetchone()
+            if row and row["actor_name"]:
+                player_name = row["actor_name"]
+
+        ps.upsert_actor_physical_state(
+            active_sid,
+            player_name,
+            {"holding": holding, "actor_type": "player"},
+            garments=garments,
+        )
+        ps.materialize_session_physical_state(active_sid)
+    except Exception as e:
+        log.warning(f"Error syncing equipment to physical state for user {user_id}: {e}")
 
 def get_equipment(user_id: int) -> dict:
     char = db.get_character(user_id)

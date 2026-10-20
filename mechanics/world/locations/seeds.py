@@ -665,3 +665,196 @@ def provision_faction_hq_tier2_location(session_id: int, faction_name: str, scen
 
     return primary_hq
 
+
+ENTRANCE_KEYWORDS = (
+    "entrance", "door", "foyer", "gate", "archway", "porch", "turnstile",
+    "vestibule", "threshold", "portal", "entryway", "airlock", "hatch", "checkpoint"
+)
+
+
+def is_entrance_sublocation(name: str) -> bool:
+    """Checks if a sublocation name represents a dedicated entrance/threshold."""
+    low = str(name or "").lower()
+    return any(k in low for k in ENTRANCE_KEYWORDS)
+
+
+def get_facility_entrance_name(fac_name: str) -> str:
+    """Deterministically derives a specific, relevant entrance sublocation name for a facility."""
+    low = str(fac_name or "").lower().strip()
+    if "homeroom" in low or "class" in low:
+        return "Classroom Sliding Door Entrance" if "homeroom" in low else "Classroom Doorway Entrance"
+    if "lab" in low or "chemistry" in low or "science" in low:
+        return "Lab Entrance & Safety Station"
+    if "library" in low or "archives" in low:
+        return "Library Entrance Turnstiles"
+    if "staff" in low or "faculty" in low:
+        return "Staff Room Entrance Doorway"
+    if "gym" in low:
+        return "Gymnasium Double Doors Entrance"
+    if "dojo" in low:
+        return "Dojo Sliding Doors Entrance"
+    if "pool" in low:
+        return "Pool Facility Entrance & Footbath"
+    if "roof" in low:
+        return "Rooftop Heavy Access Door"
+    if "dining" in low or "cafeteria" in low or "canteen" in low:
+        return "Dining Hall Double Doors Entrance"
+    if "auditorium" in low or "theater" in low or "stage" in low:
+        return "Auditorium Double Doors Entrance"
+    if "music" in low:
+        return "Music Room Entrance Door"
+    if "studio" in low or "arts" in low:
+        return f"{fac_name} Entrance Doorway"
+    if "broadcast" in low or "media" in low:
+        return "Studio Sound-Lock Entrance"
+    if "corridor" in low or "clubroom" in low:
+        return "Club Corridor Entrance"
+    if "office" in low or "council" in low:
+        return "Council Office Entrance Doorway"
+    if "courtyard" in low or "plaza" in low:
+        return "Courtyard Archway Entrance"
+    if "park" in low or "garden" in low:
+        return "Park Entrance Arch"
+    if "glasshouse" in low or "greenhouse" in low:
+        return "Glasshouse Double Doors Entrance"
+    if "pavilion" in low:
+        return "Pavilion Entrance Walkway"
+    if "café" in low or "cafe" in low:
+        return "Café Front Glass Door"
+    if "arcade" in low:
+        return "Arcade Neon Entrance"
+    if "karaoke" in low:
+        return "Lounge Reception Entrance"
+    if "convenience" in low or "store" in low or "shop" in low:
+        return "Shop Front Entrance Door"
+    if "house" in low or "residence" in low or "home" in low:
+        return "Front Door & Genkan Entrance"
+    if "tavern" in low or "inn" in low or "pub" in low:
+        return "Tavern Heavy Oak Door"
+    if "temple" in low or "shrine" in low or "chapel" in low or "church" in low or "sanctuary" in low:
+        return "Sanctuary Grand Archway"
+    if "dungeon" in low or "crypt" in low or "ruin" in low or "vault" in low:
+        return "Stone Chamber Threshold"
+    if "cave" in low or "cavern" in low or "mine" in low:
+        return "Cavern Mouth Entrance"
+    if "castle" in low or "keep" in low or "fort" in low or "palace" in low:
+        return "Castle Great Gate"
+    if "pier" in low or "dock" in low or "harbor" in low:
+        return "Pier Entrance Ramp"
+    if "beach" in low or "coast" in low:
+        return "Beach Access Boardwalk"
+    if "camp" in low or "cabin" in low:
+        return "Campground Trailhead Entrance"
+    if "shed" in low:
+        return "Alleyway Storage Entrance"
+    if "tower" in low or "clock" in low:
+        return "Arched Tower Doorway"
+    return f"{fac_name} Entrance"
+
+
+def get_contextual_interior_name(fac_name: str) -> str:
+    """Deterministically derives a descriptive, non-generic room/area name to replace 'Main Area'."""
+    low = str(fac_name or "").lower().strip()
+    if "homeroom" in low or "class" in low:
+        return "Student Desks Cluster"
+    if "lab" in low or "chemistry" in low or "science" in low:
+        return "Lab Workbenches"
+    if "library" in low or "archives" in low:
+        return "Study Tables"
+    if "staff" in low or "faculty" in low:
+        return "Faculty Desks"
+    if "gym" in low or "dojo" in low:
+        return "Basketball Court" if "gym" in low else "Central Tatami Mat"
+    if "pool" in low:
+        return "Poolside Deck"
+    if "roof" in low:
+        return "Rooftop Benches"
+    if "dining" in low or "cafeteria" in low or "canteen" in low:
+        return "Central Dining Tables"
+    if "auditorium" in low or "theater" in low or "stage" in low:
+        return "Auditorium Stage"
+    if "music" in low:
+        return "Upright Piano Alcove"
+    if "studio" in low or "arts" in low:
+        return "Easel & Drafting Desks"
+    if "broadcast" in low or "media" in low:
+        return "Newspaper Layout Desk"
+    if "corridor" in low or "clubroom" in low:
+        return "Shared Club Noticeboard"
+    if "office" in low or "council" in low:
+        return "Meeting Table"
+    if "courtyard" in low or "plaza" in low:
+        return "Central Courtyard Plaza"
+    if "park" in low or "garden" in low:
+        return "Park Grounds"
+    if "glasshouse" in low or "greenhouse" in low:
+        return "Interior Greenery Path"
+    if "pavilion" in low:
+        return "Vending Machines Area"
+    if "café" in low or "cafe" in low:
+        return "Main Seating Lounge"
+    if "arcade" in low:
+        return "Fighting Game Cabinets"
+    if "karaoke" in low:
+        return "Private Karaoke Room"
+    if "convenience" in low or "store" in low or "shop" in low:
+        return "Cash Register & Aisles"
+    if "house" in low or "residence" in low or "home" in low:
+        return "Living Room"
+    if "tavern" in low or "inn" in low or "pub" in low:
+        return "Common Room & Hearth"
+    if "temple" in low or "shrine" in low or "chapel" in low:
+        return "Main Sanctuary"
+    if "dungeon" in low or "crypt" in low or "vault" in low:
+        return "Central Chamber"
+    if "cave" in low or "cavern" in low:
+        return "Central Cavern"
+    if "castle" in low or "keep" in low:
+        return "Great Hall"
+    if "pier" in low or "dock" in low:
+        return "Pier Railing Lookout"
+    if "beach" in low or "coast" in low:
+        return "Beach Towel Spot"
+    return f"{fac_name} Central Area"
+
+
+def get_facility_contextual_sublocations(primary_name: str, existing_subs: list[dict] = None) -> list[dict]:
+    """
+    Ensures a facility has an Entrance sublocation (index 0) and contextual, non-generic room names.
+    Replaces any 'Main Area' sublocations with facility-appropriate names.
+    """
+    subs = list(existing_subs or [])
+    new_subs = []
+    has_entrance = False
+
+    for s in subs:
+        s_dict = dict(s)
+        s_name = s_dict.get("name", "").strip()
+        # Rename generic "Main Area"
+        if s_name.lower() in ("main area", "area", "main"):
+            s_dict["name"] = get_contextual_interior_name(primary_name)
+            s_dict["id"] = f"sub_{_slugify(primary_name)}_{_slugify(s_dict['name'])}"
+        if is_entrance_sublocation(s_dict["name"]):
+            has_entrance = True
+        new_subs.append(s_dict)
+
+    if not has_entrance:
+        ent_name = get_facility_entrance_name(primary_name)
+        ent_sub = {
+            "id": f"sub_{_slugify(primary_name)}_entrance",
+            "name": ent_name,
+            "is_entrance": 1
+        }
+        new_subs.insert(0, ent_sub)
+
+    if len(new_subs) == 1 and is_entrance_sublocation(new_subs[0]["name"]):
+        int_name = get_contextual_interior_name(primary_name)
+        int_sub = {
+            "id": f"sub_{_slugify(primary_name)}_{_slugify(int_name)}",
+            "name": int_name
+        }
+        new_subs.append(int_sub)
+
+    return new_subs
+
+

@@ -64,13 +64,42 @@ def is_invalid_location_string(name: str) -> bool:
 
     return False
 
+def get_facility_entrance_sublocation(primary_name: str, session_id: int = 0, scen_key: str = "high_school_drama") -> str:
+    """
+    Finds or derives the canonical Entrance sublocation for a primary facility.
+    Checks session_locations and world_nodes first; falls back to deterministic rule.
+    """
+    if not primary_name:
+        return "Entrance"
+    if session_id:
+        try:
+            nodes = db.get_session_world_nodes(session_id)
+            fac_node = next((n for n in nodes if n["node_type"] == "FACILITY" and n["name"].lower() == primary_name.lower()), None)
+            if fac_node:
+                ent_room = next((rn for rn in nodes if rn["node_type"] == "ROOM" and rn.get("parent_id") == fac_node["node_id"] and is_entrance_sublocation(rn["name"])), None)
+                if ent_room:
+                    return ent_room["name"]
+        except Exception:
+            pass
+        try:
+            existing = db.get_session_locations(session_id)
+            for r in existing:
+                if r.get("primary_name", "").lower() == primary_name.lower():
+                    s_name = r.get("sub_name", "")
+                    if is_entrance_sublocation(s_name):
+                        return s_name
+        except Exception:
+            pass
+    return get_facility_entrance_name(primary_name)
+
+
 def sanitize_location_target(raw_target: str, session_id: int = 0, scen_key: str = "fantasy", char_name: str = "") -> str:
 
     """
 
     Sanitizes raw waypoint/LLM target strings into clean physical location names.
 
-    E.g. 'the library to intercept the Burn Book notes' -> 'Oakridge Academy ➔ School Library ➔ Main Area'
+    E.g. 'the library to intercept the Burn Book notes' -> 'Oakridge Academy ➔ School Library ➔ Library Entrance Turnstiles'
 
     """
 
@@ -79,8 +108,6 @@ def sanitize_location_target(raw_target: str, session_id: int = 0, scen_key: str
         z, p, s = get_default_tiered_location(scen_key, session_id=session_id, char_name=char_name)
 
         return format_tiered_location_string(z, p, s)
-
-
 
     clean_raw = re.sub(r"[*_`]", "", str(raw_target)).strip()
     clean_raw = re.sub(r"\s*->\s*|\s*-->\s*", " ➔ ", clean_raw)
@@ -100,13 +127,15 @@ def sanitize_location_target(raw_target: str, session_id: int = 0, scen_key: str
                 # Check direct inclusion of primary name
                 if p_lower in raw_lower:
                     z_name = r.get("zone_name") or ""
-                    return format_tiered_location_string(z_name, p_name, "Main Area") if z_name else p_name
+                    ent_sub = get_facility_entrance_sublocation(p_name, session_id=session_id, scen_key=scen_key)
+                    return format_tiered_location_string(z_name, p_name, ent_sub) if z_name else p_name
 
                 # Check root keyword (e.g. "library" in "the library to intercept...")
                 p_words = [w for w in p_lower.replace("'", "").replace("&", " ").split() if len(w) >= 4 and w not in ("school", "main", "hall", "room", "area", "house", "grounds", "place")]
                 if p_words and any(pw in raw_lower for pw in p_words):
                     z_name = r.get("zone_name") or ""
-                    return format_tiered_location_string(z_name, p_name, "Main Area") if z_name else p_name
+                    ent_sub = get_facility_entrance_sublocation(p_name, session_id=session_id, scen_key=scen_key)
+                    return format_tiered_location_string(z_name, p_name, ent_sub) if z_name else p_name
 
     # If no existing match, strip trailing objective clause: e.g. "the library to intercept..." -> "Library"
     to_idx = -1
@@ -124,7 +153,8 @@ def sanitize_location_target(raw_target: str, session_id: int = 0, scen_key: str
             if "➔" in extracted:
                 return extracted
             z_default, _, _ = get_default_tiered_location(scen_key, session_id=session_id, char_name=char_name)
-            return format_tiered_location_string(z_default, extracted.title(), "Main Area")
+            ent_sub = get_facility_entrance_sublocation(extracted.title(), session_id=session_id, scen_key=scen_key)
+            return format_tiered_location_string(z_default, extracted.title(), ent_sub)
 
 
 
@@ -274,6 +304,8 @@ def process_llm_location_update(session_id: int, raw_location: str, scenario_key
         and p_low_final not in zones_index
         and s_low_final not in zones_index
         and s_low_final not in primaries
+        and p_low_final not in subs_idx
+        and not (is_school_scenario(scenario_key) and p_low_final in primaries and primaries[p_low_final][0].strip().lower() != z_low_final)
         and not is_incongruous_container(primary, sub, session_id=session_id, scenario_key=scenario_key)
     )
 
@@ -290,14 +322,18 @@ def process_llm_location_update(session_id: int, raw_location: str, scenario_key
         z_low_final = zone.strip().lower()
 
         # Gate 1: Campus facility under residential or commercial zone
-        if any(k in p_low_final for k in CAMPUS_FACILITY_KEYWORDS):
+        if any(k in p_low_final for k in CAMPUS_FACILITY_KEYWORDS) or p_low_final in ("botanical glasshouse", "interior greenery path"):
 
             if (res_z and res_z.lower() in z_low_final) or (comm_z and comm_z.lower() in z_low_final) or any(k in z_low_final for k in ("residential", "commercial", "town", "quarter", "neighborhood")):
 
                 is_valid_save = False
 
         # Gate 2: Residence under school or commercial zone
-        if any(k in p_low_final for k in ("residence", "house", "apartment", "cottage", "manor")) or bool(re.search(r"\bhome\b", p_low_final)):
+        is_res = (
+            any(re.search(r'\b' + re.escape(k) + r'\b', p_low_final) for k in ("residence", "house", "apartment", "cottage", "manor")) or
+            bool(re.search(r"\bhome\b", p_low_final))
+        ) and not any(k in p_low_final for k in ("glasshouse", "greenhouse", "conservatory", "arboretum", "pavilion", "commons", "promenade"))
+        if is_res:
 
             if (school_z and school_z.lower() in z_low_final) or (comm_z and comm_z.lower() in z_low_final) or any(k in z_low_final for k in ("academy", "school", "campus", "athletics", "commercial", "arcade", "shopping")):
 
@@ -477,46 +513,45 @@ def is_incongruous_container(primary_place: str, sub_spot: str, session_id: int 
 
 
     if s_low in ("main area", "front porch", "entryway", "foyer"):
-
         return False
 
-
+    # Seeded author-defined locations are physically valid by definition
+    if session_id:
+        try:
+            existing = db.get_session_locations(session_id)
+            for r in existing:
+                if not r.get("is_dynamic"):
+                    if r.get("primary_name", "").strip().lower() == p_low and r.get("sub_name", "").strip().lower() == s_low:
+                        return False
+        except Exception:
+            pass
 
     # UNCONDITIONAL TIER INVARIANT: A sub-spot can NEVER be a Tier 1 Zone or a
-
     # different Tier 2 Primary Place, regardless of what the container is.
-
     # This must run before the ENCLOSED_ROOM_KEYWORDS gate so it catches exterior
-
     # and transitional containers (e.g. School Gates, Residential Walkway) too.
-
     if session_id:
-
         from .hierarchy import _build_session_zone_index, _build_session_spatial_index
         zones_index = _build_session_zone_index(session_id, scenario_key)
-
-        primaries, _ = _build_session_spatial_index(session_id, scenario_key)
+        primaries, subs_idx = _build_session_spatial_index(session_id, scenario_key)
 
         if s_low in zones_index:
-
             return True
 
         if s_low in primaries and s_low != p_low:
+            # If s_low is also an existing sub-location under p_low, it is not incongruous
+            if s_low not in subs_idx or subs_idx[s_low][1].strip().lower() != p_low:
+                return True
 
-            return True
-
-
-
-    is_enclosed_room = any(k in p_low for k in ENCLOSED_ROOM_KEYWORDS)
-
-    if not is_enclosed_room:
-
+    # Botanical / greenhouse / courtyard / park spaces naturally contain exterior paths and garden features
+    if any(k in p_low for k in ("glasshouse", "greenhouse", "conservatory", "arboretum", "patio", "courtyard", "pavilion", "park", "garden", "commons", "promenade")):
         return False
 
-
+    is_enclosed_room = any(re.search(r'\b' + re.escape(k) + r'\b', p_low) for k in ENCLOSED_ROOM_KEYWORDS)
+    if not is_enclosed_room:
+        return False
 
     is_exterior_spot = any(k in s_low for k in INCONGRUOUS_EXTERIOR_SUB_KEYWORDS)
-
     return is_exterior_spot
 
 def auto_heal_incongruous_location(zone: str, primary: str, sub: str, session_id: int = 0, scenario_key: str = "high_school_drama") -> Tuple[str, str, str]:
@@ -671,77 +706,72 @@ def auto_heal_incongruous_location(zone: str, primary: str, sub: str, session_id
     return (zone, promoted_p, "Stone Railing" if "terrace" in s_low else "Main Area")
 
 def is_movement_action(action_text: str) -> bool:
-
     """Detects whether an action represents physical travel or movement."""
-
     if not action_text or not str(action_text).strip():
-
         return False
 
     act_lower = str(action_text).lower().strip()
 
+    # Rendezvous proposals and social invitations (e.g. proposing to meet at another venue,
+    # or inviting to hang out / walk together) are dialogue proposals on this turn, NOT immediate physical travel.
+    # Player/NPC must agree first (recording appointment or adding temporary companion),
+    # and actual physical travel occurs on subsequent turns via explicit travel choices (e.g. '[Travel to...').
+    is_explicit_travel_cmd = any(act_lower.startswith(p) for p in (
+        "[travel", "[move", "i travel", "i head", "i walk", "i go to", "travel to", "head to", "walk to"
+    ))
+    if not is_explicit_travel_cmd:
+        from mechanics.narrative.intent import RENDEZVOUS_PROPOSAL_RE, SOCIAL_INVITE_RE
+        if RENDEZVOUS_PROPOSAL_RE.search(act_lower):
+            return False
+        if SOCIAL_INVITE_RE.search(act_lower) and any(act_lower.startswith(k) for k in ("ask ", "invite ", "suggest ", "propose ", "want to ", "wanna ")):
+            return False
 
-
-    prefix_movement_pattern = r"^(?:i\s+)?(?:head|walk|travel|go|move|run|rush|sprint|step|leave|exit|return|enter|visit|make\s+(?:my|your|our)\s+way)\s+(?:to|toward|towards|into|out|back|home|straight\s+to|over\s+to)"
-
+    prefix_movement_pattern = r"^(?:i\s+)?(?:head|walk|travel|go|move|run|rush|sprint|step|leave|exit|return|enter|visit|make\s+(?:my|your|our)\s+way)\s+(?:to|toward|towards|into|out|back|home|straight\s+to|over\s+to) "
     if re.search(prefix_movement_pattern, act_lower):
-
         return True
 
-
-
     # Intent engine check runs FIRST — before any keyword blacklists.
-
     # This prevents 'Head toward X to investigate rumors' being blocked by 'rumor'.
-
     try:
-
         from mechanics.narrative.intent import classify_action_intent, IntentCategory
-
         intent = classify_action_intent(action_text)
-
         if intent.category in (IntentCategory.MOVEMENT, IntentCategory.APPOINTMENT_MEETUP):
-
             return True
-
     except Exception:
-
         pass
 
-
-
     override_movement_phrases = (
-
         "i travel to", "i head to", "i walk to", "[travel", "[move",
+        "head to", "head toward", "head towards", "head straight to", "head over to",
+        "walk to", "walk toward", "walk towards", "travel to", "go to",
+        "move to", "moving to",
+        "step to", "step out to", "step into", "walk into", "head into",
+        "lead to", "lead her to", "lead him to", "lead the way to",
+        "take her to", "take him to", "bring her to", "bring him to",
+        "slip to", "slip into", "slip away to", "go into", "depart to", "depart for",
+        "turn back from", "step away from", "turn back", "walk away", "step back",
+        "quieter spot", "quiet spot", "secluded spot", "private spot"
+    )
 
-        "head to", "head toward", "head towards", "head straight to",
-
-        "walk to", "walk toward", "walk towards", "travel to", "go to"
-
+    has_movement_directive = (
+        any(k in act_lower for k in override_movement_phrases)
+        or bool(re.search(r'\b(?:move|moving|travel|traveling|head|heading|walk|walking|go|going|step|stepping|lead|leading|slip|slipping|bring|bringing|take|taking)\b.*?\b(?:to|into|toward|towards|for)\b', act_lower))
+        or bool(re.search(r'\b(?:quieter|secluded|quiet|private)\s+spot\b', act_lower))
     )
 
     # Conversational blacklist only applies when no imperative movement verb/prefix was detected.
-
     conversational_non_movement = (
-
         "ask ", "inquire ", "inquired ", "asking ", "talk ", "talking ", "discuss ", "discussing ",
-
         "tell me about", "rumour", "rumours", "whisper", "speak of", "speak with", "speak to", "speak ",
-
         "read about", "study ", "studying ", "question ", "questioning ", "interrogate", "investigate rumors"
-
     )
 
-    if any(cnm in act_lower for cnm in conversational_non_movement) and not any(k in act_lower for k in override_movement_phrases):
-
+    if any(cnm in act_lower for cnm in conversational_non_movement) and not has_movement_directive:
         return False
-
-
 
     conversational_nouns = ("conversation", "discussion", "topic", "debate", "subject", "argument", "point of view", "thought", "feelings")
 
-    if any(cn in act_lower for cn in conversational_nouns) and not any(k in act_lower for k in override_movement_phrases):
-
+    if any(cn in act_lower for cn in conversational_nouns) and not has_movement_directive:
         return False
 
     # Intimate and physical interaction actions are not spatial movements unless explicit travel tag/prefix is present
@@ -860,44 +890,28 @@ def is_movement_action(action_text: str) -> bool:
 
 
 
-    if has_root and (
-
+    if has_movement_directive or (has_root and (
         has_dir
-
         or act_lower.startswith("to ")
-
         or "[travel" in act_lower
-
         or "[move" in act_lower
-
         or act_lower.startswith("i travel")
-
         or act_lower.startswith("i head")
-
         or act_lower.startswith("i go")
-
         or act_lower.startswith("i walk")
-
-    ):
-
+    )):
         return True
 
 
 
     return False
 
-def extract_movement_destination(action_text: str, session_id: int, current_zone: str = "", scen_key: str = "fantasy", char_name: str = "") -> tuple[str, str] | None:
-
+def extract_movement_destination(action_text: str, session_id: int, current_zone: str = "", scen_key: str = "fantasy", char_name: str = "", allow_proposal: bool = False) -> tuple[str, str] | None:
     """
-
     Deterministically detects if the player's chosen action intent was to travel/move to a known place.
-
     Returns (zone_name, primary_name) or None.
-
     """
-
-    if not is_movement_action(action_text):
-
+    if not is_movement_action(action_text) and not allow_proposal:
         return None
 
     act_lower = str(action_text).lower()
@@ -905,9 +919,15 @@ def extract_movement_destination(action_text: str, session_id: int, current_zone
 
 
     existing = db.get_session_locations(session_id)
+    if not existing and session_id:
+        try:
+            from mechanics.world.locations.seeding import ensure_session_locations_seeded
+            ensure_session_locations_seeded(session_id, scen_key, char_name=char_name)
+            existing = db.get_session_locations(session_id)
+        except Exception:
+            existing = []
 
     if not existing:
-
         return None
 
     if is_school_scenario(scen_key):
@@ -918,25 +938,21 @@ def extract_movement_destination(action_text: str, session_id: int, current_zone
         if not existing:
             return None
 
-
-
     # Helper to check if two zone names refer to the same region (e.g. 'Astrid' vs 'Royal Capital of Astrid')
-
     def is_same_zone(z1: str, z2: str) -> bool:
-
         if not z1 or not z2:
-
             return False
-
         if z1.strip().lower() == z2.strip().lower():
-
             return True
-
         sz1 = get_clean_zone_short_name(z1).lower()
-
         sz2 = get_clean_zone_short_name(z2).lower()
-
-        return bool(sz1 and sz2 and sz1 == sz2)
+        if sz1 and sz2 and sz1 == sz2:
+            return True
+        if is_school_scenario(scen_key):
+            school_kws = ("school", "academy", "institute", "campus", "high")
+            if any(k in z1.lower() for k in school_kws) and any(k in z2.lower() for k in school_kws):
+                return True
+        return False
 
     # 0. Direct tiered location matching with explicit delimiters (highest precedence)
     delimiters = ["➔", "->", ">", "|"]
@@ -954,6 +970,34 @@ def extract_movement_destination(action_text: str, session_id: int, current_zone
             )
             if pz and pp and pp not in ("Main Area", "") and (is_known_place or not is_poetic_drift_title(pp)):
                 return (pz, pp)
+
+    # 0a. Check turn back / step away intent (User Decision #2)
+    if any(k in act_lower for k in ("turn back from", "step away from", "turn back", "step back from")):
+        target_place = None
+        for pfx in ("turn back from ", "step away from ", "step back from "):
+            if pfx in act_lower:
+                target_place = act_lower.split(pfx, 1)[-1].strip()
+                break
+
+        if existing:
+            # Look for a public corridor, hallway, courtyard, or plaza in current_zone
+            hub_cands = [
+                r for r in existing
+                if is_same_zone(r.get("zone_name", ""), current_zone) and any(w in (r.get("primary_name") or "").lower() for w in ("hall", "corridor", "courtyard", "plaza", "entrance", "gate", "foyer", "commons"))
+                and (not target_place or target_place not in (r.get("primary_name") or "").lower())
+            ]
+            if hub_cands:
+                return (current_zone or hub_cands[0].get("zone_name"), hub_cands[0].get("primary_name"))
+            
+            zone_cands = [
+                r for r in existing
+                if is_same_zone(r.get("zone_name", ""), current_zone)
+                and (not target_place or target_place not in (r.get("primary_name") or "").lower())
+            ]
+            if zone_cands:
+                return (current_zone or zone_cands[0].get("zone_name"), zone_cands[0].get("primary_name"))
+            
+            return (current_zone or existing[0].get("zone_name"), existing[0].get("primary_name"))
 
     # 0a. Check if action matches heading home (player's home or companion's home)
 
@@ -1085,53 +1129,12 @@ def extract_movement_destination(action_text: str, session_id: int, current_zone
 
 
 
-    # 1b. Zone & Semantic Alias Matching
-
-    from .hierarchy import _build_session_zone_index, _build_session_spatial_index
-    zones_index = _build_session_zone_index(session_id, scen_key)
-
-    for z_lower, (z_name, z_gw_p, z_gw_s) in zones_index.items():
-
-        if re.search(r'\b' + re.escape(z_lower) + r'\b', act_lower):
-
-            if not re.search(r'\b(?:out\s+of(?:\s+the)?|leave(?:\s+the)?|exit(?:\s+the)?)\s+' + re.escape(z_lower) + r'\b', act_lower):
-
-                return (z_name, z_gw_p)
-
-                
-
-    aliases = {
-
-        "student lounge": ("Student Plaza & Dining Pavilion", "Central Courtyard"),
-
-        "student commons": ("Student Plaza & Dining Pavilion", "Central Courtyard"),
-
-        "campus dining": ("Campus Dining Hall & Cafeteria", "Main Area"),
-
-        "cafeteria": ("Campus Dining Hall & Cafeteria", "Main Area"),
-
-    }
-
-    for alias, (alias_z, alias_p) in aliases.items():
-
-        if alias in act_lower:
-
-            return (alias_z, alias_p)
-
-
-
     # 1. Exact full primary_name match in action_text (e.g. "Adventurers' Guild Hall" in "Travel toward the Adventurers' Guild Hall")
-
     exact_matches = []
-
     for r in existing:
-
         p_name = r.get("primary_name", "")
-
         z_name = r.get("zone_name", "")
-
         if not p_name:
-
             continue
 
         p_lower = p_name.lower()
@@ -1145,23 +1148,34 @@ def extract_movement_destination(action_text: str, session_id: int, current_zone
         if has_match:
             exact_matches.append((z_name, p_name, len(p_lower)))
 
-
-
     if exact_matches:
-
         # Prefer a match within the current zone if available
-
         same_zone_match = next((m for m in exact_matches if is_same_zone(m[0], current_zone)), None)
-
         if same_zone_match:
-
-            return (same_zone_match[0] or current_zone, same_zone_match[1])
+            return (current_zone or same_zone_match[0], same_zone_match[1])
 
         # Otherwise, travel across zones to the registered zone of the target establishment!
-
         exact_matches.sort(key=lambda m: m[2], reverse=True)
-
         return (exact_matches[0][0], exact_matches[0][1])
+
+    # 1b. Zone & Semantic Alias Matching
+    from .hierarchy import _build_session_zone_index, _build_session_spatial_index
+    zones_index = _build_session_zone_index(session_id, scen_key)
+
+    for z_lower, (z_name, z_gw_p, z_gw_s) in zones_index.items():
+        if re.search(r'\b' + re.escape(z_lower) + r'\b', act_lower):
+            if not re.search(r'\b(?:out\s+of(?:\s+the)?|leave(?:\s+the)?|exit(?:\s+the)?)\s+' + re.escape(z_lower) + r'\b', act_lower):
+                return (z_name, z_gw_p)
+
+    aliases = {
+        "student lounge": ("Student Plaza & Dining Pavilion", "Central Courtyard"),
+        "student commons": ("Student Plaza & Dining Pavilion", "Central Courtyard"),
+        "campus dining": ("Campus Dining Hall & Cafeteria", "Main Area"),
+        "cafeteria": ("Campus Dining Hall & Cafeteria", "Main Area"),
+    }
+    for alias, (alias_z, alias_p) in aliases.items():
+        if alias in act_lower:
+            return (alias_z, alias_p)
 
 
 
@@ -1318,7 +1332,7 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
     if action_dest and check_tier != "crit_fail":
         dest_z, dest_p = action_dest
-        sub_to_use = "Main Area"
+        sub_to_use = get_facility_entrance_sublocation(dest_p, session_id=session_id, scen_key=scen_key)
 
         # Check if there is an active phone appointment at this destination with a specific sub-location
         locked_target_sub = None
@@ -1349,10 +1363,9 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
                                 if t_loc:
                                     qz, qp, qsub = parse_tiered_location(t_loc, scen_key, session_id=session_id, char_name=char_name)
                                     if qp.lower() == dest_p.lower() and qsub and qsub not in ("Main Area", ""):
-                                        if (t_npc and (t_npc in act_lower or (len(t_npc.split()) > 1 and t_npc.split()[0] in act_lower))) or sub_to_use == "Main Area":
-                                            sub_to_use = qsub
-                                            locked_target_sub = qsub
-                                            break
+                                        sub_to_use = qsub
+                                        locked_target_sub = qsub
+                                        break
                         if locked_target_sub:
                             break
 
@@ -1380,12 +1393,14 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
             if r.get("primary_name", "").strip().lower() == dest_p.strip().lower() and r.get("sub_name") and r.get("sub_name") not in ("Main Area", "")
         ]
         act_lower = str(action_text).lower()
-        for sub_cand in known_subs_for_dest:
-            cand_lower = sub_cand.lower()
-            cand_words = [w for w in cand_lower.split() if len(w) >= 4 and w not in ("area", "spot", "your", "main")]
-            if (cand_lower in act_lower or (cand_words and any(cw in act_lower for cw in cand_words))) or (cand_lower in narr_prose or (cand_words and any(cw in narr_prose for cw in cand_words))):
-                sub_to_use = sub_cand
-                break
+        if not locked_target_sub:
+            dest_p_words = set(re.findall(r"\w+", dest_p.lower()))
+            for sub_cand in known_subs_for_dest:
+                cand_lower = sub_cand.lower()
+                cand_words = [w for w in re.findall(r"\w+", cand_lower) if len(w) >= 4 and w not in ("area", "spot", "your", "main") and w not in dest_p_words]
+                if (cand_lower in act_lower or (cand_words and any(cw in act_lower for cw in cand_words))) or (cand_lower in narr_prose or (cand_words and any(cw in narr_prose for cw in cand_words))):
+                    sub_to_use = sub_cand
+                    break
 
         for d in ("➔", "->", ">", "|"):
             if d in action_text:
@@ -1432,6 +1447,11 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
                     sub_to_use = "Foyer"
 
 
+
+        if locked_target_sub:
+            sub_to_use = locked_target_sub
+        elif sub_to_use.lower() in ("main area", "area", "main"):
+            sub_to_use = get_facility_entrance_sublocation(dest_p, session_id=session_id, scen_key=scen_key)
 
         formatted = format_tiered_location_string(dest_z or curr_z, dest_p, sub_to_use)
         return process_llm_location_update(session_id, formatted, scen_key, char_name=char_name)
@@ -1552,59 +1572,36 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
         # in dialogue, background sensory atmosphere, or inquiry prose.
 
-        if not has_hallway_exit and curr_p and res_p and res_p.lower() != curr_p.lower() and not is_move:
-
-            curr_words = [w for w in curr_p.lower().replace("'", "").replace("&", " ").split() if len(w) >= 4 and w not in ("school", "main", "place", "area", "grounds")]
-
-            res_words = [w for w in res_p.lower().replace("'", "").replace("&", " ").split() if len(w) >= 4 and w not in ("school", "main", "place", "area", "grounds")]
-
-
-
-            exit_verbs = (
-
-                "exit", "exits", "exited", "exiting", "leave", "leaves", "leaving", "left", "depart", "departed",
-
-                "walk out", "walks out", "walked out", "walking out", "step out", "steps out", "stepped out",
-
-                "slip out", "slips out", "slipped out", "head out", "heads out", "headed out"
-
-            )
-
-            entry_verbs = (
-
-                "walk into", "walks into", "walked into", "walking into", "step into", "steps into", "stepped into",
-
-                "arrive at", "arrives at", "arrived at", "enter", "enters", "entered", "entering", "move into",
-
-                "moves into", "moved into", "moving into", "head into", "heads into", "headed into", "head to", "heads to", "headed to",
-
-                "slip into", "slips into", "slipped into", "navigate to", "navigates to", "navigated to", "reach", "reaches", "reached"
-
-            )
-
-
-
-            has_exit = any(ev in narr_prose for ev in exit_verbs) and (not curr_words or any(cw in narr_prose or cw.rstrip("s") in narr_prose for cw in curr_words))
-
-            has_entry = any(ev in narr_prose for ev in entry_verbs) and (any(rw in narr_prose or rw.rstrip("s") in narr_prose for rw in res_words) or res_p.lower() in narr_prose)
-
-
-
-            if not (has_exit and has_entry):
-
-                # ATOMIC 3-TUPLE ROLLBACK: When no movement detected and no narrative
-
-                # exit+entry transition confirmed, revert the entire (zone, primary, sub)
-
-                # tuple to the current grounded position. Never retain a partial res_s
-
-                # from a foreign venue — that is how chimera sub-locations are born.
-
+        if not has_hallway_exit and not is_move and not action_dest:
+            if curr_z and res_z and res_z.lower() != curr_z.lower():
                 res_z = curr_z
+            if curr_p and res_p and res_p.lower() != curr_p.lower():
+                curr_words = [w for w in curr_p.lower().replace("'", "").replace("&", " ").split() if len(w) >= 4 and w not in ("school", "main", "place", "area", "grounds")]
+                res_words = [w for w in res_p.lower().replace("'", "").replace("&", " ").split() if len(w) >= 4 and w not in ("school", "main", "place", "area", "grounds")]
 
-                res_p = curr_p
+                exit_verbs = (
+                    "exit", "exits", "exited", "exiting", "leave", "leaves", "leaving", "left", "depart", "departed",
+                    "walk out", "walks out", "walked out", "walking out", "step out", "steps out", "stepped out",
+                    "slip out", "slips out", "slipped out", "head out", "heads out", "headed out"
+                )
+                entry_verbs = (
+                    "walk into", "walks into", "walked into", "walking into", "step into", "steps into", "stepped into",
+                    "arrive at", "arrives at", "arrived at", "enter", "enters", "entered", "entering", "move into",
+                    "moves into", "moved into", "moving into", "head into", "heads into", "headed into", "head to", "heads to", "headed to",
+                    "slip into", "slips into", "slipped into", "navigate to", "navigates to", "navigated to", "reach", "reaches", "reached"
+                )
 
-                res_s = curr_s
+                has_exit = any(ev in narr_prose for ev in exit_verbs) and (not curr_words or any(cw in narr_prose or cw.rstrip("s") in narr_prose for cw in curr_words))
+                has_entry = any(ev in narr_prose for ev in entry_verbs) and (any(rw in narr_prose or rw.rstrip("s") in narr_prose for rw in res_words) or res_p.lower() in narr_prose)
+
+                if not (has_exit and has_entry):
+                    # ATOMIC 3-TUPLE ROLLBACK: When no movement detected and no narrative
+                    # exit+entry transition confirmed, revert the entire (zone, primary, sub)
+                    # tuple to the current grounded position. Never retain a partial res_s
+                    # from a foreign venue — that is how chimera sub-locations are born.
+                    res_z = curr_z
+                    res_p = curr_p
+                    res_s = curr_s
 
 
 
@@ -1614,7 +1611,7 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
         # arrivals described with phrasing like "arrive at the X" or "step into the X".
 
-        if is_move and res_p.lower() == curr_p.lower() and narr_prose:
+        if (is_move or action_dest) and res_p.lower() == curr_p.lower() and narr_prose:
 
             target_zone = curr_z or (existing[0].get("zone_name") if existing else "")
 
@@ -1647,14 +1644,16 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
 
             narr_arrival_verbs = (
-                "arrive at", "arrives at", "arrived at", "enter", "enters", "entered", "entering",
+                "arrive at", "arrives at", "arrived at", "arrive in", "arrives in", "arrived in",
+                "enter", "enters", "entered", "entering",
                 "walk into", "walks into", "walked into", "step into", "steps into", "stepped into",
                 "slip into", "slips into", "slipped into", "move into", "moves into", "moved into",
                 "head into", "heads into", "headed into", "navigate to", "navigated to",
                 "reach", "reaches", "reached", "round the final corner and see", "round the corner and see",
                 "rounds the corner and sees", "round the corner", "rounds the corner", "stop at", "stops at", "stopped at",
                 "stopping at", "stand before", "stands before", "stood before", "near the gate", "at the gate",
-                "front of the gate", "main gate ahead", "gates ahead", "at the entrance"
+                "front of the gate", "main gate ahead", "gates ahead", "at the entrance",
+                "path to the", "path to", "leads to the", "lead to the", "stepped into the", "step into the"
             )
 
             has_narr_arrival = any(ev in narr_prose for ev in narr_arrival_verbs)
@@ -2039,6 +2038,170 @@ def is_interzone_travel(current_loc: str, target_loc: str, scen_key: str = "fant
     tgt_z, _, _ = parse_tiered_location(target_loc, scen_key, session_id=session_id, char_name=char_name)
 
     return curr_z.strip().lower() != tgt_z.strip().lower()
+
+
+_TACTICAL_FOCAL_POINT_PATTERNS = re.compile(
+    r"\b(?:"
+    r"(?:behind|under|beneath|beside|underneath|crouched behind|hiding behind|ducking behind|leaning against|by)\s+"
+    r"(?:the\s+|a\s+|an\s+)?"
+    r"(?P<focal>"
+    r"bleachers|desk|teacher'?s\s+desk|counter|curtains?|drapes|bookshelf|bookshelves|stacks|"
+    r"lockers?|locker\s+row|pillar|column|tree|bushes|hedges|shrubs|dumpster|crates?|barrels?|"
+    r"table|couch|sofa|bed|altar|statue|fountain|vending\s+machines?|stairwell\s+shadow|shadows?|"
+    r"window|windowsill|balcony\s+railing|stage\s+wings|partition|screen|booth|alcove\s+bench"
+    r")"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_ARCHITECTURAL_SUBROOM_PATTERNS = re.compile(
+    r"\b(?:into|enter|entering|sneak\s+into|slip\s+into|step\s+into|head\s+into|go\s+into|open|explore|search\s+inside|unlock)\s+"
+    r"(?:the\s+|a\s+|an\s+)?"
+    r"(?P<room>"
+    r"(?:secret\s+|old\s+|hidden\s+|abandoned\s+|inner\s+|back\s+|private\s+|annex\s+|basement\s+|underground\s+|locked\s+)?"
+    r"(?:cellar|basement|boiler\s+room|storage\s+room|annex\s+storage|supply\s+closet|janitor'?s\s+closet|"
+    r"equipment\s+shed|back\s+room|back\s+office|inner\s+sanctum|vault|archive\s+room|darkroom|"
+    r"dressing\s+room|green\s+room|broadcast\s+booth|server\s+room|attic|loft|wine\s+cellar|"
+    r"laboratory\s+annex|prep\s+room|changing\s+stall|private\s+study\s+room|catacombs|crypt)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def classify_freeform_sublocation(action_text: str) -> Dict[str, Optional[str]]:
+    """
+    Classifies freeform player spatial exploration into either:
+      - kind='focal_point': Tactical cover / furniture micro-position within the current room
+      - kind='architectural_room': Separate sub-room / chamber that warrants a child ROOM node in world_nodes
+      - kind=None: Not a micro-location or unlisted sub-room phrase
+    """
+    if not action_text or not str(action_text).strip():
+        return {"kind": None, "name": None}
+
+    clean = str(action_text).strip()
+
+    # 1. Check tactical cover / furniture focal points first
+    m_focal = _TACTICAL_FOCAL_POINT_PATTERNS.search(clean)
+    if m_focal:
+        full_phrase = m_focal.group(0).strip()
+        full_phrase = re.sub(r"^(?:crouched|hiding|ducking|leaning)\s+", "", full_phrase, flags=re.IGNORECASE).strip()
+        formatted_focal = " ".join(w.capitalize() if w.lower() not in ("the", "a", "an", "of", "in", "by") or i == 0 else w.lower() for i, w in enumerate(full_phrase.split()))
+        return {"kind": "focal_point", "name": formatted_focal}
+
+    # 2. Check unlisted architectural sub-rooms / chambers
+    m_room = _ARCHITECTURAL_SUBROOM_PATTERNS.search(clean)
+    if m_room:
+        raw_room = m_room.group("room").strip()
+        formatted_room = " ".join(w.capitalize() for w in raw_room.split())
+        return {"kind": "architectural_room", "name": formatted_room}
+
+    return {"kind": None, "name": None}
+
+
+def resolve_hybrid_sublocation_or_focal_point(
+    session_id: int,
+    current_location: str,
+    current_node_id: Optional[str],
+    action_text: str,
+    scen_key: str = "fantasy",
+) -> Dict[str, Any]:
+    """
+    Executes Option C (Hybrid Sub-Location Resolution):
+    - If action_text targets tactical cover/furniture ('behind the bleachers', 'under the desk'),
+      keeps the current node/location and sets focal_point.
+    - If action_text enters an unlisted architectural sub-room ('secret cellar', 'annex storage'),
+      spawns a persistent child ROOM node under the current FACILITY in world_nodes and returns
+      the updated (new_location, new_node_id).
+    """
+    info = classify_freeform_sublocation(action_text)
+    kind = info.get("kind")
+    sub_name = info.get("name")
+
+    if not kind or not sub_name:
+        return {"matched": False, "kind": None, "location": current_location, "node_id": current_node_id, "focal_point": None}
+
+    if kind == "focal_point":
+        return {
+            "matched": True,
+            "kind": "focal_point",
+            "location": current_location,
+            "node_id": current_node_id,
+            "focal_point": sub_name,
+        }
+
+    # kind == "architectural_room": Spawn or resolve persistent child ROOM node in world_nodes
+    pz, pp, _ = parse_tiered_location(current_location, scen_key, session_id=session_id)
+    new_loc = format_tiered_location_string(pz, pp, sub_name)
+    new_node_id = current_node_id
+
+    if session_id:
+        try:
+            # Resolve parent FACILITY node
+            nodes = db.get_session_world_nodes(session_id)
+            node_map = {n["node_id"]: n for n in nodes}
+            curr_node = node_map.get(current_node_id) if current_node_id else None
+            if not curr_node and current_location:
+                resolved_nid = db.resolve_node_id_from_location(session_id, current_location)
+                curr_node = node_map.get(resolved_nid) if resolved_nid else None
+
+            fac_id = None
+            cat = "academic"
+            if curr_node:
+                cat = curr_node.get("category") or "academic"
+                if curr_node.get("node_type") == "FACILITY":
+                    fac_id = curr_node["node_id"]
+                elif curr_node.get("node_type") == "ROOM" and curr_node.get("parent_id"):
+                    fac_id = curr_node["parent_id"]
+                elif curr_node.get("node_type") == "ZONE":
+                    fac_id = curr_node["node_id"]
+
+            room_slug = _slugify(f"{pp}_{sub_name}")
+            child_node_id = f"sub_dyn_{room_slug}"
+
+            # Check if child node already exists
+            existing_child = next(
+                (n for n in nodes if n.get("node_type") == "ROOM" and n.get("parent_id") == fac_id and n["name"].lower() == sub_name.lower()),
+                None,
+            )
+            if existing_child:
+                new_node_id = existing_child["node_id"]
+            else:
+                db.save_session_location(
+                    session_id=session_id,
+                    location_id=child_node_id,
+                    zone_name=pz,
+                    primary_name=pp,
+                    sub_name=sub_name,
+                    atmosphere="Enclosed interior chamber",
+                    is_dynamic=1,
+                )
+                if fac_id:
+                    db.save_world_node(
+                        session_id=session_id,
+                        node_id=child_node_id,
+                        parent_id=fac_id,
+                        name=sub_name,
+                        node_type="ROOM",
+                        category=cat,
+                        privacy_level="private",
+                        is_enclosed=1,
+                        is_transit_hub=0,
+                        access_tier="open",
+                        atmosphere="Enclosed interior chamber",
+                        is_dynamic=1,
+                    )
+                    db.save_world_edge(session_id, fac_id, child_node_id, travel_minutes=1, edge_type="internal", is_bidirectional=1)
+                new_node_id = child_node_id
+        except Exception:
+            pass
+
+    return {
+        "matched": True,
+        "kind": "architectural_room",
+        "location": new_loc,
+        "node_id": new_node_id,
+        "focal_point": None,
+    }
 
 
 from .hierarchy import (

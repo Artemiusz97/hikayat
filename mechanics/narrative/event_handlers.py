@@ -16,6 +16,14 @@ log = logging.getLogger("hikayat.event_handlers")
 def handle_location_changed(event: LocationChangedEvent):
     # This might trigger passive encounters, but for now we just log it or handle specific hooks.
     log.info(f"Session {event.session_id} party moved from {event.old_location} to {event.new_location}")
+    try:
+        from game_engine.quests import evaluate_quest_state_predicates, trigger_pending_retaliation_if_eligible
+        evaluate_quest_state_predicates(event.session_id, user_id=event.party_uids[0] if event.party_uids else None)
+        sess = db.get_session(event.session_id)
+        if sess:
+            trigger_pending_retaliation_if_eligible(event.session_id, event.new_location, session=sess)
+    except Exception as e:
+        log.warning(f"Error evaluating quest predicates on location changed: {e}")
 
 def handle_npc_spawned(event: NPCSpawnedEvent):
     db.upsert_lorebook_entity(
@@ -39,6 +47,14 @@ def handle_npc_status_changed(event: NPCStatusChangedEvent):
         name=event.name.strip(),
         status=event.status
     )
+    try:
+        from game_engine.quests import evaluate_quest_state_predicates
+        evaluate_quest_state_predicates(
+            event.session_id,
+            event_info={"type": "NPCStatusChanged", "name": event.name, "status": event.status}
+        )
+    except Exception as e:
+        log.warning(f"Error evaluating quest predicates on npc status changed: {e}")
 
 def handle_item_gifted(event: ItemGiftedEvent):
     # The gift is given, we remove from user and modify contact disposition
@@ -53,9 +69,19 @@ def handle_item_gifted(event: ItemGiftedEvent):
         character_id=char_id,
         delta_score=2,  # Gifting gives +2 disposition
     )
+    try:
+        from game_engine.quests import evaluate_quest_state_predicates
+        evaluate_quest_state_predicates(event.session_id, user_id=event.user_id)
+    except Exception as e:
+        log.warning(f"Error evaluating quest predicates on item gifted: {e}")
 
 def handle_item_gained(event: ItemGainedEvent):
     db.add_item(event.user_id, event.item_name, event.source, event.item_desc)
+    try:
+        from game_engine.quests import evaluate_quest_state_predicates
+        evaluate_quest_state_predicates(event.session_id, user_id=event.user_id)
+    except Exception as e:
+        log.warning(f"Error evaluating quest predicates on item gained: {e}")
 
 def handle_faction_leadership_changed(event: FactionLeadershipChangedEvent):
     db.update_faction_leadership_roster(event.session_id, event.faction_id, event.new_roster)

@@ -316,21 +316,45 @@
     "starting_hooks": [
       {
         "archetype": "hub_launchpad",
-        "hook": "in the lively campus courtyard beneath blooming cherry blossoms during the annual student club recruitment fair as flyers flutter",
-        "suggested_location": "{session_school} ➔ Central Courtyard ➔ Sakura Fountain",
-        "directive": "Open Hub Exploration: Bustling school grounds, club reps pitching memberships, student council presence, bulletin board, and open social choices."
+        "starting_minute": 420,
+        "hook": "at 07:00 AM in your sunlit bedroom as your morning alarm chimes, giving you time to get dressed in your uniform, check your smartphone messages, and prepare before heading to {session_school} for the 08:00 AM bell",
+        "suggested_location": "{session_residential} ➔ {session_player_house} ➔ Your Bedroom",
+        "directive": "Open Hub Exploration (07:00 AM Morning Prep): Establish crisp early morning atmosphere at home before school begins at 08:00 AM, checking smartphone notifications or family/neighbor interactions, and heading out toward campus."
+      },
+      {
+        "archetype": "hub_launchpad",
+        "starting_minute": 465,
+        "hook": "at 07:45 AM walking toward the bustling {session_school} main entrance gates and sakura-lined courtyard as commuting students stream onto campus and club representatives hand out morning flyers before the 08:00 AM bell",
+        "suggested_location": "{session_school} ➔ School Main Gates ➔ Front Gate Path",
+        "directive": "Open Hub Exploration (07:45 AM Campus Arrival): Establish lively morning commute atmosphere at the school entrance before the 08:00 AM first bell, chatting with arriving classmates, club reps pitching memberships, and heading inside."
+      },
+      {
+        "archetype": "hub_launchpad",
+        "starting_minute": 480,
+        "hook": "at 08:00 AM seated at your desk in {session_classroom} as the morning homeroom bell rings across {session_school} and classmates settle in while trading morning gossip",
+        "suggested_location": "{session_school} ➔ {session_classroom} ➔ {session_player_desk}",
+        "directive": "Open Hub Exploration (08:00 AM Homeroom Bell): Establish vibrant morning classroom atmosphere as first period begins at 08:00 AM, classmates whispering nearby, homeroom announcements, and open social/academic choices."
       },
       {
         "archetype": "in_media_res",
-        "hook": "in the 3F science wing hallway as an accidental chemical reaction triggers the fire alarm and students scramble past locked lab doors",
-        "suggested_location": "{session_school} ➔ 3F Science Wing ➔ Smoke-Filled Hallway",
-        "directive": "In Media Res: School commotion/crisis, teachers directing evacuation, trapped project or missing student, and quick tactical/social choices."
+        "starting_minute": 465,
+        "hook": "at 07:45 AM in the crowded entrance foyer and shoe lockers of {session_school} as a sudden morning commotion breaks out between the disciplinary committee and a cornered student just fifteen minutes before the 08:00 AM bell",
+        "suggested_location": "{session_school} ➔ Entrance Foyer & Shoe Lockers ➔ Main Entrance Lobby",
+        "directive": "In Media Res (07:45 AM Pre-Bell Commotion): Immediate morning campus tension at the shoe lockers before the 08:00 AM first bell, onlookers gathering, and urgent social or tactical choices to intervene, defuse, or investigate."
+      },
+      {
+        "archetype": "in_media_res",
+        "starting_minute": 480,
+        "hook": "at 08:00 AM in the 3F science wing hallway as the first-period bell rings and an accidental morning chemical reaction triggers the fire alarm outside the lab doors",
+        "suggested_location": "{session_school} ➔ Chemistry & Science Lab ➔ Lab Benches",
+        "directive": "In Media Res (08:00 AM Morning Class Crisis): School commotion/crisis at the 08:00 AM bell, teachers directing evacuation, trapped project or missing student, and quick tactical/social choices."
       },
       {
         "archetype": "delve_threshold",
-        "hook": "on the quiet school rooftop in the crisp morning air before the first bell as rumors of an old campus mystery echo in the breeze",
+        "starting_minute": 450,
+        "hook": "at 07:30 AM on the quiet school rooftop in the crisp morning air before the 08:00 AM first bell as rumors of an old campus mystery echo in the breeze",
         "suggested_location": "{session_school} ➔ School Rooftop ➔ Rooftop Benches",
-        "directive": "Delve Threshold: Solitary reflective threshold before morning classes, uncovering a hidden message or key behind the water tank, and deciding which campus mystery to pursue."
+        "directive": "Delve Threshold (07:30 AM Early Morning Campus): Solitary reflective threshold before 08:00 AM morning classes, uncovering a hidden message or key behind the water tank, and deciding which campus mystery to pursue."
       }
     ]
   },

@@ -12,14 +12,16 @@ import game_engine
 class TestFamilySyncAndDynamicRomance(unittest.TestCase):
     def setUp(self):
         db.init_db()
-        with db.get_conn() as conn:
-            conn.execute("DELETE FROM contacts")
-            conn.execute("DELETE FROM sessions")
+        self.session_ids = []
 
     def tearDown(self):
         with db.get_conn() as conn:
-            conn.execute("DELETE FROM contacts")
-            conn.execute("DELETE FROM sessions")
+            for sid in getattr(self, "session_ids", []):
+                conn.execute("DELETE FROM contacts WHERE session_id=?", (sid,))
+                conn.execute("DELETE FROM sessions WHERE id=?", (sid,))
+                conn.execute("DELETE FROM social_ties WHERE session_id=?", (sid,))
+                conn.execute("DELETE FROM social_persons WHERE session_id=?", (sid,))
+                conn.execute("DELETE FROM households WHERE session_id=?", (sid,))
 
     def test_romance_milestone_strictly_scoped_to_target_npc(self):
         """
@@ -27,6 +29,7 @@ class TestFamilySyncAndDynamicRomance(unittest.TestCase):
         into romantic interests even when they are present or mentioned in narrative text.
         """
         sess_id = db.create_session(host_user_id=1, mode="solo", capacity=1, verbosity="normal", dialogue_mode="balanced", image_gen_enabled=False, scenario="high_school_drama")
+        self.session_ids.append(sess_id)
         char_id = 101
 
         # 1. Create 3 contacts: Maya (platonic), Sofia (platonic), Zihan (platonic)
@@ -76,6 +79,7 @@ class TestFamilySyncAndDynamicRomance(unittest.TestCase):
         careers, statuses, and races) and have consistent sibling rosters.
         """
         sess_id = db.create_session(host_user_id=1, mode="solo", capacity=1, verbosity="normal", dialogue_mode="balanced", image_gen_enabled=False, scenario="high_school_drama")
+        self.session_ids.append(sess_id)
         char_id = 102
 
         db.upsert_contact(sess_id, "sofia_anderson", "Sofia Anderson", character_id=char_id,
@@ -117,6 +121,7 @@ class TestFamilySyncAndDynamicRomance(unittest.TestCase):
         Verify that relationship track can transition back and forth and dynamic mutations take effect.
         """
         sess_id = db.create_session(host_user_id=1, mode="solo", capacity=1, verbosity="normal", dialogue_mode="balanced", image_gen_enabled=False, scenario="high_school_drama")
+        self.session_ids.append(sess_id)
         char_id = 103
 
         # Start platonic
@@ -145,6 +150,7 @@ class TestFamilySyncAndDynamicRomance(unittest.TestCase):
         to romantic, do NOT overwrite background partners, and only an explicit confession can promote.
         """
         sess_id = db.create_session(host_user_id=1, mode="solo", capacity=1, verbosity="normal", dialogue_mode="balanced", image_gen_enabled=False, scenario="high_school_drama")
+        self.session_ids.append(sess_id)
         char_id = 104
 
         # 1. Setup a platonic contact with an established background partner

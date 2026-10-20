@@ -180,10 +180,30 @@ def get_all_starting_weapons() -> list[str]:
     return all_weapons or ["Runic Sword", "Arcane Staff", "Elven Bow", "Silver Dagger"]
 
 
+def is_tailed_race(race: str) -> bool:
+    r = str(race or "").strip().lower()
+    if not r:
+        return False
+    if r in ("human", "elf", "dwarf", "gnome", "halfling", "orc", "half-elf", "android", "synth", "cyborg", "clone"):
+        return False
+    tailed_keywords = (
+        "beast", "furry", "anthro", "hybrid", "tail", "cat", "dog", "wolf", "fox", "fennec",
+        "kitsune", "tiger", "lion", "cheetah", "leopard", "felid", "feline", "canid", "canine",
+        "rabbit", "bunny", "mouse", "rat", "dragon", "lizard", "reptil", "snake", "scaly"
+    )
+    return any(k in r for k in tailed_keywords)
+
+
 def get_starting_weapons(scenario: str | None = None) -> list[str]:
     weapons = load_starting_weapons()
     if not scenario or scenario == "all":
         return get_all_starting_weapons()
+    try:
+        from scenario_data import is_non_combat_scenario
+        if is_non_combat_scenario(scenario):
+            return []
+    except Exception:
+        pass
     if scenario in weapons:
         return weapons[scenario]
     mapped = TAG_TO_TEMPLATE_KEY.get(scenario)
@@ -225,7 +245,7 @@ def get_starter_gear_by_class(scenario: str = "fantasy", char_class: str = "", g
     gear_map = {}
     is_male = str(gender or "").strip().lower() == "male"
     is_female = str(gender or "").strip().lower() == "female"
-    is_humanoid_tailless = str(race or "").strip().lower() in ("human", "elf", "dwarf", "gnome", "halfling", "orc", "half-elf")
+    has_tail = is_tailed_race(race)
 
     for slot, entry in raw_gear.items():
         if entry and isinstance(entry, list) and len(entry) >= 3:
@@ -264,13 +284,27 @@ def get_starter_gear_by_class(scenario: str = "fantasy", char_class: str = "", g
                 if "slacks" in item_name.lower() and "skirt" not in item_name.lower() and "trench" not in item_name.lower():
                     pass
 
-            # Race-specific adjustments (no tail-slots for human/tailless species)
-            if is_humanoid_tailless and "tail-slotted" in item_name.lower():
-                item_name = item_name.replace("Tail-Slotted ", "").replace("tail-slotted ", "").replace("Tail-slotted ", "")
+            # Race-specific adjustments (tail-slots for tailed species, no tail-slots for tailless)
+            if has_tail:
+                if slot in ("Bottom", "Armor") and "tail" not in item_name.lower():
+                    item_name = f"Tail-Slotted {item_name}"
+            else:
+                if "tail-slotted" in item_name.lower():
+                    item_name = item_name.replace("Tail-Slotted ", "").replace("tail-slotted ", "").replace("Tail-slotted ", "")
 
             gear_map[slot] = (item_name, item_desc, cost)
         else:
             gear_map[slot] = None
+
+    try:
+        from scenario_data import is_non_combat_scenario
+        if is_non_combat_scenario(scenario):
+            gear_map["Weapon"] = None
+            gear_map["Shield"] = None
+            gear_map["Armor"] = None
+    except Exception:
+        pass
+
     return gear_map
 
 
@@ -607,7 +641,7 @@ def parse_equipment_metadata(item: dict) -> dict:
     return _parse(item)
 
 
-def reconcile_character_outcomes(char: dict, outcome: dict, is_non_combat: bool = False) -> dict:
+def reconcile_character_outcomes(char: dict, outcome: dict, is_non_combat: bool = False, allow_mp_loss: bool = True, allow_gold_loss: bool = True) -> dict:
     """Deterministically validates and bounds HP/MP/Gold deltas and status effects reported by LLM or engine."""
     max_hp = char.get("max_hp", derive_hp(char.get("end_", 1)))
     max_mp = char.get("max_mp", derive_mp(char.get("end_", 1)))
@@ -620,7 +654,11 @@ def reconcile_character_outcomes(char: dict, outcome: dict, is_non_combat: bool 
     if is_non_combat and hp_change < 0:
         hp_change = 0
     mp_change = int(outcome.get("mp_change", 0) or 0)
+    if is_non_combat and not allow_mp_loss and mp_change < 0:
+        mp_change = 0
     gold_change = int(outcome.get("gold_change", 0) or 0)
+    if is_non_combat and not allow_gold_loss and gold_change < 0:
+        gold_change = 0
 
     new_hp = max(0, min(max_hp, current_hp + hp_change))
     new_mp = max(0, min(max_mp, current_mp + mp_change))
@@ -635,6 +673,11 @@ def reconcile_character_outcomes(char: dict, outcome: dict, is_non_combat: bool 
         "actual_gold_delta": new_gold - current_gold,
     }
 
+
+ATTENDANCE_STATUS_TAGS = {
+    "present", "absent", "nearby", "here", "away", "in scene", "on stage",
+    "active partner", "bystander", "none", "null", "unknown"
+}
 
 def sanitize_status_effects(effects: list, max_words: int = 3, max_count: int = 4) -> list[str]:
     """Filters out bloated narrative status-effect logs and caps the list length.
@@ -659,6 +702,9 @@ def sanitize_status_effects(effects: list, max_words: int = 3, max_count: int = 
             continue
         # Reject entries that end in a period (sentence) or contain a comma (list)
         if s.endswith('.') or ',' in s or s in ("[]", "{}", '""', "''"):
+            continue
+        # Reject non-condition attendance or scene-presence tags
+        if s.lower() in ATTENDANCE_STATUS_TAGS:
             continue
         # Reject entries with more than max_words words (ignoring [N turns] or [N min] duration brackets)
         base_s = re.sub(r"\s*\[\d+\s*(?:turns?|min)\]", "", s, flags=re.IGNORECASE).strip()

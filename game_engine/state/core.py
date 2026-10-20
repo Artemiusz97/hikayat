@@ -74,6 +74,24 @@ def extract_scene_fields(
     else:
         npcs_arg = []
 
+    if (not partner_arg or partner_arg == "__NOOP__") and npcs_arg:
+        try:
+            party_arg = session.get("party") if isinstance(session, dict) else None
+            p_name = session.get("player_character", {}).get("name") if isinstance(session, dict) and isinstance(session.get("player_character"), dict) else None
+            combined_nar = (
+                str(data.get("outcome_narrative") or "") + "\n" +
+                str(next_narrative or "") + "\n" +
+                str(data.get("narrative") or "")
+            ).strip()
+            if combined_nar:
+                spk = game_engine.extract_speaking_npcs_from_narrative(
+                    combined_nar, npcs_arg, party=party_arg, player_name=p_name
+                )
+                if spk:
+                    partner_arg = spk[0] if len(spk) == 1 else spk
+        except Exception:
+            pass
+
     return normalized_choices, next_narrative, scene_title, partner_arg, npcs_arg
 
 def get_combined_narrative(outcome: dict) -> str:
@@ -108,430 +126,314 @@ def is_check_success(check_obj, default_if_none: bool = True) -> bool:
             return str(tier_val).lower() in ("success", "critical_success", "crit_success", "partial_success")
     return default_if_none
 
-def reconcile_narrative_leakage(outcome: dict, party: list, actions: list | None = None) -> dict:
-    """Post-LLM Audit Pass: scans outcome_narrative and next_narrative for
-    explicit transactions (gold, damage, items) that the LLM described in
-    prose but omitted from character_outcomes, then patches the outcome dict
-    in-memory before any DB writes occur.
-
-    Rules:
-    - Gold: Patches when gold_change == 0 and a clear numeric transaction
-      is mentioned in the narrative.
-    - Damage: Only patches on failed/crit_fail checks, when hp_change == 0,
-      and the narrative mentions a numeric damage figure.
-    - Items: Patches when item names (>= 4 chars) are mentioned as given/found
-      and are not already in items_gained, subject to a false-positive blocklist.
-    - Combat turns: Skipped entirely - combat is fully deterministic via
-      precompute_combat_turn/reconcile_combat_results and must not be touched.
+def resolve_pre_turn_vitals_and_resources(
+    session: dict,
+    party: list,
+    actions: list | None = None,
+) -> dict:
     """
-    # Safety coercion in case a Pydantic model slips through from a direct caller
-    if getattr(outcome, "model_dump", None):
-        outcome = outcome.model_dump(exclude_unset=False)
-    if not isinstance(outcome, dict):
-        return outcome
-    if actions is None:
-        actions = []
+    Deterministic Pre-Turn Vitals, Gold Spending, and Procedural Loot Engine.
+    Executes before calling the Narrator LLM so all resource mutations are locked in Python:
+      1. Deducts ActionCommand.gold_spent on successful check.
+      2. Rolls procedural loot from mechanics/combat/items/ when ActionCommand.triggers_loot_roll succeeds.
+      3. Applies bounded non-combat hazard HP loss (5% on fail, 10% on crit_fail) on failed physical checks
+         in combat-capable scenarios.
+    Returns:
+      {
+        "character_outcomes": list[dict],
+        "stage_directives": list[str],
+        "loot_items_rolled": list[str],
+      }
+    """
+    import scenario_data
+    from mechanics.combat import is_in_combat
 
-    # Never interfere with active combat turns - already deterministically resolved
-    is_combat = bool(
-        outcome.get("_combat_log") or
-        outcome.get("_enemy_attack_notice") or
-        game_engine.get_active_enemies(outcome)
-    )
-    if is_combat:
-        return outcome
+    if not actions:
+        return {"character_outcomes": [], "stage_directives": [], "loot_items_rolled": []}
 
-    narrative = get_combined_narrative(outcome)
-    if not narrative:
-        return outcome
+    if is_in_combat(session):
+        return {"character_outcomes": [], "stage_directives": [], "loot_items_rolled": []}
 
-    # Build list of party characters
     party_chars = []
-    for p in party:
+    for p in (party or []):
         char = p[0] if isinstance(p, (tuple, list)) else p
         if isinstance(char, dict):
             party_chars.append(char)
     if not party_chars:
-        return outcome
+        return {"character_outcomes": [], "stage_directives": [], "loot_items_rolled": []}
 
-    # Acting character is the first in party
     acting_char = party_chars[0]
     char_name = acting_char.get("name", "Hero")
+    char_level = int(acting_char.get("level", 1) or 1)
+    char_gold = int(acting_char.get("gold", 0) or 0)
+    max_hp = max(1, int(acting_char.get("max_hp", 100) or 100))
+    scen_key = session.get("scenario", "fantasy") if isinstance(session, dict) else "fantasy"
+    is_non_combat_scen = scenario_data.is_non_combat_scenario(scen_key)
 
-    # Find or create the character_outcome entry for the acting character
-    outcomes = outcome.get("character_outcomes") or []
-    co = None
-    for c in outcomes:
-        if isinstance(c, dict) and c.get("name", "").lower() == char_name.lower():
-            co = c
-            break
-    if co is None:
-        co = {
-            "name": char_name,
-            "hp_change": 0,
-            "mp_change": 0,
-            "gold_change": 0,
-            "items_gained": [],
-            "items_lost": [],
-            "status_effects": [],
-        }
-        outcome.setdefault("character_outcomes", []).append(co)
+    hp_delta = 0
+    gold_delta = 0
+    items_gained: list[str] = []
+    items_lost: list[str] = []
+    gifted_items: list[dict] = []
+    media_captured: list[dict] = []
+    status_effects: list[str] = []
+    stage_directives: list[str] = []
 
-    patched_fields = []
+    session_id = session.get("id") if isinstance(session, dict) else 0
+    user_id = acting_char.get("user_id") or 0
+    party_inv = (
+        party[0][1]
+        if (party and isinstance(party[0], (tuple, list)) and len(party[0]) > 1 and isinstance(party[0][1], list))
+        else (db.get_inventory(user_id) if user_id else [])
+    ) or []
 
-    # ---- 1. Gold Leakage Audit ----
-    if co.get("gold_change", 0) == 0:
-        gain_match = _GOLD_GAIN_RE.search(narrative)
-        loss_match = _GOLD_LOSS_RE.search(narrative)
-        if gain_match:
-            amount = min(int(gain_match.group(1)), _MAX_GOLD_LEAKAGE_PATCH)
-            co["gold_change"] = amount
-            patched_fields.append(f"gold_change=+{amount} ('{gain_match.group(0)}')")
-        elif loss_match:
-            amount = min(int(loss_match.group(1)), _MAX_GOLD_LEAKAGE_PATCH)
-            co["gold_change"] = -amount
-            patched_fields.append(f"gold_change=-{amount} ('{loss_match.group(0)}')")
-
-    # ---- 2. Non-Combat Damage Leakage Audit ----
-    # Only patch when the action failed - successes don't cause hazard damage
-    # Suppress damage patching if the action is social/conversational or scenario is non-combat
-    is_failed_action = any(
-        getattr(a.get("check"), "tier", "") in ("fail", "crit_fail")
-        for a in actions
-    )
-    import scenario_data
     from mechanics.social.intimate_excitement import is_intimate_action_label
-    from mechanics.social.physical_state import is_erotic_intimate_contact
-    _phys_upd = (outcome.get("physical_updates") if isinstance(outcome, dict) else None) or {}
-    is_social_or_non_combat = (
-        any(
-            str(a.get("action_category") or "").lower() in (
-                "dialogue", "disclosure_inquiry", "affection", "social_invite", "romantic_confession", "party_recruit"
-            )
-            or is_intimate_action_label(str(a.get("label") or ""))
-            for a in actions
-        )
-        or is_erotic_intimate_contact(str(_phys_upd.get("intimate_contact", "")))
-        or (outcome.get("scenario") and scenario_data.is_non_combat_scenario(outcome.get("scenario")))
-    )
-    if is_failed_action and not is_social_or_non_combat and co.get("hp_change", 0) == 0:
-        dmg_match = _DAMAGE_RE.search(narrative)
-        if dmg_match:
-            dmg = int(dmg_match.group(1))
-            if 1 <= dmg <= 200:  # Sanity bounds: ignore implausible values
-                co["hp_change"] = -dmg
-                patched_fields.append(f"hp_change=-{dmg} ('{dmg_match.group(0)}')")
+    from mechanics.narrative.intent import classify_action_intent, IntentCategory, IntentContext
+    from mechanics.system.phone import scenario_has_smartphone
 
-    # ---- 3. Item Grant Leakage Audit ----
-    existing_gained_lower = [i.lower() for i in (co.get("items_gained") or [])]
-    for raw_item in _ITEM_GRANT_RE.findall(narrative):
-        clean = raw_item.strip().strip("'\"").title()
-        clean_lower = clean.lower()
+    for act in actions:
+        if not isinstance(act, dict):
+            continue
+        chk = act.get("check")
+        succeeded = is_check_success(chk, default_if_none=True)
+        tier = str(
+            getattr(chk, "tier", None)
+            or (chk.get("tier") if isinstance(chk, dict) else None)
+            or ("success" if succeeded else "fail")
+        ).lower()
+        stat = str(act.get("stat") or "NONE").upper()
+        intent = str(act.get("intent") or act.get("action_category") or "").lower()
+        lbl = str(act.get("label") or act.get("action") or "")
+        lbl_low = lbl.lower()
+
+        is_social_act = (
+            intent in ("dialogue", "disclosure_inquiry", "affection", "social_invite", "romantic_confession", "party_recruit", "social", "intimate")
+            or stat == "CHA"
+            or is_intimate_action_label(lbl)
+        )
+
+        # 1. Gold Spending
+        raw_gold_spent = int(act.get("gold_spent") or 0)
+        if raw_gold_spent > 0 and succeeded:
+            actual_spend = min(char_gold, raw_gold_spent) if char_gold > 0 else raw_gold_spent
+            if actual_spend > 0:
+                if not act.get("_gold_already_deducted"):
+                    gold_delta -= actual_spend
+                stage_directives.append(
+                    f"[STAGE DIRECTION — GOLD TRANSACTION]: {char_name} spent {actual_spend} Gold."
+                )
+        if act.get("_gold_shortfall_note"):
+            stage_directives.append(str(act["_gold_shortfall_note"]))
+
+        # 2. Procedural Loot Roll OR Scene Prop / Foraging Pickup
+        if bool(act.get("triggers_loot_roll")) and succeeded and not is_social_act:
+            try:
+                from mechanics.combat.items.consumables.generators import generate_random_consumable
+                rolled_item = generate_random_consumable(scenario=scen_key, party_level=char_level)
+                item_str = rolled_item.get("formatted_string") or rolled_item.get("name")
+                item_display = rolled_item.get("name") or "Supply Cache"
+                if item_str:
+                    items_gained.append(item_str)
+                    stage_directives.append(
+                        f"[STAGE DIRECTION — LOOT DISCOVERED]: {char_name}'s search succeeded and uncovered '{item_display}'. "
+                        f"Narrate finding '{item_display}' in `outcome_narrative`."
+                    )
+            except Exception:
+                pass
+        elif succeeded and not is_social_act and any(
+            kw in lbl_low for kw in ("pick up", "take the", "grab the", "collect the", "gather ", "forage ", "harvest ")
+        ):
+            # Check if picking up a tracked scene prop or dropped item
+            phys_st = (session.get("physical_state") if isinstance(session, dict) else None) or (
+                db.get_session_physical_state(session_id) if session_id else None
+            ) or {}
+            props_map = phys_st.get("props") if isinstance(phys_st, dict) else {}
+            dropped_list = phys_st.get("dropped_items") if isinstance(phys_st, dict) else []
+            matched_prop = None
+            if isinstance(props_map, dict):
+                for pk in list(props_map.keys()):
+                    if pk and pk.lower() in lbl_low:
+                        matched_prop = pk
+                        props_map.pop(pk, None)
+                        break
+            if not matched_prop and isinstance(dropped_list, list):
+                for di in list(dropped_list):
+                    if di and str(di).lower() in lbl_low:
+                        matched_prop = str(di)
+                        dropped_list.remove(di)
+                        break
+            if matched_prop and matched_prop not in items_gained:
+                items_gained.append(matched_prop)
+                if isinstance(session, dict) and isinstance(phys_st, dict):
+                    session["physical_state"] = phys_st
+                    if session_id:
+                        try:
+                            db.update_session_physical_state(session_id, phys_st)
+                        except Exception:
+                            pass
+                stage_directives.append(
+                    f"[STAGE DIRECTION — ITEM ACQUIRED]: {char_name} picked up '{matched_prop}'. Narrate acquiring it."
+                )
+            elif any(kw in lbl_low for kw in ("forage ", "harvest ")) and not items_gained:
+                try:
+                    from mechanics.combat.items.consumables.generators import generate_random_consumable
+                    rolled_item = generate_random_consumable(scenario=scen_key, party_level=char_level)
+                    item_display = rolled_item.get("name") or "Foraged Supplies"
+                    if item_display:
+                        items_gained.append(item_display)
+                        stage_directives.append(
+                            f"[STAGE DIRECTION — FORAGING SUCCESS]: {char_name} foraged '{item_display}'. Narrate gathering it."
+                        )
+                except Exception:
+                    pass
+
+        # 3. Pre-Turn Gift Offer Validation & Consumption
+        if succeeded and lbl:
+            try:
+                present_npc_names = [
+                    (n.get("name") if isinstance(n, dict) else str(n))
+                    for n in (session.get("current_npcs") or [])
+                    if n
+                ] if isinstance(session, dict) else []
+                ictx = IntentContext(
+                    current_zone=session.get("current_location", "") if isinstance(session, dict) else "",
+                    present_npcs=present_npc_names,
+                    scenario=scen_key,
+                )
+                parsed_intent = classify_action_intent(lbl, context=ictx)
+                if parsed_intent.category == IntentCategory.GIFT_OFFER and party_inv:
+                    gift_cand = (parsed_intent.sub_target or parsed_intent.metadata.get("item_name", "") or "").strip()
+                    if gift_cand and gift_cand.lower() not in ("gift", "present"):
+                        for inv_it in party_inv:
+                            it_name = str(inv_it.get("name", "")).strip()
+                            if it_name and (gift_cand.lower() in it_name.lower() or it_name.lower() in gift_cand.lower()):
+                                target_recipient = (
+                                    parsed_intent.target_entity
+                                    or act.get("target_npc")
+                                    or (session.get("dialogue_partner") if isinstance(session, dict) else None)
+                                    or "NPC"
+                                )
+                                gifted_items.append({
+                                    "user_id": user_id,
+                                    "npc_name": target_recipient,
+                                    "item_name": it_name,
+                                })
+                                stage_directives.append(
+                                    f"[STAGE DIRECTION — GIFT PRESENTED]: {char_name} gifted '{it_name}' from their inventory to {target_recipient}. Narrate {target_recipient} receiving and reacting to '{it_name}'."
+                                )
+                                break
+                elif parsed_intent.category == IntentCategory.MEDIA_CAPTURE and scenario_has_smartphone(scen_key):
+                    media_type = parsed_intent.metadata.get("media_type", "photo")
+                    subject = (
+                        parsed_intent.target_entity
+                        or act.get("target_npc")
+                        or (session.get("dialogue_partner") if isinstance(session, dict) else None)
+                        or "Scene"
+                    )
+                    media_captured.append({
+                        "user_id": user_id,
+                        "media_type": media_type,
+                        "subject": subject,
+                        "location": session.get("current_location", "Local Area") if isinstance(session, dict) else "Local Area",
+                    })
+                    stage_directives.append(
+                        f"[STAGE DIRECTION — MEDIA CAPTURED]: {char_name} captured a {media_type} of {subject} on their smartphone (saved to Photo Vault). Narrate taking the {media_type}."
+                    )
+            except Exception:
+                pass
+
+        # 4. Non-Combat Physical Hazard Damage on Failed STR/AGI/END Checks
         if (
-            len(clean) >= 4 and
-            clean_lower not in _ITEM_BLOCKLIST and
-            not any(block == w for w in clean_lower.split() for block in _ITEM_BLOCKLIST) and
-            clean_lower not in existing_gained_lower
+            not succeeded
+            and not is_non_combat_scen
+            and not is_social_act
+            and stat in ("STR", "AGI", "END")
+            and tier in ("fail", "failure", "crit_fail", "critical_failure")
         ):
-            co.setdefault("items_gained", []).append(clean)
-            existing_gained_lower.append(clean_lower)
-            patched_fields.append(f"items_gained='{clean}'")
+            pct = 0.10 if "crit" in tier else 0.05
+            dmg = max(1, min(25, int(round(max_hp * pct))))
+            hp_delta -= dmg
+            stage_directives.append(
+                f"[STAGE DIRECTION — HAZARD CONSEQUENCE]: {char_name} suffered -{dmg} HP from the failed {stat} attempt. "
+                f"Narrate the physical scrape or strain."
+            )
 
-    if patched_fields:
-        log.info(
-            "[LeakageGuard] Patched '%s' outcome: %s",
-            char_name, " | ".join(patched_fields)
-        )
+    outcomes = []
+    if hp_delta != 0 or gold_delta != 0 or items_gained or items_lost or status_effects:
+        outcomes.append({
+            "name": char_name,
+            "hp_change": hp_delta,
+            "mp_change": 0,
+            "gold_change": gold_delta,
+            "items_gained": items_gained,
+            "items_lost": items_lost,
+            "status_effects": status_effects,
+        })
 
-    return outcome
+    return {
+        "character_outcomes": outcomes,
+        "stage_directives": stage_directives,
+        "loot_items_rolled": items_gained,
+        "gifted_items": gifted_items,
+        "media_captured": media_captured,
+    }
 
-from mechanics.world.locations import extract_movement_destination
-
-def should_trigger_state_arbiter_pass(session: dict, actions: list, party: list = None) -> bool:
-    """Evaluate whether this turn requires a high-reliability State Arbiter Pass (Pass 1).
-    Routinely bypasses standard/routine turns to preserve fast latency and minimize token costs.
-    """
-    if not ENABLE_DYNAMIC_MULTIPASS:
-        return False
-
-    scen_key = session.get("scenario", "fantasy")
-    cur_loc = session.get("current_location", "")
-
-    # 1. Critical Failures or catastrophic fail-forward checks
-    for a in actions:
-        chk = a.get("check")
-        if chk and getattr(chk, "tier", "") == "crit_fail":
-            return True
-
-    # 2. Zone/Establishment travel or movement transitions
-    for a in actions:
-        lbl = a.get("label", "")
-        dest = extract_movement_destination(lbl, session.get("id", 0), current_zone=cur_loc, scen_key=scen_key)
-        if dest:
-            return True
-
-    # 3. Multi-NPC summits (3+ NPCs in room)
-    npcs = session.get("current_npcs") or []
-    if len(npcs) >= 3:
-        return True
-
-    # 4. Dialogue exits or major conversational departures
-    from mechanics.world.mobility import get_session_dialogue_partners
-    partners = get_session_dialogue_partners(session)
-    if partners:
-        from mechanics.narrative.intent import is_conversational_exit
-        for a in actions:
-            lbl = str(a.get("label") or "")
-            if is_conversational_exit(lbl):
-                return True
-
-    # 5. Pending story quest milestones or boss transitions
-    if session.get("pending_story_milestone") or session.get("in_boss_phase_transition"):
-        return True
-
-    return False
-
-async def execute_state_arbiter_pass(session: dict, party: list, actions: list, actions_text: str = "") -> dict | None:
-    """Pass 1: Micro-State Arbiter.
-    Quickly resolves mechanical state deltas, entity presence, and dramatic consequences.
-    Uses LLM_UTILITY_MODEL and LLM_PASS1_TIMEOUT. On any timeout or error, returns None for fallback.
-    """
-    if not ENABLE_DYNAMIC_MULTIPASS:
-        return None
-
-    arbiter_system_prompt = (
-        "You are the State Arbiter for the Hikayat RPG engine. Your ONLY job is to evaluate the mechanical and dramatic state transitions for this turn.\n"
-        "Be concise, logical, and strictly adhere to check tiers:\n"
-        "- 'Critical Failure' / 'Failure': Enforce FAIL-FORWARD complications (loss, traps, alarms, ambushes). In non-combat/social scenes, NEVER deduct HP (hp_change must be 0); enforce relationship loss, awkwardness, embarrassment, or NPC tension.\n"
-        "- 'Success' / 'Critical Success': Enforce clean progress, discoveries, or advantages.\n"
-        "- Track NPC departures: if an NPC leaves, walks away, or says goodbye, list them in departed_characters.\n"
-        f"Respond with JSON matching this exact structure:\n{STATE_ARBITER_SCHEMA}"
-    )
-
-    cur_npcs = [game_engine._get_npc_name(n) for n in (session.get("current_npcs") or []) if n]
-    
-    # Check for active commitments involving current NPCs to allow the arbiter to resolve them
-    from db.memory import get_active_commitments
-    active_commitments = get_active_commitments(session.get("id"))
-    relevant_commitments = []
-    for c in active_commitments:
-        # Include if the target is in the room or it's a general promise to someone present
-        if (c["target_entity"] in cur_npcs or c["source_entity"] in cur_npcs or 
-            c["target_entity"].lower() == "player" or c["source_entity"].lower() == "player"):
-            relevant_commitments.append(f"ID {c['id']}: [{c['commitment_type'].upper()}] {c['source_entity']} -> {c['target_entity']} : {c['description']}")
-    
-    commitment_block = f"ACTIVE COMMITMENTS:\n" + "\n".join(relevant_commitments) if relevant_commitments else "ACTIVE COMMITMENTS: None"
-
-    from mechanics.social.physical_state import build_physical_prompt_block
-    phys_prompt = build_physical_prompt_block(
-        session, party,
-        is_combat=bool(game_engine.get_active_enemies(session)),
-        is_nsfw=is_nsfw_scenario(session.get("scenario")),
-        actions=actions
-    )
-
-    arbiter_user_prompt = (
-        f"SCENARIO: {session.get('scenario', 'fantasy')}\n"
-        f"LOCATION: {session.get('current_location', 'Unknown')}\n"
-        f"PARTY:\n{game_engine._party_sheet_text(party)}\n"
-        f"CURRENT NPCS IN ROOM: {cur_npcs}\n"
-        f"PHYSICAL CONTINUITY ANCHOR:\n{phys_prompt}\n\n"
-        f"{commitment_block}\n"
-        f"ACTIONS TAKEN:\n{actions_text}\n"
-        "Evaluate the mechanical state changes and output ONLY the JSON object. Check if any ACTIVE COMMITMENTS were 'fulfilled_commitments' or 'broken_commitments' (output their integer IDs)."
-    )
-
-    try:
-        result = await game_engine.call_llm_json(
-            arbiter_system_prompt,
-            arbiter_user_prompt,
-            temperature=0.2,
-            max_tokens=512,
-            retries=0,
-            is_nsfw=uses_nsfw_model(session.get("scenario")),
-            use_utility=True,
-            timeout=LLM_PASS1_TIMEOUT
-        )
-        if isinstance(result, dict) and (
-            result.get("director_reasoning") or 
-            result.get("character_outcomes") or 
-            result.get("departed_characters") or
-            result.get("fail_forward_complication")
-        ):
-            return result
-    except Exception as e:
-        log.warning("State Arbiter Pass 1 timed out or encountered error: %s. Collapsing to code fallback.", e)
-
-    return None
-
-def should_trigger_social_arbiter_pass(session: dict, actions: list, party: list, pass2_result: dict) -> bool:
-    """Evaluate whether Pass 3 is needed for this turn."""
-    if not ENABLE_DYNAMIC_MULTIPASS:
-        return False
-        
-    # Trigger if NPCs are present before or after the turn
-    if session.get("current_npcs") or pass2_result.get("npcs_present") or pass2_result.get("npc_departures"):
-        return True
-        
-    # Trigger if action has conversational intent
-    for a in actions:
-        lbl = str(a.get("label") or "").lower()
-        if any(w in lbl for w in ("talk", "speak", "ask", "greet", "tell", "say", "flirt")):
-            return True
-            
-    # Trigger if any quests are active in the session
-    if session.get("story_quests") or session.get("side_quests"):
-        return True
-        
-    # Trigger if narrative introduces someone
-    nar = get_combined_narrative(pass2_result).lower()
-    if any(w in nar for w in ("approaches", "stranger", "arrives", "appears", "meets")):
-        return True
-        
-    return False
-
-async def execute_social_arbiter_pass(session: dict, party: list, actions: list, actions_text: str, pass2_result: dict) -> dict | None:
-    """Pass 3: Post-Turn Social & World Arbiter.
-    Offloads relationships, lore generation, and deep profile processing from the main narrative loop.
-    Uses LLM_UTILITY_MODEL.
-    """
-    if not ENABLE_DYNAMIC_MULTIPASS:
-        return None
-
-    from game_engine.core import SOCIAL_ARBITER_SCHEMA
-    from models.llm_schemas import SocialArbiterOutcome
-
-    arbiter_system_prompt = (
-        "You are the Social & World Arbiter for the Hikayat RPG engine. Your ONLY job is to read the latest narrative outcome and "
-        "extract the mechanical updates for relationships, new character generation, quest updates, and NPC memories.\n"
-        "Be concise, logical, and STRICTLY adhere to the JSON schema.\n"
-        f"Respond with JSON matching this exact structure:\n{SOCIAL_ARBITER_SCHEMA}"
-    )
-
-    cur_npcs = [game_engine._get_npc_name(n) for n in (pass2_result.get("npcs_present") or session.get("current_npcs") or []) if n]
-    pass2_narrative = get_combined_narrative(pass2_result)
-
-    npc_profiles_lines = []
-    first_char = party[0][0] if (party and party[0] and isinstance(party[0], (list, tuple)) and isinstance(party[0][0], dict)) else (party[0] if (party and isinstance(party[0], dict)) else {})
-    first_char_id = first_char.get("id") or first_char.get("user_id") or 0
-    import db
-    session_id_val = session.get("id")
-    for n_name in cur_npcs:
-        c = db.get_contact(session_id_val, n_name, first_char_id) if session_id_val else None
-        if c:
-            traits_str = ", ".join(c.get("unlocked_traits") or c.get("traits") or [])
-            prefs_str = ", ".join(c.get("preferences") or [])
-            app = c.get("appearance") or {}
-            profile_parts = [f"- {n_name} (Track: {c.get('track', 'platonic')}, Score: {c.get('relationship_score', 0)})"]
-            if traits_str:
-                profile_parts.append(f"  Traits: {traits_str}")
-            if prefs_str:
-                profile_parts.append(f"  Preferences: {prefs_str}")
-            if app.get("intimate_demeanor"):
-                profile_parts.append(f"  Demeanor: {app.get('intimate_demeanor')}")
-            if app.get("intimate_dynamic"):
-                profile_parts.append(f"  Dynamic: {app.get('intimate_dynamic')}")
-            if app.get("turn_ons"):
-                profile_parts.append(f"  Turn-ons: {app.get('turn_ons')}")
-            if app.get("turn_offs"):
-                profile_parts.append(f"  Turn-offs: {app.get('turn_offs')}")
-            npc_profiles_lines.append("\n".join(profile_parts))
-
-    npc_profiles_block = "\n".join(npc_profiles_lines) if npc_profiles_lines else "None recorded"
-
-    arbiter_user_prompt = (
-        f"SCENARIO: {session.get('scenario', 'fantasy')}\n"
-        f"PARTY:\n{game_engine._party_sheet_text(party)}\n"
-        f"CURRENT NPCS IN ROOM: {cur_npcs}\n"
-        f"KNOWN SOCIAL PROFILES:\n{npc_profiles_block}\n"
-        f"ACTIONS TAKEN:\n{actions_text}\n"
-        f"NARRATIVE OUTCOME:\n{pass2_narrative}\n"
-        "Extract the social and world state changes implied by the narrative and output ONLY the JSON object."
-    )
-
-    try:
-        # We give it more tokens since it might generate deep profiles and quest updates
-        result = await game_engine.call_llm_json(
-            arbiter_system_prompt,
-            arbiter_user_prompt,
-            temperature=0.2,
-            max_tokens=2048,
-            retries=0,
-            is_nsfw=uses_nsfw_model(session.get("scenario")),
-            use_utility=True,
-            timeout=20.0,
-            response_model=SocialArbiterOutcome
-        )
-        if getattr(result, "model_dump", None):
-            result = result.model_dump(exclude_unset=False)
-        if isinstance(result, dict):
-            return result
-    except Exception as e:
-        log.warning("Social Arbiter Pass 3 timed out or encountered error: %s", e)
-
-    return None
 
 def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict | None = None,
-                    actions: list | None = None) -> dict:
+                  actions: list | None = None) -> dict:
+    """Returns {user_id: [item_name, ...]} -- every item each character gained
+    this turn, in the order the LLM listed them (duplicates preserved, so a
+    caller can count "(xN)" for multiple copies of the same item). A user
+    with no gains this turn is simply absent from the dict. This is purely
+    additive: existing callers that ignore the return value are unaffected.
+    """
+    # Coerce Pydantic model to dict so all downstream .get() / [] calls work
+    if getattr(outcome, "model_dump", None):
+        outcome = outcome.model_dump(exclude_unset=False)
+    if mp_already_spent is None:
+        mp_already_spent = {}
+    if actions is None:
+        actions = []
   
-      """Returns {user_id: [item_name, ...]} -- every item each character gained
-      this turn, in the order the LLM listed them (duplicates preserved, so a
-      caller can count "(xN)" for multiple copies of the same item). A user
-      with no gains this turn is simply absent from the dict. This is purely
-      additive: existing callers that ignore the return value are unaffected.
-      """
-      # Coerce Pydantic model to dict so all downstream .get() / [] calls work
-      if getattr(outcome, "model_dump", None):
-          outcome = outcome.model_dump(exclude_unset=False)
-      if mp_already_spent is None:
-          mp_already_spent = {}
-      if actions is None:
-          actions = []
-  
-      # Post-LLM Audit: patch any gold/damage/item transactions the LLM described
-      # in narrative prose but omitted from character_outcomes. Runs before any DB writes.
-      outcome = reconcile_narrative_leakage(outcome, party, actions)
-  
-  
-      with db.UnitOfWork():
-          party_uids = [char["user_id"] for char, _ in party]
-          session = db.get_session(session_id)
-          scen_key_curr = session.get("scenario", "fantasy") if session else "fantasy"
-          game_engine._sanitize_outcome_person_names(outcome, session_id, scen_key_curr)
-  
-          items_gained_by_user: dict = {}
-          _reduce_quests_and_waypoints(session_id, session, party_uids, outcome, actions, items_gained_by_user)
-          scen_key = session.get("scenario", "fantasy") if session else "fantasy"
+    with db.UnitOfWork():
+        party_uids = [char["user_id"] for char, _ in party]
+        session = db.get_session(session_id)
+        scen_key_curr = session.get("scenario", "fantasy") if session else "fantasy"
+        game_engine._sanitize_outcome_person_names(outcome, session_id, scen_key_curr)
 
-          is_combat = bool(outcome and (outcome.get("_combat_log") or outcome.get("_enemy_attack_notice") or game_engine.get_active_enemies(outcome)))
-          first_char_id = party[0][0]["id"] if party else 0
-          first_char_name = party[0][0].get("name", "Player") if party else "Player"
-          _reduce_vitals_and_inventory(session_id, session, party, outcome, mp_already_spent, scen_key, is_combat, items_gained_by_user)
-          _reduce_media_capture(session_id, session, party, outcome, actions, scen_key, items_gained_by_user)
-          _reduce_entities_and_gifts(session_id, session, outcome, party, actions, is_combat, scen_key)
-          _reduce_social_and_milestones(session_id, session, party, outcome, actions, scen_key, items_gained_by_user, first_char_id, first_char_name)
-          _reduce_factions(session_id, session, outcome, party, first_char_id)
-  
-          _reduce_deterministic_waypoints(session_id, session, outcome, party_uids, actions)
-          _reduce_physical_state_and_memories(session_id, session, outcome, party, scen_key, actions)
-      # ── Background Digest Trigger ────────────────────────────────────────────
-      # Schedule a non-blocking arc digest if an arc boundary was crossed this
-      # turn (zone travel, dialogue exit, sub-quest completion, or history full).
-      # This runs AFTER all DB writes so the digest captures a fully-committed state.
-      try:
-          session_for_digest = db.get_session(session_id)
-          if session_for_digest:
-              from mechanics.system.memory.digest import fire_digest_if_needed
-              fire_digest_if_needed(
-                  session=session_for_digest,
-                  actions=actions or [],
-                  outcome=outcome,
-                  history_to_archive=session_for_digest.get("history") or [],
-              )
-      except Exception:
-          pass  # digest is best-effort - never block the turn response
-  
-      return items_gained_by_user
+        items_gained_by_user: dict = {}
+        _reduce_quests_and_waypoints(session_id, session, party_uids, outcome, actions, items_gained_by_user)
+        scen_key = session.get("scenario", "fantasy") if session else "fantasy"
+
+        is_combat = bool(outcome and (outcome.get("_combat_log") or outcome.get("_enemy_attack_notice") or game_engine.get_active_enemies(outcome)))
+        first_char_id = party[0][0]["id"] if party else 0
+        first_char_name = party[0][0].get("name", "Player") if party else "Player"
+        _reduce_vitals_and_inventory(session_id, session, party, outcome, mp_already_spent, scen_key, is_combat, items_gained_by_user)
+        _reduce_media_capture(session_id, session, party, outcome, actions, scen_key, items_gained_by_user)
+        _reduce_entities_and_gifts(session_id, session, outcome, party, actions, is_combat, scen_key)
+        _reduce_social_and_milestones(session_id, session, party, outcome, actions, scen_key, items_gained_by_user, first_char_id, first_char_name)
+        _reduce_factions(session_id, session, outcome, party, first_char_id)
+
+        _reduce_deterministic_waypoints(session_id, session, outcome, party_uids, actions)
+        _reduce_physical_state_and_memories(session_id, session, outcome, party, scen_key, actions)
+    # ── Background Digest Trigger ────────────────────────────────────────────
+    # Schedule a non-blocking arc digest if an arc boundary was crossed this
+    # turn (zone travel, dialogue exit, sub-quest completion, or history full).
+    # This runs AFTER all DB writes so the digest captures a fully-committed state.
+    try:
+        session_for_digest = db.get_session(session_id)
+        if session_for_digest:
+            from mechanics.system.memory.digest import fire_digest_if_needed
+            fire_digest_if_needed(
+                session=session_for_digest,
+                actions=actions or [],
+                outcome=outcome,
+                history_to_archive=session_for_digest.get("history") or [],
+            )
+    except Exception:
+        pass  # digest is best-effort - never block the turn response
+
+    return items_gained_by_user
 
 def push_history(history: list, entry: str, limit: int | None = None) -> list:
     """

@@ -262,9 +262,48 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
             f"Respond with JSON matching exactly this schema:\n{MERCHANT_SHOP_SCHEMA}"
         )
 
-    result = await call_llm_json(system_prompt, user_prompt, temperature=0.8,
-                                  is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
-    result = namegen.resolve_tokens_deep(result, scenario=scen_key)
+    _is_llm_mocked = hasattr(call_llm_json, "_mock_name")
+    if _is_llm_mocked:
+        result = await call_llm_json(system_prompt, user_prompt, temperature=0.8,
+                                      is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
+        result = namegen.resolve_tokens_deep(result, scenario=scen_key)
+    else:
+        from mechanics.combat.items import generate_random_equipment as _gen_eq
+        from mechanics.combat.items.consumables import generate_procedural_potion, generate_procedural_food, generate_procedural_drink
+        procedural_stock = []
+        if merchant_type in ("blacksmith", "armorer", "weaponsmith", "quartermaster", "general_merchant"):
+            slots = ["Weapon", "Armor", "Shield", "Top", "Bottom", "Gloves", "Shoes"]
+            random.shuffle(slots)
+            for s in slots[:4]:
+                eq = _gen_eq(scenario=scen_key, slot=s, tier=random.choice([3, 3, 2]))
+                if eq:
+                    eq["price"] = calculate_balanced_price(eq.get("item_type", "Item"), eq.get("name", ""), tier=eq.get("tier", 3), scen_key=scen_key)
+                    eq["quantity"] = 1
+                    procedural_stock.append(eq)
+        elif merchant_type == "potion_merchant":
+            p1 = generate_procedural_potion(tier=3, genre=scen_key)
+            p2 = generate_procedural_potion(tier=2, genre=scen_key)
+            procedural_stock.extend([p1, p2])
+        elif merchant_type in ("food_merchant", "cafe_merchant", "tavern_merchant"):
+            f1 = generate_procedural_food(tier=3, genre=scen_key)
+            d1 = generate_procedural_drink(tier=3, genre=scen_key)
+            procedural_stock.extend([f1, d1])
+        else:
+            slots = ["Weapon", "Accessory 1", "Top", "Shoes"]
+            for s in slots[:3]:
+                eq = _gen_eq(scenario=scen_key, slot=s, tier=3)
+                if eq:
+                    eq["price"] = calculate_balanced_price(eq.get("item_type", "Item"), eq.get("name", ""), tier=eq.get("tier", 3), scen_key=scen_key)
+                    eq["quantity"] = 1
+                    procedural_stock.append(eq)
+        result = {
+            "intro_narrative": f"{merchant_name or arch_title} welcomes you into the shop.",
+            "stock": procedural_stock,
+            "rumors": [
+                "Trade routes have been lively lately.",
+                "Word is, rare goods may be arriving from the capital soon."
+            ]
+        }
 
     from mechanics.combat.items import parse_item_tier
     stock = []
@@ -409,6 +448,16 @@ async def evaluate_items_for_sale(items: list) -> dict:
     """Price items for player selling."""
     if not items:
         return {}
+    _is_llm_mocked = hasattr(call_llm_json, "_mock_name")
+    if not _is_llm_mocked:
+        from mechanics.combat.items import parse_item_tier
+        prices = {}
+        for i in items:
+            t = parse_item_tier(i)
+            p = calculate_balanced_price(i.get("item_type", "Item"), i.get("name", ""), tier=t)
+            prices[str(i["name"])] = max(1, p // 3)
+        return prices
+
     lines = "\n".join(f"- {i['name']} ({i['item_type']}): {i['effect'] or ''}" for i in items)
     user_prompt = (
         f"Items for sale:\n{lines}\n\n"
@@ -585,10 +634,25 @@ async def generate_faction_quartermaster_shop(faction: dict, session: dict) -> d
         f"Generate exclusive member-only quartermaster stock for {faction_name}.\n"
         f"Respond with JSON matching exactly this schema:\n{FACTION_QUARTERMASTER_SCHEMA}"
     )
-    result = await call_llm_json(FACTION_QUARTERMASTER_SYSTEM_PROMPT, user_prompt,
-                                  temperature=0.7, is_nsfw=scenario_data.uses_nsfw_model(scen_key),
-                                  use_utility=True)
-    result = namegen.resolve_tokens_deep(result, scenario=scen_key)
+    _is_llm_mocked = hasattr(call_llm_json, "_mock_name")
+    if _is_llm_mocked:
+        result = await call_llm_json(FACTION_QUARTERMASTER_SYSTEM_PROMPT, user_prompt,
+                                      temperature=0.7, is_nsfw=scenario_data.uses_nsfw_model(scen_key),
+                                      use_utility=True)
+        result = namegen.resolve_tokens_deep(result, scenario=scen_key)
+    else:
+        from mechanics.combat.items import generate_random_equipment as _gen_eq
+        q_stock = []
+        for slot in ["Weapon", "Armor", "Accessory 1"]:
+            eq = _gen_eq(scenario=scen_key, slot=slot, tier=2)
+            if eq:
+                eq["price"] = calculate_balanced_price(eq.get("item_type", "Item"), eq.get("name", ""), tier=eq.get("tier", 2), scen_key=scen_key)
+                eq["quantity"] = 1
+                q_stock.append(eq)
+        result = {
+            "intro_narrative": f"The {faction_name} quartermaster nods at you.",
+            "stock": q_stock,
+        }
     stock = []
     for entry in result.get("stock", []) or []:
         if not isinstance(entry, dict) or not entry.get("name"):

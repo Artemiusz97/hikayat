@@ -507,6 +507,17 @@ def tick_status_timers(entity: dict) -> dict:
         elif "bleed" in eff_lower:
             total_dot += 6
 
+        # Social / Intimate / Clock status tags that must NOT be managed by combat turn tick:
+        # 1. Aroused is managed exclusively by intimate excitement decay and physical state reducer
+        if "aroused" in eff_lower:
+            new_effects.append(effect)
+            continue
+
+        # 2. Minute-based tags (Refractory Recovery [X min], Satisfied [X min], etc.)
+        if re.search(r"\[\d+\s*(?:min|m)\]", effect, re.IGNORECASE) or any(k in eff_lower for k in ("refractory", "satisfied")):
+            new_effects.append(effect)
+            continue
+
         # Check if timer tag already exists: "Stunned [2 turns]"
         match = re.search(r"\s*\[(\d+)\s*turns?\]$", effect, re.IGNORECASE)
         if match:
@@ -516,8 +527,15 @@ def tick_status_timers(entity: dict) -> dict:
                 new_effects.append(f"{base} [{turns} turn{'s' if turns != 1 else ''}]")
             # If turns == 0: effect expired, drop it
         else:
-            # New effect without timer - attach default 2-turn timer
-            new_effects.append(f"{effect} [2 turns]")
+            # Non-combat or persistent condition checks: do not attach turn timers to social/exploration traits
+            if any(k in eff_lower for k in (
+                "sensitive", "flustered", "breathless", "exhausted", "recovering",
+                "rested", "drunk", "full", "smitten", "heartbroken"
+            )):
+                new_effects.append(effect)
+            else:
+                # New combat effect without timer - attach default 2-turn timer
+                new_effects.append(f"{effect} [2 turns]")
 
     if total_dot > 0:
         temp = entity.get("temp_hp", 0)

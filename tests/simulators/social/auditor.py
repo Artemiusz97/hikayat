@@ -404,13 +404,12 @@ class SocialInvariantAuditor:
 
         # Check kinship consistency
         for name, sib in dir_siblings.items():
-            name_parts = name.split()
-            sib_parts = sib.split()
-            name_surname = name_parts[-1].lower() if name_parts else ""
-            sib_surname = sib_parts[-1].lower() if sib_parts else ""
+            name_parts = [p.lower() for p in name.split()]
+            sib_parts = [p.lower() for p in sib.split()]
+            shared_surnames = set(name_parts) & set(sib_parts)
 
-            # 1. Biological siblings must share family surname
-            if name_surname and sib_surname and name_surname != sib_surname:
+            # 1. Biological siblings must share family surname (supporting Western and Eastern name order)
+            if name_parts and sib_parts and not shared_surnames:
                 violations.append(SocialViolation(
                     turn=turn,
                     category="KINSHIP_INCONSISTENCY",
@@ -423,9 +422,9 @@ class SocialInvariantAuditor:
             # If sib is also registered with a sibling, that sibling must belong to the same surname/household
             if sib in dir_siblings:
                 reciprocal = dir_siblings[sib]
-                reciprocal_parts = reciprocal.split()
-                reciprocal_surname = reciprocal_parts[-1].lower() if reciprocal_parts else ""
-                if reciprocal_surname and reciprocal_surname != name_surname:
+                reciprocal_parts = [p.lower() for p in reciprocal.split()]
+                reciprocal_shared = (set(reciprocal_parts) & set(sib_parts)) | (set(reciprocal_parts) & set(name_parts))
+                if reciprocal_parts and not reciprocal_shared:
                     violations.append(SocialViolation(
                         turn=turn,
                         category="KINSHIP_INCONSISTENCY",

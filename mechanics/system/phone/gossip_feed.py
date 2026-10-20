@@ -304,3 +304,58 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
             "feed_post": noise_post,
             "gossip_feed": updated_feed
         }
+
+
+def queue_witness_gossip_post(
+    session_id: int,
+    witness_name: str,
+    player_name: str,
+    partner_name: str,
+    location_display: str,
+    event_kind: str = "romantic",
+) -> dict:
+    """
+    Instantly queues a 0ms procedural social feed rumor post when a witness spots
+    a romantic, intimate, or illicit interaction in a semi-public/public node.
+    """
+    loc_short = str(location_display or "campus").split("➔")[-1].strip() or "the hallway"
+    handle_slug = "".join(c for c in str(witness_name or "anon").lower().split()[0] if c.isalnum()) or "campus_watch"
+    author_handle = f"@{handle_slug}_spotted"
+
+    if event_kind in ("intimate", "romantic"):
+        templates = [
+            f"Wait, did anyone else just see {player_name} and {partner_name} getting super close at {loc_short}?! 👀🔥",
+            f"Pretty sure I just walked past {player_name} and {partner_name} having a private moment near {loc_short}... my lips are sealed 🤫✨",
+            f"Spotted {player_name} and {partner_name} together at {loc_short}. Someone's definitely more than just friends! 💬",
+        ]
+        tag = "#Spotted"
+    elif event_kind in ("scandal", "indecency", "exposure"):
+        templates = [
+            f"OMG did anyone else just see {player_name} walking around practically uncovered at {loc_short}?! 😳🚨",
+            f"Someone hand {player_name} a cloak or call security! Completely exposed right at {loc_short}... cannot unsee! 🙈🔥",
+            f"Major wardrobe malfunction or total shamelessness?! Saw {player_name} exposed out in the open near {loc_short}! 😱",
+        ]
+        tag = "#Scandal" if event_kind == "scandal" else "#Indecency"
+    else:
+        templates = [
+            f"Saw {player_name} skulking around {loc_short} just now... what is going on over there? 👀",
+            f"Something sketchy is definitely happening near {loc_short}. Saw {player_name} right in the middle of it.",
+        ]
+        tag = "#RumorAlert"
+
+    content = templates[session_id % len(templates)]
+    post = {
+        "id": f"witness_{int(time.time())}_{random.randint(100, 999)}",
+        "author_name": witness_name or "Anonymous Bystander",
+        "author_handle": author_handle,
+        "content": content,
+        "tag": tag,
+        "clue_hook": "",
+        "likes": random.randint(15, 65),
+        "time_ago": "Just now",
+        "is_lead": False,
+    }
+    current_feed = db.get_gossip_feed(session_id, limit=20) or []
+    updated_feed = [post] + [p for p in current_feed if p.get("id") != post["id"]][:19]
+    db.save_gossip_feed(session_id, updated_feed)
+    return post

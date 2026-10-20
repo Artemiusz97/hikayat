@@ -360,6 +360,66 @@ def sanitize_meta_objective_leaks(text: str) -> str:
         return "Objective" if is_sentence_start else "objective"
 
     text = re.sub(r'(?i)\bSub[-\s]?(?:Objective|Quest)\b', _replace_general, text)
+    # 4. Bracketed meta tags e.g. [OBJECTIVE COMPLETE], [QUEST COMPLETED]
+    text = re.sub(r'(?i)\s*\[(?:OBJECTIVE|QUEST|SUB[-\s]?OBJECTIVE|MISSION)\s+(?:COMPLETE|COMPLETED|RESOLVED|UPDATED|SUCCEEDED)\]\s*', ' ', text).strip()
+    return text
+
+
+def sanitize_auditor_meta_leaks(text: str) -> str:
+    """
+    Deterministic pipeline guard that intercepts and sanitizes leaked background engine
+    auditor persona tokens (e.g. 'I'm an auditor', 'auditor of personal boundaries', 'audit meeting')
+    from narrative prose and spoken character dialogue, replacing them with natural in-universe phrasing.
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    # 1. Metaphorical / role leaks regarding boundaries and inspection
+    text = re.sub(
+        r"(?i)\b(?:a\s+)?(?:very\s+)?thorough auditor of personal boundaries\b",
+        "very thorough when it comes to personal boundaries",
+        text
+    )
+    text = re.sub(
+        r"(?i)\b(?:an\s+)?auditor of personal boundaries\b",
+        "careful guardian of personal boundaries",
+        text
+    )
+
+    # 2. Spoken character statements claiming to be an auditor
+    text = re.sub(
+        r"(?i)\bI['’]m an auditor,?\s*after all\b",
+        "I'm thorough, after all",
+        text
+    )
+    text = re.sub(
+        r"(?i)\bI['’]m an auditor\b",
+        "I'm thorough",
+        text
+    )
+
+    # 3. Schedule / meeting references contaminated with 'audit'
+    text = re.sub(
+        r"(?i)\bmy next audit meeting\b",
+        "my next scheduled meeting",
+        text
+    )
+    text = re.sub(
+        r"(?i)\b(?:the\s+)?next audit meeting\b",
+        "the next scheduled meeting",
+        text
+    )
+    text = re.sub(
+        r"(?i)\b(?:an|the)\s+audit meeting\b",
+        "a council meeting",
+        text
+    )
+    text = re.sub(
+        r"(?i)\bnext audit\b",
+        "next meeting",
+        text
+    )
+
     return text
 
 
@@ -561,7 +621,10 @@ def sanitize_absent_npc_hallucinations(
 
     COMMON_NAME_EXCLUSIONS = {
         "may", "will", "can", "well", "man", "guy", "boy", "her", "she",
-        "him", "his", "the", "and", "one", "two", "red", "old", "new"
+        "him", "his", "the", "and", "one", "two", "red", "old", "new",
+        "grace", "mark", "rose", "hope", "amber", "dawn", "chase", "dean",
+        "bill", "penny", "summer", "autumn", "faith", "joy", "clove", "holly",
+        "ivy", "lane", "miles", "reed", "wade", "cliff", "rob", "pat"
     }
 
     absent_contacts: list[tuple[str, str]] = []
@@ -613,11 +676,13 @@ def sanitize_absent_npc_hallucinations(
                 c_low = c_name.lower()
                 c_f_low = c_first.lower() if len(c_first) >= 3 and c_first.lower() not in COMMON_NAME_EXCLUSIONS else ""
 
-                pat = r'\b' + re.escape(c_low) + r'\b'
-                if c_f_low:
-                    pat += r'|\b' + re.escape(c_f_low) + r'\b'
+                # Full name matches case-insensitively
+                is_match = bool(re.search(r'\b' + re.escape(c_low) + r'\b', sent, re.IGNORECASE))
+                # First name ONLY matches capitalized (proper noun) to avoid dropping sentences with common English words
+                if not is_match and c_f_low:
+                    is_match = bool(re.search(r'\b' + re.escape(c_first.title()) + r'\b', sent))
 
-                if re.search(pat, sent, re.IGNORECASE):
+                if is_match:
                     if is_mentioned_only_in_dialogue(c_name, sent):
                         continue
                     if is_mentioned_only_in_absence_or_memory(c_name, sent):
@@ -652,6 +717,51 @@ def _clean_quotes_and_split(text: str) -> list[tuple[str, bool]]:
     return segments
 
 
+def _split_into_sentences(text: str) -> list[str]:
+    """Splits text into sentence chunks such that ''.join(chunks) == text without splitting inside quotes."""
+    chunks = []
+    in_quote = False
+    current = []
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            in_quote = not in_quote
+        elif c == '“':
+            in_quote = True
+        elif c == '”':
+            in_quote = False
+
+        current.append(c)
+
+        if not in_quote and c in ('.', '!', '?'):
+            m = re.match(r'^([”"]?\s+)', text[i+1:])
+            if m:
+                matched_str = m.group(1)
+                current.append(matched_str)
+                chunks.append("".join(current))
+                current = []
+                i += 1 + len(matched_str)
+                continue
+        elif in_quote and c in ('.', '!', '?'):
+            m = re.match(r'^([”"]\s+)(?=[A-Z])', text[i+1:])
+            if m:
+                matched_str = m.group(1)
+                current.append(matched_str)
+                chunks.append("".join(current))
+                current = []
+                in_quote = False
+                i += 1 + len(matched_str)
+                continue
+        i += 1
+
+    if current:
+        chunks.append("".join(current))
+
+    return chunks if chunks else [text]
+
+
 COMMON_VERBS = (
     r"(?:said|asked|replied|answered|muttered|sighed|laughed|chuckled|whispered|"
     r"spoke|stated|continued|added|noted|murmured|demanded|inquired|snapped|gasped|"
@@ -669,41 +779,443 @@ COMMON_VERBS = (
 
 COMMON_FEATURES_AND_TAGS = (
     r"(?:tail|ears|eyes|gaze|voice|tone|expression|face|features|head|brow|"
-    r"hand|hands|finger|fingers|arm|arms|shoulder|shoulders|chest|hair|fur|coat|"
-    r"breath|lips|mouth|chin|posture|stance|stride|steps|footsteps|"
-    r"desk|chair|seat|office|room|door|uniform|clothes|clothing|jacket|coat|blazer|"
+    r"hand|hands|paw|paws|claw|claws|finger|fingers|arm|arms|shoulder|shoulders|chest|heart|pulse|hair|fur|coat|"
+    r"snout|muzzle|whiskers|wings|horns|breath|lips|mouth|chin|posture|stance|stride|steps|footsteps|stomach|skin|blood|thoughts|grip|"
+    r"desk|chair|seat|office|room|door|uniform|clothes|clothing|jacket|coat|blazer|pocket|pockets|"
     r"shirt|skirt|pants|trousers|bag|backpack|notebook|paper|papers|files|folder|"
-    r"keycard|badge|pen|phone|screen|books|notes|coffee|cup|drink|snack|tray|"
+    r"keycard|badge|pen|phone|planner|screen|books|notes|coffee|cup|drink|snack|tray|"
     r"glasses|spectacles|shoes|boots|watch|tie|collar|hat|cap|body|mind|attention|words|side|lap|knees|feet|throat|neck)"
 )
 
 
+def _inflect_verb_to_singular(verb: str) -> str:
+    v_low = verb.lower()
+    modals = {"can", "could", "will", "would", "shall", "should", "may", "might", "must"}
+    if v_low in modals:
+        return verb
+    irregulars = {
+        "are": "is", "were": "was", "have": "has", "do": "does", "go": "goes"
+    }
+    if v_low in irregulars:
+        res = irregulars[v_low]
+        return res.capitalize() if verb[0].isupper() else res
+    if v_low.endswith(("ed", "s", "ing")) or v_low in ("did", "had", "said", "spoke", "ran", "saw", "went", "got", "came", "made", "knew", "thought", "felt", "began", "stood", "took", "fell"):
+        return verb
+    if v_low.endswith(("ch", "sh", "ss", "x", "z")):
+        return verb + "es"
+    if v_low.endswith("y") and len(v_low) > 1 and v_low[-2] not in "aeiou":
+        return verb[:-1] + "ies"
+    return verb + "s"
+
+
 def _replace_pronouns_to_masculine(segment: str) -> str:
-    res = re.sub(rf'(^|[.!?]\s+)She\b', r'\1He', segment)
+    res = segment
+    placeholders = {}
+    def _mask(m):
+        tok = f"__PLURAL_MASK_{len(placeholders)}__"
+        placeholders[tok] = m.group(0)
+        return tok
+
+    # Protect genuine plural phrases from singular masculine conversion
+    res = re.sub(r'\b(?:one|some|all|both|most|none|few|many|several|couple)\s+of\s+them\b', _mask, res, flags=re.I)
+    res = re.sub(r'\b(?:their)\s+(?:voices|heads|eyes|ears|tails|faces|footsteps|whispers|murmurs|hands|fingers|clothes|uniforms|banners|flyers|activities|desks|belongings|chances|lives|bodies|minds|words|questions|answers|shoulders|backs|chests|conversations|routes|paths|tracks|steps|thoughts)\b', _mask, res, flags=re.I)
+    res = re.sub(r'\b(?:a\s+group\s+of\s+students|students|people|passersby|crowd|patrons|guards|teachers|members|classmates|bystanders|others)\s+[^.!?\n]{0,80}?\b(?:their|they|them)\b', _mask, res, flags=re.I)
+
+    res = re.sub(r"\bThey\'re\b", "He's", res)
+    res = re.sub(r"\bthey\'re\b", "he's", res)
+    res = re.sub(r"\bThey\'ve\b", "He has", res)
+    res = re.sub(r"\bthey\'ve\b", "he has", res)
+    res = re.sub(r"\bThey\'d\b", "He'd", res)
+    res = re.sub(r"\bthey\'d\b", "he'd", res)
+    res = re.sub(r"\bThey\'ll\b", "He'll", res)
+    res = re.sub(r"\bthey\'ll\b", "he'll", res)
+
+    def _sub_they_verb_m(m):
+        prefix = m.group(1)
+        pronoun = m.group(2)
+        verb = m.group(3)
+        inflected = _inflect_verb_to_singular(verb)
+        target_pr = "He" if pronoun[0].isupper() else "he"
+        return f"{prefix}{target_pr} {inflected}"
+
+    res = re.sub(r'(^|[\s"“‘\'([{\-—])(They|they)\s+([A-Za-z]+)\b', _sub_they_verb_m, res)
+
+    res = re.sub(r'(^|[\s"“‘\'([{\-—])They\b', r'\1He', res)
+    res = re.sub(r'\bthey\b', 'he', res)
+
+    res = re.sub(r'(^|[\s"“‘\'([{\-—])Their\b', r'\1His', res)
+    res = re.sub(r'\btheir\b', 'his', res)
+    res = re.sub(r'\btheirs\b', 'his', res)
+
+    res = re.sub(r'\bThemselves\b', 'Himself', res)
+    res = re.sub(r'\bthemselves\b', 'himself', res)
+
+    # She/Her -> He/His
+    res = re.sub(rf'(^|[.!?]\s+)She\b', r'\1He', res)
     res = re.sub(rf'\bShe\s+({COMMON_VERBS})\b', r'He \1', res)
     res = re.sub(rf'\bshe\s+({COMMON_VERBS})\b', r'he \1', res)
-
+    # Possessive Her/her before nouns/features must be converted to His/his BEFORE preposition-objective substitution
     res = re.sub(rf'(^|[.!?]\s+)Her\s+((?:[a-z]+\s+){{0,2}})({COMMON_FEATURES_AND_TAGS})\b', r'\1His \2\3', res, flags=re.IGNORECASE)
     res = re.sub(rf'\bHer\s+((?:[a-z]+\s+){{0,2}})({COMMON_FEATURES_AND_TAGS})\b', r'His \1\2', res)
     res = re.sub(rf'\bher\s+((?:[a-z]+\s+){{0,2}})({COMMON_FEATURES_AND_TAGS})\b', r'his \1\2', res)
+    res = re.sub(r'\b(?:Herself)\b', 'Himself', res)
+    res = re.sub(r'\b(?:herself)\b', 'himself', res)
 
-    res = re.sub(r'\bHerself\b', 'Himself', res)
-    res = re.sub(r'\bherself\b', 'himself', res)
+    # Preposition + objective them/her -> him (possessives like "at her phone" were already converted to "at his phone")
+    res = re.sub(r'\b(behind|beside|after|with|to|for|at|from|near|toward|towards|against|around|about|over|under|before|without|by|of|into|onto|in|on)\s+(?:them|her)\b', r'\1 him', res, flags=re.IGNORECASE)
+    res = re.sub(r'\b(gives?|gave|hands?|handed|leaves?|left|shows?|showed|tells?|told|asks?|asked|calls?|called|pushes?|pushed|pulls?|pulled|warns?|warned|stops?|stopped|catches?|caught|releases?|released)\s+them\b', r'\1 him', res, flags=re.IGNORECASE)
+
+    for tok, orig in placeholders.items():
+        res = res.replace(tok, orig)
+
     return res
 
 
 def _replace_pronouns_to_feminine(segment: str) -> str:
-    res = re.sub(rf'(^|[.!?]\s+)He\b', r'\1She', segment)
+    res = segment
+    placeholders = {}
+    def _mask(m):
+        tok = f"__PLURAL_MASK_{len(placeholders)}__"
+        placeholders[tok] = m.group(0)
+        return tok
+
+    # Protect genuine plural phrases from singular feminine conversion
+    res = re.sub(r'\b(?:one|some|all|both|most|none|few|many|several|couple)\s+of\s+them\b', _mask, res, flags=re.I)
+    res = re.sub(r'\b(?:their)\s+(?:voices|heads|eyes|ears|tails|faces|footsteps|whispers|murmurs|hands|fingers|clothes|uniforms|banners|flyers|activities|desks|belongings|chances|lives|bodies|minds|words|questions|answers|shoulders|backs|chests|conversations|routes|paths|tracks|steps|thoughts)\b', _mask, res, flags=re.I)
+    res = re.sub(r'\b(?:a\s+group\s+of\s+students|students|people|passersby|crowd|patrons|guards|teachers|members|classmates|bystanders|others)\s+[^.!?\n]{0,80}?\b(?:their|they|them)\b', _mask, res, flags=re.I)
+
+    res = re.sub(r"\bThey\'re\b", "She's", res)
+    res = re.sub(r"\bthey\'re\b", "she's", res)
+    res = re.sub(r"\bThey\'ve\b", "She has", res)
+    res = re.sub(r"\bthey\'ve\b", "she has", res)
+    res = re.sub(r"\bThey\'d\b", "She'd", res)
+    res = re.sub(r"\bthey\'d\b", "she'd", res)
+    res = re.sub(r"\bThey\'ll\b", "She'll", res)
+    res = re.sub(r"\bthey\'ll\b", "she'll", res)
+
+    def _sub_they_verb_f(m):
+        prefix = m.group(1)
+        pronoun = m.group(2)
+        verb = m.group(3)
+        inflected = _inflect_verb_to_singular(verb)
+        target_pr = "She" if pronoun[0].isupper() else "she"
+        return f"{prefix}{target_pr} {inflected}"
+
+    res = re.sub(r'(^|[\s"“‘\'([{\-—])(They|they)\s+([A-Za-z]+)\b', _sub_they_verb_f, res)
+
+    res = re.sub(r'(^|[\s"“‘\'([{\-—])They\b', r'\1She', res)
+    res = re.sub(r'\bthey\b', 'she', res)
+
+    res = re.sub(r'(^|[\s"“‘\'([{\-—])Their\b', r'\1Her', res)
+    res = re.sub(r'\btheir\b', 'her', res)
+    res = re.sub(r'\btheirs\b', 'hers', res)
+
+    res = re.sub(r'\bThemselves\b', 'Herself', res)
+    res = re.sub(r'\bthemselves\b', 'herself', res)
+
+    res = re.sub(r'\b(behind|beside|after|with|to|for|at|from|near|toward|towards|against|around|about|over|under|before|without|by|of|into|onto|in|on)\s+(?:them|him)\b', r'\1 her', res, flags=re.IGNORECASE)
+    res = re.sub(r'\b(gives?|gave|hands?|handed|leaves?|left|shows?|showed|tells?|told|asks?|asked|calls?|called|pushes?|pushed|pulls?|pulled|warns?|warned|stops?|stopped|catches?|caught|releases?|released)\s+them\b', r'\1 her', res, flags=re.IGNORECASE)
+
+    # He/His -> She/Her
+    res = re.sub(rf'(^|[.!?]\s+)He\b', r'\1She', res)
     res = re.sub(rf'\bHe\s+({COMMON_VERBS})\b', r'She \1', res)
     res = re.sub(rf'\bhe\s+({COMMON_VERBS})\b', r'she \1', res)
-
     res = re.sub(rf'(^|[.!?]\s+)His\s+((?:[a-z]+\s+){{0,2}})({COMMON_FEATURES_AND_TAGS})\b', r'\1Her \2\3', res, flags=re.IGNORECASE)
     res = re.sub(rf'\bHis\s+((?:[a-z]+\s+){{0,2}})({COMMON_FEATURES_AND_TAGS})\b', r'Her \1\2', res)
     res = re.sub(rf'\bhis\s+((?:[a-z]+\s+){{0,2}})({COMMON_FEATURES_AND_TAGS})\b', r'her \1\2', res)
+    res = re.sub(r'\b(?:Himself)\b', 'Herself', res)
+    res = re.sub(r'\b(?:himself)\b', 'herself', res)
 
-    res = re.sub(r'\bHimself\b', 'Herself', res)
-    res = re.sub(r'\bhimself\b', 'herself', res)
+    for tok, orig in placeholders.items():
+        res = res.replace(tok, orig)
+
     return res
+
+
+def sanitize_player_physical_biology(
+    text: str,
+    session: dict | None = None,
+    party: list | None = None,
+    actions: list | None = None,
+) -> str:
+    """
+    Deterministic narrative guard that intercepts and sanitizes phantom animal physical features
+    (e.g., fox/cat/wolf ear twitching, tail wagging, tail swishing, purring) erroneously
+    attributed to the player protagonist or human characters.
+    Preserves text inside quoted dialogue and respects present beastfolk NPCs.
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    player_chars: list[dict] = []
+    if party:
+        for item in party:
+            char = item[0] if isinstance(item, (tuple, list)) else item
+            if isinstance(char, dict):
+                player_chars.append(char)
+    if not player_chars and actions:
+        for a in actions:
+            if isinstance(a, dict) and isinstance(a.get("char"), dict):
+                player_chars.append(a["char"])
+    if not player_chars and isinstance(session, dict) and session.get("user_id"):
+        try:
+            import db
+            c = db.get_character(session["user_id"])
+            if c:
+                player_chars.append(c)
+        except Exception:
+            pass
+
+    # Check if any player character is human / non-beast
+    is_non_beast = True
+    player_names = []
+    beast_kws = (
+        "beast", "fur", "half_beast", "hybrid", "kitsune", "neko",
+        "cat", "fox", "wolf", "rabbit", "bunny", "bear", "tiger",
+        "lion", "cheetah", "fennec", "mouse", "reptile", "dragon",
+        "snake", "bird", "avian"
+    )
+    for pc in player_chars:
+        nm = str(pc.get("name") or "").strip().lower()
+        if nm:
+            player_names.append(nm)
+            if len(nm.split()) > 1:
+                player_names.append(nm.split()[0])
+        r = str(pc.get("race") or "human").strip().lower()
+        if any(kw in r for kw in beast_kws):
+            is_non_beast = False
+
+    if not is_non_beast:
+        return text
+
+    # Split outside / inside quotes so character speech is untouched
+    segs = _clean_quotes_and_split(text)
+    out_segs = []
+
+    def _sub_case(pattern: str, repl: str, target: str) -> str:
+        def _repl(m):
+            matched = m.group(0)
+            res = repl
+            if matched and matched[0].isupper():
+                res = res[0].upper() + res[1:]
+            return res
+        return re.sub(pattern, _repl, target, flags=re.IGNORECASE)
+
+    for s, in_q in segs:
+        if in_q:
+            out_segs.append(s)
+            continue
+
+        cleaned = s
+
+        # 1. Animal Ears on the Player
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|animal|furry)?\s*ears?\s+twitch(?:es|ed)?\b',
+            'your brow furrows',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|animal|furry)?\s*ears?\s+twitching\b',
+            'your brow furrowing',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\b(?:twitching|twitch)\s+your\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|animal|furry)?\s*ears?\b',
+            'tilting your head',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\btwitched\s+your\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|animal|furry)?\s*ears?\b',
+            'tilted your head',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|animal|furry)?\s*ears?\s+perk(?:ed|s)?\s+up\b',
+            'you perk up',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\bperk(?:ing)?\s+your\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|animal|furry)?\s*ears?\b',
+            'raising your gaze',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\bflatten(?:ing)?\s+your\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|animal|furry)?\s*ears?\b',
+            'narrowing your eyes',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\bflattened\s+your\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|animal|furry)?\s*ears?\b',
+            'narrowed your eyes',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|animal|furry)\s+ears\b',
+            'your ears',
+            cleaned
+        )
+
+        # 2. Tail on the Player
+        # Wagging
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\s+wagged(?:\s+happily|\s+excitedly|\s+eagerly)?\b',
+            'you smiled warmly',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\s+wag(?:s)?(?:\s+happily|\s+excitedly|\s+eagerly)?\b',
+            'you smile warmly',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\s+wagging(?:\s+happily|\s+excitedly|\s+eagerly)?\b',
+            'smiling warmly',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\bwag(?:ging)?\s+your\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\b',
+            'smiling warmly',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\bwagged\s+your\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\b',
+            'smiled warmly',
+            cleaned
+        )
+
+        # Swishing
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\s+swish(?:es)?\b',
+            'you shift your stance',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\s+swished\b',
+            'you shifted your stance',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\s+swishing\b',
+            'shifting your stance',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\bswish(?:ing)?\s+your\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\b',
+            'shifting your stance',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\bswished\s+your\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\b',
+            'shifted your stance',
+            cleaned
+        )
+
+        # Flicking
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\s+flick(?:s)?\b',
+            'your jaw tightens',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\s+flicked\b',
+            'your jaw tightened',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\s+flicking\b',
+            'your jaw tightening',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\bflick(?:ing)?\s+your\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\b',
+            'clenching your jaw',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\bflicked\s+your\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\b',
+            'clenched your jaw',
+            cleaned
+        )
+
+        # Curling / drooping
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\s+curl(?:s)?\b',
+            'you tense slightly',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\s+curled\b',
+            'you tensed slightly',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\s+droop(?:s)?\b',
+            'your shoulders sag',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\byour\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\s+drooped\b',
+            'your shoulders sagged',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\bwith\s+your\s+tail\s+between\s+your\s+legs\b',
+            'with downcast eyes',
+            cleaned
+        )
+
+        # 3. Purring, Paws, Whiskers, Snout
+        cleaned = _sub_case(
+            r'\ba\s+(?:soft|low|gentle|quiet)?\s*purr\s+rumbles?\s+(?:in|from)\s+your\s+throat\b',
+            'a soft chuckle rumbles in your throat',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\ba\s+(?:soft|low|gentle|quiet)?\s*purr\s+rumbled\s+(?:in|from)\s+your\s+throat\b',
+            'a soft chuckle rumbled in your throat',
+            cleaned
+        )
+        cleaned = _sub_case(
+            r'\byou\s+purr(?:ed)?\s+softly\b',
+            'you chuckled softly',
+            cleaned
+        )
+        cleaned = _sub_case(r'\byour\s+paws\b', 'your hands', cleaned)
+        cleaned = _sub_case(r'\byour\s+claws\b', 'your fingertips', cleaned)
+        cleaned = _sub_case(r'\byour\s+whiskers\b', 'your cheeks', cleaned)
+        cleaned = _sub_case(r'\byour\s+(?:snout|muzzle)\b', 'your face', cleaned)
+
+        # 4. Third-Person Player Name matches (e.g. "Artem's fox ears twitch", "Artem's tail wagged")
+        for p_name in player_names:
+            esc = re.escape(p_name)
+            cleaned = re.sub(
+                rf'\b{esc}\'s\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|animal|furry)?\s*ears?\s+twitch(?:es|ed)?\b',
+                f"{p_name}'s brow furrowed",
+                cleaned,
+                flags=re.IGNORECASE
+            )
+            cleaned = re.sub(
+                rf'\b{esc}\'s\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\s+wag(?:s|ged)?\b',
+                f"{p_name} smiled warmly",
+                cleaned,
+                flags=re.IGNORECASE
+            )
+            cleaned = re.sub(
+                rf'\b{esc}\'s\s+(?:fox|cat|wolf|rabbit|bunny|bear|tiger|lion|dog|fennec|bushy|furry)?\s*tail\s+swish(?:es|ed)?\b',
+                f"{p_name} shifted his stance",
+                cleaned,
+                flags=re.IGNORECASE
+            )
+            cleaned = re.sub(
+                rf'\b{esc}\s+wag(?:ged|s)?\s+(?:his|her|their)\s+tail\b',
+                f"{p_name} smiled warmly",
+                cleaned,
+                flags=re.IGNORECASE
+            )
+
+        out_segs.append(cleaned)
+
+    return "".join(out_segs)
 
 
 def sanitize_npc_pronoun_consistency(
@@ -716,29 +1228,73 @@ def sanitize_npc_pronoun_consistency(
     """
     Deterministic pipeline guard that intercepts and corrects misgendered pronouns in generated
     narrative prose based on the canonical genders of present NPCs and party characters.
+    Also strips erroneous phantom animal traits from human player characters.
     Preserves text inside quotes and respects multi-character discourse boundaries.
     """
     if not text or not isinstance(text, str):
         return text
 
+    # First sanitize phantom biology traits on the player character
+    text = sanitize_player_physical_biology(text, session=session, party=party, actions=actions)
+
     char_genders: dict[str, str] = {}
+
+    def _register_name_gender(target_dict: dict, name_str: str, gender_str: str):
+        if not name_str or not gender_str:
+            return
+        c_gen = str(gender_str).strip().lower()
+        is_m = ("male" in c_gen or "man" in c_gen or "boy" in c_gen) and "female" not in c_gen
+        is_f = "female" in c_gen or "woman" in c_gen or "girl" in c_gen
+        target_g = "male" if is_m else ("female" if is_f else None)
+        if not target_g:
+            return
+        clean = name_str.strip().lower()
+        target_dict[clean] = target_g
+        honorifics = ("dr.", "dr", "mr.", "mr", "ms.", "ms", "mrs.", "mrs", "prof.", "prof", "officer", "detective", "coach", "nurse", "dean", "principal", "sensei", "captain")
+        words = clean.split()
+        if not words:
+            return
+        first_w = words[0]
+        rest_words = words[1:]
+        if first_w in honorifics and rest_words:
+            without_title = " ".join(rest_words)
+            target_dict[without_title] = target_g
+            target_dict[rest_words[-1]] = target_g  # surname: "satou"
+            target_dict[rest_words[0]] = target_g   # first name: "kento"
+            target_dict[f"{first_w} {rest_words[-1]}"] = target_g  # "dr. satou"
+            target_dict[f"{first_w.rstrip('.')} {rest_words[-1]}"] = target_g # "dr satou"
+        else:
+            if len(words) > 1:
+                target_dict[words[0]] = target_g  # first name
+                target_dict[words[-1]] = target_g # surname
 
     if party:
         for item in party:
             char = item[0] if isinstance(item, (tuple, list)) else item
             if isinstance(char, dict) and char.get("name"):
-                c_name = char["name"].strip().lower()
-                c_gen = str(char.get("gender") or "male").strip().lower()
-                is_m = ("male" in c_gen or "man" in c_gen or "boy" in c_gen) and "female" not in c_gen
-                is_f = "female" in c_gen or "woman" in c_gen or "girl" in c_gen
-                if is_m:
-                    char_genders[c_name] = "male"
-                    if len(c_name.split()) > 1:
-                        char_genders[c_name.split()[0]] = "male"
-                elif is_f:
-                    char_genders[c_name] = "female"
-                    if len(c_name.split()) > 1:
-                        char_genders[c_name.split()[0]] = "female"
+                _register_name_gender(char_genders, char["name"], str(char.get("gender") or "male"))
+
+    if actions:
+        for a in actions:
+            if isinstance(a, dict) and isinstance(a.get("char"), dict):
+                char = a["char"]
+                if char.get("name"):
+                    _register_name_gender(char_genders, char["name"], str(char.get("gender") or "male"))
+
+    if isinstance(session, dict):
+        lead_n = session.get("lead_character_name")
+        lead_g = session.get("lead_character_gender")
+        if not lead_g and session.get("user_id"):
+            try:
+                import db
+                p_char = db.get_character(session["user_id"])
+                if p_char:
+                    lead_n = lead_n or p_char.get("name")
+                    lead_g = p_char.get("gender")
+            except Exception:
+                pass
+        if lead_n and lead_g:
+            _register_name_gender(char_genders, str(lead_n), str(lead_g))
 
     session_id = session.get("id") if isinstance(session, dict) else None
     contacts_map = {}
@@ -752,8 +1308,17 @@ def sanitize_npc_pronoun_consistency(
                 for row in _conn.execute("SELECT name, gender FROM school_directory WHERE session_id=?", (session_id,)).fetchall():
                     if row["name"] and row["gender"] and row["name"].strip().lower() not in contacts_map:
                         contacts_map[row["name"].strip().lower()] = str(row["gender"]).strip().lower()
+                for row in _conn.execute("SELECT name, gender FROM lorebook WHERE session_id=? AND entity_type='person'", (session_id,)).fetchall():
+                    if row["name"] and row["gender"] and row["name"].strip().lower() not in contacts_map:
+                        contacts_map[row["name"].strip().lower()] = str(row["gender"]).strip().lower()
         except Exception:
             pass
+
+    # Register contacts mentioned in the text even if they were omitted from npcs_present
+    text_lower = text.lower()
+    for c_name, c_gen in contacts_map.items():
+        if re.search(rf"\b{re.escape(c_name)}\b", text_lower) or any(len(tok) >= 4 and re.search(rf"\b{re.escape(tok)}\b", text_lower) for tok in c_name.replace(".", " ").split()):
+            _register_name_gender(char_genders, c_name, c_gen)
 
     scene_npcs = []
     if isinstance(result, dict) and result.get("npcs_present"):
@@ -782,16 +1347,7 @@ def sanitize_npc_pronoun_consistency(
             except Exception:
                 pass
         if raw_g:
-            is_m = ("male" in raw_g.lower() or "man" in raw_g.lower() or "boy" in raw_g.lower()) and "female" not in raw_g.lower()
-            is_f = "female" in raw_g.lower() or "woman" in raw_g.lower() or "girl" in raw_g.lower()
-            if is_m:
-                char_genders[nm_low] = "male"
-                if len(nm_low.split()) > 1:
-                    char_genders[nm_low.split()[0]] = "male"
-            elif is_f:
-                char_genders[nm_low] = "female"
-                if len(nm_low.split()) > 1:
-                    char_genders[nm_low.split()[0]] = "female"
+            _register_name_gender(char_genders, nm, raw_g)
 
     if not char_genders:
         return text
@@ -804,60 +1360,106 @@ def sanitize_npc_pronoun_consistency(
             processed_paragraphs.append(para)
             continue
 
-        para_lower = para.lower()
-        male_matches = [name for name, g in char_genders.items() if g == "male" and re.search(rf"\b{re.escape(name)}\b", para_lower)]
-        female_matches = [name for name, g in char_genders.items() if g == "female" and re.search(rf"\b{re.escape(name)}\b", para_lower)]
+        segs = _clean_quotes_and_split(para)
+        nar_only = " ".join(s for s, in_q in segs if not in_q).strip()
+        nar_lower = nar_only.lower()
 
-        if male_matches and not female_matches:
-            segs = _clean_quotes_and_split(para)
+        # Check actor names in narrative prose outside quotes to avoid vocative dialogue hijacking
+        male_matches = [name for name, g in char_genders.items() if g == "male" and re.search(rf"\b{re.escape(name)}\b", nar_lower)]
+        female_matches = [name for name, g in char_genders.items() if g == "female" and re.search(rf"\b{re.escape(name)}\b", nar_lower)]
+
+        active_dp_name = str(session.get("dialogue_partner") or "").strip().lower() if isinstance(session, dict) else ""
+        active_dp_gender = char_genders.get(active_dp_name) or (char_genders.get(active_dp_name.split()[0]) if active_dp_name else None)
+
+        # If the paragraph matches opposite gender NPCs, but active dialogue partner or existing narrative
+        # already uses the partner's canon gender, do NOT do a blanket rewrite! Fall through to sentence-by-sentence.
+        is_dp_conflict = False
+        if active_dp_gender == "female":
+            if (male_matches and not female_matches and active_dp_name not in male_matches) or re.search(r'\b(?:she|her|hers|herself)\b', nar_only, re.I):
+                is_dp_conflict = True
+        elif active_dp_gender == "male":
+            if (female_matches and not male_matches and active_dp_name not in female_matches) or re.search(r'\b(?:he|him|his|himself)\b', nar_only, re.I):
+                is_dp_conflict = True
+
+        if male_matches and not female_matches and not is_dp_conflict:
             out_segs = []
             for s, in_q in segs:
                 out_segs.append(s if in_q else _replace_pronouns_to_masculine(s))
             processed_paragraphs.append("".join(out_segs))
-        elif female_matches and not male_matches:
-            segs = _clean_quotes_and_split(para)
+        elif female_matches and not male_matches and not is_dp_conflict:
             out_segs = []
             for s, in_q in segs:
                 out_segs.append(s if in_q else _replace_pronouns_to_feminine(s))
             processed_paragraphs.append("".join(out_segs))
         elif not male_matches and not female_matches:
-            all_known = bool(scene_npcs) and all((n.get("name", "").strip().lower() in char_genders) for n in scene_npcs if isinstance(n, dict) and n.get("name"))
-            if all_known:
-                unique_genders = set(char_genders.values())
-                if unique_genders == {"male"}:
-                    segs = _clean_quotes_and_split(para)
-                    out_segs = []
-                    for s, in_q in segs:
-                        out_segs.append(s if in_q else _replace_pronouns_to_masculine(s))
-                    processed_paragraphs.append("".join(out_segs))
-                elif unique_genders == {"female"}:
-                    segs = _clean_quotes_and_split(para)
-                    out_segs = []
-                    for s, in_q in segs:
-                        out_segs.append(s if in_q else _replace_pronouns_to_feminine(s))
-                    processed_paragraphs.append("".join(out_segs))
-                else:
+            scene_genders = set()
+            for n in scene_npcs:
+                n_nm = (n.get("name") if isinstance(n, dict) else str(n)).strip().lower()
+                if n_nm in char_genders:
+                    scene_genders.add(char_genders[n_nm])
+                elif n_nm.split() and n_nm.split()[-1] in char_genders:
+                    scene_genders.add(char_genders[n_nm.split()[-1]])
+            for p in (party or []):
+                p_c = p[0] if isinstance(p, (list, tuple)) else p
+                if isinstance(p_c, dict) and p_c.get("name"):
+                    p_nm = p_c["name"].strip().lower()
+                    if p_nm in char_genders:
+                        scene_genders.add(char_genders[p_nm])
+
+            if not scene_genders:
+                active_text_genders = {g for name, g in char_genders.items() if re.search(rf"\b{re.escape(name)}\b", text_lower)}
+                if active_text_genders:
+                    scene_genders = active_text_genders
+
+            if scene_genders == {"male"}:
+                # If paragraph contains explicit feminine markers (girl, woman, she, her, etc.)
+                # that were not matched to male characters, preserve it to prevent misgendering unnamed/emergent female NPCs
+                if re.search(r'\b(?:girl|woman|female|lady|sister|mother|daughter|she|her|hers|herself)\b', para, re.I):
                     processed_paragraphs.append(para)
+                    continue
+                out_segs = []
+                for s, in_q in segs:
+                    out_segs.append(s if in_q else _replace_pronouns_to_masculine(s))
+                processed_paragraphs.append("".join(out_segs))
+            elif scene_genders == {"female"}:
+                # If paragraph contains explicit masculine markers (boy, man, he, him, etc.)
+                # that were not matched to female characters, preserve it to prevent misgendering unnamed/emergent male NPCs
+                if re.search(r'\b(?:boy|man|male|guy|brother|father|son|he|him|his|himself)\b', para, re.I):
+                    processed_paragraphs.append(para)
+                    continue
+                out_segs = []
+                for s, in_q in segs:
+                    out_segs.append(s if in_q else _replace_pronouns_to_feminine(s))
+                processed_paragraphs.append("".join(out_segs))
             else:
                 processed_paragraphs.append(para)
         else:
-            sentences = re.split(r'(?<=[.!?])\s+', para)
+            sentences = _split_into_sentences(para)
             proc_sentences = []
             current_subj_gender = None
 
             for sent in sentences:
-                sent_lower = sent.lower()
+                sent_segs = _clean_quotes_and_split(sent)
+                sent_nar = " ".join(s for s, in_q in sent_segs if not in_q).strip()
+                sent_lower = sent_nar.lower()
+
                 s_male = any(re.search(rf"\b{re.escape(name)}\b", sent_lower) for name, g in char_genders.items() if g == "male")
                 s_female = any(re.search(rf"\b{re.escape(name)}\b", sent_lower) for name, g in char_genders.items() if g == "female")
+
+                # If active dialogue partner is female and this sentence already has feminine pronouns,
+                # do not let a male name mentioned in an object/prepositional role flip the pronoun
+                if s_male and not s_female and active_dp_gender == "female" and re.search(r'\b(?:she|her|hers|herself)\b', sent_nar, re.I):
+                    s_male = False
+                elif s_female and not s_male and active_dp_gender == "male" and re.search(r'\b(?:he|him|his|himself)\b', sent_nar, re.I):
+                    s_female = False
 
                 if s_male and not s_female:
                     current_subj_gender = "male"
                 elif s_female and not s_male:
                     current_subj_gender = "female"
 
-                segs = _clean_quotes_and_split(sent)
                 out_segs = []
-                for s, in_q in segs:
+                for s, in_q in sent_segs:
                     if in_q:
                         out_segs.append(s)
                     elif current_subj_gender == "male":
@@ -867,8 +1469,431 @@ def sanitize_npc_pronoun_consistency(
                     else:
                         out_segs.append(s)
                 proc_sentences.append("".join(out_segs))
-            processed_paragraphs.append(" ".join(proc_sentences))
+            processed_paragraphs.append("".join(proc_sentences))
 
     return "\n\n".join(processed_paragraphs)
 
 
+def sanitize_dialogue_canon_and_attraction_integrity(
+    text: str,
+    session: dict | None = None,
+    result: dict | None = None,
+    actions: list | None = None,
+    party: list | None = None,
+) -> str:
+    """
+    Deterministic pipeline guard that intercepts and sanitizes:
+    1. Protagonist Gender & Attraction Inversions:
+       Ensures that when NPCs flirt, tease, or ask the protagonist what they are looking for,
+       the inquiry aligns with the protagonist's canonical gender (e.g. female NPCs asking a male player
+       'what are you looking for in a girl/woman/partner', never in a 'guy/man').
+    2. Canon Virginity & Zero-Ex Romance/Dating History Integrity:
+       Ensures that an NPC who is canonically a virgin with zero ex-partners (empty ex_partners in romance relations)
+       never boasts of past suitors, past boyfriends, or 'balancing suitors/guys on their schedule',
+       sanitizing fabricated claims while preserving their authentic voice and confidence.
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    # --- 1. PROTAGONIST GENDER & ATTRACTION TARGET INTEGRITY ---
+    lead_char = party[0][0] if party and isinstance(party[0], (tuple, list)) else (party[0] if party and isinstance(party[0], dict) else None)
+    if not lead_char and actions and isinstance(actions[0], dict) and isinstance(actions[0].get("char"), dict):
+        lead_char = actions[0]["char"]
+    if not lead_char and isinstance(session, dict):
+        uid = session.get("host_user_id") or session.get("user_id")
+        if uid:
+            try:
+                import db
+                lead_char = db.get_character(uid)
+            except Exception:
+                pass
+
+    pl_gen = str(lead_char.get("gender") if isinstance(lead_char, dict) else "male").strip().lower()
+    is_pl_male = ("male" in pl_gen or "man" in pl_gen or "boy" in pl_gen) and "female" not in pl_gen
+
+    if is_pl_male:
+        text = re.sub(
+            r"(?i)\b(what (?:exactly )?(?:are you|do you|you're) looking for in a\s+)(?:guy|man|boy|dude)\b",
+            r"\g<1>girl",
+            text
+        )
+        text = re.sub(
+            r"(?i)\b(what (?:kind|type|sort) of )(?:guy|man|boy|dude)(\s+(?:are you|do you|you're) looking for)\b",
+            r"\g<1>girl\g<2>",
+            text
+        )
+        text = re.sub(
+            r"(?i)\b(what (?:kind|type|sort) of )(?:guys|men)(\s+(?:are you|do you|you're) (?:looking for|into|attracted to|interested in))\b",
+            r"\g<1>girls\g<2>",
+            text
+        )
+        text = re.sub(
+            r"(?i)\b(interested in a )(?:guy|man|boy|dude)\b",
+            r"\g<1>girl",
+            text
+        )
+        text = re.sub(
+            r"(?i)\b(looking for a )(?:guy|man|boy|dude)\b",
+            r"\g<1>girl",
+            text
+        )
+    else:
+        text = re.sub(
+            r"(?i)\b(what (?:exactly )?(?:are you|do you|you're) looking for in a\s+)(?:girl|woman|lady)\b",
+            r"\g<1>guy",
+            text
+        )
+        text = re.sub(
+            r"(?i)\b(what (?:kind|type|sort) of )(?:girl|woman|lady)(\s+(?:are you|do you|you're) looking for)\b",
+            r"\g<1>guy\g<2>",
+            text
+        )
+        text = re.sub(
+            r"(?i)\b(what (?:kind|type|sort) of )(?:girls|women)(\s+(?:are you|do you|you're) (?:looking for|into|attracted to|interested in))\b",
+            r"\g<1>guys\g<2>",
+            text
+        )
+        text = re.sub(
+            r"(?i)\b(interested in a )(?:girl|woman|lady)\b",
+            r"\g<1>guy",
+            text
+        )
+        text = re.sub(
+            r"(?i)\b(looking for a )(?:girl|woman|lady)\b",
+            r"\g<1>guy",
+            text
+        )
+
+    # --- 2. CANON VIRGINITY & ZERO-EX DATING HISTORY INTEGRITY ---
+    dialogue_partners = []
+    if isinstance(session, dict):
+        dp = session.get("dialogue_partner")
+        if dp:
+            dialogue_partners.append(str(dp).strip())
+        dps = session.get("dialogue_partners")
+        if isinstance(dps, list):
+            for p in dps:
+                if p and str(p).strip() not in dialogue_partners:
+                    dialogue_partners.append(str(p).strip())
+
+    session_id = session.get("id") if isinstance(session, dict) else None
+    if session_id and dialogue_partners:
+        try:
+            import db
+            contacts = db.get_contacts(session_id)
+            for p_name in dialogue_partners:
+                p_low = p_name.lower().strip()
+                matched_c = next((
+                    c for c in contacts
+                    if c.get("name", "").lower().strip() == p_low
+                    or c.get("npc_id", "").lower().strip() == p_low.replace(" ", "_")
+                    or p_low in c.get("name", "").lower().strip()
+                ), None)
+
+                if matched_c:
+                    appr = matched_c.get("appearance", {}) if isinstance(matched_c.get("appearance"), dict) else {}
+                    prof = matched_c.get("intimate_profile", {}) if isinstance(matched_c.get("intimate_profile"), dict) else {}
+                    ic_exp = str(
+                        matched_c.get("intercourse_experience")
+                        or prof.get("tracks", {}).get("intercourse")
+                        or prof.get("predetermined_intercourse")
+                        or appr.get("intercourse_experience")
+                        or appr.get("predetermined_intercourse")
+                        or ""
+                    ).strip().lower()
+                    rom = matched_c.get("relations", {}).get("romance", {}) if isinstance(matched_c.get("relations"), dict) else {}
+                    ex_partners = rom.get("ex_partners") or []
+                    is_virgin_no_ex = (ic_exp == "virgin" and len(ex_partners) == 0)
+
+                    if is_virgin_no_ex:
+                        # 2a. Sanitize "balancing suitors/guys on schedule"
+                        text = re.sub(
+                            r"(?i)\b(?:I['’]ve had |I have )?plenty of practice balancing (?:them|guys|men|suitors) on my schedule(?:[—–\s-]+though most of them break under the pressure)?\.?",
+                            "I don't waste time on guys who can't keep up with me—most people break under my standards anyway.",
+                            text
+                        )
+                        text = re.sub(
+                            r"(?i)\bbalancing (?:them|guys|men|suitors) on my schedule\b",
+                            "making time for people who can't meet my standards",
+                            text
+                        )
+                        text = re.sub(
+                            r"(?i)\bmost (?:guys|of them|suitors) break under the pressure\b",
+                            "most people can't keep up with my standards anyway",
+                            text
+                        )
+
+                        # 2b. Sanitize aggressive caricature ("strangle them for being boring")
+                        text = re.sub(
+                            r"(?i)\b(?:make(?:s)? me want to )?strangle (?:them|guys|men|suitors) for being boring\b",
+                            "actually catches my interest and can keep up with me",
+                            text
+                        )
+
+                        # 2c. Sanitize fabricated exes / past boyfriends / suitor rosters
+                        text = re.sub(
+                            r"(?i)\b(?:all )?my (?:ex-boyfriends|past boyfriends|past suitors|former suitors)\b",
+                            "people who've tried to approach me",
+                            text
+                        )
+                        text = re.sub(
+                            r"(?i)\b(?:all )?my exes\b",
+                            "anyone who's tried to pursue me",
+                            text
+                        )
+                        text = re.sub(
+                            r"(?i)\b(?:the )?guys I['’]ve dated\b",
+                            "the guys who've tried to catch my interest",
+                            text
+                        )
+                        text = re.sub(
+                            r"(?i)\bI(?:['’]ve| have) dated (?:plenty|a lot|many|dozens)\b",
+                            "I've had plenty of admirers",
+                            text
+                        )
+                        text = re.sub(
+                            r"(?i)\bI(?:['’]ve| have) had (?:plenty of|many|a lot of) (?:boyfriends|suitors|lovers)\b",
+                            "I've had plenty of people try their luck",
+                            text
+                        )
+
+                    # --- 3. CANON COMMANDO & BRA-LESS UNDERGARMENTS INTEGRITY ---
+                    under = prof.get("undergarments", {}) if isinstance(prof.get("undergarments"), dict) else (appr.get("undergarments", {}) if isinstance(appr.get("undergarments"), dict) else {})
+                    und_str = str(under.get("underwear") or prof.get("underwear") or appr.get("underwear") or "").strip().lower()
+                    bra_str = str(under.get("bra") or prof.get("bra") or appr.get("bra") or "").strip().lower()
+                    is_commando = any(k in und_str for k in ("none", "commando", "freeball"))
+                    is_braless = any(k in bra_str for k in ("none", "bra-less", "braless", "free"))
+
+                    if is_commando:
+                        # 3a. Sanitize "peel/pull/slide back the damp fabric of her soaked panties from between her lips/folds"
+                        text = re.sub(
+                            r"(?i)\b(?:peel(?:ed|s|ing)?|pull(?:ed|s|ing)?|slid(?:e|ing|es)?|tug(?:ged|s|ging)?|hook(?:ed|s|ing)?)\s+(?:back\s+|aside\s+|down\s+)?(?:the\s+)?(?:damp\s+|soaked\s+|thin\s+|silk\s+|lace\s+|cotton\s+)?fabric\s+of\s+her\s+(?:soaked\s+|damp\s+|lace\s+|silk\s+)?panties(?:\s+from\s+between\s+her\s+(?:swollen\s+)?(?:lips|folds))?",
+                            "parted the hem of her skirt to reveal she was completely bare underneath, exposing her damp, swollen folds",
+                            text
+                        )
+                        # 3b. Sanitize "with a soft snap against her thigh"
+                        text = re.sub(
+                            r"(?i)\b(?:with\s+a\s+(?:soft\s+|sharp\s+|gentle\s+)?snap(?:\s+of\s+(?:elastic|fabric))?\s+against\s+her\s+thigh)\b",
+                            "as her bare skin flushed against the cool air",
+                            text
+                        )
+                        # 3c. Sanitize "pull/peel/slide down/aside her panties"
+                        text = re.sub(
+                            r"(?i)\b(?:peel(?:ed|s|ing)?|pull(?:ed|s|ing)?|slid(?:e|ing|es)?|tug(?:ged|s|ging)?|push(?:ed|es|ing)?)\s+(?:aside\s+|back\s+|down\s+|off\s+)(?:her|the)\s+(?:soaked\s+|damp\s+|lace\s+|silk\s+|white\s+|black\s+|pink\s+)?panties(?:\s+(?:aside|to the side))?\b",
+                            "lifted her skirt to reveal she was completely bare underneath",
+                            text
+                        )
+                        # 3d. Sanitize "the damp/soaked fabric of her panties"
+                        text = re.sub(
+                            r"(?i)\b(?:the\s+)?(?:damp\s+|soaked\s+|thin\s+|silk\s+|lace\s+)?fabric\s+of\s+her\s+panties\b",
+                            "her damp, bare intimacy",
+                            text
+                        )
+                        # 3e. Sanitize "her soaked/damp panties" (excluding negations)
+                        text = re.sub(
+                            r"(?i)(?<!no\s)(?<!not\s)(?<!without\s)\bher\s+(?:soaked|damp|wet|lace|pink|silk)\s+panties\b",
+                            "her bare, exposed folds",
+                            text
+                        )
+                        # 3f. Sanitize "underneath her skirt, her panties"
+                        text = re.sub(
+                            r"(?i)(?<!no\s)(?<!not\s)(?<!without\s)\bunderneath\s+her\s+skirt(?:,\s*|\s+)her\s+panties\b",
+                            "underneath her skirt, she wore nothing at all",
+                            text
+                        )
+
+                    if is_braless:
+                        # 3g. Sanitize unclasping/unhooking bra
+                        text = re.sub(
+                            r"(?i)\b(?:unhook(?:ed|s|ing)?|unfasten(?:ed|s|ing)?|unclasp(?:ed|s|ing)?)\s+(?:the\s+)?(?:clasp\s+of\s+)?her\s+bra\b",
+                            "loosened her top to reveal her bare breasts",
+                            text
+                        )
+                        text = re.sub(
+                            r"(?i)\b(?:the\s+)?fabric\s+of\s+her\s+bra\b",
+                            "the fabric of her top",
+                            text
+                        )
+        except Exception:
+            pass
+
+    return text
+
+
+def validate_canon_dialogue_invariants(
+    text: str,
+    session: dict | None = None,
+    actions: list | None = None,
+    party: list | None = None,
+) -> list[str]:
+    """
+    Deterministic validator that checks whether the dialogue violates:
+    1. Protagonist Gender & Attraction Invariant
+    2. Canon Virginity & Zero-Ex Romance/Dating History Invariant
+    3. Canon Commando & Bra-less Undergarments Invariant
+    Returns a list of violation descriptions (empty if clean).
+    """
+    violations = []
+    if not text or not isinstance(text, str):
+        return violations
+
+    lead_char = party[0][0] if party and isinstance(party[0], (tuple, list)) else (party[0] if party and isinstance(party[0], dict) else None)
+    if not lead_char and actions and isinstance(actions[0], dict) and isinstance(actions[0].get("char"), dict):
+        lead_char = actions[0]["char"]
+    if not lead_char and isinstance(session, dict):
+        uid = session.get("host_user_id") or session.get("user_id")
+        if uid:
+            try:
+                import db
+                lead_char = db.get_character(uid)
+            except Exception:
+                pass
+
+    pl_gen = str(lead_char.get("gender") if isinstance(lead_char, dict) else "male").strip().lower()
+    is_pl_male = ("male" in pl_gen or "man" in pl_gen or "boy" in pl_gen) and "female" not in pl_gen
+
+    if is_pl_male:
+        if re.search(r"(?i)\b(?:looking for in a\s+)(?:guy|man|boy|dude)\b", text):
+            violations.append("Protagonist is MALE, but dialogue asks what they look for in a guy/man.")
+    else:
+        if re.search(r"(?i)\b(?:looking for in a\s+)(?:girl|woman|lady)\b", text):
+            violations.append("Protagonist is FEMALE, but dialogue asks what they look for in a girl/woman.")
+
+    dialogue_partners = []
+    if isinstance(session, dict):
+        dp = session.get("dialogue_partner")
+        if dp:
+            dialogue_partners.append(str(dp).strip())
+        dps = session.get("dialogue_partners")
+        if isinstance(dps, list):
+            for p in dps:
+                if p and str(p).strip() not in dialogue_partners:
+                    dialogue_partners.append(str(p).strip())
+
+    session_id = session.get("id") if isinstance(session, dict) else None
+    if session_id and dialogue_partners:
+        try:
+            import db
+            contacts = db.get_contacts(session_id)
+            for p_name in dialogue_partners:
+                p_low = p_name.lower().strip()
+                matched_c = next((
+                    c for c in contacts
+                    if c.get("name", "").lower().strip() == p_low
+                    or c.get("npc_id", "").lower().strip() == p_low.replace(" ", "_")
+                    or p_low in c.get("name", "").lower().strip()
+                ), None)
+
+                if matched_c:
+                    appr = matched_c.get("appearance", {}) if isinstance(matched_c.get("appearance"), dict) else {}
+                    prof = matched_c.get("intimate_profile", {}) if isinstance(matched_c.get("intimate_profile"), dict) else {}
+                    ic_exp = str(
+                        matched_c.get("intercourse_experience")
+                        or prof.get("tracks", {}).get("intercourse")
+                        or prof.get("predetermined_intercourse")
+                        or appr.get("intercourse_experience")
+                        or appr.get("predetermined_intercourse")
+                        or ""
+                    ).strip().lower()
+                    rom = matched_c.get("relations", {}).get("romance", {}) if isinstance(matched_c.get("relations"), dict) else {}
+                    ex_partners = rom.get("ex_partners") or []
+                    if ic_exp == "virgin" and len(ex_partners) == 0:
+                        if re.search(r"(?i)\b(?:practice balancing (?:them|guys|men|suitors) on my schedule|all my exes|my past boyfriends|guys I['’]ve dated)\b", text):
+                            violations.append(f"{p_name} is canonically a VIRGIN with 0 ex-partners, but dialogue claimed past suitors/dating history.")
+
+                    under = prof.get("undergarments", {}) if isinstance(prof.get("undergarments"), dict) else (appr.get("undergarments", {}) if isinstance(appr.get("undergarments"), dict) else {})
+                    und_str = str(under.get("underwear") or prof.get("underwear") or appr.get("underwear") or "").strip().lower()
+                    bra_str = str(under.get("bra") or prof.get("bra") or appr.get("bra") or "").strip().lower()
+                    is_commando = any(k in und_str for k in ("none", "commando", "freeball"))
+                    is_braless = any(k in bra_str for k in ("none", "bra-less", "braless", "free"))
+
+                    if is_commando:
+                        if re.search(r"(?i)\b(?:fabric of her (?:soaked\s+|damp\s+)?panties|snap against her thigh|peel(?:ed|s|ing)? back[^.\n]{0,30}panties|pull(?:ed|s|ing)? aside[^.\n]{0,20}panties)\b", text):
+                            violations.append(f"{p_name} is canonically COMMANDO (wearing no panties), but text narrated panties/underwear.")
+                        elif re.search(r"(?i)(?<!no\s)(?<!not\s)(?<!without\s)\b(?:her|the)\s+(?:soaked\s+|damp\s+|lace\s+|silk\s+)?panties\b", text):
+                            if not re.search(r"(?i)\b(?:wearing\s+no|not\s+wearing\s+any|without\s+any)\s+panties\b", text):
+                                violations.append(f"{p_name} is canonically COMMANDO (wearing no panties), but text narrated panties.")
+
+                    if is_braless:
+                        if re.search(r"(?i)\b(?:unhook|unclasp|unfasten)(?:ed|s|ing)?\s+(?:the\s+)?(?:clasp\s+of\s+)?her\s+bra\b", text):
+                            violations.append(f"{p_name} is canonically BRA-LESS (wearing no bra), but text narrated bra unclasping/unhooking.")
+        except Exception:
+            pass
+
+    return violations
+
+
+def sanitize_narrator_prose(
+    result: dict,
+    session: dict | None = None,
+    party: list | None = None,
+    actions: list | None = None,
+    present_npcs: list | None = None,
+) -> dict:
+    """
+    Consolidated <1ms single-pass prose guard for narrator outputs.
+    Applies all 7 deterministic prose sanitizers once across `outcome_narrative`,
+    `next_narrative`, and `narrative` (if present).
+    """
+    if not isinstance(result, dict):
+        return result
+
+    sess = dict(session) if isinstance(session, dict) else {}
+    if result.get("location"):
+        sess["current_location"] = result["location"]
+    if present_npcs is not None:
+        sess["current_npcs"] = present_npcs
+    elif result.get("npcs_present") is not None:
+        sess["current_npcs"] = result["npcs_present"]
+    if result.get("dialogue_partners") is not None:
+        sess["dialogue_partners"] = result["dialogue_partners"]
+    if result.get("dialogue_partner") is not None:
+        sess["dialogue_partner"] = result["dialogue_partner"]
+
+    act_label = ""
+    if actions and isinstance(actions, list) and actions[0]:
+        act_label = actions[0].get("label", "") if isinstance(actions[0], dict) else str(actions[0])
+
+    lead_char_name = "You"
+    if party and isinstance(party, list) and party[0]:
+        lead_c = party[0][0] if isinstance(party[0], (tuple, list)) else party[0]
+        if isinstance(lead_c, dict) and lead_c.get("name"):
+            lead_char_name = str(lead_c["name"])
+    elif actions and isinstance(actions, list) and isinstance(actions[0], dict) and isinstance(actions[0].get("char"), dict):
+        lead_char_name = str(actions[0]["char"].get("name") or "You")
+
+    def _clean_field(text: str, is_next: bool) -> str:
+        if not text or not isinstance(text, str):
+            return text
+        text = sanitize_comparative_cliches(text)
+        text = sanitize_meta_objective_leaks(text)
+        text = sanitize_auditor_meta_leaks(text)
+        text = sanitize_narrative_context_echo(
+            text,
+            sess,
+            action_label="" if is_next else act_label,
+            character_name=lead_char_name,
+            is_next_narrative=is_next,
+        )
+        text = sanitize_absent_npc_hallucinations(
+            text, sess, result=result, actions=actions, party=party
+        )
+        text = sanitize_npc_pronoun_consistency(
+            text, session=sess, result=result, actions=actions, party=party
+        )
+        text = sanitize_dialogue_canon_and_attraction_integrity(
+            text, session=sess, result=result, actions=actions, party=party
+        )
+        return text
+
+    if result.get("outcome_narrative"):
+        result["outcome_narrative"] = _clean_field(result["outcome_narrative"], is_next=False)
+        sess["narrative"] = result["outcome_narrative"]
+
+    if result.get("next_narrative"):
+        result["next_narrative"] = _clean_field(result["next_narrative"], is_next=True)
+
+    if result.get("narrative"):
+        result["narrative"] = _clean_field(result["narrative"], is_next=True)
+
+    return result

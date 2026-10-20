@@ -132,7 +132,7 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
   }, [isDragging]);
 
   const {
-    branding, appointments, gossipFeed, mediaGallery, contacts, socialState,
+    branding, appointments, gossipFeed, mediaGallery, contacts, suggestedPeers = [], socialState,
     activeChatNpc, chatMessages, dailyLimits, loadingChat, sendingChat,
     loadChatMessages, sendMessage, closeChat,
     refreshFeed, scourFeed, discoverPeer, sendFriendRequest, refreshPhoneData
@@ -216,13 +216,18 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
     }
   };
 
-  const handleSendFriendReq = async () => {
-    if (!sendFriendRequest || !peerProfile || peerBusy) return;
+  const handleSendFriendReq = async (targetProfile = null) => {
+    const profileToUse = targetProfile || peerProfile;
+    if (!sendFriendRequest || !profileToUse || peerBusy) return;
     setPeerBusy(true);
     setPeerFeedback(null);
     try {
-      const res = await sendFriendRequest(peerProfile);
-      if (res?.profile) setPeerProfile(res.profile);
+      const res = await sendFriendRequest(profileToUse);
+      if (res?.profile) {
+        if (peerProfile && (peerProfile.name === profileToUse.name || peerProfile.handle === profileToUse.handle)) {
+          setPeerProfile(res.profile);
+        }
+      }
       setPeerFeedback({
         type: res?.accepted ? 'ok' : 'warn',
         text: res?.message || (res?.accepted ? 'Friend request accepted!' : 'Request pending.'),
@@ -455,6 +460,15 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
       badgeColor: 'bg-amber-500',
     },
     {
+      id: 'planner',
+      name: branding.planner_app_name || 'Planner & Agenda',
+      subtitle: 'Schedule & Rendezvous',
+      icon: Calendar,
+      gradient: 'from-blue-500 via-indigo-500 to-sky-600',
+      badge: (appointments || []).length > 0 ? appointments.length : null,
+      badgeColor: 'bg-blue-500',
+    },
+    {
       id: 'bounties',
       name: branding.bounty_app_name || branding.bounties_app_name || 'Campus Requests',
       subtitle: branding.bounty_subtitle || 'Student Bulletin',
@@ -651,6 +665,138 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                     );
                   })}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* 7. PLANNER & RENDEZVOUS APP */}
+          {activeApp === 'planner' && (
+            <div className="flex-1 flex flex-col min-h-0 bg-neutral-950 text-neutral-100 overflow-hidden">
+              {/* App Subheader */}
+              <div className="px-4 py-3 bg-neutral-900/90 border-b border-neutral-800 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-blue-500 to-sky-600 flex items-center justify-center text-white shadow-sm">
+                    <Calendar size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-neutral-200 uppercase tracking-wider">{branding.planner_app_name || 'Planner & Agenda'}</h3>
+                    <p className="text-[10px] text-neutral-400 font-mono">Day {session?.current_day || 1} • In-Game Timeline</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-mono">
+                    {appointments.length} Active
+                  </span>
+                </div>
+              </div>
+
+              {/* Appointments List */}
+              <div className="flex-1 overflow-y-auto p-3.5 space-y-3">
+                {appointments.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-52 text-center text-neutral-500 space-y-2">
+                    <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center text-neutral-600">
+                      <Calendar size={22} />
+                    </div>
+                    <div className="text-xs font-medium text-neutral-400">No Upcoming Meetups</div>
+                    <p className="text-[10px] max-w-[220px] text-neutral-500 leading-relaxed">
+                      Message a contact or agree on plans in conversation to schedule physical rendezvous.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setActiveApp('dms')}
+                      className="mt-2 px-3 py-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[11px] font-medium transition-colors cursor-pointer"
+                    >
+                      Open Messages
+                    </button>
+                  </div>
+                ) : (
+                  appointments.map((appt, i) => {
+                    const isArrived = appt.status === 'arrived';
+                    const isConfidential = Boolean(appt.is_confidential);
+                    const shortLoc = (appt.rendezvous_location || appt.target_location || '').split('➔').pop().trim();
+                    const npcName = appt.npc_name || appt.target_entity || 'Contact';
+
+                    const hasOverlapConflict = appointments.some(other => {
+                      if (!other || (other.id && other.id === appt.id) || (other.npc_id && other.npc_id === appt.npc_id)) return false;
+                      const sameDay = (other.scheduled_day || 1) === (appt.scheduled_day || 1);
+                      if (!sameDay) return false;
+                      const oStart = other.start_minute ?? (other.created_minute ? other.created_minute % 1440 : 0);
+                      const oEnd = other.end_minute ?? (other.expiry_minute ? other.expiry_minute % 1440 : 1439);
+                      const aStart = appt.start_minute ?? (appt.created_minute ? appt.created_minute % 1440 : 0);
+                      const aEnd = appt.end_minute ?? (appt.expiry_minute ? appt.expiry_minute % 1440 : 1439);
+                      return Math.max(oStart, aStart) < Math.min(oEnd, aEnd);
+                    });
+
+                    return (
+                      <div
+                        key={appt.id || i}
+                        className={`p-3.5 rounded-2xl border transition-all ${
+                          isArrived
+                            ? 'bg-emerald-950/20 border-emerald-500/40 shadow-sm shadow-emerald-950/50'
+                            : 'bg-neutral-900/60 border-neutral-800/80 hover:border-neutral-700'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                              isArrived ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-neutral-800 text-neutral-300'
+                            }`}>
+                              {npcName.slice(0, 2).toUpperCase()}
+                            </div>
+                            <div>
+                              <div className="text-xs font-bold text-neutral-100 flex items-center gap-1.5 flex-wrap">
+                                {npcName}
+                                {isConfidential && (
+                                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-950/60 text-purple-300 border border-purple-800/40">
+                                    Private 1-on-1
+                                  </span>
+                                )}
+                                {hasOverlapConflict && (
+                                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-950/60 text-amber-300 border border-amber-800/40">
+                                    ⚠️ Overlap
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-neutral-400 flex items-center gap-1 mt-0.5">
+                                <MapPin size={10} className="text-neutral-500" />
+                                <span className="truncate max-w-[180px]">{shortLoc || 'Scheduled Venue'}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-medium ${
+                            isArrived
+                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                          }`}>
+                            {isArrived ? 'Arrived & Waiting' : 'Scheduled'}
+                          </span>
+                        </div>
+
+                        {appt.topic && (
+                          <p className="mt-2.5 text-[11px] text-neutral-300 bg-neutral-950/60 p-2 rounded-xl border border-neutral-800/60 italic">
+                            "{appt.topic}"
+                          </p>
+                        )}
+
+                        <div className="mt-3 pt-2.5 border-t border-neutral-800/60 flex items-center justify-between text-[10px]">
+                          <span className="text-neutral-500 font-mono">
+                            {appt.created_minute ? `Window: ${Math.floor(appt.created_minute % 1440 / 60)}:${String(appt.created_minute % 60).padStart(2, '0')}` : 'Flexible Window'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              openChat(appt.npc_id || npcName);
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-[10px] font-medium transition-colors cursor-pointer"
+                          >
+                            Message Contact
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           )}
@@ -1320,105 +1466,228 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
 
                   {/* Discovered Profile Card */}
                   {peerProfile ? (
-                    <div className="bg-neutral-900/90 border border-neutral-800 rounded-2xl p-3.5 space-y-2.5">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <h5 className="font-bold text-xs text-gray-100">{peerProfile.name}</h5>
-                          <span className="text-[10px] font-mono text-cyan-400 block">{peerProfile.handle}</span>
-                        </div>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-800 text-gray-300 border border-neutral-700 font-semibold">
-                          {peerProfile.grade || peerProfile.role}
-                        </span>
-                      </div>
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => { setPeerProfile(null); setPeerFeedback(null); }}
+                        className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-semibold cursor-pointer transition-colors"
+                      >
+                        <ChevronLeft size={14} />
+                        <span>Back to Suggestions</span>
+                      </button>
 
-                      {peerProfile.personality && (
-                        <p className="text-[11px] text-gray-300 leading-snug italic bg-neutral-950/80 p-2.5 rounded-xl border border-neutral-800/80">
-                          "{peerProfile.personality}"
-                        </p>
-                      )}
-
-                      <div className="flex flex-wrap gap-1.5 text-[10px]">
-                        {peerProfile.role && (
-                          <span className="px-2 py-0.5 rounded-lg bg-neutral-950 text-gray-300 border border-neutral-800">
-                            Role: {peerProfile.role}
-                          </span>
-                        )}
-                        {peerProfile.club && peerProfile.club !== 'None' && (
-                          <span className="px-2 py-0.5 rounded-lg bg-purple-950/50 text-purple-300 border border-purple-800/50">
-                            Club: {peerProfile.club}
-                          </span>
-                        )}
-                        {peerProfile.facility && (
-                          <span className="px-2 py-0.5 rounded-lg bg-neutral-950 text-gray-400 border border-neutral-800">
-                            📍 {peerProfile.facility}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Social Graph Ties & Mutual Friends */}
-                      {(peerProfile.is_sibling_friend || peerProfile.shared_club || (peerProfile.mutual_friends && peerProfile.mutual_friends.length > 0)) && (
-                        <div className="pt-1.5 border-t border-neutral-800 space-y-1 text-[10px]">
-                          <span className="font-bold uppercase tracking-wider text-cyan-400 block">
-                            Social Graph Synergies (CHA Bonus)
-                          </span>
-                          {peerProfile.is_sibling_friend && (
-                            <p className="text-emerald-300">• +4 CHA: Sibling of your contact {peerProfile.sibling_name}</p>
-                          )}
-                          {peerProfile.shared_club && (
-                            <p className="text-purple-300">• +2 CHA: Shared affiliation ({peerProfile.shared_club})</p>
-                          )}
-                          {peerProfile.mutual_friends?.length > 0 && (
-                            <p className="text-cyan-300">
-                              • Mutual Friends: {peerProfile.mutual_friends.join(', ')}
-                            </p>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Friend Request Action */}
-                      <div className="pt-1">
-                        {peerProfile.is_already_contact ? (
-                          <button
-                            onClick={() => {
-                              setActiveApp('dms');
-                              loadChatMessages(peerProfile.npc_id || peerProfile.name);
-                            }}
-                            className="w-full py-2 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-700/60 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
-                          >
-                            <MessageSquare size={13} />
-                            <span>Connected — Open Direct Message</span>
-                          </button>
-                        ) : peerProfile.is_faculty ? (
-                          <div className="text-center py-1.5 px-2 rounded-xl bg-neutral-950 border border-neutral-800 text-[10px] text-gray-500">
-                            🔒 Faculty/Staff accounts cannot be added to student friend circles
+                      <div className="bg-neutral-900/90 border border-neutral-800 rounded-2xl p-3.5 space-y-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <h5 className="font-bold text-xs text-gray-100">{peerProfile.name}</h5>
+                            <span className="text-[10px] font-mono text-cyan-400 block">{peerProfile.handle}</span>
                           </div>
-                        ) : (
-                          <button
-                            disabled={peerBusy || (peerProfile.cooldown_turns_left || 0) > 0}
-                            onClick={handleSendFriendReq}
-                            className={`w-full py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-all ${
-                              (peerProfile.cooldown_turns_left || 0) > 0
-                                ? 'bg-neutral-950 text-gray-600 border-neutral-800 cursor-not-allowed'
-                                : 'bg-cyan-600/30 hover:bg-cyan-600/45 text-cyan-200 border-cyan-500/60'
-                            }`}
-                          >
-                            <UserPlus size={13} />
-                            <span>
-                              {(peerProfile.cooldown_turns_left || 0) > 0
-                                ? `Cooldown (${peerProfile.cooldown_turns_left} turns left)`
-                                : 'Send Friend Request (CHA Check)'}
-                            </span>
-                          </button>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-800 text-gray-300 border border-neutral-700 font-semibold">
+                            {peerProfile.grade || peerProfile.role}
+                          </span>
+                        </div>
+
+                        {peerProfile.personality && (
+                          <p className="text-[11px] text-gray-300 leading-snug italic bg-neutral-950/80 p-2.5 rounded-xl border border-neutral-800/80">
+                            "{peerProfile.personality}"
+                          </p>
                         )}
+
+                        <div className="flex flex-wrap gap-1.5 text-[10px]">
+                          {peerProfile.role && (
+                            <span className="px-2 py-0.5 rounded-lg bg-neutral-950 text-gray-300 border border-neutral-800">
+                              Role: {peerProfile.role}
+                            </span>
+                          )}
+                          {peerProfile.club && peerProfile.club !== 'None' && (
+                            <span className="px-2 py-0.5 rounded-lg bg-purple-950/50 text-purple-300 border border-purple-800/50">
+                              Club: {peerProfile.club}
+                            </span>
+                          )}
+                          {peerProfile.facility && (
+                            <span className="px-2 py-0.5 rounded-lg bg-neutral-950 text-gray-400 border border-neutral-800">
+                              📍 {peerProfile.facility}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Social Graph Ties & Mutual Friends */}
+                        {(peerProfile.is_sibling_friend || peerProfile.shared_club || (peerProfile.mutual_friends && peerProfile.mutual_friends.length > 0)) && (
+                          <div className="pt-1.5 border-t border-neutral-800 space-y-1 text-[10px]">
+                            <span className="font-bold uppercase tracking-wider text-cyan-400 block">
+                              Social Graph Synergies (CHA Bonus)
+                            </span>
+                            {peerProfile.is_sibling_friend && (
+                              <p className="text-emerald-300">• +4 CHA: Sibling of your contact {peerProfile.sibling_name}</p>
+                            )}
+                            {peerProfile.shared_club && (
+                              <p className="text-purple-300">• +2 CHA: Shared affiliation ({peerProfile.shared_club})</p>
+                            )}
+                            {peerProfile.mutual_friends?.length > 0 && (
+                              <p className="text-cyan-300">
+                                • Mutual Friends: {peerProfile.mutual_friends.join(', ')}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Friend Request Action */}
+                        <div className="pt-1">
+                          {peerProfile.is_already_contact ? (
+                            <button
+                              onClick={() => {
+                                setActiveApp('dms');
+                                loadChatMessages(peerProfile.npc_id || peerProfile.name);
+                              }}
+                              className="w-full py-2 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-700/60 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                            >
+                              <MessageSquare size={13} />
+                              <span>Connected — Open Direct Message</span>
+                            </button>
+                          ) : peerProfile.is_faculty ? (
+                            <div className="text-center py-1.5 px-2 rounded-xl bg-neutral-950 border border-neutral-800 text-[10px] text-gray-500">
+                              🔒 Faculty/Staff accounts cannot be added to student friend circles
+                            </div>
+                          ) : (
+                            <button
+                              disabled={peerBusy || (peerProfile.cooldown_turns_left || 0) > 0}
+                              onClick={() => handleSendFriendReq(peerProfile)}
+                              className={`w-full py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-all ${
+                                (peerProfile.cooldown_turns_left || 0) > 0
+                                  ? 'bg-neutral-950 text-gray-600 border-neutral-800 cursor-not-allowed'
+                                  : 'bg-cyan-600/30 hover:bg-cyan-600/45 text-cyan-200 border-cyan-500/60'
+                              }`}
+                            >
+                              <UserPlus size={13} />
+                              <span>
+                                {(peerProfile.cooldown_turns_left || 0) > 0
+                                  ? `Cooldown (${peerProfile.cooldown_turns_left} turns left)`
+                                  : 'Send Friend Request (CHA Check)'}
+                              </span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ) : (
-                    <div className="text-center py-10 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl space-y-1">
-                      <Users size={26} className="mx-auto opacity-30 text-cyan-400" />
-                      <p className="text-xs text-gray-400">Discover Peers & Mutual Connections</p>
-                      <p className="text-[10px] text-gray-500">
-                        Search by name or click "Discover Suggested Peer" to view social profiles and send Friend Requests.
-                      </p>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between pb-1 border-b border-neutral-800">
+                        <div>
+                          <h5 className="font-bold text-xs text-gray-200 flex items-center gap-1.5">
+                            <Users size={14} className="text-cyan-400" />
+                            <span>Suggested Peers & Classmates</span>
+                          </h5>
+                          <p className="text-[10px] text-gray-500">
+                            Classmates and mutual peers eligible for friend requests.
+                          </p>
+                        </div>
+                        {suggestedPeers.length > 0 && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950/60 text-cyan-300 border border-cyan-800/50">
+                            {suggestedPeers.length} eligible
+                          </span>
+                        )}
+                      </div>
+
+                      {suggestedPeers.length === 0 ? (
+                        <div className="text-center py-10 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl space-y-1">
+                          <Users size={26} className="mx-auto opacity-30 text-cyan-400" />
+                          <p className="text-xs text-gray-400">Discover Peers & Mutual Connections</p>
+                          <p className="text-[10px] text-gray-500">
+                            Search by name or click "Discover Suggested Peer" to view social profiles and send Friend Requests.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-[360px] overflow-y-auto pr-0.5 custom-scrollbar">
+                          {suggestedPeers.map((peer, idx) => {
+                            const isConnected = peer.is_already_contact || contacts.some(c => (c.name === peer.name || c.id === peer.npc_id));
+                            const cooldownLeft = peer.cooldown_turns_left || 0;
+                            return (
+                              <div
+                                key={peer.handle || peer.name || idx}
+                                className="bg-neutral-900/90 hover:bg-neutral-900 border border-neutral-800 hover:border-neutral-700/80 rounded-2xl p-3 transition-colors space-y-2"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-900/50 to-blue-900/50 border border-cyan-700/40 flex items-center justify-center font-bold text-xs text-cyan-200 shrink-0">
+                                      {peer.name ? peer.name[0] : '?'}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <h6 className="font-bold text-xs text-gray-100 truncate">{peer.name}</h6>
+                                      <span className="text-[10px] font-mono text-cyan-400/90 block truncate">{peer.handle}</span>
+                                    </div>
+                                  </div>
+                                  <span className="text-[9px] px-2 py-0.5 rounded-full bg-neutral-800 text-gray-300 border border-neutral-700 font-semibold shrink-0">
+                                    {peer.grade || peer.role}
+                                  </span>
+                                </div>
+
+                                {peer.personality && (
+                                  <p className="text-[10px] text-gray-400 italic line-clamp-1">
+                                    "{peer.personality}"
+                                  </p>
+                                )}
+
+                                {/* Synergies */}
+                                <div className="flex flex-wrap gap-1 text-[9px]">
+                                  {peer.shared_club && (
+                                    <span className="px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/50">
+                                      ★ Shared: {peer.shared_club} (+2 CHA)
+                                    </span>
+                                  )}
+                                  {peer.is_sibling_friend && (
+                                    <span className="px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/50">
+                                      ★ Sibling Contact (+4 CHA)
+                                    </span>
+                                  )}
+                                  {peer.mutual_friends?.length > 0 && (
+                                    <span className="px-1.5 py-0.5 rounded bg-cyan-950/60 text-cyan-300 border border-cyan-800/50">
+                                      ★ {peer.mutual_friends.length} Mutual{peer.mutual_friends.length > 1 ? 's' : ''}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Action Buttons */}
+                                <div className="flex items-center gap-1.5 pt-1">
+                                  <button
+                                    onClick={() => {
+                                      setPeerProfile(peer);
+                                      setPeerFeedback(null);
+                                    }}
+                                    className="flex-1 py-1.5 rounded-xl bg-neutral-800 hover:bg-neutral-700/80 text-gray-300 border border-neutral-700 text-[11px] font-medium transition-colors"
+                                  >
+                                    View Bio
+                                  </button>
+                                  {isConnected ? (
+                                    <button
+                                      onClick={() => {
+                                        setActiveApp('dms');
+                                        loadChatMessages(peer.npc_id || peer.name);
+                                      }}
+                                      className="flex-1 py-1.5 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-700/60 text-[11px] font-bold flex items-center justify-center gap-1 transition-colors"
+                                    >
+                                      <MessageSquare size={12} />
+                                      <span>Message</span>
+                                    </button>
+                                  ) : (
+                                    <button
+                                      disabled={peerBusy || cooldownLeft > 0}
+                                      onClick={() => handleSendFriendReq(peer)}
+                                      className={`flex-1 py-1.5 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 border transition-all ${
+                                        cooldownLeft > 0
+                                          ? 'bg-neutral-950 text-gray-600 border-neutral-800 cursor-not-allowed'
+                                          : 'bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-200 border-cyan-500/60'
+                                      }`}
+                                      title={cooldownLeft > 0 ? `Wait ${cooldownLeft} turns before re-attempting` : 'Send a friend request (CHA check)'}
+                                    >
+                                      <UserPlus size={12} />
+                                      <span>{cooldownLeft > 0 ? `Wait (${cooldownLeft}t)` : 'Add Friend'}</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

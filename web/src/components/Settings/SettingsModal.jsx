@@ -170,7 +170,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
                   {AVAILABLE_LANGUAGES.map((lang) => {
                     const activeCode = (settings.ui_language || i18n.language || 'en').split('-')[0].toLowerCase();
                     const isSelected = activeCode === lang.code;
@@ -213,7 +213,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
                   {AVAILABLE_LANGUAGES.map((lang) => {
                     const activeCode = (settings.narration_language || settings.language || 'en').split('-')[0].toLowerCase();
                     const isSelected = activeCode === lang.code;
@@ -280,38 +280,53 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                 </div>
               </div>
 
-              {/* Section 1B: AI Scene Illustrations */}
+              {/* Section 1B: AI Scene Illustrations (3 Modes: Auto, On-Demand, Disabled) */}
               <div className="bg-black/30 border border-fantasy-border/60 rounded-lg p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-1">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <ImageIcon size={16} className={isImageGenOn ? "text-purple-400" : "text-gray-500"} />
+                      <ImageIcon size={16} className={(settings.image_gen_enabled ?? 0) > 0 ? "text-purple-400" : "text-gray-500"} />
                       <span className="font-semibold text-gray-200 text-sm">{t('settings.image_gen', 'AI Scene Illustrations')}</span>
-                      {isImageGenOn && (
+                      {(settings.image_gen_enabled ?? 0) === 1 && (
                         <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40">
-                          Active
+                          Auto
+                        </span>
+                      )}
+                      {(settings.image_gen_enabled ?? 0) === 2 && (
+                        <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                          On-Demand
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-400 leading-relaxed">
-                      {t('settings.image_gen_desc', 'Automatically generate and stream atmospheric artwork for new scenes in the background.')}
-                    </p>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={handleToggleImageGen}
-                    disabled={saving}
-                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      isImageGenOn ? 'bg-fantasy-accent' : 'bg-neutral-800 border border-neutral-700'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        isImageGenOn ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
+                  <p className="text-xs text-gray-400 leading-relaxed">
+                    {t('settings.image_gen_desc', 'Generate high-fidelity visual novel illustrations for active scenes.')}
+                  </p>
+                  <div className="grid grid-cols-3 gap-2 pt-1">
+                    {[
+                      { id: 1, label: '⚡ Auto', desc: 'Every turn' },
+                      { id: 2, label: '✨ On-Demand', desc: 'Manual click' },
+                      { id: 0, label: '🚫 Disabled', desc: 'Off' }
+                    ].map((mode) => {
+                      const isSelected = (settings.image_gen_enabled ?? 0) === mode.id;
+                      return (
+                        <button
+                          key={mode.id}
+                          type="button"
+                          onClick={() => updateSettings({ image_gen_enabled: mode.id })}
+                          disabled={saving}
+                          className={`p-2 rounded-lg text-left transition-all border ${
+                            isSelected
+                              ? 'bg-purple-950/40 border-purple-500/80 text-purple-200 shadow-[0_0_10px_rgba(168,85,247,0.15)]'
+                              : 'bg-black/40 border-neutral-800 text-gray-400 hover:text-gray-200 hover:border-neutral-700'
+                          }`}
+                        >
+                          <div className="text-xs font-semibold">{mode.label}</div>
+                          <div className="text-[10px] text-gray-400 mt-0.5">{mode.desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 

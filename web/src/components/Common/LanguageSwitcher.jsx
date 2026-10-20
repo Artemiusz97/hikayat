@@ -60,7 +60,7 @@ export const LanguageSwitcher = ({ settingsHook, className = '' }) => {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-1.5 w-48 rounded-lg bg-neutral-950 border border-neutral-800 shadow-xl z-50 overflow-hidden backdrop-blur-md animate-in fade-in zoom-in-95 duration-100">
+        <div className="absolute right-0 mt-1.5 w-52 rounded-lg bg-neutral-950 border border-neutral-800 shadow-xl z-50 overflow-hidden backdrop-blur-md animate-in fade-in zoom-in-95 duration-100">
           {/* Dual Toggle Tabs */}
           <div className="flex border-b border-neutral-800/80 bg-black/50 p-1 gap-1">
             <button

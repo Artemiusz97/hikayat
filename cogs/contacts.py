@@ -29,23 +29,21 @@ def get_scenario_contact_title(scen_key: str) -> tuple[str, str]:
 
 
 def filter_unlocked_contacts(contacts: list[dict], party_names: set[str], scenario_key: str) -> list[dict]:
-    """Filters contacts down strictly to Friends (score >= 100) or active party members.
+    """Filters contacts down strictly to Friends (score >= 100), active party members, or explicitly added contacts.
     In High School scenarios, also requires peer/student eligibility.
     """
-    from mechanics.social.relationships import is_contact_eligible
+    from mechanics.social.relationships import is_contact_eligible, is_unlocked_contact
     from scenario_data import has_tag
     is_hs = has_tag(scenario_key, "high_school")
     unlocked = []
     for c in contacts:
-        name = c.get("name", "")
-        score = c.get("relationship_score", 0)
-        is_party = name.lower() in party_names
-        if not is_party and score < 100:
+        if not is_unlocked_contact(c, party_names):
             continue
         if is_hs:
             b_info = c.get("basic_info") or {}
             r = b_info.get("role") or b_info.get("occupation") or ""
             d = b_info.get("description") or ""
+            name = c.get("name", "")
             if not is_contact_eligible(name=name, role=r, description=d, scenario=scenario_key):
                 continue
         unlocked.append(c)
@@ -797,7 +795,7 @@ def build_intimate_profile_embed(contact: dict, scenario_key: str = "fantasy", u
         desc_val = " ".join(str(v) for v in desc_val.values() if v)
     traits = list(contact.get("unlocked_traits", [])) or list(contact.get("traits", []))
 
-    norm_app = normalize_appearance(app_data, gender=gender_val, race=race_val or "", scen_key=scenario_key, desc=desc_val, traits=traits)
+    norm_app = normalize_appearance(app_data, gender=gender_val, race=race_val or "", scen_key=scenario_key, desc=desc_val, traits=traits, name=name)
     sections = format_intimate_profile_sections(
         norm_app,
         gender=gender_val,

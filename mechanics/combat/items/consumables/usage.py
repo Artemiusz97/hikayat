@@ -309,17 +309,20 @@ def apply_item_to_target(
         if actual_mp > 0:
             feedback.append(f"+{actual_mp} 💙")
         if parsed.get("buffs"):
+            dur = int(parsed.get("duration", 3) or 3)
             for k, v in parsed["buffs"].items():
                 if k == "atk_pct":
-                    feedback.append(f"+{int(v * 100)}% ATK")
+                    lbl = f"+{int(v * 100)}% ATK"
                 elif k == "dr":
-                    feedback.append(f"+{int(v * 100)}% DR")
+                    lbl = f"+{int(v * 100)}% DR"
                 elif k == "dt":
-                    feedback.append(f"+{v} DT")
+                    lbl = f"+{v} DT"
                 elif k == "eva":
-                    feedback.append(f"+{v}% EVA")
+                    lbl = f"+{v}% EVA"
                 else:
-                    feedback.append(f"+{v} {k.upper()}")
+                    lbl = f"+{v} {k.upper()}"
+                feedback.append(lbl)
+                db.add_status_effect(user_id, f"[{lbl}] [{dur} turns]")
         if parsed["cure_status"]:
             feedback.append(f"cleansed {', '.join(parsed['cure_status'])}")
 

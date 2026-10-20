@@ -208,7 +208,8 @@ class WorldNavigationSimulator:
                     # Update session location in DB
                     current_loc = new_loc
                     result.path_history.append(current_loc)
-                    db.update_session(session_id, current_location=current_loc)
+                    new_node_id = db.resolve_node_id_from_location(session_id, current_loc)
+                    db.update_session(session_id, current_location=current_loc, current_node_id=new_node_id)
 
                     # Trigger arrival waypoint check across all active waypoints
                     for wp in active_wps:
@@ -288,6 +289,8 @@ class WorldNavigationSimulator:
                         "contacts",
                         "factions",
                         "school_directory",
+                        "world_nodes",
+                        "world_edges",
                     ):
                         conn.execute(f"DELETE FROM {table} WHERE session_id=?", (session_id,))
                     conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))

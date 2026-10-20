@@ -16,7 +16,8 @@ CAMPUS_FACILITY_KEYWORDS = {
     'dormitory', "principal's office", 'principal', 'vice principal', 'headmaster',
     'guidance counselor', 'counselor', 'broadcast', 'av room', 'audio-visual',
     'bike shed', 'bicycle racks', 'locker room', 'equipment shed', 'prep room', 'science wing', 'academic wing',
-    'school gate', 'main gate', 'entrance gate', 'school entrance', 'front gate', 'campus gate', 'school main gates', 'entrance path', 'gate checkpoint', 'main gates'
+    'school gate', 'main gate', 'entrance gate', 'school entrance', 'front gate', 'campus gate', 'school main gates', 'entrance path', 'gate checkpoint', 'main gates',
+    'glasshouse', 'greenhouse', 'botanical', 'botanical glasshouse', 'conservatory', 'arboretum', 'vending machine pavilion', 'dining hall', 'campus promenade', 'student commons'
 }
 RESIDENTIAL_PLACE_KEYWORDS = {
     'residence', 'house', 'apartment', 'cottage', 'manor', 'villa', 'home',

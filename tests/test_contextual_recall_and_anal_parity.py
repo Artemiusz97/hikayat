@@ -246,3 +246,105 @@ def test_build_topic_aware_npc_context_recall():
     assert "[RECALLED PAST MOMENT]: Shared their first kiss under the willow tree" in context
     # Recent items must also be intact
     assert "Shared a passionate embrace in the royal garden" in context
+
+
+def test_female_anal_biological_invariants():
+    # 1. Dynamic generation for females across multiple seeds
+    for h in range(1, 200, 7):
+        exp = generate_dynamic_intimate_experience(hash_val=h, openness="Shameless", gender="female")
+        assert exp["anal"] in ("inexperienced", "has_received_anal"), f"Female rolled invalid anal state: {exp['anal']}"
+        assert exp["anal"] != "has_done_anal"
+        assert exp["anal"] != "has_done_and_received_anal"
+
+    # 2. Invariant normalizer clamps invalid female anal states
+    app_female_done = {
+        "gender": "female",
+        "intercourse_experience": "virgin",
+        "anal_experience": "has_done_anal",
+    }
+    normalized = enforce_intimacy_safeguard_invariants(app_female_done, gender="female")
+    assert normalized["anal_experience"] == "has_received_anal"
+
+    app_female_both = {
+        "gender": "female",
+        "intercourse_experience": "non_virgin",
+        "anal_experience": "has_done_and_received_anal",
+    }
+    normalized_both = enforce_intimacy_safeguard_invariants(app_female_both, gender="female")
+    assert normalized_both["anal_experience"] == "has_received_anal"
+
+    # 3. Transition anal experience preserves female invariant
+    assert transition_anal_experience("inexperienced", "anal_give", gender="female") == "inexperienced"
+    assert transition_anal_experience("inexperienced", "anal_receive", gender="female") == "has_received_anal"
+    assert transition_anal_experience("has_received_anal", "anal_give", gender="female") == "has_received_anal"
+
+
+def test_male_and_female_past_history_anal_roles():
+    # Female past history must synthesize 'received anal', never 'performed anal'
+    fem_hist = generate_past_intimate_history(
+        hash_val=88,
+        gender="female",
+        intercourse="virgin",
+        oral="inexperienced",
+        manual="inexperienced",
+        anal="has_received_anal",
+        openness="Bold",
+        scenario="high_school_drama"
+    )
+    assert fem_hist is not None
+    combined_fem = " ".join(fem_hist["entries"]).lower()
+    assert "received anal" in combined_fem
+    assert "performed anal" not in combined_fem
+
+    # Male with female partner can give anal ('performed anal')
+    male_hist_done = generate_past_intimate_history(
+        hash_val=99,
+        gender="male",
+        intercourse="non_virgin",
+        oral="inexperienced",
+        manual="inexperienced",
+        anal="has_done_anal",
+        openness="Bold",
+        scenario="high_school_drama"
+    )
+    assert male_hist_done is not None
+    combined_male_done = " ".join(male_hist_done["entries"]).lower()
+    assert "performed anal" in combined_male_done
+
+    # Male who receives anal must have a male partner
+    male_hist_rec = generate_past_intimate_history(
+        hash_val=105,
+        gender="male",
+        intercourse="virgin",
+        oral="inexperienced",
+        manual="inexperienced",
+        anal="has_received_anal",
+        openness="Bold",
+        scenario="high_school_drama"
+    )
+    assert male_hist_rec is not None
+    combined_male_rec = " ".join(male_hist_rec["entries"]).lower()
+    assert "received anal" in combined_male_rec
+
+
+def test_manual_and_anal_history_synthesis_no_dropping():
+    # Su-bin Vance's exact case: virgin intercourse, inexperienced oral, manual + anal
+    hist = generate_past_intimate_history(
+        hash_val=42,
+        gender="female",
+        intercourse="virgin",
+        oral="inexperienced",
+        manual="has_done_and_received_manual",
+        anal="has_received_anal",
+        openness="Bold",
+        scenario="high_school_drama"
+    )
+    assert hist is not None
+    entries = hist["entries"]
+    assert len(entries) > 0
+    combined = " ".join(entries).lower()
+    # BOTH manual foreplay AND anal intimacy MUST be present
+    assert "manual foreplay" in combined or "manual" in combined
+    assert "anal" in combined
+    assert "received anal" in combined
+    assert "performed anal" not in combined

@@ -41,6 +41,27 @@ def build_character_sheet_embed(char: dict, equipment: dict, title_prefix: str =
     if char.get("gender"):
         identity_line += f"  |  Gender: **{char['gender']}**"
     embed.add_field(name="Identity", value=identity_line, inline=False)
+
+    app = char.get("appearance") or {}
+    b_size = char.get("breast_size") or app.get("breast_size")
+    p_size = char.get("penis_size") or app.get("penis_size")
+    a_tex = char.get("asset_texture") or app.get("asset_texture")
+    from scenario_data import is_nsfw_scenario
+    is_nsfw = is_nsfw_scenario(scen_key) or bool(b_size or p_size or a_tex)
+    if is_nsfw:
+        anat_parts = []
+        is_m = any(kw in str(char.get("gender", "")).lower() for kw in ("male", "man", "boy")) and "female" not in str(char.get("gender", "")).lower()
+        if is_m:
+            if p_size:
+                anat_parts.append(f"**Size:** {str(p_size).title()}")
+        else:
+            if b_size:
+                anat_parts.append(f"**Size:** {str(b_size).title()}")
+        if a_tex:
+            anat_parts.append(f"**Tactile/Texture:** {a_tex}")
+        if anat_parts:
+            embed.add_field(name="🔞 Intimate Anatomy", value=" • ".join(anat_parts), inline=False)
+
     embed.add_field(name="Stats",
                      value=(f"STR {char['str_']} | PER {char['per_']} | END {char['end_']} | CHA {char['cha']}\n"
                             f"INT {char['int_']} | AGI {char['agi']} | LUK {char['luk']}"),
@@ -467,7 +488,12 @@ class CharacterCog(commands.Cog):
                 if session and session.get("status") == "active":
                     session_note = f"\n📖 Active Adventure: Scenario *{session.get('scenario', 'fantasy').title()}* (ID #{session['id']})"
 
+            from mechanics.social.races import format_race_display
+            race_display = format_race_display(char.get("race", "human"))
+            gender_display = char.get("gender", "Unknown")
+
             value = (
+                f"**Race & Gender:** {race_display} | {gender_display}\n"
                 f"**Class:** {char['char_class']}\n"
                 f"**Level:** {char['level']} ({char['xp']} XP) | **Gold:** {char['gold']}\n"
                 f"**Vitals:** ❤️ {char['hp']}/{char['max_hp']} | 💙 {char['mp']}/{char['max_mp']}"
@@ -504,9 +530,14 @@ class CharacterCog(commands.Cog):
             if session and session.get("status") == "active":
                 session_note = f"In active adventure: *{session.get('scene_title', 'In progress')}*! Use `/resume` to continue."
 
+        from mechanics.social.races import format_race_display
+        race_display = format_race_display(switched.get("race", "human"))
+        gender_display = switched.get("gender", "Unknown")
+
         embed = discord.Embed(
             title=f"🔄 Switched Active Character to {switched['name']}",
-            description=f"**Class:** {switched['char_class']} (Level {switched['level']})\n"
+            description=f"**Race & Gender:** {race_display} | {gender_display}\n"
+                        f"**Class:** {switched['char_class']} (Level {switched['level']})\n"
                         f"**Vitals:** ❤️ {switched['hp']}/{switched['max_hp']} | 💙 {switched['mp']}/{switched['max_mp']} | Gold {switched['gold']}\n"
                         f"**Equipped:** {equipped_count} item(s)\n"
                         f"**Adventure:** {session_note}",
@@ -523,7 +554,10 @@ class CharacterCog(commands.Cog):
             if current_lower and current_lower not in c["name"].lower():
                 continue
             active_str = " (ACTIVE)" if c.get("is_active") else ""
-            label = f"{c['name']} - Lvl {c['level']} {c['char_class']}{active_str}"
+            from mechanics.social.races import format_race_display
+            race_display = format_race_display(c.get("race", "human"))
+            gender_str = f" {c.get('gender')}" if c.get("gender") else ""
+            label = f"{c['name']} - {race_display}{gender_str} Lvl {c['level']} {c['char_class']}{active_str}"
             choices.append(app_commands.Choice(name=label[:100], value=c["name"]))
         return choices
 

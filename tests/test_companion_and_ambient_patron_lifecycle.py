@@ -534,8 +534,39 @@ class TestCompanionAndAmbientPatronLifecycle(unittest.TestCase):
             is_solo_travel_intent([{"label": "Thank Sofia and excuse yourself to head home together"}])
         )
 
+    def test_npc_not_purged_when_actively_speaking_despite_hallucinated_llm_departure(self):
+        """Verify that an NPC with active dialogue/presence in narrative is not removed when LLM hallucinates npc_departures."""
+        loc = "Shiranui Senior High ➔ Chemistry & Science Lab ➔ Lab Workbenches"
+        session = {
+            "id": self.test_session_id,
+            "scenario": "high_school_drama",
+            "current_location": loc,
+            "current_npcs": [{"name": "Dr. Kento Satou", "role": "Chemistry Teacher / Lab Supervisor"}],
+        }
+
+        # LLM prematurely reported Dr. Satou in npc_departures because he said 'Before I go', but he is still speaking in the scene
+        llm_result = {
+            "npc_departures": ["Dr. Kento Satou"],
+            "npcs_present": [],
+            "outcome_narrative": "Dr. Satou catches your wrist firmly before you can touch the residue. Satou frowns at the workbench.",
+            "next_narrative": 'He glances at you sharply. "Look I have homeroom duty soon, but before I go — what exactly do you think we are looking at?"',
+            "location": loc,
+        }
+
+        processed = game_engine.process_scene_npcs(
+            llm_result,
+            session,
+            new_loc=loc,
+            old_loc=loc,
+            actions=[{"label": "Take a closer look at residue ring on workbench"}],
+        )
+
+        names = [n["name"] if isinstance(n, dict) else n for n in processed]
+        self.assertIn("Dr. Kento Satou", names)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

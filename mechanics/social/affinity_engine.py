@@ -16,13 +16,19 @@ import re
 import logging
 from typing import Dict, Any, List, Tuple, Optional
 
-from mechanics.narrative.intent import IntentCategory, classify_action_intent, ActionIntent
+from mechanics.narrative.intent import (
+    IntentCategory,
+    classify_action_intent,
+    resolve_action_intent,
+    ActionIntent,
+)
 from mechanics.combat.traits.data import (
     TRAIT_REGISTRY,
     SOCIAL_STANCES_LIKES,
     SOCIAL_STANCES_DISLIKES,
 )
 from mechanics.combat.traits.core import is_gift_item, get_trait
+from game_engine.matching import matches_keyword_boundary
 
 logger = logging.getLogger("hikayat.mechanics.social.affinity_engine")
 
@@ -141,8 +147,12 @@ def calculate_social_affinity_delta(
     # Determine action category / intent
     action_cat = str(action.get("action_category") or action.get("intent") or "").lower().strip()
     if not action_cat:
-        parsed_intent = classify_action_intent(act_label)
+        parsed_intent = resolve_action_intent(action)
         action_cat = parsed_intent.category.value
+
+    # Extract structured tone & trait alignment if emitted
+    interaction_tone = str(action.get("interaction_tone") or "").strip().lower()
+    trait_alignment = str(action.get("trait_alignment") or "").strip().lower()
 
     # Determine check tier
     tier = ""
@@ -175,13 +185,24 @@ def calculate_social_affinity_delta(
             suggested = None
 
     if is_free_action:
-        if any(kw in act_low for kw in HOSTILE_DIALOGUE_KEYWORDS):
+        # Priority 1-3: Structured LLM tone annotation
+        if interaction_tone == "hostile":
+            base_delta = -2
+            reasons.append("Hostile / abrasive tone (-2)")
+        elif interaction_tone in ("warm", "flirtatious"):
+            base_delta = 1
+            reasons.append("Warm / polite conversation (+1)")
+        elif interaction_tone == "neutral":
+            base_delta = 0
+            reasons.append("Neutral dialogue choice (0)")
+        # Priority 4: Fallback heuristic keyword checks with boundary guards
+        elif matches_keyword_boundary(act_low, HOSTILE_DIALOGUE_KEYWORDS, allow_negated=False):
             base_delta = -2
             reasons.append("Hostile / abrasive tone (-2)")
         elif suggested is not None and suggested < 0:
             base_delta = max(-5, min(-1, suggested))
             reasons.append(f"Abrasive / displeasing remark ({base_delta})")
-        elif any(kw in act_low for kw in WARM_DIALOGUE_KEYWORDS):
+        elif matches_keyword_boundary(act_low, WARM_DIALOGUE_KEYWORDS, allow_negated=False):
             base_delta = 1
             reasons.append("Warm / polite conversation (+1)")
         else:
@@ -206,7 +227,7 @@ def calculate_social_affinity_delta(
         is_confession = (
             action_cat == IntentCategory.ROMANTIC_CONFESSION.value or
             str(action.get("intent", "")).lower() == "romantic_confession" or
-            any(kw in act_low for kw in ("confess your feelings", "pursue a romantic relationship", "be my girlfriend", "be my boyfriend"))
+            matches_keyword_boundary(act_low, ("confess your feelings", "pursue a romantic relationship", "be my girlfriend", "be my boyfriend"), allow_negated=False)
         )
         if is_confession and is_target_npc:
             if succeeded:
@@ -257,57 +278,65 @@ def calculate_social_affinity_delta(
     traits_delta = 0
     clean_traits = [str(t.get("name") or t.get("trait") or t).lower().strip() if isinstance(t, dict) else str(t).lower().strip() for t in traits if t]
 
-    for t_name in clean_traits:
-        t_def = get_trait(t_name)
-        favored = (t_def.get("favored_stances") or []) if t_def else []
-        disliked = (t_def.get("disliked_stances") or []) if t_def else []
+    if trait_alignment == "resonated":
+        traits_delta += 1
+        reasons.append("Trait alignment resonance (+1)")
+    elif trait_alignment == "clashed":
+        penalty = -2 if not succeeded else -1
+        traits_delta += penalty
+        reasons.append(f"Trait alignment clash ({penalty})")
+    else:
+        for t_name in clean_traits:
+            t_def = get_trait(t_name)
+            favored = (t_def.get("favored_stances") or []) if t_def else []
+            disliked = (t_def.get("disliked_stances") or []) if t_def else []
 
-        # Playful / Mischievous
-        if any(kw in t_name for kw in ("playful", "mischievous", "brat")):
-            if any(w in act_low for w in ("playful", "tease", "challenge", "banter", "joke", "smirk", "wink")):
-                bonus = 1 if succeeded else 0
-                if bonus:
-                    traits_delta += bonus
-                    reasons.append(f"Playful trait resonance (+{bonus})")
+            # Playful / Mischievous
+            if any(kw in t_name for kw in ("playful", "mischievous", "brat")):
+                if matches_keyword_boundary(act_low, ("playful", "tease", "challenge", "banter", "joke", "smirk", "wink"), allow_negated=False):
+                    bonus = 1 if succeeded else 0
+                    if bonus:
+                        traits_delta += bonus
+                        reasons.append(f"Playful trait resonance (+{bonus})")
 
-        # Sensitive / Shy / Anxious
-        elif any(kw in t_name for kw in ("sensitive", "shy", "anxious", "hesitant", "timid")):
-            if any(w in act_low for w in ("reassure", "gentle", "comfort", "softly", "patient", "safe")):
-                traits_delta += 1
-                reasons.append(f"{t_name.title()} favors gentle approach (+1)")
-            elif any(w in act_low for w in PRYING_INQUIRY_KEYWORDS) or any(w in act_low for w in ("demand", "force", "blunt")):
-                penalty = -2 if not succeeded else -1
-                traits_delta += penalty
-                reasons.append(f"{t_name.title()} clashes with invasive/blunt approach ({penalty})")
-
-        # Diligent / Studious / Scholarly
-        elif any(kw in t_name for kw in ("diligent", "studious", "scholarly", "perfectionist")):
-            if any(w in act_low for w in ("study", "ledger", "archive", "library", "notes", "focus", "research", "work", "duty")):
-                traits_delta += 1
-                reasons.append(f"{t_name.title()} appreciates studious focus (+1)")
-            elif any(w in act_low for w in ("slack", "ditch", "ignore the book", "ignore work", "waste time")):
-                traits_delta -= 1
-                reasons.append(f"{t_name.title()} dislikes distractions (-1)")
-
-        # Proud / Independent / Stoic
-        elif any(kw in t_name for kw in ("proud", "independent", "stoic")):
-            if any(w in act_low for w in ("patronize", "baby", "little girl", "order around", "demand obedience", "belittle")):
-                traits_delta -= 2
-                reasons.append(f"{t_name.title()} resists patronizing command (-2)")
-
-        # Trait favored/disliked stances from registry
-        for fav in favored:
-            if fav in act_low or _matches_pattern(fav, act_low):
-                if succeeded:
+            # Sensitive / Shy / Anxious
+            elif any(kw in t_name for kw in ("sensitive", "shy", "anxious", "hesitant", "timid")):
+                if matches_keyword_boundary(act_low, ("reassure", "gentle", "comfort", "softly", "patient", "safe"), allow_negated=False):
                     traits_delta += 1
-                    reasons.append(f"Trait alignment: {t_name.title()} (+1)")
+                    reasons.append(f"{t_name.title()} favors gentle approach (+1)")
+                elif matches_keyword_boundary(act_low, PRYING_INQUIRY_KEYWORDS, allow_negated=False) or matches_keyword_boundary(act_low, ("demand", "force", "blunt"), allow_negated=False):
+                    penalty = -2 if not succeeded else -1
+                    traits_delta += penalty
+                    reasons.append(f"{t_name.title()} clashes with invasive/blunt approach ({penalty})")
+
+            # Diligent / Studious / Scholarly
+            elif any(kw in t_name for kw in ("diligent", "studious", "scholarly", "perfectionist")):
+                if matches_keyword_boundary(act_low, ("study", "ledger", "archive", "library", "notes", "focus", "research", "work", "duty"), allow_negated=False):
+                    traits_delta += 1
+                    reasons.append(f"{t_name.title()} appreciates studious focus (+1)")
+                elif matches_keyword_boundary(act_low, ("slack", "ditch", "ignore the book", "ignore work", "waste time"), allow_negated=False):
+                    traits_delta -= 1
+                    reasons.append(f"{t_name.title()} dislikes distractions (-1)")
+
+            # Proud / Independent / Stoic
+            elif any(kw in t_name for kw in ("proud", "independent", "stoic")):
+                if matches_keyword_boundary(act_low, ("patronize", "baby", "little girl", "order around", "demand obedience", "belittle"), allow_negated=False):
+                    traits_delta -= 2
+                    reasons.append(f"{t_name.title()} resists patronizing command (-2)")
+
+            # Trait favored/disliked stances from registry
+            for fav in favored:
+                if matches_keyword_boundary(act_low, fav, allow_negated=False) or _matches_pattern(fav, act_low):
+                    if succeeded:
+                        traits_delta += 1
+                        reasons.append(f"Trait alignment: {t_name.title()} (+1)")
+                        break
+            for dis in disliked:
+                if matches_keyword_boundary(act_low, dis, allow_negated=False) or _matches_pattern(dis, act_low):
+                    penalty = -2 if not succeeded else -1
+                    traits_delta += penalty
+                    reasons.append(f"Trait clash: {t_name.title()} ({penalty})")
                     break
-        for dis in disliked:
-            if dis in act_low or _matches_pattern(dis, act_low):
-                penalty = -2 if not succeeded else -1
-                traits_delta += penalty
-                reasons.append(f"Trait clash: {t_name.title()} ({penalty})")
-                break
 
     breakdown["traits_delta"] = traits_delta
 
@@ -350,8 +379,9 @@ def calculate_social_affinity_delta(
 
                 # Semantic check: disclosure inquiries into past experience trigger prying dislikes
                 is_prying_act = (
+                    interaction_tone == "prying" or
                     action_cat == IntentCategory.DISCLOSURE_INQUIRY.value or
-                    any(kw in act_low for kw in PRYING_INQUIRY_KEYWORDS)
+                    matches_keyword_boundary(act_low, PRYING_INQUIRY_KEYWORDS, allow_negated=False)
                 )
 
                 if (is_prying_stance and is_prying_act) or any(_matches_pattern(tr, act_low) for tr in triggers):
@@ -374,67 +404,67 @@ def calculate_social_affinity_delta(
 
     # Demeanor evaluation
     if "playful" in dem_low or "bantering" in dem_low:
-        if any(w in act_low for w in ("playfully", "challenge", "tease", "banter", "laugh", "witty", "wink")):
+        if matches_keyword_boundary(act_low, ("playfully", "challenge", "tease", "banter", "laugh", "witty", "wink"), allow_negated=False):
             bonus = 1
             dem_dyn_delta += bonus
             reasons.append("Resonates with Playful & Bantering demeanor (+1)")
     elif "hesitant" in dem_low or "flustered" in dem_low:
-        if any(w in act_low for w in ("reassure", "slowly", "softly", "gently", "patient")):
+        if matches_keyword_boundary(act_low, ("reassure", "slowly", "softly", "gently", "patient"), allow_negated=False):
             dem_dyn_delta += 1
             reasons.append("Resonates with Hesitant & Flustered demeanor (+1)")
-        elif any(w in act_low for w in PRYING_INQUIRY_KEYWORDS):
+        elif matches_keyword_boundary(act_low, PRYING_INQUIRY_KEYWORDS, allow_negated=False):
             dem_dyn_delta -= 1
             reasons.append("Pressures Hesitant & Flustered demeanor (-1)")
     elif "poised" in dem_low or "articulate" in dem_low:
-        if any(w in act_low for w in ("articulate", "composed", "polite", "courteous", "respectful")):
+        if matches_keyword_boundary(act_low, ("articulate", "composed", "polite", "courteous", "respectful"), allow_negated=False):
             dem_dyn_delta += 1
             reasons.append("Resonates with Poised demeanor (+1)")
     elif "blunt" in dem_low or "direct" in dem_low:
-        if any(w in act_low for w in ("direct", "honest", "candid", "straightforward", "banter", "tease", "casual")):
+        if matches_keyword_boundary(act_low, ("direct", "honest", "candid", "straightforward", "banter", "tease", "casual"), allow_negated=False):
             dem_dyn_delta += 1
             reasons.append("Resonates with Blunt & Teasing demeanor (+1)")
     elif "soft" in dem_low or "affectionate" in dem_low:
-        if any(w in act_low for w in ("tender", "gentle", "praise", "warm", "loving", "sincere", "comfort")):
+        if matches_keyword_boundary(act_low, ("tender", "gentle", "praise", "warm", "loving", "sincere", "comfort"), allow_negated=False):
             dem_dyn_delta += 1
             reasons.append("Resonates with Soft & Affectionate demeanor (+1)")
     elif "passionate" in dem_low or "vocal" in dem_low:
-        if any(w in act_low for w in ("passionate", "intense", "fervent", "ardent", "whisper", "vocal")):
+        if matches_keyword_boundary(act_low, ("passionate", "intense", "fervent", "ardent", "whisper", "vocal"), allow_negated=False):
             dem_dyn_delta += 1
             reasons.append("Resonates with Passionate demeanor (+1)")
 
     # Dynamic evaluation
     if "surrenders control" in dyn_low or "eagerly receptive" in dyn_low:
         # Craves partner taking charge
-        if any(w in act_low for w in ("take charge", "guide", "confident", "lead", "firm", "assertive", "lean in close")):
+        if matches_keyword_boundary(act_low, ("take charge", "guide", "confident", "lead", "firm", "assertive", "lean in close"), allow_negated=False):
             if succeeded:
                 dem_dyn_delta += 1
                 reasons.append("Matches dynamic: appreciates partner taking charge (+1)")
     elif "dominant" in dyn_low or "boldly proactive" in dyn_low:
         # Proactive/dominant partner
-        if any(w in act_low for w in ("yield", "surrender", "receptive", "let her lead", "let him lead")):
+        if matches_keyword_boundary(act_low, ("yield", "surrender", "receptive", "let her lead", "let him lead"), allow_negated=False):
             if succeeded:
                 dem_dyn_delta += 1
                 reasons.append("Matches dynamic: receptive to their lead (+1)")
-        elif not succeeded and any(w in act_low for w in ("command", "force", "overpower")):
+        elif not succeeded and matches_keyword_boundary(act_low, ("command", "force", "overpower"), allow_negated=False):
             dem_dyn_delta -= 1
             reasons.append("Clashes with dominant dynamic on failed check (-1)")
     elif "insatiable" in dyn_low or "high-drive" in dyn_low:
-        if any(w in act_low for w in ("intense", "fervent", "deepen", "eager", "hungry", "embrace tightly")):
+        if matches_keyword_boundary(act_low, ("intense", "fervent", "deepen", "eager", "hungry", "embrace tightly"), allow_negated=False):
             if succeeded:
                 dem_dyn_delta += 1
                 reasons.append("Matches dynamic: matches insatiable drive (+1)")
     elif "yielding" in dyn_low or "gentle" in dyn_low:
-        if any(w in act_low for w in ("gentle", "tender", "soft", "slow", "caress", "hold")):
+        if matches_keyword_boundary(act_low, ("gentle", "tender", "soft", "slow", "caress", "hold"), allow_negated=False):
             if succeeded:
                 dem_dyn_delta += 1
                 reasons.append("Matches dynamic: appreciates gentle care (+1)")
     elif "service" in dyn_low or "pamper" in dyn_low:
-        if any(w in act_low for w in ("relax", "receive", "enjoy", "let her pamper", "let him pamper", "praise devotion", "comfort")):
+        if matches_keyword_boundary(act_low, ("relax", "receive", "enjoy", "let her pamper", "let him pamper", "praise devotion", "comfort"), allow_negated=False):
             if succeeded:
                 dem_dyn_delta += 1
                 reasons.append("Matches dynamic: accepts attentive service (+1)")
     elif "switch" in dyn_low or "brat" in dyn_low:
-        if any(w in act_low for w in ("counter", "challenge", "play along", "tease back", "wrestle", "pin playfully")):
+        if matches_keyword_boundary(act_low, ("counter", "challenge", "play along", "tease back", "wrestle", "pin playfully"), allow_negated=False):
             if succeeded:
                 dem_dyn_delta += 1
                 reasons.append("Matches dynamic: engages with playful switch (+1)")
@@ -455,9 +485,9 @@ def calculate_social_affinity_delta(
             words = [w for w in trig.split() if len(w) >= 3]
             stems = [re.sub(r'(ing|ed|s)$', '', w) for w in words if len(w) >= 3]
             matched = (
-                trig in act_low or
+                matches_keyword_boundary(act_low, trig, allow_negated=False) or
                 _matches_pattern(trig, act_low) or
-                (bool(stems) and all(s in act_low for s in stems))
+                (bool(stems) and all(matches_keyword_boundary(act_low, s, allow_negated=False) for s in stems))
             )
             if matched:
                 if succeeded:
@@ -487,7 +517,7 @@ def calculate_social_affinity_delta(
     from mechanics.social.persona import ACT_PREFERENCE_REGISTRY
 
     for pref_item in ACT_PREFERENCE_REGISTRY:
-        if any(kw in act_low for kw in pref_item["keywords"]):
+        if matches_keyword_boundary(act_low, pref_item["keywords"], allow_negated=False):
             p_name = pref_item["name"].lower()
             p_id = pref_item["id"]
             if p_name in act_likes.lower() or p_id in act_likes.lower():
@@ -503,7 +533,7 @@ def calculate_social_affinity_delta(
     is_intimate_action = action_cat in (
         IntentCategory.INTIMATE_ACT.value,
         IntentCategory.DISCLOSURE_INQUIRY.value
-    ) or any(kw in act_low for kw in PRYING_INQUIRY_KEYWORDS)
+    ) or matches_keyword_boundary(act_low, PRYING_INQUIRY_KEYWORDS, allow_negated=False)
 
     if is_intimate_action and erotic_openness:
         if "prude" in erotic_openness or "modest" in erotic_openness:

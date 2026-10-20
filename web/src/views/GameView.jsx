@@ -30,6 +30,7 @@ const GameView = ({
   setSession,
   lastSyncTimestamp,
   processingTurn,
+  pendingAction,
   isStreaming,
   streamingNarrative,
   streamingState,
@@ -42,6 +43,10 @@ const GameView = ({
   exitToDashboard,
   endSession,
   retryGeneration,
+  rerollImage,
+  rerollingImage,
+  actionError,
+  clearActionError,
   leaveSession
 }) => {
   const { t } = useTranslation();
@@ -355,7 +360,7 @@ const GameView = ({
         </div>
 
         {/* Scrollable Tab Content */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 flex flex-col">
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 sm:p-3.5 flex flex-col">
           {renderSidebarContent()}
         </div>
       </aside>
@@ -363,41 +368,43 @@ const GameView = ({
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col h-full min-h-0 relative min-w-0">
 
-        {/* Mobile Header: Left (Single Utility Button), Center (Game Title), Right (Clock + 3-Dots Menu) */}
-        <header className="md:hidden relative flex justify-between items-center px-2.5 py-1.5 bg-fantasy-panel border-b border-fantasy-border z-30 select-none">
-          {/* Top Left: Single Grouped Utility Button (Outcomes, Map, Phone, Hero, Pack, Party, Quests, Codex) */}
-          <button
-            type="button"
-            onClick={() => setMobileDrawerOpen(true)}
-            className="p-1.5 bg-black/50 border border-fantasy-border hover:border-fantasy-accent/60 rounded-lg text-fantasy-accent flex items-center justify-center transition-all relative shrink-0"
-            title="Open Journal & Utilities (Outcomes, Map, Phone, Character, Pack, Party, Quests, Codex)"
-            aria-label="Open utilities"
-          >
-            <Menu size={18} />
-            {(character?.pending_stat_points || activeQuestCount > 0 || (phone.appointments?.length > 0 || phone.mediaGallery?.length > 0)) && (
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse border-2 border-fantasy-panel" />
-            )}
-          </button>
-
-          {/* Top Center: Repositioned Game Name */}
-          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 pointer-events-none">
-            <Compass size={16} className="text-fantasy-accent animate-pulse" />
-            <h1 className="font-rpg font-bold text-fantasy-accent text-sm sm:text-base tracking-wider leading-none">
-              Hikayat
-            </h1>
+        {/* Mobile Header: Left (Menu + Game Title), Center (In-Game Clock), Right (Language + 3-Dots Menu) */}
+        <header className="md:hidden flex justify-between items-center px-2.5 py-1.5 bg-fantasy-panel border-b border-fantasy-border z-30 select-none">
+          {/* Top Left: Menu Button + Game Title */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setMobileDrawerOpen(true)}
+              className="p-1.5 bg-black/50 border border-fantasy-border hover:border-fantasy-accent/60 rounded-lg text-fantasy-accent flex items-center justify-center transition-all relative shrink-0"
+              title="Open Journal & Utilities (Outcomes, Map, Phone, Character, Pack, Party, Quests, Codex)"
+              aria-label="Open utilities"
+            >
+              <Menu size={18} />
+              {(character?.pending_stat_points || activeQuestCount > 0 || (phone.appointments?.length > 0 || phone.mediaGallery?.length > 0)) && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse border-2 border-fantasy-panel" />
+              )}
+            </button>
+            <div className="flex items-center gap-1.5">
+              <Compass size={16} className="text-fantasy-accent animate-pulse shrink-0" />
+              <h1 className="font-rpg font-bold text-fantasy-accent text-sm tracking-wider leading-none hidden min-[360px]:inline">
+                Hikayat
+              </h1>
+            </div>
           </div>
 
-          {/* Top Right: Clock + 3-Dots Button */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            {/* In-Game Clock Pill */}
+          {/* Top Center: In-Game Clock Pill */}
+          <div className="flex-1 flex justify-center items-center min-w-0 px-1.5">
             <div
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/60 border border-fantasy-border/80 text-[10px] sm:text-[11px] font-mono text-amber-300 shadow-sm"
               title="Current In-Game Time & Day"
             >
               <Clock size={11} className="text-amber-400 shrink-0" />
-              <span className="truncate max-w-[110px] sm:max-w-[140px]">{session?.formatted_time || 'Day 1 • 08:00'}</span>
+              <span className="truncate max-w-[95px] sm:max-w-[130px]">{session?.formatted_time || 'Day 1 • 08:00'}</span>
             </div>
+          </div>
 
+          {/* Top Right: Language Switcher + 3-Dots Button */}
+          <div className="flex items-center gap-1.5 shrink-0">
             <LanguageSwitcher settingsHook={settings} />
 
             <div className="relative">
@@ -519,8 +526,12 @@ const GameView = ({
             isStreaming={isStreaming}
             streamingNarrative={streamingNarrative}
             streamingState={streamingState}
+            processing={processingTurn}
+            pendingAction={pendingAction}
             selectedCombatTarget={selectedCombatTarget}
             onSelectCombatTarget={setSelectedCombatTarget}
+            onRerollImage={rerollImage}
+            rerollingImage={rerollingImage}
           />
         </div>
 
@@ -539,10 +550,13 @@ const GameView = ({
           phoneHook={phone}
           showPercentages={(settings.settings?.show_percentages ?? 1) === 1}
           processing={processingTurn}
+          pendingAction={pendingAction}
           isStreaming={isStreaming}
           waitingForParty={waitingForParty}
           partyStatus={partyStatus}
           onSelectContact={handleSelectContact}
+          actionError={actionError}
+          clearActionError={clearActionError}
         />
       </main>
 

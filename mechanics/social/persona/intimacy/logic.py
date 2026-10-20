@@ -40,10 +40,21 @@ def transition_manual_experience(current_state: str, action_type: str) -> str:
         return "has_done_and_received_manual" if c == "has_done_manual" else "has_received_manual"
     return c if c in ("has_done_manual", "has_received_manual", "has_done_and_received_manual") else "inexperienced"
 
-def transition_anal_experience(current_state: str, action_type: str) -> str:
-    """Transitions anal intimacy track."""
+def transition_anal_experience(current_state: str, action_type: str, gender: str = "") -> str:
+    """Transitions anal intimacy track while enforcing biological gender invariants."""
     c = str(current_state or "inexperienced").strip().lower()
     act = str(action_type or "").strip().lower()
+    raw_g = str(gender or "").lower()
+    is_female = any(kw in raw_g for kw in ("female", "woman", "girl", "lady", "she", "her"))
+    if not is_female and raw_g:
+        is_male = any(kw in raw_g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in raw_g for kw in ("female", "woman"))
+        is_female = not is_male
+    if is_female:
+        if act in ("anal_give", "has_done_anal"):
+            return c if c in ("has_received_anal", "inexperienced") else "has_received_anal"
+        if act in ("anal_receive", "has_received_anal", "anal", "has_done_and_received_anal", "anal_both"):
+            return "has_received_anal"
+        return c if c == "has_received_anal" else "inexperienced"
     if c == "has_done_and_received_anal" or act in ("has_done_and_received_anal", "anal_both"):
         return "has_done_and_received_anal"
     if (c == "has_done_anal" and act in ("anal_receive", "has_received_anal")) or (c == "has_received_anal" and act in ("anal_give", "has_done_anal")):
@@ -171,15 +182,28 @@ def partition_sensitivities_and_turn_ons(sens_str: str, turn_str: str, race: str
 
     return ", ".join(phys_items), ", ".join(act_items)
 
-def enforce_intimacy_safeguard_invariants(app_dict: Dict[str, Any]) -> Dict[str, Any]:
+def enforce_intimacy_safeguard_invariants(app_dict: Dict[str, Any], gender: str = "") -> Dict[str, Any]:
     """
     Enforces the single-source-of-truth invariant across intimacy state fields:
     1. An NPC whose canon predetermined state is 'virgin' CANNOT have active experience (intercourse, oral, manual)
        unless verified by actual recorded player milestone memories or the 'had_first_time_with_player' flag.
     2. Composite 'virginity' is strictly synchronized as a derived reflection of active experience tracks.
+    3. Biological invariant: Female characters can ONLY receive anal intimacy. They can NEVER have 'has_done_anal'
+       or 'has_done_and_received_anal'. Any active anal experience for females is normalized to 'has_received_anal'.
     """
     if not isinstance(app_dict, dict):
         return app_dict
+
+    raw_g = str(gender or app_dict.get("gender") or app_dict.get("sex") or "").strip().lower()
+    if not raw_g:
+        if app_dict.get("breast_size") and not app_dict.get("penis_size"):
+            raw_g = "female"
+        elif app_dict.get("penis_size") and not app_dict.get("breast_size"):
+            raw_g = "male"
+    is_female = any(kw in raw_g for kw in ("female", "woman", "girl", "lady", "she", "her"))
+    if not is_female and raw_g:
+        is_male = any(kw in raw_g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in raw_g for kw in ("female", "woman"))
+        is_female = not is_male
 
     mems = app_dict.get("intimate_memories") or []
 
@@ -197,7 +221,7 @@ def enforce_intimacy_safeguard_invariants(app_dict: Dict[str, Any]) -> Dict[str,
     has_oral_rec = any(any(k in str(m).lower() for k in ORAL_RECEIVE_MEMORY_KEYWORDS) for m in mems)
     has_manual_give = any(any(k in str(m).lower() for k in MANUAL_GIVE_MEMORY_KEYWORDS) for m in mems)
     has_manual_rec = any(any(k in str(m).lower() for k in MANUAL_RECEIVE_MEMORY_KEYWORDS) for m in mems)
-    has_anal_give = any(any(k in str(m).lower() for k in ANAL_GIVE_MEMORY_KEYWORDS) for m in mems)
+    has_anal_give = False if is_female else any(any(k in str(m).lower() for k in ANAL_GIVE_MEMORY_KEYWORDS) for m in mems)
     has_anal_rec = any(any(k in str(m).lower() for k in ANAL_RECEIVE_MEMORY_KEYWORDS) for m in mems)
     had_first_time = bool(app_dict.get("had_first_time_with_player"))
 
@@ -210,6 +234,9 @@ def enforce_intimacy_safeguard_invariants(app_dict: Dict[str, Any]) -> Dict[str,
     cur_o = str(app_dict.get("oral_experience") or "inexperienced").strip().lower()
     cur_m = str(app_dict.get("manual_experience") or "inexperienced").strip().lower()
     cur_a = str(app_dict.get("anal_experience") or "inexperienced").strip().lower()
+
+    if is_female and cur_a in ("has_done_anal", "has_done_and_received_anal"):
+        cur_a = "has_received_anal"
 
     if pred_i == "virgin":
         if has_sex_mem:
@@ -315,6 +342,11 @@ def enforce_intimacy_safeguard_invariants(app_dict: Dict[str, Any]) -> Dict[str,
         if has_anal_rec:
             app_dict["anal_experience"] = merge_anal_states(app_dict.get("anal_experience", "inexperienced"), "has_received_anal")
 
+    if is_female:
+        cur_a_res = str(app_dict.get("anal_experience") or "").strip().lower()
+        if cur_a_res in ("has_done_anal", "has_done_and_received_anal"):
+            app_dict["anal_experience"] = "has_received_anal"
+
     return app_dict
 
 def merge_intercourse_states(existing_virg: str, incoming_virg: str) -> str:
@@ -361,10 +393,23 @@ def merge_manual_states(existing_manual: str, incoming_manual: str) -> str:
         return i
     return e if e in MANUAL_INTIMACY_STATES else "inexperienced"
 
-def merge_anal_states(existing_anal: str, incoming_anal: str) -> str:
+def merge_anal_states(existing_anal: str, incoming_anal: str, gender: str = "") -> str:
     """Combines anal intimacy experience states following a strictly progressive one-way ratchet."""
     e = str(existing_anal or "").strip().lower()
     i = str(incoming_anal or "").strip().lower()
+    raw_g = str(gender or "").lower()
+    is_female = any(kw in raw_g for kw in ("female", "woman", "girl", "lady", "she", "her"))
+    if not is_female and raw_g:
+        is_male = any(kw in raw_g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in raw_g for kw in ("female", "woman"))
+        is_female = not is_male
+    if is_female:
+        if e in ("has_done_anal", "has_done_and_received_anal"):
+            e = "has_received_anal"
+        if i in ("has_done_anal", "has_done_and_received_anal"):
+            i = "has_received_anal"
+        if e == "has_received_anal" or i == "has_received_anal":
+            return "has_received_anal"
+        return "inexperienced"
     if e == "has_done_and_received_anal" or i == "has_done_and_received_anal":
         return "has_done_and_received_anal"
     if (e == "has_done_anal" and i == "has_received_anal") or (e == "has_received_anal" and i == "has_done_anal"):

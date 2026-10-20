@@ -158,43 +158,78 @@ class TestBeastfolkAndHybrids(unittest.TestCase):
 
         weight_map = dict(zip(FURRY_HIGH_SCHOOL_RACES, FURRY_HIGH_SCHOOL_WEIGHTS))
 
-        # 1. Baseline Human (10%)
-        self.assertAlmostEqual(weight_map["human"], 0.10)
+        # 1. Baseline Human (5%)
+        self.assertAlmostEqual(weight_map["human"], 0.05)
 
-        # 2. Cat (15%) & Fox (15%) Beastfolk
-        self.assertAlmostEqual(weight_map["beastfolk:cat"], 0.15)
-        self.assertAlmostEqual(weight_map["beastfolk:fox"], 0.15)
+        # 2. Cat (10%) & Fox (10%) Beastfolk
+        self.assertAlmostEqual(weight_map["beastfolk:cat"], 0.10)
+        self.assertAlmostEqual(weight_map["beastfolk:fox"], 0.10)
 
-        # 3. Other Canids & Felines Beastfolk (15% total -> 3% each)
-        canid_feline_total = sum(weight_map[r] for r in ["beastfolk:wolf", "beastfolk:fennec", "beastfolk:tiger", "beastfolk:cheetah", "beastfolk:lion"])
-        self.assertAlmostEqual(canid_feline_total, 0.15)
+        # 3. Other 10 Beastfolk species (45% total -> 4.5% each)
+        other_bf_species = [
+            "beastfolk:wolf", "beastfolk:fennec", "beastfolk:tiger", "beastfolk:cheetah", "beastfolk:lion",
+            "beastfolk:mouse", "beastfolk:rabbit", "beastfolk:bear", "beastfolk:bird", "beastfolk:reptile"
+        ]
+        for r in other_bf_species:
+            self.assertAlmostEqual(weight_map[r], 0.045)
+        self.assertAlmostEqual(sum(weight_map[r] for r in other_bf_species), 0.45)
 
-        # 4. Mouse & Rabbit Beastfolk (5% total -> 2.5% each)
-        mouse_rabbit_total = sum(weight_map[r] for r in ["beastfolk:mouse", "beastfolk:rabbit"])
-        self.assertAlmostEqual(mouse_rabbit_total, 0.05)
+        # 4. Cat & Fox Half-Beasts (10% total -> 5% each)
+        self.assertAlmostEqual(weight_map["half_beast:cat"], 0.05)
+        self.assertAlmostEqual(weight_map["half_beast:fox"], 0.05)
 
-        # 5. Other Minor Beastfolk (10% total)
-        minor_bf_total = sum(weight_map[r] for r in ["beastfolk:bear", "beastfolk:bird", "beastfolk:reptile"])
-        self.assertAlmostEqual(minor_bf_total, 0.10)
-
-        # 6. Cat & Fox Half-Beast (20% total -> 10% each)
-        cat_fox_hb_total = sum(weight_map[r] for r in ["half_beast:cat", "half_beast:fox"])
-        self.assertAlmostEqual(cat_fox_hb_total, 0.20)
-
-        # 7. Other Half-Beasts (10% total)
-        other_hb_total = sum(weight_map[r] for r in [
+        # 5. Other 10 Half-Beast species (20% total -> 2% each)
+        other_hb_species = [
             "half_beast:wolf", "half_beast:tiger", "half_beast:lion", "half_beast:cheetah",
-            "half_beast:fennec", "half_beast:rabbit", "half_beast:mouse", "half_beast:bear"
-        ])
-        self.assertAlmostEqual(other_hb_total, 0.10)
+            "half_beast:fennec", "half_beast:rabbit", "half_beast:mouse", "half_beast:bear",
+            "half_beast:bird", "half_beast:reptile"
+        ]
+        for r in other_hb_species:
+            self.assertAlmostEqual(weight_map[r], 0.02)
+        self.assertAlmostEqual(sum(weight_map[r] for r in other_hb_species), 0.20)
+
+        # Combined shares: Cat (15%), Fox (15%), Human (5%), All 10 others (6.5% each)
+        for sp in ["wolf", "fennec", "tiger", "cheetah", "lion", "mouse", "rabbit", "bear", "bird", "reptile"]:
+            comb = weight_map[f"beastfolk:{sp}"] + weight_map[f"half_beast:{sp}"]
+            self.assertAlmostEqual(comb, 0.065)
 
         # Total Category Groupings
         bf_total = sum(w for r, w in weight_map.items() if r.startswith("beastfolk:"))
         hb_total = sum(w for r, w in weight_map.items() if r.startswith("half_beast:"))
         human_total = weight_map["human"]
-        self.assertAlmostEqual(bf_total, 0.60)
+        self.assertAlmostEqual(bf_total, 0.65)
         self.assertAlmostEqual(hb_total, 0.30)
-        self.assertAlmostEqual(human_total, 0.10)
+        self.assertAlmostEqual(human_total, 0.05)
+
+    def test_species_key_scunthorpe_collision_prevention(self):
+        """Verify that substring collisions (e.g. 'rat' inside 'Preparatory' or 'Directorate')
+        never override explicit race tags or cause false animal species classifications."""
+        from mechanics.social.persona.core import is_scaly_race
+
+        # 1. Explicit race tag with Scunthorpe-prone description
+        mio_desc = "Junior at Northwood Preparatory Academy. High-energy, competitive. Role: Varsity Track Sprinter. Club: Athletic Directorate."
+        self.assertEqual(get_species_key_from_race("beastfolk:cat", desc=mio_desc), "cat")
+        self.assertEqual(get_species_key_from_race("Cat Beastfolk", desc=mio_desc), "cat")
+        self.assertEqual(get_species_key_from_race("half_beast:cat", desc=mio_desc), "cat")
+
+        # 2. Other explicit beastfolk races must never be overridden by description words
+        fox_desc = "Student Council President with deep knowledge and bearing."
+        self.assertEqual(get_species_key_from_race("beastfolk:fox", desc=fox_desc), "fox")
+
+        rabbit_desc = "Received an accurate certificate in preparatory literature."
+        self.assertEqual(get_species_key_from_race("beastfolk:rabbit", desc=rabbit_desc), "rabbit")
+
+        # 3. Description without explicit race must NOT trigger false positive on substrings
+        scunthorpe_prose = "Junior at Northwood Preparatory Academy under the Athletic Directorate."
+        self.assertNotEqual(get_species_key_from_race("", desc=scunthorpe_prose), "mouse")
+        self.assertIsNone(get_species_key_from_race("", desc=scunthorpe_prose))
+
+        # 4. Description with actual word-boundary animal token correctly resolves
+        valid_prose = "A nimble cat sprinter at Northwood Preparatory Academy."
+        self.assertEqual(get_species_key_from_race("", desc=valid_prose), "cat")
+
+        # 5. Scaly check Scunthorpe prevention
+        self.assertFalse(is_scaly_race("human", desc="bearing accurate certificates"))
 
 
 if __name__ == "__main__":

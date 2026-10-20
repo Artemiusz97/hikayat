@@ -21,7 +21,67 @@ def _character_sheet_text(char: dict, inventory: list) -> str:
     if char.get("race_description"):
         race_display += f" ({char['race_description']})"
     race_line = f" | Race: {race_display}"
-    gender_line = f" | Gender: {char['gender']}" if char.get("gender") else ""
+    
+    # Pronoun & Gender Canon
+    gender_raw = str(char.get("gender") or "Male").strip()
+    g_low = gender_raw.lower()
+    is_male = any(kw in g_low for kw in ("male", "man", "boy", "lord", "he", "him")) and not any(kw in g_low for kw in ("female", "woman", "girl", "lady", "she", "her"))
+    is_female = any(kw in g_low for kw in ("female", "woman", "girl", "lady", "she", "her")) or (not is_male and "fem" in g_low)
+    
+    if is_male:
+        gender_line = f" | Gender: {gender_raw}"
+        pronoun_rule = "Pronouns: he/him/his | MANDATORY: The protagonist is strictly MALE. Refer to him as he/him/his. NEVER use she/her or female pronouns."
+    elif is_female:
+        gender_line = f" | Gender: {gender_raw}"
+        pronoun_rule = "Pronouns: she/her/hers | MANDATORY: The protagonist is strictly FEMALE. Refer to her as she/her/hers. NEVER use he/him or male pronouns."
+    else:
+        gender_line = f" | Gender: {gender_raw}"
+        pronoun_rule = f"Pronouns: {gender_raw} | Use canonical pronouns for this protagonist."
+
+    # Species & Canonical Biology Boundaries
+    r_low = str(raw_race).strip().lower()
+    is_beast = any(kw in r_low for kw in ("beast", "fur", "half_beast", "hybrid", "kitsune", "neko", "cat", "fox", "wolf", "rabbit", "bunny", "bear", "tiger", "lion", "cheetah", "fennec", "mouse", "reptile", "dragon", "snake", "bird", "avian"))
+    if not is_beast:
+        biology_rule = (
+            f"CANONICAL BIOLOGY: 100% {race_display} (Humanoid). Standard humanoid anatomy.\n"
+            f"STRICTLY FORBIDDEN: This character has NO animal ears (NO fox ears, NO cat ears, NO wolf ears), "
+            f"NO tail (NO fox tail, NO wagging tail, NO swishing tail), NO fur, NO claws, NO whiskers, NO muzzle/snout, NO scales. "
+            f"NEVER narrate this character twitching animal ears, wagging a tail, purring, or exhibiting beastfolk traits!"
+        )
+    else:
+        biology_rule = (
+            f"CANONICAL BIOLOGY: {race_display}. Follow this specific species traits strictly; do not mix unassigned animal features."
+        )
+
+    # Intimate Anatomy Tracking
+    app = char.get("appearance")
+    if not app:
+        raw_app = char.get("appearance_json")
+        if isinstance(raw_app, str) and raw_app.strip():
+            try:
+                app = json.loads(raw_app)
+            except Exception:
+                app = {}
+        elif isinstance(raw_app, dict):
+            app = raw_app
+    app = app or {}
+    
+    anatomy_line = ""
+    if is_male:
+        p_size = app.get("penis_size")
+        tex = app.get("asset_texture")
+        p_desc = f"{p_size or 'Proportional'}"
+        if tex:
+            p_desc += f" ({tex})"
+        anatomy_line = f"Anatomy: Phallus: {p_desc}. (STRICTLY MALE: Has NO female breasts. NEVER describe him having female breasts or feminine intimate anatomy.)"
+    elif is_female:
+        b_size = app.get("breast_size")
+        tex = app.get("asset_texture")
+        b_desc = f"{b_size or 'Proportional'}"
+        if tex:
+            b_desc += f" ({tex})"
+        anatomy_line = f"Anatomy: Breasts: {b_desc}. (STRICTLY FEMALE: Has NO phallus. NEVER describe her having a penis.)"
+
     raw_status = char.get("status_effects")
     if isinstance(raw_status, str):
         try:
@@ -37,16 +97,32 @@ def _character_sheet_text(char: dict, inventory: list) -> str:
     if char.get("temp_hp"):
         hp_line += f" (+{char['temp_hp']} Temp Barrier)"
         
-    return (
-        f"Name: {char.get('name', 'Hero')}{race_line} | Class: {class_line} | Level: {char.get('level', 1)}{gender_line}\n"
+    # Physical Scale & Build Tracking
+    pl_stature = (app.get("stature") or app.get("height") or "average").replace("_", " ").title()
+    pl_physique = (app.get("physique") or "").replace("_", " ").title()
+    build_desc = f"Stature: {pl_stature}"
+    if pl_physique:
+        build_desc += f" | Physique: {pl_physique}"
+    build_line = f"Physical Build: {build_desc}. (Incorporate the protagonist's physical scale, height, and build into scene narration and physical interactions.)"
+
+    lines = [
+        f"Name: {char.get('name', 'Hero')}{race_line} | Class: {class_line} | Level: {char.get('level', 1)}{gender_line}",
+        pronoun_rule,
+        biology_rule,
+        build_line,
+    ]
+    if anatomy_line:
+        lines.append(anatomy_line)
+    lines.extend([
         f"STR {str_val} | PER {char.get('per_', 5)} | END {char.get('end_', 5)} | CHA {char.get('cha', 5)} | "
-        f"INT {char.get('int_', 5)} | AGI {char.get('agi', 5)} | LUK {char.get('luk', 5)}\n"
-        f"{hp_line} | MP: {char.get('mp', 30)}/{char.get('max_mp', 30)} | Gold: {char.get('gold', 50)}\n"
-        f"Status effects: {status_str}\n"
-        f"Inventory capacity: {len(inventory)}/{inventory_capacity(str_val)} slots\n"
-        f"Equipped: {equipped_text}\n"
+        f"INT {char.get('int_', 5)} | AGI {char.get('agi', 5)} | LUK {char.get('luk', 5)}",
+        f"{hp_line} | MP: {char.get('mp', 30)}/{char.get('max_mp', 30)} | Gold: {char.get('gold', 50)}",
+        f"Status effects: {status_str}",
+        f"Inventory capacity: {len(inventory)}/{inventory_capacity(str_val)} slots",
+        f"Equipped: {equipped_text}",
         f"Carried: {', '.join(carried) or 'nothing'}"
-    )
+    ])
+    return "\n".join(lines)
 
 def _party_sheet_text(party: list) -> str:
     """party: list of (char, inventory) tuples."""
@@ -147,9 +223,10 @@ def _history_text(history: list, session_id: int | None = None, query_context: s
                 witnesses = []
             wit_str = f" [Witnessed by: {', '.join(str(w) for w in witnesses)}]" if witnesses else ""
 
+            from game_engine.pronoun_resolver import strip_pronoun_tags
             if item.get("type") == "scene":
                 title = item.get("scene_title") or "Opening"
-                nar = item.get("next_narrative") or item.get("narrative") or ""
+                nar = strip_pronoun_tags(item.get("next_narrative") or item.get("narrative") or "")
                 if not is_latest and len(nar) > 160:
                     clean_nar = _re.sub(r'"[^"]*"|“[^”]*”', '', nar).strip()
                     sentences = [s.strip() for s in _re.split(r'(?<=[.!?])\s+', clean_nar) if s.strip()]
@@ -159,8 +236,8 @@ def _history_text(history: list, session_id: int | None = None, query_context: s
             char_n = item.get("character_name") or "Hero"
             lbl = item.get("label") or "Action"
             tier_s = item.get("tier_label") or item.get("tier") or ""
-            out_nar = item.get("outcome_narrative") or item.get("narrative") or ""
-            nxt_nar = item.get("next_narrative") or ""
+            out_nar = strip_pronoun_tags(item.get("outcome_narrative") or item.get("narrative") or "")
+            nxt_nar = strip_pronoun_tags(item.get("next_narrative") or "")
 
             if is_latest:
                 combined = f"{out_nar} {nxt_nar}".strip() if nxt_nar and nxt_nar != out_nar else out_nar
@@ -347,7 +424,9 @@ def _world_canon_text(session_id: int, world: dict | None = None,
         lines.append(
             "NPC CANON RULE: You MUST strictly depict known characters with their exact stated Gender, Pronouns, Race, "
             "Appearance, and Status. Male characters (he/him) must NEVER be addressed or referred to with feminine pronouns (she/her) "
-            "or described as female. Female characters (she/her) must NEVER be referred to with masculine pronouns (he/him). "
+            "or singular neutral pronouns (they/them/their/themselves) and must NEVER be described as female. Female characters (she/her) "
+            "must NEVER be referred to with masculine pronouns (he/him) or singular neutral pronouns (they/them/their/themselves). "
+            "Always refer to male characters as he/him/his exclusively and female characters as she/her/hers exclusively. "
             "Human characters have human ears and human features with NO animal traits. "
             "Beastfolk characters with dyed hair have natural biological fur/coat; their hair styling is dyed. "
             "If an NPC is DECEASED, they must NOT appear alive."
@@ -392,6 +471,7 @@ def _scene_context_text(session_id: int, current_location: str,
     lore, contacts, factions = world["lore"], world["contacts"], world["factions"]
     session = world["session"]
     scen_key = world["scen_key"]
+    history_lower = (history_text or "").lower()
 
     if is_location_engine_enabled(scen_key):
         loc_header = format_llm_location_context(session_id, current_location, scen_key)
@@ -513,7 +593,7 @@ def _scene_context_text(session_id: int, current_location: str,
 
             details = []
             if p.get("appearance"):
-                app_str = format_persona_summary(p["appearance"], scen_key=scen_key, mannerisms=p.get("mannerisms"), traits=p.get("traits"), revealed_flags=p["appearance"], gender=raw_gen)
+                app_str = format_persona_summary(p["appearance"], scen_key=scen_key, mannerisms=p.get("mannerisms"), traits=p.get("traits"), revealed_flags=p["appearance"], gender=raw_gen, include_intimate=False)
                 if app_str:
                     details.append("Appearance: " + app_str)
             elif p.get("mannerisms"):
@@ -524,6 +604,31 @@ def _scene_context_text(session_id: int, current_location: str,
                     details.append("Traits: " + ", ".join(clean_traits))
             if p.get("description"):
                 details.append(p["description"])
+            p_name_low = str(p.get("name") or "").lower().strip()
+            p_first_low = (p_name_low.split() or [""])[0]
+            mb = p.get("micro_blocking")
+            if not mb and isinstance(session, dict):
+                st_map = session.get("scene_stage_state", {})
+                st_ent = st_map.get(p_name_low) or (st_map.get(p_first_low) if len(p_first_low) >= 3 else None)
+                if isinstance(st_ent, dict) and st_ent.get("micro_blocking"):
+                    mb = st_ent["micro_blocking"]
+
+            if mb and isinstance(mb, dict) and mb.get("spot_and_posture"):
+                spot = str(mb.get("spot_and_posture", "")).strip()
+                prop = str(mb.get("active_prop", "")).strip()
+                if spot and prop:
+                    act_desc = f"{spot} with {prop}"
+                elif spot:
+                    act_desc = spot
+                else:
+                    act_desc = ""
+            else:
+                from mechanics.social.persona.actor_card import derive_scene_activity
+                curr_m = session.get("current_minute", 480) if isinstance(session, dict) else 480
+                act_desc = derive_scene_activity(p, location=current_location, current_minute=curr_m, scen_key=scen_key)
+
+            if act_desc:
+                details.append("Activity: " + act_desc)
             extra = (" (" + "; ".join(details) + ")") if details else ""
             race_raw = p.get('race') or ""
             race_tag = f"Race: {format_race_display(race_raw)} | " if race_raw else ""
@@ -573,19 +678,25 @@ def _scene_context_text(session_id: int, current_location: str,
         if present_entries:
             lines.append("Characters physically in this room: " + "; ".join(present_entries))
 
-        # 2. Known contacts elsewhere in the world (explicitly marked as NOT in the room)
+        # 2. Known contacts elsewhere in the world:
+        # Only inject if explicitly referenced or inquired about in recent turn / action history (or at adventure start when history is empty)
         absent_entries = []
         for p in absent_persons[:max(6, max_items)]:
             p_name = p.get("name", "")
-            c_data = contacts_by_name.get(p_name.lower().strip(), {})
-            c_loc = c_data.get("location") or (c_data.get("basic_info") or {}).get("location") or ""
-            loc_tag = f" [Stationed at: {c_loc} - NOT in this room]" if c_loc else " [Stationed elsewhere - NOT in this room]"
-            role_desc = p.get("description") or (c_data.get("basic_info") or {}).get("role") or ""
-            r_str = f" ({role_desc})" if role_desc else ""
-            absent_entries.append(f"{p_name}{loc_tag}{r_str}")
+            if not p_name:
+                continue
+            p_low = p_name.lower().strip()
+            if not history_text or p_low in history_lower or (len(p_low.split()) > 1 and p_low.split()[0] in history_lower):
+                c_data = contacts_by_name.get(p_low, {})
+                c_loc = c_data.get("location") or (c_data.get("basic_info") or {}).get("location") or ""
+                loc_tag = f" [Stationed at: {c_loc} - NOT in this room]" if c_loc else " [Stationed elsewhere - NOT in this room]"
+                role_desc = p.get("description") or (c_data.get("basic_info") or {}).get("role") or ""
+                r_str = f" ({role_desc})" if role_desc else ""
+                absent_entries.append(f"{p_name}{loc_tag}{r_str}")
 
         if absent_entries:
-            lines.append("Contacts elsewhere in the world (NOT present in this scene — DO NOT narrate as present): " + "; ".join(absent_entries))
+            header = "Notable figures & contacts in the world (Stationed elsewhere — NOT physically present in this room): " if not history_text else "Contacts elsewhere in the world referenced by player (Stationed elsewhere — NOT physically present in this room): "
+            lines.append(header + "; ".join(absent_entries))
 
     if current_npcs:
         described_npcs = []
@@ -612,47 +723,49 @@ def _scene_context_text(session_id: int, current_location: str,
     # Add active contact relationships if mechanic is enabled for this scenario
     if scenario_data.is_mechanic_enabled(scen_key, "contact_list") or scenario_data.is_mechanic_enabled(scen_key, "relationship_meter"):
         if contacts:
-            rel_block = format_llm_relationship_context(contacts, scenario=scen_key, scene_npcs=current_npcs, history_text=history_text, max_items=3)
+            rel_block = format_llm_relationship_context(contacts, scenario=scen_key, scene_npcs=current_npcs, history_text=history_text, max_items=3, only_present_or_mentioned=True)
             if rel_block:
                 lines.append(rel_block)
 
-            # Inject Established Relations & Social Pool for LLM casting
-            relation_candidates = []
-            seen_rel_names = set()
-            for c in contacts[:4]:
-                c_name = c.get("name", "Contact")
-                rels = c.get("relations") or {}
-                if isinstance(rels, dict):
-                    # Family
-                    for f in (rels.get("family") or []):
-                        fn = f.get("name")
-                        rel_type = f.get("relation", "Family")
-                        f_occ = f.get("occupation") or ""
-                        if fn and fn.lower() not in seen_rel_names and fn.lower() != c_name.lower():
-                            seen_rel_names.add(fn.lower())
-                            occ_str = f" ({f_occ})" if f_occ else ""
-                            relation_candidates.append(f"{fn} [{c_name}'s {rel_type}{occ_str}]")
-                    # Rivals
-                    for r in (rels.get("rivals") or []):
-                        rn = r.get("name")
-                        r_role = r.get("role") or ""
-                        if rn and rn.lower() not in seen_rel_names and rn.lower() != c_name.lower():
-                            seen_rel_names.add(rn.lower())
-                            role_str = f" ({r_role})" if r_role else ""
-                            relation_candidates.append(f"{rn} [{c_name}'s Rival{role_str}]")
-                    # Friends
-                    for fr in (rels.get("friends") or []):
-                        frn = fr.get("name")
-                        fr_role = fr.get("role") or ""
-                        if frn and frn.lower() not in seen_rel_names and frn.lower() != c_name.lower():
-                            seen_rel_names.add(frn.lower())
-                            role_str = f" ({fr_role})" if fr_role else ""
-                            relation_candidates.append(f"{frn} [{c_name}'s Friend{role_str}]")
+            # Inject Established Relations & Social Pool only when player is NOT in an active private conversation
+            has_active_convo = (bool(session.get("dialogue_partner")) or bool(session.get("dialogue_partners"))) if isinstance(session, dict) else False
+            if not has_active_convo:
+                relation_candidates = []
+                seen_rel_names = set()
+                for c in contacts[:4]:
+                    c_name = c.get("name", "Contact")
+                    rels = c.get("relations") or {}
+                    if isinstance(rels, dict):
+                        # Family
+                        for f in (rels.get("family") or []):
+                            fn = f.get("name")
+                            rel_type = f.get("relation", "Family")
+                            f_occ = f.get("occupation") or ""
+                            if fn and fn.lower() not in seen_rel_names and fn.lower() != c_name.lower():
+                                seen_rel_names.add(fn.lower())
+                                occ_str = f" ({f_occ})" if f_occ else ""
+                                relation_candidates.append(f"{fn} [{c_name}'s {rel_type}{occ_str}]")
+                        # Rivals
+                        for r in (rels.get("rivals") or []):
+                            rn = r.get("name")
+                            r_role = r.get("role") or ""
+                            if rn and rn.lower() not in seen_rel_names and rn.lower() != c_name.lower():
+                                seen_rel_names.add(rn.lower())
+                                role_str = f" ({r_role})" if r_role else ""
+                                relation_candidates.append(f"{rn} [{c_name}'s Rival{role_str}]")
+                        # Friends
+                        for fr in (rels.get("friends") or []):
+                            frn = fr.get("name")
+                            fr_role = fr.get("role") or ""
+                            if frn and frn.lower() not in seen_rel_names and frn.lower() != c_name.lower():
+                                seen_rel_names.add(frn.lower())
+                                role_str = f" ({fr_role})" if fr_role else ""
+                                relation_candidates.append(f"{frn} [{c_name}'s Friend{role_str}]")
 
-            if relation_candidates:
-                cand_str = "; ".join(relation_candidates[:5])
-                lines.append(f"ESTABLISHED RELATIONS POOL: {cand_str}")
-                lines.append("CASTING DIRECTIVE: When introducing secondary characters, peers, rivals, bounty/quest givers, or hallway encounters in this location, PRIORITIZE casting from this established relations pool before inventing new strangers.")
+                if relation_candidates:
+                    cand_str = "; ".join(relation_candidates[:5])
+                    lines.append(f"ESTABLISHED RELATIONS POOL: {cand_str}")
+                    lines.append("CASTING DIRECTIVE: When introducing secondary characters, peers, rivals, bounty/quest givers, or hallway encounters in this location, PRIORITIZE casting from this established relations pool before inventing new strangers.")
 
     # Inject campus facility directory characters for high school / academy scenarios
     from mechanics.world.mobility import is_campus_scenario

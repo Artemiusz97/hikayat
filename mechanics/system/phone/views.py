@@ -500,9 +500,10 @@ class SocialProfileView(discord.ui.View):
 
         if not profile.get("is_faculty") and not profile.get("is_already_contact"):
             cooldown = profile.get("cooldown_turns_left", 0)
-            if cooldown > 0:
+            is_cd = bool(profile.get("on_cooldown") or cooldown > 0)
+            if is_cd:
                 req_btn = discord.ui.Button(
-                    label=f"Request Pending ({cooldown}t CD)",
+                    label="Request Pending (Available Tomorrow)",
                     emoji="⏳",
                     style=discord.ButtonStyle.secondary,
                     disabled=True,

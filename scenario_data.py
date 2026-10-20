@@ -583,11 +583,19 @@ def get_dynamic_starting_hook(scenario: dict | str | None, session_id: int = 0, 
         else:
             directive = "Delve Threshold: Stage the mystery of the ancient frontier/ruin threshold, survival/scouting choices, deciphering clues, and preparing equipment."
 
+    starting_min = chosen_entry.get("starting_minute")
+    if starting_min is not None:
+        try:
+            starting_min = int(starting_min)
+        except Exception:
+            starting_min = None
+
     return {
         "archetype": chosen_archetype,
         "hook_text": hook_text,
         "suggested_location": resolved_location,
-        "directive": directive
+        "directive": directive,
+        "starting_minute": starting_min,
     }
 
 

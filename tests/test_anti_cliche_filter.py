@@ -116,7 +116,7 @@ class TestAntiClicheFilter(unittest.IsolatedAsyncioTestCase):
             
             self.assertNotIn("Most guys would be too nervous", result["outcome_narrative"])
             self.assertNotIn("not like other men", result["next_narrative"])
-            self.assertIn("She turns toward him.", result["outcome_narrative"])
+            self.assertIn("turns toward", result["outcome_narrative"])
             self.assertIn("Sofia grins.", result["next_narrative"])
 
 

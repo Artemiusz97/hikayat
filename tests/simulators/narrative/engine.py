@@ -328,7 +328,7 @@ class NarrativeSimulator:
                     pres_names = [_get_npc_name(n) for n in reconciled_npcs if _get_npc_name(n)]
                     retained_partners = [p for p in new_partners if any(is_dialogue_partner(p, [pn]) for pn in pres_names)]
 
-                    from game_engine.npcs import extract_speaking_npcs_from_narrative, can_chime_in_to_dialogue
+                    from game_engine.npcs import extract_speaking_npcs_from_narrative, evaluate_scene_attention_transition
                     speaking_npcs = extract_speaking_npcs_from_narrative(full_nar, reconciled_npcs)
                     audit_speaking = (mock_outcome.get("entity_audit") or {}).get("speaking_characters") or []
                     if isinstance(audit_speaking, list):
@@ -336,7 +336,7 @@ class NarrativeSimulator:
                             if isinstance(asp, str) and asp.strip():
                                 matched_n = next((_get_npc_name(n) for n in reconciled_npcs if is_dialogue_partner(asp, [_get_npc_name(n)])), None)
                                 if matched_n and matched_n not in speaking_npcs:
-                                    if can_chime_in_to_dialogue(
+                                    if evaluate_scene_attention_transition(
                                         matched_n,
                                         retained_partners=retained_partners,
                                         actions=action_objs,
@@ -358,7 +358,7 @@ class NarrativeSimulator:
                     merged = list(retained_partners) if same_primary else []
                     for sn in speaking_npcs:
                         if not any(is_dialogue_partner(sn, [m]) for m in merged):
-                            if can_chime_in_to_dialogue(
+                            if evaluate_scene_attention_transition(
                                 sn,
                                 retained_partners=retained_partners,
                                 actions=action_objs,

@@ -183,6 +183,12 @@ async def generate_macro_world_state(session_id: int, session: dict, party: list
         f"Respond with JSON matching this schema:\n{_WORLD_FORGE_SCHEMA}"
     )
 
+    _is_llm_mocked = hasattr(game_engine.call_llm_json, "_mock_name")
+    if not _is_llm_mocked:
+        fallback = _build_fallback_macro(factions, scen_key)
+        _persist_macro_world(session_id, fallback)
+        return fallback
+
     from scenario_data import uses_nsfw_model
     try:
         result = await game_engine.call_llm_json(
