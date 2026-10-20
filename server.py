@@ -119,8 +119,6 @@ from bin import tunnel
 
 logging.basicConfig(level=logging.INFO)
 
-# Ensure database is initialized and schema migrations are applied
-db.init_db()
 
 
 def _is_share_requested() -> bool:

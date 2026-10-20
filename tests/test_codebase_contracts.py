@@ -11,7 +11,6 @@ import os
 import json
 import pytest
 import db
-import server
 from skill_check import CheckResult
 from services.turn_service import TurnResponse
 from models.llm_schemas import TurnOutcome, OpeningScene, ActionClassification
@@ -127,6 +126,7 @@ def test_action_and_check_result_serialization():
         json.dumps(raw_action)
 
     # Verify that server._serializable_action solves this and produces valid JSON
+    import server
     safe_action = server._serializable_action(raw_action)
     dumped = json.dumps(safe_action)
     assert dumped is not None
