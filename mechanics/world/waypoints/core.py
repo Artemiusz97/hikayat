@@ -8,7 +8,13 @@ from typing import Optional, Any
 
 import db
 from .templates import ensure_multi_stage_waypoints
-from .matching import check_location_matches_waypoint, get_story_quest_climax_location
+from .matching import (
+    check_location_matches_waypoint,
+    get_story_quest_climax_location,
+    resolve_effective_waypoint_location,
+    is_waypoint_npc_present_in_scene,
+    resolve_waypoint_target_npc
+)
 
 
 
@@ -77,14 +83,16 @@ def build_waypoint_prompt_block(session_id: int, current_location: str, destinat
     for wp in active_wps:
         quest_title = wp.get("quest_title", "")
         sub_obj_id = wp.get("sub_obj_id")
-        target_loc = wp.get("target_location", "")
-        target_npc = wp.get("target_npc", "")
+        target_loc = resolve_effective_waypoint_location(session_id, wp)
+        target_npc = resolve_waypoint_target_npc(session_id, wp) or wp.get("target_npc", "")
         trigger = wp.get("completion_trigger", "arrival")
         label = wp.get("stage_label", "")
         resource_target = int(wp.get("resource_target", 0))
         resource_collected = int(wp.get("resource_collected", 0))
 
-        at_target = check_location_matches_waypoint(current_location, target_loc)
+        at_target = check_location_matches_waypoint(current_location, target_loc) or (
+            bool(target_npc) and is_waypoint_npc_present_in_scene(session_id, target_npc)
+        )
 
         header = f"  [{quest_title}" + (f" Sub-Obj #{sub_obj_id}]" if sub_obj_id is not None else "]")
         lines.append(header)
@@ -92,6 +100,14 @@ def build_waypoint_prompt_block(session_id: int, current_location: str, destinat
         if target_loc:
             npc_part = f" | Contact: {target_npc}" if target_npc else ""
             lines.append(f"    Target: {target_loc}{npc_part}")
+        v_phases = wp.get("valid_time_phases") or []
+        if v_phases:
+            lines.append(f"    Valid Time Window: {', '.join(v_phases)}")
+        d_day = wp.get("deadline_day")
+        if d_day is not None:
+            curr_day, _, _ = db.get_session_time(session_id) if session_id else (1, 480, 0)
+            days_left = max(0, int(d_day) - int(curr_day or 1))
+            lines.append(f"    Deadline: Day {d_day} ({days_left} day(s) remaining)")
         lines.append(f"    Player: {current_location or '(unknown)'} {'(AT TARGET)' if at_target else '(NOT at target)'}")
 
         if at_target:
@@ -119,8 +135,11 @@ def get_active_local_quest_hooks(session_id: int, current_location: str) -> list
     active_wps = db.get_all_session_active_waypoints(session_id)
     matched = []
     for wp in active_wps:
-        target_loc = wp.get("target_location", "")
-        if target_loc and check_location_matches_waypoint(current_location, target_loc):
+        target_loc = resolve_effective_waypoint_location(session_id, wp)
+        t_npc = resolve_waypoint_target_npc(session_id, wp) or wp.get("target_npc", "")
+        if (target_loc and check_location_matches_waypoint(current_location, target_loc)) or (
+            t_npc and is_waypoint_npc_present_in_scene(session_id, t_npc)
+        ):
             matched.append(wp)
     return matched
 
@@ -280,7 +299,7 @@ def get_location_waypoint_markers(session_id: int) -> dict[str, list[str]]:
                 markers[k].append(tag)
 
     for wp in active_wps:
-        target_loc = wp.get("target_location", "").strip()
+        target_loc = resolve_effective_waypoint_location(session_id, wp).strip()
         if not target_loc:
             continue
         parts = [target_loc]

@@ -12,12 +12,6 @@ from .deps import (
     DebugUpdateRequest,
 )
 
-if not hasattr(db, "apply_stat_mode"):
-    def _apply_stat_mode(user_id: int, mode: str):
-        db.update_settings(user_id, debug_stat_mode=mode)
-        return db.get_character(user_id)
-    db.apply_stat_mode = _apply_stat_mode
-
 router = APIRouter()
 
 

@@ -329,6 +329,79 @@ class TestLLMClientResilience(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res["scene_title"], "Interrupted")
             self.assertEqual(res["outcome_narrative"], "Action occurs")
 
+    async def test_stream_immediate_retry_on_unsupported_response_format(self):
+        """Verify BadRequestError for unsupported response_format in stream immediately retries in same attempt without backoff sleep."""
+        from openai import BadRequestError
+
+        mock_client = MagicMock()
+        mock_client.base_url = "https://nano-gpt.com/api/v1"
+        model_name = "test-unsupported-rf-model"
+
+        llm_client._MODEL_CAPABILITIES.pop((mock_client.base_url, model_name), None)
+        llm_client._MODEL_CAPABILITIES.pop(model_name, None)
+
+        chunk_ok = MagicMock()
+        chunk_ok.choices = [MagicMock(delta=MagicMock(content='{"scene_title": "Clean", "outcome_narrative": "Success"}'), finish_reason="stop")]
+        chunk_ok.usage = None
+
+        async def stream_ok():
+            yield chunk_ok
+
+        async def create_mock(**kwargs):
+            if "response_format" in kwargs:
+                raise BadRequestError(
+                    "Model test-unsupported-rf-model does not support the requested response format.",
+                    response=MagicMock(status_code=400),
+                    body={"error": {"code": "model_response_format_unsupported", "param": "response_format"}}
+                )
+            return stream_ok()
+
+        mock_client.chat.completions.create = AsyncMock(side_effect=create_mock)
+
+        with patch("llm_client.get_candidate_models", return_value=[(mock_client, model_name)]), \
+             patch("llm_client._backoff_sleep", new_callable=AsyncMock) as mock_sleep:
+
+            tokens = []
+            async def on_token(t):
+                tokens.append(t)
+
+            res = await llm_client.call_llm_json_stream("Sys", "User", on_narrative_token=on_token, retries=1)
+            self.assertEqual(res["scene_title"], "Clean")
+            self.assertEqual(res["outcome_narrative"], "Success")
+            # Must NOT sleep with backoff on parameter capability mismatch
+            mock_sleep.assert_not_called()
+            # Must have immediately stripped response_format and succeeded
+            self.assertEqual(mock_client.chat.completions.create.call_count, 2)
+            # Capability must be cached as False
+            cap = llm_client._MODEL_CAPABILITIES.get((mock_client.base_url, model_name))
+            self.assertIsNotNone(cap)
+            self.assertFalse(cap["json_mode"])
+
+    async def test_probe_all_configured_models(self):
+        """Verify probe_all_configured_models probes and populates capabilities for all candidates."""
+        mock_std = MagicMock()
+        mock_std.base_url = "https://std.api/v1"
+        mock_nsfw = MagicMock()
+        mock_nsfw.base_url = "https://nsfw.api/v1"
+
+        probe_groups = {
+            "standard": [{"client": mock_std, "model": "std-probe-model", "role": "Primary"}],
+            "nsfw": [{"client": mock_nsfw, "model": "nsfw-probe-model", "role": "Primary"}],
+        }
+
+        with patch("llm_client.get_probe_candidate_groups", return_value=probe_groups), \
+             patch("llm_client.probe_model_capabilities", new_callable=AsyncMock) as mock_probe:
+            mock_probe.side_effect = [
+                {"model": "std-probe-model", "json_mode": True, "status": "ok"},
+                {"model": "nsfw-probe-model", "json_mode": False, "status": "ok"},
+            ]
+
+            results = await llm_client.probe_all_configured_models(quiet=True)
+            self.assertIn("standard:std-probe-model", results)
+            self.assertIn("nsfw:nsfw-probe-model", results)
+            self.assertTrue(results["standard:std-probe-model"]["json_mode"])
+            self.assertFalse(results["nsfw:nsfw-probe-model"]["json_mode"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -29,6 +29,7 @@ class IntentCategory(str, Enum):
     GIFT_OFFER = "gift_offer"                      # Giving or offering items/gifts to NPCs
     MEDIA_CAPTURE = "media_capture"                # Taking photos, selfies, or recording video on smartphone
     PHONE_COMM = "phone_comm"                      # Remote calls, texts, DMs, feed browsing on phone
+    PHONE_CONTACT_EXCHANGE = "phone_contact_exchange"  # Exchanging numbers, asking for phone number/contact info/Line ID
     DIALOGUE_EXIT = "dialogue_exit"                # Saying goodbye, leaving conversation
     SOCIAL_INVITE = "social_invite"                # Inviting NPC to hang out, study, walk home, or casual date
     PARTY_RECRUIT = "party_recruit"                # Inviting NPC to permanent tactical party
@@ -178,7 +179,7 @@ DISCLOSURE_RELATIONSHIP_RE = re.compile(
     r'\b(?:single|taken|dating(?:\s+anyone|\s+someone)?|relationship\s+status|(?:got|have|has)\s+a\s+boyfriend|(?:got|have|has)\s+a\s+girlfriend|current\s+partner|partner\s+status|her\s+boyfriend|his\s+boyfriend|her\s+girlfriend|his\s+girlfriend)\b', re.I
 )
 DISCLOSURE_DEMEANOR_RE = re.compile(
-    r'\b(?:bedroom\s+demeanor|intimate\s+demeanor|in\s+private|in\s+bed)\b', re.I
+    r'\b(?:bedroom\s+demeanor|intimate\s+demeanor|(?:demeanor|acts?|attitude)\s+in\s+private|in\s+bed)\b', re.I
 )
 DISCLOSURE_MANNERISMS_RE = re.compile(
     r'\b(?:observe\s+(?:expression|body\s+language|habits?)|watch\s+closely|study\s+(?:her|his)\s+expression|'
@@ -308,12 +309,14 @@ DIALOGUE_INIT_PREFIXES = (
 # --- SPATIAL MOVEMENT & RESIDENCES ---
 MOVEMENT_PREFIXES = (
     "travel to ", "travel toward ", "travel towards ", "travel through ", "travel into ",
-    "head to ", "head toward ", "head towards ", "head into ",
+    "head to ", "head toward ", "head towards ", "head into ", "head over to ",
     "walk to ", "walk toward ", "walk towards ", "walk into ", "walk through ",
     "journey to ", "journey toward ", "journey towards ", "depart toward ",
     "step into ", "step through ", "enter the ", "enter ", "visit the ", "visit ",
-    "go to ", "move to ", "move into ", "return to ", "leave for ", "make our way to ",
-    "make your way to ", "make my way to ", "slip into ", "slip to "
+    "go to ", "move to ", "move into ", "moving to ", "moving toward ", "moving into ",
+    "return to ", "leave for ", "make our way to ",
+    "make your way to ", "make my way to ", "slip into ", "slip to ",
+    "lead her to ", "lead him to ", "lead them to ", "take her to ", "take him to ", "bring her to ", "bring him to "
 ) + get_all_movement_prefixes()
 
 RESIDENCE_VISIT_RE = re.compile(
@@ -371,8 +374,14 @@ REST_DOWNTIME_RE = re.compile(
 
 # --- RECRUITMENT & BOARDS ---
 RECRUIT_KEYWORDS = (
-    "join your party", "join party", "recruit", "join our party", "permanent companion",
-    "travel with us", "party member", "join the party", "invite into party", "invite to party"
+    "join your party", "join party", "recruit to party", "recruit into party", "recruit companion",
+    "recruit as companion", "join our party", "permanent companion", "recruit",
+    "travel with us as companion", "travel with us as a companion", "party member", "join the party",
+    "invite into party", "invite to party"
+)
+RECRUIT_DISAMBIGUATION_GUARDS = (
+    "club", "committee", "council", "school", "literature", "volunteer", "volunteers",
+    "staff", "employee", "employees", "militia", "army", "cult", "organization"
 )
 
 BOARD_INSPECT_RE = re.compile(
@@ -434,16 +443,42 @@ PHONE_COMM_RE = re.compile(
 )
 PHONE_NEGATION_GUARD_RE = re.compile(
     r'\b(?:call\s+(?:for\s+help|an\s+ambulance|the\s+police|him\s+a|her\s+a|them\s+a)|textbook|call\s+out|call\s+upon|'
+    r'phone\s+number|phone\s+contact|contact\s+info|line\s+id|'
     r'(?:silver|gold|iron|brass|magic|wedding|mood|signet|copper|ancient|metal|shiny|glowing)\s+ring|'
     r'ring\s+(?:on|of|in|around|finger|box|slot))\b',
     re.I
 )
 
+# --- SMARTPHONE CONTACT EXCHANGE ---
+CONTACT_EXCHANGE_RE = re.compile(
+    r'\b(?:ask\s+for|exchange|request|trade|add|give\s+me|get|have|share)\b.*?\b(?:contact(?:s)?|phone\s+number|phone|number|line(?:\s+id)?|contact\s+info)\b|'
+    r'\b(?:phone\s+number|contact\s+info|line\s+id)\b.*?\b(?:exchange|request|add|ask|share|get|give)\b|'
+    r'\b(?:ask\s+for\s+[A-Za-z0-9_\-\s\']+?\'s\s+(?:contact|phone\s+number|number|line(?:\s+id)?))\b|'
+    r'\b(?:add\s+(?:her|him|them|you|[A-Za-z0-9_\-\s\']+?)\s+(?:as\s+(?:a\s+)?contact|on\s+line|to\s+contacts|to\s+phone))\b',
+    re.I
+)
+
+
+# --- IN-PERSON RENDEZVOUS & SEPARATED APPOINTMENT PROPOSALS ---
+RENDEZVOUS_PROPOSAL_RE = re.compile(
+    r'\b(?:propose\s+moving|suggest\s+moving|propose\s+heading|suggest\s+heading|'
+    r'meet\s+(?:up\s+)?at|meet\s+me\s+at|see\s+you\s+at|wait\s+for\s+me\s+at|rendezvous\s+at|'
+    r'take\s+this\s+(?:discussion|conversation|talk)\s+to|'
+    r'move\s+to\s+a\s+(?:quieter|quiet|secluded|private)\s+spot|'
+    r'talk\s+in\s+private\s+at|speak\s+in\s+private\s+at)\b',
+    re.I
+)
+
+PART_WAYS_RE = re.compile(
+    r'\b(?:part\s+ways|split\s+up|say\s+goodbye|see\s+you\s+later|head\s+off\s+alone|walk\s+alone|dismiss\s+(?:companion|partner))\b',
+    re.I
+)
+
 # --- SOCIAL ESCORT & CASUAL INVITATIONS ---
 SOCIAL_INVITE_RE = re.compile(
-    r'\b(?:ask|invite)\s+([A-Za-z0-9_\-\s\']+?)\s+(?:to\s+(?:walk\s+home(?:\s+together)?|study(?:\s+together)?|hang\s+out(?:\s+together)?|grab\s+lunch(?:\s+together)?|eat\s+(?:lunch\s+)?together|get\s+coffee|go\s+on\s+a\s+date|come\s+over|join\s+me)|out\s+on\s+a\s+(?:casual\s+)?date|out\s+for\s+(?:coffee|lunch|dinner))\b|'
-    r'\b(?:walk\s+home\s+with|hang\s+out\s+with|study\s+with|grab\s+lunch\s+with|eat\s+lunch\s+with|go\s+on\s+a\s+date\s+with|walk\s+together\s+with|get\s+coffee\s+with)\s+([A-Za-z0-9_\-\s\']+)\b|'
-    r'\b(?:walk\s+home\s+together|hang\s+out\s+together|study\s+together|eat\s+lunch\s+together|grab\s+lunch\s+together|head\s+out\s+together|go\s+on\s+a\s+casual\s+date)\b',
+    r'\b(?:ask|invite)\s+([A-Za-z0-9_\-\s\']+?)\s+(?:to\s+(?:walk\s+home(?:\s+together)?|walk\s+with\s+me|study(?:\s+together)?|hang\s+out(?:\s+together)?|grab\s+lunch(?:\s+together)?|eat\s+(?:lunch\s+)?together|get\s+coffee|go\s+on\s+a\s+date|come\s+over|join\s+me)|out\s+on\s+a\s+(?:casual\s+)?date|out\s+for\s+(?:coffee|lunch|dinner))\b|'
+    r'\b(?:walk\s+home\s+with|walk\s+with|come\s+with\s+me|walk\s+together\s+with|hang\s+out\s+with|study\s+with|grab\s+lunch\s+with|eat\s+lunch\s+with|go\s+on\s+a\s+date\s+with|get\s+coffee\s+with)\s+([A-Za-z0-9_\-\s\']+)\b|'
+    r'\b(?:walk\s+home\s+together|walk\s+together|hang\s+out\s+together|study\s+together|eat\s+lunch\s+together|grab\s+lunch\s+together|head\s+out\s+together|go\s+on\s+a\s+casual\s+date)\b',
     re.I
 )
 
@@ -453,7 +488,7 @@ AREA_SCOUT_RE = re.compile(
     re.I
 )
 AREA_SCOUT_NEGATION_RE = re.compile(
-    r'\b(?:hack|pick\s+lock|breach|force\s+open|steal|pickpocket|infiltrate)\b',
+    r'\b(?:hack|pick\s+lock|breach|force\s+open|steal|pickpocket|infiltrate|attack|strike|slash|stab|shoot|cleave)\b',
     re.I
 )
 
@@ -692,7 +727,19 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
                 )
 
         # ----------------------------------------------------------------------
-        # Priority 3.8: Smartphone & Cyberdeck Remote Communication
+        # Priority 3.8: Smartphone Contact Exchange / Asking for Phone Number
+        # ----------------------------------------------------------------------
+        if CONTACT_EXCHANGE_RE.search(act_lower):
+            target = _extract_target_npc(raw_text, ctx)
+            return ActionIntent(
+                category=IntentCategory.PHONE_CONTACT_EXCHANGE,
+                target_entity=target,
+                raw_text=raw_text,
+                metadata={"is_contact_request": True}
+            )
+
+        # ----------------------------------------------------------------------
+        # Priority 3.9: Smartphone & Cyberdeck Remote Communication
         # ----------------------------------------------------------------------
         if not PHONE_NEGATION_GUARD_RE.search(act_lower):
             if PHONE_COMM_RE.search(act_lower):
@@ -704,6 +751,7 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
                     raw_text=raw_text,
                     metadata={"comm_type": comm_type}
                 )
+
 
         # ----------------------------------------------------------------------
         # Priority 4: Conversational Exits
@@ -718,8 +766,50 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
             return ActionIntent(category=IntentCategory.DIALOGUE_EXIT, raw_text=raw_text)
 
         # ----------------------------------------------------------------------
-        # Priority 4.5: Social Escort & Hangout Invitations
+        # Priority 4.5: In-Person Rendezvous Proposals & Social Hangouts
         # ----------------------------------------------------------------------
+        if RENDEZVOUS_PROPOSAL_RE.search(act_lower):
+            m_with = re.search(r'\bwith\s+([A-Za-z0-9_\-\']+)', raw_text)
+            if m_with and m_with.group(1).lower() not in ("me", "us", "each other", "the", "a", "an", "all"):
+                target = _extract_target_npc(raw_text, ctx) or m_with.group(1).strip()
+                return ActionIntent(
+                    category=IntentCategory.SOCIAL_INVITE,
+                    target_entity=target,
+                    sub_target="accompany",
+                    raw_text=raw_text,
+                    metadata={"invite_type": "accompany", "is_social": True, "is_accompany": True}
+                )
+            target = _extract_target_npc(raw_text, ctx)
+            is_confidential = any(k in act_lower for k in ("secret", "private", "privately", "quieter spot", "quiet spot", "secluded spot", "confidentially", "budget leaks", "leak", "conspiracy", "whisper", "in private"))
+            topic = ""
+            m_top = re.search(r'\b(?:discuss|talk\s+about|confer\s+about|regarding)\s+([A-Za-z0-9_\-\s\'\"]+?)(?:\.|$)', raw_text, re.I)
+            if m_top:
+                topic = m_top.group(1).strip()
+            dest = _extract_movement_target(raw_text) or ""
+            return ActionIntent(
+                category=IntentCategory.SOCIAL_INVITE,
+                target_entity=target,
+                sub_target="rendezvous_proposal",
+                raw_text=raw_text,
+                metadata={
+                    "invite_type": "rendezvous",
+                    "is_rendezvous": True,
+                    "is_confidential": is_confidential,
+                    "target_location": dest,
+                    "topic": topic
+                }
+            )
+
+        if PART_WAYS_RE.search(act_lower) and any(kw in act_lower for kw in ("part ways", "split up", "goodbye", "alone", "dismiss")):
+            target = _extract_target_npc(raw_text, ctx)
+            return ActionIntent(
+                category=IntentCategory.SOCIAL_INVITE,
+                target_entity=target,
+                sub_target="part_ways",
+                raw_text=raw_text,
+                metadata={"invite_type": "part_ways"}
+            )
+
         if SOCIAL_INVITE_RE.search(act_lower):
             target = _extract_target_npc(raw_text, ctx)
             if "walk home" in act_lower:
@@ -730,6 +820,8 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
                 sub_t = "date"
             elif any(k in act_lower for k in ("lunch", "eat", "coffee")):
                 sub_t = "lunch"
+            elif any(k in act_lower for k in ("walk with", "walk together", "come with", "stroll with")):
+                sub_t = "accompany"
             else:
                 sub_t = "hangout"
             return ActionIntent(
@@ -737,13 +829,15 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
                 target_entity=target,
                 sub_target=sub_t,
                 raw_text=raw_text,
-                metadata={"invite_type": sub_t, "is_social": True}
+                metadata={"invite_type": sub_t, "is_social": True, "is_accompany": True}
             )
 
         # ----------------------------------------------------------------------
         # Priority 5: Companion Recruitment (Combat Scenarios)
         # ----------------------------------------------------------------------
-        if any(kw in act_lower for kw in RECRUIT_KEYWORDS):
+        from game_engine.matching import matches_keyword_boundary
+        is_org_recruit = matches_keyword_boundary(act_lower, RECRUIT_DISAMBIGUATION_GUARDS, allow_negated=False)
+        if not is_org_recruit and matches_keyword_boundary(act_lower, RECRUIT_KEYWORDS, allow_negated=False):
             target = _extract_target_npc(raw_text, ctx)
             return ActionIntent(category=IntentCategory.PARTY_RECRUIT, target_entity=target, raw_text=raw_text)
 
@@ -921,13 +1015,14 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
 
         # Check general travel / movement prefixes (excluding in-scene intimate posture/rhythm transitions)
         is_mv = any(clean_lower.startswith(pfx) or act_lower.startswith(pfx) or f" {pfx}" in act_lower for pfx in MOVEMENT_PREFIXES)
+        has_dest_target = bool(re.search(r'\b(?:quieter|secluded|quiet|private)\s+spot\b', act_lower)) or bool(_extract_movement_target(raw_text))
         if (
             is_mv
             and not has_intimate_or_affection_cue
-            and not any(k in act_lower for k in ("speak", "talk", "greet", "address", "say hello", "say hi", "wave", "position", "angle", "slowly", "deeply"))
+            and not any(k in act_lower for k in ("greet", "say hello", "say hi", "wave", "position", "angle", "slowly", "deeply"))
         ):
             # Extract destination string if present
-            dest = _extract_movement_target(raw_text)
+            dest = _extract_movement_target(raw_text) or ("Secluded Spot" if "spot" in act_lower else None)
             return ActionIntent(
                 category=IntentCategory.MOVEMENT,
                 target_entity=dest,
@@ -978,6 +1073,62 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
         return ActionIntent(category=IntentCategory.GENERAL_ACTION, raw_text=raw_text)
 
 
+def resolve_action_intent(
+    action_or_text: Dict[str, Any] | str,
+    context: Optional[IntentContext] = None
+) -> ActionIntent:
+    """
+    LLM-First, Fallback-Guarded intent resolver.
+    1. If action_or_text is a dict with a specific LLM-emitted `intent` (!= 'general_action' and != ''),
+       constructs ActionIntent directly from the structured tag and `target_npc`,
+       using `classify_action_intent(label, context)` only to fill in any missing target_entity / sub_target.
+    2. If `intent` is 'general_action' or empty (or input is a plain string), delegates to
+       `classify_action_intent(label, context)` and preserves any explicit `sub_intent` or `target_npc`.
+    """
+    if isinstance(action_or_text, str):
+        return classify_action_intent(action_or_text, context)
+
+    if not isinstance(action_or_text, dict):
+        return ActionIntent(category=IntentCategory.GENERAL_ACTION, raw_text=str(action_or_text))
+
+    raw_label = str(action_or_text.get("label") or action_or_text.get("text") or "").strip()
+    explicit_intent_str = str(action_or_text.get("intent") or action_or_text.get("action_category") or "").lower().strip()
+    explicit_sub_intent = str(action_or_text.get("sub_intent") or "").lower().strip()
+    explicit_target = str(action_or_text.get("target_npc") or action_or_text.get("target_entity") or "").strip()
+
+    # 1. If a specific non-general intent is pre-tagged:
+    if explicit_intent_str and explicit_intent_str != "general_action":
+        try:
+            cat_enum = IntentCategory(explicit_intent_str)
+        except ValueError:
+            cat_enum = IntentCategory.GENERAL_ACTION
+
+        if cat_enum != IntentCategory.GENERAL_ACTION:
+            parsed_fallback = classify_action_intent(raw_label, context) if raw_label else None
+            resolved_target = explicit_target or (parsed_fallback.target_entity if parsed_fallback else "")
+            resolved_sub = explicit_sub_intent or (parsed_fallback.sub_target if parsed_fallback and parsed_fallback.category == cat_enum else "")
+            meta = dict(parsed_fallback.metadata) if parsed_fallback and parsed_fallback.category == cat_enum else {}
+            if explicit_sub_intent:
+                meta["sub_intent"] = explicit_sub_intent
+
+            return ActionIntent(
+                category=cat_enum,
+                target_entity=resolved_target,
+                sub_target=resolved_sub,
+                raw_text=raw_label,
+                metadata=meta,
+                confidence=1.0
+            )
+
+    # 2. Otherwise, fall back to linguistic classifier
+    parsed = classify_action_intent(raw_label, context)
+    if explicit_target and not parsed.target_entity:
+        parsed.target_entity = explicit_target
+    if explicit_sub_intent and not parsed.sub_target:
+        parsed.sub_target = explicit_sub_intent
+    return parsed
+
+
 # ==============================================================================
 # 4. ENTITY EXTRACTION HELPERS (PURE FUNCTIONAL)
 # ==============================================================================
@@ -988,7 +1139,8 @@ _NON_CHARACTER_NOUNS = {
     "yesterday", "today", "tomorrow", "tonight", "morning", "afternoon", "evening", "night",
     "week", "month", "year", "school", "room", "town", "city", "building", "class", "door", "window",
     "table", "chair", "bed", "desk", "house", "home", "shop", "café", "cafe", "bar", "tavern", "world",
-    "god", "heaven", "hell", "earth", "nature", "life", "death"
+    "god", "heaven", "hell", "earth", "nature", "life", "death",
+    "circle", "club", "council", "academy", "guild", "society", "order", "union", "faction", "party", "team", "alliance"
 }
 
 def _extract_target_npc(action_text: str, context: IntentContext) -> str:
@@ -1003,23 +1155,54 @@ def _extract_target_npc(action_text: str, context: IntentContext) -> str:
         if np and np not in candidates:
             candidates.append(np)
 
-    for cand in candidates:
-        if not cand:
-            continue
-        from namegen import is_collective_entity_name, is_generic_role_name, is_valid_entity_name
-        if is_collective_entity_name(cand) or is_generic_role_name(cand) or not is_valid_entity_name(cand):
-            continue
+    from namegen import (
+        is_collective_entity_name,
+        is_generic_role_name,
+        is_valid_entity_name,
+        extract_first_and_last_name,
+        NAME_PARTICLES_AND_HONORIFICS,
+    )
+    valid_candidates = [
+        cand for cand in candidates
+        if cand and not is_collective_entity_name(cand) and not is_generic_role_name(cand) and is_valid_entity_name(cand)
+    ]
+
+    # Pass 1: Exact full name match in action text
+    for cand in valid_candidates:
         c_low = cand.lower().strip()
-        c_first = c_low.split()[0] if c_low else ""
-        if c_first in _NON_CHARACTER_NOUNS:
-            if c_low in act_lower:
-                return cand
-            continue
-        if c_low in act_lower or (len(c_first) >= 3 and bool(re.search(rf"\b{re.escape(c_first)}\b", act_lower))):
+        if c_low and c_low in act_lower:
             return cand
 
-    # 2. Extract from possessive patterns (e.g. "enter Maya's home" -> "Maya")
-    poss_match = re.search(r"\b([A-Z][a-zA-Z0-9_\-]+)'s\b", action_text)
+    # Pass 2: Extracted given name match (handles Western first names, East Asian surname-first given names, and Malay patronymics)
+    for cand in valid_candidates:
+        first_tok, _ = extract_first_and_last_name(cand)
+        f_low = first_tok.lower().strip(".,")
+        if len(f_low) >= 3 and f_low not in _NON_CHARACTER_NOUNS and f_low not in NAME_PARTICLES_AND_HONORIFICS:
+            if re.search(rf"\b{re.escape(f_low)}\b", act_lower):
+                return cand
+
+    # Pass 3: Surname match when addressed by last name or title+last name (e.g. "Talk to Zhang", "Consult with Kowalska", "Mr. Harrison")
+    for cand in valid_candidates:
+        first_tok, last_tok = extract_first_and_last_name(cand)
+        for s_tok in last_tok.lower().split():
+            s_clean = s_tok.strip(".,")
+            if len(s_clean) >= 3 and s_clean not in _NON_CHARACTER_NOUNS and s_clean not in NAME_PARTICLES_AND_HONORIFICS:
+                if re.search(rf"\b{re.escape(s_clean)}\b", act_lower):
+                    # Guard: if preceded by another given name that differs from cand's first name (e.g. "Maya Vance" vs "Mila Vance"),
+                    # it is addressing a different person by full name rather than cand by surname.
+                    preceding_match = re.search(rf"\b([a-zA-Z0-9_\-]+)\s+{re.escape(s_clean)}\b", act_lower)
+                    if preceding_match:
+                        preceding_word = preceding_match.group(1).lower()
+                        if (
+                            preceding_word not in NAME_PARTICLES_AND_HONORIFICS
+                            and preceding_word not in ("to", "with", "at", "towards", "toward", "and", "the", "ask", "greet", "approach", "see", "meet", "find", "for")
+                            and preceding_word != first_tok.lower()
+                        ):
+                            continue
+                    return cand
+
+    # 2. Extract from possessive residence patterns (e.g. "enter Maya's home" -> "Maya")
+    poss_match = re.search(r"\b([A-Z][a-zA-Z0-9_\-]+)'s\s+(?:home|house|place|room|dorm|apartment|residence|bedroom|office)\b", action_text, re.I)
     if poss_match:
         cand = poss_match.group(1).strip()
         for pfx in ("enter ", "visit ", "walk to ", "head to ", "go to "):
@@ -1071,9 +1254,14 @@ def _extract_target_npc(action_text: str, context: IntentContext) -> str:
 
 
 def _extract_movement_target(action_text: str) -> str:
-    """Extracts raw destination string following movement verbs."""
+    """Extracts raw destination string following movement verbs or proposal phrases."""
     act_lower = action_text.lower()
-    for pfx in MOVEMENT_PREFIXES:
+    candidate_prefixes = (
+        "propose moving to ", "suggest moving to ", "propose heading to ", "suggest heading to ",
+        "meet at ", "meet up at ", "meet me at ", "rendezvous at ", "moving to a quieter spot near ",
+        "move to a quieter spot near ", "quieter spot near "
+    ) + MOVEMENT_PREFIXES
+    for pfx in candidate_prefixes:
         if pfx in act_lower:
             idx = act_lower.find(pfx) + len(pfx)
             target = action_text[idx:].strip().rstrip(".")
@@ -1226,6 +1414,11 @@ def is_gift_offer_action(text: str) -> bool:
 def is_social_invite_action(text: str) -> bool:
     """Facade for checking social hangout or casual date invitation."""
     return classify_action_intent(text).category == IntentCategory.SOCIAL_INVITE
+
+
+def is_contact_exchange_action(text: str) -> bool:
+    """Facade for checking smartphone contact addition / phone number exchange."""
+    return classify_action_intent(text).category == IntentCategory.PHONE_CONTACT_EXCHANGE
 
 
 def is_scout_action(text: str) -> bool:

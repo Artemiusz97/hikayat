@@ -56,7 +56,7 @@ _MODE_BUDGETS: dict[SceneMode, dict[str, int]] = {
     SceneMode.DIALOGUE: {
         "lore":         1000,   # place + NPC world context
         "history":      1600,   # last 3 raw turns
-        "dialogue":    10000,   # rich dossier + commitments - biggest budget
+        "dialogue":    20000,   # rich dossier + commitments - biggest budget
         "commitments":   800,
         "quest":         800,   # active quest kept short in dialogue
         "digest":       1200,   # past arc bullets
@@ -74,7 +74,7 @@ _MODE_BUDGETS: dict[SceneMode, dict[str, int]] = {
     SceneMode.NSFW_INTIMATE: {
         "lore":          600,
         "history":      1600,
-        "dialogue":    10000,   # partner dossier is critical for continuity
+        "dialogue":    20000,   # partner dossier is critical for continuity
         "commitments":  1200,
         "quest":         400,
         "digest":       1000,

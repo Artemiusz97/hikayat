@@ -116,6 +116,9 @@ class TestSocialSimulation:
                 gender="female",
                 basic_info={"grade": "Junior", "role": "Student"},
             )
+            db.update_contact_relations(sid, peer_name, {
+                "romance": {"status": "Single", "current_partner": None, "ex_partners": []}
+            }, cid)
 
             # At score 40, confession milestone must be False
             assert can_trigger_romantic_confession(sid, cid, peer_name, scenario="high_school_drama") is False
@@ -648,6 +651,93 @@ class TestSocialSimulation:
             )
             contact_promoted = db.get_contact(sid, "Mia Yamada", character_id=cid)
             assert contact_promoted["track"] == "romantic", "Valid confession milestone MUST promote contact to romantic track"
+        finally:
+            with db.get_conn() as conn:
+                db.core._delete_session_records(conn, sid)
+
+    def test_auditor_meta_leak_sanitization_and_virginity_grounding(self):
+        """Verify auditor meta tokens are sanitized and virginity is grounded in dialogue prompts."""
+        from game_engine.keywords import sanitize_auditor_meta_leaks
+        from game_engine.turn.dialogue import _build_dialogue_prompt_block
+        from game_engine.turn_context import TurnContext
+
+        # 1. Sanitization verification
+        leaked_dialogue = "Turn-off: when you rush the pacing. I'm an auditor, after all; I don't like sloppy work."
+        cleaned = sanitize_auditor_meta_leaks(leaked_dialogue)
+        assert "auditor" not in cleaned.lower()
+        assert "I'm thorough, after all" in cleaned
+
+        leaked_meeting = "You've got about ten minutes before my next audit meeting"
+        cleaned_meeting = sanitize_auditor_meta_leaks(leaked_meeting)
+        assert "audit" not in cleaned_meeting.lower()
+        assert "scheduled meeting" in cleaned_meeting
+
+        leaked_boundary = "I'm a very thorough auditor of personal boundaries."
+        cleaned_boundary = sanitize_auditor_meta_leaks(leaked_boundary)
+        assert "auditor" not in cleaned_boundary.lower()
+        assert "very thorough when it comes to personal boundaries" in cleaned_boundary
+
+        # 2. Dialogue prompt grounding verification
+        sid = 9999881
+        try:
+            with db.get_conn() as conn:
+                conn.execute(
+                    "INSERT INTO sessions (id, mode, capacity, scenario, current_location, history_json) VALUES (?, 'solo', 1, ?, ?, ?)",
+                    (sid, "nsfw_furry_high_school_drama", "Campus Promenade", "[]")
+                )
+                conn.commit()
+
+            db.upsert_contact(
+                session_id=sid,
+                npc_id="test_virgin",
+                name="Test Virgin",
+                delta_score=10,
+                appearance={
+                    "intercourse_experience": "virgin",
+                    "oral_experience": "inexperienced",
+                    "manual_experience": "inexperienced",
+                    "anal_experience": "inexperienced",
+                    "turn_ons": "Intimate eye contact",
+                    "turn_offs": "Dead silence",
+                    "erotic_openness": "shameless",
+                }
+            )
+
+            sess = db.get_session(sid)
+            ctx = TurnContext(sid, sess)
+            prompt_block = _build_dialogue_prompt_block(
+                sess, ctx, ["Test Virgin"], [], [{"label": "ask about your experience and turn ons"}]
+            )
+
+            assert "CANON VIRGINITY & PAST EXPERIENCE GROUNDING" in prompt_block
+            assert "canonically a VIRGIN with NO prior intercourse experience" in prompt_block
+            assert "SPOKEN CONVERSATIONAL DISCLOSURE" in prompt_block
+            assert "Intimate eye contact" in prompt_block
+            assert "Dead silence" in prompt_block
+
+            # 3. Modest / Guarded NPC Boundary Gating verification
+            db.upsert_contact(
+                session_id=sid,
+                npc_id="test_modest",
+                name="Test Modest",
+                delta_score=5,
+                appearance={
+                    "intercourse_experience": "virgin",
+                    "oral_experience": "inexperienced",
+                    "manual_experience": "inexperienced",
+                    "turn_ons": "Gentle caresses",
+                    "turn_offs": "Aggressive shouting",
+                    "erotic_openness": "modest",
+                    "intimate_demeanor": "Hesitant & Flustered",
+                }
+            )
+            ctx_modest = TurnContext(sid, sess)
+            prompt_block_modest = _build_dialogue_prompt_block(
+                sess, ctx_modest, ["Test Modest"], [], [{"label": "ask about your experience"}]
+            )
+            assert "CANON VIRGINITY & PAST EXPERIENCE GROUNDING" in prompt_block_modest
+            assert "BOUNDARY & INFORMATION GATING" in prompt_block_modest
+            assert "guarded/modest regarding private intimacy" in prompt_block_modest
         finally:
             with db.get_conn() as conn:
                 db.core._delete_session_records(conn, sid)

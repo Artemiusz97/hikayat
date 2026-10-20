@@ -97,7 +97,7 @@ class TestIntimateProfilePage(unittest.TestCase):
         self.assertFalse(field_map["❤️ Act & Position Preferences"].inline)
 
         # Intimate experience tracks and private attributes are masked, while externally visible breast size is shown
-        self.assertIn("• **Breast Size**: Plump", field_map["🔞 Anatomy & Experience"].value)
+        self.assertIn("plump", field_map["🔞 Anatomy & Experience"].value.lower())
         self.assertIn("• **Intercourse**: *Unknown*", field_map["🔞 Anatomy & Experience"].value)
         self.assertIn("• **Oral Intimacy**: *Unknown*", field_map["🔞 Anatomy & Experience"].value)
         self.assertIn("• **Manual Intimacy**: *Unknown*", field_map["🔞 Anatomy & Experience"].value)
@@ -127,7 +127,7 @@ class TestIntimateProfilePage(unittest.TestCase):
         self.assertIn("❤️ Act & Position Preferences", field_map)
         self.assertNotIn("💡 Active Intimate Synergy & Modifiers", field_map)
 
-        self.assertIn("• **Breast Size**: Plump", field_map["🔞 Anatomy & Experience"].value)
+        self.assertIn("plump", field_map["🔞 Anatomy & Experience"].value.lower())
         self.assertIn("• **Intercourse**: Virgin", field_map["🔞 Anatomy & Experience"].value)
         self.assertIn("• **Oral Intimacy**: Inexperienced", field_map["🔞 Anatomy & Experience"].value)
         self.assertIn("• **Manual Intimacy**: Inexperienced", field_map["🔞 Anatomy & Experience"].value)

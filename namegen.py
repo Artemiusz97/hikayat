@@ -24,15 +24,60 @@ with open(_DATA_PATH, encoding="utf-8") as f:
 # Precompile comprehensive sets of male and female names from all scenarios
 _ALL_MALE_NAMES = set()
 _ALL_FEMALE_NAMES = set()
+_ALL_LAST_NAMES = set()
+_ALL_EAST_ASIAN_SURNAMES = set()
+_ALL_EAST_ASIAN_GIVEN_NAMES = set()
+_SURNAME_TO_CULTURE: dict[str, str] = {}
+_FIRST_NAME_TO_CULTURE: dict[str, str] = {}
 
 for s_val in _DATA.values():
     if isinstance(s_val, dict) and "person" in s_val:
         p_dict = s_val["person"]
         if isinstance(p_dict, dict):
+            if "cultures" in p_dict and isinstance(p_dict["cultures"], dict):
+                for cult_key, cult_data in p_dict["cultures"].items():
+                    if isinstance(cult_data, dict):
+                        is_ea = cult_key in ("chinese", "japanese", "korean", "vietnamese")
+                        for n in cult_data.get("male", []):
+                            n_low = str(n).lower().strip()
+                            _ALL_MALE_NAMES.add(n_low)
+                            _FIRST_NAME_TO_CULTURE.setdefault(n_low, cult_key)
+                            if is_ea:
+                                _ALL_EAST_ASIAN_GIVEN_NAMES.add(n_low)
+                        for n in cult_data.get("female", []):
+                            n_low = str(n).lower().strip()
+                            _ALL_FEMALE_NAMES.add(n_low)
+                            _FIRST_NAME_TO_CULTURE.setdefault(n_low, cult_key)
+                            if is_ea:
+                                _ALL_EAST_ASIAN_GIVEN_NAMES.add(n_low)
+                        for n in cult_data.get("last", []):
+                            n_low = str(n).lower().strip()
+                            _ALL_LAST_NAMES.add(n_low)
+                            _SURNAME_TO_CULTURE.setdefault(n_low, cult_key)
+                            if is_ea:
+                                _ALL_EAST_ASIAN_SURNAMES.add(n_low)
             for n in p_dict.get("male", []):
                 _ALL_MALE_NAMES.add(str(n).lower().strip())
             for n in p_dict.get("female", []):
                 _ALL_FEMALE_NAMES.add(str(n).lower().strip())
+            for n in p_dict.get("last", []):
+                _ALL_LAST_NAMES.add(str(n).lower().strip())
+
+if "high_school_drama" in _DATA and "person" in _DATA["high_school_drama"]:
+    hs_p = _DATA["high_school_drama"]["person"]
+    for n in hs_p.get("last", []):
+        n_low = str(n).lower().strip()
+        if n_low == "smith":
+            break
+        _ALL_EAST_ASIAN_SURNAMES.add(n_low)
+        _SURNAME_TO_CULTURE.setdefault(n_low, "japanese")
+    for g_key in ("male", "female"):
+        for n in hs_p.get(g_key, []):
+            n_low = str(n).lower().strip()
+            if n_low in ("james", "mary"):
+                break
+            _ALL_EAST_ASIAN_GIVEN_NAMES.add(n_low)
+            _FIRST_NAME_TO_CULTURE.setdefault(n_low, "japanese")
 
 _ALL_ROLE_NAMES = set()
 for s_val in _DATA.values():
@@ -199,21 +244,162 @@ _TOKEN_RE = re.compile(r"\{{1,2}(PERSON|PLACE|ROLE|SCHOOL|CLASSROOM|PARK)(?:_\w+
 
 
 def is_known_male_name(name: str) -> bool:
-    """Checks if a given name or first name matches any known male name in namegen data."""
+    """Checks if a given name or any token matches any known male name in namegen data."""
     if not name:
         return False
     clean = str(name).strip().lower()
-    first = clean.split()[0] if clean else ""
-    return first in _ALL_MALE_NAMES or clean in _ALL_MALE_NAMES
+    tokens = clean.split()
+    return clean in _ALL_MALE_NAMES or any(t in _ALL_MALE_NAMES for t in tokens)
 
 
 def is_known_female_name(name: str) -> bool:
-    """Checks if a given name or first name matches any known female name in namegen data."""
+    """Checks if a given name or any token matches any known female name in namegen data."""
     if not name:
         return False
     clean = str(name).strip().lower()
-    first = clean.split()[0] if clean else ""
-    return first in _ALL_FEMALE_NAMES or clean in _ALL_FEMALE_NAMES
+    tokens = clean.split()
+    return clean in _ALL_FEMALE_NAMES or any(t in _ALL_FEMALE_NAMES for t in tokens)
+
+
+NAME_PARTICLES_AND_HONORIFICS = {
+    "bin", "binti", "ibn", "bint", "van", "von", "der", "den", "het", "ten", "ter",
+    "del", "della", "degli", "das", "dos", "de", "la", "le", "el", "al", "the",
+    "mr", "ms", "mrs", "miss", "dr", "prof", "professor", "madame", "madam", "sir",
+    "lord", "lady", "captain", "officer", "coach", "nurse", "principal", "headmaster",
+    "dean", "sensei", "elder", "druid", "scholar", "guardian", "warden",
+}
+
+_HONORIFIC_PREFIXES = {
+    "mr", "ms", "mrs", "miss", "dr", "prof", "professor", "madame", "madam",
+    "sir", "lord", "lady", "coach", "nurse", "principal", "headmaster", "dean", "sensei",
+}
+
+
+def normalize_base_surname(surname: str) -> str:
+    """Normalizes gender-inflected or patronymic-prefixed surnames back to their base canonical form
+    (e.g. 'Kowalska' -> 'Kowalski', 'Semenova' -> 'Semenov', 'Magnusdottir' -> 'Magnusson', 'bin Ismail' -> 'Ismail')."""
+    if not surname:
+        return ""
+    s = str(surname).strip()
+    if not s:
+        return ""
+    parts = s.split()
+    if len(parts) >= 2 and parts[0].lower() in ("bin", "binti"):
+        s = " ".join(parts[1:]).strip()
+    s_low = s.lower()
+    if s_low in _ALL_LAST_NAMES:
+        return s
+    if s_low.endswith("ska") and len(s) > 4:
+        if (s[:-3] + "skyi").lower() in _ALL_LAST_NAMES:
+            return s[:-3] + "skyi"
+        return s[:-3] + "ski"
+    if s_low.endswith("cka") and len(s) > 4:
+        return s[:-3] + "cki"
+    if s_low.endswith("dzka") and len(s) > 5:
+        return s[:-4] + "dzki"
+    if s_low.endswith("skaya") and len(s) > 6:
+        return s[:-5] + "sky"
+    if s_low.endswith(("ova", "eva", "ina")) and len(s) > 4:
+        if s[:-1].lower() in _ALL_LAST_NAMES or s_low.endswith(("ova", "eva")):
+            return s[:-1]
+    if s_low.endswith("ou") and len(s) > 4:
+        if (s[:-2] + "os").lower() in _ALL_LAST_NAMES or s_low.endswith("poulou"):
+            return s[:-2] + "os"
+    if s_low.endswith("sdottir") and len(s) > 8:
+        return s[:-7] + "sson"
+    if s_low.endswith("dottir") and len(s) > 7:
+        return s[:-6] + "son"
+    return s
+
+
+def infer_surname_culture(surname: str) -> str:
+    """Infers the cultural pool for a surname (after normalizing inflections)."""
+    if not surname:
+        return ""
+    base = normalize_base_surname(surname).lower().strip()
+    if base in _SURNAME_TO_CULTURE:
+        return _SURNAME_TO_CULTURE[base]
+    if base in _ALL_EAST_ASIAN_SURNAMES:
+        return "japanese"
+    s_low = str(surname).lower().strip()
+    if s_low.endswith(("sdottir", "dottir", "sson")):
+        return "icelandic"
+    if s_low.endswith(("ski", "ska", "cki", "cka", "dzki", "dzka")):
+        return "polish"
+    if s_low.endswith(("skyi", "enko", "chuk")):
+        return "ukrainian"
+    if s_low.endswith(("ov", "ova", "ev", "eva", "skaya")):
+        return "russian"
+    if s_low.endswith(("opoulos", "opoulou", "akis", "idis", "iadis")):
+        return "greek"
+    return ""
+
+
+def infer_first_name_culture(first_name: str) -> str:
+    """Infers the cultural pool for a given name."""
+    if not first_name:
+        return ""
+    f_low = str(first_name).lower().strip()
+    if f_low in _FIRST_NAME_TO_CULTURE:
+        return _FIRST_NAME_TO_CULTURE[f_low]
+    if f_low in _ALL_EAST_ASIAN_GIVEN_NAMES:
+        return "japanese"
+    return ""
+
+
+def extract_first_and_last_name(full_name: str) -> tuple[str, str]:
+    """Extracts (first_name, surname) respecting East Asian surname-first, patronymic, and compound surname conventions."""
+    parts = str(full_name or "").strip().split()
+    if not parts:
+        return "", ""
+    if len(parts) >= 2 and parts[0].lower().rstrip(".") in _HONORIFIC_PREFIXES:
+        parts = parts[1:]
+    if len(parts) == 1:
+        p0_low = parts[0].lower()
+        if p0_low in _ALL_LAST_NAMES or p0_low in _ALL_EAST_ASIAN_SURNAMES:
+            return "", parts[0]
+        return parts[0], ""
+
+    # Handle patronymic bin / binti: "Danial bin Ismail" -> first="Danial", last="Ismail"
+    if len(parts) >= 3 and parts[1].lower() in ("bin", "binti"):
+        return parts[0], " ".join(parts[2:])
+
+    # Handle East Asian surname first: "Zhang Wei", "Tanaka Ren", "Kim Min-jun"
+    if len(parts) == 2 and parts[0].lower() in _ALL_EAST_ASIAN_SURNAMES:
+        p1_low = parts[1].lower()
+        if p1_low in _ALL_EAST_ASIAN_GIVEN_NAMES or (
+            (p1_low in _ALL_MALE_NAMES or p1_low in _ALL_FEMALE_NAMES)
+            and p1_low not in _ALL_LAST_NAMES
+        ):
+            return parts[1], parts[0]
+
+    # Standard Western / Compound surname: first="Elena", last="Vance Anderson" or "Smith"
+    return parts[0], " ".join(parts[1:])
+
+
+def get_substantive_name_tokens(full_name: str) -> list[str]:
+    """Returns ordered substantive name tokens with the true given name first, excluding particles and honorifics."""
+    if not full_name or not isinstance(full_name, str):
+        return []
+    first, last = extract_first_and_last_name(full_name)
+    candidates = []
+    if first:
+        candidates.append(first)
+    if last:
+        for lp in last.split():
+            candidates.append(lp)
+    for raw_p in full_name.strip().split():
+        candidates.append(raw_p)
+
+    result = []
+    seen = set()
+    for tok in candidates:
+        clean_t = tok.strip(".,'\"()[]{}")
+        low_t = clean_t.lower()
+        if len(clean_t) >= 2 and low_t not in NAME_PARTICLES_AND_HONORIFICS and low_t not in seen:
+            seen.add(low_t)
+            result.append(clean_t)
+    return result
 
 
 def get_all_gendered_names() -> tuple[set, set]:
@@ -222,6 +408,8 @@ def get_all_gendered_names() -> tuple[set, set]:
 
 
 TAG_TO_NAMEGEN_KEY = {
+    "modern": "default",
+    "general_modern": "default",
     "space": "sci_fi",
     "sci_fi": "sci_fi",
     "dark_fantasy": "dark_fantasy",
@@ -236,6 +424,14 @@ TAG_TO_NAMEGEN_KEY = {
     "steampunk": "steampunk",
     "fantasy": "fantasy",
 }
+
+
+def get_scenario_cultures(scenario: str = "default") -> list[str]:
+    """Returns the list of culture names available for a scenario, or empty list if none."""
+    d = _get_scenario_data(scenario, "person")
+    if isinstance(d, dict) and "cultures" in d and isinstance(d["cultures"], dict):
+        return list(d["cultures"].keys())
+    return []
 
 
 def _get_scenario_data(scenario: str, category: str):
@@ -274,14 +470,215 @@ def _get_scenario_data(scenario: str, category: str):
     return {} if category != "roles" else []
 
 
-def generate_person_name(scenario: str = "fantasy", gender: str = "") -> str:
+CULTURE_ALIASES = {
+    "russian/ukrainian": ["russian", "ukrainian"],
+    "ukrainian/russian": ["russian", "ukrainian"],
+    "east_slavic": ["russian", "ukrainian"],
+    "scandinavian": ["swedish", "norwegian", "danish"],
+    "scandinavia": ["swedish", "norwegian", "danish"],
+    "nordic": ["swedish", "norwegian", "danish"],
+    "malay/indo": ["malay"],
+    "malay_indo": ["malay"],
+    "indonesian": ["malay"],
+    "indo": ["malay"],
+    "portuguese/brazil": ["portuguese"],
+    "brazilian": ["portuguese"],
+    "brazil": ["portuguese"],
+    "dutch & flemish": ["dutch"],
+    "dutch/flemish": ["dutch"],
+    "flemish": ["dutch"],
+    "persian/iranian": ["persian"],
+    "iranian": ["persian"],
+    "scot": ["scottish"],
+}
+
+
+def format_cultural_full_name(
+    first_name: str,
+    surname: str,
+    first_culture: str = "",
+    surname_culture: str = "",
+    gender: str = "",
+    deterministic_seed: str | None = None,
+    use_patronymic: bool | None = None,
+) -> str:
+    """Formats a cultural name according to ethnic naming rules, gender inflections,
+    patronymics, and native East Asian surname-first ordering."""
+    if not surname:
+        return first_name
+    if not first_name:
+        return surname
+
+    g = str(gender or "").lower().strip()
+    is_female = any(w in g for w in ("female", "woman", "girl", "feminine", "she"))
+
+    s_clean = normalize_base_surname(surname.strip())
+    f_clean = first_name.strip()
+
+    s_cult = str(surname_culture or "").lower().strip() or infer_surname_culture(s_clean)
+    f_cult = str(first_culture or "").lower().strip() or infer_first_name_culture(f_clean)
+
+    # 1. Gendered surname inflections (grammatical gender follows the surname's culture)
+    if is_female:
+        if s_cult == "polish":
+            if s_clean.endswith("ski"):
+                s_clean = s_clean[:-3] + "ska"
+            elif s_clean.endswith("cki"):
+                s_clean = s_clean[:-3] + "cka"
+            elif s_clean.endswith("dzki"):
+                s_clean = s_clean[:-4] + "dzka"
+        elif s_cult in ("russian", "slavic"):
+            if s_clean.endswith(("ov", "ev", "in")):
+                s_clean = s_clean + "a"
+            elif s_clean.endswith("sky"):
+                s_clean = s_clean[:-3] + "skaya"
+        elif s_cult == "ukrainian":
+            if s_clean.endswith("skyi"):
+                s_clean = s_clean[:-4] + "ska"
+        elif s_cult == "greek":
+            if s_clean.endswith("os"):
+                s_clean = s_clean[:-2] + "ou"
+        elif s_cult == "icelandic":
+            if s_clean.endswith("sson"):
+                s_clean = s_clean[:-4] + "sdottir"
+            elif s_clean.endswith("son"):
+                s_clean = s_clean[:-3] + "dottir"
+
+    # 2. Malay & Indonesian patronymics (bin / binti)
+    if s_cult == "malay":
+        if use_patronymic is not None:
+            include_patronymic = bool(use_patronymic)
+        elif deterministic_seed is not None:
+            import hashlib
+            h_val = int(hashlib.md5(str(deterministic_seed).encode("utf-8")).hexdigest(), 16)
+            include_patronymic = (h_val % 2) == 0
+        else:
+            include_patronymic = random.random() < 0.5
+        if include_patronymic:
+            particle = "binti" if is_female else "bin"
+            return f"{f_clean} {particle} {s_clean}"
+        return f"{f_clean} {s_clean}"
+
+    # 3. East Asian & Vietnamese order
+    east_asian_cultures = {"chinese", "japanese", "korean", "vietnamese"}
+    if s_cult in east_asian_cultures:
+        # Pure East Asian (both given name and surname are East Asian): Surname first
+        if f_cult in east_asian_cultures:
+            return f"{s_clean} {f_clean}"
+        # Hybrid (e.g. English first + Chinese last): Western given name first
+        return f"{f_clean} {s_clean}"
+
+    # 4. Standard Western order (Given name first)
+    return f"{f_clean} {s_clean}"
+
+
+def generate_person_name(
+    scenario: str = "fantasy",
+    gender: str = "",
+    cross_culture_chance: float | None = None,
+    culture_weights: dict[str, float] | None = None,
+    culture: str | None = None,
+) -> str:
     d = _get_scenario_data(scenario, "person")
+    cultures = d.get("cultures") if isinstance(d, dict) else None
+
+    # Culture-segregated name generation (e.g. modern / slice-of-life)
+    if cultures and isinstance(cultures, dict):
+        culture_keys = list(cultures.keys())
+        if culture_keys:
+            # 1. Select the base culture (determines surname/heritage)
+            if culture:
+                c_clean = str(culture).lower().strip()
+                if c_clean in cultures:
+                    base_culture = c_clean
+                elif c_clean in CULTURE_ALIASES:
+                    candidates = [c for c in CULTURE_ALIASES[c_clean] if c in cultures]
+                    base_culture = random.choice(candidates) if candidates else random.choice(culture_keys)
+                else:
+                    base_culture = random.choice(culture_keys)
+            else:
+                active_weights = culture_weights if culture_weights is not None else d.get("culture_weights")
+                if active_weights and isinstance(active_weights, dict):
+                    default_w = 1.0 if culture_weights is None else 0.0
+                    weights = [float(active_weights.get(k, default_w)) for k in culture_keys]
+                    if sum(weights) <= 0:
+                        weights = [1.0] * len(culture_keys)
+                    base_culture = random.choices(culture_keys, weights=weights, k=1)[0]
+                else:
+                    base_culture = random.choice(culture_keys)
+
+            base_pool = cultures.get(base_culture) or {}
+
+            # 2. Determine first name culture (intra-cultural vs cross-cultural)
+            eff_cross_chance = (
+                cross_culture_chance
+                if cross_culture_chance is not None
+                else float(d.get("cross_culture_chance", 0.25))
+            )
+
+            other_cultures = [c for c in culture_keys if c != base_culture]
+            if other_cultures and random.random() < eff_cross_chance:
+                # Cross-cultural given name roll
+                active_weights = culture_weights if culture_weights is not None else d.get("culture_weights")
+                if active_weights and isinstance(active_weights, dict):
+                    default_w = 1.0 if culture_weights is None else 0.0
+                    other_weights = [float(active_weights.get(k, default_w)) for k in other_cultures]
+                    if sum(other_weights) <= 0:
+                        other_weights = [1.0] * len(other_cultures)
+                    first_culture = random.choices(other_cultures, weights=other_weights, k=1)[0]
+                else:
+                    first_culture = random.choice(other_cultures)
+            else:
+                first_culture = base_culture
+
+            first_pool = cultures.get(first_culture) or base_pool
+
+            # 3. Select gender-appropriate first name
+            g = str(gender or "").lower().strip()
+            is_female = any(w in g for w in ("female", "woman", "girl", "feminine", "she"))
+            is_male = any(w in g for w in ("male", "man", "boy", "masculine", "he")) and not is_female
+
+            male_pool = first_pool.get("male") or []
+            female_pool = first_pool.get("female") or []
+
+            if is_female:
+                pool = female_pool or ["Sarah"]
+            elif is_male:
+                pool = male_pool or ["Alex"]
+            else:
+                if male_pool and female_pool:
+                    pool = random.choice([male_pool, female_pool])
+                else:
+                    pool = male_pool or female_pool or ["Alex"]
+
+            first = random.choice(pool)
+
+            # 4. Determine surname from base_pool
+            scen_low = str(scenario or "").lower()
+            if any(k in scen_low for k in ("school", "academy", "modern", "cyberpunk", "noir")):
+                surname_chance = 1.0
+            else:
+                surname_chance = float(d.get("surname_chance", 1.0))
+
+            last_list = base_pool.get("last") or []
+            if last_list and random.random() < surname_chance:
+                raw_surname = random.choice(last_list)
+                return format_cultural_full_name(
+                    first_name=first,
+                    surname=raw_surname,
+                    first_culture=first_culture,
+                    surname_culture=base_culture,
+                    gender=gender,
+                )
+            return first
+
+    # Standard flat pool fallback (fantasy, dark_fantasy, sci-fi, etc.)
     male_pool = d.get("male") or []
     female_pool = d.get("female") or []
 
     g = str(gender or "").lower().strip()
-    is_female = ("female" in g or "woman" in g or "girl" in g or "feminine" in g or "she" in g)
-    is_male = ("male" in g or "man" in g or "boy" in g or "masculine" in g or "he" in g) and not is_female
+    is_female = any(w in g for w in ("female", "woman", "girl", "feminine", "she"))
+    is_male = any(w in g for w in ("male", "man", "boy", "masculine", "he")) and not is_female
 
     if is_female:
         pool = female_pool or ["Celestia"]
@@ -294,11 +691,20 @@ def generate_person_name(scenario: str = "fantasy", gender: str = "") -> str:
             pool = male_pool or female_pool or ["Aldric"]
 
     first = random.choice(pool)
-    surname_chance = d.get("surname_chance", 0.5)
+    scen_low = str(scenario or "").lower()
+    if any(k in scen_low for k in ("school", "academy", "modern", "cyberpunk", "noir")):
+        surname_chance = 1.0
+    else:
+        surname_chance = d.get("surname_chance", 0.5)
     last_list = d.get("last") or []
     if last_list and random.random() < surname_chance:
         return f"{first} {random.choice(last_list)}"
     return first
+
+
+def generate_npc_name(scenario: str = "fantasy", role: str = "", gender: str = "", **kwargs) -> str:
+    """Generates an NPC person name (alias to generate_person_name, tolerating role and kwargs)."""
+    return generate_person_name(scenario=scenario, gender=gender, **kwargs)
 
 
 def generate_role(scenario: str = "fantasy", hash_val: int = None) -> str:
@@ -590,8 +996,9 @@ def generate_player_residence_name(char_name: str = "", scenario: str = "high_sc
 
         parts = clean.split()
         if len(parts) >= 2:
-            surname = parts[-1]
-            first_name = parts[0]
+            first_name, surname = extract_first_and_last_name(clean)
+            if not surname:
+                first_name, surname = parts[0], parts[-1]
             if "cyberpunk" in scen:
                 return f"{surname} Residence" if hash_val and hash_val % 2 == 0 else f"{first_name}'s Apartment"
             if "sci_fi" in scen or "space" in scen:
@@ -634,8 +1041,9 @@ def generate_npc_residence_name(npc_name: str, scenario: str = "high_school_dram
 
     parts = clean.split()
     if len(parts) >= 2:
-        surname = parts[-1]
-        first_name = parts[0]
+        first_name, surname = extract_first_and_last_name(clean)
+        if not surname:
+            first_name, surname = parts[0], parts[-1]
         if "fantasy" in scen or "isekai" in scen:
             return f"{surname} Manor" if hash_val and hash_val % 2 == 0 else f"{first_name}'s Cottage"
         if "cyberpunk" in scen:

@@ -144,6 +144,33 @@ def _infer_class_archetype_profile(char_class: str, class_description: str = "",
 
     profile = {}
 
+    # ── High School / Academic Scenarios ──────────────────────────────────
+    if _scen("high_school", "school", "academy"):
+        profile["armor"] = None
+        profile["shield"] = None
+        if _has("delinquent", "rebel"):
+            profile["top_archetype"] = _rand.choice(["jacket", "casual_shirt", "school_uniform_top"])
+            profile["bottom_archetype"] = _rand.choice(["trousers", "slacks"])
+            profile["shoes"] = "light_sneakers"
+            profile["gloves"] = _rand.choice(["fingerless_gloves", None])
+        elif _has("athlete", "varsity", "runner", "sports", "gym"):
+            profile["top_archetype"] = _rand.choice(["casual_shirt", "jacket", "hoodie"])
+            profile["bottom_archetype"] = _rand.choice(["shorts", "sweatpants", "trousers"])
+            profile["shoes"] = "light_sneakers"
+            profile["gloves"] = None
+        elif _has("bookworm", "honor", "student", "journalist", "organizer", "prodigy"):
+            profile["top_archetype"] = _rand.choice(["blazer", "school_uniform_top", "waistcoat", "sweater"])
+            profile["bottom_archetype"] = _rand.choice(["slacks", "trousers", "skirt"])
+            profile["shoes"] = "formal_shoes"
+            profile["gloves"] = None
+        else:
+            profile["top_archetype"] = _rand.choice(["school_uniform_top", "blazer", "sweater", "blouse", "casual_shirt"])
+            profile["bottom_archetype"] = _rand.choice(["slacks", "trousers", "skirt"])
+            profile["shoes"] = _rand.choice(["light_sneakers", "formal_shoes"])
+            profile["gloves"] = None
+        profile["accessory"] = _rand.choice(["ring", "bracelet", "amulet", None])
+        return profile
+
     # ── 1. Heavy Fighter / Tank / Knight / Paladin ────────────────────────────
     if _has("paladin", "knight", "crusader", "guardian", "templar", "tank", "warden",
             "sentinel", "shieldbearer", "iron", "fortress"):
@@ -294,29 +321,32 @@ def _infer_class_archetype_profile(char_class: str, class_description: str = "",
         profile["shield"] = _rand.choice(["buckler", None])
         profile["accessory"] = _rand.choice(["ring", "bracelet"])
 
-    # ── 13. Academic / Scholar / Student ─────────────────────────────────────
+    # ── 13. Academic / Scholar / Medical / Detective ─────────────────────────
     elif _has("scholar", "academic", "student", "researcher", "professor",
-              "librarian", "scribe", "archivist", "intellectual"):
-        profile["head"] = _rand.choice(["cap", "circlet", "formal_hat"])
+              "librarian", "scribe", "archivist", "intellectual", "doctor",
+              "surgeon", "medic", "physician", "nurse", "detective",
+              "investigator", "inspector", "lawyer", "attorney", "scientist"):
+        profile["head"] = _rand.choice(["cap", "circlet", "formal_hat", "ar_glasses", None])
         profile["armor"] = None
-        profile["top_archetype"] = _rand.choice(["school_uniform_top", "blouse", "jacket"])
+        profile["top_archetype"] = _rand.choice(["school_uniform_top", "blouse", "jacket", "blazer", "duster_coat"])
         profile["bottom_archetype"] = _rand.choice(["slacks", "trousers"])
-        profile["gloves"] = _rand.choice(["precision_gloves", None])
-        profile["shoes"] = "formal_shoes"
+        profile["gloves"] = _rand.choice(["precision_gloves", "leather_gloves", None])
+        profile["shoes"] = _rand.choice(["formal_shoes", "oxfords"])
         profile["shield"] = None
-        profile["accessory"] = _rand.choice(["ring", "amulet"])
+        profile["accessory"] = _rand.choice(["ring", "amulet", "pocket_watch", "monocle"])
 
-    # ── 14. Chef / Cook / Food-Related ───────────────────────────────────────
+    # ── 14. Culinary / Hospitality / Service / Domestic ──────────────────────
     elif _has("chef", "cook", "baker", "butcher", "brewer", "food", "culinary",
-              "taco", "pizza", "ramen", "sushi"):
-        profile["head"] = _rand.choice(["cap", "formal_hat"])
+              "taco", "pizza", "ramen", "sushi", "barista", "butler", "maid",
+              "waiter", "waitress", "bartender", "sommelier", "patissier"):
+        profile["head"] = _rand.choice(["cap", "formal_hat", "beret", None])
         profile["armor"] = None
-        profile["top_archetype"] = _rand.choice(["casual_shirt", "tunic"])
-        profile["bottom_archetype"] = "trousers"
-        profile["gloves"] = _rand.choice(["insulated_gloves", None])
-        profile["shoes"] = "combat_boots"
+        profile["top_archetype"] = _rand.choice(["casual_shirt", "tunic", "waistcoat", "blouse"])
+        profile["bottom_archetype"] = _rand.choice(["trousers", "slacks", "skirt"])
+        profile["gloves"] = _rand.choice(["insulated_gloves", "formal_gloves", None])
+        profile["shoes"] = _rand.choice(["combat_boots", "oxfords", "formal_shoes"])
         profile["shield"] = None
-        profile["accessory"] = _rand.choice(["ring", "bracelet"])
+        profile["accessory"] = _rand.choice(["ring", "bracelet", "pocket_watch"])
 
     # ── 15. Athlete / Sports / Gym ────────────────────────────────────────────
     elif _has("athlete", "coach", "sport", "gym", "runner", "swimmer",
@@ -330,7 +360,33 @@ def _infer_class_archetype_profile(char_class: str, class_description: str = "",
         profile["shield"] = None
         profile["accessory"] = _rand.choice(["bracelet", "ring"])
 
-    # ── 16. Dark / Cursed / Undead / Horror ──────────────────────────────────
+    # ── 16. Artisan / Crafter / Laborer / Outdoors ───────────────────────────
+    elif _has("blacksmith", "smith", "miner", "carpenter", "mason", "farmer",
+              "rancher", "angler", "fisherman", "lumberjack", "gardener",
+              "florist", "courier", "delivery", "driver", "janitor", "custodian"):
+        profile["head"] = _rand.choice(["cap", "beanie", "cloth_hood"])
+        profile["armor"] = _rand.choice(["leather", None])
+        profile["top_archetype"] = _rand.choice(["jacket", "tunic", "casual_shirt"])
+        profile["bottom_archetype"] = _rand.choice(["cargo_pants", "trousers"])
+        profile["gloves"] = _rand.choice(["leather_gloves", "insulated_gloves", "fingerless_gloves"])
+        profile["shoes"] = _rand.choice(["combat_boots", "hazard_boots", "light_sneakers"])
+        profile["shield"] = None
+        profile["accessory"] = _rand.choice(["bracelet", "talisman", "ring"])
+
+    # ── 17. Casual / Streamer / Satirical / Wacky Custom Professions ─────────
+    elif _has("streamer", "influencer", "youtuber", "gamer", "otaku", "neet",
+              "couch", "potato", "slacker", "tourist", "vacation", "hobby",
+              "idol", "celebrity", "clown", "mime", "mascot", "salaryman"):
+        profile["head"] = _rand.choice(["beanie", "cap", "ar_glasses", None])
+        profile["armor"] = None
+        profile["top_archetype"] = _rand.choice(["hoodie", "casual_shirt", "jacket"])
+        profile["bottom_archetype"] = _rand.choice(["sweatpants", "shorts", "trousers"])
+        profile["gloves"] = _rand.choice(["fingerless_gloves", None])
+        profile["shoes"] = _rand.choice(["light_sneakers", "sandals"])
+        profile["shield"] = None
+        profile["accessory"] = _rand.choice(["bracelet", "ring", "holo_badge"])
+
+    # ── 18. Dark / Cursed / Undead / Horror ──────────────────────────────────
     elif _has("death", "undead", "vampire", "reaper", "cursed", "plague",
               "horror", "eldritch", "abyssal", "voidwalker", "doomgiver"):
         profile["head"] = _rand.choice(["cloth_hood", "full_greathelm"])
@@ -384,14 +440,24 @@ def generate_starter_equipment_loadout(
     if archetype_profile is None:
         archetype_profile = _infer_class_archetype_profile(char_class, "", scenario)
 
+    from scenario_data import is_non_combat_scenario
+    from character_data import is_tailed_race
+    is_non_combat = is_non_combat_scenario(scenario)
+    has_tail = is_tailed_race(race)
+
     # 1. Weapon
-    if weapon_name:
-        weapon = _gen_weapon(scenario, "Weapon", tier=tier, name=weapon_name)
+    is_2h = False
+    if is_non_combat and not weapon_name:
+        # Non-combat: omit starting weapon slot unless explicitly named
+        pass
     else:
-        weapon = _gen_weapon(scenario, "Weapon", tier=tier)
-    loadout["Weapon"] = weapon
-    w_meta = weapon.get("metadata", {})
-    is_2h = w_meta.get("handedness") == "2H"
+        if weapon_name:
+            weapon = _gen_weapon(scenario, "Weapon", tier=tier, name=weapon_name)
+        else:
+            weapon = _gen_weapon(scenario, "Weapon", tier=tier)
+        loadout["Weapon"] = weapon
+        w_meta = weapon.get("metadata", {})
+        is_2h = w_meta.get("handedness") == "2H"
 
     # 2. Combat Body Armor (for combat-eligible scenarios only)
     can_wear_combat_armor = can_equip_armor_in_scenario(scenario)
@@ -411,27 +477,27 @@ def generate_starter_equipment_loadout(
     bottom_arch = archetype_profile.get("bottom_archetype")
 
     # Generate top, re-roll up to 5 times to match inferred archetype
-    top = _gen_clothing(scenario, "Top", tier=tier)
+    top = _gen_clothing(scenario, "Top", tier=tier, archetype=top_arch, gender=gender, race=race)
     if top_arch:
         for _ in range(5):
             if top.get("metadata", {}).get("archetype") == top_arch:
                 break
-            top = _gen_clothing(scenario, "Top", tier=tier)
+            top = _gen_clothing(scenario, "Top", tier=tier, archetype=top_arch, gender=gender, race=race)
 
     # Generate bottom, re-roll up to 5 times to match inferred archetype
-    bottom = _gen_clothing(scenario, "Bottom", tier=tier)
+    bottom = _gen_clothing(scenario, "Bottom", tier=tier, archetype=bottom_arch, gender=gender, race=race)
     if bottom_arch:
         for _ in range(5):
             if bottom.get("metadata", {}).get("archetype") == bottom_arch:
                 break
-            bottom = _gen_clothing(scenario, "Bottom", tier=tier)
+            bottom = _gen_clothing(scenario, "Bottom", tier=tier, archetype=bottom_arch, gender=gender, race=race)
 
     # Guard against skirts on male characters
     if is_male:
         b_meta = bottom.get("metadata", {})
         if b_meta.get("archetype") == "skirt" or "skirt" in bottom.get("name", "").lower():
             for _ in range(10):
-                bottom = _gen_clothing(scenario, "Bottom", tier=tier)
+                bottom = _gen_clothing(scenario, "Bottom", tier=tier, archetype="trousers", gender=gender, race=race)
                 if bottom.get("metadata", {}).get("archetype") != "skirt" and "skirt" not in bottom.get("name", "").lower():
                     break
 
@@ -478,17 +544,26 @@ def generate_starter_equipment_loadout(
     if random.random() < 0.50:
         loadout["Accessory 2"] = _gen_acc(scenario, "Accessory 2", tier=tier)
 
-    # Clean up race-inappropriate traits (tailless characters)
-    if is_tailless:
+    # Race-specific adjustments (tail-slots for tailed species, no tail-slots for tailless)
+    if has_tail:
+        for slot, item in loadout.items():
+            if slot in ("Bottom", "Armor") and "tail" not in item.get("name", "").lower():
+                item["name"] = f"Tail-Slotted {item['name']}"
+                if "metadata" in item and isinstance(item["metadata"], dict):
+                    item["metadata"]["name"] = item["name"]
+                    flags = item["metadata"].setdefault("social_flags", [])
+                    if "tail_slotted" not in flags:
+                        flags.append("tail_slotted")
+                    item["effect"] = serialize_item(item["metadata"])
+    else:
         for slot, item in loadout.items():
             if "tail-slotted" in item.get("name", "").lower():
-                item["name"] = item["name"].replace("Tail-Slotted ", "").replace("tail-slotted ", "")
-                if "metadata" in item:
+                item["name"] = item["name"].replace("Tail-Slotted ", "").replace("tail-slotted ", "").replace("Tail-slotted ", "")
+                if "metadata" in item and isinstance(item["metadata"], dict):
                     item["metadata"]["name"] = item["name"]
-                item["effect"] = serialize_item(item["metadata"])
+                    item["effect"] = serialize_item(item["metadata"])
 
-    from scenario_data import is_non_combat_scenario
-    if is_non_combat_scenario(scenario):
+    if is_non_combat:
         for slot, item in loadout.items():
             if isinstance(item, dict) and "metadata" in item and isinstance(item["metadata"], dict):
                 item["metadata"] = make_narrative_metadata(item["metadata"])

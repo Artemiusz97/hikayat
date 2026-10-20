@@ -27,11 +27,24 @@ def test_affix_translation_and_canonicalization():
     assert translate_affix("Overclocked", "ms") == "Terlebih Pacu"
     assert translate_affix("Corrosive", "ms") == "Mengkakis"
 
+    # Chinese
+    assert translate_affix("Volatile", "zh") == "易爆"
+    assert translate_affix("Overclocked", "zh") == "超频"
+    assert translate_affix("Corrosive", "zh") == "腐蚀"
+
+    # German
+    assert translate_affix("Volatile", "de") == "Flüchtig"
+    assert translate_affix("Overclocked", "de") == "Übertaktet"
+    assert translate_affix("Corrosive", "de") == "Ätzend"
+
     # Canonicalization
     assert canonicalize_affix("Niestabilny") == "Volatile"
     assert canonicalize_affix("niestabilny") == "Volatile"
     assert canonicalize_affix("Meruap") == "Volatile"
     assert canonicalize_affix("meruap") == "Volatile"
+    assert canonicalize_affix("易爆") == "Volatile"
+    assert canonicalize_affix("Flüchtig") == "Volatile"
+    assert canonicalize_affix("flüchtig") == "Volatile"
     assert canonicalize_affix("Volatile") == "Volatile"
 
 
@@ -63,6 +76,20 @@ def test_item_icon_multilingual_lemmas():
     assert get_item_icon("Kasut Kulit") == "👢"
     assert get_item_icon("Topi Keledar Besi") == "🪖"
 
+    # Chinese items
+    assert get_item_icon("铁剑") == "⚔️"
+    assert get_item_icon("治疗药水") == "❤️"
+    assert get_item_icon("圆盾") == "🛡️"
+    assert get_item_icon("黄金戒指") == "💍"
+    assert get_item_icon("长枪") == "🔱"
+
+    # German items
+    assert get_item_icon("Eisenschwert") == "⚔️"
+    assert get_item_icon("Heiltrank") == "❤️"
+    assert get_item_icon("Ritterschild") == "🛡️"
+    assert get_item_icon("Goldener Ring") == "💍"
+    assert get_item_icon("Stahlhelm") == "🪖"
+
 
 def test_two_handed_detection_multilingual():
     # English
@@ -75,9 +102,17 @@ def test_two_handed_detection_multilingual():
     assert is_two_handed({"name": "Pedang dua tangan"}) is True
     assert is_two_handed({"name": "Pedang besar pahlawan"}) is True
     assert is_two_handed({"name": "Busur kayu jati"}) is True
+    # Chinese
+    assert is_two_handed({"name": "双手巨剑"}) is True
+    assert is_two_handed({"name": "重型十字弩"}) is True
+    # German
+    assert is_two_handed({"name": "Zweihänder des Ritters"}) is True
+    assert is_two_handed({"name": "Schwerer Langbogen"}) is True
     # 1H items should not be two-handed
     assert is_two_handed({"name": "Sztylet"}) is False
     assert is_two_handed({"name": "Keris"}) is False
+    assert is_two_handed({"name": "短刀"}) is False
+    assert is_two_handed({"name": "Dolch"}) is False
 
 
 def test_conversational_exit_intent_multilingual():
@@ -91,6 +126,12 @@ def test_conversational_exit_intent_multilingual():
     assert is_conversational_exit("Ucapkan selamat tinggal dan pergi") is True
     assert is_conversational_exit("Tamatkan perbualan sekarang") is True
     assert is_conversational_exit("Beredar dari kedai") is True
+    # Chinese
+    assert is_conversational_exit("道别并离开酒馆") is True
+    assert is_conversational_exit("离开交谈") is True
+    # German
+    assert is_conversational_exit("Verabschieden und die Taverne verlassen") is True
+    assert is_conversational_exit("Gespräch beenden") is True
 
 
 def test_enemy_generation_localized_affixes():
@@ -110,6 +151,22 @@ def test_enemy_generation_localized_affixes():
         assert expected_ms in ms_enemy["name"]
         assert affix_canonical in ["Volatile", "Overclocked", "Vampiric", "Phasing", "Corrosive", "Grounded", "Hydro-Shielded", "Tempest-Wreathed"]
 
+    # Generate tier 3 enemy in Chinese
+    zh_enemy = generate_scenario_enemy("fantasy", "dungeon", 1, exact_tier=3, language="zh")
+    if zh_enemy.get("affixes"):
+        affix_canonical = zh_enemy["affixes"][0]
+        expected_zh = translate_affix(affix_canonical, "zh")
+        assert expected_zh in zh_enemy["name"]
+        assert affix_canonical in ["Volatile", "Overclocked", "Vampiric", "Phasing", "Corrosive", "Grounded", "Hydro-Shielded", "Tempest-Wreathed"]
+
+    # Generate tier 3 enemy in German
+    de_enemy = generate_scenario_enemy("fantasy", "dungeon", 1, exact_tier=3, language="de")
+    if de_enemy.get("affixes"):
+        affix_canonical = de_enemy["affixes"][0]
+        expected_de = translate_affix(affix_canonical, "de")
+        assert expected_de in de_enemy["name"]
+        assert affix_canonical in ["Volatile", "Overclocked", "Vampiric", "Phasing", "Corrosive", "Grounded", "Hydro-Shielded", "Tempest-Wreathed"]
+
 
 def test_locales_architecture_scalability_and_clean_character_data():
     import inspect
@@ -117,19 +174,24 @@ def test_locales_architecture_scalability_and_clean_character_data():
     import mechanics.combat.equipment.metadata as equip_meta
     from localization import SUPPORTED_LOCALES, ICON_KEYWORDS, TWO_HANDED_KEYWORDS
 
-    # 1. Supported locales exist and include en, pl, ms
+    # 1. Supported locales exist and include en, pl, ms, zh, de
     assert "en" in SUPPORTED_LOCALES
     assert "pl" in SUPPORTED_LOCALES
     assert "ms" in SUPPORTED_LOCALES
+    assert "zh" in SUPPORTED_LOCALES
+    assert "de" in SUPPORTED_LOCALES
 
     # 2. ICON_KEYWORDS aggregates across all locales
     assert "pierścień" in ICON_KEYWORDS["accessories"]
     assert "cincin" in ICON_KEYWORDS["accessories"]
     assert "ring" in ICON_KEYWORDS["accessories"]
+    assert "戒指" in ICON_KEYWORDS["accessories"]
 
     assert "dwuręczny" in TWO_HANDED_KEYWORDS
     assert "dua tangan" in TWO_HANDED_KEYWORDS
     assert "greatsword" in TWO_HANDED_KEYWORDS
+    assert "双手" in TWO_HANDED_KEYWORDS
+    assert "zweihändig" in TWO_HANDED_KEYWORDS
 
     # 3. character_data.py get_item_icon has zero hardcoded non-English keyword literals
     func_source = inspect.getsource(character_data.get_item_icon)
@@ -165,6 +227,16 @@ def test_dual_language_settings_separation_and_directive():
     directive_pl = build_language_directive(mock_session_pl)
     assert "LANGUAGE DIRECTIVE: POLISH" in directive_pl
     assert "Język polski" in directive_pl
+
+    mock_session_zh = {"narration_language": "zh", "language": "en"}
+    directive_zh = build_language_directive(mock_session_zh)
+    assert "LANGUAGE DIRECTIVE: CHINESE MANDARIN" in directive_zh
+    assert "中文" in directive_zh
+
+    mock_session_de = {"narration_language": "de", "language": "en"}
+    directive_de = build_language_directive(mock_session_de)
+    assert "LANGUAGE DIRECTIVE: GERMAN" in directive_de
+    assert "Deutsch" in directive_de
 
 
 def test_locales_json_key_parity_and_no_duplicates():

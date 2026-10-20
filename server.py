@@ -10,6 +10,57 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
+if sys.platform.startswith("win"):
+    # Windows IOCP Proactor resilience patch:
+    # Prevents client disconnections / connection resets (WinError 64 / 10054)
+    # from crashing uvicorn's socket accept loop.
+    try:
+        from asyncio.proactor_events import _ProactorBasePipeTransport, BaseProactorEventLoop
+
+        _orig_call_conn_lost = _ProactorBasePipeTransport._call_connection_lost
+        def _safe_call_conn_lost(self, exc):
+            try:
+                _orig_call_conn_lost(self, exc)
+            except (ConnectionResetError, OSError):
+                pass
+        _ProactorBasePipeTransport._call_connection_lost = _safe_call_conn_lost
+
+        _orig_start_serving = BaseProactorEventLoop._start_serving
+        def _resilient_start_serving(self, protocol_factory, sock, sslcontext=None, server=None, backlog=100, ssl_handshake_timeout=None, ssl_shutdown_timeout=None):
+            def resilient_loop(f=None):
+                try:
+                    if f is not None:
+                        try:
+                            conn, addr = f.result()
+                        except OSError:
+                            # Client aborted / reset connection before handshake (e.g. WinError 64)
+                            if not self.is_closed():
+                                f = self._proactor.accept(sock)
+                                f.add_done_callback(resilient_loop)
+                            return
+                        protocol = protocol_factory()
+                        if sslcontext is not None:
+                            self._make_ssl_transport(conn, protocol, sslcontext, server_side=True, extra={'peername': addr}, server=server, ssl_handshake_timeout=ssl_handshake_timeout, ssl_shutdown_timeout=ssl_shutdown_timeout)
+                        else:
+                            self._make_socket_transport(conn, protocol, extra={'peername': addr}, server=server)
+                    if self.is_closed():
+                        return
+                    f = self._proactor.accept(sock)
+                    f.add_done_callback(resilient_loop)
+                except Exception:
+                    if not self.is_closed():
+                        try:
+                            f = self._proactor.accept(sock)
+                            f.add_done_callback(resilient_loop)
+                        except Exception:
+                            pass
+            f = self._proactor.accept(sock)
+            f.add_done_callback(resilient_loop)
+        BaseProactorEventLoop._start_serving = _resilient_start_serving
+    except Exception:
+        pass
+
+
 import logging
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -129,6 +180,9 @@ async def lifespan(app: FastAPI):
         loop = asyncio.get_running_loop()
         loop.run_in_executor(None, _launch_tunnel_sync, port, provider)
 
+    # Pre-warm LLM model capability cache in background so turns have zero parameter mismatches
+    asyncio.create_task(llm_client.probe_all_configured_models())
+
     yield
 
     tunnel.stop_tunnel()
@@ -166,6 +220,9 @@ class SafeStaticFiles(StaticFiles):
         await super().__call__(scope, receive, send)
 
 
+# Serve locally saved generated scene images (shared across Discord & WebUI)
+app.mount("/images", StaticFiles(directory=config.GENERATED_IMAGES_DIR), name="generated_images")
+
 # Serve web frontend static bundle
 app.mount("/", SafeStaticFiles(directory="web/dist", html=True), name="web")
 
@@ -176,7 +233,7 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default=os.getenv("HOST", "0.0.0.0"), help="Host IP to bind to")
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")), help="Port number")
     parser.add_argument("--share", action="store_true", help="Generate a public Automatic1111/Forge style link")
-    parser.add_argument("--share-provider", type=str, default="cloudflare", choices=["cloudflare", "pinggy"], help="Tunnel provider")
+    parser.add_argument("--share-provider", type=str, default="cloudflare", choices=["cloudflare", "serveo", "localhost.run", "pinggy"], help="Tunnel provider")
     parser.add_argument("--no-reload", action="store_true", help="Disable auto-reload")
     args, _ = parser.parse_known_args()
 
@@ -186,5 +243,19 @@ if __name__ == "__main__":
 
     reload_flag = not args.no_reload
     print(f"Starting Hikayat server on http://{args.host}:{args.port} (reload={reload_flag})...")
-    uvicorn.run("server:app", host=args.host, port=args.port, reload=reload_flag)
+    try:
+        uvicorn.run("server:app", host=args.host, port=args.port, reload=reload_flag)
+    except OSError as err:
+        win_err = getattr(err, "winerror", None)
+        err_str = str(err).lower()
+        if win_err in (10013, 10048) or "access permissions" in err_str or "already in use" in err_str:
+            print("\n" + "=" * 72)
+            print(f" [ERROR] Port {args.port} is already in use by an existing process!")
+            print(f"   * If Hikayat is already running in the background, open:")
+            print(f"     http://localhost:{args.port}")
+            print(f"   * To launch on a different port, run:")
+            print(f"     python server.py --port {args.port + 1}")
+            print("=" * 72 + "\n")
+            sys.exit(1)
+        raise
 

@@ -28,10 +28,14 @@ def create_character(user_id: int, name: str, char_class: str = "Adventurer", cl
 
     app_dict = dict(appearance or {})
     is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
-    if not app_dict.get("breast_size") and not is_male:
-        app_dict["breast_size"] = "Modest B-Cup"
-    if not app_dict.get("penis_size") and is_male:
-        app_dict["penis_size"] = "Average"
+    if is_male:
+        app_dict.pop("breast_size", None)
+        if not app_dict.get("penis_size"):
+            app_dict["penis_size"] = "Average"
+    else:
+        app_dict.pop("penis_size", None)
+        if not app_dict.get("breast_size"):
+            app_dict["breast_size"] = "Modest B-Cup"
     norm_app = normalize_appearance(app_dict, gender=gender, race=norm_race, scen_key=scenario, desc=class_description)
     app_json = json.dumps(norm_app)
 
@@ -86,6 +90,9 @@ def apply_adventure_loadout(
     from mechanics.combat.items.envelope import serialize_item
     from mechanics.combat.items.weapons import generate_random_equipment as gen_weapon
 
+    from scenario_data import is_non_combat_scenario
+    is_non_combat = is_non_combat_scenario(scenario)
+
     # 1. Starting items / carried items
     if starting_items:
         for item_name, item_type, effect, slot_cost in starting_items:
@@ -101,6 +108,10 @@ def apply_adventure_loadout(
     if gear_map:
         for slot, entry in gear_map.items():
             if not entry:
+                continue
+
+            # In non-combat scenarios, omit weapon, shield, and armor
+            if is_non_combat and slot in ("Weapon", "Shield", "Armor"):
                 continue
 
             # If weapon_name was explicitly chosen by the player, let weapon_name take priority
@@ -164,7 +175,7 @@ def apply_adventure_loadout(
 
 
     # 3. Starting weapon (utilizing new weapon generation system)
-    if weapon_name or not equipped_weapon:
+    if not is_non_combat and (weapon_name or not equipped_weapon):
         target_w_name = weapon_name or f"{char_class or 'Adventurer'} Starter Weapon"
         w_item = gen_weapon(scenario=scenario, slot="Weapon", tier=3, name=target_w_name)
         weapon_id = db.add_item(user_id, w_item["name"], "Weapon", w_item["effect"], w_item.get("slot_cost", 1))
@@ -224,18 +235,28 @@ def _apply_debug_stat_override(char: dict | None) -> dict | None:
                 char[col] = cd.BASE_STAT_VALUE
     return char
 
+def apply_stat_mode(user_id: int, mode: str):
+    db.update_settings(user_id, debug_stat_mode=mode)
+    return db.get_character(user_id)
+
 def update_character_appearance(character_id: int, appearance_dict: dict) -> dict | None:
     char = get_character_by_id(character_id)
     if not char:
         return None
     from mechanics.social.persona import normalize_appearance
     existing_app = dict(char.get("appearance") or {})
+    char_gen = char.get("gender", "male")
+    is_char_male = any(kw in str(char_gen).lower() for kw in ("male", "man", "boy")) and "female" not in str(char_gen).lower()
     for k, v in (appearance_dict or {}).items():
         if v is not None:
             existing_app[k] = v
+    if is_char_male:
+        existing_app.pop("breast_size", None)
+    else:
+        existing_app.pop("penis_size", None)
     norm_app = normalize_appearance(
         existing_app,
-        gender=char.get("gender", "male"),
+        gender=char_gen,
         race=char.get("race", "human"),
         scen_key=char.get("scenario", "fantasy"),
         desc=char.get("class_description", "")
@@ -398,6 +419,13 @@ def remove_status_effect(user_id: int, effect_name: str):
     target = str(effect_name).strip().lower()
     new_effects = [e for e in effects if (e.get("name", "").lower() if isinstance(e, dict) else str(e).lower()) != target]
     set_status_effects(user_id, new_effects)
+
+def add_status_effect(user_id: int, effect: str | dict):
+    effects = get_status_effects(user_id)
+    eff_str = effect if isinstance(effect, str) else effect.get("name", str(effect))
+    if not any((e if isinstance(e, str) else e.get("name", "")) == eff_str for e in effects):
+        effects.append(effect)
+        set_status_effects(user_id, effects)
 
 get_active_character = get_character
 

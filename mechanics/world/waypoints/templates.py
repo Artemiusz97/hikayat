@@ -191,27 +191,74 @@ def ensure_multi_stage_waypoints(
     default_loc: str = "",
     archetype: str = "default",
     secondary_loc: str = "",
-    tertiary_loc: str = ""
+    tertiary_loc: str = "",
+    session_id: int = None,
+    scen_key: str = None,
+    client_npc: str = "",
+    client_location: str = "",
+    required_item: str = "",
 ) -> list[dict]:
     """Ensures a sub-objective has at least 3 progressive stages (Arrival/Travel -> Investigation/Barrier -> Action/Resolution).
-    Prevents single-turn instant completions and supports multi-location routing."""
+    Prevents single-turn instant completions, enforces multi-location routing (>= 2 distinct locations),
+    and tags target NPCs with live schedule tracking."""
+    try:
+        from mechanics.narrative.blueprints import is_single_location_allowed
+        if is_single_location_allowed(archetype):
+            secondary_loc = default_loc
+            tertiary_loc = default_loc
+    except Exception:
+        pass
+
+    if session_id and not secondary_loc:
+        try:
+            import db
+            sess_locs = db.get_session_locations(session_id)
+            for sl in sess_locs:
+                cand = f"{sl.get('zone_name')} ➔ {sl.get('primary_name')}"
+                if cand and cand != default_loc and parse_zone_primary(cand) != parse_zone_primary(default_loc):
+                    secondary_loc = cand
+                    break
+        except Exception:
+            pass
+
     if not waypoints:
-        return get_archetype_fallback_waypoints(
+        fin_loc = client_location or tertiary_loc
+        res = get_archetype_fallback_waypoints(
             archetype,
             target_location=default_loc,
             intermediate_location=secondary_loc,
-            final_location=tertiary_loc
+            final_location=fin_loc,
+            target_npc=client_npc if client_npc else ""
         )
+        if client_npc and res:
+            res[-1]["target_npc"] = client_npc
+        if client_location and res:
+            res[-1]["target_location"] = client_location
+        for st in res:
+            if st.get("target_npc"):
+                st["follow_npc_schedule"] = 1
+        if required_item and res:
+            res[-1]["required_item"] = required_item
+        return res
 
     validated = []
     for idx, wp in enumerate(waypoints, 1):
         if isinstance(wp, dict) and wp.get("stage_label"):
             target_loc = wp.get("target_location") or default_loc
+            t_npc = str(wp.get("target_npc", "") or "")[:100]
+            if not t_npc and session_id:
+                try:
+                    from .matching import resolve_waypoint_target_npc
+                    t_npc = resolve_waypoint_target_npc(session_id, wp)[:100]
+                except Exception:
+                    pass
             validated.append({
                 "stage_index": idx,
                 "stage_label": str(wp.get("stage_label", ""))[:200],
                 "target_location": str(target_loc)[:200],
-                "target_npc": str(wp.get("target_npc", "") or "")[:100],
+                "target_npc": t_npc,
+                "follow_npc_schedule": int(bool(wp.get("follow_npc_schedule", 1 if t_npc else 0))),
+                "required_item": str(wp.get("required_item", "") or "")[:100],
                 "completion_trigger": str(wp.get("completion_trigger", "skill_check" if idx > 1 else "arrival")),
                 "resource_target": int(wp.get("resource_target", 0)) if any(k in str(wp.get("stage_label", "")).lower() for k in ("harvest", "gather", "collect", "fragments", "clues", "countermeasures", "destroy the spawn", "samples", "parts", "items", "ore", "herbs")) else 0,
             })
@@ -250,9 +297,9 @@ def ensure_multi_stage_waypoints(
             "completion_trigger": single.get("completion_trigger", "skill_check"),
             "resource_target": single.get("resource_target", 0)
         }
-        return [stage1, stage2, stage3]
+        validated = [stage1, stage2, stage3]
 
-    if len(validated) == 2:
+    elif len(validated) == 2:
         stage1 = validated[0]
         stage2 = validated[1]
         loc1 = stage1.get("target_location") or default_loc
@@ -291,7 +338,53 @@ def ensure_multi_stage_waypoints(
             "completion_trigger": stage2.get("completion_trigger", "skill_check"),
             "resource_target": stage2.get("resource_target", 0)
         }
-        return [stage1, expanded_stage2, expanded_stage3]
+        validated = [stage1, expanded_stage2, expanded_stage3]
+
+    # Post-validation: Multi-location distribution rule (>= 2 distinct locations)
+    from mechanics.narrative.blueprints import is_single_location_allowed, get_blueprint_for_archetype
+    single_allowed = is_single_location_allowed(archetype)
+    if not single_allowed and secondary_loc and len(validated) >= 2:
+        distinct_locs = {v.get("target_location") for v in validated if v.get("target_location")}
+        if len(distinct_locs) <= 1:
+            validated[1]["target_location"] = secondary_loc
+            if len(validated) >= 3:
+                if client_location and client_location != secondary_loc:
+                    validated[2]["target_location"] = client_location
+                elif tertiary_loc and tertiary_loc != secondary_loc:
+                    validated[2]["target_location"] = tertiary_loc
+                else:
+                    validated[2]["target_location"] = default_loc
+
+    # Post-validation: Client NPC, schedule tagging & time phase inference
+    from mechanics.narrative.blueprints import infer_valid_time_phases_for_stage
+    bp_id = get_blueprint_for_archetype(archetype)
+    total_st = len(validated)
+    for st in validated:
+        if st.get("target_npc"):
+            if bp_id not in ("NEUTRALIZATION", "EXPLORATION_HAZARD", "SITE_DEFENSE_RITUAL") or st.get("stage_index") == total_st:
+                st["follow_npc_schedule"] = 1
+        if not st.get("valid_time_phases"):
+            inferred_phases = infer_valid_time_phases_for_stage(
+                blueprint_id=bp_id,
+                archetype=archetype,
+                stage_index=int(st.get("stage_index", 1)),
+                total_stages=total_st,
+                stage_label=str(st.get("stage_label", "")),
+                scen_key=scen_key,
+            )
+            if inferred_phases:
+                st["valid_time_phases"] = inferred_phases
+
+    if client_npc and validated:
+        final_st = validated[-1]
+        final_st["target_npc"] = client_npc
+        final_st["follow_npc_schedule"] = 1
+        if client_location:
+            final_st["target_location"] = client_location
+
+    if required_item and validated:
+        if bp_id == "ACQUISITION":
+            validated[-1]["required_item"] = required_item
 
     return validated
 

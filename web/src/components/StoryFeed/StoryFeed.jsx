@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import HistoryCard, { formatNarrative, getOutcomeTierTheme } from './HistoryCard';
+import SceneImageCard from './SceneImageCard';
 import { Feather, Sparkles, Swords, Skull, Heart } from 'lucide-react';
 
 const StoryFeed = ({
@@ -9,7 +10,11 @@ const StoryFeed = ({
   streamingNarrative,
   streamingState,
   selectedCombatTarget,
-  onSelectCombatTarget
+  onSelectCombatTarget,
+  processing,
+  pendingAction,
+  onRerollImage = null,
+  rerollingImage = false
 }) => {
   const scrollContainerRef = useRef(null);
   const feedEndRef = useRef(null);
@@ -21,7 +26,7 @@ const StoryFeed = ({
     } else {
       feedEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
-  }, [history?.length, currentScene?.narrative, streamingNarrative, streamingState?.outcomeText, streamingState?.nextText, isStreaming]);
+  }, [history?.length, currentScene?.narrative, streamingNarrative, streamingState?.outcomeText, streamingState?.nextText, isStreaming, processing]);
 
   const rawMonsters = currentScene?.nearby_enemies || currentScene?.monsters || [];
   const activeMonsters = Array.isArray(rawMonsters)
@@ -75,13 +80,17 @@ const StoryFeed = ({
             ? (histList[idx - 1]?.scene_title || histList[idx - 1]?.outcome?.scene_title || '')
             : '';
           const isLast = idx === histList.length - 1;
-          const imgUrl = isLast && isCurrentSceneAlreadyInHistory ? currentScene?.scene_image_url : null;
+          const imgUrl = entry?.scene_image_url || (isLast && isCurrentSceneAlreadyInHistory ? currentScene?.scene_image_url : null);
           return (
             <HistoryCard
               key={idx}
               entry={entry}
               prevSceneTitle={prevTitle}
               sceneImageUrl={imgUrl}
+              isLatest={isLast}
+              imageGenMode={currentScene?.image_gen_enabled ?? 1}
+              onRerollImage={onRerollImage}
+              isRerollingImage={rerollingImage}
             />
           );
         })}
@@ -92,17 +101,45 @@ const StoryFeed = ({
             <h2 className="font-rpg text-xl md:text-2xl text-fantasy-accent mb-3 md:mb-4 border-b border-fantasy-accent/30 pb-1.5 md:pb-2">
               {currentScene.scene_title || 'Adventure'}
             </h2>
-            {currentScene.scene_image_url && (
-              <div className="mb-4 md:mb-5 rounded-lg overflow-hidden border border-fantasy-border/80 shadow-lg bg-black/40">
-                <img
-                  src={currentScene.scene_image_url}
-                  alt={currentScene.scene_title || 'Scene Illustration'}
-                  className="w-full max-h-80 md:max-h-96 object-cover"
-                />
-              </div>
-            )}
+            <SceneImageCard
+              imageUrl={currentScene.scene_image_url}
+              title={currentScene.scene_title}
+              isLatest={true}
+              imageGenMode={currentScene?.image_gen_enabled ?? 1}
+              onReroll={onRerollImage}
+              isRerolling={rerollingImage}
+            />
             <div className="text-gray-100 font-serif text-[13.5px] sm:text-sm md:text-lg tracking-wide">
               {formatNarrative(currentNar)}
+            </div>
+          </div>
+        )}
+
+        {/* Turn Processing Banner (when an action is submitted and backend LLM is generating) */}
+        {processing && !isStreaming && (
+          <div className="mb-6 md:mb-8 animate-fadeIn">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5 pt-2 border-t border-white/10">
+              <div className="flex items-center gap-2 min-w-0 text-xs text-amber-300 font-medium">
+                <span className="text-fantasy-accent not-italic font-mono text-[11px]">▸</span>
+                <span className="truncate">
+                  {pendingAction?.label || pendingAction?.direct_choice?.label || pendingAction?.direct_choice?.text || pendingAction?.custom_action_text || 'Resolving Action...'}
+                </span>
+                <span className="inline-flex items-center gap-1 text-[10px] font-mono not-italic text-amber-400/90 px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
+                  <Sparkles size={10} className="animate-spin" />
+                  Resolving
+                </span>
+              </div>
+            </div>
+            <div className="border-l-2 border-amber-500/60 pl-4 py-3 bg-amber-950/20 rounded-r-lg flex items-center gap-3 text-sm text-amber-200/90">
+              <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin shrink-0" />
+              <div className="flex flex-col">
+                <span className="font-semibold text-xs tracking-wider uppercase text-amber-300">
+                  The Chronicler is resolving your choice...
+                </span>
+                <span className="text-[11px] text-gray-400 mt-0.5">
+                  Calculating outcomes, dice checks, and world reactions...
+                </span>
+              </div>
             </div>
           </div>
         )}

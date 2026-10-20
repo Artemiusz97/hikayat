@@ -27,11 +27,6 @@ const TurnOutcomePanel = ({ session }) => {
   const excitement = session?.physical_state?.excitement;
   const isExcitementActive = Boolean(excitement?.active);
 
-  // If there are no past action outcomes AND excitement is not active, render nothing
-  if (!latestOutcome && !isExcitementActive) {
-    return null;
-  }
-
   // Turn key to detect when a new turn arrives
   const currentTurnKey = latestOutcome
     ? `turn-${latestOutcome.turnNumber}-${session?.id || ''}`
@@ -49,6 +44,11 @@ const TurnOutcomePanel = ({ session }) => {
       setHasUnread(true);   // Notification badge on every new turn!
     }
   }, [currentTurnKey]);
+
+  // If there are no past action outcomes AND excitement is not active, render nothing
+  if (!latestOutcome && !isExcitementActive) {
+    return null;
+  }
 
   const handleToggle = () => {
     if (!isExpanded) {

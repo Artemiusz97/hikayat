@@ -82,10 +82,18 @@ def format_time_header(current_day: int, current_minute: int) -> str:
     return f"📅 {day_name} | 🕒 {clock_str} ({phase_name} {emoji})"
 
 
-def is_sleep_time(current_minute: int) -> bool:
-    """Returns True if it is bedtime (>= 22:00 / 10:00 PM or < 06:00 / 06:00 AM)."""
+def is_sleep_time(current_minute: int, scen_key: str | None = None) -> bool:
+    """Returns True if it is bedtime (>= 22:00 / 10:00 PM or before morning wake-up: 07:00 AM for High School, 06:00 AM default)."""
     safe_min = int(current_minute or 0) % 1440
-    return safe_min >= 1320 or safe_min < 360
+    wake_cutoff = 360
+    if scen_key:
+        try:
+            from mechanics.world.world_schedule import is_high_school_setting, get_scenario_wake_minute
+            if is_high_school_setting(scen_key):
+                wake_cutoff = get_scenario_wake_minute(scen_key)
+        except Exception:
+            pass
+    return safe_min >= 1320 or safe_min < wake_cutoff
 
 
 def is_sleep_action(action_label: str) -> bool:
@@ -108,7 +116,8 @@ def calculate_action_time_cost(
     old_loc: str = "",
     new_loc: str = "",
     is_dialogue: bool = False,
-    is_combat: bool = False
+    is_combat: bool = False,
+    session_id: int = 0
 ) -> int:
     raw_lbl = action.get("label") if isinstance(action, dict) else action
     lbl = str(raw_lbl or "").lower().strip()
@@ -129,7 +138,7 @@ def calculate_action_time_cost(
     try:
         if old_loc and new_loc and old_loc != new_loc:
             from mechanics.world.mobility import calculate_route_travel_time
-            return calculate_route_travel_time(old_loc, new_loc, scen_key=scen_key)
+            return calculate_route_travel_time(old_loc, new_loc, scen_key=scen_key, session_id=session_id)
     except Exception:
         pass
 
@@ -193,6 +202,63 @@ def advance_time(
         consecutive_days_awake=consecutive_awake + days_elapsed
     )
 
+    # Check rendezvous appointment reminders & stand-up expirations
+    try:
+        from mechanics.system.commitments_engine import audit_and_expire_commitments
+        audit_and_expire_commitments(session_id, new_day, new_minute)
+    except Exception as e:
+        log.warning("Failed processing commitments audit/expiration for session %s: %s", session_id, e)
+
+    try:
+        from mechanics.world.locations.core import get_primary_location_name
+        abs_new_minute = max(0, new_day - 1) * 1440 + new_minute
+        # 1. 30-min SMS reminders
+        due_reminders = db.get_due_reminder_appointments(session_id, abs_new_minute)
+        for appt in due_reminders:
+            db.mark_rendezvous_reminder_sent(session_id, appt["npc_id"])
+            short_loc = get_primary_location_name(appt.get("rendezvous_location", "")) or appt.get("rendezvous_location", "")
+            db.save_phone_message(
+                session_id=session_id,
+                contact_npc_id=appt["npc_id"],
+                sender="npc",
+                message=f"Are you on your way? I'm waiting at {short_loc}.",
+                intent="reminder"
+            )
+
+        # 2. 45-min Stand-up expirations
+        expired_appts = db.expire_overdue_appointments(session_id, abs_new_minute)
+        for appt in expired_appts:
+            short_loc = get_primary_location_name(appt.get("rendezvous_location", "")) or appt.get("rendezvous_location", "")
+            db.save_phone_message(
+                session_id=session_id,
+                contact_npc_id=appt["npc_id"],
+                sender="npc",
+                message=f"I couldn't wait any longer at {short_loc}. Next time don't ask to meet if you're not going to show up.",
+                intent="refusal"
+            )
+            try:
+                db.update_relationship_score(session_id, appt["npc_id"], delta_score=-5)
+            except Exception:
+                pass
+    except Exception as e:
+        log.warning("Failed processing rendezvous reminders/expirations for session %s: %s", session_id, e)
+
+    # If day rolled over, clear temporary companions (return home)
+    if day_rolled:
+        try:
+            db.clear_temporary_companions(session_id)
+        except Exception:
+            pass
+
+        # Phase 4 Daily Board Replenishment:
+        try:
+            from mechanics.narrative.bounty import replenish_daily_bounties_deterministic
+            existing_quests = db.get_session_quests(session_id)
+            if existing_quests:
+                replenish_daily_bounties_deterministic(session_id)
+        except Exception as e:
+            log.warning("Failed daily bounty replenishment for session %s: %s", session_id, e)
+
     # If day rolled over, increment days_adventured for all party members
     if day_rolled and party_uids:
         for uid in party_uids:
@@ -222,11 +288,12 @@ def advance_time(
 def apply_sleep_rest(
     session_id: int,
     party_uids: List[int],
-    wake_minute: int = 450
+    wake_minute: Optional[int] = None,
+    scen_key: str = ""
 ) -> Dict[str, Any]:
     """
     Executes a full night's sleep.
-    - Advances clock to wake_minute (default 07:30 AM / 450 mins).
+    - Advances clock to wake_minute (07:00 AM / 420 mins for High School, 07:30 AM / 450 mins for others).
     - Advances current_day += 1.
     - Increments character days_adventured += 1.
     - Restores character HP to max_hp, MP to max_mp.
@@ -234,11 +301,17 @@ def apply_sleep_rest(
     - Resets consecutive_days_awake to 0.
     """
     curr_day, curr_min, _ = db.get_session_time(session_id)
-    
-    # If sleeping before midnight (e.g. 22:00), sleep until next morning -> Day + 1
-    # If sleeping in early morning after midnight (e.g. 02:00), wake at 07:30 same morning
-    new_day = curr_day + 1 if curr_min >= 720 else curr_day
-    new_minute = wake_minute  # 07:30 AM
+    session = db.get_session(session_id)
+    if wake_minute is None:
+        eff_scen = scen_key or (session.get("scenario", "fantasy") if isinstance(session, dict) else "fantasy")
+        from mechanics.world.world_schedule import get_scenario_wake_minute
+        wake_minute = get_scenario_wake_minute(eff_scen)
+
+    # If sleeping before midnight (e.g. 22:00) or past morning wake-up (e.g. 08:00 AM),
+    # sleep until next morning -> Day + 1.
+    # If sleeping in early morning hours before wake-up (e.g. 02:00 AM), wake at morning same day.
+    new_day = curr_day + 1 if curr_min >= int(wake_minute) else curr_day
+    new_minute = int(wake_minute)
 
     db.update_session_time(
         session_id=session_id,
@@ -247,9 +320,13 @@ def apply_sleep_rest(
         consecutive_days_awake=0
     )
 
+    try:
+        db.clear_temporary_companions(session_id)
+    except Exception:
+        pass
+
     # Restock all merchant catalogues upon sleeping / morning wake-up
     try:
-        session = db.get_session(session_id)
         if session and "merchant" in session:
             merchant = session["merchant"]
             if isinstance(merchant, dict):
@@ -377,9 +454,9 @@ def format_llm_time_context(
     scen_key: str = "fantasy"
 ) -> str:
     """
-    Formats the time block for injection into the game engine's user_prompt.
+    Formats the time block and World Schedule state for injection into the game engine's user_prompt.
     Provides clear context so the narrator renders accurate ambient lighting,
-    crowd levels, shadows, and atmosphere.
+    crowd levels, school/commercial operating hours, and schedule rules.
     """
     day_name = get_day_of_week(current_day)
     clock_str = format_clock(current_minute)
@@ -400,4 +477,14 @@ def format_llm_time_context(
             f"- Day Progression: Daytime activities, ambient NPCs, and normal operations are active."
         )
 
+    try:
+        from mechanics.world.world_schedule import get_world_schedule_state
+        ws_state = get_world_schedule_state(scen_key=scen_key, current_day=current_day, current_minute=current_minute)
+        context_lines.append(
+            f"- Active World Schedule [{ws_state.get('day_type', 'weekday').capitalize()} — {ws_state.get('period_label', '')}]: {ws_state.get('narrative_directive', '')}"
+        )
+    except Exception:
+        pass
+
     return "\n".join(context_lines) + "\n"
+

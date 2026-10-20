@@ -1214,3 +1214,16 @@ def classify_and_enrich_ad_hoc_item(item_name: str, scenario_key: str = "fantasy
         "slot_cost": 1,
         "tier": tier
     }
+
+
+def generate_random_consumable(scenario: str = "fantasy", party_level: int = 1) -> Dict[str, Any]:
+    """Generates a procedural consumable (potion, food, or drink) appropriate for scenario and level."""
+    tier = 1 if party_level >= 10 else (2 if party_level >= 5 else 3)
+    roll = random.random()
+    if roll < 0.50:
+        return generate_procedural_potion(tier=tier, genre=scenario)
+    elif roll < 0.75:
+        return generate_procedural_food(tier=tier, genre=scenario)
+    else:
+        return generate_procedural_drink(tier=tier, genre=scenario)
+

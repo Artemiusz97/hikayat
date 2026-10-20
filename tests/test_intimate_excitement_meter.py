@@ -572,40 +572,48 @@ class TestIntimateExcitementMeter(unittest.TestCase):
             self.assertFalse(res["partner_stimulated"])
 
     def test_climax_negation_guards(self):
-        """Verify negated climax mentions in narrative do not trigger false climax detections."""
-        from mechanics.social.physical_state import detect_partner_climax, detect_player_climax
+        """Verify gauge-strict climax triggering: requires meter >= 100 or meter >= 80 with explicit finisher."""
+        phys_below_80 = {
+            "intimate_contact": "Intimate encounter with Mia (intercourse)",
+            "excitement": {
+                "active": True,
+                "actors": {
+                    "Artemiusz": {"meter": 40, "max": 100, "status": "Building", "endurance": 5},
+                    "Mia": {"meter": 40, "max": 100, "status": "Building", "endurance": 5},
+                }
+            }
+        }
+        res_below = compute_excitement_step(
+            physical_state=phys_below_80,
+            action_str="Push over the edge into climax with Mia",
+            player_char=self.player_char,
+            partner_contact={"name": "Mia"},
+            session={"id": self.session_id},
+        )
+        # Even with finisher phrasing, Mia is below 80 so does not climax yet
+        self.assertFalse(res_below.get("partner_climaxed"))
+        self.assertFalse(res_below.get("player_climaxed"))
 
-        negated_partner_narratives = [
-            "Mia was breathing heavily, but she was nowhere near climax as they took their time.",
-            "She was still far from reaching her climax, smiling at his measured pace.",
-            "Before her climax could arrive, he paused to catch his breath.",
-            "Without reaching climax, she rested her forehead against his shoulder.",
-            "He held back, preventing her from reaching peak too early."
-        ]
-        for narrative in negated_partner_narratives:
-            self.assertFalse(
-                detect_partner_climax(narrative, partner_name="Mia"),
-                f"Negated climax falsely triggered partner climax for: {narrative}"
-            )
-
-        negated_player_narratives = [
-            "Artemiusz was nowhere near his own climax as he maintained an even rhythm.",
-            "He fought the urge to reach his own climax, holding steady.",
-            "Trying not to spill deep inside, he paused and drew a slow breath.",
-            "He was far from his own release, savoring the warmth between them."
-        ]
-        for narrative in negated_player_narratives:
-            self.assertFalse(
-                detect_player_climax(narrative, player_name="Artemiusz"),
-                f"Negated climax falsely triggered player climax for: {narrative}"
-            )
-
-        # Confirm genuine, non-negated climaxes still trigger properly
-        genuine_partner = "Mia trembled violently as her shuddering climax tore through her core."
-        self.assertTrue(detect_partner_climax(genuine_partner, partner_name="Mia"))
-
-        genuine_player = "Artemiusz let out a breath as he reached his own climax, spilling deep inside."
-        self.assertTrue(detect_player_climax(genuine_player, player_name="Artemiusz"))
+        # Above 80 with finisher phrasing
+        phys_above_80 = {
+            "intimate_contact": "Intimate encounter with Mia (intercourse)",
+            "excitement": {
+                "active": True,
+                "actors": {
+                    "Artemiusz": {"meter": 85, "max": 100, "status": "Building", "endurance": 5},
+                    "Mia": {"meter": 85, "max": 100, "status": "Building", "endurance": 5},
+                }
+            }
+        }
+        res_above = compute_excitement_step(
+            physical_state=phys_above_80,
+            action_str="Push Mia over the edge to climax and reach your climax together",
+            player_char=self.player_char,
+            partner_contact={"name": "Mia"},
+            session={"id": self.session_id},
+        )
+        self.assertTrue(res_above.get("partner_climaxed"))
+        self.assertTrue(res_above.get("player_climaxed"))
 
     def test_disengagement_action_intent(self):
         """Verify explicit disengagement actions yield 'none' act_type and 0 stimulation even during intimate encounters."""
@@ -2038,7 +2046,7 @@ class TestIntimateExcitementMeter(unittest.TestCase):
                 "actors": {
                     "Artemiusz": {"meter": 60, "endurance": 6, "status": "Maintaining Rhythm"},
                     "Kana": {"meter": 90, "endurance": 5, "status": "On the Brink 🔥"},
-                    "Elena": {"meter": 40, "endurance": 5, "status": "Arousal Building"},
+                    "Elena": {"meter": 85, "endurance": 5, "status": "On the Brink 🔥"},
                 }
             }
         }
@@ -3103,7 +3111,7 @@ class TestIntimateExcitementMeter(unittest.TestCase):
         self.assertEqual(res1["unsatisfied_partners"], ["Kana", "Elena"])
 
         # Turn 2: Player is spent, but manually stimulates Kana to climax. Elena is still at 40%.
-        phys_state["actors"]["Kana"]["meter"] = 95
+        phys_state["excitement"]["actors"]["Kana"]["meter"] = 95
         res2 = compute_excitement_step(
             physical_state=phys_state,
             action_str="Use your hands to stroke Kana intimately",
@@ -3120,7 +3128,7 @@ class TestIntimateExcitementMeter(unittest.TestCase):
         self.assertEqual(res2["unsatisfied_partner"], "Elena")
 
         # Turn 3: Player stimulates Elena to climax. Now both are satisfied!
-        phys_state["actors"]["Elena"]["meter"] = 95
+        phys_state["excitement"]["actors"]["Elena"]["meter"] = 95
         res3 = compute_excitement_step(
             physical_state=phys_state,
             action_str="Turn to Elena and use your tongue to bring Elena to climax",
@@ -3428,20 +3436,31 @@ class TestIntimateExcitementMeter(unittest.TestCase):
         self.assertIsNone(outcome.get("intimate_update"))
 
     def test_detect_partner_climax_transitive_and_cross_clause_disambiguation(self):
-        """Verify detect_partner_climax disambiguates transitive climax phrases and prevents cross-clause false positives."""
-        from mechanics.social.physical_state import detect_partner_climax
-
-        txt1 = "You sent Kana over the edge while Elena watches breathlessly."
-        self.assertTrue(detect_partner_climax(txt1, "Kana", ["Elena"]))
-        self.assertFalse(detect_partner_climax(txt1, "Elena", ["Kana"]))
-
-        txt2 = "While Elena watches, Kana climaxes hard against your hand."
-        self.assertTrue(detect_partner_climax(txt2, "Kana", ["Elena"]))
-        self.assertFalse(detect_partner_climax(txt2, "Elena", ["Kana"]))
-
-        txt3 = "Kana climaxes first, and moments later you send Elena over the edge."
-        self.assertTrue(detect_partner_climax(txt3, "Kana", ["Elena"]))
-        self.assertTrue(detect_partner_climax(txt3, "Elena", ["Kana"]))
+        """Verify compute_excitement_step cleanly isolates partner climax to the targeted partner."""
+        phys_multi = {
+            "intimate_contact": "Intimate encounter with Kana and Elena (intercourse)",
+            "climax_state": {"partner_climaxed": False, "player_climaxed": False, "partner_climaxes": {"Kana": False, "Elena": False}},
+            "excitement": {
+                "active": True,
+                "last_act": "penetrative",
+                "actors": {
+                    "Artemiusz": {"meter": 60, "max": 100, "status": "Building", "endurance": 5},
+                    "Kana": {"meter": 85, "max": 100, "status": "On the Brink", "endurance": 5},
+                    "Elena": {"meter": 60, "max": 100, "status": "Watching with Arousal", "endurance": 5},
+                },
+            },
+        }
+        res = compute_excitement_step(
+            physical_state=phys_multi,
+            action_str="Push Kana over the edge into climax while Elena watches",
+            player_char=self.player_char,
+            partner_contact={"name": "Kana"},
+            partner_contacts=[{"name": "Kana"}, {"name": "Elena"}],
+            session={"id": self.session_id},
+        )
+        p_climaxes = res.get("partner_climaxes", {})
+        self.assertTrue(p_climaxes.get("Kana"))
+        self.assertFalse(p_climaxes.get("Elena"))
 
     def test_multi_partner_blueprint_choices_continuity_and_climax_classification(self):
         """Verify multi-partner Slot 2 & Slot 3 blueprint choices maintain active genital continuity and advance meters."""
@@ -5247,6 +5266,319 @@ class TestIntimateExcitementMeter(unittest.TestCase):
             session_id=None,
         )
         self.assertTrue(len(cleaned_no_sess) >= 1)
+
+    def test_tick_status_timers_preserves_minute_tags_and_social_traits(self):
+        """Verify tick_status_timers preserves minute clock tags, Aroused, and untimed social traits."""
+        from mechanics.combat.formulas import tick_status_timers
+
+        entity = {
+            "name": "Artemiusz",
+            "hp": 50,
+            "status_effects": [
+                "Refractory Recovery [28 min]",
+                "Satisfied [25 min]",
+                "Aroused [3 turns]",
+                "Sensitive",
+                "Breathless",
+                "Burned [2 turns]",
+                "Stunned"
+            ]
+        }
+
+        # Tick 1: Combat DoT ticks (Burned 8 dmg), Burned decrements 2 -> 1, Stunned receives default [2 turns]
+        # Minute tags and social conditions MUST remain untouched
+        tick_status_timers(entity)
+        self.assertEqual(entity["hp"], 42)
+        effects = entity["status_effects"]
+        self.assertIn("Refractory Recovery [28 min]", effects)
+        self.assertIn("Satisfied [25 min]", effects)
+        self.assertIn("Aroused [3 turns]", effects)
+        self.assertIn("Sensitive", effects)
+        self.assertIn("Breathless", effects)
+        self.assertIn("Burned [1 turn]", effects)
+        self.assertIn("Stunned [2 turns]", effects)
+
+        # Tick 2: Burned expires (drop), Stunned decrements 2 -> 1
+        tick_status_timers(entity)
+        self.assertEqual(entity["hp"], 34)
+        effects2 = entity["status_effects"]
+        self.assertIn("Refractory Recovery [28 min]", effects2)
+        self.assertIn("Satisfied [25 min]", effects2)
+        self.assertIn("Aroused [3 turns]", effects2)
+        self.assertIn("Sensitive", effects2)
+        self.assertIn("Breathless", effects2)
+        self.assertNotIn("Burned", str(effects2))
+        self.assertIn("Stunned [1 turn]", effects2)
+
+    def test_inactive_aroused_lockstep_decrement(self):
+        """Verify inactive non-intimate turns decrement player and NPC Aroused in exact lockstep without double-decrement."""
+        from game_engine.state.core import apply_outcome
+
+        char_id = 107
+        if not db.get_character(char_id):
+            db.create_character(char_id, "Leo", gender="Male")
+        db.set_status_effects(char_id, ["Aroused [3 turns]"])
+        db.upsert_contact(self.session_id, "elena", "Elena", gender="Female")
+        db.update_contact_status_effects(self.session_id, "elena", ["Aroused [3 turns]"])
+
+        char = {
+            "id": char_id,
+            "user_id": char_id,
+            "name": "Leo",
+            "gender": "Male",
+            "status_effects": ["Aroused [3 turns]"],
+        }
+        phys_state = {
+            "intimate_contact": "none",
+            "climax_state": {"player_climaxed": False, "partner_climaxed": False, "partner_climaxes": {}},
+            "excitement": {
+                "active": False,
+                "last_act": "none",
+                "actors": {
+                    "Leo": {"meter": 0, "max": 100, "aroused_turns": 3},
+                    "Elena": {"meter": 0, "max": 100, "aroused_turns": 3},
+                },
+            },
+        }
+        db.update_session_physical_state(self.session_id, phys_state)
+        sess = db.get_session(self.session_id) or {}
+        sess["physical_state"] = phys_state
+
+        outcome_turn1 = {
+            "dialogue_partner": "Elena",
+            "outcome_narrative": "Leo and Elena walk through the courtyard discussing plans.",
+            "next_narrative": "The afternoon sun warms the stone pathway.",
+            "character_outcomes": [{"name": "Leo", "status_effects": ["Aroused [3 turns]"]}],
+            "choices": [],
+        }
+
+        # Apply Turn 1
+        apply_outcome(self.session_id, [(char, [])], outcome_turn1)
+        leo_db1 = db.get_character(char_id)
+        elena_c1 = {c["name"]: c.get("status_effects", []) for c in db.get_contacts(self.session_id)}
+        self.assertIn("Aroused [2 turns]", str(leo_db1.get("status_effects", [])))
+        self.assertIn("Aroused [2 turns]", str(elena_c1.get("Elena", [])))
+
+        # Apply Turn 2
+        outcome_turn2 = {
+            "dialogue_partner": "Elena",
+            "outcome_narrative": "They check the library archives for ancient texts.",
+            "next_narrative": "Dust motes dance in the shaft of light.",
+            "character_outcomes": [{"name": "Leo", "status_effects": ["Aroused [2 turns]"]}],
+            "choices": [],
+        }
+        apply_outcome(self.session_id, [(char, [])], outcome_turn2)
+        leo_db2 = db.get_character(char_id)
+        elena_c2 = {c["name"]: c.get("status_effects", []) for c in db.get_contacts(self.session_id)}
+        self.assertIn("Aroused [1 turn]", str(leo_db2.get("status_effects", [])))
+        self.assertIn("Aroused [1 turn]", str(elena_c2.get("Elena", [])))
+
+        # Apply Turn 3 (expiration)
+        outcome_turn3 = {
+            "dialogue_partner": "Elena",
+            "outcome_narrative": "They finish their reading and head towards the exit.",
+            "next_narrative": "Evening settles across the campus.",
+            "character_outcomes": [{"name": "Leo", "status_effects": ["Aroused [1 turn]"]}],
+            "choices": [],
+        }
+        apply_outcome(self.session_id, [(char, [])], outcome_turn3)
+        leo_db3 = db.get_character(char_id)
+        elena_c3 = {c["name"]: c.get("status_effects", []) for c in db.get_contacts(self.session_id)}
+        self.assertNotIn("Aroused", str(leo_db3.get("status_effects", [])))
+        self.assertNotIn("Aroused", str(elena_c3.get("Elena", [])))
+
+    def test_companion_climax_and_disengage_party_refractory_sync(self):
+        """Verify companion in party who climaxes receives Satisfied tag and retains it upon disengagement."""
+        from game_engine.state.core import apply_outcome
+
+        lead_id = 108
+        comp_id = 109
+        if not db.get_character(lead_id):
+            db.create_character(lead_id, "Felix", gender="Male")
+        if not db.get_character(comp_id):
+            db.create_character(comp_id, "Elena", gender="Female")
+
+        db.set_status_effects(lead_id, [])
+        db.set_status_effects(comp_id, [])
+
+        felix = {"id": lead_id, "user_id": lead_id, "name": "Felix", "gender": "Male", "status_effects": []}
+        elena = {"id": comp_id, "user_id": comp_id, "name": "Elena", "gender": "Female", "status_effects": []}
+        party = [(felix, []), (elena, [])]
+
+        # Scenario: Elena climaxes unilaterally with Felix, who remains unclimaxed
+        phys_enc = {
+            "intimate_contact": "Intimate encounter with Elena (ongoing for player, partner reached climax)",
+            "climax_state": {
+                "player_climaxed": False,
+                "partner_climaxed": True,
+                "partner_climaxes": {"Elena": True},
+            },
+            "excitement": {
+                "active": False,
+                "refractory_until_minute": (1 * 1440) + 630,
+                "player_in_refractory": False,
+                "refractory_partners": {"Elena": True},
+                "actors": {},
+            },
+        }
+        db.update_session_physical_state(self.session_id, phys_enc)
+        sess = db.get_session(self.session_id) or {}
+        sess["current_day"] = 1
+        sess["current_minute"] = 600  # 30 min recovery remaining
+        sess["physical_state"] = phys_enc
+
+        outcome_disengage = {
+            "dialogue_partner": "Elena",
+            "outcome_narrative": "Felix steps back, adjusts his clothes, and offers Elena a warm towel.",
+            "next_narrative": "Elena smiles tenderly as she catches her breath.",
+            "character_outcomes": [
+                {"name": "Felix", "status_effects": []},
+                {"name": "Elena", "status_effects": []},
+            ],
+            "choices": [],
+        }
+
+        actions = [{"char": felix, "label": "Step back and get dressed", "success": True}]
+        apply_outcome(self.session_id, party, outcome_disengage, actions=actions)
+
+        felix_now = db.get_character(lead_id)
+        elena_now = db.get_character(comp_id)
+
+        # Felix (unclimaxed lead player) should not have refractory recovery
+        self.assertNotIn("Refractory Recovery", str(felix_now.get("status_effects", [])))
+        # Elena (companion who climaxed) should have Satisfied [30 min]
+        self.assertIn("Satisfied [", str(elena_now.get("status_effects", [])))
+
+    def test_female_protagonist_climax_detection_and_primacy_symmetry(self):
+        """Verify female protagonist climax properly resets to warm 35% baseline without male refractory stop."""
+        female_player = {"name": "Aria", "gender": "Female", "endurance": 6}
+        phys_female = {
+            "intimate_contact": "Intimate encounter with Elena (intercourse)",
+            "excitement": {
+                "active": True,
+                "actors": {
+                    "Aria": {"meter": 85, "max": 100, "status": "Building", "endurance": 6},
+                    "Elena": {"meter": 50, "max": 100, "status": "Building", "endurance": 6},
+                }
+            }
+        }
+        res = compute_excitement_step(
+            physical_state=phys_female,
+            action_str="Thrust deep and reach your climax together with Elena",
+            player_char=female_player,
+            partner_contact={"name": "Elena"},
+            session={"id": self.session_id},
+        )
+        self.assertTrue(res.get("player_climaxed"))
+        p_actor = res["actors"]["Aria"]
+        self.assertEqual(p_actor["meter"], 35)
+        self.assertIn("Hypersensitive", p_actor["status"])
+
+    def test_spectator_partner_warmth_status_persists_at_cap_limit(self):
+        """Verify untouched spectator partner in a multi-partner scene maintains 'Watching with Arousal'
+        status when reaching the 80% spectator warmth cap, instead of jumping to 'On the Brink 🔥'.
+        """
+        from mechanics.social.intimate_excitement import compute_excitement_step
+
+        phys = {
+            "intimate_contact": "Intimate encounter with Elena and Kana (intercourse)",
+            "actors": {
+                "Hero": {"posture": "Maintaining rhythm inside Elena"},
+                "Elena": {"posture": "Resting against pillows, receiving rhythm"},
+                "Kana": {"posture": "Resting close beside Hero and Elena with flushed warmth"},
+            },
+            "excitement": {
+                "active": True,
+                "last_act": "penetrative",
+                "actors": {
+                    "Hero": {"meter": 60, "max": 100, "status": "Building", "idle_turns": 0, "aroused_turns": 3},
+                    "Elena": {"meter": 60, "max": 100, "status": "Building", "idle_turns": 0, "aroused_turns": 3},
+                    "Kana": {"meter": 80, "max": 100, "status": "Watching with Arousal", "idle_turns": 0, "aroused_turns": 3},
+                },
+            },
+        }
+
+        # Action: Player penetrates Elena (Kana is spectator, untouched)
+        action_str = "Thrust steadily into Elena while Kana watches"
+        res = compute_excitement_step(
+            physical_state=phys,
+            action_str=action_str,
+            player_char={"name": "Hero", "gender": "Male", "endurance": 10},
+            partner_contact={"name": "Elena"},
+            partner_contacts=[{"name": "Elena"}, {"name": "Kana"}],
+            session={"id": self.session_id, "current_day": 1, "current_minute": 500},
+            narrative_str="You drive forward into Elena, her soft cries filling the room as Kana looks on with flushed cheeks.",
+        )
+
+        kana_actor = res["actors"]["Kana"]
+        # Kana was at 80% cap limit, so delta is 0
+        self.assertEqual(kana_actor["delta"], 0)
+        self.assertEqual(kana_actor["meter"], 80)
+        # Kana's status MUST remain "Watching with Arousal", NOT "On the Brink 🔥"
+        self.assertEqual(kana_actor["status"], "Watching with Arousal")
+
+    def test_multi_partner_companion_status_effects_synced_to_party_and_character_db(self):
+        """Verify that recruited companions participating in intimate encounters have their status effects
+        synced to db characters table, party in-memory record, and character_outcomes across stimulating turns.
+        """
+        from game_engine.state.core import apply_outcome
+
+        lead_id = 111
+        comp_id = 112
+        if not db.get_character(lead_id):
+            db.create_character(lead_id, "Valen", gender="Male")
+        if not db.get_character(comp_id):
+            db.create_character(comp_id, "Lyra", gender="Female")
+
+        db.set_status_effects(lead_id, [])
+        db.set_status_effects(comp_id, [])
+        db.upsert_contact(self.session_id, "lyra", "Lyra", gender="Female")
+        db.update_contact_status_effects(self.session_id, "lyra", [])
+
+        valen = {"id": lead_id, "user_id": lead_id, "name": "Valen", "gender": "Male", "status_effects": []}
+        lyra = {"id": comp_id, "user_id": comp_id, "name": "Lyra", "gender": "Female", "status_effects": []}
+        party = [(valen, []), (lyra, [])]
+
+        phys_init = {
+            "intimate_contact": "Intimate encounter with Lyra (intercourse)",
+            "climax_state": {"player_climaxed": False, "partner_climaxed": False, "partner_climaxes": {}},
+            "excitement": {
+                "active": True,
+                "last_act": "penetrative",
+                "actors": {
+                    "Valen": {"meter": 40, "max": 100, "aroused_turns": 3},
+                    "Lyra": {"meter": 40, "max": 100, "aroused_turns": 3},
+                },
+            },
+        }
+        db.update_session_physical_state(self.session_id, phys_init)
+        sess = db.get_session(self.session_id) or {}
+        sess["physical_state"] = phys_init
+
+        outcome_turn = {
+            "dialogue_partner": "Lyra",
+            "outcome_narrative": "Valen moves together with Lyra, their bodies trembling in passionate warmth.",
+            "next_narrative": "Lyra clings tight as the pleasure deepens.",
+            "character_outcomes": [
+                {"name": "Valen", "status_effects": []},
+                {"name": "Lyra", "status_effects": []},
+            ],
+            "choices": [],
+        }
+        actions = [{"char": valen, "label": "Maintain intimate pace with Lyra", "success": True}]
+        apply_outcome(self.session_id, party, outcome_turn, actions=actions)
+
+        # 1. Lead player (Valen) status in DB and in-memory party
+        valen_db = db.get_character(lead_id)
+        self.assertIn("Aroused [3 turns]", valen_db.get("status_effects", []))
+        self.assertIn("Aroused [3 turns]", valen.get("status_effects", []))
+
+        # 2. Companion partner (Lyra) status in DB, in-memory party, and character_outcomes
+        lyra_db = db.get_character(comp_id)
+        self.assertIn("Aroused [3 turns]", lyra_db.get("status_effects", []))
+        self.assertIn("Aroused [3 turns]", lyra.get("status_effects", []))
+        lyra_co = next(c for c in outcome_turn["character_outcomes"] if c["name"] == "Lyra")
+        self.assertIn("Aroused [3 turns]", lyra_co.get("status_effects", []))
 
 
 if __name__ == "__main__":

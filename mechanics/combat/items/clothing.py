@@ -520,7 +520,7 @@ SCENARIO_CLOTHING_AFFIXES: Dict[str, Dict[str, Any]] = {
             "tank_top": ["Gym Class Tank Top", "Summer Ribbed Crop Top", "Track & Field Singlet"],
             "sweater": ["Cable-Knit School Cardigan", "Oversized Cream Pullover", "Pastel V-Neck Knit"],
             "leather_jacket": ["Rebel Biker Leather Jacket", "Thrifted Moto Jacket", "Rock Band Studded Jacket"],
-            "blazer": ["Academy Crest Blazer", "Navy Prep Blazer", "Student Council Tailored Blazer"],
+            "blazer": ["Academy Crest Blazer", "Navy Prep Blazer", "Classic Navy Uniform Blazer"],
             "techwear_anorak": ["Rainy Day Windbreaker", "Hiking Club Anorak", "Urban Streetwear Pullover"],
             "bodysuit_top": ["Ballet Dance Leotard", "Swim Team Rashguard", "Gymnastics Compression Top"],
             "holo_jacket": ["Festival LED Windbreaker", "Cyber-Harajuku Glow Jacket", "Pop Idol Concert Coat"],
@@ -544,7 +544,7 @@ SCENARIO_CLOTHING_AFFIXES: Dict[str, Dict[str, Any]] = {
         "prefixes": {
             3: ["Clean", "Campus", "Everyday", "Neat", "Casual", "Standard-Issue", "Comfy"],
             2: ["Tailored", "Designer", "Varsity-Star", "Boutique", "Charming", "Preppy"],
-            1: ["Student Council President's", "Custom-Tailored", "Festival Champion's", "Prizewinning", "Heirloom"]
+            1: ["Class Valedictorian's", "Custom-Tailored", "Festival Champion's", "Prizewinning", "Heirloom"]
         },
         "suffixes": {
             2: ["of Youth", "of Style", "of the Honor Society", "of Friendship", "of Campus Trend"],
@@ -638,24 +638,66 @@ def normalize_clothing_scenario(scenario: str) -> str:
         return "high_school"
     return "fantasy"
 
-def generate_random_clothing(scenario: str = "fantasy", slot: str = "Top", tier: Optional[int] = None) -> Dict[str, Any]:
+def is_tailed_race(race: str) -> bool:
+    r = str(race or "").strip().lower()
+    if not r:
+        return False
+    if r in ("human", "elf", "dwarf", "gnome", "halfling", "orc", "half-elf", "android", "synth", "cyborg", "clone"):
+        return False
+    tailed_keywords = (
+        "beast", "furry", "anthro", "hybrid", "tail", "cat", "dog", "wolf", "fox", "fennec",
+        "kitsune", "tiger", "lion", "cheetah", "leopard", "felid", "feline", "canid", "canine",
+        "rabbit", "bunny", "mouse", "rat", "dragon", "lizard", "reptil", "snake", "scaly"
+    )
+    return any(k in r for k in tailed_keywords)
+
+
+def generate_random_clothing(
+    scenario: str = "fantasy",
+    slot: str = "Top",
+    tier: Optional[int] = None,
+    archetype: Optional[str] = None,
+    gender: Optional[str] = None,
+    race: Optional[str] = None,
+) -> Dict[str, Any]:
     item_tier = tier if tier in (1, 2, 3) else roll_tier()
     scen_key = normalize_clothing_scenario(scenario)
     affix_data = SCENARIO_CLOTHING_AFFIXES.get(scen_key, SCENARIO_CLOTHING_AFFIXES["fantasy"])
+    is_male = str(gender or "").strip().lower() == "male"
+    is_female = str(gender or "").strip().lower() == "female"
+    has_tail = is_tailed_race(race)
 
+    chosen_archetype = archetype
     if slot == "Top":
-        archetype = random.choice(list(CLOTHING_TOPS.keys()))
-        base_data = CLOTHING_TOPS[archetype]
+        if chosen_archetype not in CLOTHING_TOPS:
+            if scen_key == "high_school":
+                chosen_archetype = random.choice([
+                    "school_uniform_top", "blazer", "sweater", "waistcoat", "blouse", "casual_shirt"
+                ])
+            else:
+                chosen_archetype = random.choice(list(CLOTHING_TOPS.keys()))
+        base_data = CLOTHING_TOPS[chosen_archetype]
     else:
-        archetype = random.choice(list(CLOTHING_BOTTOMS.keys()))
-        base_data = CLOTHING_BOTTOMS[archetype]
+        if chosen_archetype not in CLOTHING_BOTTOMS:
+            if scen_key == "high_school":
+                if is_female:
+                    chosen_archetype = random.choice(["skirt", "slacks", "trousers"])
+                else:
+                    chosen_archetype = random.choice(["trousers", "slacks"])
+            else:
+                chosen_archetype = random.choice(list(CLOTHING_BOTTOMS.keys()))
+                if is_male and chosen_archetype == "skirt":
+                    chosen_archetype = random.choice(["trousers", "slacks"])
+        elif is_male and chosen_archetype == "skirt":
+            chosen_archetype = "trousers"
+        base_data = CLOTHING_BOTTOMS[chosen_archetype]
 
     # Resolve genre-specific base garment name
-    genre_names = affix_data.get("archetype_names", {}).get(archetype)
+    genre_names = affix_data.get("archetype_names", {}).get(chosen_archetype)
     if genre_names:
         base_name = random.choice(genre_names)
     else:
-        base_name = archetype.replace('_', ' ').title()
+        base_name = chosen_archetype.replace('_', ' ').title()
 
     # Calculate modifiers: standard regular clothes give at most +1 to SPECIAL stats (strictly CHA or PER).
     # NON-ARMOR WEARABLES DO NOT GRANT DT (base_dt: 0, type_dt: {}).
@@ -697,20 +739,36 @@ def generate_random_clothing(scenario: str = "fantasy", slot: str = "Top", tier:
         else:
             name = base_name
 
+    # Gender adjustments
+    if is_male and "skirt" in name.lower():
+        name = name.replace("Skirt", "Trousers").replace("skirt", "trousers")
+
+    # Race adjustments: accommodate tails for bottom items
+    social_flags = list(base_data["social_flags"])
+    if slot != "Top":
+        if has_tail:
+            if "tail" not in name.lower():
+                name = f"Tail-Slotted {name}"
+            if "tail_slotted" not in social_flags:
+                social_flags.append("tail_slotted")
+        else:
+            if "tail-slotted" in name.lower():
+                name = name.replace("Tail-Slotted ", "").replace("tail-slotted ", "").replace("Tail-slotted ", "")
+
     metadata = {
         "name": name,
         "tier": item_tier,
         "tier_name": tier_name,
         "slot": slot,
         "item_type": "Clothing",
-        "archetype": archetype,
+        "archetype": chosen_archetype,
         "base_dt": 0,
         "dt": 0,
         "type_dt": {},
         "social_modifiers": mods,
         "stat_modifiers": dict(mods),
-        "social_flags": list(base_data["social_flags"]),
-        "tags": derive_clothing_tags(style=base_data["style"], social_vibe=base_data["social_flags"])
+        "social_flags": social_flags,
+        "tags": derive_clothing_tags(style=base_data["style"], social_vibe=social_flags)
     }
 
     return {

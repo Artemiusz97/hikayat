@@ -451,32 +451,26 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
         if not session.get("narrative"):
             session["narrative"] = "You look around and assess your surroundings before taking action."
 
+        scene_img = session.get("scene_image_url")
         if session["mode"] == "sync":
             waiting_on = [uid for uid in session["turn_order"] if str(uid) not in session["pending_picks"]]
             embeds = sync_scene_embed(session, party, session["scene_title"], session["narrative"],
-                                      session["choices"], waiting_on)
+                                      session["choices"], waiting_on, image_url=scene_img)
             view = SyncChoiceView(self, session["id"], session["turn_order"], session["choices"], party,
                                    session.get("merchant"))
         else:
             turn_uid = db.current_turn_user_id(session)
             actor_char = await adb(db.get_character, turn_uid)
             embeds = scene_embed(session, actor_char, session["scene_title"], session["narrative"],
-                                 session["choices"])
+                                 session["choices"], image_url=scene_img)
             view = ChoiceView(self, session["id"], turn_uid, session["choices"], actor_char,
                                session.get("merchant"))
-        target_channel = interaction.channel or self.bot.get_channel(session.get("channel_id"))
-        sent = False
-        if use_followup:
-            try:
-                await interaction.followup.send(content="Resuming your adventure...", embeds=embeds, view=view)
-                sent = True
-            except (discord.NotFound, discord.HTTPException) as e:
-                logger.warning("interaction.followup.send failed (%s), falling back to channel.send", e)
-        if not sent:
-            if target_channel:
-                await target_channel.send(content="Resuming your adventure...", embeds=embeds, view=view)
-            else:
-                await interaction.followup.send(content="Resuming your adventure...", embeds=embeds, view=view)
+        
+        _, discord_file = prepare_discord_image(scene_img)
+        send_kwargs = {"content": "Resuming your adventure...", "embeds": embeds, "view": view}
+        if discord_file:
+            send_kwargs["file"] = discord_file
+        await self._safe_send(interaction, **send_kwargs)
 
     async def launch_opening_scene(self, interaction: discord.Interaction, session: dict,
                                     use_followup: bool = False):
@@ -521,7 +515,8 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
         await adb(db.save_session_scene, session["id"], scene_title,
                                narrative, choices, history=[],
                                location=location, nearby_enemies=enemies, current_npcs=npcs,
-                               dialogue_partner=partner_arg)
+                               dialogue_partner=partner_arg,
+                               current_node_id=scene.get("current_node_id"))
         merchant = _apply_merchant_encounter_result(session["id"], scene.get("merchant_encounter"))
         scen_key = session.get("scenario", "fantasy")
         first_char_id = party[0][0]["id"] if party and party[0][0] else 0
@@ -580,7 +575,7 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
                 )
 
         fresh_session = await adb(db.get_session, session["id"])
-        image_url = await self._maybe_generate_image(fresh_session, scene.get("image_prompt"))
+        image_url = await self._maybe_generate_image(fresh_session, scene.get("image_prompt"), outcome=scene)
 
         if session["mode"] == "sync":
             embeds = sync_scene_embed(fresh_session, party, scene.get("scene_title"), narrative,
@@ -593,32 +588,27 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
                                  choices, image_url)
             view = ChoiceView(self, session["id"], turn_uid, choices, actor_char, merchant)
 
-        target_channel = interaction.channel or self.bot.get_channel(session.get("channel_id"))
-        sent = False
-        if use_followup:
-            try:
-                await interaction.followup.send(embeds=embeds, view=view)
-                sent = True
-            except (discord.NotFound, discord.HTTPException) as e:
-                logger.warning("interaction.followup.send failed (%s), falling back to channel.send", e)
-        if not sent:
-            if target_channel:
-                await target_channel.send(embeds=embeds, view=view)
-            else:
-                await interaction.followup.send(embeds=embeds, view=view)
+        _, discord_file = prepare_discord_image(image_url)
+        send_kwargs = {"embeds": embeds, "view": view}
+        if discord_file:
+            send_kwargs["file"] = discord_file
+        await self._safe_send(interaction, **send_kwargs)
 
-    async def _maybe_generate_image(self, session: dict, image_prompt: str | None) -> str | None:
+    async def _maybe_generate_image(
+        self,
+        session: dict,
+        image_prompt: str | None = None,
+        outcome: dict | None = None,
+        action: dict | None = None,
+    ) -> str | None:
         if not session.get("image_gen_enabled"):
             return None
-        prompt = (image_prompt or "").strip()
-        if not prompt:
-            scenario = session.get("scenario", "fantasy")
-            location = session.get("current_location") or session.get("scene_title") or ""
-            narrative = (session.get("narrative") or "")[:450]
-            if narrative or location:
-                prompt = f"{scenario} RPG scene illustration. Location: {location}. {narrative}".strip()
-        if not prompt:
-            return None
+        from mechanics.narrative.image_prompt_composer import compose_turn_image_prompt
+
+        composed = compose_turn_image_prompt(session, outcome=outcome, action=action)
+        prompt = (image_prompt.strip() if image_prompt and "masterpiece" in image_prompt else composed.prompt)
+        target_size = composed.size
+        negative_prompt = composed.negative_prompt
 
         model_override = None
         host_uid = session.get("host_user_id")
@@ -630,7 +620,25 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
                 pass
 
         try:
-            return await image_client.generate_scene_image(prompt, model=model_override)
+            image_result = await image_client.generate_scene_image(
+                prompt,
+                model=model_override,
+                session_id=session.get("id"),
+                size=target_size,
+                negative_prompt=negative_prompt,
+            )
+            if image_result and session.get("id"):
+                sid = session["id"]
+                local_url = getattr(image_result, "local_url", str(image_result))
+                await adb(db.update_session, sid, scene_image_url=local_url)
+                fresh_s = await adb(db.get_session, sid)
+                if fresh_s:
+                    raw_hist = list(fresh_s.get("history") or [])
+                    if raw_hist and isinstance(raw_hist[-1], dict):
+                        raw_hist[-1]["scene_image_url"] = local_url
+                        import json
+                        await adb(db.update_session, sid, history_json=json.dumps(raw_hist, default=str))
+            return image_result
         except Exception as e:
             logger.warning("Scene image generation failed for session %s: %s", session.get("id"), e)
             return None
@@ -750,6 +758,17 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
         try:
             return await interaction.followup.send(**kwargs)
         except (discord.HTTPException, discord.NotFound) as exc:
+            if "file" in kwargs:
+                # If sending with file attachment failed (e.g. payload too large or attachment error),
+                # retry sending without the file attachment so message still arrives.
+                logger.warning("Sending with file attachment failed (%s), retrying without file", exc)
+                kwargs_no_file = dict(kwargs)
+                kwargs_no_file.pop("file", None)
+                try:
+                    return await interaction.followup.send(**kwargs_no_file)
+                except Exception:
+                    pass
+
             # 50027 = Invalid/expired webhook token, 10062 = Unknown interaction, 10015 = Unknown webhook
             if getattr(exc, "code", None) in (50027, 10062, 10015) or (hasattr(exc, "status") and exc.status in (401, 404)):
                 logger.warning("Followup token expired or invalid (%s), falling back to channel.send", exc)
@@ -758,6 +777,8 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
                 kwargs.pop("wait", None)
                 channel = interaction.channel
                 if channel:
+                    if "file" in kwargs and hasattr(kwargs["file"], "reset"):
+                        kwargs["file"].reset()
                     return await channel.send(**kwargs)
                 raise
             else:
@@ -814,6 +835,11 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
 
+        char = await adb(db.get_character, interaction.user.id)
+        if not char:
+            await interaction.response.send_message("❌ You don't have an active character. Create one with `/character create` first.", ephemeral=True)
+            return
+
         session_id = await adb(db.get_active_session_id_for_user, interaction.user.id)
         if not session_id:
             await interaction.response.send_message("❌ You're not in an active adventure to save.", ephemeral=True)
@@ -831,8 +857,9 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
             return
 
         loc = res.get("current_location") or "Wilderness"
+        total_slots = await adb(db.count_character_adventure_saves, char["id"])
         await interaction.response.send_message(
-            f"💾 Successfully saved adventure checkpoint **{res['slot_name']}** at location **{loc}**!\n"
+            f"💾 Successfully saved adventure checkpoint **{res['slot_name']}** for **{char['name']}** ({total_slots}/6 slots used) at location **{loc}**!\n"
             f"You can restore this checkpoint anytime using `/adventure load {res['slot_name']}` or browse with `/adventure saves`.",
             ephemeral=True
         )
@@ -841,11 +868,16 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
     @app_commands.describe(name="The name of the save slot to restore")
     async def load_slot_cmd(self, interaction: discord.Interaction, name: str):
         from mechanics.system.save_system import LoadConfirmView
+        char = await adb(db.get_character, interaction.user.id)
+        if not char:
+            await interaction.response.send_message("❌ You don't have an active character. Create one with `/character create` first.", ephemeral=True)
+            return
+
         clean_name = (name or "").strip()
         save_meta = await adb(db.get_adventure_save_metadata, interaction.user.id, clean_name)
         if not save_meta:
             await interaction.response.send_message(
-                f"❌ Save slot '{clean_name}' not found. Use `/adventure saves` to view all your checkpoints.",
+                f"❌ Save slot '{clean_name}' not found for active character **{char['name']}**. Use `/adventure saves` to view all your checkpoints for this character.",
                 ephemeral=True
             )
             return
@@ -855,7 +887,7 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
             view = LoadConfirmView(self, interaction.user.id, clean_name)
             await interaction.response.send_message(
                 f"⚠️ You currently have an active adventure in progress! Loading checkpoint **{clean_name}** "
-                f"will replace your current active adventure. Do you want to proceed?",
+                f"will replace your current active adventure for **{char['name']}**. Do you want to proceed?",
                 view=view,
                 ephemeral=True
             )
@@ -868,7 +900,7 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
             await interaction.followup.send(f"❌ Failed to load save slot: {e}", ephemeral=True)
             return
 
-        await interaction.followup.send(f"✅ Successfully loaded checkpoint **{clean_name}**!")
+        await interaction.followup.send(f"✅ Successfully loaded checkpoint **{clean_name}** for **{char['name']}**!")
         await self._resend_current_scene(interaction, session, use_followup=True)
 
     @load_slot_cmd.autocomplete("name")
@@ -892,15 +924,20 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
     @app_commands.describe(name="The name of the save slot to delete")
     async def delete_save_cmd(self, interaction: discord.Interaction, name: str):
         from mechanics.system.save_system import DeleteSaveConfirmView
+        char = await adb(db.get_character, interaction.user.id)
+        if not char:
+            await interaction.response.send_message("❌ You don't have an active character. Create one with `/character create` first.", ephemeral=True)
+            return
+
         clean_name = (name or "").strip()
         save_meta = await adb(db.get_adventure_save_metadata, interaction.user.id, clean_name)
         if not save_meta:
-            await interaction.response.send_message(f"❌ Save slot '{clean_name}' not found.", ephemeral=True)
+            await interaction.response.send_message(f"❌ Save slot '{clean_name}' not found for active character **{char['name']}**.", ephemeral=True)
             return
 
         view = DeleteSaveConfirmView(self, interaction.user.id, clean_name)
         await interaction.response.send_message(
-            f"⚠️ Are you sure you want to permanently delete save slot **{clean_name}**? This cannot be undone.",
+            f"⚠️ Are you sure you want to permanently delete save slot **{clean_name}** for active character **{char['name']}**? This cannot be undone.",
             view=view,
             ephemeral=True
         )
@@ -908,6 +945,25 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
     @delete_save_cmd.autocomplete("name")
     async def delete_save_autocomplete(self, interaction: discord.Interaction, current: str):
         return await self._save_slot_autocomplete(interaction, current)
+
+    # Top-level convenience shortcuts: /save, /load, /saves
+    @app_commands.command(name="save", description="Save your active adventure progress to a named checkpoint slot")
+    @app_commands.describe(name="Name for your save slot (e.g. Chapter 1, Before Boss, Castle Gate)")
+    async def save_top_cmd(self, interaction: discord.Interaction, name: str):
+        await self.save_slot_cmd(interaction, name)
+
+    @app_commands.command(name="load", description="Load a saved adventure checkpoint")
+    @app_commands.describe(name="The name of the save slot to restore")
+    async def load_top_cmd(self, interaction: discord.Interaction, name: str):
+        await self.load_slot_cmd(interaction, name)
+
+    @load_top_cmd.autocomplete("name")
+    async def load_top_autocomplete(self, interaction: discord.Interaction, current: str):
+        return await self._save_slot_autocomplete(interaction, current)
+
+    @app_commands.command(name="saves", description="Browse and manage your saved adventure checkpoints")
+    async def list_saves_top_cmd(self, interaction: discord.Interaction):
+        await self.list_saves_cmd(interaction)
 
 
 

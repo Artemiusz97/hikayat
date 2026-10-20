@@ -117,18 +117,6 @@ COMBAT_CHOICE_SCHEMA = {
                 }
             }
         },
-        "nearby_enemies": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "level": {"type": "integer"},
-                    "hp": {"type": "integer"},
-                    "max_hp": {"type": "integer"}
-                }
-            }
-        },
         "character_outcomes": {
             "type": "array",
             "items": {
@@ -263,6 +251,7 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
     dead_enemies = []
     yielded_enemies = []
     fled_enemies = []
+    surrendered_enemies = []
     fled_battle = False
 
     def _register_kill(m):
@@ -764,20 +753,128 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
             else:
                 combat_log.append(f"🏃 **{acting_char_name}** attempted to disengage, but was cut off by **{target_enemy['name']}**!")
 
-        # 7. ENVIRONMENTAL TRAP
-        elif c_type == "ENVIRONMENTAL_TRAP" or action.get("action_category") == "trap":
+        # 7. ENVIRONMENTAL TRAP OR FREEFORM ENVIRONMENTAL HAZARD
+        elif (
+            c_type == "ENVIRONMENTAL_TRAP"
+            or action.get("action_category") == "trap"
+            or action.get("combat_tactical_archetype") == "environmental_hazard"
+        ):
             if tier in ("crit_success", "success"):
                 trap_stat = max(player_attrs.get("matk", 20), player_attrs.get("atk", 20))
-                trap_dmg = max(12, int(trap_stat * 1.25))
-                if tier == "crit_success":
-                    trap_dmg = int(round(trap_dmg * 1.5))
+                mult = 1.85 if tier == "crit_success" else 1.25
+                trap_dmg = max(12, int(round(trap_stat * mult)))
                 applied_dmg = _apply_damage_to_enemy(target_enemy, trap_dmg)
                 total_enemy_damage += applied_dmg
                 target_enemy.setdefault("status_effects", []).append("Staggered [1 turn]")
                 crit_tag = " *(Critical hit!)*" if tier == "crit_success" else ""
-                combat_log.append(f"⚙️ **{acting_char_name}** sprung an environmental trap on **{target_enemy['name']}**: Dealt **{applied_dmg} damage** and Staggered them{crit_tag}!")
+                combat_log.append(f"⚙️ **{acting_char_name}** triggered an environmental hazard on **{target_enemy['name']}**: Dealt **{applied_dmg} damage** and Staggered them{crit_tag}!")
             else:
-                combat_log.append(f"⚙️ **{acting_char_name}** attempted to spring an environmental trap on **{target_enemy['name']}**, but it failed to trigger!")
+                combat_log.append(f"⚙️ **{acting_char_name}** attempted to use the environment against **{target_enemy['name']}**, but it failed to trigger!")
+
+        # 8. FREEFORM COMBAT PARLEY (Morale-Gated Surrender / Intimidation)
+        elif action.get("combat_tactical_archetype") == "combat_parley":
+            enemy_tier_rank = int(target_enemy.get("tier_rank", 2) or 2)
+            enemy_hp_pct = target_enemy.get("hp", 100) / max(1, target_enemy.get("max_hp", 100))
+            if tier == "crit_success" or (tier == "success" and enemy_tier_rank <= 3 and enemy_hp_pct <= 0.50):
+                surrendered_enemies.append(target_enemy["name"])
+                fled_enemies.append(target_enemy["name"])
+                target_enemy["hp"] = 0
+                target_enemy["surrendered"] = True
+                combat_log.append(
+                    f"🏳️ **{acting_char_name}** broke **{target_enemy['name']}**'s will to fight! "
+                    f"**{target_enemy['name']}** dropped their weapon and surrendered!"
+                )
+            elif tier == "success":
+                target_enemy.setdefault("status_effects", []).append("Hesitating / Demoralized [-25% ATK] [2 turns]")
+                target_enemy.setdefault("status_effects", []).append("Staggered [1 turn]")
+                combat_log.append(
+                    f"🗣️ **{acting_char_name}** shook **{target_enemy['name']}**'s resolve! "
+                    f"They are **Hesitating / Demoralized (-25% ATK)** and **Staggered** for 1 turn!"
+                )
+            else:
+                combat_log.append(
+                    f"🗣️ **{acting_char_name}** attempted to parley with **{target_enemy['name']}**, "
+                    f"but they refused to yield!"
+                )
+
+        # 9. FREEFORM TACTICAL DEBUFF (Sabotage / Blind / Feint)
+        elif action.get("combat_tactical_archetype") == "tactical_debuff":
+            if tier in ("crit_success", "success"):
+                target_enemy.setdefault("status_effects", []).append("Vulnerable [-25% EVA, -20% ATK] [2 turns]")
+                target_enemy.setdefault("status_effects", []).append("Staggered [1 turn]")
+                combat_log.append(
+                    f"🎯 **{acting_char_name}** executed a tactical disruption on **{target_enemy['name']}**: "
+                    f"Inflicted **Vulnerable (-25% EVA, -20% ATK)** and **Staggered [1 turn]**!"
+                )
+            else:
+                combat_log.append(
+                    f"🎯 **{acting_char_name}** attempted a tactical disruption against **{target_enemy['name']}**, "
+                    f"but they anticipated the feint!"
+                )
+
+        # 10. FREEFORM REPOSITION (Break Tether / Evasion + Flanking Primer)
+        elif action.get("combat_tactical_archetype") == "reposition":
+            if tier in ("crit_success", "success"):
+                acting_char_data.setdefault("status_effects", []).append("Evasive Maneuver [+30% EVA] [1 turn]")
+                acting_char_data.setdefault("status_effects", []).append("Flanking Advantage [+25% ACC, +20% ATK] [2 turns]")
+                player_attrs["dodge_chance"] = min(85, player_attrs.get("dodge_chance", 5) + 30)
+                # Clear any active grapple/restraint tether in physical_state
+                try:
+                    phys = session.get("physical_state") if isinstance(session, dict) else None
+                    if isinstance(phys, dict) and isinstance(phys.get("actors"), dict):
+                        for ak, av in phys["actors"].items():
+                            if ak.lower() == acting_char_name.lower() and isinstance(av, dict):
+                                av["tether"] = "none"
+                except Exception:
+                    pass
+                combat_log.append(
+                    f"💨 **{acting_char_name}** repositioned with agile footwork! "
+                    f"Cleared restraints, gained **+30% Evasion** this turn, and secured **Flanking Advantage (+25% ACC, +20% ATK)**!"
+                )
+            else:
+                combat_log.append(
+                    f"💨 **{acting_char_name}** tried to reposition around **{target_enemy['name']}**, "
+                    f"but was forced back!"
+                )
+
+        # 11. FREEFORM CALLED SHOT (Precision Targeted Strike + 40% DT Pierce + Body-Part Debuff)
+        elif action.get("combat_tactical_archetype") == "called_shot":
+            if tier in ("crit_success", "success"):
+                reduced_armor = dict(enemy_armor)
+                reduced_armor["base_dt"] = int(reduced_armor.get("base_dt", 0) * 0.60)
+                tactical_res = calculate_tactical_damage(
+                    attacker_attrs=player_attrs,
+                    defender_attrs=enemy_attrs,
+                    weapon_meta=player_weapon,
+                    armor_meta=reduced_armor,
+                    tier="success",
+                    attacker_level=acting_char_data.get("level", 1),
+                    defender_max_hp=target_enemy.get("max_hp", 100),
+                )
+                mult = 1.60 if tier == "crit_success" else 1.15
+                cs_dmg = max(6, int(round(tactical_res["damage"] * mult)))
+                applied_dmg = _apply_damage_to_enemy(target_enemy, cs_dmg)
+                total_enemy_damage += applied_dmg
+
+                lbl_low = str(action.get("label", "")).lower()
+                if any(w in lbl_low for w in ("eye", "eyes", "head", "face", "visor", "sensor", "helm")):
+                    part_status = "Blinded [-25% ACC] [2 turns]"
+                elif any(w in lbl_low for w in ("hand", "wrist", "arm", "weapon", "grip", "blade", "gun")):
+                    part_status = "Disarmed [-25% ATK] [2 turns]"
+                else:
+                    part_status = "Crippled [-25% EVA] [2 turns]"
+                    target_enemy.setdefault("status_effects", []).append("Staggered [1 turn]")
+                target_enemy.setdefault("status_effects", []).append(part_status)
+                crit_tag = " *(Critical Called Shot!)*" if tier == "crit_success" else ""
+                combat_log.append(
+                    f"🎯 **{acting_char_name}** landed a precision called shot on **{target_enemy['name']}**: "
+                    f"Dealt **{applied_dmg} damage** (piercing 40% armor) and inflicted **{part_status.split('[')[0].strip()}**{crit_tag}!"
+                )
+            else:
+                combat_log.append(
+                    f"🎯 **{acting_char_name}** aimed a called shot at **{target_enemy['name']}**, "
+                    f"but the narrow target slipped out of reach!"
+                )
 
         else:
             action_stance = action.get("stance")
@@ -1168,14 +1265,23 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
     if fled_battle:
         # Player disengaged and escaped: hostiles remain alive elsewhere but encounter ends
         session["nearby_enemies"] = []
-        session["nearby_enemies"] = []
         surviving_enemies = []
     else:
         for m in enemies:
             if m["name"] in yielded_enemies:
                 pass # Removed from fight, no XP/Gold, but NOT dead and NOT surviving to attack next turn.
             elif m["name"] in fled_enemies:
-                pass # Fled from fight, no XP/Gold.
+                if m.get("surrendered") or m["name"] in surrendered_enemies:
+                    t_rank = m.get("tier_rank")
+                    if not t_rank:
+                        t_name = str(m.get("tier", "standard")).lower()
+                        t_rank = 5 if t_name == "boss" else (4 if t_name == "miniboss" else (3 if t_name == "elite" else (1 if t_name == "minion" else 2)))
+                    base_xp, base_gold = TIER_REWARD_SCALING.get(t_rank, (75, 25))
+                    multiplier = m.get("xp_multiplier", 1.0)
+                    xp_gain += int(base_xp * multiplier)
+                    gold_gain += int(base_gold * multiplier)
+                else:
+                    pass # Fled from fight, no XP/Gold.
             elif m.get("hp", 0) <= 0:
                 if m["name"] not in dead_enemies:
                     dead_enemies.append(m["name"])
@@ -1209,7 +1315,6 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
             m["intent"] = random.choice(intents)
 
     session["nearby_enemies"] = surviving_enemies
-    session["nearby_enemies"] = surviving_enemies
     session["current_npcs"] = current_npcs
 
     # Narrative Directive for LLM
@@ -1222,9 +1327,15 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
         from mechanics.combat import resolve_sparring_defeat
         directive_lines.append(resolve_sparring_defeat({"name": yielded_enemies[0]}))
 
+    if surrendered_enemies:
+        names = ", ".join(surrendered_enemies)
+        directive_lines.append(f"- Enemies Surrendered: {names} dropped weapons and yielded to the party. Narrate their surrender.")
+
     if fled_enemies:
-        names = ", ".join(fled_enemies)
-        directive_lines.append(f"- Enemies Fled: {names} broke rank and fled the battlefield.")
+        actual_fled = [n for n in fled_enemies if n not in surrendered_enemies]
+        if actual_fled:
+            names = ", ".join(actual_fled)
+            directive_lines.append(f"- Enemies Fled: {names} broke rank and fled the battlefield.")
 
     if fled_battle:
         directive_lines.append("- Escape: The party successfully disengaged and fled from combat. Narrate their tactical retreat.")
@@ -1255,6 +1366,8 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
         "yielded_monsters": yielded_enemies,
         "fled_enemies": fled_enemies,
         "fled_monsters": fled_enemies,
+        "surrendered_enemies": surrendered_enemies,
+        "surrendered_monsters": surrendered_enemies,
         "enemy_damage": total_enemy_damage,
         "monster_damage": total_enemy_damage,
         "surviving_enemies": surviving_enemies,
@@ -1278,7 +1391,6 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
 
     # Session enemies and NPCs were already mutated by precompute_combat_turn
     enemies = session.get("nearby_enemies", [])
-    llm_outcome["nearby_enemies"] = enemies
     llm_outcome["nearby_enemies"] = enemies
     llm_outcome["npcs_present"] = session.get("current_npcs", [])
 
@@ -1520,8 +1632,6 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
 
         if all_downed:
             session["nearby_enemies"] = []
-            session["nearby_enemies"] = []
-            llm_outcome["nearby_enemies"] = []
             llm_outcome["nearby_enemies"] = []
 
             for char, _ in party:

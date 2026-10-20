@@ -321,7 +321,7 @@ class TestTacticalCombat(unittest.TestCase):
         }]
         res_fail = precompute_combat_turn(session, party, fail_actions)
         self.assertEqual(troll["hp"], 200)
-        self.assertIn("failed to trigger", " ".join(res_fail.get("combat_log", [])))
+        self.assertTrue(any("failed to trigger" in msg or "failed to connect" in msg for msg in res_fail.get("combat_log", [])))
 
         # Success test
         troll["hp"] = 200

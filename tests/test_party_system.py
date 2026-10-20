@@ -1,4 +1,5 @@
 import unittest
+import json
 import db
 import game_engine
 import mechanics.combat as combat
@@ -125,14 +126,27 @@ class TestPartySystem(unittest.TestCase):
 
         game_engine.apply_outcome(sess_id, party, outcome, actions=actions)
 
-        # Verify not recruited and cooldown is active
+        # Verify not recruited and 24h / until next day cooldown is active
         self.assertEqual(len(db.get_session_party_npcs(sess_id)), 0)
         cd = db.get_recruitment_cooldown(sess_id, "Severus")
-        self.assertEqual(cd, 3)
+        self.assertGreater(cd, 0)
 
-        # Next turn tick
+        # Cooldown remains active across turn ticks on the same day
         db.decrement_recruitment_cooldowns(sess_id)
-        self.assertEqual(db.get_recruitment_cooldown(sess_id, "Severus"), 2)
+        self.assertGreater(db.get_recruitment_cooldown(sess_id, "Severus"), 0)
+
+        # Once the day rolls over to next day (e.g. resting/sleeping or 24 hours passing), cooldown expires
+        db.update_session_time(sess_id, current_day=2, current_minute=480)
+        self.assertEqual(db.get_recruitment_cooldown(sess_id, "Severus"), 0)
+
+    def test_explicit_turn_recruitment_cooldown(self):
+        """Explicit turn cooldown counts down per turn tick."""
+        uid = 99885
+        sess_id = db.create_session(uid, "solo", 1, "vivid", "individual", False, scenario="fantasy")
+        db.set_recruitment_cooldown(sess_id, "Garrick", turns=3)
+        self.assertEqual(db.get_recruitment_cooldown(sess_id, "Garrick"), 3)
+        db.decrement_recruitment_cooldowns(sess_id)
+        self.assertEqual(db.get_recruitment_cooldown(sess_id, "Garrick"), 2)
 
     def test_companion_dismissal_and_return(self):
         """Dismissing companion removes from party and returns origin location."""
@@ -226,6 +240,82 @@ class TestPartySystem(unittest.TestCase):
         exit_idx = next(i for i, l in enumerate(labels) if "step away" in l.lower() or "thank" in l.lower())
         recruit_idx = next(i for i, l in enumerate(labels) if "Invite Seraphine Quill" in l)
         self.assertLess(recruit_idx, exit_idx)
+
+    def test_dialogue_recruitment_blocked_in_non_combat(self):
+        """In non-combat scenarios, party recruitment is completely blocked from choices."""
+        uid = 99882
+        char = db.create_character(uid, "Maya", "Student", "high_school_drama")
+        sess_id = db.create_session(uid, "solo", 1, "vivid", "individual", False, scenario="high_school_drama")
+
+        raw_choices = [
+            {"label": "Discuss student council duties with Seo-ah Vance", "stat": "CHA", "requirement": 6},
+            {"label": "Invite Seo-ah Vance to join your party as a permanent companion", "stat": "CHA", "requirement": 6},
+            {"label": "Thank Seo-ah Vance and head to class", "stat": "NONE", "requirement": 0}
+        ]
+
+        from cogs.adventure import AdventureCog
+        cleaned = AdventureCog._clean_choices(
+            raw_choices,
+            scenario="high_school_drama",
+            location="Oakridge High ➔ Hallway",
+            char=char,
+            dialogue_partner="Seo-ah Vance",
+            current_npcs=[{"name": "Seo-ah Vance"}],
+            session_id=sess_id
+        )
+
+        labels = [c["label"].lower() for c in cleaned]
+        self.assertFalse(any("party" in l or "recruit" in l or "companion" in l for l in labels))
+        self.assertTrue(any("student council" in l for l in labels))
+
+    def test_dialogue_recruitment_blocked_for_merchant_or_enemy(self):
+        """Merchants and active enemies cannot be auto-offered recruitment in combat scenarios."""
+        uid = 99883
+        char = db.create_character(uid, "Hero", "Warrior", "fantasy")
+        sess_id = db.create_session(uid, "solo", 1, "vivid", "individual", False, scenario="fantasy")
+
+        # 1. Register a merchant in lorebook
+        db.upsert_lorebook_entity(
+            sess_id, "person", "Barnaby", "The local apothecary merchant and potion vendor.",
+            "neutral"
+        )
+
+        from cogs.adventure import AdventureCog
+        raw_choices = [
+            {"label": "Ask Barnaby about his wares", "stat": "CHA", "requirement": 5},
+            {"label": "Thank Barnaby and step away", "stat": "NONE", "requirement": 0}
+        ]
+        cleaned_merchant = AdventureCog._clean_choices(
+            raw_choices,
+            scenario="fantasy",
+            location="Solaria ➔ Alchemy Shop",
+            char=char,
+            dialogue_partner="Barnaby",
+            current_npcs=[{"name": "Barnaby"}],
+            session_id=sess_id
+        )
+        labels_merch = [c["label"].lower() for c in cleaned_merchant]
+        self.assertFalse(any("join your party" in l for l in labels_merch))
+
+        # 2. Hostile enemy in active_enemies
+        with db.get_conn() as conn:
+            conn.execute(
+                "UPDATE sessions SET nearby_enemies_json = ? WHERE id = ?",
+                (json.dumps([{"name": "Bandit Leader Malor", "hp": 40, "max_hp": 40}]), sess_id)
+            )
+            conn.commit()
+
+        cleaned_enemy = AdventureCog._clean_choices(
+            [{"label": "Negotiate with Bandit Leader Malor", "stat": "CHA", "requirement": 10}],
+            scenario="fantasy",
+            location="Forest ➔ Camp",
+            char=char,
+            dialogue_partner="Bandit Leader Malor",
+            current_npcs=[{"name": "Bandit Leader Malor"}],
+            session_id=sess_id
+        )
+        labels_enemy = [c["label"].lower() for c in cleaned_enemy]
+        self.assertFalse(any("join your party" in l for l in labels_enemy))
 
 
 if __name__ == "__main__":

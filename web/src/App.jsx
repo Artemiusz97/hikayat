@@ -13,11 +13,13 @@ function App() {
   } = useAuth();
 
   const {
-    session, setSession, pausedOnDashboard, loading: sessionLoading, processingTurn, isStreaming, streamingNarrative, streamingState,
+    session, setSession, pausedOnDashboard, loading: sessionLoading, processingTurn, pendingAction, isStreaming, streamingNarrative, streamingState,
     waitingForParty, partyStatus, lastSyncTimestamp,
     partyChatMessages, onlineUserIds, sendPartyChat,
     startSession, joinSession, submitAction,
     exitToDashboard, resumeSession, endSession, retryGeneration,
+    rerollImage, rerollingImage,
+    actionError, clearActionError,
     refreshSession
   } = useGameSession(user, character);
 
@@ -29,7 +31,12 @@ function App() {
     return <AuthView loginGuest={loginGuest} loginDiscord={loginDiscord} />;
   }
 
-  if (!sessionLoading && (!session || pausedOnDashboard)) {
+  // Cold-start initial loading: Only show full-screen loader when there is no session and user is not on dashboard
+  if (sessionLoading && !session && !pausedOnDashboard) {
+    return <div className="flex h-screen items-center justify-center text-fantasy-accent">Summoning Reality...</div>;
+  }
+
+  if (!session || pausedOnDashboard) {
     return (
       <DashboardView
         user={user}
@@ -68,6 +75,7 @@ function App() {
       setSession={setSession}
       lastSyncTimestamp={lastSyncTimestamp}
       processingTurn={processingTurn}
+      pendingAction={pendingAction}
       isStreaming={isStreaming}
       streamingNarrative={streamingNarrative}
       streamingState={streamingState}
@@ -80,6 +88,10 @@ function App() {
       exitToDashboard={exitToDashboard}
       endSession={endSession}
       retryGeneration={retryGeneration}
+      rerollImage={rerollImage}
+      rerollingImage={rerollingImage}
+      actionError={actionError}
+      clearActionError={clearActionError}
       leaveSession={logout}
     />
   );

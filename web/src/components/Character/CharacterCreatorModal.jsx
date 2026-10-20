@@ -13,6 +13,45 @@ const STAT_KEYS = [
 
 const DEFAULT_STATS = { str: 1, per: 1, end: 1, cha: 1, int: 1, agi: 1, luk: 1 };
 
+const FEMALE_TEXTURE_OPTIONS = [
+  { value: 'Perky & High-Set', label: 'Perky & High-Set' },
+  { value: 'Pillowy Soft & Yielding', label: 'Pillowy Soft & Yielding' },
+  { value: 'Firm & Toned', label: 'Firm & Toned' },
+  { value: 'Smooth & Supple', label: 'Smooth & Supple' },
+  { value: 'Heavy & Plush', label: 'Heavy & Plush' },
+  { value: 'Bouncy & Sensitive', label: 'Bouncy & Sensitive' },
+  { value: 'Tender & Delicate', label: 'Tender & Delicate' },
+  { value: 'Shapely Teardrop', label: 'Shapely Teardrop' },
+  { value: 'Compact & Dense', label: 'Compact & Dense' },
+  { value: 'Sensitive & Responsive', label: 'Sensitive & Responsive' },
+  { value: 'Warm & Supple', label: 'Warm & Supple' },
+  { value: 'Soft & Downy Chest Fur', label: 'Soft & Downy Chest Fur (Beastfolk)' },
+  { value: 'Silky Fur-Rimmed', label: 'Silky Fur-Rimmed (Beastfolk)' },
+  { value: 'Velvety Underbelly Down', label: 'Velvety Underbelly Down (Beastfolk)' },
+  { value: 'Fluffy Plush-Accented', label: 'Fluffy Plush-Accented (Beastfolk)' },
+  { value: 'Silky Warm with Smooth Micro-Scales', label: 'Silky Warm with Smooth Micro-Scales (Scaly/Draconic)' },
+  { value: 'Supple with Shimmering Scale Borders', label: 'Supple with Shimmering Scale Borders (Scaly/Draconic)' },
+  { value: 'Sleek & Supple Drake-Contour', label: 'Sleek & Supple Drake-Contour (Scaly/Draconic)' },
+  { value: 'Downy Feather-Lined', label: 'Downy Feather-Lined (Avian/Winged)' },
+  { value: 'Light & Buoyant', label: 'Light & Buoyant (Avian/Winged)' },
+  { value: 'Velvety Plumage Accents', label: 'Velvety Plumage Accents (Avian/Winged)' },
+  { value: 'Glistening & Ultra-Smooth', label: 'Glistening & Ultra-Smooth (Aquatic)' },
+];
+
+const MALE_TEXTURE_OPTIONS = [
+  { value: 'Veined & Firm', label: 'Veined & Firm' },
+  { value: 'Smooth & Heavy', label: 'Smooth & Heavy' },
+  { value: 'Toned & Athletic', label: 'Toned & Athletic' },
+  { value: 'Warm & Pulsing', label: 'Warm & Pulsing' },
+  { value: 'Slender & Ultra-Sensitive', label: 'Slender & Ultra-Sensitive' },
+  { value: 'Dense & Formidable', label: 'Dense & Formidable' },
+  { value: 'Balanced & Firm', label: 'Balanced & Firm' },
+  { value: 'Soft Fur-Ringed Base', label: 'Soft Fur-Ringed Base (Beastfolk)' },
+  { value: 'Silky Fur-Dusted & Resilient', label: 'Silky Fur-Dusted & Resilient (Beastfolk)' },
+  { value: 'Sleek Scaled Base & Firm', label: 'Sleek Scaled Base & Firm (Scaly/Draconic)' },
+  { value: 'Sturdy Draconic Build', label: 'Sturdy Draconic Build (Scaly/Draconic)' },
+];
+
 const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -44,6 +83,9 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
 
   const effectiveGender = gender === '__custom__' ? customGender.trim() || 'Non-binary' : gender;
   const effectiveRace = race === '__custom__' ? customRace.trim() || 'Human' : race;
+  const egLower = effectiveGender.toLowerCase();
+  const isMale = ['male', 'man', 'boy', 'lord', 'he', 'him', 'his'].some(kw => egLower.includes(kw)) && !['female', 'woman', 'girl', 'lady', 'she', 'her'].some(kw => egLower.includes(kw));
+  const isFemale = ['female', 'woman', 'girl', 'lady', 'she', 'her'].some(kw => egLower.includes(kw)) || (!isMale && egLower.includes('fem'));
 
   const handleResetStats = () => setStats({ ...DEFAULT_STATS });
 
@@ -66,6 +108,9 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
     setSubmitting(true);
     setError(null);
     try {
+      const finalBSize = isMale ? undefined : breastSize;
+      const finalPSize = isFemale ? undefined : penisSize;
+
       await onCreateCharacter({
         name: name.trim(),
         gender: effectiveGender,
@@ -78,12 +123,12 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
         int: stats.int,
         agi: stats.agi,
         luk: stats.luk,
-        breast_size: breastSize,
-        penis_size: penisSize,
+        breast_size: finalBSize,
+        penis_size: finalPSize,
         asset_texture: assetTexture,
         appearance: {
-          breast_size: breastSize,
-          penis_size: penisSize,
+          breast_size: finalBSize,
+          penis_size: finalPSize,
           asset_texture: assetTexture,
         },
       });
@@ -289,63 +334,53 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
 
                   {showIntimate && (
                     <div className="mt-2 p-3 bg-pink-950/20 border border-pink-900/50 rounded-lg space-y-2.5 text-xs">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[10px] uppercase font-bold text-pink-300 mb-1">
-                            Breast Size Tier
-                          </label>
-                          <select
-                            value={breastSize}
-                            onChange={(e) => setBreastSize(e.target.value)}
-                            className="w-full bg-fantasy-dark border border-pink-900/60 p-1.5 rounded text-xs text-gray-200"
-                          >
-                            <option value="flat">Flat (AA-Cup)</option>
-                            <option value="small">Petite (A-B Cup)</option>
-                            <option value="average">Proportional (C)</option>
-                            <option value="large">Voluptuous (D-DD)</option>
-                            <option value="huge">Bountiful (E+)</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] uppercase font-bold text-purple-300 mb-1">
-                            Penis Size Tier
-                          </label>
-                          <select
-                            value={penisSize}
-                            onChange={(e) => setPenisSize(e.target.value)}
-                            className="w-full bg-fantasy-dark border border-purple-900/60 p-1.5 rounded text-xs text-gray-200"
-                          >
-                            <option value="small">Petite (Compact)</option>
-                            <option value="average">Proportional (Avg)</option>
-                            <option value="large">Formidable (Large)</option>
-                            <option value="huge">Massive (Huge)</option>
-                          </select>
-                        </div>
+                      <div>
+                        {isMale ? (
+                          <div>
+                            <label className="block text-[10px] uppercase font-bold text-purple-300 mb-1">
+                              Penis Size Tier
+                            </label>
+                            <select
+                              value={penisSize}
+                              onChange={(e) => setPenisSize(e.target.value)}
+                              className="w-full bg-fantasy-dark border border-purple-900/60 p-1.5 rounded text-xs text-gray-200"
+                            >
+                              <option value="small">Petite (Compact)</option>
+                              <option value="average">Proportional (Avg)</option>
+                              <option value="large">Formidable (Large)</option>
+                              <option value="huge">Massive (Huge)</option>
+                            </select>
+                          </div>
+                        ) : (
+                          <div>
+                            <label className="block text-[10px] uppercase font-bold text-pink-300 mb-1">
+                              Breast Size Tier
+                            </label>
+                            <select
+                              value={breastSize}
+                              onChange={(e) => setBreastSize(e.target.value)}
+                              className="w-full bg-fantasy-dark border border-pink-900/60 p-1.5 rounded text-xs text-gray-200"
+                            >
+                              <option value="flat">Flat (AA-Cup)</option>
+                              <option value="small">Petite (A-B Cup)</option>
+                              <option value="average">Proportional (C)</option>
+                              <option value="large">Voluptuous (D-DD)</option>
+                              <option value="huge">Bountiful (E+)</option>
+                            </select>
+                          </div>
+                        )}
                       </div>
 
                       <div>
                         <div className="flex items-center justify-between mb-1">
                           <label className="block text-[10px] uppercase font-bold text-gray-400">
-                            Tactile Texture / Feature
+                            Tactile Feature &amp; Texture ({isMale ? 'Phallus' : 'Breasts'})
                           </label>
                           <button
                             type="button"
                             onClick={() => {
-                              const femalePool = [
-                                'Perky & High-Set', 'Pillowy Soft & Yielding', 'Firm & Toned', 'Smooth & Supple',
-                                'Heavy & Plush', 'Bouncy & Sensitive', 'Tender & Delicate', 'Shapely Teardrop',
-                                'Compact & Dense', 'Soft & Downy Chest Fur', 'Silky Fur-Rimmed', 'Downy Feather-Lined',
-                                'Silky Warm with Smooth Micro-Scales'
-                              ];
-                              const malePool = [
-                                'Veined & Firm', 'Smooth & Heavy', 'Toned & Athletic', 'Warm & Pulsing',
-                                'Slender & Ultra-Sensitive', 'Dense & Formidable', 'Balanced & Firm',
-                                'Soft Fur-Ringed Base', 'Sleek Scaled Base & Firm', 'Sturdy Draconic Build'
-                              ];
-                              const egLower = effectiveGender.toLowerCase();
-                              const isM = ['male', 'man', 'boy'].some(kw => egLower.includes(kw)) && !['female', 'woman', 'girl'].some(kw => egLower.includes(kw));
-                              const pool = isM ? malePool : femalePool;
-                              setAssetTexture(pool[Math.floor(Math.random() * pool.length)]);
+                              const pool = isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS;
+                              setAssetTexture(pool[Math.floor(Math.random() * pool.length)].value);
                             }}
                             className="text-[10px] text-pink-400 hover:text-pink-300 flex items-center gap-1 font-semibold"
                           >
@@ -358,24 +393,9 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                           className="w-full bg-fantasy-dark border border-fantasy-border/70 p-1.5 rounded text-xs text-gray-200"
                         >
                           <option value="">Auto-Assign dynamically based on race</option>
-                          <option value="Perky & High-Set">Perky &amp; High-Set</option>
-                          <option value="Pillowy Soft & Yielding">Pillowy Soft &amp; Yielding</option>
-                          <option value="Firm & Toned">Firm &amp; Toned</option>
-                          <option value="Smooth & Supple">Smooth &amp; Supple</option>
-                          <option value="Heavy & Plush">Heavy &amp; Plush</option>
-                          <option value="Bouncy & Sensitive">Bouncy &amp; Sensitive</option>
-                          <option value="Tender & Delicate">Tender &amp; Delicate</option>
-                          <option value="Shapely Teardrop">Shapely Teardrop</option>
-                          <option value="Compact & Dense">Compact &amp; Dense</option>
-                          <option value="Soft & Downy Chest Fur">Soft &amp; Downy Chest Fur (Beastfolk)</option>
-                          <option value="Silky Fur-Rimmed">Silky Fur-Rimmed (Beastfolk)</option>
-                          <option value="Silky Warm with Smooth Micro-Scales">Silky Warm with Smooth Micro-Scales</option>
-                          <option value="Downy Feather-Lined">Downy Feather-Lined</option>
-                          <option value="Veined & Firm">Veined &amp; Firm (Male)</option>
-                          <option value="Smooth & Heavy">Smooth &amp; Heavy (Male)</option>
-                          <option value="Toned & Athletic">Toned &amp; Athletic (Male)</option>
-                          <option value="Warm & Pulsing">Warm &amp; Pulsing (Male)</option>
-                          <option value="Dense & Formidable">Dense &amp; Formidable (Male)</option>
+                          {(isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS).map(opt => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                          ))}
                         </select>
                       </div>
                     </div>

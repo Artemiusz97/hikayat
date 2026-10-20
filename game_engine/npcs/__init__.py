@@ -3,12 +3,16 @@ from .dialogue_tracking import (
     DIALOGUE_STALL_VERBS,
     count_dialogue_stall_turns,
     format_dialogue_stall_directive,
+    compute_scene_beat_linger_turns,
+    format_organic_npc_initiative_directive,
     build_scene_escalation_and_consequence_directives,
+    evaluate_and_tick_scene_tension_timer,
     get_session_dialogue_partners,
     is_dialogue_partner,
     extract_speaking_npcs_from_narrative,
     is_npc_invited_in_action,
     can_chime_in_to_dialogue,
+    evaluate_scene_attention_transition,
     DIALOGUE_TITLE_WORDS,
 )
 from .presence import (
@@ -23,18 +27,29 @@ from .reconciliation import (
     process_scene_npcs,
     _sanitize_outcome_person_names,
 )
+from .stage_manager import (
+    compute_pre_turn_stage,
+    format_ring2_attentive_peer_cues,
+    resolve_post_turn_stage_delta,
+    update_stage_blocking_and_composure_post_turn,
+    derive_initial_micro_blocking,
+)
 
 __all__ = [
     "DIALOGUE_STALL_VERBS",
     "DIALOGUE_TITLE_WORDS",
     "count_dialogue_stall_turns",
     "format_dialogue_stall_directive",
+    "compute_scene_beat_linger_turns",
+    "format_organic_npc_initiative_directive",
     "build_scene_escalation_and_consequence_directives",
+    "evaluate_and_tick_scene_tension_timer",
     "get_session_dialogue_partners",
     "is_dialogue_partner",
     "extract_speaking_npcs_from_narrative",
     "is_npc_invited_in_action",
     "can_chime_in_to_dialogue",
+    "evaluate_scene_attention_transition",
     "sync_hostile_entities",
     "classify_scene_npcs",
     "extract_departed_npcs_from_narrative",
@@ -43,4 +58,9 @@ __all__ = [
     "_distribute_fallback_locations",
     "process_scene_npcs",
     "_sanitize_outcome_person_names",
+    "compute_pre_turn_stage",
+    "format_ring2_attentive_peer_cues",
+    "resolve_post_turn_stage_delta",
+    "update_stage_blocking_and_composure_post_turn",
+    "derive_initial_micro_blocking",
 ]

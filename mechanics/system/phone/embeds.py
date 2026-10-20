@@ -497,8 +497,9 @@ def _build_social_profile_embed(session_id: int, profile: dict, branding: dict) 
         if profile.get("is_sibling_friend"):
             mutual_str += f" *(Sibling: {profile.get('sibling_name')})*"
 
+        is_cd = bool(profile.get("on_cooldown") or cooldown > 0)
         status_str = "✅ **In Your Contacts** (Line Messenger unlocked)" if is_already else (
-            f"⏳ **Request Pending / Declined** ({cooldown} turn(s) cooldown)" if cooldown > 0 else
+            "⏳ **Request Pending / Declined** (Available tomorrow)" if is_cd else
             "✨ *Not yet connected. Tap 'Send Friend Request' below!*"
         )
 

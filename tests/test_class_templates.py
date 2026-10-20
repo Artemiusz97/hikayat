@@ -21,7 +21,8 @@ class TestClassTemplates(unittest.TestCase):
         self.assertEqual(list(self.starting_weapons.keys()), expected_scenarios)
 
         for scen, classes in self.class_templates.items():
-            self.assertEqual(len(classes), 6, f"Scenario '{scen}' should have exactly 6 classes")
+            expected_count = 14 if scen == "high_school_drama" else 6
+            self.assertEqual(len(classes), expected_count, f"Scenario '{scen}' should have {expected_count} classes")
             for c_name, c_data in classes.items():
                 self.assertIn("description", c_data, f"Class {c_name} missing description")
                 self.assertTrue(len(c_data["description"]) > 0)
@@ -43,18 +44,21 @@ class TestClassTemplates(unittest.TestCase):
         self.assertIn("Aspiring Actor", hs_classes)
         self.assertIn("School Journalist", hs_classes)
         self.assertIn("Occult Enthusiast", hs_classes)
+        self.assertEqual(len(hs_classes), 14)
 
     def test_starting_weapons_count(self):
         for scen, weapons in self.starting_weapons.items():
-            self.assertEqual(len(weapons), 6, f"Scenario '{scen}' should have 6 starting weapons")
+            expected_weapons = 0 if scen == "high_school_drama" else 6
+            self.assertEqual(len(weapons), expected_weapons, f"Scenario '{scen}' should have {expected_weapons} starting weapons")
 
     def test_character_data_helpers(self):
         all_classes = cd.get_all_class_templates()
-        self.assertEqual(len(all_classes), 54)
+        self.assertEqual(len(all_classes), 62)
 
         for scen, classes in self.class_templates.items():
             scen_classes = cd.get_class_templates(scen)
-            self.assertEqual(len(scen_classes), 6)
+            expected_count = 14 if scen == "high_school_drama" else 6
+            self.assertEqual(len(scen_classes), expected_count)
             for c_name in classes:
                 gear_map = cd.get_starter_gear_by_class(scen, c_name)
                 self.assertIsInstance(gear_map, dict)
@@ -66,7 +70,8 @@ class TestClassTemplates(unittest.TestCase):
                 self.assertTrue(len(items) >= 1)
 
             weapons = cd.get_starting_weapons(scen)
-            self.assertEqual(len(weapons), 6)
+            expected_weapons = 0 if scen == "high_school_drama" else 6
+            self.assertEqual(len(weapons), expected_weapons)
 
 
     def test_equipment_gender_and_race_separation(self):
@@ -97,6 +102,15 @@ class TestClassTemplates(unittest.TestCase):
         for slot, entry in tail_gear.items():
             if entry:
                 self.assertNotIn("tail-slotted", entry[0].lower())
+
+        # 5. Beastfolk / Anthro race gets Tail-Slotted prefix on bottom
+        beast_gear = cd.get_starter_gear_by_class("high_school_drama", "School Journalist", gender="Male", race="Beastfolk / Anthro")
+        self.assertTrue(beast_gear["Bottom"][0].startswith("Tail-Slotted "))
+
+        # 6. High school drama (non-combat) has None for Weapon, Shield, Armor
+        self.assertIsNone(male_journo.get("Weapon"))
+        self.assertIsNone(male_journo.get("Shield"))
+        self.assertIsNone(male_journo.get("Armor"))
 
 
     def test_apply_adventure_loadout_all_template_classes(self):

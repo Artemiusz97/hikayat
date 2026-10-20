@@ -10,6 +10,19 @@ import character_data as cd
 from .core import *
 from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
 
+MAX_SAVE_SLOTS_PER_CHAR = 6
+
+def count_character_adventure_saves(character_id: int) -> int:
+    """Returns the total number of saved checkpoints for a specific character."""
+    if not character_id:
+        return 0
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM adventure_saves WHERE character_id = ?",
+            (character_id,)
+        ).fetchone()
+        return row["cnt"] if row else 0
+
 def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -> dict:
     """Creates or overwrites a named checkpoint save slot for the user's active character."""
     import re
@@ -50,8 +63,8 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
             "SELECT COUNT(*) as cnt FROM adventure_saves WHERE character_id = ?",
             (char_id,)
         ).fetchone()["cnt"]
-        if not existing and total_saves >= 10:
-            raise ValueError("Maximum save slots reached (10 slots per character). Delete an older save first.")
+        if not existing and total_saves >= MAX_SAVE_SLOTS_PER_CHAR:
+            raise ValueError(f"Maximum save slots reached ({MAX_SAVE_SLOTS_PER_CHAR} slots per character). Delete an older save first.")
 
         # Gather all child table data
         child_data = {}
@@ -63,6 +76,8 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
                 cleaned_rows = []
                 for r in rows:
                     rd = dict(r)
+                    if tbl == "households":
+                        rd["_orig_household_id"] = rd.get("id")
                     rd.pop("id", None)
                     cleaned_rows.append(rd)
                 child_data[tbl] = cleaned_rows
@@ -193,13 +208,58 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
             (new_session_id, user_id, now)
         )
 
-        # Restore child tables with remapped session_id
+        # 1. Restore households first to obtain fresh autoincrement IDs and remap session keys
+        household_id_map = {}
+        old_session_id = sess_dict.get("id")
+        old_sess_str = str(old_session_id) if old_session_id else ""
+        new_sess_str = str(new_session_id)
+
+        hh_rows = child_data.get("households", [])
+        for r in hh_rows:
+            row_dict = dict(r)
+            orig_hid = row_dict.pop("_orig_household_id", None)
+            row_dict["session_id"] = new_session_id
+
+            # Remap household_key if it contained the old session ID
+            hh_key = row_dict.get("household_key", "")
+            if old_sess_str and old_sess_str in hh_key:
+                row_dict["household_key"] = hh_key.replace(old_sess_str, new_sess_str)
+
+            for k, v in row_dict.items():
+                if isinstance(v, (dict, list)):
+                    row_dict[k] = json.dumps(v)
+            c_names = ",".join(row_dict.keys())
+            qmarks = ",".join("?" * len(row_dict))
+            cur = conn.execute(f"INSERT OR IGNORE INTO households ({c_names}) VALUES ({qmarks})", list(row_dict.values()))
+            new_hid = cur.lastrowid
+            if not new_hid:
+                existing_hh = conn.execute(
+                    "SELECT id FROM households WHERE session_id = ? AND household_key = ?",
+                    (new_session_id, row_dict.get("household_key"))
+                ).fetchone()
+                if existing_hh:
+                    new_hid = existing_hh["id"]
+            if orig_hid and new_hid:
+                household_id_map[orig_hid] = new_hid
+            sname = row_dict.get("surname", "")
+            if sname and new_hid:
+                household_id_map[sname.lower()] = new_hid
+
+        # 2. Restore remaining child tables with remapped session_id and foreign keys
         for tbl, rows in child_data.items():
+            if tbl == "households":
+                continue
             for r in rows:
                 row_dict = dict(r)
                 row_dict["session_id"] = new_session_id
                 if tbl == "contacts":
                     row_dict["character_id"] = char_id
+                    # Remap foreign key household_id to the new session's household
+                    old_hid = row_dict.get("household_id")
+                    if old_hid:
+                        c_name = row_dict.get("name", "")
+                        c_last = c_name.strip().split()[-1] if c_name else ""
+                        row_dict["household_id"] = household_id_map.get(old_hid) or household_id_map.get(c_last.lower())
                 for k, v in row_dict.items():
                     if isinstance(v, (dict, list)):
                         row_dict[k] = json.dumps(v)

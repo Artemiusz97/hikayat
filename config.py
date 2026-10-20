@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.4.0"
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -95,16 +95,26 @@ def is_channel_allowed(channel_id: int | None, parent_id: int | None = None) -> 
 
 
 # ---------------------------------------------------------------- image gen
-# Optional. Uses ImageRouter (https://imagerouter.io) by default, which
-# exposes an OpenAI-images-compatible endpoint that works with almost any
-# underlying image model. Browse exact model slugs at
-# https://imagerouter.io/models and set IMAGE_ROUTER_MODEL accordingly --
-# the "flux 2 klein 9b" family is on there under a provider/model slug that
-# may change as the catalog is updated, so double check it before relying on
-# the default below.
+# Supports both cloud ImageRouter and local SD WebUI / Forge via /sdapi/v1/txt2img
+IMAGE_PROVIDER = os.getenv("IMAGE_PROVIDER", "imagerouter").lower().strip()
+
+# Local SD WebUI / Forge settings
+FORGE_BASE_URL = os.getenv("FORGE_BASE_URL", "http://127.0.0.1:7860").rstrip("/")
+FORGE_STEPS = int(os.getenv("FORGE_STEPS", "20"))
+FORGE_CFG_SCALE = float(os.getenv("FORGE_CFG_SCALE", "7.0"))
+FORGE_SAMPLER = os.getenv("FORGE_SAMPLER", "Euler a").strip("\"'")
+
+# Cloud ImageRouter settings
 IMAGE_ROUTER_API_KEY = os.getenv("IMAGE_ROUTER_API_KEY", "")
 IMAGE_ROUTER_BASE_URL = os.getenv("IMAGE_ROUTER_BASE_URL", "https://api.imagerouter.io/v1/openai/images/generations")
 IMAGE_ROUTER_MODEL = os.getenv("IMAGE_ROUTER_MODEL", "black-forest-labs/flux-2-klein-9b")
+
+# Directory where generated scene images are saved locally across both Discord & WebUI
+GENERATED_IMAGES_DIR = os.getenv(
+    "GENERATED_IMAGES_DIR",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "data", "generated_images"))
+)
+os.makedirs(GENERATED_IMAGES_DIR, exist_ok=True)
 
 # Sanity checks at import time so the bot fails fast with a clear message
 # instead of dying deep inside a Discord event handler.

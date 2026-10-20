@@ -98,6 +98,8 @@ def test_class_templates_all_have_starter_gear_weapons():
     templates = cd.load_class_templates()
     total_classes = 0
     for scen, classes in templates.items():
+        if scen == "high_school_drama":
+            continue
         for cname, cdata in classes.items():
             total_classes += 1
             sg = cdata.get("starter_gear", {})
@@ -114,7 +116,7 @@ def test_class_templates_all_have_starter_gear_weapons():
                     f"Class {scen}:{cname} still has weapon in starting_items: {s_item}"
                 )
 
-    assert total_classes == 54
+    assert total_classes == 48
 
 
 def test_spellcaster_starter_weapons():

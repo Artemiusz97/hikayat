@@ -1,3 +1,4 @@
+from typing import Dict, Any, List, Optional
 from .constants import *
 import mechanics.narrative.event_handlers
 from mechanics.narrative.events import bus, LocationChangedEvent, NPCSpawnedEvent, NPCStatusChangedEvent, ItemGiftedEvent, ItemGainedEvent, FactionLeadershipChangedEvent, QuestCompletedEvent
@@ -22,10 +23,16 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
     # Decrement recruitment and confession cooldowns for session
     db.decrement_recruitment_cooldowns(session_id)
     db.decrement_confession_cooldowns(session_id)
+    db.decrement_contact_request_cooldowns(session_id)
   
     # Process Party Companion / Social Escort Recruitment & Dismissal
     from scenario_data import is_mechanic_enabled
-    from mechanics.narrative.intent import classify_action_intent, IntentCategory
+    from mechanics.narrative.intent import (
+        classify_action_intent,
+        resolve_action_intent,
+        IntentCategory,
+        is_contact_exchange_action,
+    )
     is_combat_scen = is_mechanic_enabled(scen_key, "tactical_combat")
     from mechanics.narrative.intent import is_escort_dismissal_action
     
@@ -37,10 +44,65 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 for p in curr_party:
                     if p.get("role") in ("Companion", "Friend", "Date", "Study Partner", "Classmate"):
                         db.remove_session_party_npc(session_id, p.get("name", ""))
+
+    # Smartphone Contact Request / Phone Number Exchange
+    for a in (actions or []):
+        a_label = str(a.get("label", ""))
+        a_parsed = resolve_action_intent(a)
+        is_contact_req = (
+            a_parsed.category == IntentCategory.PHONE_CONTACT_EXCHANGE
+            or is_contact_exchange_action(a_label)
+            or (any(kw in a_label.lower() for kw in ("contact info", "phone number", "line id")) and any(kw in a_label.lower() for kw in ("ask", "exchange", "request", "add")))
+        )
+        if is_contact_req:
+            a_check = a.get("check")
+            is_success = is_check_success(a_check, default_if_none=False)
+            target_npc_name = a.get("target_npc") or a.get("combat_target") or a_parsed.target_entity
+            if not target_npc_name:
+                curr_npcs = session.get("current_npcs", []) if session else []
+                for npc in curr_npcs:
+                    n_name = game_engine._get_npc_name(npc)
+                    if n_name and n_name.lower() != "none" and n_name.lower() in a_label.lower():
+                        target_npc_name = n_name
+                        break
+            if not target_npc_name:
+                from mechanics.world.mobility import get_session_dialogue_partners
+                dps = get_session_dialogue_partners(session)
+                if dps:
+                    target_npc_name = dps[0]
+
+            if target_npc_name:
+                if is_success:
+                    existing_c = db.get_contact(session_id, target_npc_name, first_char_id)
+                    b_info = dict(existing_c.get("basic_info") or {}) if existing_c else {}
+                    b_info["contact_added"] = True
+                    b_info["is_contact"] = True
+                    db.upsert_contact(
+                        session_id=session_id,
+                        character_id=first_char_id,
+                        npc_id=target_npc_name,
+                        name=target_npc_name,
+                        basic_info=b_info,
+                        delta_score=8,
+                        track="platonic",
+                        new_general_memory=f"{target_npc_name} gave {first_char_name} their phone number and exchanged Line contact info."
+                    )
+                else:
+                    db.set_contact_request_cooldown(session_id, target_npc_name, hours=24, until_next_day=True)
+                    existing_c = db.get_contact(session_id, target_npc_name, first_char_id)
+                    if existing_c:
+                        db.upsert_contact(
+                            session_id=session_id,
+                            character_id=first_char_id,
+                            npc_id=target_npc_name,
+                            name=target_npc_name,
+                            delta_score=-1,
+                            new_general_memory=f"{target_npc_name} declined to share their contact info with {first_char_name} for now."
+                        )
   
     for a in (actions or []):
         a_label = str(a.get("label", ""))
-        a_parsed = classify_action_intent(a_label)
+        a_parsed = resolve_action_intent(a)
         is_recruit = is_combat_scen and a_parsed.category == IntentCategory.PARTY_RECRUIT
         if is_recruit:
             a_check = a.get("check")
@@ -51,7 +113,11 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
             curr_npcs = session.get("current_npcs", []) if session else []
             for npc in curr_npcs:
                 n_name = game_engine._get_npc_name(npc)
-                if n_name and n_name.lower() != "none" and (n_name.lower() in a_label.lower() or (a_parsed.target_entity and n_name.lower() == a_parsed.target_entity.lower())):
+                if n_name and n_name.lower() != "none" and (
+                    matches_keyword_boundary(a_label.lower(), n_name.lower())
+                    or (a_parsed.target_entity and n_name.lower() == a_parsed.target_entity.lower())
+                    or (str(a.get("target_npc", "")).lower().strip() == n_name.lower())
+                ):
                     target_npc_name = n_name
                     break
             if not target_npc_name and a_parsed.target_entity:
@@ -134,7 +200,10 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                             track="platonic"
                         )
                 else:
-                    db.set_recruitment_cooldown(session_id, target_npc_name, turns=3)
+                    if not is_money_recruit:
+                        db.set_recruitment_cooldown(session_id, target_npc_name, hours=24, until_next_day=True)
+                    else:
+                        db.set_recruitment_cooldown(session_id, target_npc_name, turns=3)
   
     # Auto-register all non-hostile scene NPCs into contacts
     if is_mechanic_enabled(scen_key, "contact_list") or is_mechanic_enabled(scen_key, "relationship_meter"):
@@ -174,15 +243,17 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
             n_role = (npc.get("role") if isinstance(npc, dict) else "") or ""
             n_desc = (npc.get("description") if isinstance(npc, dict) else "") or ""
   
+            n_srt = (npc.get("social_role_type") if isinstance(npc, dict) else "") or ""
             # Check Peer / Role Eligibility (e.g. students vs teachers/parents/clerks in high school)
             import mechanics.social.relationships as relationships
-            if not relationships.is_contact_eligible(name=n_name, role=n_role, description=n_desc, scenario=scen_key):
+            if not relationships.is_contact_eligible(name=n_name, role=n_role, description=n_desc, scenario=scen_key, session_id=session_id, social_role_type=n_srt):
                 continue
 
-            # Contacts require Friend tier (score >= 100) or active party membership
+            # Contacts require Friend tier (score >= 100), active party membership, or explicit contact_added
+            from mechanics.social.relationships import is_unlocked_contact
             existing_c = db.get_contact(session_id, n_name, first_char_id)
             is_party = n_name.lower() in party_names
-            if not is_party and (not existing_c or existing_c.get("relationship_score", 0) < 100):
+            if not is_party and not is_unlocked_contact(existing_c, party_names):
                 continue
   
             n_traits = (npc.get("traits") if isinstance(npc, dict) else []) or []
@@ -351,24 +422,31 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
             
         r_role = rel.get("role", "")
         r_desc = rel.get("description", "")
-        if not r_role or not r_desc:
+        r_srt = rel.get("social_role_type", "")
+        if not r_role or not r_desc or not r_srt:
             for npc in (all_scene_npcs or []):
                 if isinstance(npc, dict) and str(npc.get("name", "")).strip().lower() == str(r_name).strip().lower():
                     r_role = r_role or npc.get("role", "")
                     r_desc = r_desc or npc.get("description", "")
+                    r_srt = r_srt or npc.get("social_role_type", "")
                     break
-        if r_name and not relationships.is_contact_eligible(name=r_name, role=r_role, description=r_desc, scenario=scen_key, session_id=session_id):
+        if r_name and not relationships.is_contact_eligible(name=r_name, role=r_role, description=r_desc, scenario=scen_key, session_id=session_id, social_role_type=r_srt):
             continue
 
+        import namegen
         r_key = r_name.lower()
+        r_first = (r_key.split() or [""])[0]
+        r_given = namegen.extract_first_and_last_name(r_name)[0].lower().strip()
+        r_tokens = {t for t in (r_first, r_given) if len(t) >= 3 and t not in namegen.NAME_PARTICLES_AND_HONORIFICS}
         matched_k = None
         for k in seen_rel_map:
             if k == r_key:
                 matched_k = k
                 break
             k_first = (k.split() or [""])[0]
-            r_first = (r_key.split() or [""])[0]
-            if len(r_first) >= 3 and k_first == r_first:
+            k_given = namegen.extract_first_and_last_name(k)[0].lower().strip()
+            k_tokens = {t for t in (k_first, k_given) if len(t) >= 3 and t not in namegen.NAME_PARTICLES_AND_HONORIFICS}
+            if r_tokens & k_tokens:
                 matched_k = k
                 break
 
@@ -446,7 +524,7 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
             present_npcs=[game_engine._get_npc_name(n) for n in (sess.get("current_npcs") or []) if n],
             scenario=scen_key
         )
-        parsed_a = classify_action_intent(a_lbl, ctx_a)
+        parsed_a = resolve_action_intent(a, ctx_a)
   
         _primary_dp = _sess_dps[0] if _sess_dps else None
         # Check Layer 1, 2, 3 confession intent
@@ -470,19 +548,20 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 is_player_romantic_action = True
   
         # Check Gift Offer intent
-        if parsed_a.category == IntentCategory.GIFT_OFFER:
+        if parsed_a.category == IntentCategory.GIFT_OFFER or a.get("sub_intent") == "gift_offer":
             gift_target_npc = a.get("target_npc") or parsed_a.target_entity or _primary_dp
             gift_item_name = parsed_a.sub_target or parsed_a.metadata.get("item_name", "Gift")
   
         # Check Intimate Act intent
-        if parsed_a.category == IntentCategory.INTIMATE_ACT:
+        a_sub = str(a.get("sub_intent") or parsed_a.sub_target or "").lower()
+        if parsed_a.category == IntentCategory.INTIMATE_ACT or a_sub in ("intercourse", "oral_give", "oral_receive", "anal_give", "anal_receive"):
             if chk_ok:
                 is_player_intimate_action = True
-                if parsed_a.sub_target == "intercourse":
+                if a_sub == "intercourse":
                     is_player_intercourse_action = True
-                elif parsed_a.sub_target in ("oral_give", "oral_receive"):
+                elif a_sub in ("oral_give", "oral_receive"):
                     is_player_oral_action = True
-                elif parsed_a.sub_target in ("anal_give", "anal_receive"):
+                elif a_sub in ("anal_give", "anal_receive"):
                     is_player_intimate_action = True
   
         if chk_ok:
@@ -490,23 +569,38 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 is_player_romantic_action = True
             if matches_keyword_boundary(a_lbl, PLAYER_INTIMATE_ACTION_KEYWORDS, allow_negated=False):
                 is_player_intimate_action = True
-            is_oral_act = matches_keyword_boundary(a_lbl, PLAYER_ORAL_ACTION_KEYWORDS, allow_negated=False) or (parsed_a and parsed_a.sub_target in ("oral_give", "oral_receive"))
+            is_oral_act = matches_keyword_boundary(a_lbl, PLAYER_ORAL_ACTION_KEYWORDS, allow_negated=False) or (a_sub in ("oral_give", "oral_receive"))
             if is_oral_act:
                 is_player_oral_action = True
                 is_player_intimate_action = True
-            is_anal_act = (parsed_a and parsed_a.sub_target in ("anal_give", "anal_receive")) or matches_keyword_boundary(a_lbl, ("anal", "ass", "pegged", "pegging", "backdoor"), allow_negated=False)
+            is_anal_act = (a_sub in ("anal_give", "anal_receive")) or matches_keyword_boundary(a_lbl, ("anal", "ass", "pegged", "pegging", "backdoor"), allow_negated=False)
             if is_anal_act:
                 is_player_intimate_action = True
             has_explicit_penetration = matches_keyword_boundary(a_lbl, ("dick", "cock", "shaft", "penis", "have sex", "make love", "penetrate", "fuck", "creampie", "breed"), allow_negated=False)
-            if matches_keyword_boundary(a_lbl, PLAYER_INTERCOURSE_ACTION_KEYWORDS, allow_negated=False):
+            if matches_keyword_boundary(a_lbl, PLAYER_INTERCOURSE_ACTION_KEYWORDS, allow_negated=False) or a_sub == "intercourse":
                 if (not is_oral_act and not is_anal_act) or (has_explicit_penetration and not is_anal_act):
                     is_player_intercourse_action = True
   
     # Process explicit relationship updates from LLM outcome
     narrative_text = get_combined_narrative(outcome)
-    combined_check_text = (
-        " ".join(str(a.get("label", "")) for a in actions) + " " + narrative_text
-    ).lower()
+    _pre_intimate_info = (outcome.get("_pre_turn_intimacy") if isinstance(outcome, dict) else None) or {}
+    _pre_act_classified = str((_pre_intimate_info.get("action_classified") or {}).get("act_type") or "").lower()
+    _has_pre_turn_pipeline = isinstance(outcome, dict) and (
+        outcome.get("_pre_turn_social") is not None or outcome.get("_pre_turn_intimacy") is not None
+    )
+    _block_prose_milestone_scrape = bool(
+        _has_pre_turn_pipeline
+        and _pre_act_classified in ("", "none", "foreplay_nongenital")
+        and not (is_player_intercourse_action or is_player_oral_action or is_player_intimate_action)
+    )
+    if _block_prose_milestone_scrape:
+        # Pre-turn deterministic pipeline verified this turn is NOT an explicit sexual act;
+        # do not allow LLM narrative metaphors to trigger false virginity/experience milestones.
+        combined_check_text = " ".join(str(a.get("label", "")) for a in actions).lower()
+    else:
+        combined_check_text = (
+            " ".join(str(a.get("label", "")) for a in actions) + " " + narrative_text
+        ).lower()
     processed_npcs = set()
     for idx, rel in enumerate(outcome.get("relationship_updates", []) or []):
         if not isinstance(rel, dict):
@@ -515,21 +609,46 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
         outcome["relationship_updates"][idx] = rel
         npc_name = rel.get("npc_name") or rel.get("name")
         if npc_name and is_valid_entity_name(npc_name):
+            import namegen
             n_low = npc_name.lower().strip()
             n_first = (n_low.split() or [""])[0]
+            n_given = namegen.extract_first_and_last_name(npc_name)[0].lower().strip()
+            n_tokens = {t for t in (n_first, n_given) if len(t) >= 3 and t not in namegen.NAME_PARTICLES_AND_HONORIFICS}
+
+            # Check whether any action explicitly names or targets specific character(s)
+            action_explicit_targets = set()
+            for a in (actions or []):
+                t_npc = str(a.get("target_npc") or a.get("combat_target") or "").lower().strip()
+                if t_npc:
+                    action_explicit_targets.add(t_npc)
+                lbl_low = str(a.get("label") or a.get("text") or "").lower()
+                for sn in (all_scene_npcs or []):
+                    sn_name = str(sn.get("name") if isinstance(sn, dict) else sn).lower().strip()
+                    sn_first = (sn_name.split() or [""])[0]
+                    if sn_name and (matches_keyword_boundary(lbl_low, sn_name) or (len(sn_first) >= 3 and matches_keyword_boundary(lbl_low, sn_first))):
+                        action_explicit_targets.add(sn_name)
+
+            is_directly_addressed = any(
+                (matches_keyword_boundary(str(a.get("label", "")).lower(), n_low) or any(matches_keyword_boundary(str(a.get("label", "")).lower(), tok) for tok in n_tokens))
+                or (str(a.get("target_npc", "")).lower().strip() in ({n_low} | n_tokens))
+                for a in (actions or [])
+            )
+
+            is_special_target = bool(
+                (confession_target_npc and (n_low == confession_target_npc.lower().strip() or bool(n_tokens & {(confession_target_npc.lower().split() or [""])[0], namegen.extract_first_and_last_name(confession_target_npc)[0].lower().strip()})))
+                or (affection_target_npc and (n_low == affection_target_npc.lower().strip() or bool(n_tokens & {(affection_target_npc.lower().split() or [""])[0], namegen.extract_first_and_last_name(affection_target_npc)[0].lower().strip()})))
+                or (gift_target_npc and (n_low == gift_target_npc.lower().strip() or bool(n_tokens & {(gift_target_npc.lower().split() or [""])[0], namegen.extract_first_and_last_name(gift_target_npc)[0].lower().strip()})))
+            )
 
             # Determine whether npc_name is an active participant / target of the player's action
-            is_target_npc = (
-                any(
-                    (n_low in str(a.get("label", "")).lower() or (len(n_first) >= 3 and n_first in str(a.get("label", "")).lower()))
-                    or (str(a.get("target_npc", "")).lower().strip() in (n_low, n_first))
-                    for a in (actions or [])
+            if action_explicit_targets:
+                is_target_npc = is_directly_addressed or is_special_target
+            else:
+                is_target_npc = (
+                    is_directly_addressed
+                    or bool(session and game_engine.is_dialogue_partner(npc_name, session=session))
+                    or is_special_target
                 )
-                or bool(session and game_engine.is_dialogue_partner(npc_name, session=session))
-                or (confession_target_npc and (n_low == confession_target_npc.lower().strip() or n_first == (confession_target_npc.lower().split() or [""])[0]))
-                or (affection_target_npc and (n_low == affection_target_npc.lower().strip() or n_first == (affection_target_npc.lower().split() or [""])[0]))
-                or (gift_target_npc and (n_low == gift_target_npc.lower().strip() or n_first == (gift_target_npc.lower().split() or [""])[0]))
-            )
 
             # Determine whether player's action towards this NPC was hostile
             hostile_keywords = (
@@ -538,15 +657,15 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 "steal", "rob", "pickpocket", "poison", "betray"
             )
             is_hostile_action = any(
-                any(kw in str(a.get("label", "")).lower() for kw in hostile_keywords)
+                matches_keyword_boundary(str(a.get("label", "")).lower(), hostile_keywords, allow_negated=False)
                 for a in (actions or [])
-                if (n_low in str(a.get("label", "")).lower() or (len(n_first) >= 3 and n_first in str(a.get("label", "")).lower()))
+                if (matches_keyword_boundary(str(a.get("label", "")).lower(), n_low) or (len(n_first) >= 3 and matches_keyword_boundary(str(a.get("label", "")).lower(), n_first)) or str(a.get("target_npc", "")).lower().strip() in (n_low, n_first))
             )
 
             # Find matching action for check evaluation
             primary_action = None
             for a in (actions or []):
-                if n_low in str(a.get("label", "")).lower() or (len(n_first) >= 3 and n_first in str(a.get("label", "")).lower()) or str(a.get("target_npc", "")).lower().strip() in (n_low, n_first):
+                if matches_keyword_boundary(str(a.get("label", "")).lower(), n_low) or (len(n_first) >= 3 and matches_keyword_boundary(str(a.get("label", "")).lower(), n_first)) or str(a.get("target_npc", "")).lower().strip() in (n_low, n_first):
                     primary_action = a
                     break
             if not primary_action and actions:
@@ -570,10 +689,14 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 eval_action["item_name"] = gift_item_name
             if rel.get("delta_score") is not None:
                 eval_action["suggested_delta"] = rel.get("delta_score")
+            if rel.get("interaction_tone") is not None:
+                eval_action["interaction_tone"] = rel.get("interaction_tone")
+            if rel.get("trait_alignment") is not None:
+                eval_action["trait_alignment"] = rel.get("trait_alignment")
 
-            if not actions and rel.get("delta_score") is not None:
+            if (not actions or rel.get("_pre_turn_resolved")) and rel.get("delta_score") is not None:
                 delta = int(rel.get("delta_score"))
-                aff_reasons = ["Direct outcome update"]
+                aff_reasons = ["Pre-turn deterministic social resolution"] if rel.get("_pre_turn_resolved") else ["Direct outcome update"]
                 aff_breakdown = {"base_delta": delta}
             else:
                 from mechanics.social.affinity_engine import calculate_social_affinity_delta
@@ -777,7 +900,7 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 intercourse_exp=intercourse_exp,
                 oral_exp=oral_exp,
                 actions=actions,
-                narrative_text=narrative_text,
+                narrative_text="" if _block_prose_milestone_scrape else narrative_text,
                 overall_check_success=overall_check_success,
                 is_player_romantic_action=is_player_romantic_action,
                 is_player_intimate_action=is_player_intimate_action,
@@ -846,6 +969,22 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 elif not rom_mem:
                     rom_mem = custom_summary.strip()
 
+            from mechanics.social.relationships import is_contact_eligible
+            if not is_contact_eligible(name=npc_name, role=rel_binfo.get("role", ""), description=rel_binfo.get("description", ""), scenario=scen_key, session_id=session_id):
+                m_val = rel.get("mannerisms") or (app_dict.get("mannerisms") if isinstance(app_dict, dict) else "") or ""
+                db.upsert_lorebook_entity(
+                    session_id=session_id,
+                    entity_type="person",
+                    name=npc_name,
+                    description=rel_binfo.get("description", ""),
+                    traits=traits,
+                    mannerisms=m_val,
+                    race=rel_race,
+                    appearance=app_dict if app_dict else {},
+                    gender=rel_gender,
+                )
+                continue
+
             db.upsert_contact(
                 session_id=session_id,
                 character_id=first_char_id,
@@ -868,9 +1007,18 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
             # Breakup handling: If affinity plunges into negative territory (< 0), demote romantic track to platonic
             if updated_contact and str(updated_contact.get("track", "")).lower() == "romantic" and updated_contact.get("relationship_score", 0) < 0:
                 db.update_contact_track(session_id, npc_name, "platonic", character_id=first_char_id)
-                up_rels = updated_contact.get("relations") or {}
-                up_rels["romance"] = {"status": "single", "current_partner": None}
-                db.update_contact_relations(session_id, npc_name, up_rels, character_id=first_char_id)
+                try:
+                    import mechanics.social.relationship_graph as rg
+                    p_key = rg.player_person_key(first_char_id)
+                    npc_key = rg.canonical_person_key(npc_name)
+                    rg.end_tie(session_id, p_key, npc_key, rg.TIETYPE_DATING, reason="affinity_collapse")
+                    c_npc_id = updated_contact.get("npc_id") or npc_name
+                    rg.materialize_and_save_relations(session_id, c_npc_id)
+                except Exception as e:
+                    up_rels = updated_contact.get("relations") or {}
+                    up_rels["romance"] = {"status": "Single", "current_partner": None}
+                    db.update_contact_relations(session_id, npc_name, up_rels, character_id=first_char_id)
+
                 db.upsert_contact(
                     session_id=session_id,
                     character_id=first_char_id,
@@ -960,7 +1108,7 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                     intercourse_exp="",
                     oral_exp="",
                     actions=actions,
-                    narrative_text=narrative_text,
+                    narrative_text="" if _block_prose_milestone_scrape else narrative_text,
                     overall_check_success=overall_check_success,
                     is_player_romantic_action=is_player_romantic_action,
                     is_player_intimate_action=is_player_intimate_action,
@@ -1022,3 +1170,421 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
 
 from .reducers import _evaluate_npc_milestones
 from .core import get_combined_narrative, is_check_success
+
+
+def resolve_pre_turn_social_and_disclosures(
+    session: Dict[str, Any],
+    party: Optional[List[Any]] = None,
+    actions: Optional[List[Any]] = None,
+    new_dialogue_partners: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Deterministic pre-turn social affinity, canonical disclosure, and witness resolution engine.
+    Runs BEFORE the Narrator LLM on social/dialogue turns:
+    1. Evaluates active dialogue partners and computes deterministic affinity deltas.
+    2. Checks successful disclosure inquiries and PER observations:
+       - Immediately flips revealed flags on contact in SQLite.
+       - Generates [MANDATORY CANONICAL DISCLOSURE] prompt directives with exact seeded truths.
+    3. Evaluates witness detection and queues 0ms procedural gossip feed posts.
+    """
+    import db
+    from skill_check import is_check_success
+    from mechanics.social.affinity_engine import calculate_social_affinity_delta
+    from mechanics.system.phone.social_graph import evaluate_pre_turn_witness_detection
+    from mechanics.world.mobility import get_session_dialogue_partners
+
+    session_id = session.get("id") or 0
+    player_char = session.get("player_character")
+    if not player_char and party:
+        first_entry = party[0]
+        player_char = first_entry[0] if isinstance(first_entry, (tuple, list)) else first_entry
+    if not isinstance(player_char, dict):
+        player_char = {}
+
+    player_name = str(player_char.get("name") or "Player").strip()
+    first_char_id = player_char.get("id") or player_char.get("user_id") or 1
+
+    sess_dps = list(get_session_dialogue_partners(session))
+    if new_dialogue_partners:
+        for ndp in new_dialogue_partners:
+            if ndp and ndp not in sess_dps:
+                sess_dps.append(ndp)
+    if not sess_dps and session.get("dialogue_partner"):
+        sess_dps.append(session["dialogue_partner"])
+
+    primary_target = sess_dps[0] if sess_dps else ""
+    first_action = actions[0] if (actions and isinstance(actions[0], dict)) else ({"label": str(actions[0])} if actions else {})
+    act_label = str(first_action.get("label") or first_action.get("action") or "")
+    act_low = act_label.lower()
+    is_success = is_check_success(first_action.get("check"), default_if_none=True)
+
+    affinity_deltas: Dict[str, int] = {}
+    directives: List[str] = []
+    revealed_attributes: List[str] = []
+
+    # Check whether the action explicitly addresses or targets specific NPC(s)
+    from game_engine.matching import matches_keyword_boundary
+    explicit_action_targets = set()
+    act_target = str(first_action.get("target_npc") or first_action.get("combat_target") or "").lower().strip()
+    if act_target:
+        explicit_action_targets.add(act_target)
+    for dp in sess_dps:
+        dp_low = dp.lower().strip()
+        dp_first = (dp_low.split() or [""])[0]
+        if matches_keyword_boundary(act_low, dp_low) or (len(dp_first) >= 3 and matches_keyword_boundary(act_low, dp_first)):
+            explicit_action_targets.add(dp_low)
+
+    for npc_name in sess_dps:
+        contact = None
+        if session_id:
+            try:
+                contact = db.get_contact(session_id, npc_name, first_char_id)
+            except Exception:
+                contact = None
+        if not contact:
+            contact = {
+                "name": npc_name,
+                "npc_id": npc_name.lower().replace(" ", "_"),
+                "appearance": {},
+                "relationship_score": 0,
+            }
+
+        n_low = npc_name.lower().strip()
+        n_first = (n_low.split() or [""])[0]
+        if explicit_action_targets:
+            is_target = bool(
+                n_low in explicit_action_targets
+                or (len(n_first) >= 3 and n_first in explicit_action_targets)
+                or any(t in explicit_action_targets for t in (n_low, n_first))
+            )
+        else:
+            is_target = True
+
+        # Deterministic affinity delta calculation
+        delta, reasons, breakdown = calculate_social_affinity_delta(
+            action=first_action,
+            npc_name=npc_name,
+            contact_data=contact,
+            is_target_npc=is_target,
+        )
+        affinity_deltas[npc_name] = delta
+
+        # Disclosure inquiry checks if action succeeded
+        if is_success and act_label and is_target:
+            app_dict = dict(contact.get("appearance") or {})
+            npc_first = npc_name.split()[0].lower() if npc_name else ""
+            npc_mentioned = (
+                (npc_name.lower() in act_low)
+                or (len(npc_first) >= 3 and npc_first in act_low)
+                or (not explicit_action_targets and npc_name == primary_target)
+            )
+
+            if npc_mentioned:
+                revealed_for_npc = []
+                if any(kw in act_low for kw in ("sensitive spot", "erogenous", "touch where", "tickle", "turn on", "turn-on", "turns her on", "turns him on", "arousal trigger")):
+                    app_dict["sensitive_spots_revealed"] = True
+                    app_dict["turn_ons_revealed"] = True
+                    revealed_for_npc.extend(["sensitive_spots", "turn_ons"])
+                if any(kw in act_low for kw in ("fetish", "kink", "fantasy", "roleplay in bed", "bondage")):
+                    app_dict["fetishes_revealed"] = True
+                    revealed_for_npc.append("fetishes")
+                if any(kw in act_low for kw in ("like in bed", "preferred position", "bedroom preference", "likes oral", "dislikes")):
+                    app_dict["act_preferences_revealed"] = True
+                    revealed_for_npc.append("act_preferences")
+                if any(kw in act_low for kw in ("virgin", "virginity", "first time", "experienced", "past partner", "done oral", "received oral", "manual")):
+                    app_dict["intercourse_revealed"] = True
+                    app_dict["oral_revealed"] = True
+                    app_dict["manual_revealed"] = True
+                    revealed_for_npc.extend(["intercourse_experience", "oral_experience"])
+                if any(kw in act_low for kw in ("bedroom demeanor", "intimate demeanor", "in private", "in bed")):
+                    app_dict["demeanor_revealed"] = True
+                    revealed_for_npc.append("intimate_demeanor")
+                if any(kw in act_low for kw in ("observe", "watch closely", "study expression", "study her expression", "study his expression", "notice body language", "watch body language", "scrutinize", "gauge reaction")):
+                    app_dict["mannerisms_revealed"] = True
+                    revealed_for_npc.append("mannerisms")
+                if any(kw in act_low for kw in ("personal detail", "intimate detail", "intimate secret", "bedroom preference", "intimate preference", "ask about preference", "inquire about preference", "confess preference", "admit preference", "whisper preference")):
+                    app_dict["intimate_revealed"] = True
+                    app_dict["sensitive_spots_revealed"] = True
+                    app_dict["turn_ons_revealed"] = True
+                    app_dict["fetishes_revealed"] = True
+                    app_dict["act_preferences_revealed"] = True
+                    app_dict["demeanor_revealed"] = True
+                    app_dict["intercourse_revealed"] = True
+                    app_dict["oral_revealed"] = True
+                    app_dict["manual_revealed"] = True
+                    revealed_for_npc.extend(["sensitive_spots", "turn_ons", "fetishes", "intimate_demeanor"])
+
+                if revealed_for_npc:
+                    revealed_attributes.extend(revealed_for_npc)
+                    scen_key = str(session.get("scenario") or "fantasy")
+                    if any(rk != "mannerisms" for rk in revealed_for_npc):
+                        app_dict["intimate_revealed"] = True
+                    if any(not app_dict.get(rk) for rk in revealed_for_npc):
+                        try:
+                            from mechanics.social.persona import normalize_appearance
+                            app_dict = normalize_appearance(
+                                app_dict,
+                                gender=str(contact.get("gender") or ""),
+                                race=str(contact.get("race") or "human"),
+                                desc=npc_name,
+                                scen_key=scen_key,
+                                traits=contact.get("unlocked_traits") or [],
+                                role=str((contact.get("basic_info") or {}).get("role") or ""),
+                            )
+                        except Exception:
+                            pass
+                    if session_id:
+                        try:
+                            c_id = contact.get("npc_id") or npc_name.lower().replace(" ", "_")
+                            db.upsert_contact(
+                                session_id=session_id,
+                                npc_id=c_id,
+                                name=npc_name,
+                                character_id=first_char_id,
+                                delta_score=0,
+                                appearance=app_dict,
+                            )
+                            db.upsert_contact(
+                                session_id=session_id,
+                                npc_id=c_id,
+                                name=npc_name,
+                                character_id=0,
+                                delta_score=0,
+                                appearance=app_dict,
+                            )
+                        except Exception:
+                            pass
+
+                    # Format mandatory disclosure directives
+                    for r_key in set(revealed_for_npc):
+                        r_val = app_dict.get(r_key)
+                        if r_val:
+                            clean_val = str(r_val).strip()
+                            clean_tag = r_key.replace("_", " ")
+                            directives.append(
+                                f"[MANDATORY CANONICAL DISCLOSURE]: {npc_name} reveals their canonical {clean_tag}: '{clean_val}'. Weave this exact truth into their dialogue/reaction."
+                            )
+
+    # Deterministic commitment fulfillment, breakage & immediate creation resolution
+    fulfilled_commitments: list[int] = []
+    broken_commitments: list[int] = []
+    created_commitments: list[dict] = []
+    if session_id and act_low:
+        try:
+            from db.memory import get_active_commitments, add_commitment
+            active_commits = get_active_commitments(session_id) or []
+            _fulfill_kws = ("fulfill", "keep promise", "kept promise", "repay", "pay back", "deliver", "hand over", "return the", "honor pact")
+            _break_kws = ("break promise", "broke promise", "betray", "refuse to pay", "expose secret", "spill secret", "tell secret", "renounce pact")
+            
+            c_scene_npcs = session.get("current_npcs") or []
+            present_names = [
+                (n.get("name") if isinstance(n, dict) else str(n)).strip()
+                for n in c_scene_npcs
+                if (isinstance(n, dict) and n.get("name")) or (isinstance(n, str) and n.strip())
+            ]
+            target_npcs = [str(p).strip() for p in sess_dps if p]
+
+            for cm in active_commits:
+                cid = cm.get("id")
+                if not cid:
+                    continue
+                c_src = str(cm.get("source_entity") or "").strip().lower()
+                c_tgt = str(cm.get("target_entity") or "").strip().lower()
+                c_desc = str(cm.get("description") or "").strip()
+                c_npc = c_tgt if c_src in ("player", player_name.lower(), "") else c_src
+                c_npc_first = (c_npc.split() or [""])[0]
+                npc_in_scene = any(
+                    c_npc == tn.lower() or (len(c_npc_first) >= 3 and c_npc_first == (tn.lower().split() or [""])[0])
+                    for tn in (target_npcs + present_names)
+                )
+                if not npc_in_scene and c_npc and c_npc not in act_low and (len(c_npc_first) < 3 or c_npc_first not in act_low):
+                    continue
+                if is_success and any(kw in act_low for kw in _fulfill_kws):
+                    fulfilled_commitments.append(int(cid))
+                    directives.append(
+                        f"[MANDATORY COMMITMENT FULFILLED]: The commitment '{c_desc}' with {c_npc.title() or 'the NPC'} has been fulfilled! Acknowledge this in the narrative."
+                    )
+                elif any(kw in act_low for kw in _break_kws):
+                    broken_commitments.append(int(cid))
+                    directives.append(
+                        f"[MANDATORY COMMITMENT BROKEN]: The commitment '{c_desc}' with {c_npc.title() or 'the NPC'} has been broken! Reflect their reaction in the narrative."
+                    )
+
+            # Immediate Pre-Turn Commitment Creation (Promises, Pacts, Debts, Secrets)
+            if is_success and not fulfilled_commitments and not broken_commitments:
+                _create_map = [
+                    ("pact", ("swear a pact", "forge a pact", "make a pact", "seal a pact", "blood oath")),
+                    ("secret", ("swear secrecy", "keep secret", "keep her secret", "keep his secret", "keep their secret", "never tell anyone")),
+                    ("debt", ("owe you", "promise to repay", "borrow gold", "in your debt")),
+                    ("promise", ("promise to", "i promise", "swear to", "vow to", "give my word", "agree to help")),
+                ]
+                matched_ctype = None
+                for ctype, kws in _create_map:
+                    if any(kw in act_low for kw in kws):
+                        matched_ctype = ctype
+                        break
+                commit_partner = primary_target or (present_names[0] if present_names else "")
+                if matched_ctype and commit_partner:
+                    clean_desc = act_label.strip().rstrip(".")
+                    already_exists = any(
+                        str(cm.get("target_entity") or "").strip().lower() == commit_partner.lower()
+                        and str(cm.get("description") or "").strip().lower() == clean_desc.lower()
+                        for cm in active_commits
+                    )
+                    if not already_exists:
+                        turn_num = len(session.get("history") or [])
+                        new_cm = add_commitment(
+                            session_id=session_id,
+                            source_entity="player",
+                            target_entity=commit_partner,
+                            commitment_type=matched_ctype,
+                            description=clean_desc,
+                            turn_number=turn_num,
+                        )
+                        if new_cm:
+                            created_commitments.append(new_cm)
+                            directives.append(
+                                f"[MANDATORY NEW COMMITMENT RECORDED]: {player_name} made a binding {matched_ctype} with {commit_partner}: '{clean_desc}'. Have {commit_partner} acknowledge this pledge."
+                            )
+        except Exception as e:
+            log.warning("Commitment resolution error: %s", e)
+
+    # Deterministic Pre-Turn Faction Discovery, Endorsements, Direct Faction Actions & Promotion Trials
+    faction_updates: list[dict] = []
+    faction_promotion_result: str = ""
+    if session_id:
+        try:
+            # 1. Resolve Pending Faction Promotion Trial deterministically from skill check
+            pending_promo = session.get("pending_promotion")
+            if isinstance(pending_promo, dict) and pending_promo.get("faction_id"):
+                from mechanics.combat import is_in_combat
+                is_setup_turn = (
+                    "initiates promotion trial" in act_low
+                    or "faction promotion trial directive" in act_low
+                )
+                has_trial_check = (
+                    first_action.get("check") is not None
+                    or str(first_action.get("stat") or "NONE").upper() not in ("NONE", "FREE", "")
+                )
+                if not is_setup_turn and has_trial_check and not is_in_combat(session):
+                    p_fid = str(pending_promo.get("faction_id") or "").strip()
+                    p_rank = int(pending_promo.get("target_rank") or 1)
+                    p_tmpl = str(pending_promo.get("template") or "guild")
+                    from mechanics.social.factions import get_rank_title
+                    p_title = get_rank_title(p_tmpl, p_rank)
+                    if is_success:
+                        faction_promotion_result = "success"
+                        directives.append(
+                            f"[MANDATORY FACTION PROMOTION COMPLETE]: {player_name} succeeded in the promotion trial for '{p_fid}' and has been promoted to Rank {p_rank} ({p_title})! Narrate the formal recognition and promotion ceremony."
+                        )
+                    else:
+                        faction_promotion_result = "failed"
+                        directives.append(
+                            f"[FACTION PROMOTION TRIAL FAILED]: {player_name} fell short in the promotion trial for '{p_fid}' (Rank {p_rank}: {p_title}). Narrate why the trial was not passed yet."
+                        )
+
+            # 2. Deterministic Faction Discovery & Milestone Endorsements from Contact Interactions
+            for npc_name, aff_delta in affinity_deltas.items():
+                c_row = db.get_contact(session_id, npc_name, first_char_id) or db.get_contact(session_id, npc_name.lower().replace(" ", "_"))
+                if not c_row:
+                    continue
+                b_info = c_row.get("basic_info") or {}
+                c_fac = str(
+                    b_info.get("faction")
+                    or b_info.get("faction_affiliation")
+                    or b_info.get("club")
+                    or c_row.get("faction")
+                    or ""
+                ).strip()
+                if not c_fac or c_fac.lower() in ("none", "unaligned", ""):
+                    continue
+                old_sc = int(c_row.get("relationship_score", c_row.get("score", 0)) or 0)
+                new_sc = old_sc + int(aff_delta or 0)
+                existing_fac_row = db.get_faction(session_id, c_fac)
+
+                if old_sc < 30 and new_sc >= 30:
+                    faction_updates.append({
+                        "faction_name": c_fac,
+                        "delta_score": 5,
+                        "notes": f"Milestone endorsement from {npc_name} (Reached Friend status).",
+                        "_pre_turn_resolved": True,
+                    })
+                    directives.append(
+                        f"[STAGE DIRECTION — FACTION ENDORSEMENT]: Reaching Friend status with {npc_name} earned +5 Reputation with '{c_fac}'."
+                    )
+                elif aff_delta <= -5:
+                    faction_updates.append({
+                        "faction_name": c_fac,
+                        "delta_score": -2,
+                        "notes": f"Friction with affiliated member {npc_name}.",
+                        "_pre_turn_resolved": True,
+                    })
+                elif not existing_fac_row:
+                    faction_updates.append({
+                        "faction_name": c_fac,
+                        "delta_score": 0,
+                        "notes": f"Introduced via {npc_name}.",
+                        "_pre_turn_resolved": True,
+                    })
+
+            # 3. Direct Non-Contact Faction Actions (Supportive +3 / Hostile Sabotage -5)
+            if act_low:
+                known_factions = db.get_factions(session_id) or []
+                already_updated_fnames = {str(f.get("faction_name") or "").lower() for f in faction_updates}
+                _fac_support_kws = ("help ", "assist ", "defend ", "protect ", "support ", "reinforce ", "aid ", "donate ", "deliver to ", "rescue ")
+                _fac_hostile_kws = ("sabotage ", "attack ", "raid ", "steal from ", "rob ", "ambush ", "destroy ", "vandalize ", "betray ", "infiltrate ", "disrupt ")
+                for kf in known_factions:
+                    kf_name = str(kf.get("name") or "").strip()
+                    if not kf_name or kf_name.lower() in already_updated_fnames:
+                        continue
+                    if kf_name.lower() in act_low:
+                        if any(kw in act_low for kw in _fac_hostile_kws):
+                            faction_updates.append({
+                                "faction_name": kf_name,
+                                "delta_score": -5,
+                                "notes": f"Direct hostile action against {kf_name}: {act_label[:80]}",
+                                "_pre_turn_resolved": True,
+                            })
+                            already_updated_fnames.add(kf_name.lower())
+                            directives.append(
+                                f"[STAGE DIRECTION — FACTION HOSTILITY]: {player_name}'s action against '{kf_name}' incurred -5 Reputation."
+                            )
+                        elif is_success and any(kw in act_low for kw in _fac_support_kws):
+                            faction_updates.append({
+                                "faction_name": kf_name,
+                                "delta_score": 3,
+                                "notes": f"Direct support for {kf_name}: {act_label[:80]}",
+                                "_pre_turn_resolved": True,
+                            })
+                            already_updated_fnames.add(kf_name.lower())
+                            directives.append(
+                                f"[STAGE DIRECTION — FACTION SUPPORT]: {player_name}'s assistance earned +3 Reputation with '{kf_name}'."
+                            )
+        except Exception as e:
+            log.warning("Pre-turn faction resolution error: %s", e)
+
+    # Deterministic witness detection
+    witness_res = evaluate_pre_turn_witness_detection(
+        session=session,
+        actions=actions or [],
+        player_name=player_name,
+        target_npc=primary_target,
+        location_str=session.get("current_location", ""),
+    )
+    if witness_res.get("witness_spotted") and witness_res.get("directive"):
+        directives.append(witness_res["directive"])
+
+    res = {
+        "affinity_deltas": affinity_deltas,
+        "revealed_attributes": revealed_attributes,
+        "fulfilled_commitments": fulfilled_commitments,
+        "broken_commitments": broken_commitments,
+        "created_commitments": created_commitments,
+        "faction_updates": faction_updates,
+        "faction_promotion_result": faction_promotion_result,
+        "directives": directives,
+        "witness_detection": witness_res,
+    }
+    session["_pre_turn_social_res"] = res
+    return res
+

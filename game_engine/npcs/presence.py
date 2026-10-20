@@ -251,20 +251,23 @@ def classify_scene_npcs(
 
 
     # Load formal party NPC names (these always travel, dismissal is explicit)
-
     formal_party_names: set[str] = set()
-
+    temp_companion_names: set[str] = set()
     if session.get("id"):
-
         for p in db.get_session_party_npcs(session["id"]):
-
             p_name = str(p.get("name", "")).strip().lower()
-
             if p_name:
-
                 formal_party_names.add(p_name)
-
-
+        try:
+            for tc in db.get_temporary_companions(session["id"]):
+                tc_name = str(tc.get("name", "")).strip().lower()
+                if tc_name:
+                    temp_companion_names.add(tc_name)
+                    tc_first = tc_name.split()[0]
+                    if len(tc_first) >= 3:
+                        temp_companion_names.add(tc_first)
+        except Exception:
+            pass
 
     traveling_companions = []
 
@@ -290,6 +293,52 @@ def classify_scene_npcs(
                             target_meetup_npc_names.add(a_first)
         except Exception:
             pass
+
+    # Check if action expresses a private meeting, secluded conversation, or stepping aside
+    is_private_meeting = any(
+        any(k in text for k in (
+            "private", "privately", "in private", "quieter spot", "quiet spot", "secluded spot",
+            "aside", "step aside", "pull aside", "pull her aside", "pull him aside", "separate",
+            "alone", "just the two of us", "between us", "confidentially", "secretly"
+        ))
+        for text in action_texts_lower
+    )
+    targeted_private_partners = set()
+    if is_private_meeting:
+        for an in active_dialogue_names:
+            an_first = an.split()[0] if an else ""
+            for text in action_texts_lower:
+                if an in text or (len(an_first) >= 3 and an_first in text):
+                    targeted_private_partners.add(an)
+        if not targeted_private_partners and active_dialogue_names:
+            dps_list = get_session_dialogue_partners(session)
+            has_her = any(re.search(r'\b(?:her|she)\b', t) for t in action_texts_lower)
+            has_him = any(re.search(r'\b(?:him|he)\b', t) for t in action_texts_lower)
+            if has_her or has_him:
+                try:
+                    roster = db.get_school_roster(sess_id) if sess_id else []
+                    for dp_name in dps_list:
+                        for m in roster:
+                            if m.get("name", "").lower() == dp_name.lower():
+                                g = (m.get("gender") or "").lower()
+                                if has_her and g == "female":
+                                    targeted_private_partners.add(dp_name.lower())
+                                    break
+                                elif has_him and g == "male":
+                                    targeted_private_partners.add(dp_name.lower())
+                                    break
+                        if targeted_private_partners:
+                            break
+                except Exception:
+                    pass
+
+            if not targeted_private_partners:
+                if dps_list:
+                    targeted_private_partners.add(dps_list[0].lower())
+                elif len(active_dialogue_names) == 1:
+                    targeted_private_partners.update(active_dialogue_names)
+                else:
+                    targeted_private_partners.add(sorted(list(active_dialogue_names))[0])
 
     for n in old_npcs:
 
@@ -340,101 +389,109 @@ def classify_scene_npcs(
                 left_behind_patrons.append(n)
                 continue
 
+        # Private Meeting & Secluded Discussion Isolation:
+        # If moving to a quieter/secluded spot or explicitly holding a private discussion,
+        # only the targeted partner travels; uninvited bystanders / other partners stay behind.
+        if is_private_meeting:
+            first_tok = n_clean.split()[0] if n_clean else ""
+            is_invited_in_action = game_engine.is_npc_invited_in_action(n_name, actions)
+            is_target_partner = (n_clean in targeted_private_partners) or (len(first_tok) >= 3 and first_tok in targeted_private_partners)
+            if not is_invited_in_action and not is_target_partner:
+                left_behind_patrons.append(n)
+                continue
+            elif is_target_partner:
+                traveling_companions.append(n)
+                continue
 
+
+
+        # 1b. Temporary Companion (active hangout/walking partner)
+        if temp_companion_names:
+            first_tok = n_clean.split()[0] if n_clean else ""
+            if n_clean in temp_companion_names or (len(first_tok) >= 3 and first_tok in temp_companion_names):
+                is_invited_in_action = game_engine.is_npc_invited_in_action(n_name, actions)
+                # If player already exited conversation (no active dialogue partners) and action is not accompanied/inviting,
+                # temporary companions do not follow into the new venue.
+                if not active_dialogue_names and not is_invited_in_action and not action_has_together:
+                    left_behind_patrons.append(n)
+                    continue
+                traveling_companions.append(n)
+                continue
 
         # 2. In contacts as companion/ally (but NOT just because they have HP fields from LLM)
-
         if n_clean in companion_contact_names and not n.get("hp"):
-
             traveling_companions.append(n)
-
             continue
 
 
 
         # 3. Explicitly invited/recruited in player's action
-
-        if game_engine.is_npc_invited_in_action(n_name, actions):
-
+        is_invited = game_engine.is_npc_invited_in_action(n_name, actions, session=session)
+        if is_invited:
             traveling_companions.append(n)
-
             continue
 
-
-
-        # 4. Was active dialogue / quest partner when moving within the same primary venue AND invited
-
-        if is_same_primary and n_clean in active_dialogue_names and game_engine.is_npc_invited_in_action(n_name, actions):
-
+        # 4. Was active dialogue / quest partner when moving within the same primary venue
+        if is_same_primary and n_clean in active_dialogue_names:
             traveling_companions.append(n)
-
             continue
-
-
 
         # 5. Active Social / Romantic Date Companion moving together:
-
         # A mobile character who is an active dialogue partner or has a narrative continuity bridge (e.g. date/meetup)
-
         # where the player travels together with them or narrative prose shows active physical presence.
-
         from mechanics.world.mobility import (
-
             is_character_mobile,
-
             has_narrative_continuity_bridge,
-
             has_active_physical_presence,
-
             MEETUP_INTENT_KEYWORDS
-
         )
-
         c_data = next((c for c in known_contacts if str(c.get("name") or c.get("npc_id") or "").strip().lower() == n_clean), None)
-
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-
         is_mobile = is_character_mobile(n_name, c_data, scen_key)
 
-
-
         if is_mobile:
-
             is_dp = n_clean in active_dialogue_names
 
-
-
             c_track = str((c_data or {}).get("track") or ((c_data or {}).get("basic_info") or {}).get("track") or "").lower()
-
             c_score = (c_data or {}).get("relationship_score", 0)
-
             is_romantic = c_track in ("romance", "romantic", "date")
 
+            first_tok = n_clean.split()[0] if n_clean else ""
+            c_gender = str((c_data or {}).get("gender") or (n.get("gender") or "")).lower()
+            is_action_target = any(
+                isinstance(a, dict) and str(a.get("target_npc") or "").strip().lower() in (n_clean, first_tok)
+                for a in actions
+            )
+            pronoun_match = False
+            if c_gender == "female" and any(re.search(r"\b(?:her|she)\b", t) for t in action_texts_lower):
+                pronoun_match = True
+            elif c_gender == "male" and any(re.search(r"\b(?:him|he)\b", t) for t in action_texts_lower):
+                pronoun_match = True
+            elif any(re.search(r"\b(?:them|they)\b", t) for t in action_texts_lower):
+                pronoun_match = True
 
+            has_travel_or_escort = (
+                action_has_together
+                or is_action_target
+                or (is_dp and pronoun_match)
+                or any(re.search(r"\b(?:carry|walk|escort|guide|lead|take|bring|help|accompany)\b", t) for t in action_texts_lower)
+            )
+
+            if is_dp and has_travel_or_escort:
+                traveling_companions.append(n)
+                continue
 
             hist_raw = session.get("history") or session.get("history_json") or []
-
             if isinstance(hist_raw, str):
-
                 try:
-
                     hist_list = json.loads(hist_raw)
-
                 except Exception:
-
                     hist_list = [hist_raw]
-
             elif isinstance(hist_raw, list):
-
                 hist_list = hist_raw
-
             else:
-
                 hist_list = []
-
             recent_hist = hist_list[-3:] if len(hist_list) > 3 else hist_list
-
-            first_tok = n_clean.split()[0] if n_clean else ""
 
             from mechanics.world.mobility import _extract_history_text, _has_meetup_intent_keyword
             has_meetup_history = False
@@ -470,7 +527,6 @@ def classify_scene_npcs(
             # - Player explicitly travels with or invites them in the action (action_has_together or is_npc_invited_in_action)
             # - OR there is an established active date/meetup agreed in recent history (is_romantic and has_meetup_history and not has_split_up)
             # Merely having discussed a meetup or future rendezvous does NOT make them follow on separate travel!
-            is_invited = game_engine.is_npc_invited_in_action(n_name, actions)
             if action_has_together or is_invited or (is_romantic and has_meetup_history):
                 if is_dp or narr_presence or has_meetup_history:
                     traveling_companions.append(n)
@@ -520,82 +576,121 @@ def extract_departed_npcs_from_narrative(narrative_text: str, candidate_npcs: li
 
 
 
+    # Pre-extract descriptive descriptors across candidates to enable unambiguous epithet departure matching
+    descriptor_counts = {}
+    cand_descriptors = {}
     for cand in candidate_npcs:
+        c_nm = game_engine._get_npc_name(cand)
+        if not c_nm:
+            continue
+        c_descs = set()
+        if isinstance(cand, dict):
+            race = str(cand.get("race") or "").strip().lower()
+            role = str(cand.get("role") or "").strip().lower()
+            b_info = dict(cand.get("basic_info") or {}) if isinstance(cand.get("basic_info"), dict) else {}
+            if not role and b_info.get("role"):
+                role = str(b_info.get("role")).strip().lower()
+            if not race and b_info.get("race"):
+                race = str(b_info.get("race")).strip().lower()
 
+            if race:
+                clean_r = re.sub(r'[^a-z0-9\s-]', '', race).strip()
+                if clean_r:
+                    c_descs.add(clean_r)
+                    for r_part in clean_r.split():
+                        if len(r_part) >= 4 and r_part not in ("half", "beast", "folk"):
+                            c_descs.add(r_part)
+                    if "half-beast" in clean_r:
+                        c_descs.add("half-beast")
+                    if "fennec" in clean_r:
+                        c_descs.add("fennec")
+                        c_descs.add("fennec half-beast")
+
+            if role:
+                clean_rl = re.sub(r'[^a-z0-9\s-]', '', role).strip()
+                if clean_rl:
+                    c_descs.add(clean_rl)
+                    for rl_part in clean_rl.split():
+                        if len(rl_part) >= 4 and rl_part not in ("teacher", "coach", "staff", "head"):
+                            c_descs.add(rl_part)
+
+        cand_descriptors[c_nm] = c_descs
+        for d in c_descs:
+            descriptor_counts[d] = descriptor_counts.get(d, 0) + 1
+
+    honorific_prefixes = ("dr.", "dr", "mr.", "mr", "mrs.", "mrs", "ms.", "ms", "miss", "prof.", "prof", "professor", "doctor", "sensei", "coach")
+
+    import namegen
+    for cand in candidate_npcs:
         c_name = game_engine._get_npc_name(cand)
-
         if not c_name:
-
             continue
 
-        c_lower = c_name.lower()
-
-        first_name = c_lower.split()[0] if len(c_lower.split()) > 1 else c_lower
-
-
+        c_lower = c_name.lower().strip()
+        tokens = c_lower.split()
+        
+        clean_tokens = [t.strip(".,") for t in tokens if t.strip(".,") not in honorific_prefixes and t.strip(".,") not in namegen.NAME_PARTICLES_AND_HONORIFICS]
+        first_name = clean_tokens[0] if clean_tokens else (tokens[0] if tokens else "")
+        last_name = clean_tokens[-1] if len(clean_tokens) > 1 else ""
+        given_name = namegen.extract_first_and_last_name(c_name)[0].lower().strip()
 
         names_to_test = [re.escape(c_lower)]
-
+        if clean_tokens:
+            joined_clean = " ".join(clean_tokens)
+            if joined_clean != c_lower:
+                names_to_test.append(re.escape(joined_clean))
         if len(first_name) >= 3 and first_name != c_lower:
-
             names_to_test.append(re.escape(first_name))
+        if len(last_name) >= 3 and last_name != c_lower and last_name != first_name:
+            names_to_test.append(re.escape(last_name))
 
-
+        # Add unambiguous epithets (where exactly 1 candidate shares the descriptor)
+        for d in cand_descriptors.get(c_name, []):
+            if descriptor_counts.get(d) == 1 and len(d) >= 4:
+                names_to_test.append(rf"(?:the\s+)?{re.escape(d)}")
 
         has_narr_departure = False
-
         if narr_lower:
-
             for n_pat in names_to_test:
-
-                # Pattern A: Observed departure: "watches Sofia depart", "sees Sofia leave", "watches Sofia's exit"
-
-                if re.search(r'\b(?:watches|watching|watched|bids|bidding|bid|sees|seeing|saw)\s+' + n_pat + r'(?:\'s)?\s+(?:depart|departs|departed|departing|exit|exits|exited|exiting|leave|leaves|leaving|left|walk\s+out|walks\s+out|walked\s+out|head\s+home|heads\s+home|headed\s+home|step\s+out|steps\s+out|stepped\s+out)\b', narr_lower):
-
+                # Pattern A: Observed departure: "watches Sofia depart", "sees the fennec half-beast leave", "watches Sofia's exit"
+                if re.search(r'\b(?:watches|watching|watched|bids|bidding|bid|sees|seeing|saw)\s+(?:the\s+)?' + n_pat + r'(?:\'s)?\s+(?:depart|departs|departed|departing|exit|exits|exited|exiting|leave|leaves|leaving|left|walk\s+out|walks\s+out|walked\s+out|stride\s+out|strides\s+out|strode\s+out|head\s+home|heads\s+home|headed\s+home|step\s+out|steps\s+out|stepped\s+out)\b', narr_lower):
                     has_narr_departure = True
-
                     break
-
-
 
                 # Pattern B: Direct physical departure: "Sofia departs", "Sofia exits", "Sofia left the room", "Sofia takes her leave"
-
-                if re.search(r'\b' + n_pat + r'\s+(?:departs|departed|departing|exits|exited|exiting|leaves|leaving|left|walked\s+out|walks\s+out|headed\s+home|heads\s+home|stepped\s+out|steps\s+out|took\s+(?:her|his|their)\s+leave|takes\s+(?:her|his|their)\s+leave|slips\s+out|slipped\s+out)\b', narr_lower):
-
+                if re.search(r'\b' + n_pat + r'\s+(?:departs|departed|departing|exits|exited|exiting|leaves|leaving|left|walked\s+out|walks\s+out|strides?\s+out|strode\s+out|striding\s+out|headed\s+home|heads\s+home|stepped\s+out|steps\s+out|took\s+(?:her|his|their)\s+leave|takes\s+(?:her|his|their)\s+leave|slips\s+out|slipped\s+out)\b', narr_lower):
                     has_narr_departure = True
-
                     break
 
+                # Pattern B2: Directional movement departure: "strides out toward faculty room", "walks away down corridor", "hurries off"
+                if re.search(r'\b' + n_pat + r'\s+(?:strides?|strode|walks?|walked|steps?|stepped|slips?|slipped|hurries|hurried|heads?|headed)\s+(?:out|away|off|back)\s+(?:toward|towards|to|into|down|through|around)\b', narr_lower):
+                    has_narr_departure = True
+                    break
 
+                # Pattern B3: Turning/pivoting then leaving: "pivots sharply on their heel and strides out", "turns and leaves"
+                if re.search(r'\b' + n_pat + r'\s+(?:pivots?|pivoted|turns?|turned)(?:\s+\w+){0,6}?\s+(?:and\s+)?(?:strides?|strode|walks?|walked|steps?|stepped|hurries|hurried|heads?|headed|slips?|slipped|leaves?|left)\b', narr_lower):
+                    has_narr_departure = True
+                    break
+
+                # Pattern B4: Absence / disappearance around corner: "bushy cream tail disappearing around corridor corner", "Satou disappears down the hall"
+                if re.search(r'\b' + n_pat + r'(?:\'s\s+\w+)?\s+(?:disappearing|disappeared|disappears|vanished|vanishes|vanishing)\s+(?:around|down|into|through|out)\b', narr_lower):
+                    has_narr_departure = True
+                    break
 
                 # Pattern C: Retrospective departure / state of absence: "after Sofia left", "once Sofia had departed", "with Sofia having left"
-
                 if re.search(r'\b(?:after|once|now\s+that|with)\s+' + n_pat + r'\s+(?:has\s+left|had\s+left|left|departed|is\s+gone|was\s+gone|having\s+departed)\b', narr_lower):
-
                     has_narr_departure = True
-
                     break
-
-
 
                 # Pattern D: Farewell & door exit: "said goodbye to Sofia", "signaling Sofia's exit", "door signaling her exit"
-
                 if re.search(r'\b(?:said|saying|bid|bidding|bade)\s+(?:goodbye|farewell)\s+to\s+' + n_pat + r'\b', narr_lower):
-
                     has_narr_departure = True
-
                     break
-
                 if re.search(r'\b(?:goodbye|farewell|parting\s+ways)\s+(?:with|to|from)\s+' + n_pat + r'\b', narr_lower):
-
                     has_narr_departure = True
-
                     break
-
                 if re.search(r'\b(?:door|exit)\s+signaling\s+' + n_pat + r'\'s\s+(?:exit|departure)\b', narr_lower):
-
                     has_narr_departure = True
-
                     break
 
 
@@ -616,13 +711,17 @@ def extract_departed_npcs_from_narrative(narrative_text: str, candidate_npcs: li
 
                 # Joint travel is not dismissal
 
-                if any(jt in act_txt for jt in ("together", f"with {c_lower}", f"with {first_name}", "come with", "join us", "join me", "accompany")):
+                if any(jt in act_txt for jt in ("together", f"with {c_lower}", f"with {first_name}", f"with {given_name}", "come with", "join us", "join me", "accompany")):
 
                     continue
 
 
 
-                is_name_in_act = bool(re.search(r'\b' + re.escape(c_lower) + r'\b', act_txt) or (len(first_name) >= 3 and re.search(r'\b' + re.escape(first_name) + r'\b', act_txt)))
+                is_name_in_act = bool(
+                    re.search(r'\b' + re.escape(c_lower) + r'\b', act_txt)
+                    or (len(first_name) >= 3 and re.search(r'\b' + re.escape(first_name) + r'\b', act_txt))
+                    or (len(given_name) >= 3 and re.search(r'\b' + re.escape(given_name) + r'\b', act_txt))
+                )
 
                 if not is_name_in_act:
 
@@ -675,22 +774,19 @@ def is_mentioned_only_in_absence_or_memory(npc_name: str, narr_prose: str) -> bo
     """
 
     if not npc_name or not narr_prose:
-
         return False
 
-
-
+    import namegen
+    narr_prose = narr_prose.lower()
     n_lower = npc_name.lower().strip()
 
     first_name = n_lower.split()[0] if len(n_lower.split()) > 1 else n_lower
-
-
+    given_name = namegen.extract_first_and_last_name(npc_name)[0].lower().strip()
 
     names_to_check = [n_lower]
-
-    if len(first_name) >= 3 and first_name != n_lower:
-
-        names_to_check.append(first_name)
+    for fc in {first_name, given_name}:
+        if len(fc) >= 3 and fc != n_lower and fc not in namegen.NAME_PARTICLES_AND_HONORIFICS and fc not in names_to_check:
+            names_to_check.append(fc)
 
 
 
@@ -706,7 +802,7 @@ def is_mentioned_only_in_absence_or_memory(npc_name: str, narr_prose: str) -> bo
 
         r"(?:without|missing|absence of|after)\s+{name}",
 
-        r"(?:reminded of|thinking of|thought of|remembering|recalled|reminisced about)\s+{name}",
+        r"(?:reminded of|thinking of|thought of|remembering|remembers|recalled|reminisced about)\s+(?:how\s+)?{name}",
 
         r"space\s+{name}\s+occupied",
 

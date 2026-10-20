@@ -258,14 +258,11 @@ class TestPhysicalStateEngine(unittest.TestCase):
         }
         turn_outcome = {
             "location": "Westlake Academy ➔ Library ➔ Archive Stacks",  # Location changed!
-            "physical_updates": {
-                "actors": {
-                    "Artemiusz": {
-                        "posture": "Examining tome at reading desk",
-                        "holding": "Ancient Tome"
-                    }
-                },
-                "props": [{"name": "Reading Desk", "state": "Lit by candle"}]
+            "actor_poses": {
+                "Artemiusz": {
+                    "posture": "Examining tome at reading desk",
+                    "holding": "Ancient Tome"
+                }
             },
             "npc_departures": ["Departing NPC"],
             "npcs_present": [{"name": "Librarian Clara", "gender": "female"}]
@@ -276,10 +273,8 @@ class TestPhysicalStateEngine(unittest.TestCase):
         )
 
         persisted = db.get_session_physical_state(self.session_id)
-        # Old Classroom Desk should be gone, but new Reading Desk should be preserved!
+        # Old Classroom Desk should be gone!
         self.assertNotIn("Old Classroom Desk", persisted["props"])
-        self.assertIn("Reading Desk", persisted["props"])
-        self.assertEqual(persisted["props"]["Reading Desk"], "Lit by candle")
 
         # Departing NPC should be removed from actors
         self.assertNotIn("Departing NPC", persisted["actors"])
@@ -309,12 +304,12 @@ class TestPhysicalStateEngine(unittest.TestCase):
         combat_outcome = {
             "outcome_narrative": "Goblins kick down the door!",
             "_combat_log": "Goblin strikes for 5 damage!",
-            "physical_updates": {"combat_focus": "Defending against Goblin Spearman"}
+            "nearby_enemies": [{"name": "Goblin Spearman", "hp": 12}],
         }
         _reduce_physical_state_and_memories(self.session_id, session, combat_outcome, self.party, "fantasy", [])
         persisted = db.get_session_physical_state(self.session_id)
         self.assertEqual(persisted["intimate_contact"], "none")
-        self.assertEqual(persisted["combat_focus"], "Defending against Goblin Spearman")
+        self.assertEqual(persisted["combat_focus"], "Engaged with Goblin Spearman")
 
         # Scenario 2: Combat concludes -> combat_focus reset to 'none'
         peace_outcome = {

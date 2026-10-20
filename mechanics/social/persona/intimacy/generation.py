@@ -263,10 +263,13 @@ def generate_dynamic_act_preferences(hash_val: int, dynamic: str = "", demeanor:
         "act_dislikes": dislikes_str
     }
 
-def generate_dynamic_intimate_experience(hash_val: int, openness: str = "moderate") -> Dict[str, str]:
+def generate_dynamic_intimate_experience(hash_val: int, openness: str = "moderate", gender: str = "") -> Dict[str, str]:
     """
-    Computes decoupled 3-track experience (Intercourse, Oral, Manual).
+    Computes decoupled 4-track experience (Intercourse, Oral, Manual, Anal).
     Base experience chance is 15% across all 3, modified additively by openness tier.
+    Enforces biological gender invariants for anal intimacy:
+    - Females: can only receive anal or be inexperienced (never 'has_done_anal' or 'has_done_and_received_anal').
+    - Males: can give anal to females, and can give or receive anal with males.
     """
     o_low = str(openness or "moderate").lower()
     mod = 0
@@ -315,13 +318,22 @@ def generate_dynamic_intimate_experience(hash_val: int, openness: str = "moderat
     anal_rate = max(0, min(100, 8 + mod))
     roll_anal = (hash_val // 19) % 100
     if roll_anal < anal_rate:
-        sub_anal = (hash_val // 23) % 100
-        if sub_anal < 40:
-            anal_val = "has_done_anal"
-        elif sub_anal < 80:
+        raw_g = str(gender or "").lower()
+        is_female = any(kw in raw_g for kw in ("female", "woman", "girl", "lady", "she", "her"))
+        if not is_female and raw_g:
+            is_male = any(kw in raw_g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in raw_g for kw in ("female", "woman"))
+            is_female = not is_male
+        if is_female:
+            # Biological invariant: Female characters can only receive anal intimacy, never give
             anal_val = "has_received_anal"
         else:
-            anal_val = "has_done_and_received_anal"
+            sub_anal = (hash_val // 23) % 100
+            if sub_anal < 40:
+                anal_val = "has_done_anal"
+            elif sub_anal < 80:
+                anal_val = "has_received_anal"
+            else:
+                anal_val = "has_done_and_received_anal"
     else:
         anal_val = "inexperienced"
 
@@ -337,7 +349,7 @@ def generate_dynamic_intimate_attributes(hash_val: int, race: str = "", gender: 
     phys_str, desires_str, turn_offs_str = generate_dynamic_desires_and_turn_offs(hash_val, race=race, dynamic=dynamic, openness=openness, traits=traits)
     fetish_str = generate_dynamic_fetish(hash_val, race=race, dynamic=dynamic, openness=openness)
     act_prefs = generate_dynamic_act_preferences(hash_val, dynamic=dynamic, openness=openness)
-    experience = generate_dynamic_intimate_experience(hash_val, openness=openness)
+    experience = generate_dynamic_intimate_experience(hash_val, openness=openness, gender=gender)
     undergarments = generate_procedural_undergarments(gender=gender, openness=openness, dynamic=dynamic, hash_val=hash_val)
 
     return {
@@ -468,7 +480,12 @@ def generate_past_intimate_history(
 
     raw_g = str(gender or "").strip().lower()
     is_char_male = any(kw in raw_g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in raw_g for kw in ("female", "woman"))
-    partner_gender = "female" if is_char_male else "male"
+    is_char_female = not is_char_male
+
+    # Biological gender invariant for anal intimacy:
+    # Female characters can only receive anal intimacy. They can never give / perform anal.
+    if is_char_female and a_state in ("has_done_anal", "has_done_and_received_anal"):
+        a_state = "has_received_anal"
 
     open_l = str(openness or "moderate").lower()
 
@@ -491,9 +508,23 @@ def generate_past_intimate_history(
 
     entries = []
     partners_data = []
+    structured_events = []
 
     for p_idx in range(partner_count):
         p_hash = hash_val + p_idx * 79 + 17
+
+        # Partner gender determination:
+        # Females have male partners.
+        # Males: if engaging in received anal (or mutual anal), the partner must be male (M/M).
+        # Otherwise default partner is female.
+        if is_char_female:
+            partner_gender = "male"
+        else:
+            if a_state in ("has_received_anal", "has_done_and_received_anal"):
+                partner_gender = "male"
+            else:
+                partner_gender = "female"
+
         partner_name = generate_past_partner_name(scenario=scenario, partner_gender=partner_gender, hash_val=p_hash)
         role = generate_past_partner_role(scenario=scenario, hash_val=p_hash)
 
@@ -517,6 +548,9 @@ def generate_past_intimate_history(
         o_count = base_enc_min + ((p_hash // 7) % enc_range)
         o_str = "1 time" if o_count == 1 else f"{o_count} times"
 
+        m_count = base_enc_min + ((p_hash // 11) % enc_range)
+        m_str = "1 time" if m_count == 1 else f"{m_count} times"
+
         a_count = base_enc_min + ((p_hash // 13) % enc_range)
         a_str = "1 time" if a_count == 1 else f"{a_count} times"
 
@@ -533,27 +567,125 @@ def generate_past_intimate_history(
                 oral_act = f"performed & received oral ({o_str})"
                 oral_participle = f"performing & receiving oral ({o_str})"
 
+        manual_act = ""
+        manual_participle = ""
+        if has_manual:
+            if m_state == "has_done_manual":
+                manual_act = f"manually stimulated partner ({m_str})"
+                manual_participle = f"manually stimulating partner ({m_str})"
+            elif m_state == "has_received_manual":
+                manual_act = f"received manual stimulation ({m_str})"
+                manual_participle = f"receiving manual stimulation ({m_str})"
+            else:
+                manual_act = f"mutual manual foreplay ({m_str})"
+                manual_participle = f"engaging in mutual manual foreplay ({m_str})"
+
         anal_act = ""
         anal_participle = ""
         if has_anal:
-            if a_state == "has_done_anal":
-                anal_act = f"performed anal ({a_str})"
-                anal_participle = f"performing anal ({a_str})"
-            elif a_state == "has_received_anal":
+            if is_char_female or a_state == "has_received_anal":
                 anal_act = f"received anal ({a_str})"
                 anal_participle = f"receiving anal ({a_str})"
+            elif a_state == "has_done_anal":
+                anal_act = f"performed anal ({a_str})"
+                anal_participle = f"performing anal ({a_str})"
             else:
                 anal_act = f"engaged in anal intimacy ({a_str})"
                 anal_participle = f"engaging in anal intimacy ({a_str})"
 
+        # Collect structured events for this partner
+        if has_intercourse:
+            structured_events.append({
+                "act_type": "intercourse",
+                "direction": "mutual",
+                "count": ic_count,
+                "partner_name": partner_name,
+                "partner_role": role_label,
+                "is_secret_affair": is_this_affair,
+                "is_physical": True,
+                "partner_gender": partner_gender,
+                "turn_number": 0,
+                "event_origin": "past_history"
+            })
+        if has_oral:
+            o_dir = "give" if o_state == "has_done_oral" else ("receive" if o_state == "has_received_oral" else "mutual")
+            structured_events.append({
+                "act_type": "oral",
+                "direction": o_dir,
+                "count": o_count,
+                "partner_name": partner_name,
+                "partner_role": role_label,
+                "is_secret_affair": is_this_affair,
+                "is_physical": True,
+                "partner_gender": partner_gender,
+                "turn_number": 0,
+                "event_origin": "past_history"
+            })
+        if has_manual:
+            m_dir = "give" if m_state == "has_done_manual" else ("receive" if m_state == "has_received_manual" else "mutual")
+            structured_events.append({
+                "act_type": "manual",
+                "direction": m_dir,
+                "count": m_count,
+                "partner_name": partner_name,
+                "partner_role": role_label,
+                "is_secret_affair": is_this_affair,
+                "is_physical": True,
+                "partner_gender": partner_gender,
+                "turn_number": 0,
+                "event_origin": "past_history"
+            })
+        if has_anal:
+            if is_char_female:
+                a_dir = "receive"
+            elif a_state == "has_done_anal":
+                a_dir = "give"
+            elif a_state == "has_received_anal":
+                a_dir = "receive"
+            else:
+                a_dir = "mutual"
+            structured_events.append({
+                "act_type": "anal",
+                "direction": a_dir,
+                "count": a_count,
+                "partner_name": partner_name,
+                "partner_role": role_label,
+                "is_secret_affair": is_this_affair,
+                "is_physical": True,
+                "partner_gender": partner_gender,
+                "turn_number": 0,
+                "event_origin": "past_history"
+            })
+
         # Multi-act synthesis
-        if has_intercourse and has_oral and has_anal:
+        if has_intercourse and has_oral and has_manual and has_anal:
+            if is_this_affair:
+                entry = f"Past History: Secret affair ({count_str}) by having intercourse ({ic_str}), {oral_participle}, {manual_participle} & {anal_participle} with '{partner_name}' ({role}) behind partner's back"
+            elif ic_count == 1 and p_idx == 0:
+                entry = f"Past History: Lost virginity & had intercourse (1 time), {oral_act}, {manual_act} and {anal_act} during a relationship with '{partner_name}' ({role})"
+            else:
+                entry = f"Past History: Had intercourse ({ic_str}), {oral_act}, {manual_act} & {anal_act} during a relationship with '{partner_name}' ({role})"
+        elif has_intercourse and has_oral and has_anal:
             if is_this_affair:
                 entry = f"Past History: Secret affair ({count_str}) by having intercourse ({ic_str}), {oral_participle} & {anal_participle} with '{partner_name}' ({role}) behind partner's back"
             elif ic_count == 1 and p_idx == 0:
                 entry = f"Past History: Lost virginity & had intercourse (1 time), {oral_act} and {anal_act} during a relationship with '{partner_name}' ({role})"
             else:
                 entry = f"Past History: Had intercourse ({ic_str}), {oral_act} & {anal_act} during a relationship with '{partner_name}' ({role})"
+        elif has_intercourse and has_oral and has_manual:
+            if is_this_affair:
+                entry = f"Past History: Secret affair ({count_str}) by having intercourse ({ic_str}), {oral_participle} & {manual_participle} with '{partner_name}' ({role}) behind partner's back"
+            elif ic_count == 1 and p_idx == 0:
+                entry = f"Past History: Lost virginity & had intercourse (1 time), {oral_act} and {manual_act} during a relationship with '{partner_name}' ({role})"
+            else:
+                entry = f"Past History: Had intercourse ({ic_str}), {oral_act} & {manual_act} during a relationship with '{partner_name}' ({role})"
+        elif has_intercourse and has_anal and has_manual:
+            if is_this_affair:
+                entry = f"Past History: Secret affair ({count_str}) by having intercourse ({ic_str}), {manual_participle} & {anal_participle} with '{partner_name}' ({role}) behind partner's back"
+            elif ic_count == 1 and p_idx == 0:
+                entry = f"Past History: Lost virginity & had intercourse (1 time), {manual_act} and {anal_act} during a relationship with '{partner_name}' ({role})"
+            else:
+                entry = f"Past History: Had intercourse ({ic_str}), {manual_act} & {anal_act} during a relationship with '{partner_name}' ({role})"
         elif has_intercourse and has_oral:
             if is_this_affair:
                 entry = f"Past History: Secret affair ({count_str}) by having intercourse ({ic_str}) & {oral_participle} with '{partner_name}' ({role}) behind partner's back"
@@ -568,6 +700,13 @@ def generate_past_intimate_history(
                 entry = f"Past History: Lost virginity & had intercourse (1 time) and {anal_act} during a relationship with '{partner_name}' ({role})"
             else:
                 entry = f"Past History: Had intercourse ({ic_str}) & {anal_act} during a relationship with '{partner_name}' ({role})"
+        elif has_intercourse and has_manual:
+            if is_this_affair:
+                entry = f"Past History: Secret affair ({count_str}) by having intercourse ({ic_str}) & {manual_participle} with '{partner_name}' ({role}) behind partner's back"
+            elif ic_count == 1 and p_idx == 0:
+                entry = f"Past History: Lost virginity & had intercourse (1 time) and {manual_act} during a relationship with '{partner_name}' ({role})"
+            else:
+                entry = f"Past History: Had intercourse ({ic_str}) & {manual_act} during a relationship with '{partner_name}' ({role})"
         elif has_intercourse:
             if is_this_affair:
                 entry = f"Past History: Secret affair ({count_str}) by having intercourse ({ic_str}) with '{partner_name}' ({role}) behind partner's back"
@@ -575,11 +714,26 @@ def generate_past_intimate_history(
                 entry = f"Past History: Lost virginity and had intercourse 1 time with '{partner_name}' ({role})"
             else:
                 entry = f"Past History: Had intercourse {count_str} during a relationship with '{partner_name}' ({role})"
+        elif has_oral and has_anal and has_manual:
+            if is_this_affair:
+                entry = f"Past History: Secret affair ({count_str}) through {oral_participle}, {manual_participle} & {anal_participle} with '{partner_name}' ({role}) behind partner's back"
+            else:
+                entry = f"Past History: Engaged in {oral_act}, {manual_act} & {anal_act} during a relationship with '{partner_name}' ({role})"
         elif has_oral and has_anal:
             if is_this_affair:
                 entry = f"Past History: Secret affair ({count_str}) by {oral_participle} & {anal_participle} with '{partner_name}' ({role}) behind partner's back"
             else:
                 entry = f"Past History: Engaged in {oral_act} & {anal_act} during a relationship with '{partner_name}' ({role})"
+        elif has_oral and has_manual:
+            if is_this_affair:
+                entry = f"Past History: Secret affair ({count_str}) through {oral_participle} & {manual_participle} with '{partner_name}' ({role}) behind partner's back"
+            else:
+                entry = f"Past History: Engaged in {oral_act} & {manual_act} during a relationship with '{partner_name}' ({role})"
+        elif has_anal and has_manual:
+            if is_this_affair:
+                entry = f"Past History: Secret affair ({count_str}) through {manual_participle} & {anal_participle} with '{partner_name}' ({role}) behind partner's back"
+            else:
+                entry = f"Past History: Engaged in {manual_act} & {anal_act} during a relationship with '{partner_name}' ({role})"
         elif has_oral:
             if o_state == "has_done_oral":
                 if is_this_affair:
@@ -597,16 +751,16 @@ def generate_past_intimate_history(
                 else:
                     entry = f"Past History: Engaged in mutual oral intimacy ({count_str}) with '{partner_name}' ({role})"
         elif has_anal:
-            if a_state == "has_done_anal":
-                if is_this_affair:
-                    entry = f"Past History: Secret affair ({count_str}) by performing anal ({count_str}) with '{partner_name}' ({role}) behind partner's back"
-                else:
-                    entry = f"Past History: Performed anal {count_str} with '{partner_name}' ({role})"
-            elif a_state == "has_received_anal":
+            if is_char_female or a_state == "has_received_anal":
                 if is_this_affair:
                     entry = f"Past History: Secret affair ({count_str}) by receiving anal ({count_str}) from '{partner_name}' ({role}) behind partner's back"
                 else:
                     entry = f"Past History: Received anal {count_str} from '{partner_name}' ({role})"
+            elif a_state == "has_done_anal":
+                if is_this_affair:
+                    entry = f"Past History: Secret affair ({count_str}) by performing anal ({count_str}) with '{partner_name}' ({role}) behind partner's back"
+                else:
+                    entry = f"Past History: Performed anal {count_str} with '{partner_name}' ({role})"
             else:
                 if is_this_affair:
                     entry = f"Past History: Secret affair ({count_str}) through anal intimacy ({count_str}) with '{partner_name}' ({role}) behind partner's back"
@@ -635,6 +789,7 @@ def generate_past_intimate_history(
     return {
         "entry": "\n".join(entries),
         "entries": entries,
+        "events": structured_events,
         "partner_count": partner_count,
         "partner_name": partners_data[0]["partner_name"] if partners_data else "",
         "partner_role": partners_data[0]["partner_role"] if partners_data else "",
@@ -642,4 +797,49 @@ def generate_past_intimate_history(
         "count": partners_data[0]["count"] if partners_data else 1,
         "partners": partners_data
     }
+
+
+def persist_generated_past_history(
+    session_id: int,
+    character_id: str,
+    history_dict: Optional[Dict[str, Any]],
+    character_gender: str = "",
+    conn: Optional[Any] = None
+) -> int:
+    """
+    Inserts all events from a generated past history dict into intimate_events table.
+    Guarantees no duplicate past events are created if they already exist for (session_id, character_id).
+    """
+    if not history_dict or not session_id or not character_id:
+        return 0
+    from .ledger import record_intimate_event, get_intimate_events
+    existing = get_intimate_events(session_id, character_id, origin="past_history", conn=conn)
+    if existing:
+        return 0
+
+    events = history_dict.get("events") or []
+    inserted = 0
+    for ev in events:
+        record_intimate_event(
+            session_id=session_id,
+            character_id=character_id,
+            partner_name=ev.get("partner_name", "Past Partner"),
+            act_type=ev.get("act_type", "intercourse"),
+            direction=ev.get("direction", "mutual"),
+            partner_id=None,
+            partner_role=ev.get("partner_role", "Former Classmate"),
+            turn_number=0,
+            event_origin="past_history",
+            is_physical=bool(ev.get("is_physical", True)),
+            count=ev.get("count", 1),
+            climax_count=0,
+            is_secret_affair=bool(ev.get("is_secret_affair", False)),
+            narrative_summary=ev.get("narrative_summary", ""),
+            character_gender=character_gender,
+            partner_gender=ev.get("partner_gender", ""),
+            is_reciprocal=False,
+            conn=conn
+        )
+        inserted += 1
+    return inserted
 

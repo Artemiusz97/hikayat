@@ -101,31 +101,33 @@ async def generate_player_chat_message(session: dict, contact: dict, player_char
         )
         user_prompt = f"Generate {char_name}'s opening message to {contact_name}:"
 
-    try:
-        result = await mechanics.system.phone.call_llm_json(system_prompt, user_prompt, temperature=0.85, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
-        player_msg = (result.get("message") or "").strip()
-        if player_msg:
-            if is_ongoing:
-                # Strip leading greeting if the model inadvertently included one
-                first_name = contact_name.split()[0] if contact_name.split() else contact_name
-                name_alt = rf"(?:{re.escape(contact_name)}|{re.escape(first_name)})"
-                clean_msg = re.sub(
-                    rf"^(?:hey(?:a)?|hi|hello|yo)\s*(?:{name_alt}|there)?\s*[,!.:-]*\s*",
-                    "",
-                    player_msg,
-                    flags=re.IGNORECASE
-                ).strip()
-                clean_msg = re.sub(
-                    rf"^{name_alt}\s*[,!.:-]+\s*",
-                    "",
-                    clean_msg,
-                    flags=re.IGNORECASE
-                ).strip()
-                if len(clean_msg) >= 4:
-                    player_msg = clean_msg[0].upper() + clean_msg[1:]
-            return player_msg
-    except Exception as e:
-        log.warning(f"[phone] Failed to generate dynamic player chat message: {e}")
+    _is_llm_mocked = hasattr(mechanics.system.phone.call_llm_json, "_mock_name")
+    if _is_llm_mocked:
+        try:
+            result = await mechanics.system.phone.call_llm_json(system_prompt, user_prompt, temperature=0.85, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
+            player_msg = (result.get("message") or "").strip()
+            if player_msg:
+                if is_ongoing:
+                    # Strip leading greeting if the model inadvertently included one
+                    first_name = contact_name.split()[0] if contact_name.split() else contact_name
+                    name_alt = rf"(?:{re.escape(contact_name)}|{re.escape(first_name)})"
+                    clean_msg = re.sub(
+                        rf"^(?:hey(?:a)?|hi|hello|yo)\s*(?:{name_alt}|there)?\s*[,!.:-]*\s*",
+                        "",
+                        player_msg,
+                        flags=re.IGNORECASE
+                    ).strip()
+                    clean_msg = re.sub(
+                        rf"^{name_alt}\s*[,!.:-]+\s*",
+                        "",
+                        clean_msg,
+                        flags=re.IGNORECASE
+                    ).strip()
+                    if len(clean_msg) >= 4:
+                        player_msg = clean_msg[0].upper() + clean_msg[1:]
+                return player_msg
+        except Exception as e:
+            log.warning(f"[phone] Failed to generate dynamic player chat message: {e}")
 
     # Contextual intelligent fallbacks
     if is_ongoing:

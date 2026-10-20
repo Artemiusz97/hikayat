@@ -4,6 +4,7 @@ import random
 import game_engine
 from game_engine.core import *
 from game_engine.core import _get_npc_name, _norm_dialogue_name
+from game_engine.matching import matches_keyword_boundary
 
 
 # ── Canonical dialogue stall verb registry (single source of truth for both npcs.py and turn.py)
@@ -56,120 +57,324 @@ def count_dialogue_stall_turns(history: list, window: int = 8) -> int:
 
 
 
-def format_dialogue_stall_directive(
+def compute_scene_beat_linger_turns(
+    history: list,
+    session: dict = None,
+    active_partners: list = None,
+) -> int:
+    """
+    Counts consecutive turns in the same scene beat with the same dialogue partner(s)
+    where no location change, quest milestone, combat, or physical state shift occurred.
+    """
+    if not history or not isinstance(history, list):
+        return 0
 
-    stall_count: int,
+    curr_loc = str((session or {}).get("current_location", "")).lower()
+    partners = [
+        str(p).strip().lower()
+        for p in (active_partners or ((session or {}).get("dialogue_partners") or ([session["dialogue_partner"]] if (session or {}).get("dialogue_partner") else [])))
+        if p
+    ]
+    partner_tokens = set()
+    for p in partners:
+        partner_tokens.add(p)
+        tokens = p.split()
+        if tokens and len(tokens[0]) >= 3:
+            partner_tokens.add(tokens[0])
 
-    dialogue_type: str,
+    linger_turns = 0
+    for h in reversed(history):
+        if not isinstance(h, dict):
+            break
+        # Opening scene records are not dialogue turns
+        if h.get("type") == "scene":
+            break
+        h_loc = str(h.get("location") or h.get("current_location") or "").lower()
+        if curr_loc and h_loc and h_loc != curr_loc:
+            break
+        h_intent = str(h.get("intent") or h.get("action_intent") or "").lower().strip()
+        if h_intent in ("movement", "dialogue_exit"):
+            break
+        lbl = str(h.get("label") or h.get("action_label") or h.get("action") or "").lower()
+        movement_kws = (
+            "travel to", "head to", "walk to", "go to", "leave room", "step away",
+            "depart", "move to", "walk away", "exit", "farewell", "goodbye", "bye", "head out"
+        )
+        if matches_keyword_boundary(lbl, movement_kws, allow_negated=False):
+            break
 
-    partner_str: str,
+        # Only break on quest updates if an actual milestone was reached (completed or failed)
+        if h.get("completed_sub_quest_ids"):
+            break
+        q_updates = h.get("quest_updates") or []
+        if isinstance(q_updates, list) and any(
+            isinstance(q, dict) and str(q.get("status") or "").lower() in ("completed", "failed")
+            for q in q_updates
+        ):
+            break
 
-    bounty_title: str = ""
+        if h.get("combat_encounter") or h.get("nearby_enemies"):
+            break
 
+        # Partner continuity check: if active partners exist, ensure turn involved at least one partner
+        if partner_tokens:
+            h_target = str(h.get("target_npc") or "").lower().strip()
+            if h_target and any(matches_keyword_boundary(h_target, tok) for tok in partner_tokens):
+                # Explicit target matches partner
+                pass
+            else:
+                wits = [str(w).strip().lower() for w in (h.get("witnessed_by") or []) if w]
+                wit_match = any(any(matches_keyword_boundary(w, tok) for tok in partner_tokens) for w in wits)
+                nar_text = str(h.get("outcome_narrative") or h.get("narrative") or "").lower()
+                text_match = any(matches_keyword_boundary(lbl, tok) or matches_keyword_boundary(nar_text, tok) for tok in partner_tokens)
+                if wits and not wit_match and not text_match:
+                    break
+
+        linger_turns += 1
+
+    return linger_turns
+
+
+def format_organic_npc_initiative_directive(
+    linger_turns: int,
+    npc: dict,
+    current_location: str = "",
+    time_slot: str = "",
+    dialogue_type: str = "social",
+    bounty_title: str = "",
+    current_minute: int = 480,
+    scen_key: str = "fantasy",
 ) -> str:
-
     """
-
-    Returns the correct, non-contradictory stall directive for the given dialogue mode.
-
-
-
-    dialogue_type must be one of:
-
-      'bounty'  — NPC is a bounty/commission client: urge advancing the specific task.
-
-      'quest'   — Story quest investigation: demand a decisive move or ultimatum.
-
-      'social'  — Casual hangout, date, or phone meetup: natural pacing with no hostility.
-
+    Formats graduated, organic in-character initiative directives based on linger turns:
+      - linger_turns < 2: "" (natural early flow)
+      - linger_turns == 2 (Stage 1 — Organic Beat Pivot): Proactive topic transition grounded in agenda, active prop, or task
+      - linger_turns >= 3 (Stage 2 — Physical & Schedule Initiative): Proactive physical movement, schedule transition, or decisive move
     """
-
-    if stall_count < 2:
-
+    if linger_turns < 2:
         return ""
 
+    partner_str = _get_npc_name(npc) if isinstance(npc, dict) else str(npc)
+    if not partner_str or partner_str == "None":
+        partner_str = "Dialogue Partner"
 
+    task_ref = f" on the task '{bounty_title}'" if bounty_title else ""
 
     if dialogue_type == "bounty":
-
-        task_ref = f" on the task '{bounty_title}'" if bounty_title else ""
-
-        if stall_count >= 3:
-
+        if linger_turns >= 3:
             return (
-
                 f"- ⚠️ BOUNTY STALL WARNING: The conversation with {partner_str} has continued for "
-
-                f"{stall_count} turns without committing{task_ref}. "
-
+                f"{linger_turns} turns without committing{task_ref}. "
                 f"Have {partner_str} firmly urge the player to accept and act on the bounty task now. "
-
                 f"Generate at least 1 choice that directly commits to the task.\n"
-
             )
-
         return (
-
-            f"- ⚠️ BOUNTY DEPTH: After {stall_count} conversational turns, "
-
+            f"- ⚠️ BOUNTY DEPTH: After {linger_turns} conversational turns, "
             f"ensure at least 1 choice commits to or advances the bounty task{task_ref}.\n"
-
         )
-
-
 
     if dialogue_type == "quest":
-
-        if stall_count >= 3:
-
+        if linger_turns >= 3:
             return (
-
-                f"- ⚠️ QUEST INVESTIGATION LOOP DETECTED ({stall_count} consecutive Proposal/Suggest/Analyze turns): "
-
+                f"- ⚠️ QUEST INVESTIGATION LOOP DETECTED ({linger_turns} consecutive Proposal/Suggest/Analyze turns): "
                 f"The conversation MUST reach a concrete turning point this turn. "
-
                 f"Have {partner_str} issue a direct demand, ultimatum, revelation, or personal challenge. "
-
                 f"BANNED THIS TURN: 'Propose...', 'Suggest...', 'Analyze...', 'Outline...'. Replace with direct, committal choices.\n"
-
             )
-
         return (
-
-            f"- ⚠️ DEPTH WARNING: After {stall_count} planning turns, ensure at least 1 choice this turn "
-
+            f"- ⚠️ DEPTH WARNING: After {linger_turns} planning turns, ensure at least 1 choice this turn "
             f"is a CONCRETE COMMITMENT or skill check — not another proposal.\n"
-
         )
-
-
 
     # Social / casual hangout / phone meetup
+    blocking = npc.get("micro_blocking") if isinstance(npc, dict) and isinstance(npc.get("micro_blocking"), dict) else {}
+    active_prop = blocking.get("active_prop", "their belongings") if isinstance(blocking, dict) else "their belongings"
+    agenda = (npc.get("immediate_agenda") if isinstance(npc, dict) else "") or ""
+    open_thread = (npc.get("open_thread") if isinstance(npc, dict) else "") or ""
 
-    if stall_count >= 3:
-
+    if linger_turns == 2:
+        pivot_topic = open_thread or agenda or f"their task with {active_prop}"
         return (
-
-            f"- ☕ SOCIAL HANGOUT PROGRESSION: The casual conversation with {partner_str} has continued for "
-
-            f"{stall_count} turns. Keep the mood warm, relaxed, and natural. Advance the interaction naturally "
-
-            f"(e.g. order refreshments, share a personal memory/joke, transition to an activity, or conclude the meetup). "
-
-            f"STRICTLY FORBIDDEN: Do NOT turn this into a challenge, trial, or ultimatum!\n"
-
+            f"- ☕ SOCIAL HANGOUT MOMENTUM (Stage 1 — Natural Beat Pivot): Keep dialogue grounded in personal connection, authentic reactions, "
+            f"and humor rather than analytical proposals. {partner_str} naturally pivots the topic to something authentic to them: {pivot_topic} (Active Prop: {active_prop}).\n"
         )
 
+    # Stage 2: linger_turns >= 3
+    sched_hint = ""
+    if isinstance(npc, dict):
+        try:
+            from mechanics.world.schedules import get_npc_scheduled_location
+            sl = get_npc_scheduled_location(npc, current_minute=current_minute, scen_key=scen_key, time_slot=time_slot)
+            if sl and str(sl).strip().lower() != str(current_location or "").strip().lower():
+                sched_hint = f" or invites walking toward {sl}"
+        except Exception:
+            pass
+
     return (
-
-        f"- ☕ SOCIAL HANGOUT MOMENTUM: Keep dialogue grounded in personal connection, authentic reactions, "
-
-        f"and humor rather than analytical proposals.\n"
-
+        f"- ☕ SOCIAL HANGOUT PROGRESSION: The casual conversation with {partner_str} has continued for "
+        f"{linger_turns} turns. Keep the mood warm, relaxed, and natural. Advance the interaction naturally "
+        f"(e.g. order refreshments, share a personal memory/joke, transition to an activity, help with {active_prop}{sched_hint}, or conclude the meetup). "
+        f"STRICTLY FORBIDDEN: Do NOT turn this into a challenge, trial, or ultimatum!\n"
     )
 
 
+def format_dialogue_stall_directive(
+    stall_count: int,
+    dialogue_type: str,
+    partner_str: str,
+    bounty_title: str = ""
+) -> str:
+    """
+    Compatibility wrapper forwarding to format_organic_npc_initiative_directive.
+    """
+    return format_organic_npc_initiative_directive(
+        linger_turns=stall_count,
+        npc={"name": partner_str},
+        dialogue_type=dialogue_type,
+        bounty_title=bounty_title,
+    )
 
+
+_TENSION_ESCALATION_KEYWORDS = (
+    "hammer", "hammering", "patrol", "patrols", "sentry", "sentries",
+    "barricade", "barricaded", "breach", "breaching", "alarm", "alarms", "countdown",
+    "seconds away", "moments before", "collapse", "collapsing", "intruder",
+    "intruders", "ward-lines", "backlash", "locked in", "forced entry", "pounding",
+    "shattered circle", "defender", "defenders", "assault", "assaulting", "siege",
+    "standoff", "stand-off", "hostile standoff", "ambush",
+)
+
+
+def evaluate_and_tick_scene_tension_timer(
+    session: dict,
+    actions: list = None,
+    is_movement: bool = False,
+    access_gated: bool = False,
+) -> dict:
+    """
+    Deterministically tracks and increments `session['scene_tension_timer']`.
+    When `scene_tension_timer >= 2`, spawns a canonical patrol NPC (in non-combat scenarios)
+    or a hostile enemy (in combat scenarios) directly into the pre-turn stage state.
+
+    Returns:
+      {
+        "timer": int,
+        "expired": bool,
+        "spawned_patrol_npc": dict | None,
+        "spawned_hostile_enemy": dict | None,
+        "stage_direction": str,
+      }
+    """
+    if not isinstance(session, dict):
+        return {"timer": 0, "expired": False, "spawned_patrol_npc": None, "spawned_hostile_enemy": None, "stage_direction": ""}
+
+    import scenario_data
+    from mechanics.social.physical_state import is_erotic_intimate_contact
+
+    scen_key = session.get("scenario") or "fantasy"
+    is_non_combat = scenario_data.is_non_combat_scenario(scen_key)
+    phys_st = session.get("physical_state") or {}
+    if is_erotic_intimate_contact(str(phys_st.get("intimate_contact", ""))):
+        session["scene_tension_timer"] = 0
+        return {"timer": 0, "expired": False, "spawned_patrol_npc": None, "spawned_hostile_enemy": None, "stage_direction": ""}
+
+    # Reset timer if the player successfully moved to a new location (without being halted at a gate)
+    if is_movement and not access_gated:
+        session["scene_tension_timer"] = 0
+        return {"timer": 0, "expired": False, "spawned_patrol_npc": None, "spawned_hostile_enemy": None, "stage_direction": ""}
+
+    curr_timer = int(session.get("scene_tension_timer") or 0)
+    history = session.get("history") or []
+    intimate_prose_markers = ("climax", "orgasm", "aftercare", "aftershocks", "moan", "kiss", "thighs", "arousal", "cunnilingus", "fellatio")
+
+    # Check if latest history entry or current state has active tension
+    history_tension_count = 0
+    for h in history[-6:]:
+        if isinstance(h, dict):
+            h_nar = f"{h.get('outcome_narrative') or ''} {h.get('narrative') or ''} {h.get('next_narrative') or ''}".lower()
+        elif isinstance(h, str):
+            h_nar = h.lower()
+        else:
+            continue
+        if h_nar.strip():
+            has_t = matches_keyword_boundary(h_nar, _TENSION_ESCALATION_KEYWORDS, allow_negated=False)
+            has_i = matches_keyword_boundary(h_nar, intimate_prose_markers, allow_negated=False)
+            if has_t and not has_i:
+                history_tension_count += 1
+
+    # Also check if player is trespassing on campus after hours or repeatedly failing at a locked gate
+    has_failed_gate_action = False
+    if access_gated and actions:
+        for a in actions:
+            if isinstance(a, dict):
+                chk = a.get("check")
+                tier = getattr(chk, "tier", None) or (chk.get("tier") if isinstance(chk, dict) else None)
+                if a.get("success") is False or tier in ("fail", "crit_fail"):
+                    has_failed_gate_action = True
+                    break
+
+    if history_tension_count > 0 or has_failed_gate_action:
+        curr_timer = max(curr_timer + 1 if history_tension_count >= 1 or has_failed_gate_action else curr_timer, history_tension_count)
+    else:
+        curr_timer = 0
+
+    session["scene_tension_timer"] = curr_timer
+    if curr_timer < 2:
+        return {"timer": curr_timer, "expired": False, "spawned_patrol_npc": None, "spawned_hostile_enemy": None, "stage_direction": ""}
+
+    # Timer expired (>= 2)! Deterministically spawn patrol NPC or hostile enemy if not already present
+    curr_npcs = session.get("current_npcs") or []
+    curr_enemies = session.get("nearby_enemies") or []
+    spawned_patrol = None
+    spawned_enemy = None
+    stage_dir = ""
+
+    if is_non_combat:
+        # Check if a patrol / disciplinary / authority NPC is already on stage
+        has_authority = any(
+            any(k in str((n.get("role") if isinstance(n, dict) else "") or "").lower() for k in ("guard", "monitor", "prefect", "teacher", "security", "patrol", "faculty"))
+            for n in curr_npcs
+        )
+        if not has_authority:
+            import namegen
+            patrol_role = "Disciplinary Prefect" if "school" in str(scen_key).lower() else "Security Guard"
+            patrol_name = namegen.generate_person_name(scenario=scen_key)
+            spawned_patrol = {
+                "name": patrol_name,
+                "role": patrol_role,
+                "status_effects": ["Present", "Alert"],
+                "stage_role": "active_partner",
+                "attention_ring": "ring_1_primary",
+            }
+            stage_dir = (
+                f"[STAGE DIRECTION — TENSION TIMER EXPIRED]: {patrol_name} ({patrol_role}) arrives on the scene "
+                f"to investigate the commotion and directly confronts the party!"
+            )
+    else:
+        # Combat-capable scenario: if no active enemies yet and history had sentry/patrol tension, spawn a sentry
+        if not curr_enemies and history_tension_count >= 2:
+            try:
+                from mechanics.combat.enemies import generate_scenario_enemy
+                spawned_enemy = generate_scenario_enemy(
+                    scenario=scen_key,
+                    location=session.get("current_location", "area"),
+                    chapter=int(session.get("chapter", 1) or 1),
+                )
+                enemy_nm = spawned_enemy.get("name", "Sentry")
+                stage_dir = (
+                    f"[STAGE DIRECTION — TENSION TIMER EXPIRED]: The standoff breaches! "
+                    f"{enemy_nm} forces entry into the scene ({spawned_enemy.get('hp', 20)} HP)!"
+                )
+            except Exception:
+                pass
+
+    return {
+        "timer": curr_timer,
+        "expired": True,
+        "spawned_patrol_npc": spawned_patrol,
+        "spawned_hostile_enemy": spawned_enemy,
+        "stage_direction": stage_dir,
+    }
 
 
 def build_scene_escalation_and_consequence_directives(
@@ -223,22 +428,36 @@ def build_scene_escalation_and_consequence_directives(
     if not is_intimate_scene and not is_non_combat:
 
         tension_keywords = (
-            "hammer", "hammering", "patrol", "patrols", "sentry", "sentries", "guard", "guards",
+            "hammer", "hammering", "patrol", "patrols", "sentry", "sentries",
             "barricade", "barricaded", "breach", "breaching", "alarm", "alarms", "countdown",
-            "seconds away", "moments before", "collapse", "collapsing", "timer", "intruder",
+            "seconds away", "moments before", "collapse", "collapsing", "intruder",
             "intruders", "ward-lines", "backlash", "locked in", "forced entry", "pounding",
             "shattered circle", "defender", "defenders", "assault", "assaulting", "siege",
-            "standoff", "stand-off", "hostile", "ambush"
+            "standoff", "stand-off", "hostile standoff", "ambush"
         )
         intimate_prose_markers = (
             "climax", "orgasm", "aftercare", "aftershocks", "moan", "kiss", "thighs", "arousal", "cunnilingus", "fellatio"
         )
 
-        recent_tension_count = sum(
-            1 for h in history[-6:]
-            if any(kw in str(h).lower() for kw in tension_keywords)
-            and not any(im in str(h).lower() for im in intimate_prose_markers)
-        )
+        recent_tension_count = 0
+        for h in history[-6:]:
+            if isinstance(h, dict):
+                h_narrative = (
+                    str(h.get("outcome_narrative") or "") + " " +
+                    str(h.get("narrative") or "") + " " +
+                    str(h.get("next_narrative") or "")
+                ).lower()
+            elif isinstance(h, str):
+                h_narrative = h.lower()
+            else:
+                continue
+
+            if not h_narrative.strip():
+                continue
+            has_tension = matches_keyword_boundary(h_narrative, tension_keywords, allow_negated=False)
+            has_intimacy = matches_keyword_boundary(h_narrative, intimate_prose_markers, allow_negated=False)
+            if has_tension and not has_intimacy:
+                recent_tension_count += 1
 
         if recent_tension_count >= 2:
             directives.append(
@@ -629,11 +848,17 @@ DIALOGUE_TITLE_WORDS: set[str] = {
     "druid", "scholar", "guardian", "student", "council", "president", "vice", "secretary",
     "representative", "officer", "member", "guildmaster", "archivist", "warden", "guard",
     "patron", "shopkeeper", "innkeeper", "headmaster", "dean", "professor", "teacher",
-    "coach", "trainer", "instructor", "principal", "referee", "sensei", "bartender", "nurse", "clerk", "vendor"
+    "coach", "trainer", "instructor", "principal", "referee", "sensei", "bartender", "nurse", "clerk", "vendor",
+    "bin", "binti", "ibn", "bint", "van", "von", "der", "den", "het", "ten", "ter", "del", "della", "degli", "das", "dos"
 }
 
 
-def extract_speaking_npcs_from_narrative(narrative_text: str, npcs_present: list) -> list[str]:
+def extract_speaking_npcs_from_narrative(
+    narrative_text: str,
+    npcs_present: list,
+    party: list | None = None,
+    player_name: str | None = None,
+) -> list[str]:
 
     """
 
@@ -711,7 +936,47 @@ def extract_speaking_npcs_from_narrative(narrative_text: str, npcs_present: list
 
         "snap", "snaps", "snapped", "snapping", "wave", "waves", "waved", "waving",
 
-        "gasp", "gasps", "gasped", "gasping"
+        "gasp", "gasps", "gasped", "gasping",
+
+        "rumble", "rumbles", "rumbled", "rumbling",
+
+        "growl", "growls", "growled", "growling",
+
+        "bark", "barks", "barked", "barking",
+
+        "drawl", "drawls", "drawled", "drawling",
+
+        "huff", "huffs", "huffed", "huffing",
+
+        "snarl", "snarls", "snarled", "snarling",
+
+        "snort", "snorts", "snorted", "snorting",
+
+        "intone", "intones", "intoned", "intoning",
+
+        "breathe", "breathes", "breathed", "breathing",
+
+        "hiss", "hisses", "hissed", "hissing",
+
+        "stammer", "stammers", "stammered", "stammering",
+
+        "stutter", "stutters", "stuttered", "stuttering",
+
+        "chide", "chides", "chided", "chiding",
+
+        "taunt", "taunts", "taunted", "taunting",
+
+        "scold", "scolds", "scolded", "scolding",
+
+        "plead", "pleads", "pleaded", "pleading",
+
+        "groan", "groans", "groaned", "groaning",
+
+        "grunt", "grunts", "grunted", "grunting",
+
+        "jeer", "jeers", "jeered", "jeering",
+
+        "mock", "mocks", "mocked", "mocking"
 
     }
 
@@ -737,7 +1002,24 @@ def extract_speaking_npcs_from_narrative(narrative_text: str, npcs_present: list
 
     speaking_npcs = []
 
-
+    # Collect player and party tokens to avoid misattributing player dialogue to NPCs with overlapping names
+    party_tokens = set()
+    party_full_names = set()
+    if player_name:
+        pn_norm = game_engine._norm_dialogue_name(str(player_name))
+        party_full_names.add(pn_norm)
+        for t in pn_norm.split():
+            if len(t) > 2 and t not in title_words:
+                party_tokens.add(t)
+    if party:
+        for p_entry in party:
+            p_char = p_entry[0] if isinstance(p_entry, (list, tuple)) and p_entry else p_entry
+            if isinstance(p_char, dict) and p_char.get("name"):
+                cn_norm = game_engine._norm_dialogue_name(str(p_char["name"]))
+                party_full_names.add(cn_norm)
+                for t in cn_norm.split():
+                    if len(t) > 2 and t not in title_words:
+                        party_tokens.add(t)
 
     for npc in npcs_present:
 
@@ -748,6 +1030,9 @@ def extract_speaking_npcs_from_narrative(narrative_text: str, npcs_present: list
             continue
 
         n_norm = game_engine._norm_dialogue_name(n_name)
+        if n_norm in party_full_names:
+            # Skip player or party members in NPC presence list
+            continue
 
         n_tokens = [t for t in n_norm.split() if len(t) > 2 and t not in title_words]
 
@@ -755,17 +1040,17 @@ def extract_speaking_npcs_from_narrative(narrative_text: str, npcs_present: list
 
             n_tokens = [n_norm]
 
-
+        # Exclude tokens shared with the player character / party to avoid false attribution
+        n_tokens_filtered = [t for t in n_tokens if t not in party_tokens]
 
         target_text = nar_attrib_only if has_quotes else nar_norm
 
         sentences = [s.strip() for s in re.split(r'[.!?\n]+', target_text) if s.strip()]
 
-
-
         is_speaking = False
         for idx, s in enumerate(sentences):
-            if n_norm in s or any(t in s for t in n_tokens):
+            matches_npc = n_norm in s or (bool(n_tokens_filtered) and any(t in s for t in n_tokens_filtered))
+            if matches_npc:
                 s_words = set(re.findall(r"\b\w+\b", s))
                 if s_words & speech_verbs:
                     is_speaking = True
@@ -777,6 +1062,31 @@ def extract_speaking_npcs_from_narrative(narrative_text: str, npcs_present: list
                         is_speaking = True
                         break
 
+        # Action-beat dialogue attribution: if a paragraph contains quotes and this NPC is the sole character in the paragraph's action prose
+        if not is_speaking and has_quotes:
+            for para in narrative_text.split("\n"):
+                para_clean = para.strip()
+                if not para_clean:
+                    continue
+                if any(q in para_clean for q in ('"', '“', '”', "'", '‘', '’')):
+                    p_norm = game_engine._norm_dialogue_name(para_clean)
+                    p_attrib = re.sub(r'["“][^"”]*["”]', ' ', p_norm)
+                    p_attrib = re.sub(r"['‘][^'’]*['’]", ' ', p_attrib)
+                    matches_npc_para = n_norm in p_attrib or (bool(n_tokens_filtered) and any(t in p_attrib for t in n_tokens_filtered))
+                    if matches_npc_para:
+                        other_mentioned = False
+                        for other_npc in npcs_present:
+                            o_name = game_engine._get_npc_name(other_npc)
+                            if not o_name or o_name.lower() == n_name.lower():
+                                continue
+                            o_norm = game_engine._norm_dialogue_name(o_name)
+                            o_tokens = [ot for ot in o_norm.split() if len(ot) > 2 and ot not in title_words]
+                            if o_norm in p_attrib or any(ot in p_attrib for ot in o_tokens):
+                                other_mentioned = True
+                                break
+                        if not other_mentioned:
+                            is_speaking = True
+                            break
 
         if is_speaking and n_name not in speaking_npcs:
             speaking_npcs.append(n_name)
@@ -787,46 +1097,72 @@ def extract_speaking_npcs_from_narrative(narrative_text: str, npcs_present: list
 
 
 
-def is_npc_invited_in_action(npc_name: str, actions: list) -> bool:
-
+def is_npc_invited_in_action(npc_name: str, actions: list, session: dict = None) -> bool:
     """Checks if any player action explicitly invites or recruits an NPC to travel."""
-
     if not npc_name or not actions:
-
         return False
 
+    import namegen
+    import re
     n_low = npc_name.lower().strip()
-
     first_token = n_low.split()[0] if n_low else ""
+    given_token = namegen.extract_first_and_last_name(npc_name)[0].lower().strip()
+    token_candidates = {t for t in (first_token, given_token) if len(t) >= 3 and t not in namegen.NAME_PARTICLES_AND_HONORIFICS}
 
-
-
-    invitation_verbs = (
-
-        "invite ", "ask ", "bring ", "take ", "tell ", "call ", "convince ",
-
-        "recruit ", "hire ", "command ", "lead ", "request ", "guide ", "steer ", "usher ", "escort ", "thank "
-
+    dismissal_terms = (
+        "leave", "depart", "go home", "head home", "goodbye", "farewell",
+        "part ways", "split up", "alone", "dismiss", "step away", "excuse yourself", "see you later"
     )
 
-    follow_terms = ("join", "come with", "come along", "follow", "accompany", "with us", "travel with", "explore with", "together", "walk with", "head home with", "head with")
+    follow_terms = (
+        "join", "come with", "come along", "follow", "accompany", "with us",
+        "travel with", "explore with", "together", "walk with", "head home with", "head with",
+        "bring along", "tag along", "carry", "escort", "guide", "lead", "help carry",
+        "walk to class", "walk to homeroom", "walk together", "head out together"
+    )
 
-
+    is_dp = False
+    if session:
+        try:
+            from mechanics.world.mobility import is_dialogue_partner
+            is_dp = is_dialogue_partner(npc_name, session=session)
+        except Exception:
+            is_dp = False
 
     for a in actions:
-
         label = (a.get("label") if isinstance(a, dict) else str(a)).lower()
+        t_npc = (str(a.get("target_npc") or "").strip().lower()) if isinstance(a, dict) else ""
+        
+        is_targeted = bool(
+            t_npc and (t_npc == n_low or any(ft in t_npc for ft in token_candidates))
+        )
+        is_named_in_label = bool(
+            n_low in label or any(ft in label for ft in token_candidates)
+        )
+        is_dp_escort = bool(
+            is_dp and (
+                any(ft in label for ft in follow_terms)
+                or re.search(r"\b(?:carry|walk|escort|guide|lead|take|bring|help|accompany)\b.*\b(?:her|him|them)\b", label)
+            )
+        )
 
-        if n_low in label or (len(first_token) >= 3 and first_token in label):
-
-            if any(iv in label for iv in invitation_verbs) or any(ft in label for ft in follow_terms):
-
+        if is_targeted or is_named_in_label or is_dp_escort:
+            # If the action explicitly dismisses or says goodbye, it is NEVER an invitation
+            if any(dt in label for dt in dismissal_terms):
+                return False
+            if is_targeted or is_dp_escort:
+                return True
+            if any(ft in label for ft in follow_terms):
+                return True
+            if any(k in label for k in ("invite", "recruit", "hire")) and any(kw in label for kw in ("party", "companion", "journey", "adventure", "travel")):
+                return True
+            if re.search(r"\b(?:carry|walk|escort|guide|lead|take|bring|help|accompany)\b", label):
                 return True
 
     return False
 
 
-def can_chime_in_to_dialogue(
+def evaluate_scene_attention_transition(
     npc_name: str,
     *,
     retained_partners: list[str] | None = None,
@@ -868,13 +1204,24 @@ def can_chime_in_to_dialogue(
     if not n_tokens and len(n_norm) > 2:
         n_tokens = [n_norm]
 
+    # Collect player and party tokens to prevent player name collisions from triggering attention transitions
+    party_tokens = set()
+    if party:
+        for p_entry in party:
+            p_char = p_entry[0] if isinstance(p_entry, (list, tuple)) and p_entry else p_entry
+            if isinstance(p_char, dict) and p_char.get("name"):
+                for t in game_engine._norm_dialogue_name(str(p_char["name"])).split():
+                    if len(t) > 2 and t not in DIALOGUE_TITLE_WORDS:
+                        party_tokens.add(t)
+    n_tokens_filtered = [t for t in n_tokens if t not in party_tokens]
+
     # 2. Player explicitly addressed or invited them in their action?
     if actions:
         act_txt = " ".join(
             str(a.get("label", "")) if isinstance(a, dict) else str(a)
             for a in actions
         ).lower()
-        if n_norm in act_txt or any(t in act_txt for t in n_tokens):
+        if n_norm in act_txt or (bool(n_tokens_filtered) and any(t in act_txt for t in n_tokens_filtered)):
             return True
 
     # 3. Party Companion?
@@ -1001,7 +1348,7 @@ def can_chime_in_to_dialogue(
         )
 
         for idx, s in enumerate(sentences):
-            if n_norm in s or any(t in s for t in n_tokens):
+            if n_norm in s or (bool(n_tokens_filtered) and any(t in s for t in n_tokens_filtered)):
                 # If subsequent sentence continues with quotes or pronoun attribution, combine for analysis
                 s_eval = s
                 if idx + 1 < len(sentences):
@@ -1044,4 +1391,7 @@ def can_chime_in_to_dialogue(
                     return True
 
     return False
+
+
+can_chime_in_to_dialogue = evaluate_scene_attention_transition
 

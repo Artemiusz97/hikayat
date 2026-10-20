@@ -143,10 +143,20 @@ def create_contextual_story_quest_data(
             }
         ]
 
+    from mechanics.narrative.blueprints import get_blueprint_for_archetype, infer_required_item_and_count_from_text
     sub_waypoints = {}
     for idx, so in enumerate(sub_objs, 1):
         arch = so.get("archetype", "Investigation")
-        sub_waypoints[idx] = ensure_multi_stage_waypoints([], default_loc=loc, archetype=arch)
+        so_bp = get_blueprint_for_archetype(arch, so.get("text", ""))
+        so["blueprint_id"] = so_bp
+        req_item, req_cnt = infer_required_item_and_count_from_text(so.get("text", "")) if so_bp == "ACQUISITION" else ("", 1)
+        so["required_item"] = req_item
+        so["required_item_count"] = req_cnt
+        sec = loc2 if idx == 1 else (loc3 if idx == 2 else loc1)
+        sub_waypoints[idx] = ensure_multi_stage_waypoints(
+            [], default_loc=loc, archetype=arch, secondary_loc=sec,
+            session_id=session_id, scen_key=scen_key, required_item=req_item
+        )
 
     sub_waypoints = game_engine._distribute_fallback_locations(session_id, scen_key, sub_waypoints, sub_objs)
 
@@ -376,7 +386,7 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
         for idx, item in enumerate(raw_sub, 1):
             if isinstance(item, str) and item.strip():
                 sub_objs.append({"id": idx, "archetype": "Investigation", "text": item.strip(), "completed": False})
-                sub_waypoints[idx] = ensure_multi_stage_waypoints([], default_loc=loc, archetype="Investigation")
+                sub_waypoints[idx] = ensure_multi_stage_waypoints([], default_loc=loc, archetype="Investigation", session_id=session_id)
             elif isinstance(item, dict):
                 so_id = item.get("id", idx)
                 arch = item.get("archetype", "Objective")
@@ -389,7 +399,7 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
                         "completed": False
                     })
                     wp_list = item.get("waypoints") or []
-                    sub_waypoints[so_id] = ensure_multi_stage_waypoints(wp_list, default_loc=loc, archetype=arch)
+                    sub_waypoints[so_id] = ensure_multi_stage_waypoints(wp_list, default_loc=loc, archetype=arch, session_id=session_id)
 
     # STRICT PYTHON GUARDRAIL: Guarantee EXACTLY 3 Sub-Objectives
     if len(sub_objs) < 3:
@@ -409,7 +419,7 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
                     "text": clause,
                     "completed": False
                 })
-                sub_waypoints[next_id] = ensure_multi_stage_waypoints([], default_loc=loc, archetype=arch)
+                sub_waypoints[next_id] = ensure_multi_stage_waypoints([], default_loc=loc, archetype=arch, session_id=session_id)
                 existing_texts.append(clause.lower())
 
         archetype_fallbacks = [
@@ -426,14 +436,25 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
                 "text": default_text,
                 "completed": False
             })
-            sub_waypoints[next_id] = ensure_multi_stage_waypoints([], default_loc=loc, archetype=arch)
+            sub_waypoints[next_id] = ensure_multi_stage_waypoints([], default_loc=loc, archetype=arch, session_id=session_id)
 
-    # Normalize IDs to 1, 2, 3
+    from mechanics.narrative.blueprints import get_blueprint_for_archetype, infer_required_item_and_count_from_text
+    # Normalize IDs to 1, 2, 3 and enrich with blueprints
     for idx, so in enumerate(sub_objs[:3], 1):
         old_id = so["id"]
         so["id"] = idx
         if old_id != idx and old_id in sub_waypoints:
             sub_waypoints[idx] = sub_waypoints.pop(old_id)
+        arch = so.get("archetype", "Investigation")
+        so_bp = get_blueprint_for_archetype(arch, so.get("text", ""))
+        so["blueprint_id"] = so_bp
+        req_item, req_cnt = infer_required_item_and_count_from_text(so.get("text", "")) if so_bp == "ACQUISITION" else ("", 1)
+        so["required_item"] = req_item
+        so["required_item_count"] = req_cnt
+        if idx in sub_waypoints and req_item:
+            for wp in sub_waypoints[idx]:
+                if wp.get("stage_index") == len(sub_waypoints[idx]):
+                    wp["required_item"] = req_item
     sub_objs = sub_objs[:3]
 
     # Distribute fallback locations so each sub-quest targets a DISTINCT location
@@ -735,6 +756,7 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
                     if not so.get("completed"):
                         so["completed"] = True
                         newly_completed.append(so)
+                        consume_quest_delivery_item_if_needed(session_id, matched_quest or quest_update, party_user_ids, sub_obj=so)
                     break
 
     # Deterministic Clue Grounding: If an investigation/clue sub-objective completed, append a structured clue note
@@ -995,4 +1017,1435 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
         }
         
     return None
+
+def evaluate_quest_state_predicates(
+    session_id: int,
+    user_id: int = None,
+    event_info: dict = None
+) -> list[dict]:
+    """
+    Dual-layer predicate evaluator for active quests and sub-objectives.
+    Runs pre-turn and on reactive event triggers (e.g. ItemGained, NPCStatusChanged).
+    - ACQUISITION quests: checks player unequipped inventory against required_item & required_item_count.
+      - If held >= required: auto-advances pre-final waypoints to completed, activates final delivery waypoint,
+        and sets quest progress to 'Ready to deliver <item> (<held>/<req>)'.
+      - If 0 < held < required: updates quest progress to '<held>/<req> <item> Collected'.
+    - Also evaluates Story Quest sub-objectives with blueprint_id == 'ACQUISITION'.
+    - NEUTRALIZATION / ESCORT quests: handles NPCStatusChangedEvent to advance waypoints if target NPC status changed.
+    Returns list of notification/update dicts.
+    """
+    import db
+    import time
+    from mechanics.narrative.blueprints import (
+        get_blueprint_for_archetype,
+        infer_required_item_and_count_from_text,
+        find_matching_inventory_items_for_quest,
+    )
+
+    if not session_id:
+        return []
+
+    party_uids = []
+    if user_id:
+        party_uids.append(user_id)
+    sess = db.get_session(session_id)
+    if sess:
+        if sess.get("host_user_id") and sess["host_user_id"] not in party_uids:
+            party_uids.append(sess["host_user_id"])
+        if sess.get("user_id") and sess["user_id"] not in party_uids:
+            party_uids.append(sess["user_id"])
+    if not party_uids:
+        try:
+            with db.get_conn() as conn:
+                row = conn.execute("SELECT user_id FROM characters LIMIT 1").fetchone()
+                if row and row["user_id"]:
+                    party_uids.append(row["user_id"])
+        except Exception:
+            pass
+    if not party_uids:
+        party_uids = [1]
+
+    # Pool unequipped inventory items across party
+    all_inventory = []
+    for uid in party_uids:
+        all_inventory.extend(db.get_inventory(uid))
+
+    active_quests = db.get_session_quests(session_id, status="Active")
+    results = []
+
+    for q in active_quests:
+        qid = q.get("quest_id")
+        if not qid:
+            continue
+        bp = q.get("blueprint_id") or get_blueprint_for_archetype(q.get("quest_type", ""), q.get("objective", ""))
+
+        # 1. Top-level ACQUISITION quest
+        if bp == "ACQUISITION":
+            req_item = (q.get("required_item") or "").strip()
+            req_cnt = int(q.get("required_item_count") or 1)
+            if not req_item:
+                req_item, req_cnt = infer_required_item_and_count_from_text(q.get("objective", ""), q.get("title", ""))
+
+            if req_item:
+                matching = find_matching_inventory_items_for_quest(req_item, all_inventory, exclude_equipped=True)
+                held_cnt = len(matching)
+
+                wps = db.get_quest_waypoints(session_id, qid, None)
+                if wps and len(wps) > 1:
+                    max_stage = max(int(w.get("stage_index", 1)) for w in wps)
+                    if held_cnt >= req_cnt:
+                        with db.get_conn() as conn:
+                            conn.execute(
+                                "UPDATE quest_waypoints SET status='completed', updated_at=? WHERE session_id=? AND quest_id=? AND sub_obj_id IS NULL AND stage_index < ?",
+                                (time.time(), session_id, qid, max_stage)
+                            )
+                            conn.execute(
+                                "UPDATE quest_waypoints SET status='active', updated_at=? WHERE session_id=? AND quest_id=? AND sub_obj_id IS NULL AND stage_index = ?",
+                                (time.time(), session_id, qid, max_stage)
+                            )
+                        new_prog = f"Ready to deliver {req_item} ({held_cnt}/{req_cnt})"
+                        if q.get("progress") != new_prog:
+                            with db.get_conn() as conn:
+                                conn.execute(
+                                    "UPDATE quests SET progress=?, required_item=?, required_item_count=?, updated_at=? WHERE session_id=? AND quest_id=?",
+                                    (new_prog, req_item, req_cnt, time.time(), session_id, qid)
+                                )
+                            results.append({"quest_id": qid, "type": "inventory_ready", "progress": new_prog, "required_item": req_item, "held_count": held_cnt})
+                    elif held_cnt > 0:
+                        new_prog = f"{held_cnt}/{req_cnt} {req_item} Collected"
+                        if q.get("progress") != new_prog:
+                            with db.get_conn() as conn:
+                                conn.execute(
+                                    "UPDATE quests SET progress=?, required_item=?, required_item_count=?, updated_at=? WHERE session_id=? AND quest_id=?",
+                                    (new_prog, req_item, req_cnt, time.time(), session_id, qid)
+                                )
+                            results.append({"quest_id": qid, "type": "partial_progress", "progress": new_prog, "required_item": req_item, "held_count": held_cnt})
+                elif not wps and held_cnt >= req_cnt:
+                    new_prog = f"Ready to deliver {req_item} ({held_cnt}/{req_cnt})"
+                    if q.get("progress") != new_prog:
+                        with db.get_conn() as conn:
+                            conn.execute(
+                                "UPDATE quests SET progress=?, required_item=?, required_item_count=?, updated_at=? WHERE session_id=? AND quest_id=?",
+                                (new_prog, req_item, req_cnt, time.time(), session_id, qid)
+                            )
+                        results.append({"quest_id": qid, "type": "inventory_ready", "progress": new_prog, "required_item": req_item, "held_count": held_cnt})
+
+        # 2. Sub-objectives (Story Quests & Multi-branch quests)
+        sub_objs = q.get("sub_objectives") or []
+        if isinstance(sub_objs, list) and sub_objs:
+            sub_dirty = False
+            for so in sub_objs:
+                if not isinstance(so, dict) or so.get("completed"):
+                    continue
+                so_id = so.get("id")
+                if not so_id:
+                    continue
+                so_bp = so.get("blueprint_id") or get_blueprint_for_archetype(so.get("archetype", ""), so.get("text", ""))
+                if so_bp == "ACQUISITION":
+                    so_req_item = (so.get("required_item") or "").strip()
+                    so_req_cnt = int(so.get("required_item_count") or 1)
+                    if not so_req_item:
+                        so_req_item, so_req_cnt = infer_required_item_and_count_from_text(so.get("text", ""))
+                        if so_req_item:
+                            so["required_item"] = so_req_item
+                            so["required_item_count"] = so_req_cnt
+                            sub_dirty = True
+                    
+                    if so_req_item:
+                        so_matching = find_matching_inventory_items_for_quest(so_req_item, all_inventory, exclude_equipped=True)
+                        so_held = len(so_matching)
+
+                        so_wps = db.get_quest_waypoints(session_id, qid, so_id)
+                        if so_wps and len(so_wps) > 1:
+                            so_max_stage = max(int(w.get("stage_index", 1)) for w in so_wps)
+                            if so_held >= so_req_cnt:
+                                with db.get_conn() as conn:
+                                    conn.execute(
+                                        "UPDATE quest_waypoints SET status='completed', updated_at=? WHERE session_id=? AND quest_id=? AND sub_obj_id=? AND stage_index < ?",
+                                        (time.time(), session_id, qid, so_id, so_max_stage)
+                                    )
+                                    conn.execute(
+                                        "UPDATE quest_waypoints SET status='active', updated_at=? WHERE session_id=? AND quest_id=? AND sub_obj_id=? AND stage_index = ?",
+                                        (time.time(), session_id, qid, so_id, so_max_stage)
+                                    )
+                                new_so_prog = f"Ready to deliver {so_req_item} ({so_held}/{so_req_cnt})"
+                                if so.get("progress") != new_so_prog:
+                                    so["progress"] = new_so_prog
+                                    sub_dirty = True
+                                    results.append({"quest_id": qid, "sub_obj_id": so_id, "type": "inventory_ready", "progress": new_so_prog})
+                            elif so_held > 0:
+                                new_so_prog = f"{so_held}/{so_req_cnt} {so_req_item} Collected"
+                                if so.get("progress") != new_so_prog:
+                                    so["progress"] = new_so_prog
+                                    sub_dirty = True
+                                    results.append({"quest_id": qid, "sub_obj_id": so_id, "type": "partial_progress", "progress": new_so_prog})
+            if sub_dirty:
+                with db.get_conn() as conn:
+                    conn.execute(
+                        "UPDATE quests SET sub_objectives_json=?, updated_at=? WHERE session_id=? AND quest_id=?",
+                        (json.dumps(sub_objs), time.time(), session_id, qid)
+                    )
+
+        # 3. Reactive NPCStatusChanged check
+        if event_info and event_info.get("type") in ("NPCStatusChanged", "NPCStatusChangedEvent"):
+            target_status = str(event_info.get("status") or "").strip().lower()
+            changed_npc = str(event_info.get("name") or "").strip().lower()
+            if target_status in ("deceased", "captured", "disappeared", "spared"):
+                from mechanics.world.waypoints.matching import advance_waypoint_stage
+                top_active_wp = db.get_active_waypoint(session_id, qid, None)
+                if top_active_wp:
+                    wp_npc = str(top_active_wp.get("target_npc") or "").strip().lower()
+                    if wp_npc and (wp_npc in changed_npc or changed_npc in wp_npc):
+                        adv_res = advance_waypoint_stage(session_id, qid, None)
+                        results.append({"quest_id": qid, "type": "npc_status_advanced", "npc": changed_npc, "status": target_status, "adv_res": adv_res})
+
+                if isinstance(sub_objs, list) and sub_objs:
+                    for so in sub_objs:
+                        if not isinstance(so, dict) or so.get("completed"):
+                            continue
+                        so_id = so.get("id")
+                        if not so_id:
+                            continue
+                        so_active_wp = db.get_active_waypoint(session_id, qid, so_id)
+                        if so_active_wp:
+                            so_wp_npc = str(so_active_wp.get("target_npc") or "").strip().lower()
+                            if so_wp_npc and (so_wp_npc in changed_npc or changed_npc in so_wp_npc):
+                                adv_res = advance_waypoint_stage(session_id, qid, so_id)
+                                results.append({"quest_id": qid, "sub_obj_id": so_id, "type": "npc_status_advanced", "npc": changed_npc, "status": target_status, "adv_res": adv_res})
+
+    return results
+
+
+def grant_stage_acquisition_item_if_needed(
+    session_id: int,
+    quest: dict,
+    completed_stage_index: int,
+    total_stages: int,
+    party_user_ids: list[int] = None,
+    sub_obj: dict = None,
+) -> str | None:
+    """
+    When a non-final stage of an ACQUISITION quest/sub-objective completes, guarantees
+    that the required item is in the player's inventory so the final delivery stage
+    can consume it. Eliminates ghost item bugs.
+    """
+    if completed_stage_index >= total_stages:
+        return None
+
+    import db
+    from mechanics.narrative.blueprints import (
+        get_blueprint_for_archetype,
+        infer_required_item_and_count_from_text,
+        find_matching_inventory_items_for_quest,
+    )
+
+    bp = (sub_obj.get("blueprint_id") if sub_obj else (quest.get("blueprint_id") if quest else None)) or ""
+    if not bp:
+        bp = get_blueprint_for_archetype(
+            (sub_obj.get("archetype") if sub_obj else (quest.get("quest_type") if quest else "")) or "",
+            (sub_obj.get("text") if sub_obj else (quest.get("objective") if quest else "")) or ""
+        )
+    if bp != "ACQUISITION":
+        return None
+
+    req_item = (sub_obj.get("required_item") if sub_obj else (quest.get("required_item") if quest else "")) or ""
+    req_cnt = int((sub_obj.get("required_item_count") if sub_obj else (quest.get("required_item_count") if quest else 1)) or 1)
+    if not req_item:
+        req_item, req_cnt = infer_required_item_and_count_from_text(
+            (sub_obj.get("text") if sub_obj else (quest.get("objective") if quest else "")) or "",
+            (quest.get("title") if quest else "") or ""
+        )
+    if not req_item:
+        return None
+
+    party_uids = list(party_user_ids or [])
+    if not party_uids and session_id:
+        sess = db.get_session(session_id)
+        if sess:
+            if sess.get("host_user_id"):
+                party_uids.append(sess["host_user_id"])
+            elif sess.get("user_id"):
+                party_uids.append(sess["user_id"])
+    if not party_uids:
+        try:
+            with db.get_conn() as conn:
+                row = conn.execute("SELECT user_id FROM characters LIMIT 1").fetchone()
+                if row and row["user_id"]:
+                    party_uids.append(row["user_id"])
+        except Exception:
+            pass
+    if not party_uids:
+        party_uids = [1]
+
+    matching = []
+    for uid in party_uids:
+        inv = db.get_inventory(uid)
+        matching.extend(find_matching_inventory_items_for_quest(req_item, inv, exclude_equipped=True))
+    held_cnt = len(matching)
+
+    if held_cnt < req_cnt:
+        needed = req_cnt - held_cnt
+        target_uid = party_uids[0]
+        label = sub_obj.get("text") if sub_obj else quest.get("title", "Quest")
+        desc = f"Acquired for {label}"
+        for _ in range(needed):
+            db.add_item(target_uid, req_item, "Quest Item", desc, slot_cost=0, force=True)
+        return req_item
+    return None
+
+
+def consume_quest_delivery_item_if_needed(
+    session_id: int,
+    quest: dict,
+    party_user_ids: list[int] = None,
+    sub_obj: dict = None,
+) -> str | None:
+    """
+    When an ACQUISITION quest or sub-objective completes, removes the required number
+    of unequipped matching items from player inventory. Strictly preserves equipped items.
+    """
+    import db
+    if sub_obj and sub_obj.get("delivery_consumed"):
+        return None
+
+    qid = quest.get("quest_id") if quest else None
+    q_full = db.get_quest_by_id(session_id, qid) if (session_id and qid) else quest
+    if not sub_obj and q_full and q_full.get("delivery_consumed"):
+        return None
+
+    from mechanics.narrative.blueprints import (
+        get_blueprint_for_archetype,
+        infer_required_item_and_count_from_text,
+        find_matching_inventory_items_for_quest,
+    )
+
+    bp = (sub_obj.get("blueprint_id") if sub_obj else (q_full.get("blueprint_id") if q_full else None)) or ""
+    if not bp:
+        bp = get_blueprint_for_archetype(
+            (sub_obj.get("archetype") if sub_obj else (q_full.get("quest_type") if q_full else "")) or "",
+            (sub_obj.get("text") if sub_obj else (q_full.get("objective") if q_full else "")) or ""
+        )
+    if bp != "ACQUISITION":
+        return None
+
+    req_item = (sub_obj.get("required_item") if sub_obj else (q_full.get("required_item") if q_full else "")) or ""
+    req_cnt = int((sub_obj.get("required_item_count") if sub_obj else (q_full.get("required_item_count") if q_full else 1)) or 1)
+    if not req_item:
+        req_item, req_cnt = infer_required_item_and_count_from_text(
+            (sub_obj.get("text") if sub_obj else (q_full.get("objective") if q_full else "")) or "",
+            (q_full.get("title") if q_full else "") or ""
+        )
+    if not req_item:
+        return None
+
+    party_uids = list(party_user_ids or [])
+    if not party_uids and session_id:
+        sess = db.get_session(session_id)
+        if sess:
+            if sess.get("host_user_id"):
+                party_uids.append(sess["host_user_id"])
+            elif sess.get("user_id"):
+                party_uids.append(sess["user_id"])
+    if not party_uids:
+        try:
+            with db.get_conn() as conn:
+                row = conn.execute("SELECT user_id FROM characters LIMIT 1").fetchone()
+                if row and row["user_id"]:
+                    party_uids.append(row["user_id"])
+        except Exception:
+            pass
+    if not party_uids:
+        party_uids = [1]
+
+    consumed = 0
+    for uid in party_uids:
+        if consumed >= req_cnt:
+            break
+        inv = db.get_inventory(uid)
+        matching = find_matching_inventory_items_for_quest(req_item, inv, exclude_equipped=True)
+        for item in matching:
+            if consumed >= req_cnt:
+                break
+            if db.remove_item(uid, item["id"]):
+                consumed += 1
+
+    if sub_obj:
+        sub_obj["delivery_consumed"] = 1
+    elif q_full:
+        q_full["delivery_consumed"] = 1
+
+    if consumed > 0:
+        return f"Consumed {consumed}x {req_item}"
+    return None
+
+
+# -----------------------------------------------------------------------------
+# Phase 4 Comms Engine & Cross-System Messaging
+# -----------------------------------------------------------------------------
+
+def send_quest_comms_message(
+    session_id: int,
+    sender_npc_id: str,
+    msg_type: str,
+    quest_title: str,
+    target_npc: str = "",
+    target_loc: str = "",
+    scen_key: str = "fantasy",
+) -> str | None:
+    """
+    Sends a scenario-appropriate Phone DM / Guild Courier message, persists it to phone_messages,
+    and returns the narrator directive string (truthy on success, None on failure).
+    """
+    import db
+    from mechanics.narrative.blueprints import format_quest_comms_message
+    if not session_id or not sender_npc_id:
+        return None
+    try:
+        channel_prefix, body = format_quest_comms_message(
+            scen_key=scen_key,
+            sender_name=sender_npc_id,
+            msg_type=msg_type,
+            quest_title=quest_title,
+            target_npc=target_npc,
+            target_loc=target_loc,
+        )
+        full_msg = f"{channel_prefix} {body}"
+        db.save_phone_message(
+            session_id=session_id,
+            contact_npc_id=sender_npc_id,
+            sender="npc",
+            message=full_msg,
+            intent="quest_comms",
+        )
+        return f"[INCOMING QUEST COMMS - {channel_prefix}]: {body}"
+    except Exception:
+        return None
+
+
+def trigger_stage2_midquest_comms_if_eligible(
+    session_id: int, quest: dict, session: dict = None
+) -> str | None:
+    """
+    Checks if a quest has advanced to Stage >= 2 and dispatches the mid-quest tactical intel or plea DM.
+    Returns the narrator directive string when sent (truthy), or None if not eligible.
+    """
+    import db
+    from mechanics.narrative.blueprints import has_quest_note_flag
+    from db.quests import append_quest_note_flag_in_db
+    qid = quest.get("quest_id", "")
+    if not qid:
+        return None
+    q_fresh = db.get_quest_by_id(session_id, qid) or quest
+    q_notes = str(q_fresh.get("quest_notes") or "")
+    if has_quest_note_flag(q_notes, "midquest_dm_sent"):
+        return None
+    cur_active_wp = db.get_active_waypoint(session_id, qid, None)
+    if not cur_active_wp or int(cur_active_wp.get("stage_index") or 1) < 2:
+        return None
+
+    append_quest_note_flag_in_db(session_id, qid, "midquest_dm_sent", "1")
+    scen = (session.get("scenario") if session else "") or "fantasy"
+    bp = str(quest.get("blueprint_id") or "")
+    client = quest.get("client_npc") or "Guild Handler"
+    tgt_npc = cur_active_wp.get("target_npc") or quest.get("target_npc") or ""
+    tgt_loc = cur_active_wp.get("target_location") or ""
+    if bp in ("NEUTRALIZATION", "SOCIAL_MANIPULATION") and tgt_npc and tgt_npc.strip().lower() != client.strip().lower():
+        return send_quest_comms_message(
+            session_id=session_id,
+            sender_npc_id=tgt_npc,
+            msg_type="stage2_target_plea",
+            quest_title=quest.get("title", "Quest"),
+            target_npc=tgt_npc,
+            target_loc=tgt_loc,
+            scen_key=scen,
+        )
+    else:
+        return send_quest_comms_message(
+            session_id=session_id,
+            sender_npc_id=client,
+            msg_type="stage2_client_intel",
+            quest_title=quest.get("title", "Quest"),
+            target_npc=tgt_npc,
+            target_loc=tgt_loc,
+            scen_key=scen,
+        )
+
+
+# -----------------------------------------------------------------------------
+# Phase 2 Multi-Approach Resolution & Failure Consequence Handlers
+# -----------------------------------------------------------------------------
+
+def apply_quest_approach_effects(
+    session_id: int,
+    quest: dict,
+    waypoint: dict,
+    approach: str,
+    gold_cost: int,
+    party_user_ids: list[int],
+    sub_obj: dict = None,
+    session: dict = None,
+) -> dict:
+    """
+    Applies approach-specific deterministic side-effects (Buyout/Bribe gold deduction,
+    Spare/Fake-Death contact & lorebook updates, or Counter-Offer Betrayal).
+    Returns dict with optional 'directive', 'terminated_by_betrayal', etc.
+    """
+    import db
+    from mechanics.narrative.blueprints import calculate_quest_buyout_cost
+    app = (approach or "").lower()
+    qid = quest.get("quest_id", "")
+    lead_uid = party_user_ids[0] if party_user_ids else 1
+
+    # 1. Gold Buyout / Bribery
+    if app == "buyout_bribe" or "[buyout / bribe" in str(waypoint.get("stage_label", "")).lower():
+        cost = gold_cost if gold_cost > 0 else calculate_quest_buyout_cost(quest)
+        db.apply_hp_mp_delta(lead_uid, gold_delta=-cost)
+        db.set_quest_resolution_approach(session_id, qid, "bought_or_bribed")
+        stage_desc = waypoint.get("stage_label") or "objective"
+        return {
+            "directive": f"[MANDATORY QUEST BUYOUT RESOLUTION]: The player paid {cost} Gold to resolve stage '{stage_desc}' of '{quest.get('title')}' via buyout/bribery without risk."
+        }
+
+    # 2. Spare & Fake Death
+    elif app == "spare_deceive" or "[spare & fake death]" in str(waypoint.get("stage_label", "")).lower():
+        db.set_quest_resolution_approach(session_id, qid, "spared_deception")
+        target_npc = waypoint.get("target_npc") or quest.get("target_npc") or ""
+        if target_npc:
+            try:
+                db.upsert_lorebook_entity(session_id=session_id, entity_type="person", name=target_npc, status="disappeared")
+            except Exception:
+                pass
+            try:
+                db.update_relationship_score(session_id, target_npc, delta_score=15)
+            except Exception:
+                pass
+        target_disp = target_npc or "the target"
+        return {
+            "directive": f"[MANDATORY SPARE & DECEIVE RESOLUTION]: The player spared {target_disp}, convinced them to vanish into hiding, and secured staged proof of elimination for '{quest.get('title')}'!"
+        }
+
+    # 3. Accept Counter-Offer / Betray Client
+    elif app == "counter_offer" or "[accept counter-offer]" in str(waypoint.get("stage_label", "")).lower():
+        betrayal_gold = int(round(int(quest.get("reward_gold") or 30) * 1.5))
+        for uid in (party_user_ids or [lead_uid]):
+            db.apply_hp_mp_delta(uid, gold_delta=betrayal_gold)
+        target_npc = waypoint.get("target_npc") or quest.get("target_npc") or ""
+        if target_npc:
+            try:
+                db.update_relationship_score(session_id, target_npc, delta_score=15)
+            except Exception:
+                pass
+        # Phase 4 Rival Faction Ripple (+5 rep with rival factions when betraying sponsoring faction):
+        q_notes = str(quest.get("quest_notes") or "")
+        riv_ids = []
+        for rm in re.finditer(r'rival_faction:\s*([A-Za-z0-9_-]+)', q_notes, re.IGNORECASE):
+            r_val = rm.group(1).strip()
+            if r_val and r_val not in riv_ids:
+                riv_ids.append(r_val)
+        fac_match = re.search(r'(?:^|\||\n)\s*faction:\s*([A-Za-z0-9_-]+)', q_notes, re.IGNORECASE)
+        sponsor_fac_id = fac_match.group(1).strip() if fac_match else ""
+        if sponsor_fac_id:
+            try:
+                s_fac = db.get_faction(session_id, sponsor_fac_id)
+                if s_fac and s_fac.get("rival_faction_ids"):
+                    for r in s_fac["rival_faction_ids"]:
+                        if r and str(r).strip() not in riv_ids:
+                            riv_ids.append(str(r).strip())
+            except Exception:
+                pass
+        for rid in riv_ids:
+            if rid and rid != sponsor_fac_id:
+                try:
+                    db.upsert_faction(session_id, rid, delta_score=5, notes=f"Betrayed rival operation '{quest.get('title')}'")
+                except Exception:
+                    pass
+        apply_quest_failure_consequences(session_id, quest, party_user_ids, reason="betrayed_client", session=session)
+        client_disp = quest.get("client_npc") or "the client"
+        return {
+            "terminated_by_betrayal": True,
+            "betrayal_gold": betrayal_gold,
+            "directive": f"[MANDATORY TARGET COUNTER-OFFER ACCEPTED]: The player betrayed {client_disp} and allied with {target_npc or 'the target'} for {betrayal_gold} Gold! The contract is voided and {client_disp} is enraged."
+        }
+
+    # 4. Companion Assist
+    elif app == "companion_assist" or "[companion assist" in str(waypoint.get("stage_label", "")).lower():
+        from mechanics.world.waypoints.choices import get_active_companion_for_waypoint
+        active_comp = get_active_companion_for_waypoint(session_id, waypoint)
+        if not active_comp:
+            all_comps = list(db.get_session_party_npcs(session_id) or []) + list(db.get_temporary_companions(session_id) or [])
+            active_comp = all_comps[0] if all_comps else None
+        comp_name = (active_comp.get("name") if isinstance(active_comp, dict) else None) or "Companion"
+        try:
+            db.update_relationship_score(session_id, comp_name, delta_score=3)
+        except Exception:
+            pass
+        return {
+            "handled": True,
+            "companion_assisted": True,
+            "companion_name": comp_name,
+            "directive": f"[MANDATORY COMPANION ASSIST]: {comp_name} actively assisted with their specialized expertise to resolve this stage smoothly (+3 Affinity with {comp_name})!",
+        }
+
+    # 5. Breakthrough Leverage
+    elif app == "breakthrough_leverage" or "[breakthrough leverage]" in str(waypoint.get("stage_label", "")).lower():
+        db.set_quest_resolution_approach(session_id, qid, "breakthrough_leverage")
+        target_npc = waypoint.get("target_npc") or quest.get("target_npc") or "the target"
+        return {
+            "handled": True,
+            "breakthrough_leveraged": True,
+            "directive": f"[MANDATORY BREAKTHROUGH LEVERAGE]: The player confronted {target_npc} with undeniable deductions synthesized from the caseboard, shattering their resistance!",
+        }
+
+    return {}
+
+
+def apply_quest_failure_consequences(
+    session_id: int,
+    quest: dict,
+    party_user_ids: list[int],
+    reason: str = "failed_strikes",
+    session: dict = None,
+) -> dict:
+    """
+    Applies hard failure to side/faction bounties, including client affinity drop,
+    sponsoring faction reputation penalty, and queuing a Delayed Travel Ambush or PeerPulse scandal.
+    """
+    import db
+    import time
+    qid = quest.get("quest_id", "")
+    client_npc = quest.get("client_npc") or ""
+    progress_note = "Failed (Betrayed Client)" if reason == "betrayed_client" else "Failed (Target Alerted / Escaped)"
+    db.fail_quest_and_waypoints(session_id, qid, resolution_approach=reason, progress_note=progress_note)
+
+    # Client Affinity fallout
+    if client_npc:
+        client_delta = -15 if reason == "betrayed_client" else -10
+        try:
+            db.update_relationship_score(session_id, client_npc, delta_score=client_delta)
+        except Exception:
+            pass
+
+    # Sponsoring Faction Reputation fallout
+    q_notes = str(quest.get("quest_notes") or "")
+    fac_match = re.search(r'faction:\s*(?:faction:)?([A-Za-z0-9_-]+)', q_notes, re.IGNORECASE)
+    fac_id = fac_match.group(1) if fac_match else ""
+    if fac_id:
+        fac_norm = fac_id.lower()
+        fac_spaced = fac_norm.replace("_", " ")
+        try:
+            with db.get_conn() as conn:
+                conn.execute(
+                    """UPDATE factions 
+                       SET reputation_score = MAX(-100, MIN(100, reputation_score - 15)), updated_at=? 
+                       WHERE session_id=? AND (faction_id=? OR faction_id=? OR lower(name)=? OR lower(name)=?)""",
+                    (time.time(), session_id, fac_norm, fac_spaced, fac_norm, fac_spaced)
+                )
+        except Exception:
+            pass
+
+    # Delayed Travel Ambush for combat/criminal blueprints
+    bp = quest.get("blueprint_id") or ""
+    if bp in ("NEUTRALIZATION", "HEIST_INFILTRATION", "CONTEST_RIVALRY", "EXPLORATION_HAZARD", ""):
+        cur_loc = (session.get("current_location") if session else "") or ""
+        enemy_name = f"{client_npc}'s Enforcer" if (reason == "betrayed_client" and client_npc) else (quest.get("target_npc") or "Vengeful Mercenary")
+        retaliation_data = {
+            "quest_id": qid,
+            "quest_title": quest.get("title", "Bounty"),
+            "reason": reason,
+            "origin_location": cur_loc,
+            "enemy_name": enemy_name,
+            "enemy_role": "Mercenary / Bounty Hunter",
+        }
+        if session is not None:
+            session["pending_retaliation"] = retaliation_data
+        try:
+            db.update_session(session_id, extra={"pending_retaliation": retaliation_data})
+        except Exception:
+            pass
+
+    # PeerPulse Scandal for Social or School scenarios
+    scen = (session.get("scenario") if session else "") or "fantasy"
+    try:
+        from mechanics.world.locations.seeds import is_school_scenario
+        is_school = is_school_scenario(scen)
+    except Exception:
+        is_school = False
+    if bp == "SOCIAL_MANIPULATION" or is_school:
+        try:
+            scandal_post = {
+                "author_name": "Campus Gossip",
+                "author_handle": "@CampusSpill",
+                "content": f"Word on the street is someone completely botched their promise on '{quest.get('title')}'... embarrassing!",
+                "tag": "#Scandal",
+                "clue_hook": quest.get("title", ""),
+                "time_ago": "Just now",
+            }
+            db.save_gossip_feed(session_id, [scandal_post])
+        except Exception:
+            pass
+
+    return {
+        "failed": True,
+        "reason": reason,
+        "directive": f"[MANDATORY QUEST FAILURE & FALLOUT]: Quest '{quest.get('title')}' has FAILED ({reason}). Narrate the consequences and strained relations vividly."
+    }
+
+
+def handle_failed_quest_skill_check(
+    session_id: int,
+    quest: dict,
+    waypoint: dict,
+    check_result_tier: str,
+    party_user_ids: list[int],
+    sub_obj: dict = None,
+    session: dict = None,
+) -> dict | None:
+    """
+    Handles a failed skill check on an active quest waypoint:
+    - Stage 1 Immunity: Scouting checks never add strikes.
+    - Stage >= 2: Adds +1 Strike (or +2 on Stage 3 critical failure).
+    - At 1/2 Strikes: Emits complication directive.
+    - At 2/2 Strikes: Deterministic Hard Failure for bounties, or Pyrrhic Breakthrough ('dire_cost') for Story Quests.
+    """
+    import db
+    import time
+    qid = quest.get("quest_id", "")
+    sub_obj_id = waypoint.get("sub_obj_id")
+    stage_idx = int(waypoint.get("stage_index", 1) or 1)
+
+    all_wps = db.get_quest_waypoints(session_id, qid, sub_obj_id) or []
+    if stage_idx <= 1 and len(all_wps) > 1:
+        return None
+
+    # Phase 4 Companion Strike Shield Check:
+    # If the player has an active companion (party or temporary hangout) and hasn't used the shield yet for this quest
+    from mechanics.narrative.blueprints import has_quest_note_flag
+    from mechanics.world.waypoints.choices import get_active_companion_for_waypoint
+    q_fresh = db.get_quest_by_id(session_id, qid) or quest
+    q_notes = str(q_fresh.get("quest_notes") or quest.get("quest_notes") or "")
+    active_comp = get_active_companion_for_waypoint(session_id, waypoint)
+    if active_comp and not has_quest_note_flag(q_notes, "companion_shield_used"):
+        from db.quests import append_quest_note_flag_in_db
+        append_quest_note_flag_in_db(session_id, qid, "companion_shield_used", "1")
+        comp_name = active_comp.get("name") or "Your companion"
+        return {
+            "status": "companion_shield_absorbed",
+            "shield_absorbed": True,
+            "failed": False,
+            "companion_name": comp_name,
+            "strikes": int(q_fresh.get("strike_count") or 0),
+            "max_strikes": 2,
+            "directive": f"[COMPANION STRIKE SHIELD ACTIVATED]: {comp_name} intervened to parry/deflect the complication! Strike count was NOT incremented (0 strikes accrued).",
+        }
+
+
+    delta = 2 if (check_result_tier == "critical_failure" and stage_idx >= 3) else 1
+    strike_res = db.increment_quest_strikes(session_id, qid, delta=delta)
+
+    if not strike_res["failed"]:
+        return {
+            "status": "strike_warning",
+            "strikes": strike_res["strikes"],
+            "max_strikes": strike_res["max_strikes"],
+            "failed": False,
+            "directive": f"[QUEST COMPLICATION - {strike_res['strikes']}/{strike_res['max_strikes']} STRIKES]: The player failed a check on '{quest.get('title')}'. The opposition is now on high alert! One more failure will botch the contract."
+        }
+
+    # strikes >= max_strikes
+    if not quest.get("is_story_quest"):
+        fail_res = apply_quest_failure_consequences(session_id, quest, party_user_ids, reason="failed_strikes", session=session)
+        fail_res["strikes"] = strike_res["strikes"]
+        fail_res["max_strikes"] = strike_res["max_strikes"]
+        return fail_res
+    else:
+        # Story Quest Fail-Forward: Pyrrhic Breakthrough ('dire_cost')
+        now = time.time()
+        with db.get_conn() as conn:
+            conn.execute(
+                "UPDATE quest_waypoints SET status='completed', updated_at=? WHERE session_id=? AND quest_id=? AND sub_obj_id=?",
+                (now, session_id, qid, sub_obj_id)
+            )
+        if sub_obj:
+            sub_obj["completed"] = True
+            sub_obj["resolution_approach"] = "dire_cost"
+        db.reset_quest_strikes(session_id, qid)
+        lead_uid = party_user_ids[0] if party_user_ids else 1
+        db.apply_hp_mp_delta(lead_uid, hp_delta=-5)
+        return {
+            "status": "dire_cost",
+            "failed": False,
+            "directive": f"[MANDATORY PYRRHIC BREAKTHROUGH / DIRE COST]: The sub-objective for '{quest.get('title')}' was forced through at a dire cost! Narrate the narrow escape and the physical/social toll."
+        }
+
+
+def trigger_pending_retaliation_if_eligible(
+    session_id: int,
+    current_location: str,
+    session: dict = None,
+) -> dict | None:
+    """
+    Checks if a pending retaliation ambush is scheduled and the player has traveled
+    to a non-safe location away from the origin location.
+    """
+    if not session or not current_location:
+        return None
+    retaliation = session.get("pending_retaliation")
+    if not retaliation or not isinstance(retaliation, dict):
+        return None
+    origin = retaliation.get("origin_location", "")
+    if origin and current_location.strip().lower() == origin.strip().lower():
+        return None
+    safe_words = ("bedroom", "dorm", "quarters", "apartment", "sanctuary", "infirmary", "inn room")
+    if any(sw in current_location.lower() for sw in safe_words):
+        return None
+
+    import db
+    enemy_name = retaliation.get("enemy_name") or "Vengeful Mercenary"
+    ambush_enemy = {
+        "name": enemy_name,
+        "enemy_name": enemy_name,
+        "hp": 35,
+        "max_hp": 35,
+        "attack": 8,
+        "defense": 4,
+        "role": retaliation.get("enemy_role") or "Ambush Mercenary",
+        "description": f"A hostile tracker sent in retaliation for the contract '{retaliation.get('quest_title')}'.",
+        "is_retaliation_ambush": True,
+    }
+    nearby = list(session.get("nearby_enemies") or [])
+    nearby.append(ambush_enemy)
+    session["nearby_enemies"] = nearby
+    session["pending_retaliation"] = None
+    try:
+        db.update_session(session_id, nearby_enemies=nearby, extra={"pending_retaliation": None})
+    except Exception:
+        pass
+
+    return {
+        "enemy_name": enemy_name,
+        "quest_title": retaliation.get("quest_title", ""),
+        "directive": f"[MANDATORY RETALIATION AMBUSH]: {enemy_name} ambushes the player at {current_location} in retaliation for '{retaliation.get('quest_title')}'! Narrate the surprise attack vividly."
+    }
+
+
+def is_quest_in_turn_in_grace_period(session_id: int, quest: dict | str) -> bool:
+    """
+    Returns True if the quest has reached its final Client Turn-In stage (Stage >= 3 or final stage
+    targeting the client / delivery), freezing the deadline timer so it can never expire while turning in.
+    """
+    import db
+    if isinstance(quest, str):
+        qid = quest
+        quest = db.get_quest_by_id(session_id, qid) or {}
+    else:
+        qid = (quest or {}).get("quest_id", "")
+    all_wps = db.get_quest_waypoints(session_id, qid, None) or []
+    active_wp = db.get_active_waypoint(session_id, qid, None)
+    if not active_wp or len(all_wps) < 2:
+        return False
+    max_stage = max(int(w.get("stage_index", 1)) for w in all_wps)
+    curr_stage = int(active_wp.get("stage_index", 1))
+    if curr_stage < max_stage:
+        return False
+    lbl_low = str(active_wp.get("stage_label") or "").lower()
+    client_npc = str(quest.get("client_npc") or "").strip().lower()
+    wp_npc = str(active_wp.get("target_npc") or "").strip().lower()
+    if client_npc and wp_npc == client_npc:
+        return True
+    if any(w in lbl_low for w in ("turn in", "deliver", "report", "hand over", "return to", "claim", "confirm")):
+        return True
+    if curr_stage >= 3:
+        return True
+    return False
+
+
+def check_and_expire_overdue_quests(
+    session_id: int,
+    party_user_ids: list[int] = None,
+    session: dict = None,
+) -> dict:
+    """
+    Sweeps active non-story quests for expired deadlines.
+    - Respects the Stage 3 Client Turn-In Grace Rule (never expires on the turn-in stage).
+    - Applies Rival Claim / Expired Contract mild fallout (-5 client affinity, -5 faction rep, no ambush).
+    - Tags quests within 24 hours of deadline with '[⏰ <24h Left]'.
+    """
+    import db
+    import time
+    if not session_id:
+        return {"expired_quests": [], "directives": []}
+
+    curr_day, curr_min, _ = db.get_session_time(session_id)
+    active_quests = db.get_session_quests(session_id, status="Active") or []
+    expired_quests = []
+    directives = []
+
+    for q in active_quests:
+        if q.get("is_story_quest"):
+            continue
+        d_day = q.get("deadline_day")
+        if d_day is None:
+            continue
+        d_day = int(d_day)
+        d_min = int(q.get("deadline_minute") if q.get("deadline_minute") is not None else 1200)
+        qid = q.get("quest_id", "")
+
+        # Stage 3 Client Turn-In Grace Rule
+        if is_quest_in_turn_in_grace_period(session_id, q):
+            continue
+
+        is_expired = (curr_day > d_day) or (curr_day == d_day and curr_min >= d_min)
+        if is_expired:
+            db.expire_quest_and_waypoints(session_id, qid)
+            client_npc = q.get("client_npc") or ""
+            if client_npc:
+                try:
+                    db.update_relationship_score(session_id, client_npc, delta_score=-5)
+                except Exception:
+                    pass
+            q_notes = str(q.get("quest_notes") or "")
+            fac_match = re.search(r'faction:\s*(?:faction:)?([A-Za-z0-9_\-\s]+?)(?:\||,|$|\n)', q_notes, re.IGNORECASE)
+            fac_id = fac_match.group(1).strip() if fac_match else ""
+            if not fac_id:
+                fac_id = str(q.get("target_faction") or "").strip()
+            if fac_id:
+                fac_norm = fac_id.lower().replace(" ", "_")
+                fac_spaced = fac_id.lower().replace("_", " ")
+                try:
+                    with db.get_conn() as conn:
+                        conn.execute(
+                            """UPDATE factions
+                               SET reputation_score = MAX(-100, MIN(100, reputation_score - 5)), updated_at=?
+                               WHERE session_id=? AND (faction_id=? OR faction_id=? OR lower(name)=? OR lower(name)=?)""",
+                            (time.time(), session_id, fac_norm, fac_spaced, fac_norm, fac_spaced)
+                        )
+                except Exception:
+                    pass
+            expired_quests.append(qid)
+            directives.append(
+                f"[QUEST CONTRACT EXPIRED]: The deadline for '{q.get('title')}' has expired! A rival mercenary company claimed the target. Mild standing penalty applied (-5 affinity/reputation)."
+            )
+        else:
+            # Check if within 24 hours (1440 mins)
+            mins_remaining = (d_day - curr_day) * 1440 + (d_min - curr_min)
+            if 0 < mins_remaining <= 1440:
+                prog = str(q.get("progress") or "")
+                if "[⏰ <24h Left]" not in prog:
+                    new_prog = f"{prog} [⏰ <24h Left]".strip()
+                    with db.get_conn() as conn:
+                        conn.execute(
+                            "UPDATE quests SET progress=?, updated_at=? WHERE session_id=? AND quest_id=?",
+                            (new_prog, time.time(), session_id, qid)
+                        )
+                # Phase 4 Comms: Send 24h deadline reminder warning DM
+                from mechanics.narrative.blueprints import has_quest_note_flag
+                from db.quests import append_quest_note_flag_in_db
+                q_notes = str(q.get("quest_notes") or "")
+                if not has_quest_note_flag(q_notes, "deadline_dm_sent"):
+                    append_quest_note_flag_in_db(session_id, qid, "deadline_dm_sent", "1")
+                    sender = q.get("client_npc") or "Guild Registry"
+                    scen = (session.get("scenario") if session else "") or "fantasy"
+                    dm_dir = send_quest_comms_message(
+                        session_id=session_id,
+                        sender_npc_id=sender,
+                        msg_type="deadline_24h_warning",
+                        quest_title=q.get("title", "Bounty"),
+                        scen_key=scen,
+                    )
+                    if dm_dir:
+                        directives.append(dm_dir)
+
+    return {
+        "expired_quests": expired_quests,
+        "expired_quest_ids": expired_quests,
+        "directives": directives,
+    }
+
+
+def resolve_pre_turn_quests_and_clues(
+    session: dict,
+    party: list = None,
+    actions: list = None,
+) -> dict:
+    """
+    Deterministic pre-turn quest, clue, and chapter climax resolution engine.
+    Runs BEFORE the Narrator LLM on every turn:
+    1. Evaluates active quests against current location and player action checks (Dual-Trigger).
+    2. Advances waypoints and marks completed sub-quests and full quests deterministically.
+    3. Manages the Two-Phase Chapter Climax system (setup -> resolution) and chapter increments.
+    4. Emits [MANDATORY QUEST OBJECTIVE COMPLETE] and [MANDATORY CHAPTER CLIMAX RESOLUTION] directives.
+    """
+    import db
+    from mechanics.world.waypoints import (
+        try_advance_on_arrival,
+        try_complete_on_skill_check,
+        does_action_target_waypoint,
+        get_story_quest_climax_location,
+    )
+    from mechanics.narrative.blueprints import classify_choice_approach
+    from skill_check import is_check_success
+
+    session_id = session.get("id") or 0
+    cur_loc = session.get("current_location") or ""
+
+    action_str = ""
+    is_success = False
+    fa = {}
+    if actions:
+        fa = actions[0] if isinstance(actions[0], dict) else {}
+        if isinstance(actions[0], dict):
+            action_str = str(fa.get("label") or fa.get("action") or "")
+            is_success = is_check_success(fa.get("check"), default_if_none=True)
+        else:
+            action_str = str(actions[0] or "")
+            is_success = True
+    act_low = action_str.lower()
+
+    check_obj = fa.get("check") if isinstance(fa, dict) else None
+    raw_tier = getattr(check_obj, "result_tier", None) or getattr(check_obj, "tier", None) if check_obj else None
+    if raw_tier is None and isinstance(check_obj, dict):
+        raw_tier = check_obj.get("result_tier") or check_obj.get("tier")
+    check_tier = str(raw_tier or ("success" if is_success else "failure")).lower()
+    is_quest_action = bool(fa.get("is_quest_action"))
+    action_quest_id = str(fa.get("quest_id") or "")
+    action_sub_obj_id = fa.get("sub_obj_id")
+    act_approach = str(fa.get("approach") or classify_choice_approach(action_str))
+    act_gold_cost = int(fa.get("gold_cost") or 0)
+    act_wait_minutes = int(fa.get("wait_minutes") or 0)
+
+    party_list = party or []
+    party_uids = [
+        (c[0]["user_id"] if isinstance(c, (tuple, list)) else c["user_id"])
+        for c in party_list if isinstance(c, dict) or (isinstance(c, (tuple, list)) and isinstance(c[0], dict))
+    ]
+    if not party_uids and session.get("host_user_id"):
+        party_uids = [session["host_user_id"]]
+    if not party_uids and session.get("user_id"):
+        party_uids = [session["user_id"]]
+    if not party_uids:
+        party_uids = [1]
+
+    # Pre-turn evaluate quest state predicates (inventory pre-completion, etc.)
+    if session_id:
+        evaluate_quest_state_predicates(session_id=session_id, user_id=party_uids[0] if party_uids else None)
+
+    directives = []
+
+    # Fast-forward time if wait action selected
+    if act_approach in ("wait_for_window", "wait_until_morning") and act_wait_minutes > 0 and session_id:
+        try:
+            from mechanics.system.time_engine import advance_time, format_clock, get_time_of_day_phase
+            time_adv = advance_time(session_id, delta_minutes=act_wait_minutes, party_uids=party_uids)
+            new_day = time_adv.get("new_day", 1)
+            new_min = time_adv.get("new_minute", 480)
+            if isinstance(session, dict):
+                session["current_day"] = new_day
+                session["current_minute"] = new_min
+            clock_str = format_clock(new_min)
+            phase_name, emoji, _ = get_time_of_day_phase(new_min)
+            directives.append(f"⏳ Time passed: waited {act_wait_minutes} minutes ({clock_str}, {phase_name} {emoji}).")
+        except Exception as e:
+            logger.warning("Failed to advance time for wait action: %s", e)
+
+    # Check and expire overdue quests (grace period protected)
+    if session_id:
+        exp_res = check_and_expire_overdue_quests(session_id, party_user_ids=party_uids, session=session)
+        if exp_res.get("directives"):
+            directives.extend(exp_res["directives"])
+
+    # Check for pending travel retaliation ambush
+    retaliation_res = trigger_pending_retaliation_if_eligible(session_id, cur_loc, session=session)
+    if retaliation_res and retaliation_res.get("directive"):
+        directives.append(retaliation_res["directive"])
+
+    active_quests = db.get_session_quests(session_id, status="Active") if session_id else []
+    completed_quests = []
+    advanced_stages = []
+    advanced_keys = []
+    waypoint_notices = []
+    completed_sub_quests = []
+
+    resolves_so_id = None
+    if actions and isinstance(actions[0], dict):
+        resolves_so_id = actions[0].get("resolves_sub_obj_id")
+
+    for q in active_quests:
+        qid = q.get("quest_id")
+        if not qid:
+            continue
+        dm_dir = trigger_stage2_midquest_comms_if_eligible(session_id, q, session=session)
+        if dm_dir:
+            directives.append(dm_dir)
+
+        # 1. Check top-level quest waypoints (bounties / single-track quests)
+        active_wp = db.get_active_waypoint(session_id, qid, None)
+        if active_wp:
+            trig = active_wp.get("completion_trigger") or "arrival"
+            if trig == "arrival":
+                if act_approach in ("wait_for_window", "wait_until_morning"):
+                    continue
+                res_adv = try_advance_on_arrival(session_id, qid, None, cur_loc)
+                if res_adv:
+                    advanced_stages.append({"quest_id": qid, "res": res_adv})
+                    advanced_keys.append((qid, None))
+                    waypoint_notices.append(res_adv)
+                    if not res_adv.get("all_stages_complete"):
+                        grant_stage_acquisition_item_if_needed(
+                            session_id=session_id,
+                            quest=q,
+                            completed_stage_index=res_adv.get("completed_stage_index", 1),
+                            total_stages=res_adv.get("total_stages", 2),
+                            party_user_ids=party_uids,
+                        )
+                        dm_dir2 = trigger_stage2_midquest_comms_if_eligible(session_id, q, session=session)
+                        if dm_dir2:
+                            directives.append(dm_dir2)
+                    if res_adv.get("all_stages_complete"):
+                        completed_quests.append(q)
+            elif trig in ("skill_check", "action", "inspect_prop", "talk_to_npc", "resource_progress", "defeat_target"):
+                wp_match = does_action_target_waypoint(
+                    session_id=session_id,
+                    quest_id=qid,
+                    sub_obj_id=None,
+                    current_location=cur_loc,
+                    action_text=action_str,
+                    narrative="",
+                    sub_obj_text="",
+                    is_quest_action=is_quest_action,
+                    action_quest_id=action_quest_id,
+                    action_sub_obj_id=action_sub_obj_id,
+                )
+                if wp_match:
+                    if act_approach in ("wait_for_window", "wait_until_morning"):
+                        continue
+                    if act_approach == "counter_offer":
+                        betray_res = apply_quest_approach_effects(
+                            session_id=session_id,
+                            quest=q,
+                            waypoint=active_wp,
+                            approach="counter_offer",
+                            gold_cost=0,
+                            party_user_ids=party_uids,
+                            session=session,
+                        )
+                        if betray_res.get("directive"):
+                            directives.append(betray_res["directive"])
+                        continue
+                    elif is_success:
+                        res_adv = try_complete_on_skill_check(
+                            session_id=session_id,
+                            quest_id=qid,
+                            sub_obj_id=None,
+                            current_location=cur_loc,
+                            check_success=True,
+                            check_result_tier=check_tier,
+                            action_text=action_str,
+                            is_quest_action=is_quest_action,
+                            action_quest_id=action_quest_id,
+                            action_sub_obj_id=action_sub_obj_id,
+                        )
+                        if res_adv:
+                            advanced_stages.append({"quest_id": qid, "res": res_adv})
+                            advanced_keys.append((qid, None))
+                            waypoint_notices.append(res_adv)
+                            appr_eff = apply_quest_approach_effects(
+                                session_id=session_id,
+                                quest=q,
+                                waypoint=active_wp,
+                                approach=act_approach,
+                                gold_cost=act_gold_cost,
+                                party_user_ids=party_uids,
+                                session=session,
+                            )
+                            if appr_eff.get("directive"):
+                                directives.append(appr_eff["directive"])
+                            if not res_adv.get("all_stages_complete"):
+                                grant_stage_acquisition_item_if_needed(
+                                    session_id=session_id,
+                                    quest=q,
+                                    completed_stage_index=res_adv.get("completed_stage_index", 1),
+                                    total_stages=res_adv.get("total_stages", 2),
+                                    party_user_ids=party_uids,
+                                )
+                                dm_dir3 = trigger_stage2_midquest_comms_if_eligible(session_id, q, session=session)
+                                if dm_dir3:
+                                    directives.append(dm_dir3)
+
+                            if res_adv.get("all_stages_complete"):
+                                completed_quests.append(q)
+                    else:
+                        strike_res = handle_failed_quest_skill_check(
+                            session_id=session_id,
+                            quest=q,
+                            waypoint=active_wp,
+                            check_result_tier=check_tier,
+                            party_user_ids=party_uids,
+                            session=session,
+                        )
+                        if strike_res and strike_res.get("directive"):
+                            directives.append(strike_res["directive"])
+
+        # 2. Check sub-objective waypoints (Story Quests & multi-branch quests)
+        sub_objs = q.get("sub_objectives") or []
+        if isinstance(sub_objs, list) and sub_objs:
+            sub_dirty = False
+            for so in sub_objs:
+                if not isinstance(so, dict) or so.get("completed"):
+                    continue
+                so_id = so.get("id")
+                if not so_id:
+                    continue
+                so_wp = db.get_active_waypoint(session_id, qid, so_id)
+                so_done = False
+                if so_wp:
+                    so_trig = so_wp.get("completion_trigger") or "arrival"
+                    if so_trig == "arrival":
+                        if act_approach in ("wait_for_window", "wait_until_morning"):
+                            continue
+                        res_so = try_advance_on_arrival(session_id, qid, so_id, cur_loc)
+                        if res_so:
+                            advanced_stages.append({"quest_id": qid, "sub_obj_id": so_id, "res": res_so})
+                            advanced_keys.append((qid, so_id))
+                            waypoint_notices.append(res_so)
+                            if not res_so.get("all_stages_complete"):
+                                grant_stage_acquisition_item_if_needed(
+                                    session_id=session_id,
+                                    quest=q,
+                                    completed_stage_index=res_so.get("completed_stage_index", 1),
+                                    total_stages=res_so.get("total_stages", 2),
+                                    party_user_ids=party_uids,
+                                    sub_obj=so,
+                                )
+                            if res_so.get("all_stages_complete"):
+                                so_done = True
+                    elif so_trig in ("skill_check", "action", "inspect_prop", "talk_to_npc", "resource_progress", "defeat_target"):
+                        wp_match_so = does_action_target_waypoint(
+                            session_id=session_id,
+                            quest_id=qid,
+                            sub_obj_id=so_id,
+                            current_location=cur_loc,
+                            action_text=action_str,
+                            narrative="",
+                            sub_obj_text=str(so.get("text") or ""),
+                            is_quest_action=is_quest_action,
+                            action_quest_id=action_quest_id,
+                            action_sub_obj_id=action_sub_obj_id,
+                        )
+                        if wp_match_so:
+                            if act_approach in ("wait_for_window", "wait_until_morning"):
+                                break
+                            if act_approach == "counter_offer":
+                                betray_res = apply_quest_approach_effects(
+                                    session_id=session_id,
+                                    quest=q,
+                                    waypoint=so_wp,
+                                    approach="counter_offer",
+                                    gold_cost=0,
+                                    party_user_ids=party_uids,
+                                    sub_obj=so,
+                                    session=session,
+                                )
+                                if betray_res.get("directive"):
+                                    directives.append(betray_res["directive"])
+                                break
+                            elif is_success:
+                                res_so = try_complete_on_skill_check(
+                                    session_id=session_id,
+                                    quest_id=qid,
+                                    sub_obj_id=so_id,
+                                    current_location=cur_loc,
+                                    check_success=True,
+                                    check_result_tier=check_tier,
+                                    action_text=action_str,
+                                    sub_obj_text=str(so.get("text") or ""),
+                                    is_quest_action=is_quest_action,
+                                    action_quest_id=action_quest_id,
+                                    action_sub_obj_id=action_sub_obj_id,
+                                )
+                                if res_so:
+                                    advanced_stages.append({"quest_id": qid, "sub_obj_id": so_id, "res": res_so})
+                                    advanced_keys.append((qid, so_id))
+                                    waypoint_notices.append(res_so)
+                                    appr_eff = apply_quest_approach_effects(
+                                        session_id=session_id,
+                                        quest=q,
+                                        waypoint=so_wp,
+                                        approach=act_approach,
+                                        gold_cost=act_gold_cost,
+                                        party_user_ids=party_uids,
+                                        sub_obj=so,
+                                        session=session,
+                                    )
+                                    if appr_eff.get("directive"):
+                                        directives.append(appr_eff["directive"])
+                                    if not res_so.get("all_stages_complete"):
+                                        grant_stage_acquisition_item_if_needed(
+                                            session_id=session_id,
+                                            quest=q,
+                                            completed_stage_index=res_so.get("completed_stage_index", 1),
+                                            total_stages=res_so.get("total_stages", 2),
+                                            party_user_ids=party_uids,
+                                            sub_obj=so,
+                                        )
+                                    if res_so.get("all_stages_complete"):
+                                        so_done = True
+                            else:
+                                strike_res = handle_failed_quest_skill_check(
+                                    session_id=session_id,
+                                    quest=q,
+                                    waypoint=so_wp,
+                                    check_result_tier=check_tier,
+                                    party_user_ids=party_uids,
+                                    sub_obj=so,
+                                    session=session,
+                                )
+                                if strike_res and strike_res.get("directive"):
+                                    directives.append(strike_res["directive"])
+                                if strike_res and strike_res.get("status") == "dire_cost":
+                                    so_done = True
+
+                if not so_done and resolves_so_id and str(resolves_so_id) == str(so_id) and is_success:
+                    so_done = True
+                    advanced_keys.append((qid, so_id))
+                if so_done:
+                    so["completed"] = True
+                    sub_dirty = True
+                    consume_quest_delivery_item_if_needed(
+                        session_id=session_id,
+                        quest=q,
+                        party_user_ids=party_uids,
+                        sub_obj=so,
+                    )
+                    completed_sub_quests.append({
+                        "quest_id": qid,
+                        "quest_title": q.get("title", "Quest"),
+                        "sub_obj_id": so_id,
+                        "text": so.get("text", so_id),
+                    })
+                    directives.append(
+                        f"[MANDATORY QUEST OBJECTIVE COMPLETE]: Sub-objective '{so.get('text', so_id)}' for quest '{q.get('title')}' is completed! Narrate the breakthrough/discovery vividly."
+                    )
+                    break
+            if sub_dirty and session_id:
+                try:
+                    done_cnt = sum(1 for s in sub_objs if isinstance(s, dict) and s.get("completed"))
+                    db.upsert_quest(
+                        session_id=session_id,
+                        quest_id=qid,
+                        quest_type=q.get("quest_type") or "Story Quest",
+                        title=q.get("title") or "Quest",
+                        objective=q.get("objective") or "",
+                        progress=f"{done_cnt}/{len(sub_objs)} Cleared",
+                        current_clues=q.get("current_clues") or "",
+                        status=q.get("status") or "Active",
+                        reward_xp=int(q.get("reward_xp") or 100),
+                        reward_gold=int(q.get("reward_gold") or 30),
+                        is_story_quest=int(q.get("is_story_quest") or 0),
+                        clues_required=int(q.get("clues_required") or len(sub_objs)),
+                        sub_objectives=sub_objs,
+                    )
+                except Exception:
+                    pass
+                if not q.get("is_story_quest") and all(isinstance(s, dict) and s.get("completed") for s in sub_objs):
+                    if q not in completed_quests:
+                        completed_quests.append(q)
+
+        # Check if climax action was executed for a story quest
+        if q.get("is_story_quest"):
+            sq, climax_loc = get_story_quest_climax_location(session_id)
+            if sq and sq.get("quest_id") == qid:
+                if ("story climax" in act_low or "⚡" in action_str):
+                    if is_success:
+                        if q not in completed_quests:
+                            completed_quests.append(q)
+                    else:
+                        strike_res = db.increment_quest_strikes(session_id, qid, delta=2 if check_tier == "critical_failure" else 1)
+                        if strike_res["failed"] or check_tier == "critical_failure":
+                            db.set_quest_resolution_approach(session_id, qid, "pyrrhic_climax")
+                            q["resolution_approach"] = "pyrrhic_climax"
+                            q["reward_xp"] = max(25, int(int(q.get("reward_xp") or 100) * 0.5))
+                            q["reward_gold"] = max(10, int(int(q.get("reward_gold") or 30) * 0.5))
+                            db.apply_hp_mp_delta(party_uids[0], hp_delta=-10)
+                            directives.append(
+                                f"[MANDATORY PYRRHIC CLIMAX RESOLUTION]: The Chapter Climax '{q.get('title')}' concluded with bittersweet compromise and dark consequences! Complete the climax and narrate the heavy toll."
+                            )
+                            if q not in completed_quests:
+                                completed_quests.append(q)
+                        else:
+                            directives.append(
+                                f"[QUEST COMPLICATION - {strike_res['strikes']}/{strike_res['max_strikes']} STRIKES]: The Story Climax check met unexpected resistance! The stakes escalate for the final push."
+                            )
+
+    # Award rewards deterministically for newly completed quests
+    import time
+    reward_notices = []
+    for cq in completed_quests:
+        cq_id = cq["quest_id"]
+        consume_quest_delivery_item_if_needed(
+            session_id=session_id,
+            quest=cq,
+            party_user_ids=party_uids,
+        )
+
+        claim_res = None
+        try:
+            claim_res = db.claim_quest_reward(session_id, cq_id, party_uids)
+        except Exception:
+            try:
+                with db.get_conn() as _conn:
+                    _conn.execute("UPDATE quests SET status='Completed', updated_at=? WHERE session_id=? AND quest_id=?", (time.time(), session_id, cq_id))
+            except Exception:
+                pass
+
+        xp = int(cq.get("reward_xp") or 100)
+        gold = int(cq.get("reward_gold") or 30)
+        ritem = cq.get("reward_item") or ""
+        notice = {
+            "claimed": True,
+            "title": cq.get("title", "Quest"),
+            "quest_type": cq.get("quest_type") or ("Story Quest" if cq.get("is_story_quest") else "Side Bounty"),
+            "is_story_quest": bool(cq.get("is_story_quest") or cq.get("quest_type") in ("Story Quest", "Main Quest")),
+            "xp": xp,
+            "gold": gold,
+            "item": ritem,
+            "quest_id": cq_id,
+            "levels_gained": (claim_res or {}).get("levels_gained", {}) if isinstance(claim_res, dict) else {},
+            "_item_granted_in_db": bool(isinstance(claim_res, dict) and claim_res.get("_item_granted_in_db")),
+        }
+        reward_notices.append(notice)
+        directives.append(
+            f"[MANDATORY QUEST OBJECTIVE COMPLETE]: Quest '{cq.get('title')}' is completed! Narrate the breakthrough/success vividly."
+        )
+
+    # Two-Phase Chapter Climax System
+    chapter_climax = False
+    active_sq = db.get_active_story_quest(session_id) if session_id else None
+    if not active_sq and session_id:
+        cur_ch = session.get("chapter", 1)
+        if session.get("chapter_climax_phase") == "setup":
+            session["chapter"] = cur_ch + 1
+            session["chapter_climax_phase"] = "resolved"
+            try:
+                db.set_session_chapter(session_id, session["chapter"])
+            except Exception:
+                pass
+            directives.append(
+                f"[MANDATORY CHAPTER CLIMAX RESOLUTION]: Chapter {cur_ch} climax successfully concluded! Transition into Chapter {session['chapter']}."
+            )
+            chapter_climax = True
+        elif completed_quests and any(q.get("is_story_quest") for q in completed_quests):
+            session["chapter_climax_phase"] = "setup"
+
+    res = {
+        "completed_quests": [q.get("quest_id") for q in completed_quests],
+        "reward_notices": reward_notices,
+        "waypoint_notices": waypoint_notices,
+        "completed_sub_quests": completed_sub_quests,
+        "advanced_keys": advanced_keys,
+        "directives": directives,
+        "chapter_climax": chapter_climax,
+    }
+    session["_pre_turn_quest_res"] = res
+    return res
+
 

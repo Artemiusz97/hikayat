@@ -107,15 +107,28 @@ class TestMemoryCRUD(unittest.TestCase):
         import sqlite3 as _sqlite3
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS commitments_ledger (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id      INTEGER NOT NULL,
-                source_entity   TEXT NOT NULL,
-                target_entity   TEXT NOT NULL,
-                commitment_type TEXT NOT NULL,
-                description     TEXT NOT NULL,
-                status          TEXT DEFAULT 'active',
-                turn_created    INTEGER NOT NULL,
-                updated_at      REAL NOT NULL
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id          INTEGER NOT NULL,
+                commitment_key      TEXT,
+                commitment_type     TEXT NOT NULL,
+                source_entity       TEXT NOT NULL,
+                target_entity       TEXT NOT NULL,
+                participants_json   TEXT DEFAULT '[]',
+                target_location     TEXT DEFAULT '',
+                target_node_id      TEXT DEFAULT '',
+                scheduled_day       INTEGER DEFAULT 1,
+                start_minute        INTEGER DEFAULT 0,
+                end_minute          INTEGER DEFAULT 1439,
+                deadline_turn       INTEGER,
+                status              TEXT DEFAULT 'active',
+                origin              TEXT DEFAULT 'in_person',
+                is_confidential     INTEGER DEFAULT 0,
+                title               TEXT DEFAULT '',
+                description         TEXT NOT NULL,
+                metadata_json       TEXT DEFAULT '{}',
+                turn_created        INTEGER NOT NULL,
+                created_at          REAL NOT NULL,
+                updated_at          REAL NOT NULL
             );
             CREATE TABLE IF NOT EXISTS session_digests (
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,9 +161,27 @@ class TestMemoryCRUD(unittest.TestCase):
             def __enter__(self): return conn
             def __exit__(self, *a): conn.commit()
 
-        # Patch the name as it is in db.memory's namespace
-        patcher = patch("db.memory.get_conn", return_value=_CM())
-        return patcher, conn
+        class _CombinedPatcher:
+            def __init__(self):
+                self.p1 = patch("db.core.get_conn", return_value=_CM())
+                self.p2 = patch("db.memory.get_conn", return_value=_CM())
+                self.p3 = patch("mechanics.system.commitments_engine.get_conn", return_value=_CM())
+            def start(self):
+                self.p1.start()
+                self.p2.start()
+                try:
+                    self.p3.start()
+                except Exception:
+                    pass
+            def stop(self):
+                self.p1.stop()
+                self.p2.stop()
+                try:
+                    self.p3.stop()
+                except Exception:
+                    pass
+
+        return _CombinedPatcher(), conn
 
     def test_add_and_get_commitment(self):
         patcher, _conn = self._make_patcher()

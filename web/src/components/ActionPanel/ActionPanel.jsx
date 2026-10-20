@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Send, Lock, Zap, RefreshCw, ChevronDown, ChevronUp, Smartphone, PenLine, X, Users } from 'lucide-react';
+import { Send, Lock, Zap, RefreshCw, ChevronDown, ChevronUp, Smartphone, PenLine, X, Users, Loader2 } from 'lucide-react';
 import TurnOutcomePanel from './TurnOutcomePanel';
 import { StatusEffectBadge } from '../Sidebar/CharacterSheet';
+import { getRelationshipTier } from '../Sidebar/CodexPanel';
 
 const STAT_EMOJI = {
   STR: '💪',
@@ -264,10 +265,13 @@ const ActionPanel = ({
   phoneHook,
   showPercentages = true,
   processing,
+  pendingAction,
   isStreaming,
   waitingForParty,
   partyStatus,
-  onSelectContact
+  onSelectContact,
+  actionError,
+  clearActionError
 }) => {
   const { t } = useTranslation();
   const [customAction, setCustomAction] = useState('');
@@ -278,10 +282,30 @@ const ActionPanel = ({
 
   const npcs = Array.isArray(session?.current_npcs) ? session.current_npcs : [];
   const dialoguePartners = new Set(
-    (Array.isArray(session?.dialogue_partners)
-      ? session.dialogue_partners
-      : (session?.dialogue_partner ? [session.dialogue_partner] : [])
-    ).map(n => String(n || '').toLowerCase().trim()).filter(Boolean)
+    (() => {
+      let list = [];
+      if (Array.isArray(session?.dialogue_partners) && session.dialogue_partners.length > 0) {
+        list = session.dialogue_partners;
+      } else if (session?.dialogue_partner) {
+        const dp = session.dialogue_partner;
+        if (Array.isArray(dp)) {
+          list = dp;
+        } else if (typeof dp === 'string') {
+          const trimmed = dp.trim();
+          if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+            try {
+              const parsed = JSON.parse(trimmed);
+              list = Array.isArray(parsed) ? parsed : [dp];
+            } catch {
+              list = [dp];
+            }
+          } else {
+            list = [dp];
+          }
+        }
+      }
+      return list;
+    })().map(n => String(n || '').toLowerCase().trim()).filter(Boolean)
   );
 
   const livingEnemies = (session?.nearby_enemies || session?.monsters || []).filter(
@@ -375,8 +399,40 @@ const ActionPanel = ({
                   const clothing = typeof npc === 'object' ? npc?.clothing_status : null;
                   const statusEffects = (typeof npc === 'object' && Array.isArray(npc?.status_effects) ? npc.status_effects : []).filter(eff => {
                     const str = (typeof eff === 'string' ? eff : (eff?.name || '')).trim();
-                    return str && str !== '[]' && str !== '{}' && str !== '""' && str !== "''" && str.toLowerCase() !== 'none' && str.toLowerCase() !== 'null';
+                    const low = str.toLowerCase();
+                    return str && str !== '[]' && str !== '{}' && str !== '""' && str !== "''" && low !== 'none' && low !== 'null' && low !== 'present' && low !== 'absent' && low !== 'nearby';
                   });
+
+                  // 1. Affinity
+                  const score = npc?.relationship_score ?? npc?.affinity ?? 0;
+                  const isRomantic = (npc?.track === 'romantic') || (npc?.relations?.track === 'romantic');
+                  const tier = getRelationshipTier(score, isRomantic ? 'romantic' : 'platonic', t);
+
+                  // 2. Excitement (when applicable)
+                  const physExc = session?.physical_state?.excitement;
+                  const physActors = (physExc?.actors && typeof physExc.actors === 'object') ? physExc.actors : {};
+                  let actorExc = (npc?.excitement_meter !== undefined && npc?.excitement_meter !== null) ? {
+                    meter: Number(npc.excitement_meter),
+                    status: npc.excitement_status,
+                    climaxed: npc.excitement_climaxed,
+                    active: npc.excitement_active
+                  } : null;
+
+                  if (!actorExc && physActors) {
+                    const cleanN = name.toLowerCase().trim();
+                    for (const [k, v] of Object.entries(physActors)) {
+                      const cleanK = String(k || '').toLowerCase().trim();
+                      if (cleanK && (cleanK === cleanN || cleanN.includes(cleanK) || cleanK.includes(cleanN))) {
+                        actorExc = v;
+                        break;
+                      }
+                    }
+                  }
+
+                  const excMeter = actorExc?.meter !== undefined && actorExc?.meter !== null ? Number(actorExc.meter) : null;
+                  const isExcActive = Boolean(actorExc?.active || physExc?.active || (excMeter !== null && excMeter > 0));
+                  const showExcitement = isExcActive && excMeter !== null;
+
                   return (
                     <div key={`${name}-${idx}`} className="inline-flex items-center gap-1 shrink-0">
                       <button
@@ -396,13 +452,21 @@ const ActionPanel = ({
                             {t('actions.talking')}
                           </span>
                         )}
+                        <span className={`text-[8.5px] font-mono font-semibold px-1 rounded bg-black/60 border border-neutral-700/60 leading-tight ${tier.color}`}>
+                          {score > 0 ? `+${score}` : score}
+                        </span>
+                        {showExcitement && (
+                          <span className="text-[8.5px] font-mono font-bold px-1 rounded bg-rose-950/80 border border-pink-700/60 text-pink-200 leading-tight">
+                            💋 {excMeter}%
+                          </span>
+                        )}
                         {clothing && (
                           <span className="text-[8.5px] font-mono px-1 rounded bg-black/60 text-gray-300 border border-neutral-700/60 leading-tight">
                             {clothing}
                           </span>
                         )}
                       </button>
-                      {statusEffects && statusEffects.length > 0 && statusEffects.slice(0, 1).map((eff, eIdx) => (
+                      {statusEffects && statusEffects.length > 0 && statusEffects.map((eff, eIdx) => (
                         <StatusEffectBadge key={eIdx} effect={eff} />
                       ))}
                     </div>
@@ -513,12 +577,26 @@ const ActionPanel = ({
                       const choiceEmoji = getChoiceEmoji(choice);
                       const statName = String(choice.stat || 'FREE').toUpperCase();
                       const displayStat = statName === 'NONE' ? 'FREE' : statName;
+                      const isPending = Boolean(
+                        processing && pendingAction && (
+                          (pendingAction.choice_index !== undefined && pendingAction.choice_index === idx) ||
+                          (pendingAction.direct_choice && (
+                            pendingAction.direct_choice === choice ||
+                            pendingAction.direct_choice.label === choice.label ||
+                            pendingAction.direct_choice.text === choice.text
+                          ))
+                        )
+                      );
                       return (
                         <button
                           key={idx}
                           onClick={() => onAction({ choice_index: idx, direct_choice: choice, combat_target: selectedTargetName })}
                           disabled={isBusy}
-                          className="group flex items-center justify-between gap-1.5 md:gap-2 px-2.5 md:px-3 py-1 md:py-1.5 rounded-md md:rounded-lg bg-black/50 border border-fantasy-border hover:border-fantasy-accent hover:bg-fantasy-accent/10 transition-all disabled:opacity-50 text-left"
+                          className={`group flex items-center justify-between gap-1.5 md:gap-2 px-2.5 md:px-3 py-1 md:py-1.5 rounded-md md:rounded-lg border transition-all disabled:opacity-50 text-left ${
+                            isPending
+                              ? 'bg-amber-950/70 border-amber-400 ring-2 ring-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.35)] !opacity-100'
+                              : 'bg-black/50 border-fantasy-border hover:border-fantasy-accent hover:bg-fantasy-accent/10'
+                          }`}
                         >
                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[9.5px] md:text-[10px] font-mono font-bold uppercase text-fantasy-accent shrink-0">
                             <span className="text-xs leading-none">{choiceEmoji}</span>
@@ -528,12 +606,18 @@ const ActionPanel = ({
                             {choice.label || choice.text}
                           </span>
                           <div className="flex items-center gap-1 shrink-0">
-                            {mpCost > 0 && (
+                            {isPending && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-amber-300 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40">
+                                <Loader2 size={11} className="animate-spin text-amber-300" />
+                                <span>{t('actions.resolving') || 'Resolving...'}</span>
+                              </span>
+                            )}
+                            {mpCost > 0 && !isPending && (
                               <span className="text-blue-400 font-mono flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-950/50 border border-blue-800/40">
                                 <Zap size={10} /> {mpCost}
                               </span>
                             )}
-                            {showPercentages && pct !== undefined && pct !== null && (
+                            {showPercentages && pct !== undefined && pct !== null && !isPending && (
                               <span className={`px-1.5 py-0.5 rounded border font-mono text-[9.5px] md:text-[10px] font-bold ${getOddsBadgeClass(pct)}`}>
                                 {pct}%
                               </span>
@@ -556,13 +640,25 @@ const ActionPanel = ({
                         const canAfford = item.can_afford !== false;
                         const itemStat = String(item.stat || 'STR').toUpperCase();
                         const itemEmoji = STAT_EMOJI[itemStat] || getChoiceEmoji(item);
+                        const isPending = Boolean(
+                          processing && pendingAction && pendingAction.direct_choice && (
+                            pendingAction.direct_choice === item ||
+                            pendingAction.direct_choice.label === item.label ||
+                            pendingAction.direct_choice.name === item.name ||
+                            pendingAction.direct_choice.text === item.text
+                          )
+                        );
                         return (
                           <button
                             key={idx}
                             type="button"
                             disabled={isBusy || !canAfford}
                             onClick={() => onAction({ direct_choice: item, combat_target: selectedTargetName })}
-                            className="group flex items-center justify-between gap-1.5 md:gap-2 px-2.5 md:px-3 py-1 md:py-1.5 rounded-md md:rounded-lg bg-black/50 border border-red-900/60 hover:border-amber-400 hover:bg-red-950/30 transition-all disabled:opacity-40 text-left"
+                            className={`group flex items-center justify-between gap-1.5 md:gap-2 px-2.5 md:px-3 py-1 md:py-1.5 rounded-md md:rounded-lg border transition-all disabled:opacity-40 text-left ${
+                              isPending
+                                ? 'bg-amber-950/70 border-amber-400 ring-2 ring-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.35)] !opacity-100'
+                                : 'bg-black/50 border-red-900/60 hover:border-amber-400 hover:bg-red-950/30'
+                            }`}
                           >
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-950/50 border border-red-800/40 text-[9.5px] md:text-[10px] font-mono font-bold uppercase text-amber-300 shrink-0">
                               <span className="text-xs leading-none">{itemEmoji}</span>
@@ -577,12 +673,18 @@ const ActionPanel = ({
                               )}
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
-                              {mpCost > 0 && (
+                              {isPending && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-amber-300 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40">
+                                  <Loader2 size={11} className="animate-spin text-amber-300" />
+                                  <span>{t('actions.resolving') || 'Resolving...'}</span>
+                                </span>
+                              )}
+                              {mpCost > 0 && !isPending && (
                                 <span className="text-blue-400 font-mono flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-950/50 border border-blue-800/40">
                                   <Zap size={10} /> {mpCost}
                                 </span>
                               )}
-                              {showPercentages && pct !== undefined && pct !== null && (
+                              {showPercentages && pct !== undefined && pct !== null && !isPending && (
                                 <span className={`px-1.5 py-0.5 rounded border font-mono text-[9.5px] md:text-[10px] font-bold ${getOddsBadgeClass(pct)}`}>
                                   {pct}%
                                 </span>
@@ -598,6 +700,24 @@ const ActionPanel = ({
             ) : (
               /* Non-Combat Choices Grid: Full-width compact horizontal rows with zero scrollbars */
               <div className="space-y-1.5">
+                {actionError && (
+                  <div className="flex items-center justify-between bg-red-950/80 border border-red-700/80 px-3 py-1.5 rounded-lg text-xs text-red-200 shadow-md">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-red-400 font-bold shrink-0">⚠️ Error:</span>
+                      <span className="truncate">{actionError}</span>
+                    </div>
+                    {clearActionError && (
+                      <button
+                        type="button"
+                        onClick={clearActionError}
+                        className="text-gray-400 hover:text-white text-xs px-2 py-0.5 rounded hover:bg-white/10 shrink-0 ml-2"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {session?.is_fallback_generation && onRetry && (
                   <div className="flex items-center justify-between bg-amber-950/40 border border-amber-700/50 px-3 py-1 rounded text-xs text-amber-200">
                     <span>⚠️ {t('actions.fallback_warning')}</span>
@@ -672,15 +792,28 @@ const ActionPanel = ({
                       .replace(/\s*\((?:STR|PER|END|CHA|INT|AGI|LUK)\)\s*$/i, '')
                       .trim() || rawDisplayLabel;
 
+                    const isPending = Boolean(
+                      processing && pendingAction && (
+                        (pendingAction.choice_index !== undefined && pendingAction.choice_index === idx) ||
+                        (pendingAction.direct_choice && (
+                          pendingAction.direct_choice === choice ||
+                          pendingAction.direct_choice.label === choice.label ||
+                          pendingAction.direct_choice.text === choice.text
+                        ))
+                      )
+                    );
+
                     return (
                       <button
                         key={idx}
                         onClick={() => onAction({ choice_index: idx, direct_choice: choice })}
                         disabled={isBusy}
                         className={`group flex items-center justify-between gap-1.5 md:gap-2 px-2.5 md:px-3 py-1 md:py-1.5 rounded-md md:rounded-lg text-left transition-all disabled:opacity-50 ${
-                          isQuestHighlighted
-                            ? 'bg-amber-950/35 border border-amber-400/75 hover:border-amber-300 hover:bg-amber-900/45 shadow-[0_0_12px_rgba(245,158,11,0.16)]'
-                            : 'bg-black/45 border border-fantasy-border hover:border-fantasy-accent hover:bg-fantasy-accent/10'
+                          isPending
+                            ? 'bg-amber-950/70 border-amber-400 ring-2 ring-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.35)] !opacity-100'
+                            : isQuestHighlighted
+                              ? 'bg-amber-950/35 border border-amber-400/75 hover:border-amber-300 hover:bg-amber-900/45 shadow-[0_0_12px_rgba(245,158,11,0.16)]'
+                              : 'bg-black/45 border border-fantasy-border hover:border-fantasy-accent hover:bg-fantasy-accent/10'
                         }`}
                       >
                         {/* Left: Quest Marker Badge + Stat Pill */}
@@ -720,14 +853,20 @@ const ActionPanel = ({
                           {cleanDisplayLabel}
                         </span>
 
-                        {/* Right: MP Cost + Success Odds Badge */}
+                        {/* Right: MP Cost + Success Odds Badge or Resolving Spinner */}
                         <div className="flex items-center gap-1 shrink-0">
-                          {mpCost > 0 && (
+                          {isPending && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-amber-300 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40">
+                              <Loader2 size={11} className="animate-spin text-amber-300" />
+                              <span>{t('actions.resolving') || 'Resolving...'}</span>
+                            </span>
+                          )}
+                          {mpCost > 0 && !isPending && (
                             <span className="text-blue-400 font-mono flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-950/50 border border-blue-800/40">
                               <Zap size={10} /> {mpCost}
                             </span>
                           )}
-                          {showPercentages && pct !== undefined && pct !== null && !isFreeAction && (
+                          {showPercentages && pct !== undefined && pct !== null && !isFreeAction && !isPending && (
                             <span className={`px-1.5 py-0.5 rounded border font-mono text-[9.5px] md:text-[10px] font-bold ${getOddsBadgeClass(pct)}`}>
                               {pct}%
                             </span>
@@ -860,7 +999,11 @@ const ActionPanel = ({
                   title="Submit Custom Action"
                   className="absolute right-1 md:right-1.5 top-1/2 -translate-y-1/2 p-1 md:p-1.5 rounded-md bg-fantasy-accent text-fantasy-dark hover:bg-fantasy-accent-hover transition-colors disabled:opacity-40 disabled:bg-gray-700"
                 >
-                  <Send size={12} />
+                  {processing && pendingAction?.custom_action_text ? (
+                    <Loader2 size={12} className="animate-spin text-fantasy-dark" />
+                  ) : (
+                    <Send size={12} />
+                  )}
                 </button>
               </form>
               <button

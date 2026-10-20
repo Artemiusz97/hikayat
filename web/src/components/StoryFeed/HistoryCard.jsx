@@ -1,10 +1,94 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import SceneImageCard from './SceneImageCard';
+
+export const PronounTooltip = ({ charName, charRole, children }) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <span
+      className="relative inline-block group"
+      onClick={(e) => {
+        e.stopPropagation();
+        setIsOpen((prev) => !prev);
+      }}
+      onMouseLeave={() => setIsOpen(false)}
+      tabIndex={0}
+      role="button"
+      aria-label={`Refers to ${charName}`}
+    >
+      <span className="border-b border-dotted border-fantasy-accent/60 text-fantasy-accent/95 hover:text-fantasy-accent hover:border-solid hover:bg-fantasy-accent/15 rounded px-0.5 cursor-pointer transition-all duration-150 font-medium select-none">
+        {children}
+      </span>
+
+      {/* Tooltip Popup */}
+      <span
+        className={`pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 flex-col items-center px-2.5 py-1.5 rounded-lg bg-neutral-900/95 border border-fantasy-accent/50 text-xs shadow-2xl backdrop-blur-md whitespace-nowrap transition-all duration-150 ${
+          isOpen ? 'flex' : 'hidden group-hover:flex'
+        }`}
+      >
+        <span className="font-bold text-fantasy-accent text-[12px] leading-tight flex items-center gap-1.5 font-sans">
+          <span className="text-[13px]">👤</span>
+          <span>{charName}</span>
+        </span>
+        {charRole && (
+          <span className="text-[10px] text-gray-300/90 font-sans tracking-tight mt-0.5">
+            {charRole}
+          </span>
+        )}
+        <span className="absolute top-full left-1/2 -translate-x-1/2 -mt-[1px] border-solid border-t-neutral-900/95 border-t-[5px] border-x-transparent border-x-[5px] border-b-0" />
+      </span>
+    </span>
+  );
+};
+
+export const parseNarrativeWithPronounRefs = (paragraph) => {
+  if (!paragraph || !paragraph.includes('<ref')) {
+    return paragraph;
+  }
+
+  const regex = /<ref\s+char="([^"]+)"(?:\s+role="([^"]*)")?>([\s\S]*?)<\/ref>/gi;
+  const elements = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(paragraph)) !== null) {
+    const matchStart = match.index;
+    const matchEnd = regex.lastIndex;
+
+    if (matchStart > lastIndex) {
+      elements.push(paragraph.substring(lastIndex, matchStart));
+    }
+
+    const charName = match[1];
+    const charRole = match[2] || '';
+    const pronounText = match[3];
+    const key = `ref-${matchStart}-${charName}`;
+
+    elements.push(
+      <PronounTooltip key={key} charName={charName} charRole={charRole}>
+        {pronounText}
+      </PronounTooltip>
+    );
+
+    lastIndex = matchEnd;
+  }
+
+  if (lastIndex < paragraph.length) {
+    elements.push(paragraph.substring(lastIndex));
+  }
+
+  return elements;
+};
 
 export const formatNarrative = (text) => {
   if (!text) return null;
   return text.split('\n').map((para, idx) => (
-    para.trim() ? <p key={idx} className="mb-2.5 last:mb-0 leading-relaxed">{para}</p> : null
+    para.trim() ? (
+      <p key={idx} className="mb-2.5 last:mb-0 leading-relaxed">
+        {parseNarrativeWithPronounRefs(para)}
+      </p>
+    ) : null
   ));
 };
 
@@ -77,13 +161,21 @@ export const getOutcomeTierTheme = (rawTier, rawTierLabel, rawStat) => {
   };
 };
 
-const HistoryCard = ({ entry, prevSceneTitle = '', sceneImageUrl = null }) => {
+const HistoryCard = ({
+  entry,
+  prevSceneTitle = '',
+  sceneImageUrl = null,
+  isLatest = false,
+  imageGenMode = 1,
+  onRerollImage = null,
+  isRerollingImage = false,
+}) => {
   const { t } = useTranslation();
   if (!entry) return null;
 
   if (typeof entry === 'string') {
     return (
-      <div className="mb-5 text-gray-100 font-serif text-[13.5px] sm:text-sm md:text-[15px] tracking-wide">
+      <div className="mb-5 text-gray-100 font-serif text-[13.5px] sm:text-sm md:text-lg tracking-wide">
         {formatNarrative(entry)}
       </div>
     );
@@ -101,16 +193,15 @@ const HistoryCard = ({ entry, prevSceneTitle = '', sceneImageUrl = null }) => {
             {title}
           </h2>
         )}
-        {sceneImageUrl && (
-          <div className="mb-4 rounded-lg overflow-hidden border border-fantasy-border/80 shadow-lg bg-black/40">
-            <img
-              src={sceneImageUrl}
-              alt={title || 'Scene Illustration'}
-              className="w-full max-h-80 object-cover"
-            />
-          </div>
-        )}
-        <div className="text-gray-100 font-serif text-[13.5px] sm:text-sm md:text-[15px] tracking-wide">
+        <SceneImageCard
+          imageUrl={sceneImageUrl}
+          title={title}
+          isLatest={isLatest}
+          imageGenMode={imageGenMode}
+          onReroll={onRerollImage}
+          isRerolling={isRerollingImage}
+        />
+        <div className="text-gray-100 font-serif text-[13.5px] sm:text-sm md:text-lg tracking-wide">
           {formatNarrative(sceneText)}
         </div>
       </div>
@@ -183,15 +274,14 @@ const HistoryCard = ({ entry, prevSceneTitle = '', sceneImageUrl = null }) => {
               {entrySceneTitle}
             </h2>
           )}
-          {sceneImageUrl && (
-            <div className="mb-4 md:mb-5 rounded-lg overflow-hidden border border-fantasy-border/80 shadow-lg bg-black/40">
-              <img
-                src={sceneImageUrl}
-                alt={entrySceneTitle || 'Scene Illustration'}
-                className="w-full max-h-80 md:max-h-96 object-cover"
-              />
-            </div>
-          )}
+          <SceneImageCard
+            imageUrl={sceneImageUrl}
+            title={entrySceneTitle}
+            isLatest={isLatest}
+            imageGenMode={imageGenMode}
+            onReroll={onRerollImage}
+            isRerolling={isRerollingImage}
+          />
           <div className="text-gray-100 font-serif text-[13.5px] sm:text-sm md:text-lg tracking-wide">
             {formatNarrative(nextNarrative)}
           </div>

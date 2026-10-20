@@ -418,10 +418,17 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                       {place.quest_tag || '⭐ Quest Target'}
                                     </span>
                                   )}
+                                  {place.is_transit_hub && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border bg-cyan-950/60 text-cyan-300 border-cyan-800/60">
+                                      🚀 Transit Hub
+                                    </span>
+                                  )}
                                   <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border ${
-                                    isInstant
+                                    place.is_adjacent || isInstant
                                       ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60'
-                                      : 'bg-amber-950/60 text-amber-300 border-amber-800/60'
+                                      : place.travel_tag?.includes('Transit')
+                                        ? 'bg-cyan-950/60 text-cyan-300 border-cyan-800/60'
+                                        : 'bg-amber-950/60 text-amber-300 border-amber-800/60'
                                   }`}>
                                     {place.travel_tag || 'Travel'}
                                   </span>
@@ -430,6 +437,30 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                       {place.archetype}
                                     </span>
                                   )}
+                                  {/* Access / Curfew Badge */}
+                                  {place.access_badge && (() => {
+                                    const isCurfew = Boolean(place.is_curfew_active || place.access_badge.includes('Curfew'));
+                                    const isClosedOrLocked = Boolean(place.schedule_locked || place.access_badge.includes('Closed') || place.access_badge.includes('Locked'));
+                                    return (
+                                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border ${
+                                        place.access_badge === 'Unlocked'
+                                          ? 'bg-teal-950/60 text-teal-300 border-teal-800/60'
+                                          : isCurfew || isClosedOrLocked
+                                            ? 'bg-rose-950/70 text-rose-300 border-rose-800/60'
+                                            : place.access_badge === 'Restricted'
+                                              ? 'bg-orange-950/60 text-orange-300 border-orange-800/60'
+                                              : place.access_badge === 'Private'
+                                                ? 'bg-purple-950/60 text-purple-300 border-purple-800/60'
+                                                : 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60'
+                                      }`}>
+                                        {place.access_badge === 'Unlocked' ? '🔓 Unlocked' :
+                                         isCurfew || isClosedOrLocked ? `🔒 ${place.access_badge}` :
+                                         place.access_badge === 'Restricted' ? '⛔ Restricted' :
+                                         place.access_badge === 'Private' ? '🏠 Private' :
+                                         '🟢 Open'}
+                                      </span>
+                                    );
+                                  })()}
                                 </div>
 
                                 {/* Facility Feature Pills (Notice Board, Merchant, Faction HQ, Home) */}
@@ -443,6 +474,39 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                         {fp.label}
                                       </span>
                                     ))}
+                                  </div>
+                                )}
+
+                                {/* Live Occupancy Pills (Known Contacts + Unmet Activity Count) */}
+                                {(place.known_npcs_here?.length > 0 || place.unmet_activity_count > 0) && (
+                                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                    {place.known_npcs_here?.map((kn, knIdx) => (
+                                      <span
+                                        key={knIdx}
+                                        className={`text-[9px] px-2 py-0.5 rounded-full border font-semibold flex items-center gap-1 ${
+                                          kn.status === 'Rendezvous'
+                                            ? 'bg-amber-500/25 text-amber-200 border-amber-400/60 shadow-sm'
+                                            : 'bg-sky-950/60 text-sky-200 border-sky-700/50'
+                                        }`}
+                                        title={`${kn.name} is currently here (${kn.status})`}
+                                      >
+                                        <span>👤 {kn.name}</span>
+                                        {kn.status === 'Rendezvous' && <span className="text-[8px] uppercase tracking-wider text-amber-400 font-bold">• Meetup</span>}
+                                      </span>
+                                    ))}
+                                    {place.unmet_activity_count > 0 && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-black/60 text-gray-400 border border-fantasy-border/50 font-mono">
+                                        👥 +{place.unmet_activity_count} student{place.unmet_activity_count > 1 ? 's' : ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Persistent Room Memory Banner */}
+                                {place.scene_residue && (
+                                  <div className="text-[10px] text-amber-200/90 italic bg-amber-950/30 border border-amber-800/40 rounded px-2 py-1 mt-1 flex items-center gap-1.5">
+                                    <span className="not-italic shrink-0">💭</span>
+                                    <span className="truncate" title={place.scene_residue}>Memory: &ldquo;{place.scene_residue}&rdquo;</span>
                                   </div>
                                 )}
                               </div>

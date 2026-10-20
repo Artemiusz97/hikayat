@@ -56,6 +56,23 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
 
 
         is_departing_venue = False
+        is_acc = bool(parsed_action.metadata.get("is_accompanied")) if parsed_action and parsed_action.metadata else False
+        from mechanics.world.mobility import ACCOMPANIED_TRAVEL_PHRASES, is_solo_travel_intent
+        if not is_acc:
+            if any(term in label_low for term in ACCOMPANIED_TRAVEL_PHRASES) or any(k in label_low for k in ("propose moving", "suggest moving", "quieter spot", "secluded spot", "private meeting", "speak in private", "talk in private")):
+                is_acc = True
+            elif current_partners and not is_solo_travel_intent(actions):
+                if any(v in label_low for v in ("discuss", "talk", "speak", "chat", "convene", "confer", "meet", "continue", "carry", "walk", "escort", "guide", "lead", "help")):
+                    is_acc = True
+                elif re.search(r"\b(?:carry|walk|escort|guide|lead|take|bring|help|accompany)\b.*\b(?:her|him|them)\b", label_low):
+                    is_acc = True
+                elif isinstance(a, dict) and any(dp.lower() == str(a.get("target_npc") or "").strip().lower() for dp in current_partners):
+                    is_acc = True
+            for dp in current_partners:
+                if dp.lower() in label_low or (len(dp.split()[0]) >= 3 and dp.split()[0].lower() in label_low):
+                    is_acc = True
+                    break
+
         if parsed_action.category == IntentCategory.MOVEMENT:
             curr_loc = session.get("current_location", "")
             curr_zone = get_zone_location_name(curr_loc)
@@ -65,28 +82,121 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
                 dest_z, dest_p = action_dest
                 curr_p = get_primary_location_name(curr_loc)
                 if curr_p and dest_p and curr_p.lower() != dest_p.lower():
-                    is_departing_venue = True
+                    if not is_acc:
+                        is_departing_venue = True
             elif parsed_action.metadata.get("is_room_exit"):
-                # If room exit but accompanied by partner, not a venue departure
-                is_acc = bool(parsed_action.metadata.get("is_accompanied"))
-                for dp in current_partners:
-                    if dp.lower() in label_low or (len(dp.split()[0]) >= 3 and dp.split()[0].lower() in label_low):
-                        is_acc = True
-                        break
                 if not is_acc:
                     is_departing_venue = True
 
         # Check for conversational exit: unified intent engine
         is_explicit_exit = parsed_action.category == IntentCategory.DIALOGUE_EXIT
-        is_departure_exit = (parsed_action.category == IntentCategory.MOVEMENT and is_departing_venue and not parsed_action.metadata.get("is_accompanied"))
+        is_departure_exit = (parsed_action.category == IntentCategory.MOVEMENT and is_departing_venue and not is_acc)
+        is_rendezvous_proposal = (parsed_action.category == IntentCategory.SOCIAL_INVITE and bool(parsed_action.metadata.get("is_rendezvous")))
+        is_accompany_proposal = (parsed_action.category == IntentCategory.SOCIAL_INVITE and bool(parsed_action.metadata.get("is_accompany")))
+        is_part_ways = (parsed_action.category == IntentCategory.SOCIAL_INVITE and parsed_action.metadata.get("invite_type") == "part_ways")
 
-        if is_explicit_exit:
+        if is_explicit_exit or is_part_ways:
             has_exited_convo = True
             new_partners = []
+            if session.get("id"):
+                import db
+                target_npc = parsed_action.target_entity
+                if not target_npc:
+                    tcs = db.get_temporary_companions(session["id"])
+                    matched_tcs = [
+                        tc.get("name", "") for tc in tcs
+                        if tc.get("name", "").lower() in label_low
+                        or (len(tc.get("name", "").split()[0]) >= 3 and tc.get("name", "").split()[0].lower() in label_low)
+                    ]
+                    is_general = any(k in label_low for k in (
+                        "everyone", "all", "both", "room", "excuse", "leave", "goodbye",
+                        "farewell", "walk away", "step away", "part ways", "alone", "dismiss",
+                        "wrap up", "head back"
+                    ))
+                    if matched_tcs and len(matched_tcs) < len(tcs) and not is_general:
+                        for m_name in matched_tcs:
+                            db.remove_temporary_companion(session["id"], m_name)
+                    else:
+                        db.clear_temporary_companions(session["id"])
+                else:
+                    db.remove_temporary_companion(session["id"], target_npc)
+        elif is_rendezvous_proposal:
+            # Player proposed an in-person rendezvous / private meeting at another venue.
+            action_succeeded = bool(a.get("success", True)) if isinstance(a, dict) else True
+            cand_target = parsed_action.target_entity
+            if cand_target and any(p.lower() == cand_target.lower() for p in current_partners):
+                target_npc = next(p for p in current_partners if p.lower() == cand_target.lower())
+            elif session.get("dialogue_partner") and any(p.lower() == str(session.get("dialogue_partner")).lower() for p in current_partners):
+                target_npc = session.get("dialogue_partner")
+            elif current_partners:
+                target_npc = current_partners[0]
+            else:
+                target_npc = cand_target or session.get("dialogue_partner") or ""
+
+            if not action_succeeded:
+                # Failed skill check: NPC declines the rendezvous; they do NOT leave and no appointment is booked
+                has_exited_convo = False
+                new_partners = current_partners
+            else:
+                curr_loc = session.get("current_location", "")
+                curr_zone = get_zone_location_name(curr_loc)
+                scen_k = session.get("scenario", "default")
+                action_dest = extract_movement_destination(label, session.get("id"), current_zone=curr_zone, scen_key=scen_k, allow_proposal=True)
+                dest_loc = f"{action_dest[0]} ➔ {action_dest[1]}" if action_dest else (parsed_action.metadata.get("target_location") or "")
+                sess_id = session.get("id")
+                if not action_dest and dest_loc and "➔" not in dest_loc and sess_id:
+                    try:
+                        import db
+                        all_locs = db.get_session_locations(sess_id)
+                        d_low = dest_loc.lower().strip()
+                        for r in all_locs:
+                            pn = r.get("primary_name", "")
+                            zn = r.get("zone_name", "")
+                            if pn and (d_low in pn.lower() or pn.lower() in d_low):
+                                dest_loc = f"{zn} ➔ {pn}"
+                                break
+                    except Exception:
+                        pass
+                if sess_id and target_npc and dest_loc:
+                    import db
+                    cur_day = int(session.get("current_day") or 1)
+                    cur_min = int(session.get("current_minute") or 480)
+                    abs_min = max(0, cur_day - 1) * 1440 + cur_min
+                    db.save_rendezvous_appointment(
+                        session_id=sess_id,
+                        npc_id=target_npc,
+                        npc_name=target_npc,
+                        rendezvous_location=dest_loc,
+                        topic=parsed_action.metadata.get("topic", ""),
+                        is_confidential=bool(parsed_action.metadata.get("is_confidential", True)),
+                        created_minute=abs_min,
+                        expiry_minute=abs_min + 45
+                    )
+                    db.clear_temporary_companions(sess_id)
+
+                # The agreeing NPC excuses themselves to head to the destination first
+                has_exited_convo = True
+                new_partners = [p for p in current_partners if p.lower() != (target_npc or "").lower()]
+        elif is_accompany_proposal:
+            action_succeeded = bool(a.get("success", True)) if isinstance(a, dict) else True
+            target_npc = parsed_action.target_entity or session.get("dialogue_partner") or (current_partners[0] if current_partners else "")
+            sess_id = session.get("id")
+            if action_succeeded:
+                if sess_id and target_npc:
+                    import db
+                    db.add_temporary_companion(sess_id, target_npc, activity=parsed_action.metadata.get("invite_type", "walking_together"))
+                has_exited_convo = False
+                new_partners = [target_npc] if target_npc else current_partners
+            else:
+                has_exited_convo = False
+                new_partners = current_partners
         elif is_departure_exit:
             # Player departed from the venue without an accompanied partner; old partners are left behind
             new_partners = []
             has_exited_convo = bool(current_partners)
+            if session.get("id"):
+                import db
+                db.clear_temporary_companions(session["id"])
             # Check if this departure action was taken specifically to meet a new NPC at the destination
             # e.g. "Travel to the Gym & Fieldhouse to meet Sofia Anderson"
             from mechanics.world.mobility import is_rendezvous_target
@@ -143,6 +253,7 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
 
                 if not detected and session.get("id"):
                     import db
+                    import namegen
                     try:
                         roster = db.get_school_roster(session["id"])
                         tgt_low = parsed_action.target_entity.lower().strip()
@@ -150,7 +261,8 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
                             m_name = member.get("name", "")
                             m_low = m_name.lower().strip()
                             m_first = m_low.split()[0] if m_low else ""
-                            if m_name and (tgt_low == m_low or tgt_low == m_first or f" {tgt_low} " in f" {m_low} " or m_low.startswith(tgt_low)):
+                            m_given = namegen.extract_first_and_last_name(m_name)[0].lower().strip()
+                            if m_name and (tgt_low == m_low or tgt_low in (m_first, m_given) or f" {tgt_low} " in f" {m_low} " or m_low.startswith(tgt_low)):
                                 detected.append(m_name)
                                 break
                     except Exception:
@@ -179,7 +291,9 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
 
                     "representative", "officer", "member", "guildmaster", "archivist", "warden", "guard",
 
-                    "patron", "shopkeeper", "innkeeper", "headmaster", "dean", "professor", "teacher"
+                    "patron", "shopkeeper", "innkeeper", "headmaster", "dean", "professor", "teacher",
+
+                    "bin", "binti", "ibn", "bint", "van", "von", "der", "den", "het", "ten", "ter", "del", "della", "degli", "das", "dos"
 
                 }
 
@@ -228,6 +342,7 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
 
             if not detected and session.get("id"):
                 import db
+                import namegen
                 try:
                     roster = db.get_school_roster(session["id"])
                     for member in roster:
@@ -236,11 +351,28 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
                             continue
                         m_low = m_name.lower().strip()
                         m_first = m_low.split()[0] if m_low else ""
-                        if m_low in label_low or (len(m_first) >= 3 and f" {m_first} " in f" {label_low} "):
+                        m_given = namegen.extract_first_and_last_name(m_name)[0].lower().strip()
+                        first_cands = {fc for fc in (m_first, m_given) if len(fc) >= 3 and fc not in namegen.NAME_PARTICLES_AND_HONORIFICS}
+                        if m_low in label_low or any(f" {fc} " in f" {label_low} " for fc in first_cands):
                             detected.append(m_name)
                             break
                 except Exception:
                     pass
+
+            label_low = label.lower()
+            is_priv = any(k in label_low for k in (
+                "private", "privately", "in private", "quieter spot", "quiet spot", "secluded spot",
+                "aside", "step aside", "pull aside", "pull her aside", "pull him aside", "separate",
+                "alone", "just the two of us", "between us", "whisper", "confidentially", "secretly"
+            ))
+            from mechanics.social.intimate_excitement import is_intimate_action_label
+            is_intim = is_intimate_action_label(label) or any(k in label_low for k in (
+                "lean into", "leans into", "kiss", "caress", "touch", "hold hands", "embrace", "cuddle"
+            ))
+            is_mv = is_departing_venue or (parsed_action and parsed_action.category == IntentCategory.MOVEMENT)
+            is_single_direct = len(detected) == 1 and not any(g_kw in label_low for g_kw in (
+                "both", "all", "everyone", "council", "group", "committee", "each other", "them all", "together"
+            ))
 
             if detected:
                 if len(current_partners) >= 2:
@@ -259,12 +391,46 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
                                 return True
                         return False
 
-                    if all(_is_in_current_group(d) for d in detected):
+                    if (is_priv or is_mv) and detected:
+                        new_partners = list(detected)
+                    elif all(_is_in_current_group(d) for d in detected):
                         new_partners = list(current_partners)
                     else:
                         new_partners = detected
                 else:
                     new_partners = detected
+            elif (is_priv or is_intim) and current_partners:
+                resolved_target = None
+                has_female_pronoun = bool(re.search(r'\b(?:her|she)\b', label_low))
+                has_male_pronoun = bool(re.search(r'\b(?:him|he)\b', label_low))
+                if has_female_pronoun or has_male_pronoun:
+                    try:
+                        import db
+                        roster = db.get_school_roster(session.get("id")) if session.get("id") else []
+                        for cp in current_partners:
+                            cp_low = cp.lower()
+                            for m in roster:
+                                if m.get("name", "").lower() == cp_low:
+                                    g = (m.get("gender") or "").lower()
+                                    if has_female_pronoun and g == "female":
+                                        resolved_target = cp
+                                        break
+                                    elif has_male_pronoun and g == "male":
+                                        resolved_target = cp
+                                        break
+                            if resolved_target:
+                                break
+                    except Exception:
+                        pass
+
+                if not resolved_target:
+                    main_dp = str(session.get("dialogue_partner") or "").strip()
+                    if main_dp and any(main_dp.lower() == cp.lower() for cp in current_partners):
+                        resolved_target = main_dp
+                    else:
+                        resolved_target = current_partners[0]
+
+                new_partners = [resolved_target]
 
     return new_partners, has_exited_convo
 
@@ -275,6 +441,67 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
     import db, game_engine, scenario_data
     scen_key = session.get('scenario', 'fantasy')
     dialogue_prompt_block = ""
+
+    lead_char = party[0][0] if party and isinstance(party[0], (tuple, list)) else (party[0] if party and isinstance(party[0], dict) else {})
+    if not lead_char and actions and isinstance(actions[0], dict) and isinstance(actions[0].get("char"), dict):
+        lead_char = actions[0]["char"]
+    if not lead_char and session.get("host_user_id"):
+        try:
+            lead_char = db.get_character(session.get("host_user_id")) or {}
+        except Exception:
+            pass
+    pl_name = str(lead_char.get("name") or "you").strip()
+    pl_gender = str(lead_char.get("gender", "male")).strip().lower()
+    is_pl_male = any(kw in pl_gender for kw in ("male", "man", "boy")) and "female" not in pl_gender
+    pl_pronoun = "he/him" if is_pl_male else "she/her"
+    pl_target_attraction = "a GIRL / WOMAN / FEMALE PARTNER" if is_pl_male else "a GUY / MAN / MALE PARTNER"
+
+    # 0a. Check active rendezvous agreement and departure in player actions
+    from mechanics.narrative.intent import RENDEZVOUS_PROPOSAL_RE
+    for a in (actions or []):
+        lbl = (a.get("label", "") if isinstance(a, dict) else str(a)).lower()
+        if RENDEZVOUS_PROPOSAL_RE.search(lbl):
+            dialogue_prompt_block += (
+                "RENDEZVOUS AGREEMENT & DEPARTURE:\n"
+                "- The character agrees to the proposed meeting venue and excuses themselves to head there first.\n"
+                "- Narrate them agreeing and exiting the room (e.g. 'I will go ahead so we do not draw attention. Meet me there.').\n"
+                "- The player remains at the current location for this turn.\n\n"
+            )
+            break
+
+    # 0b. Check active confidential topic embargoes
+    if session.get("id"):
+        try:
+            from mechanics.world.waypoints import check_location_matches_waypoint
+            curr_l = session.get("current_location", "")
+            active_appts = db.get_active_rendezvous_appointments(session["id"])
+            for appt in active_appts:
+                if appt.get("is_confidential") and appt.get("topic"):
+                    appt_loc = appt.get("rendezvous_location", "")
+                    if not (check_location_matches_waypoint(curr_l, appt_loc) or check_location_matches_waypoint(appt_loc, curr_l)):
+                        dialogue_prompt_block += (
+                            f"CONFIDENTIAL TOPIC EMBARGO ({appt.get('npc_name')}):\n"
+                            f"- {appt.get('npc_name')} and the player agreed to discuss \"{appt.get('topic')}\" strictly in private at {appt_loc}.\n"
+                            f"- Under NO circumstances should \"{appt.get('topic')}\" be discussed in this current public setting.\n"
+                            f"- If the player attempts to discuss it here, {appt.get('npc_name')} must refuse: 'Keep your voice down. We agreed to talk at {appt_loc}.'\n\n"
+                        )
+        except Exception:
+            pass
+
+    # 0c. Check active temporary walking companions
+    if session.get("id"):
+        try:
+            tcs = db.get_temporary_companions(session["id"])
+            if tcs:
+                tc_names = ", ".join(tc.get("name", "") for tc in tcs if tc.get("name"))
+                if tc_names:
+                    dialogue_prompt_block += (
+                        f"ACCOMPANYING HANGOUT COMPANION(S) ({tc_names}):\n"
+                        f"- {tc_names} is currently walking and hanging out alongside the player.\n"
+                        f"- They should participate naturally in conversations and ambient observations.\n\n"
+                    )
+        except Exception:
+            pass
 
     if is_in_combat(session):
         pres_npcs = [
@@ -338,23 +565,57 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
             )
         )
 
+        _scen_name = session.get("scenario", "fantasy")
+        _is_combat_scen = (
+            scenario_data.is_mechanic_enabled(_scen_name, "tactical_combat")
+            and not scenario_data.is_non_combat_scenario(_scen_name)
+            and not scenario_data.has_tag(_scen_name, "non_combat")
+            and not scenario_data.has_tag(_scen_name, "high_school")
+        )
+
         recruitment_prompt = ""
-
-        if (
-            not _in_active_erotic_dlg
-            and scenario_data.is_mechanic_enabled(session.get("scenario", "fantasy"), "tactical_combat")
-            and (human_count + len(party_npcs) < 4)
-        ):
-
+        if not _is_combat_scen:
+            recruitment_prompt = "  * PARTY RECRUITMENT DISABLED: This is a non-combat / civilian scenario. NEVER generate party recruitment, mercenary hire, or companion joining choices.\n"
+        elif not _in_active_erotic_dlg and (human_count + len(party_npcs) < 4):
+            enemy_list = game_engine.get_active_enemies(session) or []
+            enemy_names = {game_engine._get_npc_name(e).lower() for e in enemy_list if e}
+            lore_people = db.get_lorebook(session["id"]).get("person", []) if session.get("id") else []
             for partner in new_partners:
-
+                if not partner or partner.lower() in enemy_names:
+                    continue
+                lore_ent = next((p for p in lore_people if p.get("name", "").lower() == partner.lower()), {})
+                t_role = str(lore_ent.get("role") or lore_ent.get("occupation") or lore_ent.get("description") or "").lower()
+                if any(m in t_role for m in ("merchant", "shopkeeper", "vendor", "apothecary", "peddler", "trader")):
+                    continue
                 cd = db.get_recruitment_cooldown(session["id"], partner) if session.get("id") else 0
-
                 if cd == 0 and not any(p.get("name", "").lower() == partner.lower() for p in party_npcs):
-
                     recruitment_prompt += f"  * 🤝 [CHA] Party Recruitment check: 'Invite {partner} to join your party as a permanent companion' (Offer this skill check choice when talking to friendly/allied NPCs to recruit them).\n"
+                elif cd > 0:
+                    recruitment_prompt += f"  * Note: {partner} declined a party recruitment invitation earlier and cannot be invited again today (on cooldown until next day/tomorrow). NEVER offer a recruitment choice for {partner}.\n"
 
-
+        contact_exchange_prompt = ""
+        from mechanics.system.phone import scenario_has_smartphone
+        if scenario_has_smartphone(_scen_name) and not _in_active_erotic_dlg:
+            from mechanics.social.relationships import is_contact_eligible, is_unlocked_contact, calculate_contact_exchange_dc
+            party_names_lower = {str(p.get("name", "")).strip().lower() for p in party_npcs}
+            lore_people = db.get_lorebook(session["id"]).get("person", []) if session.get("id") else []
+            for partner in new_partners:
+                if not partner:
+                    continue
+                lore_ent = next((p for p in lore_people if p.get("name", "").lower() == partner.lower()), {})
+                t_role = str(lore_ent.get("role") or lore_ent.get("occupation") or "").lower()
+                t_desc = str(lore_ent.get("description") or "").lower()
+                if not is_contact_eligible(name=partner, role=t_role, description=t_desc, scenario=_scen_name):
+                    continue
+                existing_c = db.get_contact(session["id"], partner) if session.get("id") else None
+                if is_unlocked_contact(existing_c, party_names_lower) or partner.lower() in party_names_lower:
+                    continue
+                cd = db.get_contact_request_cooldown(session["id"], partner) if session.get("id") else 0
+                if cd == 0:
+                    dc = calculate_contact_exchange_dc(existing_c or lore_ent, scenario=_scen_name)
+                    contact_exchange_prompt += f"  * 📱 [CHA] Smartphone Contact Request check (DC {dc}): 'Ask for {partner}\\'s Phone Number / Contact Info' (Difficult social check to exchange numbers and add them to your phone contacts bypassing friend affinity requirement).\n"
+                elif cd > 0:
+                    contact_exchange_prompt += f"  * Note: {partner} declined to share their contact info earlier and cannot be asked again today (on cooldown until tomorrow). NEVER offer a contact request choice for {partner}.\n"
 
         multi_partner_note = ""
 
@@ -378,10 +639,13 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
 
 
-        # Use canonical count_dialogue_stall_turns helper from npcs.py (single source of truth,
-        # full 27-verb registry, replacing the previous 21-verb _stall_verbs inline duplicate).
-        from game_engine.npcs import count_dialogue_stall_turns as _count_stall, format_dialogue_stall_directive as _fmt_stall
-        _stall_count = _count_stall(session.get("history") or [])
+        # Use canonical compute_scene_beat_linger_turns helper from npcs
+        from game_engine.npcs import (
+            compute_scene_beat_linger_turns as _compute_linger,
+            format_organic_npc_initiative_directive as _fmt_initiative,
+            format_ring2_attentive_peer_cues as _fmt_ring2,
+        )
+        _stall_count = _compute_linger(session.get("history") or [], session=session, active_partners=new_partners)
 
         # Determine if any partner is a specific quest investigation target, bounty contact, or hostile confrontation
         is_quest_interrogation = False
@@ -449,224 +713,97 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
                 p_low = p.lower().strip()
 
+                p_first = (p_low.split() or [""])[0]
                 matched_c = next((
-
                     c for c in contacts
-
                     if c.get("name", "").lower().strip() == p_low or
-
                     c.get("npc_id", "").lower().strip() == p_low.replace(" ", "_")
-
                 ), None)
+                if not matched_c and len(p_first) >= 3:
+                    matched_c = next((
+                        c for c in contacts
+                        if (c.get("name", "").lower().strip().split() or [""])[0] == p_first
+                    ), None)
+                if not matched_c:
+                    stg_npcs = (session.get("pre_turn_stage_npcs") or []) + (session.get("current_npcs") or [])
+                    matched_c = next((
+                        n for n in stg_npcs
+                        if isinstance(n, dict) and n.get("name", "").lower().strip() == p_low
+                    ), None)
+                    if not matched_c and len(p_first) >= 3:
+                        matched_c = next((
+                            n for n in stg_npcs
+                            if isinstance(n, dict) and (n.get("name", "").lower().strip().split() or [""])[0] == p_first
+                        ), None)
 
                 if matched_c:
-
-                    score = matched_c.get("relationship_score", 0)
-
-                    track = matched_c.get("track", "platonic")
-
-                    basic = matched_c.get("basic_info") or {}
-
-                    role = basic.get("role", "")
-
-                    traits = matched_c.get("unlocked_traits") or []
-
-                    prefs = matched_c.get("preferences") or []
-
-                    appr = matched_c.get("appearance") or {}
-
-                    mannerisms = matched_c.get("mannerisms") or basic.get("mannerisms") or ""
-
-
-
-                    details = []
-
-                    if role and str(role).lower() != "none":
-
-                        details.append(f"Role: {role}")
-
-                    faction_k = basic.get("faction") or basic.get("faction_affiliation") or basic.get("club") or matched_c.get("faction")
-
-                    if faction_k and str(faction_k).lower() != "none":
-
-                        details.append(f"Faction: {faction_k}")
-
-                    details.append(f"Affinity: {score}/100 ({track.capitalize()} Track)")
-
-                    effective_traits = list(traits or [])
-
-                    if not effective_traits:
-
-                        from mechanics.combat.traits import assign_npc_traits
-
-                        effective_traits = assign_npc_traits(seed_str=p, count=3, role=role or "", race=matched_c.get("race", ""))
-
-                    if effective_traits:
-
-                        details.append(f"Persona Traits: {', '.join(effective_traits)}")
-
-
-
-                    from mechanics.social.persona import categorize_likes_and_dislikes, format_mannerisms_list
-
-                    likes_l, dislikes_l = categorize_likes_and_dislikes(
-
-                        prefs,
-
-                        traits=effective_traits,
-
-                        role=role or "",
-
-                        race=matched_c.get("race", ""),
-
-                        desc=basic.get("description", "")
-
-                    )
-
-                    from mechanics.social.relationships import get_unlocked_info_level
-
-                    scen_k = session.get("scenario", "fantasy")
-
-                    is_nsfw = is_nsfw_scenario(scen_k)
-
-
-
-                    info_lvl = get_unlocked_info_level(score)
-
-                    rev_flags = dict(matched_c.get("revealed_flags", {}))
-
-                    if isinstance(appr, dict):
-
-                        for k_f in (
-                            "intimate_revealed", "intercourse_revealed", "oral_revealed", "manual_revealed",
-                            "demeanor_revealed", "dynamic_revealed", "openness_revealed",
-                            "sensitive_spots_revealed", "turn_ons_revealed", "fetishes_revealed",
-                            "act_preferences_revealed", "underwear_revealed", "mannerisms_revealed", "all_revealed"
-                        ):
-
-                            if appr.get(k_f):
-
-                                rev_flags[k_f] = True
-
-
-
-                    if likes_l:
-
-                        details.append(f"Likes & Desires: {', '.join(likes_l)}")
-
-                    if dislikes_l:
-
-                        details.append(f"Dislikes & Aversions: {', '.join(dislikes_l)}")
-
-                    details.append(f"[PREFERENCE SYNERGY: Appealing to {p}'s likes grants positive affinity (delta_score: +2 to +4); triggering {p}'s dislikes or offending them causes annoyance and negative affinity (delta_score: -1 to -4).]")
-
-
-
-
-
-                    mannerisms_list = format_mannerisms_list(mannerisms, race=matched_c.get("race", ""), desc=basic.get("description", ""), traits=effective_traits, role=role or "")
-
-                    if mannerisms_list:
-
-                        details.append(f"Mannerisms & Habits: {'; '.join(mannerisms_list)}")
-
-                    elif mannerisms:
-
-                        details.append(f"Mannerisms & Speech Quirks: {mannerisms}")
-
-
-
-                    distinctive = appr.get("distinctive_features")
-
-                    if distinctive and str(distinctive).lower() not in ("none", "unknown"):
-
-                        details.append(f"Features: {distinctive}")
-
-                    intimate_dem = appr.get("intimate_demeanor")
-                    if intimate_dem and str(intimate_dem).lower() not in ("none", "unknown"):
-                        details.append(f"Intimate Demeanor: {intimate_dem}")
-
-                    intimate_dyn = appr.get("intimate_dynamic") or appr.get("dynamic")
-                    if intimate_dyn and str(intimate_dyn).lower() not in ("none", "unknown"):
-                        details.append(f"Intimate Dynamic: {intimate_dyn}")
-
-                    erotic_open = appr.get("erotic_openness") or appr.get("openness")
-                    if erotic_open and str(erotic_open).lower() not in ("none", "unknown"):
-                        details.append(f"Erotic Openness: {erotic_open}")
-
-
-
-                    intimate_unlocked = (info_lvl >= 3) or rev_flags.get("intimate_revealed") or rev_flags.get("all_revealed")
-                    sens_unlocked = intimate_unlocked or rev_flags.get("sensitive_spots_revealed") or appr.get("sensitive_spots_revealed")
-                    turns_unlocked = intimate_unlocked or rev_flags.get("turn_ons_revealed") or appr.get("turn_ons_revealed")
-
-                    if is_nsfw and (intimate_unlocked or sens_unlocked or turns_unlocked):
-
-                        from mechanics.social.persona import sanitize_sensitive_spots_for_species
-                        from mechanics.social.persona.intimacy.appearance import clean_attribute_list_string
-
-                        sens = sanitize_sensitive_spots_for_species(clean_attribute_list_string(appr.get("sensitive_spots")) or "", race=matched_c.get("race", ""), distinctive_features=appr.get("distinctive_features", ""))
-
-                        if sens_unlocked and sens and str(sens).lower() not in ("none", "unknown"):
-                            details.append(f"Sensitive Spots: {sens}")
-
-                        turns = sanitize_sensitive_spots_for_species(clean_attribute_list_string(appr.get("turn_ons")) or "", race=matched_c.get("race", ""), distinctive_features=appr.get("distinctive_features", ""))
-                        if turns_unlocked and turns and str(turns).lower() not in ("none", "unknown"):
-                            details.append(f"Turn-Ons: {turns}")
-
-                        fet = clean_attribute_list_string(appr.get("fetishes"))
-                        if intimate_unlocked and fet and str(fet).lower() not in ("none", "unknown", "none (vanilla)"):
-                            details.append(f"Kinks: {fet}")
-
-                        if intimate_unlocked:
-                            ic_exp = appr.get("intercourse_experience")
-                            or_exp = appr.get("oral_experience")
-                            if ic_exp and str(ic_exp).lower() not in ("none", "unknown"):
-                                details.append(f"Intercourse Experience: {ic_exp}")
-
-                            if or_exp and str(or_exp).lower() not in ("none", "unknown"):
-                                details.append(f"Oral Experience: {or_exp}")
-
-                            man_exp = appr.get("manual_experience")
-                            if man_exp and str(man_exp).lower() not in ("none", "unknown"):
-                                details.append(f"Manual Experience: {man_exp}")
-
-                        known_triggers = []
-                        if turns and str(turns).lower() not in ("none", "unknown"):
-                            known_triggers.append(f"turn-ons: {turns}")
-                        elif sens and str(sens).lower() not in ("none", "unknown"):
-                            known_triggers.append(f"sensitive spots: {sens}")
-
-                        if known_triggers or intimate_dyn:
-                            trig_str = "; ".join(known_triggers) if known_triggers else "their desires"
-                            dyn_str = f", dynamic: {intimate_dyn}" if intimate_dyn else ""
-                            details.append(f"INTIMATE SYNERGY: During intimate scenes, shape {p}'s dialogue and actions using their {trig_str}{dyn_str} (+2 to +4 bonus to check resolution)")
-
-
-
+                    from mechanics.social.persona.actor_card import build_actor_direction_card
                     from mechanics.social.genealogy import build_topic_aware_npc_context
 
-                    topic_context = build_topic_aware_npc_context(
+                    # Merge contact with lorebook entity if available
+                    merged_npc = dict(matched_c)
+                    if session.get("id"):
+                        try:
+                            lore_ent = db.get_lorebook_entity(session["id"], p)
+                            if lore_ent:
+                                for lk, lv in lore_ent.items():
+                                    if lv and not merged_npc.get(lk):
+                                        merged_npc[lk] = lv
+                        except Exception:
+                            pass
 
-                        matched_c,
+                    # Overlay living scene stage state (micro_blocking, composure_state, attention_ring, stage_role)
+                    stage_source = None
+                    for stg in (session.get("pre_turn_stage_npcs") or []):
+                        if isinstance(stg, dict):
+                            s_nm = game_engine._get_npc_name(stg).lower().strip()
+                            if s_nm == p_low or (len(p_first) >= 3 and (s_nm.split() or [""])[0] == p_first):
+                                stage_source = stg
+                                break
+                    if not stage_source and isinstance(session.get("scene_stage_state"), dict):
+                        st_dict = session["scene_stage_state"].get(p_low) or (session["scene_stage_state"].get(p_first) if len(p_first) >= 3 else None)
+                        if isinstance(st_dict, dict):
+                            stage_source = st_dict
+                    if stage_source:
+                        for sk in ("micro_blocking", "composure_state", "composure_ttl", "stage_role", "attention_ring"):
+                            if stage_source.get(sk) is not None:
+                                merged_npc[sk] = stage_source[sk]
 
+                    lead_char = party[0][0] if party and isinstance(party[0], (tuple, list)) else (party[0] if party and isinstance(party[0], dict) else {})
+                    if not lead_char and actions and isinstance(actions[0], dict) and isinstance(actions[0].get("char"), dict):
+                        lead_char = actions[0]["char"]
+
+                    npcs_present_now = session.get("pre_turn_stage_npcs") or session.get("current_npcs") or []
+                    dps_lower = {str(dp).lower().strip() for dp in (new_partners or [])}
+                    bystanders = [
+                        n_name for n in npcs_present_now
+                        if (n_name := game_engine._get_npc_name(n))
+                        and n_name.lower().strip() not in dps_lower
+                        and not game_engine.is_dialogue_partner(n_name, new_partners)
+                    ]
+
+                    card_text = build_actor_direction_card(
+                        session=session,
+                        npc=merged_npc,
+                        context=ctx,
+                        active_partners=new_partners,
                         actions=actions,
-
-                        session_history=session.get("history", []),
-
-                        scenario=session.get("scenario", "fantasy")
-
+                        in_active_erotic=_in_active_erotic_dlg,
+                        player_char=lead_char,
+                        bystander_names=bystanders,
                     )
 
-
-
-                    line = f"  * {p}: " + " | ".join(details)
+                    topic_context = build_topic_aware_npc_context(
+                        matched_c,
+                        actions=actions,
+                        session_history=session.get("history", []),
+                        scenario=session.get("scenario", "fantasy")
+                    )
 
                     if topic_context:
+                        card_text += "\n" + topic_context
 
-                        line += "\n" + topic_context
-
-                    contact_context_lines.append(line)
+                    contact_context_lines.append(card_text)
 
 
 
@@ -745,66 +882,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
         recent_phone_section = "\n".join(recent_phone_blocks) + "\n" if recent_phone_blocks else ""
 
         trait_behavioral_blocks = []
-
-        if session.get("id"):
-
-            session_id_val = session["id"]
-
-            contacts = ctx.contacts
-
-            for p in new_partners:
-
-                p_low = p.lower().strip()
-
-                matched_c = next((
-
-                    c for c in contacts
-
-                    if c.get("name", "").lower().strip() == p_low or
-
-                    c.get("npc_id", "").lower().strip() == p_low.replace(" ", "_")
-
-                ), None)
-
-                if matched_c:
-
-                    c_traits = matched_c.get("unlocked_traits") or matched_c.get("traits") or []
-
-                    if c_traits:
-
-                        from mechanics.combat.traits import format_trait_behavioral_prompt
-
-                        t_block = format_trait_behavioral_prompt(c_traits, partner_name=p)
-
-                        if t_block:
-
-                            trait_behavioral_blocks.append(t_block)
-
-                    demeanor_val = str(matched_c.get("demeanor") or "").lower()
-                    persona_val = str(matched_c.get("persona") or "").lower()
-                    traits_all = [str(t).lower() for t in (matched_c.get("traits") or [])] + [str(t).lower() for t in (matched_c.get("unlocked_traits") or [])]
-                    appr_temp = matched_c.get("appearance", {}) if isinstance(matched_c.get("appearance"), dict) else {}
-                    open_temp = str(appr_temp.get("erotic_openness") or appr_temp.get("openness") or "").lower()
-
-                    is_shameless = any(k in demeanor_val or k in persona_val or any(k in t for t in traits_all) or k in open_temp for k in ("shameless", "lewd", "provocative", "seductive", "hedonist", "nympho", "lascivious", "pervert"))
-                    is_bold = any(k in demeanor_val or k in persona_val or any(k in t for t in traits_all) or k in open_temp for k in ("bold", "flirtatious", "uninhibited", "forward"))
-
-                    if is_shameless:
-                        trait_behavioral_blocks.append(
-                            f"  * ⚡ SHAMELESS / LEWD SPOKEN DIALOGUE DIRECTIVE ({p}): "
-                            f"{p} has an unapologetically shameless and lewd disposition. In spoken dialogue, THEY HAVE NO VERBAL FILTER! "
-                            f"They freely make unsolicited sexual innuendos, playfully dirty remarks, cheeky double entendres, and provocative flirtations even during regular conversation and at early affinity. "
-                            f"DO NOT sanitize their speech or force them into bashful modesty!"
-                        )
-                    elif is_bold:
-                        trait_behavioral_blocks.append(
-                            f"  * ⚡ BOLD / UNINHIBITED SPOKEN DIALOGUE DIRECTIVE ({p}): "
-                            f"{p} is bold, confident, and uninhibited. In spoken dialogue, they speak their mind openly, flirt proactively, and meet romantic or suggestive topics without stammering or awkward shame."
-                        )
-
-
-
-        trait_behavioral_section = "\n".join(trait_behavioral_blocks) + "\n" if trait_behavioral_blocks else ""
+        trait_behavioral_section = ""
 
 
 
@@ -845,171 +923,6 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                         n for n in (session.get("current_npcs") or [])
                         if isinstance(n, dict) and (n.get("name", "").lower().strip().split() or [""])[0] == p_first
                     ), None)
-
-                if matched_c:
-
-                    appr_c = matched_c.get("appearance", {})
-
-                    if isinstance(appr_c, dict):
-
-                        info_lvl = matched_c.get("information_level", 1)
-                        rev_flags = matched_c.get("revealed_flags", {}) or {}
-                        intimate_unlocked = (info_lvl >= 3) or rev_flags.get("intimate_revealed") or rev_flags.get("all_revealed")
-
-                        demeanor_val = str(matched_c.get("demeanor") or "").lower()
-                        traits_all = [str(t).lower() for t in (matched_c.get("traits") or [])] + [str(t).lower() for t in (matched_c.get("unlocked_traits") or [])]
-                        dyn_val = str(appr_c.get("intimate_dynamic") or appr_c.get("dynamic") or "").strip()
-                        open_val = str(appr_c.get("erotic_openness") or appr_c.get("openness") or "").strip()
-                        open_val_low = open_val.lower()
-
-                        is_shameless = any(k in demeanor_val or any(k in t for t in traits_all) or k in open_val_low for k in ("shameless", "lewd", "provocative", "seductive", "hedonist", "nympho", "lascivious", "pervert"))
-                        is_prude = any(k in demeanor_val or any(k in t for t in traits_all) or k in open_val_low for k in ("prude", "modest", "chaste", "prudish", "sheltered", "timid", "proper"))
-
-                        from mechanics.social.persona.intimacy.appearance import clean_attribute_list_string as _clean_al
-                        turn_ons_val = _clean_al(appr_c.get("desires_and_kinks") or appr_c.get("turn_ons") or appr_c.get("sensitive_spots") or "") or ""
-                        turn_offs_val = _clean_al(appr_c.get("turn_offs") or appr_c.get("aversions") or "") or ""
-                        fetish_val = _clean_al(appr_c.get("fetishes") or "") or ""
-                        likes_val = _clean_al(appr_c.get("act_likes") or "") or ""
-                        dislikes_val = _clean_al(appr_c.get("act_dislikes") or "") or ""
-
-                        from mechanics.social.persona import (
-                            format_demeanor_prompt_directive,
-                            format_dynamic_prompt_directive, format_openness_prompt_directive,
-                            format_desires_and_turn_offs_prompt_directive, format_fetish_prompt_directive,
-                            format_act_preferences_prompt_directive,
-                            format_body_asset_narrative_directive
-                        )
-
-                        intimate_dem = str(appr_c.get("intimate_demeanor") or "").strip()
-                        if intimate_dem:
-                            dm_dir = format_demeanor_prompt_directive(p, intimate_dem)
-                            if dm_dir:
-                                intimate_dynamic_openness_blocks.append(dm_dir)
-
-                        if dyn_val:
-                            d_dir = format_dynamic_prompt_directive(p, dyn_val)
-                            if d_dir:
-                                intimate_dynamic_openness_blocks.append(d_dir)
-
-                        if open_val:
-                            o_dir = format_openness_prompt_directive(p, open_val)
-                            if o_dir:
-                                intimate_dynamic_openness_blocks.append(o_dir)
-
-                        # Body Asset Narrative Flavor & Insecurity/Pride Matrix
-                        p_gender = str(matched_c.get("gender") or appr_c.get("gender") or "female").strip().lower()
-                        is_male_npc = any(kw in p_gender for kw in ("male", "man", "boy")) and "female" not in p_gender
-                        p_asset_size = str(appr_c.get("penis_size" if is_male_npc else "breast_size") or "").strip()
-                        p_race = str(matched_c.get("race") or appr_c.get("race") or "human").strip()
-                        p_under = appr_c.get("undergarments") if isinstance(appr_c.get("undergarments"), dict) else {}
-                        p_asset_tex = str(appr_c.get("asset_texture") or "").strip()
-
-                        lead_char = party[0][0] if party and isinstance(party[0], (tuple, list)) else (party[0] if party and isinstance(party[0], dict) else {})
-                        if not lead_char and actions and isinstance(actions[0], dict) and isinstance(actions[0].get("char"), dict):
-                            lead_char = actions[0]["char"]
-                        pl_gender = str(lead_char.get("gender", "male")).strip().lower()
-                        is_pl_male = any(kw in pl_gender for kw in ("male", "man", "boy")) and "female" not in pl_gender
-                        pl_app = lead_char.get("appearance", {}) if isinstance(lead_char.get("appearance"), dict) else {}
-                        pl_asset_size = str(pl_app.get("penis_size" if is_pl_male else "breast_size") or "").strip()
-
-                        if p_asset_size and p_asset_size.lower() not in ("none", "unknown"):
-                            asset_dir = format_body_asset_narrative_directive(
-                                partner_name=p,
-                                gender=p_gender,
-                                asset_size=p_asset_size,
-                                demeanor=intimate_dem,
-                                openness=open_val,
-                                race=p_race,
-                                undergarments=p_under,
-                                player_asset=pl_asset_size,
-                                player_gender=pl_gender,
-                                asset_texture=p_asset_tex,
-                                affinity=matched_c.get("relationship_score", 0)
-                            )
-                            if asset_dir:
-                                intimate_dynamic_openness_blocks.append(asset_dir)
-
-                        if intimate_unlocked or is_shameless:
-                            if turn_ons_val or turn_offs_val:
-                                t_dir = format_desires_and_turn_offs_prompt_directive(p, desires_val=turn_ons_val, turn_offs_val=turn_offs_val, dynamic_val=dyn_val)
-                                if t_dir:
-                                    intimate_dynamic_openness_blocks.append(t_dir)
-
-                            if fetish_val:
-                                f_dir = format_fetish_prompt_directive(p, fetish_val, dyn_val)
-                                if f_dir:
-                                    intimate_dynamic_openness_blocks.append(f_dir)
-
-                            if likes_val or dislikes_val:
-                                a_dir = format_act_preferences_prompt_directive(p, likes_val, dislikes_val, dyn_val)
-                                if a_dir:
-                                    intimate_dynamic_openness_blocks.append(a_dir)
-
-                        # Situational Privacy & Alone Together Dynamic:
-                        npcs_present_now = session.get("current_npcs") or []
-                        dps_lower = {str(dp).lower().strip() for dp in (new_partners or [])}
-                        bystanders = [
-                            n_name for n in npcs_present_now
-                            if (n_name := game_engine._get_npc_name(n))
-                            and n_name.lower().strip() != p_low
-                            and n_name.lower().strip() not in dps_lower
-                            and not game_engine.is_dialogue_partner(n_name, new_partners)
-                        ]
-                        curr_loc = str(session.get("current_location", "")).lower()
-                        is_private_room = any(k in curr_loc for k in ("bedroom", "dorm", "private room", "inn room", "quarters", "personal chamber", "bath", "onsen", "cabin", "tent"))
-                        is_alone_together = len(bystanders) == 0 or is_private_room
-
-                        if is_alone_together:
-                            if is_prude:
-                                privacy_dir = (
-                                    f"  * [SITUATIONAL PRIVACY & MODESTY ({p})]: You and {p} are alone together (no other characters present). "
-                                    f"However, {p} is naturally modest/prude: they remain bashful and flustered around direct advances, "
-                                    f"treasuring gentle emotional bonding (holding hands, sincere quiet sharing) before overt physical passion."
-                                )
-                            else:
-                                loc_name = session.get("current_location") or "the current secluded spot"
-                                d_low = dyn_val.lower()
-                                is_receptive = any(k in d_low for k in ("receptive", "yielding", "submissive", "surrender", "docile", "meek", "gentle"))
-                                is_service = any(k in d_low for k in ("service", "pamper", "devoted", "pleasing", "worship"))
-                                if is_receptive:
-                                    physical_posture = (
-                                        f"They welcome mutual passion wholeheartedly, melting into your touch, inviting you to take complete charge, "
-                                        f"arching close, guiding your hands, whispering breathless desires, and surrendering control without bashful public hesitation!"
-                                    )
-                                elif is_service:
-                                    physical_posture = (
-                                        f"They eagerly pamper, massage, attend, and worship you with tender physical devotion, "
-                                        f"freely attending to your comfort, kissing your hands, and caring for you without fear of onlookers!"
-                                    )
-                                else:
-                                    physical_posture = (
-                                        f"They can be openly passionate, affectionate, and physically forward—freely initiating touch, pulling you close, "
-                                        f"leaning in for kisses, whispering intimate thoughts, sitting close, or taking physical charge without awkward hesitation or fear of being seen."
-                                    )
-
-                                privacy_dir = (
-                                    f"  * [ALONE TOGETHER & OPEN PASSION ({p})]: You and {p} are ALONE TOGETHER with NO bystanders present to interrupt or judge (Location: {loc_name}). "
-                                    f"If you two share romantic or mutual attraction, {p} is COMPLETELY UNCONSTRAINED by public modesty! "
-                                    f"{physical_posture}"
-                                )
-                            intimate_dynamic_openness_blocks.append(privacy_dir)
-                        else:
-                            # Bystanders are present in the room
-                            other_names_str = ", ".join(bystanders)
-                            intimate_dynamic_openness_blocks.insert(0, f"[PRIVATE PROFILE NOTE: The intimate profile below belongs exclusively to {p}. Other characters in the scene ({other_names_str}) have NO knowledge of these details and must NEVER reference or react to them.]")
-                            has_public_thrill = any(k in str(fetish_val).lower() for k in ("public", "exhibition", "voyeur", "outdoor", "thrill", "danger"))
-                            if is_shameless or has_public_thrill:
-                                public_dir = (
-                                    f"  * [PUBLIC AUDACITY & THRILL ({p})]: Other characters ({other_names_str}) are present in the room, but {p} is Shameless / thrives on the thrill! "
-                                    f"They openly drop cheeky double entendres, audacious innuendos, playful winks, or subtle physical touches just out of sight of onlookers."
-                                )
-                            else:
-                                public_dir = (
-                                    f"  * [PUBLIC DECORUM & DISCRETION ({p})]: Other characters ({other_names_str}) are present in the room. "
-                                    f"Unless privately secluded, {p} maintains situational decorum in public. Direct displays of affection are subtle "
-                                    f"(lingering glances, secret smiles, private hand brushes) rather than blatant public scenes."
-                                )
-                            intimate_dynamic_openness_blocks.append(public_dir)
 
                 curr_ic = str(curr_phys.get("intimate_contact", "")).lower() if curr_phys else ""
                 if is_nsfw and not _is_disengaging_dlg and (is_erotic_intimate_contact(curr_ic) or _in_active_erotic_dlg) and (p_low in curr_ic or (len(p_first) >= 3 and p_first in curr_ic) or " with " not in curr_ic or _in_active_erotic_dlg):
@@ -1140,7 +1053,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
 
 
-        # Use canonical format_dialogue_stall_directive — single prompt-level stall note injected
+        # Use canonical format_organic_npc_initiative_directive — single prompt-level initiative note injected
         # exactly once in dialogue_prompt_block (NOT in directive_note, preventing duplication).
         if active_bounty_contact and not has_phone_meetup:
             _stall_dialogue_type = "bounty"
@@ -1151,7 +1064,36 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
         else:
             _stall_dialogue_type = "social"
             _stall_bounty_title = ""
-        _stall_note = "" if _in_active_erotic_dlg else _fmt_stall(_stall_count, _stall_dialogue_type, partner_str, _stall_bounty_title)
+
+        _partner_stage_npc = None
+        _all_stage = (session.get("pre_turn_stage_npcs") or []) + (session.get("current_npcs") or [])
+        if new_partners:
+            _p_first_low = new_partners[0].lower().strip()
+            _partner_stage_npc = next((
+                n for n in _all_stage
+                if isinstance(n, dict) and (n.get("name", "").lower().strip() == _p_first_low or (n.get("name", "").lower().strip().split() or [""])[0] == _p_first_low.split()[0])
+            ), None)
+        if not _partner_stage_npc:
+            _partner_stage_npc = {"name": partner_str}
+
+        from mechanics.world.schedules import get_time_block_key
+        _dlg_cur_loc = session.get("current_location", "")
+        _dlg_cur_min = int(session.get("current_minute", 480) or 480)
+        _dlg_scen_key = session.get("scenario", "fantasy")
+        _dlg_time_slot = session.get("time_slot") or get_time_block_key(_dlg_cur_min)
+        _stall_note = "" if _in_active_erotic_dlg else _fmt_initiative(
+            linger_turns=_stall_count,
+            npc=_partner_stage_npc,
+            current_location=_dlg_cur_loc,
+            time_slot=_dlg_time_slot,
+            dialogue_type=_stall_dialogue_type,
+            bounty_title=_stall_bounty_title,
+            current_minute=_dlg_cur_min,
+            scen_key=_dlg_scen_key,
+        )
+
+        ring2_peer_section = _fmt_ring2(session.get("pre_turn_stage_npcs") or session.get("current_npcs") or [], active_partners=new_partners)
+
 
 
         if active_bounty_contact and not has_phone_meetup:
@@ -1211,9 +1153,11 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                 f"{intimate_dynamic_openness_section}"
 
                 f"- `next_choices`: Generate 3 to 5 conversational choices reacting directly to what {partner_str} just said. You MUST include at least 1-2 choices that directly advance, accept, clarify, or commit to the bounty task (e.g. accepting the notes, agreeing to the delivery, asking for delivery instructions). Every substantive choice MUST require a skill check (`stat: 'CHA'`, `'INT'`, `'PER'`, or `'AGI'`, requirement: 5-8). Only the 1 dedicated conversational exit has `stat: 'NONE'`, `requirement: 0`.\n"
+                f"{ring2_peer_section}"
                 f"{_stall_note}"
                 f"{multi_partner_note}"
                 f"{recruitment_prompt}"
+                f"{contact_exchange_prompt}"
                 f"- `relationship_updates`: For eligible peer characters ({partner_str}), report affinity reactions (`delta_score`: +1 to +3 for good chat/banter/appealing to likes, +4 to +6 for great insight/support/flirtation targeting likes or turn-ons, +7 to +10 for major milestones; -1 to -4 for triggering dislikes/aversions/offending values/rudeness) and any newly revealed traits or preferences.\n"
                 f"- ALWAYS include 1 dedicated conversational exit (`stat: 'NONE'`, `requirement: 0`, e.g. 'Thank {partner_str} and excuse yourself to step away').\n"
                 f"- STRICTLY FORBIDDEN WHILE IN DIALOGUE: Do NOT generate greeting choices ('Greet {partner_str}') or travel choices to leave the room.\n\n"
@@ -1250,13 +1194,12 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
                 f"- `next_choices`: Generate 3 to 5 organic, distinct conversational choices reacting directly to what {partner_str} just said or proposed. Every substantive choice (pressing for evidence/clues, negotiating terms, challenging motives, strategic cooperation) MUST require a skill check (`stat: 'INT'`, `'CHA'`, or `'PER'`, requirement: 5-8). Only the 1 dedicated conversational exit has `stat: 'NONE'`, `requirement: 0`.\n"
                 f"- Give distinct tactical stances (e.g. pressing for evidence/clues, negotiating terms/compromise, challenging motives, or offering strategic cooperation).\n"
-
+                f"{ring2_peer_section}"
                 f"{_stall_note}"
 
                 f"{multi_partner_note}"
-
                 f"{recruitment_prompt}"
-
+                f"{contact_exchange_prompt}"
                 f"- `relationship_updates`: For eligible peer characters ({partner_str}), report affinity reactions and newly revealed traits/preferences. Base affinity is +1 on check success (+2 crit), -1 on check failure (-2 crit), 0 on neutral ambient talk. Add +1 to +3 for actions resonating with their traits, preferences, or turn-ons; favorite gifts scale by rarity (+3 common to +7 relic); deduct -1 to -4 for triggering dislikes, turn-offs, prying into boundaries, or failed intimate advances (disliked gifts -3 to -5).\n"
 
                 f"- ALWAYS include 1 dedicated conversational exit (`stat: 'NONE'`, `requirement: 0`, e.g. 'Thank {partner_str} and excuse yourself to step away').\n"
@@ -1314,7 +1257,9 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
                 f"  * Write {partner_str}'s dialogue strictly in their unique character voice, speech mannerisms, and personality traits.\n"
 
-                f"  * CANON FACTUAL & LINEAGE GROUNDING: When discussing family, siblings, upbringing, past relationships, friends, or shared memories with the player, you MUST strictly adhere to the recorded facts above. DO NOT invent non-existent siblings (e.g. do not invent brothers if the character only has sisters) or contradict established codex data.\n"
+                f"  * CANON INTIMACY, DATING & VIRGINITY INTEGRITY: When an NPC is asked about their romantic history, dating experience, sexual experience, past suitors, virginity, turn-ons, or turn-offs, their dialogue must strictly reflect their canon profile! A virgin character with no past relationship history (empty ex_partners) must NEVER claim to have had past boyfriends, past suitors, foreplay encounters, or 'plenty of practice balancing partners on their schedule'. When asked about turn-ons and turn-offs, they must truthfully state their canon preferences rather than inventing unlisted desires or aversions.\n"
+                f"  * PROTAGONIST GENDER & ATTRACTION ALIGNMENT (CRITICAL): The player character ({pl_name}) is canonically {pl_gender.upper()} ({pl_pronoun}). When female NPCs banter or flirt with a male player ({pl_name}), they MUST address him as a man and ask what he is looking for in a girl/woman/partner. NEVER invert attraction or mistakenly ask a male player 'what are you looking for in a guy?'!\n"
+                f"  * INFORMATION GATING & NARRATOR BOUNDARIES: Third-person narration must NEVER describe unrevealed intimate anatomy, underwear, or hidden erogenous spots before they have been revealed through player action or intimacy progression. NPCs who are modest or guarded must refuse or deflect intrusive intimate probing unless the player succeeds on a difficult check.\n"
 
                 f"  * DIRECT CONVERSATION & ZERO COMPARISONS: Speak directly to the player about what is happening right now in front of you. NEVER compare the player to third parties, hypothetical people, or generic baselines (e.g. NEVER say 'Most guys would be too nervous...', 'You're not like other men...', 'Anyone else would have...'). Focus strictly on your immediate thoughts, personal reactions, playful humor, and physical presence.\n"
 
@@ -1349,13 +1294,12 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                 f"  * In social dialogues, `PER` choices represent attentive listening, empathy, or noticing their comfort/smile (NOT 'reading micro-expressions for tells or deceit').\n"
 
                 f"  * In social dialogues, `CHA` choices represent warmth, charm, humor, or genuine personal sharing (NOT 'negotiating contractual terms').\n"
-
+                f"{ring2_peer_section}"
                 f"{_stall_note}"
 
                 f"{multi_partner_note}"
-
                 f"{recruitment_prompt}"
-
+                f"{contact_exchange_prompt}"
                 f"- `relationship_updates`: For eligible peer characters ({partner_str}), report affinity reactions and newly revealed traits/preferences. Base affinity is +1 on check success (+2 crit), -1 on check failure (-2 crit), 0 on neutral ambient talk. Add +1 to +3 for actions resonating with their traits, preferences, or turn-ons; favorite gifts scale by rarity (+3 common to +7 relic); deduct -1 to -4 for triggering dislikes, turn-offs, prying into boundaries, or failed intimate advances (disliked gifts -3 to -5). (In high school scenarios, faculty, parents, and store clerks do not receive relationship updates).\n"
 
                 f"- STRICTLY FORBIDDEN WHILE IN DIALOGUE: Do NOT generate greeting or conversation-initiation choices (e.g. 'Greet {partner_str}', 'Speak with {partner_str}', 'Approach {partner_str}', 'Talk to {partner_str}'). You are ALREADY talking face-to-face in active dialogue! Every choice must be a specific reply, stance, or inquiry reacting to what {partner_str} just said.\n"
@@ -1414,7 +1358,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
         active_room_npcs = []
 
-        for n in (session.get("current_npcs") or []):
+        for n in (session.get("pre_turn_stage_npcs") or session.get("current_npcs") or []):
 
             if not n:
 
@@ -1464,37 +1408,5 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
 
 
-    movement_dest_str = ""
-
-    for a in actions:
-
-        _ad = extract_movement_destination(a.get("label", ""), session["id"], current_zone=get_zone_location_name(session.get("current_location", "")), scen_key=scen_key)
-
-        if _ad:
-
-            movement_dest_str = _ad
-
-            break
-
-
-
-    from mechanics.system.memory.budget import DynamicTokenBudget
-    budget = DynamicTokenBudget.from_session(session, party, actions)
-
-    trimmed_dialogue = budget.trim(dialogue_prompt_block, "dialogue")
-
-    from mechanics.system.time_engine import (
-
-        format_llm_time_context,
-
-        calculate_action_time_cost,
-
-        advance_time,
-
-        apply_sleep_rest,
-
-        is_sleep_action
-
-    )
     return dialogue_prompt_block
 

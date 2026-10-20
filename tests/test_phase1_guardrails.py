@@ -7,7 +7,7 @@ from mechanics.narrative.intent import (
     IntentCategory
 )
 from mechanics.world.waypoints.matching import check_action_matches_waypoint
-from game_engine.state import should_trigger_state_arbiter_pass
+from game_engine.npcs.stage_manager import compute_pre_turn_stage
 
 
 class TestPhase1Guardrails(unittest.TestCase):
@@ -43,7 +43,7 @@ class TestPhase1Guardrails(unittest.TestCase):
             )
 
     def test_multipass_generation_arbiter_does_not_flag_polite_dialogue_as_departure(self):
-        """Verify should_run_multipass_generation does not trigger for polite thank-you dialogue."""
+        """Verify compute_pre_turn_stage does not flag polite thank-you dialogue as departure."""
         session = {
             "dialogue_partner": "Denise Richards",
             "current_npcs": [{"name": "Denise Richards", "role": "Classmate"}]
@@ -51,11 +51,11 @@ class TestPhase1Guardrails(unittest.TestCase):
         actions = [
             {"label": "Thank Denise for the notes and review them together"}
         ]
-        # Should NOT trigger multi-pass solely due to 'thank'
-        self.assertFalse(should_trigger_state_arbiter_pass(session, actions))
+        stage = compute_pre_turn_stage(session, actions)
+        self.assertFalse(stage["has_exited_convo"])
 
     def test_multipass_generation_arbiter_detects_genuine_departure(self):
-        """Verify should_trigger_state_arbiter_pass triggers on true conversational exit."""
+        """Verify compute_pre_turn_stage triggers on true conversational exit."""
         session = {
             "dialogue_partner": "Denise Richards",
             "current_npcs": [{"name": "Denise Richards", "role": "Classmate"}]
@@ -63,7 +63,8 @@ class TestPhase1Guardrails(unittest.TestCase):
         actions = [
             {"label": "Say goodbye to Denise and leave the room"}
         ]
-        self.assertTrue(should_trigger_state_arbiter_pass(session, actions))
+        stage = compute_pre_turn_stage(session, actions)
+        self.assertTrue(stage["has_exited_convo"])
 
     def test_waypoint_matching_rejects_expanded_movement_phrases(self):
         """Verify novel movement actions do NOT complete stationary skill-check waypoints."""

@@ -10,13 +10,17 @@ from typing import Dict, List, Optional, Tuple, Set
 from . import en
 from . import pl
 from . import ms
+from . import zh
+from . import de
 
-SUPPORTED_LOCALES: Tuple[str, ...] = ("en", "pl", "ms")
+SUPPORTED_LOCALES: Tuple[str, ...] = ("en", "pl", "ms", "zh", "de")
 
 LOCALES = {
     "en": en,
     "pl": pl,
     "ms": ms,
+    "zh": zh,
+    "de": de,
 }
 
 # 1. Affix Mappings

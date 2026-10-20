@@ -142,6 +142,17 @@ def calculate_route_travel_time(
     if not old_loc or not new_loc or old_loc == new_loc:
         return 2
 
+    if session_id:
+        try:
+            from_nid = db.resolve_node_id_from_location(session_id, old_loc)
+            to_nid = db.resolve_node_id_from_location(session_id, new_loc)
+            if from_nid and to_nid:
+                graph_mins = db.find_shortest_graph_path_minutes(session_id, from_nid, to_nid)
+                if graph_mins is not None:
+                    return graph_mins
+        except Exception:
+            pass
+
     from mechanics.world.locations import get_zone_location_name, get_primary_location_name
     old_z = get_zone_location_name(old_loc).strip()
     new_z = get_zone_location_name(new_loc).strip()
@@ -310,9 +321,11 @@ def is_rendezvous_target(npc_name: str, actions: list = None, session_id: int = 
     if not npc_name:
         return False
 
+    import namegen
     n_low = npc_name.lower().strip()
     n_first = n_low.split()[0] if n_low else ""
-    first_min_len = 3
+    n_given = namegen.extract_first_and_last_name(npc_name)[0].lower().strip()
+    first_candidates = {tok for tok in (n_first, n_given) if len(tok) >= 3 and tok not in namegen.NAME_PARTICLES_AND_HONORIFICS}
 
     # 1. Inspect player actions (travel-to-meet actions ONLY)
     travel_meetup_verbs = (
@@ -323,7 +336,7 @@ def is_rendezvous_target(npc_name: str, actions: list = None, session_id: int = 
     for a in (actions or []):
         lbl = (a.get("label") if isinstance(a, dict) else str(a)).lower()
         if is_movement_action(lbl) or any(k in lbl for k in ("travel to", "head to", "walk to", "go to", "visit")):
-            if n_low in lbl or (len(n_first) >= first_min_len and f" {n_first}" in f" {lbl}"):
+            if n_low in lbl or any(f" {fc}" in f" {lbl}" for fc in first_candidates):
                 if any(mv in lbl for mv in travel_meetup_verbs) or "meet" in lbl or "rendezvous" in lbl:
                     return True
 
@@ -331,31 +344,54 @@ def is_rendezvous_target(npc_name: str, actions: list = None, session_id: int = 
     if session_id:
         try:
             from mechanics.world.waypoints import check_location_matches_waypoint
+            sess = db.get_session(session_id)
+            sess_node = sess.get("current_node_id", "") if sess else ""
+
+            def _check_loc_or_node_match(target_location_str: str, target_node: str = "") -> bool:
+                if not target_location_str and not target_node:
+                    return True
+                resolved_node = target_node or (db.resolve_node_id_from_location(session_id, target_location_str) if target_location_str else "")
+                if sess_node and resolved_node:
+                    return db.is_descendant_of(session_id, sess_node, resolved_node) or db.is_descendant_of(session_id, resolved_node, sess_node)
+                if not new_loc or not target_location_str:
+                    return True
+                return check_location_matches_waypoint(new_loc, target_location_str) or check_location_matches_waypoint(target_location_str, new_loc)
 
             # Check all active quest waypoints
             active_wps = db.get_all_session_active_waypoints(session_id)
             for wp in active_wps:
-                wp_text = f"{wp.get('title', '')} {wp.get('objective', '')} {wp.get('notes', '')}".lower()
-                wp_loc = wp.get("location", "")
-                is_loc_match = not wp_loc or not new_loc or check_location_matches_waypoint(new_loc, wp_loc) or check_location_matches_waypoint(wp_loc, new_loc)
-                if is_loc_match:
-                    if n_low in wp_text or (len(n_first) >= first_min_len and f" {n_first}" in f" {wp_text}"):
+                wp_text = f"{wp.get('title', '')} {wp.get('objective', '')} {wp.get('notes', '')} {wp.get('stage_label', '')} {wp.get('target_npc', '')}".lower()
+                wp_loc = wp.get("target_location") or wp.get("location") or ""
+                wp_node = wp.get("target_node_id") or ""
+                if _check_loc_or_node_match(wp_loc, wp_node):
+                    if n_low in wp_text or any(f" {fc}" in f" {wp_text}" for fc in first_candidates):
                         return True
 
             # Check active story quest sub-objectives
             sq = db.get_active_story_quest(session_id)
             if sq:
-                sq_text = f"{sq.get('title', '')} {sq.get('objective', '')}".lower()
+                sq_loc = sq.get("target_location") or sq.get("location") or ""
+                sq_node = sq.get("target_node_id") or ""
                 sub_objs = sq.get("sub_objectives") or []
+                has_active_sub = False
                 for so in sub_objs:
                     if isinstance(so, dict) and not so.get("completed"):
-                        sq_text += " " + str(so.get("text", "")).lower()
-                if n_low in sq_text or (len(n_first) >= first_min_len and f" {n_first}" in f" {sq_text}"):
-                    return True
+                        has_active_sub = True
+                        so_text = f"{so.get('text', '')} {so.get('stage_label', '')} {so.get('target_npc', '')}".lower()
+                        so_loc = so.get("target_location") or so.get("location") or sq_loc
+                        so_node = so.get("target_node_id") or sq_node
+                        if _check_loc_or_node_match(so_loc, so_node):
+                            if n_low in so_text or any(f" {fc}" in f" {so_text}" for fc in first_candidates):
+                                return True
+
+                if not has_active_sub:
+                    if _check_loc_or_node_match(sq_loc, sq_node):
+                        sq_text = f"{sq.get('title', '')} {sq.get('objective', '')}".lower()
+                        if n_low in sq_text or any(f" {fc}" in f" {sq_text}" for fc in first_candidates):
+                            return True
 
             # 3. Inspect phone appointments (only pending appointments or ongoing arrived meetups)
             pending_appts = db.get_phone_appointments(session_id, status="pending")
-            sess = db.get_session(session_id) if session_id else None
             arrived_appts = [
                 a for a in db.get_phone_appointments(session_id, status="arrived")
                 if any(str((x.get("name") or x.get("npc_name")) if isinstance(x, dict) else x).strip().lower() == a.get("npc_name", "").strip().lower() for x in (sess.get("current_npcs") or []))
@@ -364,7 +400,8 @@ def is_rendezvous_target(npc_name: str, actions: list = None, session_id: int = 
             for appt in (pending_appts + arrived_appts):
                 a_npc = str(appt.get("npc_name", "")).lower().strip()
                 a_loc = str(appt.get("rendezvous_location", ""))
-                if (n_low in a_npc or a_npc in n_low) and (not a_loc or not new_loc or check_location_matches_waypoint(new_loc, a_loc)):
+                a_node = str(appt.get("target_node_id", "") or "")
+                if (n_low in a_npc or a_npc in n_low) and _check_loc_or_node_match(a_loc, a_node):
                     return True
         except Exception:
             pass
@@ -469,19 +506,55 @@ def is_dialogue_partner(name: str, dialogue_partners: list | str = None, session
         "the", "elder", "lord", "lady", "sir", "madam", "captain", "dr", "mr", "ms", "mrs",
         "scholar", "guardian", "druid", "student", "council", "president", "vice", "secretary",
         "representative", "officer", "member", "guildmaster", "archivist", "warden",
-        "coach", "trainer", "instructor", "principal", "referee", "sensei", "bartender", "nurse", "clerk", "vendor"
+        "coach", "trainer", "instructor", "principal", "referee", "sensei", "bartender", "nurse", "clerk", "vendor",
+        "bin", "binti", "ibn", "bint", "van", "von", "der", "den", "het", "ten", "ter", "del", "della", "degli", "das", "dos"
     }
     n_tokens = [t for t in n_clean.split() if len(t) > 2 and t not in title_words]
     if not n_tokens and len(n_clean) > 2:
         n_tokens = [n_clean]
 
+    import namegen
+    n_stripped = " ".join(w for w in name.split() if w.lower().strip(".,") not in title_words) or name
+    n_first, n_last = namegen.extract_first_and_last_name(n_stripped)
+    n_first_low = n_first.lower().strip() if n_first else ""
+    n_last_low = n_last.lower().strip() if n_last else ""
+
+    male_titles = {"mr", "mr.", "sir", "lord", "father"}
+    fem_titles = {"ms", "ms.", "mrs", "mrs.", "lady", "madam", "sister"}
+    n_words = set(n_raw.split())
+
     for p in partners_list:
         p_raw = str(p).strip().lower()
         p_clean = _norm_name(p)
-        if p_raw in n_raw or n_raw in p_raw or p_clean in n_clean or n_clean in p_clean:
+        if not p_clean:
+            continue
+        if p_raw == n_raw or p_clean == n_clean:
             return True
+        p_words = set(p_raw.split())
+
+        # Check gender/title conflict
+        if (n_words & male_titles and p_words & fem_titles) or (n_words & fem_titles and p_words & male_titles):
+            continue
+
+        p_stripped = " ".join(w for w in str(p).split() if w.lower().strip(".,") not in title_words) or str(p)
+        p_first, p_last = namegen.extract_first_and_last_name(p_stripped)
+        p_first_low = p_first.lower().strip() if p_first else ""
+        p_last_low = p_last.lower().strip() if p_last else ""
+
+        # If both entities have distinct given names, they MUST match to be the same character
+        if n_first_low and p_first_low and n_first_low != p_first_low:
+            continue
+
+        # If one entity has a male title e.g. "Mr. Kobayashi" and the other has a female student given name, reject
+        if (p_words & male_titles and not p_first_low and n_first_low) or (n_words & male_titles and not n_first_low and p_first_low):
+            if n_first_low in namegen._ALL_FEMALE_NAMES or p_first_low in namegen._ALL_FEMALE_NAMES:
+                continue
+
+        if re.search(rf"\b{re.escape(p_clean)}\b", n_clean) or re.search(rf"\b{re.escape(n_clean)}\b", p_clean):
+            return True
+        p_tokens = {t for t in p_clean.split() if len(t) > 2 and t not in title_words}
         for t in n_tokens:
-            if t in p_clean or t in p_raw:
+            if t in p_tokens or re.search(rf"\b{re.escape(t)}\b", p_clean) or re.search(rf"\b{re.escape(t)}\b", p_raw):
                 return True
     return False
 
@@ -540,7 +613,15 @@ ACCOMPANIED_TRAVEL_PHRASES = (
     "together", "with her", "with him", "with them", "both of us",
     "hand in hand", "holding hands", "walk together", "head out together",
     "our walk", "leave together", "step out together", "join me", "accompany",
-    "come with", "tag along"
+    "come with", "tag along",
+    "carry her things", "carry his things", "carry their things", "carry things",
+    "help carry", "help her carry", "help him carry", "help them carry",
+    "walk her to", "walk him to", "walk them to", "walk to class", "walk to homeroom",
+    "escort her", "escort him", "escort them", "escort to", "guide her", "guide him", "guide them",
+    "bring her", "bring him", "bring them", "to class with", "to homeroom with", "head with", "walk with",
+    "moving to a quieter spot", "move to a quieter spot", "quieter spot", "quiet spot", "secluded spot",
+    "propose moving to", "suggest moving to", "pull aside", "step aside",
+    "speak in private", "talk in private", "private conversation", "private meeting"
 )
 
 _SOLO_TRAVEL_REGEX = re.compile(
@@ -561,7 +642,12 @@ def is_solo_travel_intent(actions: list = None) -> bool:
         ).lower()
         
         # Guard 1: Accompanied Travel (Keywords or RegEx)
-        if any(term in lbl for term in ACCOMPANIED_TRAVEL_PHRASES) or re.search(r"\b(?:with|accompany|follow)\s+[a-z]+", lbl) or re.search(r"\b(?:together|both of us)\b", lbl):
+        if (
+            any(term in lbl for term in ACCOMPANIED_TRAVEL_PHRASES)
+            or re.search(r"\b(?:with|accompany|follow)\s+[a-z]+", lbl)
+            or re.search(r"\b(?:together|both of us)\b", lbl)
+            or re.search(r"\b(?:carry|walk|escort|guide|lead|take|bring|help)\b.*\b(?:her|him|them)\b", lbl)
+        ):
             continue
             
         # Guard 2: Conversational Privacy / Intimacy
@@ -604,9 +690,12 @@ def has_narrative_continuity_bridge(npc_name: str, session: dict = None, actions
         return False
 
     from mechanics.world.locations import get_primary_location_name
+    import namegen
 
     n_low = npc_name.lower().strip()
     n_first = n_low.split()[0] if n_low else ""
+    n_given = namegen.extract_first_and_last_name(npc_name)[0].lower().strip()
+    first_candidates = {tok for tok in (n_first, n_given) if len(tok) >= 3 and tok not in namegen.NAME_PARTICLES_AND_HONORIFICS}
 
     old_loc = (session.get("current_location") or "") if session else ""
     old_primary = get_primary_location_name(old_loc) if old_loc else ""
@@ -625,7 +714,7 @@ def has_narrative_continuity_bridge(npc_name: str, session: dict = None, actions
             old_npcs = session.get("current_npcs") or []
             for on in old_npcs:
                 on_name = str((on.get("name") or on.get("npc_name")) if isinstance(on, dict) else on).strip().lower()
-                if on_name and (on_name == n_low or (len(n_first) >= 3 and on_name.startswith(n_first))):
+                if on_name and (on_name == n_low or any(on_name.startswith(fc) or f" {fc}" in f" {on_name}" for fc in first_candidates)):
                     return True
 
     # 2. Check actions for travel/meetup/accompanied intent
@@ -636,12 +725,16 @@ def has_narrative_continuity_bridge(npc_name: str, session: dict = None, actions
                 if isinstance(a, dict)
                 else str(a)
             ).lower()
-            # Active dialogue partner with accompanied travel phrase (e.g., "Step out together")
-            if is_dp and any(term in lbl for term in ACCOMPANIED_TRAVEL_PHRASES):
+            # Active dialogue partner with accompanied travel phrase (e.g., "Step out together", "carry her things")
+            if is_dp and (
+                any(term in lbl for term in ACCOMPANIED_TRAVEL_PHRASES)
+                or re.search(r"\b(?:carry|walk|escort|guide|lead|take|bring|help|accompany)\b.*\b(?:her|him|them)\b", lbl)
+                or (isinstance(a, dict) and str(a.get("target_npc") or "").strip().lower() in (n_low, n_first))
+            ):
                 return True
-            if n_low in lbl or (len(n_first) >= 3 and f" {n_first}" in f" {lbl}"):
+            if n_low in lbl or any(f" {fc}" in f" {lbl}" for fc in first_candidates):
                 if _has_meetup_intent_keyword(lbl) or any(
-                    k in lbl for k in ("travel to", "head to", "go to", "visit", "with", "invite", "bring", "follow")
+                    k in lbl for k in ("travel to", "head to", "go to", "visit", "with", "invite", "bring", "follow", "carry", "escort")
                 ):
                     return True
 
@@ -680,8 +773,8 @@ def has_narrative_continuity_bridge(npc_name: str, session: dict = None, actions
                 if not h_text:
                     continue
                 name_pattern = r"\b" + re.escape(n_low) + r"\b"
-                if len(n_first) >= 3:
-                    name_pattern += r"|\b" + re.escape(n_first) + r"\b"
+                for fc in first_candidates:
+                    name_pattern += r"|\b" + re.escape(fc) + r"\b"
                 if re.search(name_pattern, h_text) and _has_meetup_intent_keyword(h_text):
                     return True
 
@@ -693,8 +786,10 @@ def is_mentioned_only_in_dialogue(npc_name: str, text: str) -> bool:
     """Checks if an NPC is mentioned exclusively inside spoken dialogue (in quotation marks)."""
     if not npc_name or not text:
         return False
+    import namegen
     n_lower = npc_name.lower().strip()
     first_name = n_lower.split()[0] if len(n_lower.split()) > 1 else n_lower
+    given_name = namegen.extract_first_and_last_name(npc_name)[0].lower().strip()
 
     # Strip paired double quotes and curly quotes
     without_quotes = re.sub(r'["“][^"”]*["”]', ' ', text)
@@ -702,15 +797,16 @@ def is_mentioned_only_in_dialogue(npc_name: str, text: str) -> bool:
     without_quotes = re.sub(r'「[^」]*」', ' ', without_quotes)
 
     pattern = r'\b' + re.escape(n_lower) + r'\b'
-    if len(first_name) >= 3 and first_name != n_lower:
-        pattern += r'|\b' + re.escape(first_name) + r'\b'
+    for fc in {first_name, given_name}:
+        if len(fc) >= 3 and fc != n_lower and fc not in namegen.NAME_PARTICLES_AND_HONORIFICS:
+            pattern += r'|\b' + re.escape(fc) + r'\b'
 
     in_full = bool(re.search(pattern, text, re.IGNORECASE))
     in_outside = bool(re.search(pattern, without_quotes, re.IGNORECASE))
     return in_full and not in_outside
 
 
-def has_active_physical_presence(npc_name: str, result: dict, narrative_text: str = "") -> bool:
+def has_active_physical_presence(npc_name: str, result: dict, narrative_text: str = "", ignore_departures: bool = False) -> bool:
     """
     Determines if an NPC is physically present in the scene (speaking aloud,
     physically described as present in entity_audit, or acting in narrative),
@@ -719,29 +815,47 @@ def has_active_physical_presence(npc_name: str, result: dict, narrative_text: st
     if not npc_name:
         return False
 
+    import namegen
     n_low = npc_name.lower().strip()
     n_first = n_low.split()[0] if n_low else ""
+    first_last = namegen.extract_first_and_last_name(npc_name)
+    n_given = first_last[0].lower().strip() if first_last else ""
+    n_surname = first_last[1].lower().strip() if len(first_last) > 1 else ""
+
+    name_candidates = {tok for tok in (n_first, n_given, n_surname) if len(tok) >= 3 and tok not in namegen.NAME_PARTICLES_AND_HONORIFICS}
+    if n_surname and n_first in namegen.NAME_PARTICLES_AND_HONORIFICS:
+        name_candidates.add(f"{n_first} {n_surname}")
+        name_candidates.add(f"{n_first.rstrip('.')} {n_surname}")
 
     # Check if explicitly departed
-    departures = [str(x).lower().strip() for x in (result.get("npc_departures") or [])]
-    entity_audit = result.get("entity_audit") or {}
-    if isinstance(entity_audit, dict):
-        departures.extend(str(x).lower().strip() for x in (entity_audit.get("departed_characters") or []))
-    if any(n_low in d or (len(n_first) >= 3 and n_first in d) for d in departures):
-        return False
+    if not ignore_departures:
+        departures = [str(x).lower().strip() for x in (result.get("npc_departures") or [])]
+        entity_audit = result.get("entity_audit") or {}
+        if isinstance(entity_audit, dict):
+            departures.extend(str(x).lower().strip() for x in (entity_audit.get("departed_characters") or []))
+        if any(n_low in d or any(fc in d for fc in name_candidates) for d in departures):
+            return False
 
     # If mentioned ONLY inside spoken dialogue quotes, they are being talked about, NOT present
     if narrative_text and is_mentioned_only_in_dialogue(npc_name, narrative_text):
         return False
 
-    # 1. Check entity_audit speaking_characters & present_named_characters
+    # 1. Check physical state actors, entity_audit speaking_characters & present_named_characters
+    phys_actors = (result.get("_physical_state") or {}).get("actors") or {}
+    if isinstance(phys_actors, dict):
+        for pa_name in phys_actors:
+            pa_low = pa_name.lower().strip()
+            if pa_low == n_low or pa_low in name_candidates or (n_low in pa_low or pa_low in n_low):
+                return True
+
+    entity_audit = result.get("entity_audit") or {}
     if isinstance(entity_audit, dict):
         speaking = [str(x).lower().strip() for x in (entity_audit.get("speaking_characters") or [])]
-        if any(n_low == s or (len(n_first) >= 3 and n_first == s) or (n_low in s or s in n_low) for s in speaking if s):
+        if any(n_low == s or s in name_candidates or (n_low in s or s in n_low) for s in speaking if s):
             return True
 
         present = [str(x).lower().strip() for x in (entity_audit.get("present_named_characters") or [])]
-        if any(n_low == p or (len(n_first) >= 3 and n_first == p) or (n_low in p or p in n_low) for p in present if p):
+        if any(n_low == p or p in name_candidates or (n_low in p or p in n_low) for p in present if p):
             return True
 
     # 2. Check speaking characters and physical action in narrative
@@ -750,37 +864,87 @@ def has_active_physical_presence(npc_name: str, result: dict, narrative_text: st
         nar_without_dialogue = re.sub(r'["“][^"”]*["”]', ' ', nar_norm)
         nar_without_dialogue = re.sub(r'‘[^’]*’', ' ', nar_without_dialogue)
         nar_without_dialogue = re.sub(r'「[^」]*」', ' ', nar_without_dialogue)
+        nar_without_dialogue = re.sub(r'[—–]', ' ', nar_without_dialogue)
 
         pattern = r'\b' + re.escape(n_low) + r'\b'
-        if len(n_first) >= 3 and n_first != n_low:
-            pattern += r'|\b' + re.escape(n_first) + r'\b'
+        for fc in name_candidates:
+            if fc != n_low:
+                pattern += r'|\b' + re.escape(fc) + r'\b'
 
         has_in_prose = bool(re.search(pattern, nar_without_dialogue))
 
         if has_in_prose:
-            # Check for direct speech verbs, physical actions, and clause action verbs
-            nar_cleaned = re.sub(r'[—–]', ' ', nar_norm)
+            # Check if mentioned in thought, recollection, or hypothetical contemplation
+            thought_pattern = (
+                r'\b(?:thought\s+(?:about|of)?|thinking\s+(?:about|of)?|wondered\s+(?:about|if|what|how)?|'
+                r'wonders\s+(?:about|if|what|how)?|wondering\s+(?:about|if|what|how)?|remembered|imagined|'
+                r'recalled|wished\s+(?:that)?|hoped\s+(?:that)?|news\s+of|heard\s+(?:about|from))\b[^.!?\n]*?(?:' + pattern + r')\b'
+            )
+            is_in_thought = bool(re.search(thought_pattern, nar_norm))
+
             action_verbs = {
                 "says", "said", "asks", "asked", "replies", "replied", "greets", "greeted",
-                "pushes", "stands", "stood", "leans", "leaned", "looks", "looked", "shifts",
+                "pushes", "stands", "stood", "standing", "leans", "leaned", "leaning", "looks", "looked", "shifts",
                 "shifted", "smiles", "smiled", "smirks", "smirked", "steps", "stepped",
-                "waves", "waved", "nods", "nodded", "sits", "sat", "takes", "took", "waits",
+                "waves", "waved", "nods", "nodded", "sits", "sat", "sitting", "takes", "took", "waits",
                 "waited", "waiting", "arrives", "arrived", "watches", "watched", "watch",
                 "laughs", "laughed", "remarks", "remarked", "sips", "sipped", "orders",
                 "ordered", "pauses", "paused", "tilts", "tilted", "cuts", "walks", "walked",
                 "joins", "joined", "listen", "listens", "listened", "gathers", "gathered",
-                "beside", "behind", "surrounding", "flanked", "accompanied", "seated"
+                "glances", "glanced", "turns", "turned", "approaches", "approached", "whispers",
+                "whispered", "clutches", "clutched", "holds", "held", "carries", "carried",
+                "scans", "scanning", "reads", "writes", "scribbles", "scribbled", "scribbling",
+                "gestures", "gestured", "gesturing", "seated", "speaks", "spoke",
+                "catches", "caught", "catching", "frowns", "frowned", "frowning",
+                "pulls", "pulled", "pulling", "retrieves", "retrieved", "retrieving",
+                "releases", "released", "releasing", "snaps", "snapped", "snapping",
+                "sighs", "sighed", "sighing", "hunched", "working", "works", "worked",
+                "secures", "secured", "securing", "struggles", "struggled", "struggling",
+                "trembles", "trembled", "trembling", "tries", "tried", "trying",
+                "examines", "examined", "examining", "inspects", "inspected", "inspecting",
+                "adjusts", "adjusted", "adjusting", "fiddling", "pouring", "pours", "poured"
             }
-            # Direct name + verb
-            if any(re.search(r'\b' + re.escape(f"{n_first} {v}") + r'\b', nar_cleaned) for v in action_verbs):
+
+            # 1. Direct subject + (optional adverb) + action verb: "Sofia smiled", "Maya slowly walked"
+            subj_verb_re = re.compile(
+                r'\b(?:' + pattern + r')\s+(?:(?:quietly|softly|calmly|slowly|suddenly|gently|warmly|nervously|confidently|playfully|curiously|brightly|coldly|silently|hesitantly|abruptly)\s+)?(?:' +
+                '|'.join(action_verbs) + r')\b',
+                re.IGNORECASE
+            )
+            if subj_verb_re.search(nar_without_dialogue):
                 return True
-            # Clause window check: name and action verb within 60 chars in prose
-            for m in re.finditer(pattern, nar_without_dialogue):
-                start = max(0, m.start() - 60)
-                end = min(len(nar_cleaned), m.end() + 60)
-                clause = nar_cleaned[start:end]
-                if any(re.search(r'\b' + re.escape(v) + r'\b', clause) for v in action_verbs):
-                    return True
+
+            # 2. Inverted speech attribution: "said Sofia", "asked Maya"
+            speech_attr_re = re.compile(
+                r'\b(?:said|asks|asked|replied|replies|remarks|remarked|whispered|whispers|called|called out)\s+(?:by\s+)?(?:' + pattern + r')\b',
+                re.IGNORECASE
+            )
+            if speech_attr_re.search(nar_norm):
+                return True
+
+            # 3. Inverted verb-subject positioning: "stands Sofia", "sits Maya", "approaches Rachel"
+            inv_verb_re = re.compile(
+                r'\b(?:stands|stood|sits|sat|waits|waited|approaches|approached|enters|entered|arrives|arrived)\s+(?:' + pattern + r')\b',
+                re.IGNORECASE
+            )
+            if inv_verb_re.search(nar_without_dialogue):
+                return True
+
+            # 4. Explicit physical copresence / positioning: "beside Sofia", "accompanied by Maya", "seated next to Sofia"
+            positioning_re = re.compile(
+                r'\b(?:beside|next to|near|behind|in front of|approaching|facing|flanked by|accompanied by|seated with)\s+(?:' + pattern + r')\b',
+                re.IGNORECASE
+            )
+            if positioning_re.search(nar_without_dialogue) and not is_in_thought:
+                return True
+
+            # 5. Sentence-bounded clause check: If not in thought, check if any action verb is in the sentence
+            if not is_in_thought:
+                sentences = re.split(r'[.!?\n]+', nar_without_dialogue)
+                for sent in sentences:
+                    if re.search(pattern, sent):
+                        if any(re.search(r'\b' + re.escape(v) + r'\b', sent) for v in action_verbs):
+                            return True
 
     return False
 

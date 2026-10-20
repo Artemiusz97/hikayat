@@ -111,3 +111,33 @@ def resolve_check(stat_value: int, requirement: int = None, luck: int = 3, check
     if rescaled <= chance:
         return CheckResult(chance, roll, "success", "Success", True, requirement=requirement)
     return CheckResult(chance, roll, "fail", "Failure", False, requirement=requirement)
+
+
+def is_check_success(check_obj, default_if_none: bool = True) -> bool:
+    """Canonical evaluator for stat/skill check success across all engine structures.
+    Safely handles CheckResult objects, dicts, and uppercase/lowercase tier strings.
+    """
+    if not check_obj:
+        return default_if_none
+    if hasattr(check_obj, "succeeded") and check_obj.succeeded is not None:
+        return bool(check_obj.succeeded)
+    if hasattr(check_obj, "is_success") and check_obj.is_success is not None:
+        return bool(check_obj.is_success)
+    if hasattr(check_obj, "success") and check_obj.success is not None:
+        return bool(check_obj.success)
+    if hasattr(check_obj, "tier") and check_obj.tier is not None:
+        return str(check_obj.tier).lower() in ("success", "critical_success", "crit_success", "partial_success")
+    if hasattr(check_obj, "result_tier") and check_obj.result_tier is not None:
+        return str(check_obj.result_tier).lower() in ("success", "critical_success", "crit_success", "partial_success")
+    if isinstance(check_obj, dict):
+        if check_obj.get("succeeded") is not None:
+            return bool(check_obj["succeeded"])
+        if check_obj.get("is_success") is not None:
+            return bool(check_obj["is_success"])
+        if check_obj.get("success") is not None:
+            return bool(check_obj["success"])
+        tier_val = check_obj.get("tier") if check_obj.get("tier") is not None else check_obj.get("result_tier")
+        if tier_val is not None:
+            return str(tier_val).lower() in ("success", "critical_success", "crit_success", "partial_success")
+    return default_if_none
+

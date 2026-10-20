@@ -12,5 +12,6 @@ from .quests import *
 from .quests import _is_valid_investigation_note, _is_similar_clue
 from .state import *
 from .turn import *
-from .choices_cleaner import clean_choices_impl, sanitize_and_diversify_choices
+from .choices_cleaner import clean_choices_impl, sanitize_and_diversify_choices, build_hybrid_turn_choices
+from .pronoun_resolver import tag_narrative_pronouns, strip_pronoun_tags, annotate_turn_pronouns
 from llm_client import call_llm_json, call_llm_json_stream

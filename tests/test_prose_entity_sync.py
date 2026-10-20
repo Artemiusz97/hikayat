@@ -138,6 +138,30 @@ class TestProseEntitySync(unittest.TestCase):
         self.assertNotIn("Artemiusz", npc_names)
         self.assertIn("Sofia Anderson", npc_names)
 
+    def test_generate_opening_scene_recovers_prose_mentioned_characters_into_npcs_present(self):
+        """Verify that generate_opening_scene recovers characters mentioned in narrative even if npcs_present is empty."""
+        import asyncio
+        from unittest.mock import patch, AsyncMock
+        from game_engine.turn.generation import generate_opening_scene
+
+        session = db.get_session(self.session_id)
+        char = db.get_character(self.user_id)
+        party = [(char, [])]
+
+        raw_llm_result = {
+            "scene_title": "Petals & Promises",
+            "narrative": "Under the tree stands Sofia Anderson, scanning the crowd. Beside her, Manon Sokolov clutches a stack of brochures.",
+            "choices": [{"label": "Observe surroundings", "stat": "PER", "requirement": 5}],
+            "location": "Westlake Academy ➔ Student Council Office ➔ Main Office Area",
+            "npcs_present": []  # LLM omitted npcs_present
+        }
+
+        with patch("game_engine.turn.generation.game_engine.call_llm_json", new=AsyncMock(return_value=raw_llm_result)):
+            scene = asyncio.run(generate_opening_scene(session, party))
+            npc_names = [n.get("name") if isinstance(n, dict) else n for n in scene.get("npcs_present", [])]
+            self.assertIn("Sofia Anderson", npc_names)
+            self.assertIn("Manon Sokolov", npc_names)
+
 
 if __name__ == "__main__":
     unittest.main()

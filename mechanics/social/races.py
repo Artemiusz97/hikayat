@@ -76,16 +76,27 @@ def resolve_animal_family_species(family: str, seed: str = "") -> str:
 
 def resolve_generic_beastfolk_species(seed: str = "") -> str:
     """Deterministically (via seed) resolves generic 'beastfolk', 'anthro', 'furry', or 'half-beast'
-    into one of the canonical beastfolk species."""
-    species_pool = [
-        "cat", "fox", "wolf", "fennec", "rabbit", "tiger", "lion", "cheetah",
-        "bear", "mouse", "bird", "reptile"
-    ]
+    into one of the canonical beastfolk species according to weighted scenario rates."""
+    species_pool = (
+        ["cat"] * 15 +
+        ["fox"] * 15 +
+        ["wolf"] * 7 +
+        ["tiger"] * 7 +
+        ["lion"] * 7 +
+        ["cheetah"] * 7 +
+        ["fennec"] * 7 +
+        ["rabbit"] * 7 +
+        ["mouse"] * 7 +
+        ["bear"] * 7 +
+        ["bird"] * 7 +
+        ["reptile"] * 7
+    )
     if seed:
         import hashlib
         h = int(hashlib.md5(str(seed).encode("utf-8")).hexdigest(), 16)
         return species_pool[h % len(species_pool)]
     return random.choice(species_pool)
+
 
 
 HALF_BEAST_ALIASES = {
@@ -140,33 +151,30 @@ MUTANT_ALIASES = {
 import random
 
 FURRY_HIGH_SCHOOL_RACES = [
-    # Baseline Human (10%)
+    # Baseline Human (5%)
     "human",
-    # Primary Beastfolk (Cat 15%, Fox 15%)
+    # Primary Beastfolk (Cat 10%, Fox 10%)
     "beastfolk:cat", "beastfolk:fox",
-    # Other Canids & Felines Beastfolk (15% total -> 3% each)
+    # Other Beastfolk (45% total -> 4.5% each across 10 species)
     "beastfolk:wolf", "beastfolk:fennec", "beastfolk:tiger", "beastfolk:cheetah", "beastfolk:lion",
-    # Mouse & Rabbit Beastfolk (5% total -> 2.5% each)
-    "beastfolk:mouse", "beastfolk:rabbit",
-    # Other Minor Beastfolk (10% total)
-    "beastfolk:bear", "beastfolk:bird", "beastfolk:reptile",
-    # Cat & Fox Half-Beasts (20% total -> 10% each)
+    "beastfolk:mouse", "beastfolk:rabbit", "beastfolk:bear", "beastfolk:bird", "beastfolk:reptile",
+    # Cat & Fox Half-Beasts (10% total -> 5% each)
     "half_beast:cat", "half_beast:fox",
-    # Other Half-Beasts (10% total -> 1.25% each across 8 species)
+    # Other Half-Beasts (20% total -> 2% each across 10 species)
     "half_beast:wolf", "half_beast:tiger", "half_beast:lion", "half_beast:cheetah",
-    "half_beast:fennec", "half_beast:rabbit", "half_beast:mouse", "half_beast:bear"
+    "half_beast:fennec", "half_beast:rabbit", "half_beast:mouse", "half_beast:bear",
+    "half_beast:bird", "half_beast:reptile"
 ]
 
-# Total Breakdown: 60% Beastfolk, 30% Half-Beast, 10% Human = 100%
+# Total Breakdown: 65% Beastfolk, 30% Half-Beast, 5% Human = 100%
 FURRY_HIGH_SCHOOL_WEIGHTS = [
-    0.10,                           # Human (10%)
-    0.15, 0.15,                     # Cat (15%), Fox (15%)
-    0.03, 0.03, 0.03, 0.03, 0.03,   # Wolf, Fennec, Tiger, Cheetah, Lion (15% total)
-    0.025, 0.025,                   # Mouse, Rabbit (5% total)
-    0.04, 0.03, 0.03,               # Bear (4%), Bird (3%), Reptile (3%) (10% total)
-    0.10, 0.10,                     # Half-Beast Cat (10%), Half-Beast Fox (10%) (20% total)
-    0.0125, 0.0125, 0.0125, 0.0125, # Half-Beast Wolf, Tiger, Lion, Cheetah (5% total)
-    0.0125, 0.0125, 0.0125, 0.0125  # Half-Beast Fennec, Rabbit, Mouse, Bear (5% total)
+    0.05,                           # Human (5%)
+    0.10, 0.10,                     # Cat (10%), Fox (10%) (20% total)
+    0.045, 0.045, 0.045, 0.045, 0.045, # Wolf, Fennec, Tiger, Cheetah, Lion (22.5% total)
+    0.045, 0.045, 0.045, 0.045, 0.045, # Mouse, Rabbit, Bear, Bird, Reptile (22.5% total)
+    0.05, 0.05,                     # Half-Beast Cat (5%), Half-Beast Fox (5%) (10% total)
+    0.02, 0.02, 0.02, 0.02, 0.02,   # Half-Beast Wolf, Tiger, Lion, Cheetah, Fennec (10% total)
+    0.02, 0.02, 0.02, 0.02, 0.02    # Half-Beast Rabbit, Mouse, Bear, Bird, Reptile (10% total)
 ]
 
 
@@ -364,9 +372,26 @@ def extract_race_from_text(text: str, scen_key: str = "fantasy", name: str = "")
     target_text = text
     if name and len(name) >= 3:
         sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
-        matching = [s for s in sentences if name.lower() in s.lower()]
+        first_name = name.split()[0].strip() if " " in name else ""
+        matching = [
+            s for s in sentences
+            if name.lower() in s.lower() or (first_name and len(first_name) >= 3 and first_name.lower() in s.lower())
+        ]
         if matching:
             target_text = " ".join(matching)
+        elif len(sentences) > 1:
+            # If a character name is specified and does not appear in a multi-sentence narrative,
+            # do not fall back to the entire narrative to avoid cross-contaminating species from other characters!
+            return None
+
+    # Sanitize common verb/idiom usages of 'bear' (e.g. 'hardly bear', 'bear in mind', 'cannot bear', 'bear with', 'bearing')
+    # so they are not falsely recognized as the ursine/bear species.
+    target_text = re.sub(
+        r"\b(?:hardly\s+bear|cannot\s+bear|can\'t\s+bear|couldn\'t\s+bear|bear\s+in\s+mind|bear\s+with|bear\s+the|bearing)\b",
+        "",
+        target_text,
+        flags=re.IGNORECASE
+    )
 
     # 1. Check half-beast / hybrid indicators
     is_half = bool(re.search(r"\b(half[\s\-_]beast|half[\s\-_]breed|hybrid|demi[\s\-_]human|beastkin)\b", target_text, re.IGNORECASE))
@@ -406,7 +431,7 @@ def extract_race_from_text(text: str, scen_key: str = "fantasy", name: str = "")
         (r"\b(lions?|lioness)\b", "lion"),
         (r"\b(cheetahs?)\b", "cheetah"),
         (r"\b(cats?|nekos?)\b", "cat"),
-        (r"\b(bears?)\b", "bear"),
+        (r"\b(bear[\s\-_]folk|bear[\s\-_]girl|bear[\s\-_]boy|bear[\s\-_]man|bear[\s\-_]woman|bear[\s\-_]beast|ursine|bears?)\b", "bear"),
         (r"\b(rabbits?|bunnies|bunny|hares?)\b", "rabbit"),
         (r"\b(mice|mouse|rats?)\b", "mouse"),
         (r"\b(snakes?|serpents?|vipers?|cobras?|nagas?)\b", "snake"),

@@ -579,6 +579,9 @@ async def probe_model_capabilities(client: AsyncOpenAI, model_name: str) -> dict
             if "response_format" in err_msg or "response format" in err_msg:
                 info["json_mode"] = False
                 info["json_schema"] = False
+                # Cache negative capability immediately so response_format is never attempted
+                _MODEL_CAPABILITIES[cache_key] = dict(info)
+                _MODEL_CAPABILITIES[model_name] = dict(info)
                 try:
                     await client.chat.completions.create(
                         model=model_name,
@@ -600,6 +603,37 @@ async def probe_model_capabilities(client: AsyncOpenAI, model_name: str) -> dict
     return info
 
 
+async def probe_all_configured_models(quiet: bool = False) -> dict[str, dict]:
+    """Pre-probe all configured standard and NSFW candidate models to warm capability caches."""
+    groups = get_probe_candidate_groups()
+    probed_results = {}
+
+    for group_name, candidates in groups.items():
+        for item in candidates:
+            client = item["client"]
+            model_name = item["model"]
+            role = item["role"]
+            role_tag = f" ({role})" if role != "Primary" else ""
+            cache_key = (str(getattr(client, "base_url", "")), model_name)
+
+            if cache_key in _MODEL_CAPABILITIES:
+                cap = _MODEL_CAPABILITIES[cache_key]
+            else:
+                try:
+                    cap = await probe_model_capabilities(client, model_name)
+                except Exception as e:
+                    cap = {"model": model_name, "json_mode": False, "status": "error", "error": str(e)}
+
+            probed_results[f"{group_name}:{model_name}"] = cap
+            if not quiet:
+                if cap.get("json_mode"):
+                    log.info("[LLM Probe] %s model '%s'%s: Native JSON mode supported.", group_name.capitalize(), model_name, role_tag)
+                elif cap.get("status") == "ok":
+                    log.info("[LLM Probe] %s model '%s'%s: Native JSON mode UNSUPPORTED (using markdown JSON fallback).", group_name.capitalize(), model_name, role_tag)
+                else:
+                    log.warning("[LLM Probe] %s model '%s'%s: Probe warning/error: %s", group_name.capitalize(), model_name, role_tag, cap.get("error"))
+
+    return probed_results
 
 
 class StreamingNarrativeExtractor:
@@ -753,16 +787,60 @@ async def call_llm_json_stream(system_prompt: str | list, user_prompt: str,
                     t0 = time.perf_counter()
                     
                     while continuation_count <= 2:
-                        try:
-                            response = await client.chat.completions.create(stream=True, **kwargs)
-                        except BadRequestError as bad_req_err:
-                            if continuation_count > 0:
-                                log.warning(
-                                    "Stream auto-continuation (pass %d) rejected with BadRequestError: %s. Salvaging accumulated prose with json_repair...",
-                                    continuation_count, bad_req_err
-                                )
+                        while True:
+                            try:
+                                response = await client.chat.completions.create(stream=True, **kwargs)
                                 break
-                            raise
+                            except (RateLimitError, APITimeoutError):
+                                raise
+                            except BadRequestError as bad_req_err:
+                                if continuation_count > 0:
+                                    log.warning(
+                                        "Stream auto-continuation (pass %d) rejected with BadRequestError: %s. Salvaging accumulated prose with json_repair...",
+                                        continuation_count, bad_req_err
+                                    )
+                                    response = None
+                                    break
+                                err_str = str(bad_req_err).lower()
+                                stripped = False
+                                if ("response_format" in err_str or "response format" in err_str) and "response_format" in kwargs:
+                                    log.info("Model '%s' does not support response_format; bypassing.", model_name)
+                                    cap_record = {"model": model_name, "json_mode": False, "json_schema": False, "status": "ok", "error": None}
+                                    _MODEL_CAPABILITIES[cache_key] = cap_record
+                                    _MODEL_CAPABILITIES[model_name] = cap_record
+                                    supports_json_mode = False
+                                    kwargs.pop("response_format", None)
+                                    stripped = True
+                                if "stream_options" in err_str and "stream_options" in kwargs:
+                                    log.info("Model '%s' does not support stream_options; bypassing.", model_name)
+                                    _STREAM_USAGE_UNSUPPORTED.add(cache_key)
+                                    kwargs.pop("stream_options", None)
+                                    stripped = True
+                                if not stripped:
+                                    raise
+                            except Exception as init_err:
+                                if _is_non_retriable_error(init_err):
+                                    raise
+                                err_str = str(init_err).lower()
+                                stripped = False
+                                if ("response_format" in err_str or "response format" in err_str) and "response_format" in kwargs:
+                                    log.info("Model '%s' does not support response_format; bypassing.", model_name)
+                                    cap_record = {"model": model_name, "json_mode": False, "json_schema": False, "status": "ok", "error": None}
+                                    _MODEL_CAPABILITIES[cache_key] = cap_record
+                                    _MODEL_CAPABILITIES[model_name] = cap_record
+                                    supports_json_mode = False
+                                    kwargs.pop("response_format", None)
+                                    stripped = True
+                                if "stream_options" in err_str and "stream_options" in kwargs:
+                                    log.info("Model '%s' does not support stream_options; bypassing.", model_name)
+                                    _STREAM_USAGE_UNSUPPORTED.add(cache_key)
+                                    kwargs.pop("stream_options", None)
+                                    stripped = True
+                                if not stripped:
+                                    raise
+
+                        if response is None:
+                            break
                         
                         final_finish_reason = None
                         stripped_continuation_fence = False
@@ -852,7 +930,9 @@ async def call_llm_json_stream(system_prompt: str | list, user_prompt: str,
                         log.warning("Stream attempt %d with model %s failed: %s", attempt + 1, model_name, str(e))
                         
                 if attempt < retries:
-                    await _backoff_sleep(attempt, error=locals().get("last_stream_err"))
+                    err_msg_lower = str(locals().get("last_stream_err", "")).lower()
+                    if "response_format" not in err_msg_lower and "response format" not in err_msg_lower and "stream_options" not in err_msg_lower:
+                        await _backoff_sleep(attempt, error=locals().get("last_stream_err"))
     
     # If we get here, stream attempts failed. 
     # Fallback completely to standard batch mode using the existing function.
@@ -1144,7 +1224,7 @@ GM_SHARED_RULES = """You are the Game Master for Hikayat. The PRIMARY STORY QUES
 ### Narrative & Roleplay Engine Rules
 ⚡ STYLE & DIALOGUE SUPREMACY (HIGHEST PRIORITY — OVERRIDES ALL OTHER RULES): The STYLE and DIALOGUE directives provided in the ACTIVE NARRATIVE STYLE & DIALOGUE DIRECTIVES section define the player's active narrative preferences. These ALWAYS take absolute precedence over any general narrative/roleplay guidance below. Follow the STYLE directive's paragraph quotas, vocabulary rules, and STRICTLY FORBIDDEN constraints exactly. Follow the DIALOGUE directive's exchange requirements and STRICTLY FORBIDDEN constraints exactly. NEVER default to purple prose, multi-paragraph sensory narration, or one-sided NPC monologues when the active STYLE or DIALOGUE directive explicitly forbids them.
 ⚡ IMMERSIVE NARRATIVE PURITY (NO META-LEAKS): Spoken character dialogue and story narration MUST remain 100% in-universe. NEVER write engine tracking labels, system prompts, or internal metadata (such as "Sub-Objective #", "Sub-Quest #", "Objective 1/2", "quest log", "DC check", "system directive") in story narration or character quotes. Characters must speak naturally, referring to the actual in-world plot events, clues, suspects, or evidence.
-⚡ CHARACTER IDENTITY, GENDER & PRONOUN IMMUTABILITY: An established character's canonical identity, gender, and pronouns (he/him/his for male, she/her/hers for female, they/them for non-binary) are absolute and immutable. You MUST NEVER switch, mix, or invert a character's pronouns or gender in narration or dialogue. Always address and describe male NPCs using masculine pronouns (he/him/his) and female NPCs using feminine pronouns (she/her/hers). Never refer to a male NPC as 'she' or describe them with female titles/terms, and never refer to a female NPC as 'he'.
+⚡ CHARACTER IDENTITY, GENDER & PRONOUN IMMUTABILITY: An established character's canonical identity, gender, pronouns (he/him/his for male, she/her/hers for female, they/them for non-binary), and species biology are absolute and immutable. You MUST NEVER switch, mix, or invert a character's pronouns or gender in narration or dialogue. If the player protagonist is male, you MUST ALWAYS refer to him with masculine pronouns (he/him/his) and NEVER use 'she' or 'her'; if female, always she/her/hers. Always address and describe male NPCs using masculine pronouns (he/him/his) and female NPCs using feminine pronouns (she/her/hers). Male characters (he/him) and female characters (she/her) must NEVER be referred to using singular neutral pronouns (they/them/their/theirs/themselves). Never refer to a male NPC as 'she' or describe them with female titles/terms, and never refer to a female NPC as 'he'. Furthermore, strictly respect each character's canonical race biology: NEVER narrate phantom animal traits (such as fox ear twitching, tail wagging, tail swishing, or purring) on a human character! A human protagonist has NO animal ears and NO tail.
 1. NARRATIVE & SCENE FLOW: Craft scenes according to the active STYLE directive. Apply prose richness, sensory environment details (lighting, sounds, scents), NPC dialogue, and micro-expressions/mannerisms only to the degree the STYLE directive permits. For `vivid` or `shakespearean` style, write with full atmospheric immersion. For `normal`, use clean contemporary prose. For `direct` or `concise`, keep narration tight, functional, and momentum-focused without sensory padding.
 
 2. SUB-QUEST COMPLETION & DELVE GUARDRAIL: Include a sub-quest ID in `completed_sub_quest_ids` ONLY when the player's action and the current scene physically and conclusively achieve that entire multi-step objective.

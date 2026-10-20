@@ -38,6 +38,8 @@ class TrackerEntity(BaseModel):
     grade: Optional[str] = Field(default=None, description="Academic year or standing, e.g. Senior, Junior")
     clique: Optional[str] = Field(default=None, description="Social clique or group")
     race: Optional[str] = Field(default=None)
+    species: Optional[str] = Field(default=None, description="Canonical animal species if beastfolk/hybrid, e.g. cat, fox, wolf, rabbit, tiger, lion, cheetah, fennec, mouse, bear, bird, reptile, snake, dragon, or human")
+    social_role_type: Optional[str] = Field(default=None, description="student_peer, faculty_staff, adult_service, or general")
     gender: Optional[str] = Field(default=None)
     age: Optional[Union[int, str]] = Field(default=None)
     mannerisms: Optional[str] = Field(default=None)
@@ -52,6 +54,23 @@ class TrackerEntity(BaseModel):
     status_effects: List[str] = Field(default_factory=list, description="Short condition or mood tags (e.g. Bleeding, Stunned, Flustered, Angry, Scared, Aroused, Calm)")
     mood: Optional[str] = Field(default=None, description="Current emotional mood or state (e.g. Angry, Confused, Scared, Flustered, Aroused, Calm, Neutral)")
 
+    @field_validator("social_role_type", mode="before")
+    @classmethod
+    def coerce_social_role_type(cls, v: Any) -> Optional[str]:
+        if not v:
+            return None
+        s = str(v).lower().strip()
+        if s in ("student_peer", "peer", "classmate", "student", "contemporary"):
+            return "student_peer"
+        if s in ("faculty_staff", "faculty", "staff", "teacher", "principal"):
+            return "faculty_staff"
+        if s in ("adult_service", "service", "clerk", "cashier"):
+            return "adult_service"
+        if s in ("family_relative", "relative", "parent", "family"):
+            return "family_relative"
+        if s in ("general", "neutral"):
+            return "general"
+        return None
 
     @field_validator("level", mode="before")
     @classmethod
@@ -111,6 +130,8 @@ class NewEntity(BaseModel):
     clique: Optional[str] = None
     location: Optional[str] = None
     race: Optional[str] = None
+    species: Optional[str] = Field(default=None, description="Canonical animal species if beastfolk/hybrid, e.g. cat, fox, wolf, rabbit, tiger, lion, cheetah, fennec, mouse, bear, bird, reptile, snake, dragon, or human")
+    social_role_type: Optional[str] = Field(default=None, description="student_peer, faculty_staff, adult_service, or general")
     gender: Optional[str] = None
     age: Optional[Union[int, str]] = None
     appearance: Optional[Union[Appearance, Dict[str, Any], str]] = None
@@ -120,6 +141,24 @@ class NewEntity(BaseModel):
     preferences: List[str] = Field(default_factory=list)
     motivation: Optional[str] = None
     mannerisms: Optional[str] = None
+
+    @field_validator("social_role_type", mode="before")
+    @classmethod
+    def coerce_social_role_type(cls, v: Any) -> Optional[str]:
+        if not v:
+            return None
+        s = str(v).lower().strip()
+        if s in ("student_peer", "peer", "classmate", "student", "contemporary"):
+            return "student_peer"
+        if s in ("faculty_staff", "faculty", "staff", "teacher", "principal"):
+            return "faculty_staff"
+        if s in ("adult_service", "service", "clerk", "cashier"):
+            return "adult_service"
+        if s in ("family_relative", "relative", "parent", "family"):
+            return "family_relative"
+        if s in ("general", "neutral"):
+            return "general"
+        return None
 
 class MerchantEncounter(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -149,6 +188,8 @@ class RelationshipUpdate(BaseModel):
     npc_name: str
     delta_score: int = Field(default=0, description="-10 to +10")
     track: Optional[Literal["platonic", "romantic"]] = None
+    interaction_tone: Optional[Literal["warm", "neutral", "hostile", "flirtatious", "prying"]] = None
+    trait_alignment: Optional[Literal["resonated", "clashed", "none"]] = None
     role: Optional[str] = None
     description: Optional[str] = None
     faction: Optional[str] = None
@@ -185,6 +226,22 @@ class RelationshipUpdate(BaseModel):
             return int(v)
         except (TypeError, ValueError):
             return 0
+
+    @field_validator("interaction_tone", mode="before")
+    @classmethod
+    def coerce_interaction_tone(cls, v: Any) -> Optional[str]:
+        if not v:
+            return None
+        s = str(v).lower().strip()
+        return s if s in ("warm", "neutral", "hostile", "flirtatious", "prying") else None
+
+    @field_validator("trait_alignment", mode="before")
+    @classmethod
+    def coerce_trait_alignment(cls, v: Any) -> Optional[str]:
+        if not v:
+            return None
+        s = str(v).lower().strip()
+        return s if s in ("resonated", "clashed", "none") else None
 
 class FactionUpdate(BaseModel):
     faction_name: str

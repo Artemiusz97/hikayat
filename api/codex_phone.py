@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query
+import json
 
 import db
 from db import adb
@@ -19,6 +20,7 @@ from mechanics.system.phone import (
     lookup_social_profile,
     discover_suggested_peer,
     resolve_social_friend_request,
+    get_suggested_peers,
 )
 from mechanics.social.factions import (
     get_faction_tier,
@@ -212,46 +214,314 @@ async def manage_party_companion(req: CompanionPartyRequest):
 
 
 @router.get("/api/lorebook/{session_id}")
-async def get_lorebook(session_id: int):
-    """Fetches all lorebook entities (places, people, factions) grouped by category."""
+async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
+    """Fetches lorebook entities grouped by category, restricting person entities to discovered characters."""
+    import re
+    from mechanics.social.persona import infer_contact_gender
+    from mechanics.social.persona.intimacy.appearance import normalize_appearance
+
+    session = await adb(db.get_session, session_id) or {}
+    scen_key = str(session.get("scenario") or "fantasy")
+    curr_npcs = session.get("current_npcs") or []
+    party_npcs = await adb(db.get_session_party_npcs, session_id) or []
+    dialogue_partner = session.get("dialogue_partner") or ""
+
+    valid_uid = user_id if isinstance(user_id, int) else (int(user_id) if isinstance(user_id, str) and user_id.isdigit() else None)
+    lookup_uid = valid_uid or session.get("host_user_id") or 0
+    settings = await adb(db.get_settings, lookup_uid) if lookup_uid else {}
+    debug_reveal_all = bool((settings or {}).get("debug_reveal_all_info", 0))
+    phys_st = session.get("physical_state") if isinstance(session.get("physical_state"), dict) else None
+
     grouped = await adb(db.get_lorebook, session_id)
     commitments = await adb(db.get_active_commitments, session_id)
     contacts = await adb(db.get_contacts, session_id) or []
-    contact_score_map = {
-        (c.get("name") or "").lower().strip(): int(c.get("relationship_score", 0) or 0)
+    school_roster = await adb(db.get_school_roster, session_id) or []
+    dir_by_name = {str(d.get("name", "")).strip().lower(): d for d in school_roster if d.get("name")}
+
+    contact_map = {
+        (c.get("name") or "").lower().strip(): c
         for c in contacts if c.get("name")
     }
+
+    char_row = await adb(db.get_character, lookup_uid) if lookup_uid else None
+    player_char_name = str((char_row or {}).get("name") or session.get("character_name") or "").strip().lower()
+
+    party_names = {
+        str(p.get("name", "")).strip().lower()
+        for p in (party_npcs or [])
+        if isinstance(p, dict) and p.get("name")
+    } | {
+        str(p).strip().lower() for p in (party_npcs or []) if isinstance(p, str) and p.strip()
+    }
+
+    # Only include NPCs encountered in person (current scene, turn history)
+    met_in_story_names = set(party_names)
+    for n in curr_npcs:
+        if isinstance(n, dict) and n.get("name"):
+            met_in_story_names.add(str(n["name"]).lower().strip())
+        elif isinstance(n, str) and n.strip():
+            met_in_story_names.add(str(n).lower().strip())
+    if dialogue_partner:
+        met_in_story_names.add(str(dialogue_partner).lower().strip())
+    for dp_item in (session.get("dialogue_partners") or []):
+        if dp_item:
+            met_in_story_names.add(str(dp_item).lower().strip())
+
+    # Include all NPCs encountered across session turn history (witnesses, dialogue partners, present NPCs)
+    for h in (session.get("history") or []):
+        if not isinstance(h, dict):
+            continue
+        for w in (h.get("witnessed_by") or []):
+            if isinstance(w, str) and w.strip():
+                met_in_story_names.add(w.strip().lower())
+        hist_dp = h.get("dialogue_partner")
+        if hist_dp and isinstance(hist_dp, str) and hist_dp.strip():
+            met_in_story_names.add(hist_dp.strip().lower())
+        for ru in (h.get("relationship_updates") or []):
+            if isinstance(ru, dict) and ru.get("npc_name"):
+                met_in_story_names.add(str(ru["npc_name"]).strip().lower())
+        for n in (h.get("current_npcs") or h.get("present_npcs") or []):
+            if isinstance(n, dict) and n.get("name"):
+                met_in_story_names.add(str(n["name"]).strip().lower())
+            elif isinstance(n, str) and n.strip():
+                met_in_story_names.add(str(n).strip().lower())
+
+    if player_char_name:
+        met_in_story_names.discard(player_char_name)
+
+    discovered_people_names = set()
     all_entities = []
+
     if isinstance(grouped, dict):
         for cat, items in grouped.items():
             for it in items:
                 it_dict = dict(it)
-                if cat == "person" or it_dict.get("entity_type") == "person":
-                    p_name = (it_dict.get("name") or "").lower().strip()
-                    it_dict["relationship_score"] = contact_score_map.get(p_name, 0)
-                all_entities.append(it_dict)
-        for p in grouped.get("person", []):
-            if isinstance(p, dict):
-                p_name = (p.get("name") or "").lower().strip()
-                p["relationship_score"] = contact_score_map.get(p_name, 0)
+                is_person = (cat == "person" or it_dict.get("entity_type") == "person")
 
-        existing_person_names = {str(p.get("name") or "").strip().lower() for p in grouped.get("person", [])}
+                if is_person:
+                    p_name = (it_dict.get("name") or "").lower().strip()
+                    if p_name == player_char_name:
+                        continue
+                    c = contact_map.get(p_name)
+                    dir_entry = dir_by_name.get(p_name)
+                    score = int(it_dict.get("relationship_score", 0) or 0)
+                    if c:
+                        score = int(c.get("relationship_score", 0) or 0)
+
+                    # A character is strictly discovered if met in person (including past turns via last_in_person_ts or story lore), has active affinity, or is an unlocked contact
+                    from mechanics.social.relationships import is_unlocked_contact
+                    has_last_in_person = bool(c and (c.get("last_in_person_ts") or (c.get("basic_info") or {}).get("last_in_person_ts")))
+                    is_custom_story_lore = bool(
+                        not it_dict.get("faction")
+                        and (
+                            it_dict.get("mannerisms")
+                            or it_dict.get("motivation")
+                            or (isinstance(it_dict.get("appearance"), dict) and it_dict["appearance"].get("distinctive_features"))
+                        )
+                    )
+                    is_discovered = bool(
+                        debug_reveal_all
+                        or p_name in met_in_story_names
+                        or score != 0
+                        or (c is not None and is_unlocked_contact(c, party_names))
+                        or has_last_in_person
+                        or is_custom_story_lore
+                    )
+
+                    # Filter out unencountered background faction / directory placeholders
+                    if not is_discovered:
+                        continue
+
+                    # Enrich person details
+                    it_dict["relationship_score"] = score
+                    if c:
+                        b_info = c.get("basic_info") or {}
+                        if isinstance(b_info, str):
+                            try:
+                                b_info = json.loads(b_info)
+                            except Exception:
+                                b_info = {}
+                        it_dict["grade"] = it_dict.get("grade") or b_info.get("grade") or ""
+                        it_dict["club"] = it_dict.get("club") or b_info.get("club") or ""
+                        it_dict["mannerisms"] = it_dict.get("mannerisms") or b_info.get("mannerisms") or ""
+                        it_dict["description"] = it_dict.get("description") or b_info.get("description") or ""
+                        it_dict["race"] = it_dict.get("race") or c.get("race") or b_info.get("race") or "human"
+                        it_dict["gender"] = it_dict.get("gender") or c.get("gender") or b_info.get("gender") or ""
+                        it_dict["role"] = it_dict.get("role") or b_info.get("role") or b_info.get("occupation") or ""
+                        if c.get("appearance"):
+                            it_dict["appearance"] = c["appearance"]
+                            it_dict["appearance_json"] = c.get("appearance_json") or json.dumps(c["appearance"])
+
+                    if dir_entry:
+                        it_dict["grade"] = it_dict.get("grade") or dir_entry.get("grade") or ""
+                        it_dict["club"] = it_dict.get("club") or dir_entry.get("club") or ""
+                        it_dict["mannerisms"] = it_dict.get("mannerisms") or dir_entry.get("mannerisms") or ""
+                        it_dict["race"] = it_dict.get("race") or dir_entry.get("race") or "human"
+                        it_dict["gender"] = it_dict.get("gender") or dir_entry.get("gender") or ""
+                        it_dict["role"] = it_dict.get("role") or dir_entry.get("role") or ""
+
+                    # Ensure valid gender
+                    raw_g = str(it_dict.get("gender") or "").strip().lower()
+                    if not raw_g or raw_g in ("unknown", "none"):
+                        it_dict["gender"] = infer_contact_gender({"name": it_dict.get("name"), "basic_info": it_dict}) or "female"
+
+                    # Ensure full normalized appearance
+                    app = it_dict.get("appearance")
+                    if isinstance(app, str):
+                        try:
+                            app = json.loads(app)
+                        except Exception:
+                            app = {}
+                    if not isinstance(app, dict):
+                        app = {}
+
+                    has_full_app = bool(
+                        app.get("eye_color") and app.get("hair_color") and (app.get("stature") or app.get("physique"))
+                    )
+                    if not has_full_app:
+                        norm_app = normalize_appearance(
+                            app,
+                            gender=it_dict["gender"],
+                            race=it_dict.get("race", "human"),
+                            scen_key=scen_key,
+                            desc=it_dict.get("description", ""),
+                            name=it_dict.get("name", "")
+                        )
+                        it_dict["appearance"] = norm_app
+                        it_dict["appearance_json"] = json.dumps(norm_app)
+                        # Persist back into DB so it heals permanently
+                        try:
+                            await adb(
+                                db.upsert_lorebook_entity,
+                                session_id=session_id,
+                                entity_type="person",
+                                name=it_dict["name"],
+                                gender=it_dict["gender"],
+                                race=it_dict.get("race", "human"),
+                                appearance=norm_app
+                            )
+                        except Exception:
+                            pass
+
+                    # Enrich full dossier for character profile viewing
+                    it_basic = it_dict.get("basic_info") or {}
+                    if isinstance(it_basic, str):
+                        try:
+                            it_basic = json.loads(it_basic)
+                        except Exception:
+                            it_basic = {}
+                    it_basic.setdefault("role", it_dict.get("role") or "")
+                    it_basic.setdefault("grade", it_dict.get("grade") or "")
+                    it_basic.setdefault("club", it_dict.get("club") or "")
+                    it_basic.setdefault("race", it_dict.get("race") or "human")
+                    it_basic.setdefault("gender", it_dict["gender"])
+                    it_basic.setdefault("description", it_dict.get("description") or "")
+                    it_basic.setdefault("mannerisms", it_dict.get("mannerisms") or "")
+                    it_dict["basic_info"] = it_basic
+
+                    enriched_person = _enrich_contact_record(it_dict, session_id, scen_key, debug_reveal_all, phys_st=phys_st)
+                    it_dict.update(enriched_person)
+                    it_dict["is_contact"] = bool(c is not None)
+
+                    discovered_people_names.add(p_name)
+                    all_entities.append(it_dict)
+                else:
+                    # Non-person world lore entry (place, faction, artifact, world concept)
+                    all_entities.append(it_dict)
+
+        # Merge in any discovered contacts not yet in all_entities
         for c in contacts:
             c_name = str(c.get("name") or "").strip()
-            if c_name and c_name.lower() not in existing_person_names:
-                b_info = c.get("basic_info") or {}
-                p_dict = {
-                    "name": c_name,
-                    "role": b_info.get("role") or b_info.get("occupation") or "Contact",
-                    "race": c.get("race") or b_info.get("race") or "Unknown",
-                    "gender": c.get("gender") or b_info.get("gender") or "Unknown",
-                    "description": b_info.get("description") or "",
-                    "entity_type": "person",
-                    "relationship_score": contact_score_map.get(c_name.lower(), 0),
-                }
-                grouped.setdefault("person", []).append(p_dict)
-                all_entities.append(p_dict)
-                existing_person_names.add(c_name.lower())
+            c_name_lower = c_name.lower()
+            if not c_name or c_name_lower == player_char_name or c_name_lower in discovered_people_names:
+                continue
+
+            score = int(c.get("relationship_score", 0) or 0)
+            from mechanics.social.relationships import is_unlocked_contact
+            is_discovered_c = bool(
+                debug_reveal_all
+                or c_name_lower in met_in_story_names
+                or score != 0
+                or is_unlocked_contact(c, party_names)
+                or bool(c.get("last_in_person_ts") or (c.get("basic_info") or {}).get("last_in_person_ts"))
+            )
+            if not is_discovered_c:
+                continue
+
+            b_info = c.get("basic_info") or {}
+            if isinstance(b_info, str):
+                try:
+                    b_info = json.loads(b_info)
+                except Exception:
+                    b_info = {}
+
+            c_gender = c.get("gender") or b_info.get("gender") or infer_contact_gender({"name": c_name, "basic_info": b_info}) or "female"
+            c_race = c.get("race") or b_info.get("race") or "human"
+            c_app = c.get("appearance")
+            if isinstance(c_app, str):
+                try:
+                    c_app = json.loads(c_app)
+                except Exception:
+                    c_app = {}
+            if not isinstance(c_app, dict) or not (c_app.get("eye_color") and c_app.get("hair_color")):
+                c_app = normalize_appearance(c_app or {}, gender=c_gender, race=c_race, scen_key=scen_key, desc=b_info.get("description", ""), name=c_name)
+
+            p_dict = dict(c)
+            p_dict["name"] = c_name
+            p_dict["role"] = b_info.get("role") or b_info.get("occupation") or "Contact"
+            p_dict["race"] = c_race
+            p_dict["gender"] = c_gender
+            p_dict["grade"] = b_info.get("grade") or ""
+            p_dict["club"] = b_info.get("club") or ""
+            p_dict["mannerisms"] = b_info.get("mannerisms") or ""
+            p_dict["description"] = b_info.get("description") or ""
+            p_dict["appearance"] = c_app
+            p_dict["appearance_json"] = json.dumps(c_app)
+            p_dict["entity_type"] = "person"
+            p_dict["basic_info"] = b_info
+            p_dict["relationship_score"] = score
+            p_dict["is_contact"] = True
+
+            enriched_p = _enrich_contact_record(p_dict, session_id, scen_key, debug_reveal_all, phys_st=phys_st)
+            p_dict.update(enriched_p)
+            grouped.setdefault("person", []).append(p_dict)
+            all_entities.append(p_dict)
+            discovered_people_names.add(c_name_lower)
+
+        # Synthesize any characters met in person who had neither lorebook nor contact entry
+        for met_name_lower in met_in_story_names:
+            if met_name_lower in discovered_people_names or met_name_lower == player_char_name:
+                continue
+            r_entry = dir_by_name.get(met_name_lower)
+            matched_curr_npc = None
+            for n in curr_npcs:
+                if isinstance(n, dict) and str(n.get("name", "")).strip().lower() == met_name_lower:
+                    matched_curr_npc = n
+                    break
+
+            display_name = (r_entry.get("name") if r_entry else None) or (matched_curr_npc.get("name") if matched_curr_npc else met_name_lower.title())
+            p_dict = {
+                "name": display_name,
+                "role": (r_entry.get("role") if r_entry else None) or (matched_curr_npc.get("role") if matched_curr_npc else "Acquaintance"),
+                "grade": (r_entry.get("grade") if r_entry else "") or "",
+                "club": (r_entry.get("club") if r_entry else "") or "",
+                "race": (r_entry.get("race") if r_entry else "") or "human",
+                "gender": (r_entry.get("gender") if r_entry else "") or "female",
+                "entity_type": "person",
+                "relationship_score": 0,
+                "is_contact": False,
+            }
+            enriched_p = _enrich_contact_record(p_dict, session_id, scen_key, debug_reveal_all, phys_st=phys_st)
+            p_dict.update(enriched_p)
+            grouped.setdefault("person", []).append(p_dict)
+            all_entities.append(p_dict)
+            discovered_people_names.add(met_name_lower)
+
+        # Update categories["person"] to only discovered people
+        grouped["person"] = [
+            e for e in all_entities if e.get("entity_type") == "person"
+        ]
+
     return {
         "categories": grouped,
         "entities": all_entities,
@@ -260,386 +530,8 @@ async def get_lorebook(session_id: int):
 
 
 def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_reveal_all: bool, phys_st: dict | None = None) -> dict:
-    c = dict(c_raw)
-    score = int(c.get("relationship_score", 0) or 0)
-    if debug_reveal_all:
-        info_level = 3
-    elif hasattr(mechanics.social.persona, "get_contact_info_level"):
-        info_level = mechanics.social.persona.get_contact_info_level(c)
-    else:
-        info_level = mechanics.social.relationships.get_unlocked_info_level(score)
-
-    skill_modifier = mechanics.social.relationships.get_relationship_modifier(score)
-    raw_prefs = c.get("preferences") or []
-    dislikes = c.get("dislikes")
-    clean_likes = None
-    try:
-        cat_likes, cat_dislikes = mechanics.social.persona.categorize_likes_and_dislikes(
-            raw_prefs, traits=c.get("unlocked_traits") or []
-        )
-        if not dislikes and cat_dislikes:
-            dislikes = cat_dislikes
-        if cat_likes:
-            clean_likes = cat_likes
-    except Exception:
-        pass
-
-    if dislikes:
-        dislike_set = {str(d).lower().strip() for d in dislikes}
-        if clean_likes:
-            c["preferences"] = [l for l in clean_likes if str(l).lower().strip() not in dislike_set]
-        else:
-            c["preferences"] = [p for p in raw_prefs if str(p).lower().strip() not in dislike_set]
-    elif clean_likes:
-        c["preferences"] = clean_likes
-
-    # 1. Synchronize & format Relations, Romantic Standing, and Family Tree
-    try:
-        relations = mechanics.social.genealogy.ensure_contact_relations(
-            c, session_id=session_id, scenario=scen_key
-        )
-    except Exception:
-        relations = c.get("relations") if isinstance(c.get("relations"), dict) else {}
-
-    try:
-        disclosed_relations = mechanics.social.genealogy.format_relations_for_disclosure(
-            relations, info_level=info_level, debug_reveal=debug_reveal_all
-        )
-    except Exception:
-        disclosed_relations = {}
-
-    c["relations"] = relations
-    c["disclosed_relations"] = disclosed_relations
-    family_tree = relations.get("family") or c.get("family_tree") or []
-    c["family_tree"] = family_tree
-
-    # 2. Extract traits, gender, race, description for accurate intimate dossier normalization
-    from mechanics.social.persona import infer_contact_gender, clean_attribute_list_string, enforce_intimacy_safeguard_invariants
-    from mechanics.social.persona.intimacy.appearance import normalize_appearance
-    from mechanics.social.persona.intimacy.formatting import format_intimate_profile_sections
-
-    c_gender = infer_contact_gender(c) or str(c.get("gender") or (c.get("basic_info") or {}).get("gender") or "female")
-    c_basic = c.get("basic_info") or {}
-    c_race = str(c.get("race") or c_basic.get("race") or (c.get("appearance") or {}).get("race") or "")
-    c_desc = c_basic.get("description", "")
-    if isinstance(c_desc, dict):
-        c_desc = " ".join(str(v) for v in c_desc.values() if v)
-    c_traits = list(c.get("unlocked_traits", [])) or list(c.get("traits", []))
-    c_role = str(c_basic.get("role") or c_basic.get("occupation") or "")
-
-    raw_app = dict(c.get("appearance") or {})
-    raw_app["intimate_memories"] = list(c.get("intimate_memories", []))
-    app = normalize_appearance(
-        raw_app,
-        gender=c_gender,
-        race=c_race or "human",
-        scen_key=scen_key,
-        desc=c_desc,
-        traits=c_traits,
-        role=c_role
-    )
-    app["intimate_memories"] = list(c.get("intimate_memories", []))
-    app = enforce_intimacy_safeguard_invariants(app)
-
-    i_exp_val = str(app.get("intercourse_experience") or app.get("virginity_intercourse") or "virgin").strip().lower()
-    o_exp_val = str(app.get("oral_experience") or app.get("virginity_oral") or "inexperienced").strip().lower()
-    m_exp_val = str(app.get("manual_experience") or app.get("virginity_manual") or "inexperienced").strip().lower()
-    a_exp_val = str(app.get("anal_experience") or app.get("virginity_anal") or "inexperienced").strip().lower()
-
-    had_first_time = bool(app.get("had_first_time_with_player")) and (i_exp_val == "non_virgin")
-    past_history = c.get("past_intimate_history") or app.get("past_intimate_history") or app.get("past_intimate_entries")
-    if not past_history and c.get("intimate_memories"):
-        past_mems = [str(m).replace("Past History:", "").strip() for m in c.get("intimate_memories") if str(m).startswith("Past History:")]
-        if past_mems:
-            past_history = past_mems
-
-    is_virgin_shared = False
-    if isinstance(past_history, list) and past_history:
-        is_virgin_shared = any("shared first time with you" in str(p) for p in past_history)
-    elif isinstance(past_history, str):
-        is_virgin_shared = "shared first time with you" in past_history
-
-    # Check if existing past history is out of sync with current intimate experience tracks
-    has_oral_exp = o_exp_val in ("has_done_oral", "has_received_oral", "has_done_and_received_oral")
-    has_anal_exp = a_exp_val in ("has_done_anal", "has_received_anal", "has_done_and_received_anal")
-    past_str = " ".join(past_history) if isinstance(past_history, list) else str(past_history or "")
-    is_out_of_sync = bool(
-        past_history
-        and not had_first_time
-        and (
-            (has_oral_exp and "oral" not in past_str.lower())
-            or (has_anal_exp and "anal" not in past_str.lower())
-        )
-    )
-
-    if had_first_time:
-        past_history = ["Virgin (No prior intimate history before meeting you; shared first time with you)"]
-    elif not past_history or is_out_of_sync or (is_virgin_shared and not had_first_time):
-        try:
-            name_str = str(c.get("name") or c.get("npc_id") or "npc").strip()
-            import hashlib
-            hash_val = int(hashlib.md5(f"{name_str}_past_history".encode("utf-8")).hexdigest(), 16)
-            c_race_val = str(c.get("race") or app.get("race") or "")
-            c_gender_val = str(c.get("gender") or app.get("gender") or "female")
-            open_val = str(app.get("erotic_openness") or app.get("openness") or "moderate")
-            pred_i = str(app.get("predetermined_intercourse") or "").strip().lower()
-
-            if (i_exp_val in ("virgin", "inexperienced", "") or pred_i == "virgin") and o_exp_val in ("inexperienced", "unknown", "") and m_exp_val in ("inexperienced", "unknown", "") and a_exp_val in ("inexperienced", "unknown", ""):
-                past_history = ["Virgin (No prior intimate history before meeting you)"]
-            else:
-                has_existing_partner = bool(
-                    c.get("relations", {}).get("current_partner")
-                    or (c.get("disclosed_relations") or {}).get("current_partner")
-                )
-                past_data = mechanics.social.persona.generate_past_intimate_history(
-                    hash_val=hash_val,
-                    race=c_race_val,
-                    gender=c_gender_val,
-                    scenario=scen_key,
-                    openness=open_val,
-                    intercourse=i_exp_val,
-                    oral=o_exp_val,
-                    manual=m_exp_val,
-                    anal=a_exp_val,
-                    has_existing_partner=has_existing_partner,
-                )
-                if past_data and past_data.get("entries"):
-                    past_history = [str(e).replace("Past History:", "").strip() for e in past_data["entries"]]
-                elif past_data and past_data.get("entry"):
-                    past_history = [str(past_data["entry"]).replace("Past History:", "").strip()]
-                else:
-                    past_history = []
-
-                # Persist generated past history into contact memories
-                if past_history:
-                    try:
-                        import db as _db
-                        sess_id = c.get("session_id", 0)
-                        char_id = c.get("character_id", 0)
-                        npc_id = c.get("npc_id") or name_str
-
-                        if is_out_of_sync and c.get("id"):
-                            import json as _json
-                            with _db.get_conn() as conn:
-                                row = conn.execute("SELECT intimate_memories_json, appearance_json FROM contacts WHERE id = ?", (c.get("id"),)).fetchone()
-                                if row:
-                                    cur_mems = _json.loads(row[0] or "[]")
-                                    cur_app = _json.loads(row[1] or "{}")
-                                    clean_mems = [m for m in cur_mems if not str(m).startswith("Past History:")]
-                                    new_mems = [f"Past History: {e}" for e in past_history] + clean_mems
-                                    if "intimate_memories" in cur_app:
-                                        cur_app["intimate_memories"] = new_mems
-                                    if "shared_romantic_milestones" in cur_app:
-                                        srm = [m for m in cur_app.get("shared_romantic_milestones", []) if not str(m).startswith("Past History:")]
-                                        cur_app["shared_romantic_milestones"] = [f"Past History: {e}" for e in past_history] + srm
-                                    conn.execute(
-                                        "UPDATE contacts SET intimate_memories_json = ?, appearance_json = ? WHERE id = ?",
-                                        (_json.dumps(new_mems), _json.dumps(cur_app), c.get("id"))
-                                    )
-                        else:
-                            for ph_entry in past_history:
-                                mem_str = f"Past History: {ph_entry}"
-                                _db.upsert_contact(
-                                    session_id=sess_id,
-                                    character_id=char_id,
-                                    npc_id=npc_id,
-                                    name=name_str,
-                                    new_memory=mem_str,
-                                )
-                    except Exception:
-                        pass
-        except Exception:
-            past_history = []
-
-    # 3. Enrich appearance & Intimate Dossier for Web Codex / Phone display
-    intimate_unlocked = (info_level >= 3) or debug_reveal_all or c.get("intimate_revealed", False) or c.get("all_revealed", False) or app.get("intimate_revealed", False)
-    i_rev = intimate_unlocked or debug_reveal_all or c.get("intercourse_revealed", False) or app.get("intercourse_revealed", False)
-    o_rev = intimate_unlocked or debug_reveal_all or c.get("oral_revealed", False) or app.get("oral_revealed", False) or i_rev
-    m_rev = intimate_unlocked or debug_reveal_all or c.get("manual_revealed", False) or app.get("manual_revealed", False) or i_rev
-
-    revealed_flags = {
-        "intimate_revealed": intimate_unlocked,
-        "all_revealed": intimate_unlocked or debug_reveal_all,
-        "mannerisms_revealed": intimate_unlocked or (info_level >= 1) or debug_reveal_all,
-        "intercourse_revealed": i_rev,
-        "oral_revealed": o_rev,
-        "manual_revealed": m_rev,
-        "demeanor_revealed": intimate_unlocked or debug_reveal_all or c.get("demeanor_revealed", False) or app.get("demeanor_revealed", False),
-        "dynamic_revealed": intimate_unlocked or debug_reveal_all or c.get("dynamic_revealed", False) or app.get("dynamic_revealed", False),
-        "openness_revealed": intimate_unlocked or debug_reveal_all or c.get("openness_revealed", False) or app.get("openness_revealed", False),
-        "sensitive_spots_revealed": intimate_unlocked or debug_reveal_all or c.get("sensitive_spots_revealed", False) or app.get("sensitive_spots_revealed", False),
-        "turn_ons_revealed": intimate_unlocked or debug_reveal_all or c.get("turn_ons_revealed", False) or app.get("turn_ons_revealed", False),
-        "turn_offs_revealed": intimate_unlocked or debug_reveal_all or c.get("turn_offs_revealed", False) or app.get("turn_offs_revealed", False),
-        "fetishes_revealed": intimate_unlocked or debug_reveal_all or c.get("fetishes_revealed", False) or app.get("fetishes_revealed", False),
-        "underwear_revealed": intimate_unlocked or debug_reveal_all or c.get("underwear_revealed", False) or app.get("underwear_revealed", False),
-        "act_preferences_revealed": intimate_unlocked or debug_reveal_all or c.get("act_preferences_revealed", False) or app.get("act_preferences_revealed", False),
-    }
-
-    try:
-        intimate_sections = format_intimate_profile_sections(
-            app,
-            gender=c_gender,
-            race=c_race or "human",
-            scen_key=scen_key,
-            info_level=info_level,
-            revealed_flags=revealed_flags
-        )
-    except Exception:
-        intimate_sections = {}
-    c["intimate_sections"] = intimate_sections
-
-    i_state = str(app.get("intercourse_experience") or "virgin").strip().lower()
-    exp_disp = ("Virgin" if i_state == "virgin" else "Non-Virgin") if i_rev else "Unknown"
-    app["experience"] = exp_disp if i_rev else ""
-
-    raw_g = str(c.get("gender") or app.get("gender") or "female").strip().lower()
-    is_male = any(kw in raw_g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in raw_g for kw in ("female", "woman"))
-
-    oral_state = str(app.get("oral_experience") or "unknown").strip().lower()
-    oral_map = {
-        "inexperienced": "Inexperienced",
-        "has_done_oral": "Has Performed",
-        "has_received_oral": "Has Received",
-        "has_done_and_received_oral": "Has Performed & Received"
-    }
-    oral_disp = "Unknown"
-    if o_rev and oral_state != "unknown":
-        oral_disp = oral_map.get(oral_state, "Inexperienced")
-
-    manual_state = str(app.get("manual_experience") or "unknown").strip().lower()
-    man_map = {
-        "inexperienced": "Inexperienced",
-        "has_done_manual": "Has Given",
-        "has_received_manual": "Has Received",
-        "has_done_and_received_manual": "Has Given & Received"
-    }
-    man_disp = "Unknown"
-    if m_rev and manual_state != "unknown":
-        man_disp = man_map.get(manual_state, "Inexperienced")
-
-    if is_male:
-        p_size = str(app.get("penis_size") or "average").title()
-        p_size_disp = p_size if (intimate_unlocked or debug_reveal_all) else "Unknown"
-        app["anatomy"] = f"Penis Size: {p_size_disp} • Intercourse: {exp_disp} • Oral: {oral_disp} • Manual: {man_disp}"
-    else:
-        b_size = str(app.get("breast_size") or "Modest B-Cup").title()
-        b_size_disp = b_size
-        app["anatomy"] = f"Breast Size: {b_size_disp} • Intercourse: {exp_disp} • Oral: {oral_disp} • Manual: {man_disp}"
-
-    if isinstance(app.get("undergarments"), dict):
-        under_d = app.get("undergarments")
-        bra_str = under_d.get("bra", "")
-        und_str = under_d.get("underwear", "")
-        if bra_str and und_str:
-            app["undergarments"] = f"Bra: {bra_str} • Underwear: {und_str}"
-        elif bra_str:
-            app["undergarments"] = f"Bra: {bra_str}"
-        elif und_str:
-            app["undergarments"] = f"Underwear: {und_str}"
-    elif not app.get("undergarments") and (app.get("bra") or app.get("underwear")):
-        bra_str = app.get("bra", "")
-        und_str = app.get("underwear", "")
-        if bra_str and und_str:
-            app["undergarments"] = f"Bra: {bra_str} • Underwear: {und_str}"
-        elif bra_str:
-            app["undergarments"] = f"Bra: {bra_str}"
-        elif und_str:
-            app["undergarments"] = f"Underwear: {und_str}"
-
-    t_rev = intimate_unlocked or debug_reveal_all or c.get("turn_ons_revealed", False) or app.get("turn_ons_revealed", False)
-    if not t_rev:
-        app["turn_ons"] = []
-    else:
-        t_cleaned = clean_attribute_list_string(app.get("turn_ons"))
-        if t_cleaned:
-            app["turn_ons"] = [t.strip() for t in t_cleaned.split(",") if t.strip() and t.strip().lower() not in ("none", "unknown")]
-
-    s_rev = intimate_unlocked or debug_reveal_all or c.get("sensitive_spots_revealed", False) or app.get("sensitive_spots_revealed", False)
-    if not s_rev:
-        app["erogenous_zones"] = []
-        app["sensitive_spots"] = ""
-    else:
-        s_cleaned = clean_attribute_list_string(app.get("sensitive_spots"))
-        if s_cleaned:
-            app["erogenous_zones"] = [s.strip() for s in s_cleaned.split(",") if s.strip() and s.strip().lower() not in ("none", "unknown")]
-        elif not app.get("erogenous_zones") and app.get("sensitive_spots"):
-            app["erogenous_zones"] = list(app.get("sensitive_spots"))
-
-    f_rev = intimate_unlocked or debug_reveal_all or c.get("fetishes_revealed", False) or app.get("fetishes_revealed", False)
-    if not f_rev:
-        app["kinks"] = []
-        app["fetishes"] = ""
-    else:
-        f_cleaned = clean_attribute_list_string(app.get("fetishes") or app.get("kinks"))
-        if f_cleaned and f_cleaned.lower() not in ("none", "none (vanilla)", "unknown", ""):
-            app["kinks"] = [f.strip() for f in f_cleaned.split(",") if f.strip() and f.strip().lower() not in ("none", "none (vanilla)", "unknown")]
-
-    pref_rev = intimate_unlocked or debug_reveal_all or c.get("act_preferences_revealed", False) or app.get("act_preferences_revealed", False)
-    if not pref_rev:
-        app["favorite_acts"] = []
-        app["act_likes"] = ""
-        app["disliked_acts"] = []
-        app["act_dislikes"] = ""
-    else:
-        likes_cleaned = clean_attribute_list_string(app.get("act_likes") or app.get("favorite_acts"))
-        if likes_cleaned and likes_cleaned.lower() not in ("none", "unknown", ""):
-            app["favorite_acts"] = [l.strip() for l in likes_cleaned.split(",") if l.strip() and l.strip().lower() not in ("none", "unknown")]
-
-        dislikes_cleaned = clean_attribute_list_string(app.get("act_dislikes") or app.get("disliked_acts"))
-        if dislikes_cleaned and dislikes_cleaned.lower() not in ("none", "unknown", ""):
-            app["disliked_acts"] = [d.strip() for d in dislikes_cleaned.split(",") if d.strip() and d.strip().lower() not in ("none", "unknown")]
-
-    c["appearance"] = app
-    c["info_level"] = info_level
-    c["skill_modifier"] = skill_modifier
-    c["dislikes"] = dislikes or []
-    c["debug_revealed"] = debug_reveal_all
-    history_unlocked = intimate_unlocked or (info_level >= 2) or debug_reveal_all or c.get("history_revealed", False) or app.get("history_revealed", False)
-    if history_unlocked:
-        if isinstance(past_history, list):
-            c["past_intimate_history"] = " • ".join(past_history)
-            c["past_intimate_entries"] = past_history
-        else:
-            c["past_intimate_history"] = str(past_history or "")
-            c["past_intimate_entries"] = [str(past_history)] if past_history else []
-    else:
-        c["past_intimate_history"] = ""
-        c["past_intimate_entries"] = []
-
-    from mechanics.social.persona import is_romantic_milestone_str
-    raw_mems = list(c.get("intimate_memories") or app.get("intimate_memories") or [])
-    c["shared_romantic_milestones"] = [
-        m for m in raw_mems if not str(m).startswith("Past History:") and is_romantic_milestone_str(str(m))
-    ]
-    recent_mems = list(c.get("recent_memories") or c.get("rel_history") or app.get("recent_memories") or [])
-    if not recent_mems:
-        recent_mems = [
-            m for m in raw_mems if not str(m).startswith("Past History:") and not is_romantic_milestone_str(str(m))
-        ]
-    from scenario_data import is_nsfw_scenario
-    c["is_nsfw"] = is_nsfw_scenario(scen_key)
-    c["recent_memories"] = recent_mems
-
-    try:
-        from mechanics.social.physical_state import compute_clothing_summary_badge, _match_actor_key
-        phys_actors = (phys_st.get("actors") or {}) if isinstance(phys_st, dict) else {}
-        c_name_str = str(c.get("name") or "").strip()
-        m_act_key = _match_actor_key(c_name_str, phys_actors) if c_name_str else ""
-        n_act_data = phys_actors.get(m_act_key) or {}
-        c["clothing_status"] = compute_clothing_summary_badge(n_act_data.get("clothing"), gender=c_gender)
-    except Exception:
-        c.setdefault("clothing_status", "Fully Clothed 👕")
-
-    raw_effs = c.get("status_effects") or (c.get("basic_info") or {}).get("status_effects") or []
-    if isinstance(raw_effs, list):
-        c["status_effects"] = [
-            str(s).strip()
-            for s in raw_effs
-            if str(s).strip() and str(s).strip().lower() not in ("[]", "{}", '""', "''", "none", "null")
-        ]
-    else:
-        c["status_effects"] = []
-    return c
+    from mechanics.social.relationships import enrich_contact_dossier
+    return enrich_contact_dossier(c_raw, session_id, scen_key, debug_reveal_all=debug_reveal_all, phys_st=phys_st)
 
 
 @router.get("/api/contacts/{session_id}")
@@ -648,7 +540,8 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None)):
     session = await adb(db.get_session, session_id) or {}
     scen_key = session.get("scenario", "fantasy")
     phys_st = session.get("physical_state") if isinstance(session.get("physical_state"), dict) else None
-    lookup_uid = user_id or session.get("host_user_id") or 0
+    valid_uid = user_id if isinstance(user_id, int) else (int(user_id) if isinstance(user_id, str) and user_id.isdigit() else None)
+    lookup_uid = valid_uid or session.get("host_user_id") or 0
     settings = await adb(db.get_settings, lookup_uid) if lookup_uid else {}
     debug_reveal_all = bool((settings or {}).get("debug_reveal_all_info", 0))
     char_row = await adb(db.get_character, lookup_uid) if lookup_uid else None
@@ -660,8 +553,12 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None)):
         lambda: [_enrich_contact_record(c, session_id, scen_key, debug_reveal_all, phys_st=phys_st) for c in contacts]
     )
     from scenario_data import is_nsfw_scenario
+    from mechanics.social.relationships import is_unlocked_contact
+    party_npcs = await adb(db.get_session_party_npcs, session_id)
+    party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
+    unlocked_contacts = [c for c in enriched_contacts if is_unlocked_contact(c, party_names)]
     return {
-        "contacts": enriched_contacts,
+        "contacts": unlocked_contacts,
         "is_nsfw": is_nsfw_scenario(scen_key),
         "scenario": scen_key
     }
@@ -1104,6 +1001,12 @@ async def get_phone_state(session_id: int, user_id: int = Query(...)):
                 "tags": meta.get("tags") or []
             })
 
+    party_npcs = await adb(db.get_session_party_npcs, session_id)
+    party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
+    from mechanics.social.relationships import is_unlocked_contact
+    unlocked_contacts = [dict(c) for c in contacts if is_unlocked_contact(c, party_names)]
+    suggested_peers = await adb(get_suggested_peers, session_id, user_id)
+
     return {
         "is_supported": is_supported,
         "scenario": scen_key,
@@ -1121,7 +1024,8 @@ async def get_phone_state(session_id: int, user_id: int = Query(...)):
         "appointments": [dict(a) for a in appointments],
         "gossip_feed": [dict(g) for g in gossip],
         "media_gallery": digital_media,
-        "contacts": [dict(c) for c in contacts],
+        "contacts": unlocked_contacts,
+        "suggested_peers": suggested_peers,
         "social_state": social_state,
     }
 
@@ -1201,6 +1105,19 @@ async def send_peerpulse_friend_request(session_id: int, req: PeerPulseFriendReq
         **res,
         "profile": req.profile,
         "contacts": [dict(c) for c in contacts],
+    }
+
+
+@router.get("/api/phone/{session_id}/peerpulse/suggestions")
+async def get_peerpulse_suggestions(session_id: int, user_id: int = Query(...)):
+    """Fetches suggested student peers for PeerPulse Graph."""
+    session = await adb(db.get_session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    suggestions = await adb(get_suggested_peers, session_id, user_id)
+    return {
+        "success": True,
+        "suggested_peers": suggestions,
     }
 
 

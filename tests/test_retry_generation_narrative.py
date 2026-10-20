@@ -157,7 +157,7 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
         """Verify that game_engine.turn.narration.run_narration_pass executes without import errors
         and correctly invokes call_llm_json and call_llm_json_stream."""
         from game_engine.turn.narration import run_narration_pass
-        from models.llm_schemas import NarrationOutcome
+        from models.llm_schemas import NarrationOutcome, DeterministicTurnNarration
 
         session = db.get_session(self.session_id)
         snapshot = {
@@ -187,7 +187,7 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res["scene_title"], "Garden Stillness")
             mock_call.assert_called_once()
             call_kwargs = mock_call.call_args[1]
-            self.assertEqual(call_kwargs["response_model"], NarrationOutcome)
+            self.assertIn(call_kwargs["response_model"], (DeterministicTurnNarration, NarrationOutcome))
             self.assertTrue(call_kwargs["is_nsfw"])
 
         # 2. Test stream execution
@@ -425,7 +425,52 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
             self.assertIn("whisper to Mia", out["outcome_narrative"])
             self.assertIn("Mia smiles", out["next_narrative"])
 
+    async def test_handle_retry_opening_scene_reinvokes_launch_opening_scene(self):
+        """Verify that handle_retry on Turn 0 (empty history, no snapshot) delegates to launch_opening_scene."""
+        db.save_session_scene(
+            self.session_id,
+            scene_title="Hikayat",
+            narrative="",
+            choices=[{"label": "Proceed", "is_fallback": True}],
+            history=[]
+        )
+
+        interaction = MagicMock(spec=discord.Interaction)
+        interaction.user.id = self.user_id
+        interaction.response.is_done.return_value = False
+        interaction.response.defer = AsyncMock()
+        interaction.followup.send = AsyncMock()
+
+        with patch.object(self.cog, "launch_opening_scene", new=AsyncMock()) as mock_launch:
+            await self.cog.handle_retry(interaction, self.session_id)
+            mock_launch.assert_called_once()
+            called_args, called_kwargs = mock_launch.call_args
+            self.assertEqual(called_kwargs.get("use_followup"), True)
+
+    async def test_generate_opening_scene_empty_narrative_generates_contextual_fallback(self):
+        """Verify that generate_opening_scene creates a rich fallback when LLM yields empty prose."""
+        from game_engine.turn.generation import generate_opening_scene
+        session = db.get_session(self.session_id)
+        char = db.get_character(self.user_id)
+        party = [(char, [])]
+
+        # LLM returns empty narrative and empty scene_title
+        empty_llm_result = {
+            "narrative": "",
+            "scene_title": "",
+            "choices": [{"label": "Observe surroundings", "stat": "PER", "requirement": 5}],
+            "location": "Student Commons ➔ Central Courtyard"
+        }
+
+        with patch("game_engine.turn.generation.game_engine.call_llm_json", new=AsyncMock(return_value=empty_llm_result)):
+            scene = await generate_opening_scene(session, party)
+            self.assertTrue(len(scene["narrative"]) > 0)
+            self.assertTrue(scene.get("is_fallback"))
+            self.assertIn("Student Commons", scene["narrative"])
+            self.assertNotEqual(scene.get("scene_title"), "")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

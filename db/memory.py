@@ -35,6 +35,23 @@ def add_commitment(
     """
     if not description or not description.strip():
         return {}
+    
+    # Delegate to commitments_engine for full unified schema population
+    try:
+        from mechanics.system.commitments_engine import create_promise
+        res = create_promise(
+            session_id=session_id,
+            promiser=source_entity or "player",
+            promisee=target_entity or "player",
+            description=description.strip(),
+            commitment_type=commitment_type or "promise",
+            turn_created=turn_number
+        )
+        if res:
+            return res
+    except Exception:
+        pass
+
     commitment_type = commitment_type.lower().strip()
     if commitment_type not in VALID_COMMITMENT_TYPES:
         commitment_type = "promise"
@@ -72,25 +89,25 @@ def get_commitment(session_id: int, commitment_id: int) -> dict:
 def get_active_commitments(
     session_id: int,
     entity_name: str | None = None,
-    limit: int = 10,
+    limit: int = 50,
 ) -> list[dict]:
     """Return all active commitments for a session, optionally filtered to
-    those involving a specific entity (as source OR target, case-insensitive).
+    those involving a specific entity (as source OR target OR in participants_json, case-insensitive).
     """
     with get_conn() as conn:
         if entity_name:
             name_lower = entity_name.strip().lower()
             rows = conn.execute(
                 """SELECT * FROM commitments_ledger
-                   WHERE session_id=? AND status='active'
-                     AND (lower(source_entity)=? OR lower(target_entity)=?)
+                   WHERE session_id=? AND status IN ('active', 'pending', 'approaching', 'arrived', 'in_progress')
+                     AND (lower(source_entity)=? OR lower(target_entity)=? OR participants_json LIKE ?)
                    ORDER BY turn_created ASC LIMIT ?""",
-                (session_id, name_lower, name_lower, limit),
+                (session_id, name_lower, name_lower, f"%{name_lower}%", limit),
             ).fetchall()
         else:
             rows = conn.execute(
                 """SELECT * FROM commitments_ledger
-                   WHERE session_id=? AND status='active'
+                   WHERE session_id=? AND status IN ('active', 'pending', 'approaching', 'arrived', 'in_progress')
                    ORDER BY turn_created ASC LIMIT ?""",
                 (session_id, limit),
             ).fetchall()
@@ -100,9 +117,10 @@ def get_active_commitments(
 def update_commitment_status(
     session_id: int, commitment_id: int, status: str
 ) -> bool:
-    """Update commitment status to 'fulfilled' or 'broken'. Returns True on success."""
+    """Update commitment status to 'fulfilled', 'broken', 'active', 'flaked', etc. Returns True on success."""
     status = status.lower().strip()
-    if status not in ("fulfilled", "broken", "active"):
+    valid_statuses = ("fulfilled", "broken", "active", "flaked", "completed", "cancelled", "voided", "abandoned")
+    if status not in valid_statuses:
         return False
     now = time.time()
     with get_conn() as conn:
@@ -412,13 +430,23 @@ def get_session_chronicles(session_id: int) -> list[dict]:
         ).fetchall()
         return [dict(r) for r in rows]
 
-def add_npc_memory(session_id: int, npc_name: str, turn_index: int, memory_fact: str, sentiment_delta: int = 0, importance: int = 1, is_secret: bool = False):
+def add_npc_memory(
+    session_id: int,
+    npc_name: str,
+    turn_index: int,
+    memory_fact: str,
+    sentiment_delta: int = 0,
+    importance: int = 1,
+    is_secret: bool = False,
+    emotional_tone: str = "",
+    open_thread: str = "",
+):
     with get_conn() as conn:
         conn.execute(
             """INSERT INTO npc_memories 
-               (session_id, npc_name, turn_index, memory_fact, sentiment_delta, importance, is_secret, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (session_id, npc_name, turn_index, memory_fact, sentiment_delta, importance, 1 if is_secret else 0, time.time())
+               (session_id, npc_name, turn_index, memory_fact, sentiment_delta, importance, is_secret, emotional_tone, open_thread, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (session_id, npc_name, turn_index, memory_fact, sentiment_delta, importance, 1 if is_secret else 0, emotional_tone or "", open_thread or "", time.time())
         )
 
 def get_npc_memories(session_id: int, npc_name: str) -> list[dict]:

@@ -23,6 +23,7 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v2.4.0** | 2026-10-21 | Minor | SDXL Scene Image Generation, Living Scene Stage Manager, World Schedules, Spatial Graph & Dijkstra Navigation, Commitments Engine, Intimacy Ledger & 5-Language Localization. |
 | **v2.3.0** | 2026-10-13 | Minor | Multi-Language Localization, NPC Gender & Pronoun Consistency, Combat Stance & Affinity Synergy, Sub-Facility Waypoints, Web UI Internationalization. |
 | **v2.2.0** | 2026-10-12 | Minor | Deterministic Affinity Engine, In-Game Smartphone Narrative Bridge, Engine Auditor, Equipment Expansion & Web UI Overhaul. |
 | **v2.1.0** | 2026-10-04 | Minor | Mechanics Domain Restructuring, Unified Web Frontend Architecture, Root Declutter, and Distribution Hardening. |
@@ -42,6 +43,41 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 ---
 
 ## Release Details
+
+### [v2.4.0] - 2026-10-21
+
+#### Added & Enhanced
+- **SDXL Scene Image Generation & Local Media Persistence (mechanics/media/, services/image_service.py, pi/)**:
+  - Local-first SDXL scene rendering engine synthesizing environment, lighting, character framing, and artistic atmosphere tokens directly from narrative prose.
+  - Negative prompt conditioning and aesthetic genre presets eliminating visual artifacts.
+  - Local disk persistence with content-hash deduplication and high-performance static asset streaming (/api/media/{hash}.png).
+  - In-game Smartphone photo vault and media gallery integration with persistent captions.
+- **Pre-Turn Stage Manager & Living Scene NPC Presence Arbitration (mechanics/world/stage_manager.py, game_engine/turn/)**:
+  - Deterministic living scene orchestrator tracking NPC spatial presence (*Present in Scene*, *Nearby in Facility*, *Off-Site*).
+  - Dynamic arrival and departure arbitration preventing phantom dialogue from distant characters.
+  - Ambient crowd separation isolating transient background murmurs from persistent codex and directory characters.
+- **World Routine & Dynamic NPC Schedules Engine (mechanics/world/schedules.py, mechanics/world/locations/)**:
+  - Time-of-day activity matrices cycling characters through 8 distinct daily routine phases.
+  - Behavioral scheduling reflecting character club, grade, role, and personality disposition.
+  - Proactive rendezvous tracking allowing NPCs to travel and arrive on schedule for player appointments.
+- **Spatial Graph Architecture, Dijkstra Navigation & Access Gates (mechanics/world/locations/spatial_graph.py, mechanics/world/locations/movement.py)**:
+  - Formally modeled bidirectional spatial graph with Dijkstra shortest-path pathfinding and travel distance calculations.
+  - Sub-facility waypoint preservation maintaining granular 3-tier precision (*Zone ➔ Facility ➔ Sub-Facility*).
+  - Access control gates restricting unauthorized passage into private staff offices or restricted campus facilities.
+- **Commitments, Promises & Scheduled Rendezvous Engine (mechanics/system/commitments_engine.py)**:
+  - Centralized commitments ledger tracking player promises, deadlines, and social rendezvous across SQLite tables.
+  - Multi-state lifecycle tracking (scheduled, 
+eminder_sent, rrived, ulfilled, roken, xpired) with dynamic social consequences.
+- **Intimacy Ledger & Normalized Relationship Graph (mechanics/social/relationship_graph.py, mechanics/social/persona/intimacy/ledger.py)**:
+  - Physical intimacy ledger tracking intimate milestones and disclosure gating with immutable physical safeguard invariants.
+  - Normalized relationship graph (social_ties, social_persons) tracking directed and mutual ties (dating, affairs, friendships, rivalries).
+  - Automatic write-through materialization to legacy relations dictionaries for full web UI backward compatibility.
+- **5-Language Internationalization Expansion (localization/, web/src/locales/)**:
+  - Comprehensive 5-language localization across backend and frontend: English (n), Polish (pl), Malay (ms), German (de), and Simplified Chinese (zh).
+  - Localized item lemmas, unicode icons, combat actions, dialogue intents, and UI interface strings.
+- **Anti-Hallucination Pronoun Consistency & Deterministic Turn Pipeline (game_engine/pronoun_resolver.py, game_engine/turn/narration.py)**:
+  - Multi-tier pronoun resolver eliminating gender drift in multi-character scenes.
+  - Deterministic Turn Narration pipeline decoupling state calculation from creative prose.
 
 ### [v2.3.0] - 2026-10-13
 

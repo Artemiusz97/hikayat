@@ -388,25 +388,18 @@ def _build_session_spatial_index(session_id: int = 0, scenario_key: str = "fanta
                     continue
 
                 # Skip known corrupted residential entries (school facilities under residential or commercial zone)
-
-                if ("residential" in z_name.lower() or "commercial" in z_name.lower()) and any(k in p_name.lower() for k in ("classroom", "homeroom", "science lab", "library", "staff room", "student council", "gymnasium")):
-
+                if ("residential" in z_name.lower() or "commercial" in z_name.lower()) and any(k in p_name.lower() for k in ("classroom", "homeroom", "science lab", "library", "staff room", "student council", "gymnasium", "glasshouse", "greenhouse", "botanical", "promenade", "commons")):
                     continue
 
                 # Skip incongruous containers or tier demotions in dynamic entries
-
                 if r.get("is_dynamic"):
-
                     if p_name.strip().lower() in primaries:
-
                         continue
-
+                    if p_name.strip().lower() in subs:
+                        continue
                     if s_lower in zones_index or s_lower in primaries:
-
                         continue
-
                     if is_incongruous_container(p_name, s_name, session_id=0, scenario_key=scenario_key):
-
                         continue
 
 
@@ -652,8 +645,15 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
             elif p0_low in primaries:
                 return (z_name, primaries[p0_low][1], p1 if p1 else "Main Area")
             return zones_index[p2_low]
-        if p1_low in primaries and p2_low in primaries:
+        if p0_low not in zones_index and p1_low in primaries and p2_low in primaries:
             return (primaries[p2_low][0], primaries[p2_low][1], "Main Area")
+
+        # Direct Zone + Canonical Primary match: if Part 0 is a known Zone and Part 1 is a known Primary in Part 0
+        if p0_low in zones_index and p1_low in primaries:
+            z_canonical, p_canonical = primaries[p1_low]
+            if z_canonical.strip().lower() == p0_low or p0_low in z_canonical.strip().lower() or z_canonical.strip().lower() in p0_low:
+                s_clean = "Main Area" if any(w in p2_low for w in ("wing", "administration", "faculty", "science", "academic", "media center")) else p2
+                return (p0, p_canonical, s_clean)
 
         # Check if Part 0 is actually a Primary Residence / Establishment (e.g. "Anderson Residence ➔ Maya's Room ➔ Main Area" or "Artemiusz's House ➔ Bedroom ➔ Desk")
         if (p0_low in primaries and "residence" in p0_low) or (
@@ -682,14 +682,17 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
 
                 from .constants import CAMPUS_FACILITY_KEYWORDS, RESIDENTIAL_PLACE_KEYWORDS, COMMERCIAL_PLACE_KEYWORDS
 
-                p1_is_campus = any(k in p1_low for k in CAMPUS_FACILITY_KEYWORDS) or p1_is_academic_room
-                p1_is_residence = (
-                    any(k in p1_low for k in RESIDENTIAL_PLACE_KEYWORDS) or
+                p1_is_campus = any(k in p1_low for k in CAMPUS_FACILITY_KEYWORDS) or p1_is_academic_room or (
+                    any(k in z_found.lower() for k in ("academy", "school", "campus", "athletics", "commons", "student commons"))
+                    and not any(ck in z_found.lower() for ck in ("commercial", "shopping", "arcade", "market", "residential", "suburban", "town", "quarter", "neighborhood"))
+                )
+                p1_is_residence = not p1_is_campus and not any(k in p1_low for k in ("glasshouse", "greenhouse", "botanical", "promenade", "commons", "plaza")) and (
+                    any(re.search(r'\b' + re.escape(k) + r'\b', p1_low) for k in RESIDENTIAL_PLACE_KEYWORDS) or
                     bool(re.search(r"\bhome\b", p1_low)) or
                     any(k in z_found.lower() for k in ("residential", "suburban", "quarter", "neighborhood", "heights"))
                 )
-                p1_is_commercial = (
-                    any(k in p1_low for k in COMMERCIAL_PLACE_KEYWORDS) or
+                p1_is_commercial = not p1_is_campus and not any(k in p1_low for k in ("glasshouse", "greenhouse", "botanical")) and (
+                    any(re.search(r'\b' + re.escape(k) + r'\b', p1_low) for k in COMMERCIAL_PLACE_KEYWORDS) or
                     any(k in z_found.lower() for k in ("commercial", "shopping", "arcade", "market", "promenade", "strip", "avenue"))
                 )
 
@@ -944,11 +947,24 @@ def parse_tiered_location(raw_location: Any, scenario_key: str = "fantasy", sess
         p_low = str(p or "").lower().strip()
         z_low = str(z or "").lower().strip()
 
-        is_campus_fac = any(k in p_low for k in CAMPUS_FACILITY_KEYWORDS)
-        is_residence_place = any(k in p_low for k in ("residence", "house", "apartment", "cottage", "manor", "villa")) or bool(re.search(r"home", p_low))
-        is_commercial_place = any(k in p_low for k in ("café", "cafe", "arcade", "store", "diner", "bakery", "restaurant", "bookstore", "boba", "mall", "shopping", "boutique", "market", "game center"))
-
         primaries_idx, _ = _build_session_spatial_index(session_id, scenario_key)
+
+        is_campus_fac = (
+            any(k in p_low for k in CAMPUS_FACILITY_KEYWORDS)
+            or (p_low in primaries_idx and any(sk in primaries_idx[p_low][0].lower() for sk in ("academy", "school", "campus", "athletics", "commons", "arts", "abandoned"))
+                and not any(ck in primaries_idx[p_low][0].lower() for ck in ("commercial", "shopping", "arcade", "market", "residential", "suburban", "town", "quarter", "neighborhood")))
+            or (
+                any(k in z_low for k in ("academy", "school", "campus", "athletics", "student commons"))
+                and not any(ck in z_low for ck in ("commercial", "shopping", "arcade", "market", "residential", "suburban", "town", "quarter", "neighborhood"))
+                and not any(re.search(r"\b" + re.escape(ck) + r"\b", p_low) for ck in ("café", "cafe", "arcade", "store", "diner", "bakery", "restaurant", "bookstore", "boba", "mall", "shopping", "boutique", "market", "game center", "residence", "house", "apartment", "cottage", "manor"))
+            )
+        )
+        is_residence_place = not is_campus_fac and not any(k in p_low for k in ("glasshouse", "greenhouse", "botanical", "promenade", "commons", "plaza")) and (
+            any(re.search(r"\b" + re.escape(k) + r"\b", p_low) for k in ("residence", "house", "apartment", "cottage", "manor", "villa")) or bool(re.search(r"\bhome\b", p_low))
+        )
+        is_commercial_place = not is_campus_fac and not any(k in p_low for k in ("glasshouse", "greenhouse", "botanical")) and any(
+            re.search(r"\b" + re.escape(k) + r"\b", p_low) for k in ("café", "cafe", "arcade", "store", "diner", "bakery", "restaurant", "bookstore", "boba", "mall", "shopping", "boutique", "market", "game center")
+        )
 
         if is_campus_fac:
             is_non_campus_zone = (

@@ -223,10 +223,10 @@ async def test_conversational_departure_directive_injection():
         result = await game_engine.resolve_turn(session, party, actions)
 
         assert mock_call.called
-        # Locate the primary TurnOutcome narrative call
-        from models.llm_schemas import TurnOutcome
+        # Locate the primary TurnOutcome / DeterministicTurnNarration narrative call
+        from models.llm_schemas import TurnOutcome, DeterministicTurnNarration
         narrative_call = next(
-            c for c in mock_call.call_args_list if c[1].get("response_model") == TurnOutcome
+            c for c in mock_call.call_args_list if c[1].get("response_model") in (TurnOutcome, DeterministicTurnNarration)
         )
         narrative_prompt = narrative_call[0][1]
         assert "[CONVERSATIONAL DEPARTURE & SCENE TRANSITION DIRECTIVE]" in narrative_prompt

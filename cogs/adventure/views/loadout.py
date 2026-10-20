@@ -132,6 +132,20 @@ class LoadoutCustomClassModal(discord.ui.Modal, title="Describe Your Profession"
     async def on_submit(self, interaction: discord.Interaction):
         c_name = str(self.class_name).strip()
         c_desc = str(self.description).strip()
+        scenario = self.session_config.get("scenario", "fantasy")
+        from scenario_data import is_non_combat_scenario
+        if is_non_combat_scenario(scenario):
+            await interaction.response.defer(ephemeral=True)
+            view = await LoadoutEquipmentPreviewView.create(
+                self.cog, self.user_id, self.session_config, c_name, c_desc, "", ""
+            )
+            embed = view.build_embed()
+            await interaction.followup.send(
+                content=f"Chosen Profession: **{c_name}** (Non-Combat)\n⚔️ **Adventure Loadout Preview** — Review your gear before embarking:",
+                embed=embed, view=view, ephemeral=True
+            )
+            return
+
         view = LoadoutWeaponSelectView(self.cog, self.user_id, self.session_config, c_name, c_desc)
         await interaction.response.send_message(
             content=f"Chosen Profession: **{c_name}**\nNow choose your starting weapon:",
@@ -169,8 +183,21 @@ class LoadoutClassSelectView(discord.ui.View):
             await interaction.response.send_modal(LoadoutCustomClassModal(self.cog, self.user_id, self.session_config))
         else:
             scenario = self.session_config.get("scenario", "fantasy")
+            from scenario_data import is_non_combat_scenario
             templates = get_class_templates(scenario)
             cls_desc = templates.get(val, {}).get("description", "")
+            if is_non_combat_scenario(scenario):
+                await interaction.response.defer()
+                view = await LoadoutEquipmentPreviewView.create(
+                    self.cog, self.user_id, self.session_config, val, cls_desc, "", ""
+                )
+                embed = view.build_embed()
+                await interaction.edit_original_response(
+                    content=f"Chosen Profession: **{val}** (Non-Combat)\n⚔️ **Adventure Loadout Preview** — Review your gear before embarking:",
+                    view=view, embed=embed
+                )
+                return
+
             view = LoadoutWeaponSelectView(self.cog, self.user_id, self.session_config, val, cls_desc)
             await interaction.response.edit_message(
                 content=f"Chosen Profession: **{val}**\nNow choose your starting weapon:",
@@ -264,6 +291,61 @@ class LoadoutWeaponSelectView(discord.ui.View):
                 embed=embed, view=view
             )
 
+FEMALE_TEXTURE_OPTIONS = [
+    {"value": "Perky & High-Set", "label": "Perky & High-Set"},
+    {"value": "Pillowy Soft & Yielding", "label": "Pillowy Soft & Yielding"},
+    {"value": "Firm & Toned", "label": "Firm & Toned"},
+    {"value": "Smooth & Supple", "label": "Smooth & Supple"},
+    {"value": "Heavy & Plush", "label": "Heavy & Plush"},
+    {"value": "Bouncy & Sensitive", "label": "Bouncy & Sensitive"},
+    {"value": "Tender & Delicate", "label": "Tender & Delicate"},
+    {"value": "Shapely Teardrop", "label": "Shapely Teardrop"},
+    {"value": "Compact & Dense", "label": "Compact & Dense"},
+    {"value": "Sensitive & Responsive", "label": "Sensitive & Responsive"},
+    {"value": "Warm & Supple", "label": "Warm & Supple"},
+    {"value": "Soft & Downy Chest Fur", "label": "Soft & Downy Chest Fur (Beastfolk)"},
+    {"value": "Silky Fur-Rimmed", "label": "Silky Fur-Rimmed (Beastfolk)"},
+    {"value": "Velvety Underbelly Down", "label": "Velvety Underbelly Down (Beastfolk)"},
+    {"value": "Fluffy Plush-Accented", "label": "Fluffy Plush-Accented (Beastfolk)"},
+    {"value": "Silky Warm with Smooth Micro-Scales", "label": "Silky Warm with Smooth Micro-Scales (Scaly)"},
+    {"value": "Supple with Shimmering Scale Borders", "label": "Supple with Shimmering Scale Borders (Draconic)"},
+    {"value": "Sleek & Supple Drake-Contour", "label": "Sleek & Supple Drake-Contour (Scaly)"},
+    {"value": "Downy Feather-Lined", "label": "Downy Feather-Lined (Avian)"},
+    {"value": "Light & Buoyant", "label": "Light & Buoyant (Avian)"},
+    {"value": "Velvety Plumage Accents", "label": "Velvety Plumage Accents (Avian)"},
+    {"value": "Glistening & Ultra-Smooth", "label": "Glistening & Ultra-Smooth (Aquatic)"},
+]
+
+MALE_TEXTURE_OPTIONS = [
+    {"value": "Veined & Firm", "label": "Veined & Firm"},
+    {"value": "Smooth & Heavy", "label": "Smooth & Heavy"},
+    {"value": "Toned & Athletic", "label": "Toned & Athletic"},
+    {"value": "Warm & Pulsing", "label": "Warm & Pulsing"},
+    {"value": "Slender & Ultra-Sensitive", "label": "Slender & Ultra-Sensitive"},
+    {"value": "Dense & Formidable", "label": "Dense & Formidable"},
+    {"value": "Balanced & Firm", "label": "Balanced & Firm"},
+    {"value": "Soft Fur-Ringed Base", "label": "Soft Fur-Ringed Base (Beastfolk)"},
+    {"value": "Silky Fur-Dusted & Resilient", "label": "Silky Fur-Dusted & Resilient (Beastfolk)"},
+    {"value": "Sleek Scaled Base & Firm", "label": "Sleek Scaled Base & Firm (Scaly/Draconic)"},
+    {"value": "Sturdy Draconic Build", "label": "Sturdy Draconic Build (Scaly/Draconic)"},
+]
+
+MALE_SIZE_OPTIONS = [
+    {"value": "small", "label": "Petite / Modest (Compact)"},
+    {"value": "average", "label": "Proportional (Average)"},
+    {"value": "large", "label": "Well-Endowed / Formidable (Large)"},
+    {"value": "huge", "label": "Massive / Heavy (Huge)"},
+]
+
+FEMALE_SIZE_OPTIONS = [
+    {"value": "flat", "label": "Flat (AA-Cup / Barely There)"},
+    {"value": "small", "label": "Petite / Modest (A-B Cup)"},
+    {"value": "average", "label": "Proportional (C-Cup)"},
+    {"value": "large", "label": "Voluptuous / Full (D-DD Cup)"},
+    {"value": "huge", "label": "Bountiful / Massive (E+ Cup)"},
+]
+
+
 class LoadoutEquipmentPreviewView(discord.ui.View):
     def __init__(self, cog: "AdventureCog", user_id: int, session_config: dict,
                  char_class: str, class_description: str, weapon_name: str, weapon_description: str):
@@ -275,13 +357,208 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
         self.class_description = class_description
         self.weapon_name = weapon_name
         self.weapon_description = weapon_description
+        self._build_components()
 
     @classmethod
     async def create(cls, cog: "AdventureCog", user_id: int, session_config: dict,
                      char_class: str, class_description: str, weapon_name: str, weapon_description: str):
         view = cls(cog, user_id, session_config, char_class, class_description, weapon_name, weapon_description)
         await view.generate_and_apply_loadout()
+        view._build_components()
         return view
+
+    def _is_nsfw(self) -> bool:
+        scenario = self.session_config.get("scenario", "fantasy")
+        tags = str(self.session_config.get("tags") or "")
+        from scenario_data import is_nsfw_scenario
+        return is_nsfw_scenario(scenario) or "nsfw" in tags.lower() or (isinstance(scenario, str) and "nsfw" in scenario.lower())
+
+    def _build_components(self):
+        self.clear_items()
+
+        # Row 0: Action buttons
+        regen_btn = discord.ui.Button(label="Regenerate Equipment", style=discord.ButtonStyle.secondary, emoji="🔄", row=0)
+        regen_btn.callback = self._on_regenerate_clicked
+        self.add_item(regen_btn)
+
+        is_nsfw = self._is_nsfw()
+        char = db.get_character(self.user_id) or {}
+        gender = char.get("gender", "Male")
+        is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
+
+        if is_nsfw:
+            roll_btn = discord.ui.Button(label="Roll Feature", style=discord.ButtonStyle.secondary, emoji="🎲", row=0)
+            roll_btn.callback = self._on_roll_feature_clicked
+            self.add_item(roll_btn)
+
+        begin_btn = discord.ui.Button(label="Begin Adventure", style=discord.ButtonStyle.success, emoji="⚔️", row=0)
+        begin_btn.callback = self._on_begin_adventure_clicked
+        self.add_item(begin_btn)
+
+        if is_nsfw:
+            app = char.get("appearance") or {}
+            # Row 1: Size dropdown
+            if is_male:
+                cur_size = char.get("penis_size") or app.get("penis_size", "average")
+                size_options = []
+                for opt in MALE_SIZE_OPTIONS:
+                    size_options.append(discord.SelectOption(
+                        label=opt["label"][:100],
+                        value=opt["value"],
+                        default=(opt["value"].lower() == str(cur_size).lower())
+                    ))
+                size_select = discord.ui.Select(
+                    placeholder="Select Penis Size Tier...",
+                    options=size_options,
+                    row=1
+                )
+                size_select.callback = self._on_size_select
+                self.add_item(size_select)
+
+                # Row 2: Male Texture dropdown
+                cur_tex = char.get("asset_texture") or app.get("asset_texture", "")
+                tex_options = [
+                    discord.SelectOption(
+                        label="Auto-Assign from Race & Build (Dynamic Roll)",
+                        value="auto",
+                        default=(not cur_tex or cur_tex == "auto")
+                    )
+                ]
+                for opt in MALE_TEXTURE_OPTIONS[:24]:
+                    tex_options.append(discord.SelectOption(
+                        label=opt["label"][:100],
+                        value=opt["value"],
+                        default=(opt["value"] == cur_tex)
+                    ))
+                tex_select = discord.ui.Select(
+                    placeholder="Select Tactile Feature & Texture (Phallus)...",
+                    options=tex_options,
+                    row=2
+                )
+                tex_select.callback = self._on_texture_select
+                self.add_item(tex_select)
+            else:
+                cur_size = char.get("breast_size") or app.get("breast_size", "average")
+                size_options = []
+                for opt in FEMALE_SIZE_OPTIONS:
+                    size_options.append(discord.SelectOption(
+                        label=opt["label"][:100],
+                        value=opt["value"],
+                        default=(opt["value"].lower() == str(cur_size).lower())
+                    ))
+                size_select = discord.ui.Select(
+                    placeholder="Select Breast Size Tier...",
+                    options=size_options,
+                    row=1
+                )
+                size_select.callback = self._on_size_select
+                self.add_item(size_select)
+
+                # Row 2: Female Texture dropdown
+                cur_tex = char.get("asset_texture") or app.get("asset_texture", "")
+                tex_options = [
+                    discord.SelectOption(
+                        label="Auto-Assign from Race & Build (Dynamic Roll)",
+                        value="auto",
+                        default=(not cur_tex or cur_tex == "auto")
+                    )
+                ]
+                for opt in FEMALE_TEXTURE_OPTIONS[:24]:
+                    tex_options.append(discord.SelectOption(
+                        label=opt["label"][:100],
+                        value=opt["value"],
+                        default=(opt["value"] == cur_tex)
+                    ))
+                tex_select = discord.ui.Select(
+                    placeholder="Select Tactile Feature & Texture (Breasts)...",
+                    options=tex_options,
+                    row=2
+                )
+                tex_select.callback = self._on_texture_select
+                self.add_item(tex_select)
+
+    async def _on_regenerate_clicked(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your setup.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        await self.generate_and_apply_loadout(force_dynamic=True)
+        self._build_components()
+        embed = self.build_embed()
+        await interaction.edit_original_response(embed=embed, view=self)
+
+    async def _on_roll_feature_clicked(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your setup.", ephemeral=True)
+            return
+        char = db.get_character(self.user_id)
+        if char:
+            gender = char.get("gender", "Male")
+            is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
+            pool = MALE_TEXTURE_OPTIONS if is_male else FEMALE_TEXTURE_OPTIONS
+            chosen = random.choice(pool)["value"]
+            db.update_character_appearance(char["id"], {"asset_texture": chosen})
+        self._build_components()
+        embed = self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def _on_size_select(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your setup.", ephemeral=True)
+            return
+        val = interaction.data["values"][0]
+        char = db.get_character(self.user_id)
+        if char:
+            gender = char.get("gender", "Male")
+            is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
+            payload = {"penis_size": val} if is_male else {"breast_size": val}
+            db.update_character_appearance(char["id"], payload)
+        self._build_components()
+        embed = self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def _on_texture_select(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your setup.", ephemeral=True)
+            return
+        val = interaction.data["values"][0]
+        char = db.get_character(self.user_id)
+        if char:
+            gender = char.get("gender", "Male")
+            if val == "auto":
+                from mechanics.social.persona import normalize_appearance
+                app = normalize_appearance(
+                    {},
+                    gender=gender,
+                    race=char.get("race", "human"),
+                    scen_key=self.session_config.get("scenario", "fantasy")
+                )
+                val = app.get("asset_texture", "")
+            db.update_character_appearance(char["id"], {"asset_texture": val})
+        self._build_components()
+        embed = self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def _on_begin_adventure_clicked(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This isn't your setup.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        for child in self.children:
+            child.disabled = True
+        await interaction.edit_original_response(content="🎲 Initializing adventure and entering the world...", embed=None, view=None)
+
+        cfg = self.session_config
+        capacity = 1 if cfg["mode"] == "solo" else 2
+        session_id = db.create_session(
+            self.user_id, cfg["mode"], capacity,
+            cfg["verbosity"], cfg["dialogue"], cfg["image_gen"],
+            cfg["choices_style"], interaction.channel_id,
+            scenario=cfg["scenario"],
+            result_display=cfg["result_display"]
+        )
+        session = db.get_session(session_id)
+        await self.cog.launch_opening_scene(interaction, session, use_followup=True)
 
     async def generate_and_apply_loadout(self, force_dynamic: bool = False):
         scenario = self.session_config.get("scenario", "fantasy")
@@ -333,38 +610,9 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
         char = db.get_character(self.user_id)
         equipment = db.get_equipment(self.user_id)
         embed = build_character_sheet_embed(char, equipment, title_prefix="⚔️ Adventure Loadout: ")
-        embed.set_footer(text="Click 'Regenerate Equipment' to re-roll starting gear, or 'Begin Adventure' to start!")
+        if self._is_nsfw():
+            embed.set_footer(text="🔞 NSFW Mode Active — Customize intimate anatomy & tactile texture below, then Begin Adventure!")
+        else:
+            embed.set_footer(text="Click 'Regenerate Equipment' to re-roll starting gear, or 'Begin Adventure' to start!")
         return embed
-
-    @discord.ui.button(label="Regenerate Equipment", style=discord.ButtonStyle.secondary, emoji="🔄", row=0)
-    async def regenerate_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This isn't your setup.", ephemeral=True)
-            return
-        await interaction.response.defer()
-        await self.generate_and_apply_loadout(force_dynamic=True)
-        embed = self.build_embed()
-        await interaction.edit_original_response(embed=embed, view=self)
-
-    @discord.ui.button(label="Begin Adventure", style=discord.ButtonStyle.success, emoji="⚔️", row=0)
-    async def begin_adventure_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This isn't your setup.", ephemeral=True)
-            return
-        await interaction.response.defer()
-        for child in self.children:
-            child.disabled = True
-        await interaction.edit_original_response(content="🎲 Initializing adventure and entering the world...", embed=None, view=None)
-
-        cfg = self.session_config
-        capacity = 1 if cfg["mode"] == "solo" else 2
-        session_id = db.create_session(
-            self.user_id, cfg["mode"], capacity,
-            cfg["verbosity"], cfg["dialogue"], cfg["image_gen"],
-            cfg["choices_style"], interaction.channel_id,
-            scenario=cfg["scenario"],
-            result_display=cfg["result_display"]
-        )
-        session = db.get_session(session_id)
-        await self.cog.launch_opening_scene(interaction, session, use_followup=True)
 

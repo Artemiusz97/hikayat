@@ -639,10 +639,30 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
         "action_category": "flee"
     }
 
-    # Ensure all actions have target_entity
-    for act in attacks + magic + tactics:
-        if act and "target_entity" not in act:
-            act["target_entity"] = monster_name
+    # Ensure all actions have target_entity, intent, sub_intent, and target_npc
+    for act in attacks:
+        if act:
+            act.setdefault("intent", "general_action")
+            act.setdefault("sub_intent", "combat_attack")
+            act.setdefault("target_npc", monster_name)
+            act.setdefault("target_entity", monster_name)
+    for act in magic:
+        if act:
+            act.setdefault("intent", "general_action")
+            act.setdefault("sub_intent", "combat_magic")
+            act.setdefault("target_npc", monster_name)
+            act.setdefault("target_entity", monster_name)
+    for act in tactics:
+        if act:
+            act.setdefault("intent", "general_action")
+            act.setdefault("sub_intent", "combat_tactic")
+            act.setdefault("target_npc", monster_name)
+            act.setdefault("target_entity", monster_name)
+    if flee_action:
+        flee_action.setdefault("intent", "movement")
+        flee_action.setdefault("sub_intent", "combat_flee")
+        flee_action.setdefault("target_npc", monster_name)
+        flee_action.setdefault("target_entity", monster_name)
 
     return {
         "attacks": attacks,
@@ -664,6 +684,12 @@ def generate_procedural_scene_choices(scenario: str = "fantasy", location: str =
             ("PER", "Search the surrounding area carefully for evidence", 5),
             ("CHA", "Initiate a conversation to learn more details", 5),
             ("AGI", "Check the hallway and monitor movement nearby", 4),
+        ],
+        "slice_of_life": [
+            ("CHA", "Greet those nearby and strike up a casual conversation", 5),
+            ("PER", "Take in the surroundings and notice subtle details", 4),
+            ("INT", "Check your daily schedule and organize your tasks", 5),
+            ("AGI", "Stroll through the area to see what is happening", 4),
         ],
         "cyberpunk": [
             ("INT", "Scan local datalinks and breach subnet security", 7),
@@ -697,14 +723,113 @@ def generate_procedural_scene_choices(scenario: str = "fantasy", location: str =
         ],
     }
 
-    options = TEMPLATES.get(scen_key)
-    if not options:
-        for k in TEMPLATES:
-            if k in scen_key:
-                options = TEMPLATES[k]
-                break
-    if not options:
+    norm_key = scen_key.replace("-", "_")
+    options = None
+    if any(k in norm_key for k in ("high_school", "highschool", "school", "academy")):
+        options = TEMPLATES["highschool"]
+    elif any(k in norm_key for k in ("slice_of_life", "sliceoflife", "sol")):
+        options = TEMPLATES["slice_of_life"]
+    elif any(k in norm_key for k in ("cyberpunk", "cyber")):
+        options = TEMPLATES["cyberpunk"]
+    elif any(k in norm_key for k in ("sci_fi", "scifi", "space")):
+        options = TEMPLATES["scifi"]
+    elif any(k in norm_key for k in ("steampunk", "steam")):
+        options = TEMPLATES["steampunk"]
+    elif any(k in norm_key for k in ("post_apoc", "postapoc", "apocalypse", "nuclear")):
+        options = TEMPLATES["postapoc"]
+    elif any(k in norm_key for k in ("fantasy", "isekai")):
         options = TEMPLATES["fantasy"]
+    else:
+        options = TEMPLATES.get(scen_key)
+        if not options:
+            for k in TEMPLATES:
+                if k.replace("_", "") in norm_key.replace("_", ""):
+                    options = TEMPLATES[k]
+                    break
+        if not options:
+            options = TEMPLATES["fantasy"]
+
+    choices = []
+    for stat, label, req in options:
+        intent = "investigate_clue" if stat in ("INT", "PER") else ("dialogue_init" if stat == "CHA" else "area_scout")
+        choices.append({
+            "label": label,
+            "stat": stat,
+            "requirement": req,
+            "mp_cost": 0,
+            "intent": intent,
+            "sub_intent": "",
+            "target_npc": "",
+            "is_fallback": True,
+        })
+    return choices
+
+
+def get_scenario_dialogue_fallbacks(
+    partner_name: str,
+    scenario: str = "fantasy",
+    present_bystanders: list = None,
+    location: str = "",
+    char: dict = None,
+) -> list[dict]:
+    """Generates rich, scenario-appropriate conversational and social interaction fallback choices
+    addressing the active dialogue partner, present room bystanders, and immediate setting."""
+    partner = str(partner_name or "your companion").strip()
+    scen_key = str(scenario or "fantasy").lower().replace("-", "_")
+
+    # 1. Partner-focused conversational templates per scenario genre
+    TEMPLATES = {
+        "highschool": [
+            ("CHA", f"Playfully comment on {partner}'s reaction and joke about the situation", 6),
+            ("INT", f"Ask {partner} about upcoming classes, homeroom duties, or campus rumors", 6),
+            ("PER", f"Notice {partner}'s expression and ask what is on their mind", 5),
+        ],
+        "slice_of_life": [
+            ("CHA", f"Share a lighthearted observation and tease {partner} casually", 5),
+            ("INT", f"Ask {partner} about their schedule, plans, and what they are working on", 5),
+            ("PER", f"Pay close attention to {partner}'s mood and ask how their day is going", 5),
+        ],
+        "cyberpunk": [
+            ("CHA", f"Exchange street-smart banter and probe {partner} with casual swagger", 6),
+            ("INT", f"Inquire into local network rumors, fixer jobs, and street alerts with {partner}", 6),
+            ("PER", f"Read {partner}'s body language and gauge their nervous cyber-ticks", 5),
+        ],
+        "scifi": [
+            ("CHA", f"Exchange casual banter over comms and compare notes with {partner}", 5),
+            ("INT", f"Query {partner} regarding sensor logs, sector news, and station diagnostics", 6),
+            ("PER", f"Monitor {partner}'s vital telemetry and ask how they are holding up", 5),
+        ],
+        "steampunk": [
+            ("CHA", f"Share a wry observation and converse casually with {partner}", 5),
+            ("INT", f"Inquire with {partner} about local inventor guilds, patents, and aetheric currents", 6),
+            ("PER", f"Assess {partner}'s demeanor amidst the steam pressure and machinery hum", 5),
+        ],
+        "postapoc": [
+            ("CHA", f"Share a brief bit of dry wasteland humor with {partner}", 5),
+            ("INT", f"Inquire into supply routes, safe havens, and local scav reports with {partner}", 6),
+            ("PER", f"Gauge {partner}'s fatigue and check if they have spotted any threats", 5),
+        ],
+        "fantasy": [
+            ("CHA", f"Share friendly banter and discuss the journey with {partner}", 5),
+            ("INT", f"Inquire into local lore, guild contracts, and background details with {partner}", 6),
+            ("PER", f"Observe {partner}'s demeanor and assess their readiness for what lies ahead", 5),
+        ],
+    }
+
+    if any(k in scen_key for k in ("high_school", "highschool", "school", "academy")):
+        options = TEMPLATES["highschool"]
+    elif any(k in scen_key for k in ("slice_of_life", "sliceoflife", "sol")):
+        options = TEMPLATES["slice_of_life"]
+    elif any(k in scen_key for k in ("cyberpunk", "cyber")):
+        options = TEMPLATES["cyberpunk"]
+    elif any(k in scen_key for k in ("sci_fi", "scifi", "space")):
+        options = TEMPLATES["scifi"]
+    elif any(k in scen_key for k in ("steampunk", "steam")):
+        options = TEMPLATES["steampunk"]
+    elif any(k in scen_key for k in ("post_apoc", "postapoc", "apocalypse", "nuclear")):
+        options = TEMPLATES["postapoc"]
+    else:
+        options = TEMPLATES.get(scen_key, TEMPLATES["fantasy"])
 
     choices = []
     for stat, label, req in options:
@@ -713,7 +838,73 @@ def generate_procedural_scene_choices(scenario: str = "fantasy", location: str =
             "stat": stat,
             "requirement": req,
             "mp_cost": 0,
+            "intent": "dialogue_init",
+            "sub_intent": "",
+            "target_npc": partner,
             "is_fallback": True,
         })
+
+    # 2. Add lightweight engagement options with other present room bystanders if available
+    if present_bystanders and isinstance(present_bystanders, list):
+        import game_engine
+        added_bystanders = 0
+        for b in present_bystanders:
+            b_name = game_engine._get_npc_name(b) if hasattr(game_engine, "_get_npc_name") else (b.get("name") if isinstance(b, dict) else str(b))
+            if not b_name or b_name.lower() in ("none", partner.lower()):
+                continue
+            b_role = (b.get("role") if isinstance(b, dict) else "") or ""
+            b_role_low = b_role.lower()
+
+            if any(k in scen_key for k in ("high_school", "highschool", "school", "academy")):
+                if any(cr in b_role_low for cr in ("rep", "council", "president", "lead")):
+                    b_label = f"Approach {b_name} ({b_role}) to check morning announcements or roll call"
+                    b_stat = "INT"
+                    b_req = 6
+                else:
+                    b_label = f"Wave over to {b_name} and greet them before the bell rings"
+                    b_stat = "CHA"
+                    b_req = 5
+            elif any(k in scen_key for k in ("slice_of_life", "sliceoflife", "sol")):
+                b_label = f"Give a friendly wave to {b_name} and see how they are doing"
+                b_stat = "CHA"
+                b_req = 5
+            elif any(k in scen_key for k in ("cyberpunk", "cyber")):
+                b_label = f"Nod in {b_name}'s direction and assess what angle they are working"
+                b_stat = "PER"
+                b_req = 5
+            else:
+                b_label = f"Acknowledge {b_name} nearby with a respectful nod and casual greeting"
+                b_stat = "CHA"
+                b_req = 5
+
+            choices.append({
+                "label": b_label,
+                "stat": b_stat,
+                "requirement": b_req,
+                "mp_cost": 0,
+                "intent": "dialogue_init",
+                "sub_intent": "",
+                "target_npc": b_name,
+                "is_fallback": True,
+            })
+            added_bystanders += 1
+            if added_bystanders >= 2:
+                break
+
+    # 3. Ambient room/desk activity fallback if location indicates a homeroom / study desk / room
+    loc_low = str(location or "").lower()
+    if any(k in scen_key for k in ("high_school", "highschool", "school", "academy")):
+        if "desk" in loc_low or "room 201" in loc_low or "homeroom" in loc_low or "classroom" in loc_low:
+            choices.append({
+                "label": "Take your seat at your desk and organize your study materials",
+                "stat": "PER",
+                "requirement": 5,
+                "mp_cost": 0,
+                "intent": "general_action",
+                "sub_intent": "",
+                "target_npc": "",
+                "is_fallback": True,
+            })
+
     return choices
 

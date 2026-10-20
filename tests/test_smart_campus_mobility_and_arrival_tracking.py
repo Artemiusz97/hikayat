@@ -294,7 +294,7 @@ class TestSmartCampusMobilityAndArrivalTracking(unittest.TestCase):
         mock_llm.return_value = {
             "title": "Homeroom Arrival",
             "outcome_narrative": "Artemiusz excuses himself from the rooftop and arrives in Classroom 3-B alone.",
-            "next_narrative": "Students are chatting at their desks as the warning bell rings.",
+            "next_narrative": "Piotr Xu and other students are chatting at their desks as the warning bell rings.",
             "location": "Westlake Academy ➔ Academic Wing ➔ Classroom 3-B",
             "npcs_present": [
                 {"name": "Piotr Xu", "role": "Science Club President"}
@@ -450,6 +450,41 @@ class TestSmartCampusMobilityAndArrivalTracking(unittest.TestCase):
         self.assertNotIn("Yuki Kuroda", traveling_names)
         self.assertIn("Yuki Kuroda", left_behind_names)
 
+    def test_story_quest_rendezvous_target_constrained_to_target_location(self):
+        """Verify that an NPC referenced in a story quest sub-objective only acts as a rendezvous target at the target location."""
+        from mechanics.world.mobility import is_rendezvous_target
+        db.upsert_quest(
+            session_id=self.test_session_id,
+            quest_id="SQ-TEST-LOCATION",
+            quest_type="Story",
+            title="The Petal Ledger Confidential",
+            objective="Investigate club funds",
+            status="Active",
+            is_story_quest=1,
+            sub_objectives=[
+                {
+                    "id": 1,
+                    "text": "Confront Student Council Vice-President Kazuya Halloway in the Student Council Office",
+                    "completed": False,
+                    "target_npc": "Kazuya Halloway",
+                    "target_location": "Creative Arts & Student Union Wing ➔ Student Council Office"
+                }
+            ]
+        )
+
+        # In glasshouse or unrelated area: should be False
+        self.assertFalse(is_rendezvous_target(
+            "Kazuya Halloway",
+            session_id=self.test_session_id,
+            new_loc="Campus Promenade & Student Commons ➔ Botanical Glasshouse"
+        ))
+
+        # At the actual quest target location: should be True
+        self.assertTrue(is_rendezvous_target(
+            "Kazuya Halloway",
+            session_id=self.test_session_id,
+            new_loc="Creative Arts & Student Union Wing ➔ Student Council Office"
+        ))
 
 
 if __name__ == "__main__":

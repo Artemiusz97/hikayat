@@ -21,6 +21,45 @@ function computeClassPreset(className = '', classDesc = '') {
   return { str: 3, per: 1, end: 3, cha: 1, int: 1, agi: 2, luk: 1 };
 }
 
+const FEMALE_TEXTURE_OPTIONS = [
+  { value: 'Perky & High-Set', label: 'Perky & High-Set' },
+  { value: 'Pillowy Soft & Yielding', label: 'Pillowy Soft & Yielding' },
+  { value: 'Firm & Toned', label: 'Firm & Toned' },
+  { value: 'Smooth & Supple', label: 'Smooth & Supple' },
+  { value: 'Heavy & Plush', label: 'Heavy & Plush' },
+  { value: 'Bouncy & Sensitive', label: 'Bouncy & Sensitive' },
+  { value: 'Tender & Delicate', label: 'Tender & Delicate' },
+  { value: 'Shapely Teardrop', label: 'Shapely Teardrop' },
+  { value: 'Compact & Dense', label: 'Compact & Dense' },
+  { value: 'Sensitive & Responsive', label: 'Sensitive & Responsive' },
+  { value: 'Warm & Supple', label: 'Warm & Supple' },
+  { value: 'Soft & Downy Chest Fur', label: 'Soft & Downy Chest Fur (Beastfolk)' },
+  { value: 'Silky Fur-Rimmed', label: 'Silky Fur-Rimmed (Beastfolk)' },
+  { value: 'Velvety Underbelly Down', label: 'Velvety Underbelly Down (Beastfolk)' },
+  { value: 'Fluffy Plush-Accented', label: 'Fluffy Plush-Accented (Beastfolk)' },
+  { value: 'Silky Warm with Smooth Micro-Scales', label: 'Silky Warm with Smooth Micro-Scales (Scaly/Draconic)' },
+  { value: 'Supple with Shimmering Scale Borders', label: 'Supple with Shimmering Scale Borders (Scaly/Draconic)' },
+  { value: 'Sleek & Supple Drake-Contour', label: 'Sleek & Supple Drake-Contour (Scaly/Draconic)' },
+  { value: 'Downy Feather-Lined', label: 'Downy Feather-Lined (Avian/Winged)' },
+  { value: 'Light & Buoyant', label: 'Light & Buoyant (Avian/Winged)' },
+  { value: 'Velvety Plumage Accents', label: 'Velvety Plumage Accents (Avian/Winged)' },
+  { value: 'Glistening & Ultra-Smooth', label: 'Glistening & Ultra-Smooth (Aquatic)' },
+];
+
+const MALE_TEXTURE_OPTIONS = [
+  { value: 'Veined & Firm', label: 'Veined & Firm' },
+  { value: 'Smooth & Heavy', label: 'Smooth & Heavy' },
+  { value: 'Toned & Athletic', label: 'Toned & Athletic' },
+  { value: 'Warm & Pulsing', label: 'Warm & Pulsing' },
+  { value: 'Slender & Ultra-Sensitive', label: 'Slender & Ultra-Sensitive' },
+  { value: 'Dense & Formidable', label: 'Dense & Formidable' },
+  { value: 'Balanced & Firm', label: 'Balanced & Firm' },
+  { value: 'Soft Fur-Ringed Base', label: 'Soft Fur-Ringed Base (Beastfolk)' },
+  { value: 'Silky Fur-Dusted & Resilient', label: 'Silky Fur-Dusted & Resilient (Beastfolk)' },
+  { value: 'Sleek Scaled Base & Firm', label: 'Sleek Scaled Base & Firm (Scaly/Draconic)' },
+  { value: 'Sturdy Draconic Build', label: 'Sturdy Draconic Build (Scaly/Draconic)' },
+];
+
 const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = [], availableTags = [] }) => {
   const [step, setStep] = useState(1);
   const [scenario, setScenario] = useState('fantasy');
@@ -53,6 +92,12 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     return false;
   }, [scenario, customTags, scenarios]);
 
+  const charGen = String(character?.gender || '').toLowerCase();
+  const isMale = useMemo(() => {
+    return ['male', 'man', 'boy', 'lord', 'he', 'him', 'his'].some(kw => charGen.includes(kw)) &&
+      !['female', 'woman', 'girl', 'lady', 'she', 'her'].some(kw => charGen.includes(kw));
+  }, [charGen]);
+
   useEffect(() => {
     if (isOpen && character) {
       setStats({
@@ -67,7 +112,13 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
       const appObj = character.appearance || {};
       setBreastSize(appObj.breast_size || character.breast_size || 'average');
       setPenisSize(appObj.penis_size || character.penis_size || 'average');
-      setAssetTexture(appObj.asset_texture || character.asset_texture || '');
+      let curTex = appObj.asset_texture || character.asset_texture || '';
+      if (isMale && FEMALE_TEXTURE_OPTIONS.some(o => o.value === curTex)) {
+        curTex = '';
+      } else if (!isMale && MALE_TEXTURE_OPTIONS.some(o => o.value === curTex)) {
+        curTex = '';
+      }
+      setAssetTexture(curTex);
       setStep(1);
       
       // Fetch share link in background
@@ -97,6 +148,16 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     }).finally(() => setLoading(false));
   }, [isOpen, scenario, tagsParam]);
 
+  const isNonCombat = useMemo(() => {
+    if (templates?.is_non_combat) return true;
+    if (scenario === 'custom' && (customTags.includes('non_combat') || customTags.includes('non-combat'))) return true;
+    const scenStr = String(scenario || '').toLowerCase();
+    if (scenStr.includes('high_school') || scenStr.includes('school')) return true;
+    const scenObj = scenarios.find(s => s.key === scenario);
+    if (scenObj?.tags?.some(t => t === 'non_combat' || t === 'non-combat')) return true;
+    return false;
+  }, [templates, scenario, customTags, scenarios]);
+
   const activeClassesMap = templates?.classes || {};
   const activeClassInfo = activeClassesMap[charClass] || {};
   
@@ -106,11 +167,21 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
   }, [templates]);
 
   const displayedLoadout = useMemo(() => {
-    if (regeneratedLoadout) return regeneratedLoadout;
+    if (regeneratedLoadout) {
+      if (isNonCombat) {
+        const copy = { ...regeneratedLoadout };
+        delete copy['Weapon'];
+        delete copy['Shield'];
+        delete copy['Armor'];
+        return copy;
+      }
+      return regeneratedLoadout;
+    }
     const rawGear = activeClassInfo?.starter_gear || {};
     const loadout = {};
     Object.entries(rawGear).forEach(([slot, entry]) => {
       if (slot === 'Weapon' || !entry) return;
+      if (isNonCombat && (slot === 'Shield' || slot === 'Armor')) return;
       if (Array.isArray(entry) && entry.length >= 1) {
         loadout[slot] = {
           name: entry[0],
@@ -121,7 +192,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
       }
     });
     return loadout;
-  }, [regeneratedLoadout, activeClassInfo]);
+  }, [regeneratedLoadout, activeClassInfo, isNonCombat]);
 
   const maxTotalPoints = 12;
   const totalAllocated = Object.values(stats).reduce((acc, v) => acc + Number(v || 1), 0);
@@ -151,7 +222,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
           tags: scenario === 'custom' ? customTags : undefined,
           gender: character?.gender || 'Male',
           race: character?.race || 'Human',
-          starting_weapon: startingWeapon,
+          starting_weapon: isNonCombat ? '' : startingWeapon,
           force_dynamic: true,
         }),
       });
@@ -179,6 +250,9 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     setSubmitting(true);
     setError(null);
     try {
+      const finalBSize = isMale ? undefined : breastSize;
+      const finalPSize = isMale ? penisSize : undefined;
+
       if (character?.user_id) {
         try {
           await apiCall('/api/character/appearance', {
@@ -186,8 +260,8 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
             body: JSON.stringify({
               user_id: character.user_id,
               character_id: character.id,
-              breast_size: breastSize,
-              penis_size: penisSize,
+              breast_size: finalBSize,
+              penis_size: finalPSize,
               asset_texture: assetTexture,
             }),
           });
@@ -201,7 +275,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         mode,
         tags: scenario === 'custom' ? customTags : undefined,
         char_class: charClass,
-        weapon_name: startingWeapon,
+        weapon_name: isNonCombat ? '' : startingWeapon,
         starter_loadout: displayedLoadout || undefined,
         str_val: stats.str,
         per: stats.per,
@@ -210,8 +284,8 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         int_val: stats.int,
         agi: stats.agi,
         luk: stats.luk,
-        breast_size: breastSize,
-        penis_size: penisSize,
+        breast_size: finalBSize,
+        penis_size: finalPSize,
         asset_texture: assetTexture,
       });
       onClose();
@@ -333,10 +407,14 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                      {Object.keys(activeClassesMap).map(cls => <option key={cls} value={cls}>{cls}</option>)}
                    </select>
 
-                   <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-400 mt-2">Starting Weapon</label>
-                   <select value={startingWeapon} onChange={(e) => setStartingWeapon(e.target.value)} className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100">
-                     {weaponsList.map(w => <option key={w} value={w}>{w}</option>)}
-                   </select>
+                   {!isNonCombat && (
+                     <>
+                       <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-400 mt-2">Starting Weapon</label>
+                       <select value={startingWeapon} onChange={(e) => setStartingWeapon(e.target.value)} className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100">
+                         {weaponsList.map(w => <option key={w} value={w}>{w}</option>)}
+                       </select>
+                     </>
+                   )}
 
                    <div className="mt-3 pt-3 border-t border-fantasy-border/50 space-y-2">
                      <div className="flex items-center justify-between">
@@ -354,15 +432,15 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                        </button>
                      </div>
 
-                     <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto custom-scrollbar pr-1">
+                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto custom-scrollbar pr-1">
                        {Object.entries(displayedLoadout).map(([slot, item]) => (
-                         <div key={slot} className="p-1.5 rounded bg-black/40 border border-fantasy-border/60 flex flex-col justify-between">
-                           <span className="text-[9px] uppercase tracking-wider text-gray-400">{slot}</span>
-                           <span className="text-[11px] font-bold text-gray-200 truncate" title={item.description || item.name}>{item.name}</span>
+                         <div key={slot} className="p-2 rounded bg-black/40 border border-fantasy-border/60 flex flex-col justify-center">
+                           <span className="text-[9px] uppercase tracking-wider text-gray-400 font-semibold">{slot}</span>
+                           <span className="text-xs font-bold text-gray-200 leading-snug break-words" title={item.description || item.name}>{item.name}</span>
                          </div>
                        ))}
                        {Object.keys(displayedLoadout).length === 0 && (
-                         <div className="col-span-2 text-center text-[10px] text-gray-500 py-2 italic">
+                         <div className="col-span-1 sm:col-span-2 text-center text-[10px] text-gray-500 py-2 italic">
                            Default gear will be forged upon embarkation.
                          </div>
                        )}
@@ -414,67 +492,54 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                     Assets influence psychological vulnerability or confidence, tactile sensations, lingerie fit, and partner reactions across romantic encounters.
                   </p>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                    {/* Breast Size Tier */}
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wider font-bold text-pink-300 mb-1">
-                        Breast Size Tier
-                      </label>
-                      <select
-                        value={breastSize}
-                        onChange={(e) => setBreastSize(e.target.value)}
-                        className="w-full bg-fantasy-dark border border-pink-900/60 p-2 rounded text-xs text-gray-100 focus:outline-none focus:border-pink-500"
-                      >
-                        <option value="flat">Flat (AA-Cup / Barely There)</option>
-                        <option value="small">Petite / Modest (A-B Cup)</option>
-                        <option value="average">Proportional (C-Cup)</option>
-                        <option value="large">Voluptuous / Full (D-DD Cup)</option>
-                        <option value="huge">Bountiful / Massive (E+ Cup)</option>
-                      </select>
-                    </div>
-
-                    {/* Penis Size Tier */}
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wider font-bold text-purple-300 mb-1">
-                        Penis Size Tier
-                      </label>
-                      <select
-                        value={penisSize}
-                        onChange={(e) => setPenisSize(e.target.value)}
-                        className="w-full bg-fantasy-dark border border-purple-900/60 p-2 rounded text-xs text-gray-100 focus:outline-none focus:border-purple-500"
-                      >
-                        <option value="small">Petite / Modest (Compact)</option>
-                        <option value="average">Proportional (Average)</option>
-                        <option value="large">Well-Endowed / Formidable (Large)</option>
-                        <option value="huge">Massive / Heavy (Huge)</option>
-                      </select>
-                    </div>
+                  <div>
+                    {isMale ? (
+                      <div>
+                        <label className="block text-[11px] uppercase tracking-wider font-bold text-purple-300 mb-1">
+                          Penis Size Tier
+                        </label>
+                        <select
+                          value={penisSize}
+                          onChange={(e) => setPenisSize(e.target.value)}
+                          className="w-full bg-fantasy-dark border border-purple-900/60 p-2 rounded text-xs text-gray-100 focus:outline-none focus:border-purple-500"
+                        >
+                          <option value="small">Petite / Modest (Compact)</option>
+                          <option value="average">Proportional (Average)</option>
+                          <option value="large">Well-Endowed / Formidable (Large)</option>
+                          <option value="huge">Massive / Heavy (Huge)</option>
+                        </select>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-[11px] uppercase tracking-wider font-bold text-pink-300 mb-1">
+                          Breast Size Tier
+                        </label>
+                        <select
+                          value={breastSize}
+                          onChange={(e) => setBreastSize(e.target.value)}
+                          className="w-full bg-fantasy-dark border border-pink-900/60 p-2 rounded text-xs text-gray-100 focus:outline-none focus:border-pink-500"
+                        >
+                          <option value="flat">Flat (AA-Cup / Barely There)</option>
+                          <option value="small">Petite / Modest (A-B Cup)</option>
+                          <option value="average">Proportional (C-Cup)</option>
+                          <option value="large">Voluptuous / Full (D-DD Cup)</option>
+                          <option value="huge">Bountiful / Massive (E+ Cup)</option>
+                        </select>
+                      </div>
+                    )}
                   </div>
 
                   {/* Tactile Texture / Shape Feature */}
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-300">
-                        Tactile Feature &amp; Texture
+                        Tactile Feature &amp; Texture ({isMale ? 'Phallus' : 'Breasts'})
                       </label>
                       <button
                         type="button"
                         onClick={() => {
-                          const femalePool = [
-                            'Perky & High-Set', 'Pillowy Soft & Yielding', 'Firm & Toned', 'Smooth & Supple',
-                            'Heavy & Plush', 'Bouncy & Sensitive', 'Tender & Delicate', 'Shapely Teardrop',
-                            'Compact & Dense', 'Soft & Downy Chest Fur', 'Silky Fur-Rimmed', 'Downy Feather-Lined',
-                            'Silky Warm with Smooth Micro-Scales'
-                          ];
-                          const malePool = [
-                            'Veined & Firm', 'Smooth & Heavy', 'Toned & Athletic', 'Warm & Pulsing',
-                            'Slender & Ultra-Sensitive', 'Dense & Formidable', 'Balanced & Firm',
-                            'Soft Fur-Ringed Base', 'Sleek Scaled Base & Firm', 'Sturdy Draconic Build'
-                          ];
-                          const charGen = String(character?.gender || '').toLowerCase();
-                          const isM = ['male', 'man', 'boy'].some(kw => charGen.includes(kw)) && !['female', 'woman', 'girl'].some(kw => charGen.includes(kw));
-                          const pool = isM ? malePool : femalePool;
-                          setAssetTexture(pool[Math.floor(Math.random() * pool.length)]);
+                          const pool = isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS;
+                          setAssetTexture(pool[Math.floor(Math.random() * pool.length)].value);
                         }}
                         className="text-[10px] text-pink-400 hover:text-pink-300 flex items-center gap-1 font-semibold"
                       >
@@ -487,26 +552,9 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                       className="w-full bg-fantasy-dark border border-fantasy-border/80 p-2 rounded text-xs text-gray-100"
                     >
                       <option value="">Auto-Assign from Race &amp; Build (Dynamic Roll)</option>
-                      <option value="Perky & High-Set">Perky &amp; High-Set</option>
-                      <option value="Pillowy Soft & Yielding">Pillowy Soft &amp; Yielding</option>
-                      <option value="Firm & Toned">Firm &amp; Toned</option>
-                      <option value="Smooth & Supple">Smooth &amp; Supple</option>
-                      <option value="Heavy & Plush">Heavy &amp; Plush</option>
-                      <option value="Bouncy & Sensitive">Bouncy &amp; Sensitive</option>
-                      <option value="Tender & Delicate">Tender &amp; Delicate</option>
-                      <option value="Shapely Teardrop">Shapely Teardrop</option>
-                      <option value="Compact & Dense">Compact &amp; Dense</option>
-                      <option value="Soft & Downy Chest Fur">Soft &amp; Downy Chest Fur (Beastfolk)</option>
-                      <option value="Silky Fur-Rimmed">Silky Fur-Rimmed (Beastfolk)</option>
-                      <option value="Silky Warm with Smooth Micro-Scales">Silky Warm with Smooth Micro-Scales (Scaly/Draconic)</option>
-                      <option value="Downy Feather-Lined">Downy Feather-Lined (Avian/Winged)</option>
-                      <option value="Veined & Firm">Veined &amp; Firm (Male)</option>
-                      <option value="Smooth & Heavy">Smooth &amp; Heavy (Male)</option>
-                      <option value="Toned & Athletic">Toned &amp; Athletic (Male)</option>
-                      <option value="Warm & Pulsing">Warm &amp; Pulsing (Male)</option>
-                      <option value="Dense & Formidable">Dense &amp; Formidable (Male)</option>
-                      <option value="Soft Fur-Ringed Base">Soft Fur-Ringed Base (Male Beastfolk)</option>
-                      <option value="Sturdy Draconic Build">Sturdy Draconic Build (Male Draconic)</option>
+                      {(isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS).map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
                     </select>
                   </div>
                 </section>

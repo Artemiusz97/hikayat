@@ -58,19 +58,31 @@ def _compile_keyword_regex(keywords: Sequence[str]) -> Pattern:
     if cached is not None:
         return cached
 
-    phrases = []
+    cjk_phrases = []
+    word_phrases = []
     for kw in sorted_keywords:
-        tokens = kw.split()
-        if not tokens:
+        if not kw.strip():
             continue
-        escaped_tokens = [re.escape(t) for t in tokens]
-        phrases.append(r"\s+".join(escaped_tokens))
+        # CJK characters (e.g. Chinese) have no Latin word boundaries (\b)
+        if any(0x4e00 <= ord(c) <= 0x9fff for c in kw):
+            tokens = kw.split()
+            cjk_phrases.append(r"\s*".join(re.escape(t) for t in tokens))
+        elif kw.startswith("*"):
+            # Wildcard prefix for compound nouns (e.g. German Eisenschwert with *schwert)
+            suffix = kw[1:].strip()
+            if suffix:
+                word_phrases.append(r"\w*" + re.escape(suffix))
+        else:
+            tokens = kw.split()
+            word_phrases.append(r"\s+".join(re.escape(t) for t in tokens))
 
-    if not phrases:
-        pattern = r"$^"  # Matches nothing
-    else:
-        pattern = r"\b(?:" + "|".join(phrases) + r")\b"
+    parts = []
+    if word_phrases:
+        parts.append(r"\b(?:" + "|".join(word_phrases) + r")\b")
+    if cjk_phrases:
+        parts.append(r"(?:" + "|".join(cjk_phrases) + r")")
 
+    pattern = "|".join(parts) if parts else r"$^"
     rx = re.compile(pattern, re.IGNORECASE)
     _KEYWORD_REGEX_CACHE[sorted_keywords] = rx
     return rx
@@ -107,7 +119,7 @@ def detect_negation(text: str, match_start: int, max_window_words: int = 5) -> b
 
 def find_keyword_match(
     text: str,
-    keywords: Sequence[str] | Set[str] | Tuple[str, ...],
+    keywords: Sequence[str] | Set[str] | Tuple[str, ...] | str,
     *,
     check_negation: bool = True,
     max_negation_window_words: int = 5
@@ -118,6 +130,9 @@ def find_keyword_match(
     """
     if not text or not keywords:
         return MatchResult()
+
+    if isinstance(keywords, str):
+        keywords = (keywords,)
 
     norm_text = normalize_text(text)
     rx = _compile_keyword_regex(tuple(keywords))
@@ -151,7 +166,7 @@ def find_keyword_match(
 
 def matches_keyword(
     text: str,
-    keywords: Sequence[str] | Set[str] | Tuple[str, ...],
+    keywords: Sequence[str] | Set[str] | Tuple[str, ...] | str,
     *,
     allow_negated: bool = True,
     check_negation: bool = True
@@ -160,6 +175,8 @@ def matches_keyword(
     Convenience boolean checker.
     If allow_negated is False, returns False when the match is preceded by a negation marker.
     """
+    if isinstance(keywords, str):
+        keywords = (keywords,)
     res = find_keyword_match(text, keywords, check_negation=check_negation or not allow_negated)
     if not res.matched:
         return False
@@ -170,7 +187,7 @@ def matches_keyword(
 
 def matches_keyword_boundary(
     text: str,
-    keywords: tuple[str, ...] | list[str] | Sequence[str],
+    keywords: tuple[str, ...] | list[str] | Sequence[str] | str,
     *,
     allow_negated: bool = True
 ) -> bool:
@@ -178,4 +195,6 @@ def matches_keyword_boundary(
     Word-boundary keyword matcher for backward compatibility with game_engine.keywords.
     Strictly prevents Scunthorpe collisions and optionally checks negation guards.
     """
+    if isinstance(keywords, str):
+        keywords = (keywords,)
     return matches_keyword(text, keywords, allow_negated=allow_negated)

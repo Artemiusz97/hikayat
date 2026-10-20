@@ -20,6 +20,8 @@ class TestGenealogy(unittest.TestCase):
         self.assertEqual(genealogy.extract_species_from_race("Fox-Beastfolk"), "fox")
         self.assertEqual(genealogy.extract_species_from_race("human"), "")
         self.assertEqual(genealogy.extract_species_from_race("elf"), "")
+        self.assertEqual(genealogy.extract_species_from_race("preparatory directorate"), "")
+        self.assertEqual(genealogy.extract_species_from_race("accurate certificate"), "")
 
     def test_extract_surname_and_firstname(self):
         self.assertEqual(genealogy.extract_surname_and_firstname("Sofia Anderson"), ("Sofia", "Anderson"))
@@ -510,6 +512,306 @@ class TestGenealogy(unittest.TestCase):
             # Stephen Hernandez must have been moved to ex_partners
             exes = rel["romance"]["ex_partners"]
             self.assertTrue(any(e.get("name") == "Stephen Hernandez" for e in exes))
+        finally:
+            with db.get_conn() as conn:
+                db.core._delete_session_records(conn, sess_id)
+
+    def test_bidirectional_and_transitive_sibling_symmetry(self):
+        """Verify that siblings with unidirectional/transitive links across 3+ members all resolve to 100% symmetric rosters."""
+        sess_id = 999977
+        try:
+            # Contact 1: Ayane Vance, sibling_name = "Mia Vance"
+            c1 = {
+                "session_id": sess_id,
+                "name": "Ayane Vance",
+                "race": "half_beast:fennec",
+                "basic_info": {"sibling_name": "Mia Vance", "grade": "Sophomore", "role": "Theater Set Painter"},
+                "appearance": {"eyes": "Amber", "hair": "Golden-Blonde"}
+            }
+            # Contact 2: Su-bin Vance, sibling_name = "Ayane Vance"
+            c2 = {
+                "session_id": sess_id,
+                "name": "Su-bin Vance",
+                "race": "half_beast:fennec",
+                "basic_info": {"sibling_name": "Ayane Vance", "grade": "Freshman", "role": "Student Council Aide"},
+                "appearance": {"eyes": "Amber", "hair": "Golden-Blonde"}
+            }
+            # Contact 3: Andrew Vance, sibling_name = "Ayane Vance"
+            c3 = {
+                "session_id": sess_id,
+                "name": "Andrew Vance",
+                "race": "half_beast:fennec",
+                "basic_info": {"sibling_name": "Ayane Vance", "grade": "Senior", "role": "Art & Set Designer"},
+                "appearance": {"eyes": "Amber", "hair": "Golden-Blonde"}
+            }
+
+            # Upsert into DB for session
+            db.upsert_contact(sess_id, "ayane_vance", "Ayane Vance", 0, basic_info=c1["basic_info"], race=c1["race"])
+            db.upsert_contact(sess_id, "su_bin_vance", "Su-bin Vance", 0, basic_info=c2["basic_info"], race=c2["race"])
+            db.upsert_contact(sess_id, "andrew_vance", "Andrew Vance", 0, basic_info=c3["basic_info"], race=c3["race"])
+
+            # Resolve canonical family unit from Su-bin's perspective
+            h_subin = genealogy.get_canonical_family_unit(sess_id, "Vance", c2, scenario="high_school_drama")
+            # Resolve from Ayane's perspective
+            h_ayane = genealogy.get_canonical_family_unit(sess_id, "Vance", c1, scenario="high_school_drama")
+            # Resolve from Andrew's perspective
+            h_andrew = genealogy.get_canonical_family_unit(sess_id, "Vance", c3, scenario="high_school_drama")
+
+            subin_kids = sorted([c["name"] for c in h_subin["children"]])
+            ayane_kids = sorted([c["name"] for c in h_ayane["children"]])
+            andrew_kids = sorted([c["name"] for c in h_andrew["children"]])
+
+            # All three perspectives must yield the exact same roster of children
+            self.assertEqual(subin_kids, ayane_kids)
+            self.assertEqual(ayane_kids, andrew_kids)
+
+            # Both Ayane, Andrew, and Mia must be in Su-bin's family tree
+            subin_tree = genealogy.build_family_tree_for_member(h_subin, "Su-bin Vance", scenario="high_school_drama")
+            subin_tree_names = [m["name"] for m in subin_tree]
+            self.assertIn("Ayane Vance", subin_tree_names)
+            self.assertIn("Andrew Vance", subin_tree_names)
+            self.assertIn("Mia Vance", subin_tree_names)
+            # Parents must be identical across households
+            self.assertEqual(h_subin["father"]["name"], h_ayane["father"]["name"])
+            self.assertEqual(h_ayane["father"]["name"], h_andrew["father"]["name"])
+            self.assertEqual(h_subin["mother"]["name"], h_ayane["mother"]["name"])
+        finally:
+            with db.get_conn() as conn:
+                db.core._delete_session_records(conn, sess_id)
+
+    def test_household_entity_model_crud_and_single_source_of_truth(self):
+        """Architecture 1: Verify single-row household mutation propagates to all siblings immediately."""
+        sess_id = 999988
+        try:
+            # 1. Create household directly
+            father = {
+                "relation": "Father", "name": "Arthur Sterling", "first_name": "Arthur",
+                "surname": "Sterling", "race": "human", "gender": "male", "status": "Alive",
+                "occupation": "Bank Director", "features": "Blue eyes, Grey hair"
+            }
+            mother = {
+                "relation": "Mother", "name": "Victoria Sterling", "first_name": "Victoria",
+                "surname": "Sterling", "race": "human", "gender": "female", "status": "Alive",
+                "occupation": "Art Collector", "features": "Emerald eyes, Auburn hair"
+            }
+            hh_id = db.create_household(
+                session_id=sess_id,
+                household_key=f"sterling_household_{sess_id}",
+                surname="Sterling",
+                father=father,
+                mother=mother,
+                narrative_siblings=[{"name": "Julian Sterling", "first_name": "Julian", "surname": "Sterling", "relation": "Older Brother", "role": "Diplomat", "status": "Off-Campus", "is_contactable": False}],
+                residence_location="Upper Ward -> Sterling Manor"
+            )
+            self.assertGreater(hh_id, 0)
+
+            # 2. Insert two student siblings
+            c1 = db.upsert_contact(sess_id, "lucas_sterling", "Lucas Sterling", 0, basic_info={"grade": "Junior", "role": "Student"})
+            c2 = db.upsert_contact(sess_id, "clara_sterling", "Clara Sterling", 0, basic_info={"grade": "Freshman", "role": "Student Council Aide"})
+
+            db.assign_contact_household(sess_id, c1["id"], hh_id)
+            db.assign_contact_household(sess_id, c2["id"], hh_id)
+
+            # Retrieve household members
+            members = db.get_household_members(hh_id)
+            member_names = [m["name"] for m in members]
+            self.assertIn("Lucas Sterling", member_names)
+            self.assertIn("Clara Sterling", member_names)
+
+            # 3. Retrieve contacts and verify household_id populated
+            l_contact = db.get_contact(sess_id, "lucas_sterling")
+            c_contact = db.get_contact(sess_id, "clara_sterling")
+            self.assertEqual(l_contact["household_id"], hh_id)
+            self.assertEqual(c_contact["household_id"], hh_id)
+
+            # Both see Julian Sterling (narrative sibling)
+            l_tree_names = [m["name"] for m in l_contact["relations"]["family"]]
+            c_tree_names = [m["name"] for m in c_contact["relations"]["family"]]
+            self.assertIn("Julian Sterling", l_tree_names)
+            self.assertIn("Julian Sterling", c_tree_names)
+            self.assertIn("Clara Sterling", l_tree_names)
+            self.assertIn("Lucas Sterling", c_tree_names)
+
+            # 4. Mutate single row in households table: e.g. Father promoted to 'Ambassador'
+            father["occupation"] = "Ambassador"
+            updated = db.update_household(hh_id, father=father)
+            self.assertTrue(updated)
+
+            # Immediately query both contacts without manual sync: both must reflect mutated father
+            l_refreshed = db.get_contact(sess_id, "lucas_sterling")
+            c_refreshed = db.get_contact(sess_id, "clara_sterling")
+            l_father = next(m for m in l_refreshed["relations"]["family"] if m["relation"] == "Father")
+            c_father = next(m for m in c_refreshed["relations"]["family"] if m["relation"] == "Father")
+            self.assertEqual(l_father["occupation"], "Ambassador")
+            self.assertEqual(c_father["occupation"], "Ambassador")
+        finally:
+            with db.get_conn() as conn:
+                db.core._delete_session_records(conn, sess_id)
+
+    def test_lazy_parent_hydration_to_active_contact(self):
+        """Verify on-demand promotion of lightweight household parent into an active contact."""
+        sess_id = 999989
+        try:
+            father = {
+                "relation": "Father", "name": "Thomas Thorne", "first_name": "Thomas",
+                "surname": "Thorne", "race": "human", "gender": "male", "status": "Alive",
+                "occupation": "Master Blacksmith", "features": "Grey eyes, Beard"
+            }
+            mother = {
+                "relation": "Mother", "name": "Sarah Thorne", "first_name": "Sarah",
+                "surname": "Thorne", "race": "human", "gender": "female", "status": "Alive",
+                "occupation": "Herbalist", "features": "Hazel eyes"
+            }
+            hh_id = db.create_household(
+                session_id=sess_id,
+                household_key=f"thorne_household_{sess_id}",
+                surname="Thorne",
+                father=father,
+                mother=mother
+            )
+            # Hydrate Father into an active contact
+            parent_contact = genealogy.hydrate_parent_to_contact(sess_id, hh_id, parent_role="father")
+            self.assertIsNotNone(parent_contact)
+            self.assertEqual(parent_contact["name"], "Thomas Thorne")
+            self.assertEqual(parent_contact["household_id"], hh_id)
+
+            # Verify Father is now queryable as an active contact in the session
+            fetched = db.get_contact(sess_id, "thomas_thorne")
+            self.assertIsNotNone(fetched)
+            self.assertEqual(fetched["name"], "Thomas Thorne")
+            self.assertEqual(fetched["household_id"], hh_id)
+        finally:
+            with db.get_conn() as conn:
+                db.core._delete_session_records(conn, sess_id)
+
+    def test_non_traditional_family_status(self):
+        """Verify orphan, single mother, and deceased parent traits dynamically set status: 'Deceased'."""
+        sess_id = 999990
+        try:
+            c_orphan = {
+                "session_id": sess_id,
+                "name": "Evelyn Cross",
+                "race": "human",
+                "basic_info": {"description": "An orphaned student raised by her late grandmother.", "traits": ["Orphan", "Determined"]},
+                "appearance": {"eyes": "Blue"}
+            }
+            hh = genealogy.get_or_create_household(sess_id, "Cross", c_orphan, scenario="high_school_drama")
+            self.assertEqual(hh["father"]["status"], "Deceased")
+            self.assertEqual(hh["mother"]["status"], "Deceased")
+
+            # Single mother scenario
+            c_single_mom = {
+                "session_id": sess_id,
+                "name": "Leo Drake",
+                "race": "human",
+                "basic_info": {"description": "Raised solely by his single mother after his late father passed away.", "traits": ["Resourceful"]},
+                "appearance": {"eyes": "Green"}
+            }
+            hh2 = genealogy.get_or_create_household(sess_id, "Drake", c_single_mom, scenario="high_school_drama")
+            self.assertEqual(hh2["father"]["status"], "Deceased")
+            self.assertEqual(hh2["mother"]["status"], "Alive")
+        finally:
+            with db.get_conn() as conn:
+                db.core._delete_session_records(conn, sess_id)
+
+    def test_player_character_lineage_protection(self):
+        """Verify player character is protected from random procedural parentage."""
+        sess_id = 999991
+        try:
+            player_contact = {
+                "session_id": sess_id,
+                "name": "Player",
+                "is_player": True,
+                "basic_info": {"role": "Protagonist"},
+                "relations": {"family": []}
+            }
+            rel = genealogy.ensure_contact_relations(player_contact, session_id=sess_id, scenario="fantasy")
+            # Family tree must NOT have procedurally generated parents
+            self.assertEqual(rel.get("family"), [])
+        finally:
+            with db.get_conn() as conn:
+                db.core._delete_session_records(conn, sess_id)
+
+    def test_hydrated_parent_excluded_from_children_and_parent_perspective(self):
+        """Verify that hydrating a parent into contacts links them to father/mother dict,
+        strictly excludes them from household['children'], and formats the family tree accurately
+        both from a child's perspective and from a parent's perspective."""
+        sess_id = 999992
+        try:
+            father = {
+                "relation": "Father", "name": "George Vance", "first_name": "George",
+                "surname": "Vance", "race": "human", "gender": "male", "status": "Alive",
+                "occupation": "Guildmaster", "features": "Blue eyes, Grey beard"
+            }
+            mother = {
+                "relation": "Mother", "name": "Evelyn Vance", "first_name": "Evelyn",
+                "surname": "Vance", "race": "human", "gender": "female", "status": "Alive",
+                "occupation": "Merchant", "features": "Hazel eyes"
+            }
+            hh_id = db.create_household(
+                session_id=sess_id,
+                household_key=f"vance_household_{sess_id}",
+                surname="Vance",
+                father=father,
+                mother=mother,
+                narrative_siblings=[
+                    {"name": "Ayane Vance", "first_name": "Ayane", "gender": "female", "grade": "Freshman", "role": "Student"}
+                ]
+            )
+
+            # Create child contact Su-bin Vance
+            c_subin = db.upsert_contact(
+                session_id=sess_id,
+                npc_id="su_bin_vance",
+                name="Su-bin Vance",
+                gender="female",
+                basic_info={"grade": "Junior", "role": "Student"}
+            )
+            db.assign_contact_household(sess_id, c_subin["id"], hh_id)
+
+            # Hydrate George Vance into an active contact
+            parent_contact = genealogy.hydrate_parent_to_contact(sess_id, hh_id, parent_role="father")
+            self.assertIsNotNone(parent_contact)
+            self.assertEqual(parent_contact["name"], "George Vance")
+            self.assertEqual(parent_contact["household_id"], hh_id)
+
+            # Re-hydrate the household entity
+            hh_raw = db.get_household_by_id(hh_id)
+            hh_hydrated = genealogy._hydrate_household_entity(hh_raw, c_subin, scenario="fantasy")
+
+            # 1. Father dict should be linked to the active contact ID and is_contactable=True
+            self.assertEqual(hh_hydrated["father"]["id"], parent_contact["id"])
+            self.assertTrue(hh_hydrated["father"]["is_contactable"])
+
+            # 2. George Vance must NOT be present in children list
+            child_names = [c["name"] for c in hh_hydrated["children"]]
+            self.assertNotIn("George Vance", child_names)
+            self.assertIn("Su-bin Vance", child_names)
+            self.assertIn("Ayane Vance", child_names)
+
+            # 3. View family tree from child's perspective (Su-bin Vance)
+            subin_tree = genealogy.build_family_tree_for_member(hh_hydrated, "Su-bin Vance", scenario="fantasy")
+            self.assertEqual(subin_tree[0]["relation"], "Father")
+            self.assertEqual(subin_tree[0]["name"], "George Vance")
+            self.assertEqual(subin_tree[1]["relation"], "Mother")
+            self.assertEqual(subin_tree[1]["name"], "Evelyn Vance")
+            # Sibling must be Ayane Vance, NOT George Vance!
+            sib_relations = [m["relation"] for m in subin_tree[2:]]
+            sib_names = [m["name"] for m in subin_tree[2:]]
+            self.assertNotIn("George Vance", sib_names)
+            self.assertIn("Ayane Vance", sib_names)
+            self.assertTrue(all("Brother" not in r and "Sister" in r for r in sib_relations))
+
+            # 4. View family tree from parent's perspective (George Vance)
+            george_tree = genealogy.build_family_tree_for_member(hh_hydrated, "George Vance", scenario="fantasy")
+            self.assertEqual(george_tree[0]["relation"], "Wife")
+            self.assertEqual(george_tree[0]["name"], "Evelyn Vance")
+            # Descendants should be Su-bin and Ayane as Daughters
+            desc_relations = [m["relation"] for m in george_tree[1:]]
+            desc_names = [m["name"] for m in george_tree[1:]]
+            self.assertIn("Su-bin Vance", desc_names)
+            self.assertIn("Ayane Vance", desc_names)
+            self.assertTrue(all(r == "Daughter" for r in desc_relations))
         finally:
             with db.get_conn() as conn:
                 db.core._delete_session_records(conn, sess_id)

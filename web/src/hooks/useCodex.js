@@ -28,7 +28,7 @@ export const useCodex = (sessionId, user) => {
       const [contactsRes, factionsRes, lorebookRes, questsRes] = await Promise.allSettled([
         apiCall(`/api/contacts/${sessionId}?user_id=${user.user_id}`),
         apiCall(`/api/factions/${sessionId}?user_id=${user.user_id}`),
-        apiCall(`/api/lorebook/${sessionId}`),
+        apiCall(`/api/lorebook/${sessionId}?user_id=${user.user_id}`),
         apiCall(`/api/quests/${sessionId}`)
       ]);
 

@@ -202,8 +202,9 @@ def format_openness_prompt_directive(partner_name: str, openness_val: str) -> st
         )
     elif "shameless" in o_low or "lewd" in o_low:
         return (
-            f"  * EROTIC OPENNESS ({partner_name}: Shameless / Lewd): Hedonistic high-drive; "
-            f"zero verbal filter; openly speaks dirty, craves erotic contact, and teases with shameless, provocative audacity."
+            f"  * EROTIC OPENNESS ({partner_name}: Shameless / Lewd): High erotic openness; "
+            f"zero verbal filter regarding intimacy and desire; speaks candidly and playfully about physical attraction and preferences without shame or bashfulness. "
+            f"This reflects frankness about desires and playful flirtation, NOT malice, hostility, or a history of having had past partners."
         )
     elif "bold" in o_low or "uninhibited" in o_low:
         return (
@@ -250,6 +251,16 @@ def format_desires_and_turn_offs_prompt_directive(partner_name: str, desires_val
         blocks.append(
             f"  * INTIMATE TURN-OFFS & AVERSIONS ({partner_name}): {turn_offs_val}.\n"
             f"    - {turn_off_guide}"
+        )
+
+    disc_parts = []
+    if desires_val and str(desires_val).lower() not in ("none", "unknown", ""):
+        disc_parts.append(f"their actual turn-ons/desires ({desires_val})")
+    if turn_offs_val and str(turn_offs_val).lower() not in ("none", "unknown", ""):
+        disc_parts.append(f"their actual turn-offs/aversions ({turn_offs_val})")
+    if disc_parts:
+        blocks.append(
+            f"  * SPOKEN CONVERSATIONAL DISCLOSURE ({partner_name}): If the player directly asks {partner_name} about their turn-ons, turn-offs, desires, or dislikes in dialogue, {partner_name}'s spoken dialogue MUST accurately disclose {' and '.join(disc_parts)} (phrased naturally in their own tone and personality voice), rather than inventing unlisted turn-ons or turn-offs!"
         )
 
     return "\n".join(blocks)
@@ -456,18 +467,37 @@ def format_body_asset_narrative_directive(
         bra_str = str(undergarments.get("bra") or "").strip()
         und_str = str(undergarments.get("underwear") or "").strip()
         if bra_str or und_str:
-            clothing_notes = []
-            if bra_str:
-                clothing_notes.append(f"Bra: {bra_str}")
-            if und_str:
-                clothing_notes.append(f"Underwear: {und_str}")
-            cloth_summary = "; ".join(clothing_notes)
-            fit_reaction = "When undressing or unhooking, describe how the fabric strains, hugs, or reveals their curves."
-            if tier in ("large", "huge"):
-                fit_reaction += " Note the spill of generous curves freed from fabric or indentations along warm skin."
-            elif tier in ("flat", "small"):
-                fit_reaction += " Note the delicate silhouette and vulnerability as the intimate layer is slipped away."
-            behavior_lines.append(f"- LINGERIE FIT & UNDRESSING ({cloth_summary}): {fit_reaction}")
+            is_commando = any(k in und_str.lower() for k in ("none", "commando", "freeball"))
+            is_braless = any(k in bra_str.lower() for k in ("none", "bra-less", "braless", "free"))
+
+            if is_commando:
+                behavior_lines.append(
+                    f"- UNDERGARMENT CANON ({partner_name} - COMMANDO): {partner_name} is wearing NO UNDERWEAR / PANTIES (going completely commando underneath). "
+                    f"When their skirt, dress, pants, or bottoms are lifted, opened, pulled down, or removed, they are completely bare underneath! "
+                    f"STRICTLY FORBIDDEN: NEVER narrate peeling back, sliding aside, pulling down, or snapping panties or underwear fabric—there are no panties!"
+                )
+            if is_braless:
+                behavior_lines.append(
+                    f"- UNDERGARMENT CANON ({partner_name} - BRA-LESS): {partner_name} is wearing NO BRA underneath their top. "
+                    f"Their breasts are completely bare and unrestrained under their clothing. "
+                    f"STRICTLY FORBIDDEN: NEVER narrate unhooking, unclasping, or peeling away a bra or bra straps—they are wearing no bra."
+                )
+
+            worn_notes = []
+            if bra_str and not is_braless:
+                worn_notes.append(f"Bra: {bra_str}")
+            if und_str and not is_commando:
+                worn_notes.append(f"Underwear: {und_str}")
+
+            if worn_notes:
+                cloth_summary = "; ".join(worn_notes)
+                fit_reaction = "When undressing or unhooking, describe how the fabric strains, hugs, or reveals their curves."
+                if tier in ("large", "huge"):
+                    fit_reaction += " Note the spill of generous curves freed from fabric or indentations along warm skin."
+                elif tier in ("flat", "small"):
+                    fit_reaction += " Note the delicate silhouette and vulnerability as the intimate layer is slipped away."
+                behavior_lines.append(f"- LINGERIE FIT & UNDRESSING ({cloth_summary}): {fit_reaction}")
+
 
     # 4. Beastfolk / Species Nuances
     if any(k in r_low for k in ("fox", "cat", "wolf", "neko", "kitsune", "rabbit", "bunny", "tiger", "lion", "bear", "mouse", "beastfolk", "beast")):
@@ -514,9 +544,174 @@ def format_body_asset_narrative_directive(
 
     return f"  * [ANATOMY NARRATIVE & EMOTIONAL REACTION ({partner_name} — {asset_size})]:\n" + "\n".join(f"    {line}" for line in behavior_lines)
 
-def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "", race: str = "human", scen_key: str = "fantasy", info_level: int = 1, revealed_flags: Dict[str, Any] = None) -> Dict[str, Any]:
+
+def format_stature_and_physique_narrative_directive(
+    partner_name: str,
+    npc_stature: str = "average",
+    npc_physique: str = "",
+    npc_gender: str = "female",
+    npc_race: str = "human",
+    *,
+    player_stature: str = "average",
+    player_physique: str = "",
+    player_gender: str = "male",
+    demeanor: str = "",
+    dynamic: str = ""
+) -> str:
+    """Formats a dedicated physical presence, spatial behavior, and height-contrast directive
+    for dialogue, social interactions, and intimate scenes.
+    Ensures the LLM actively incorporates height and build differences into movement, touch, and eye contact.
+    """
+    from .appearance import normalize_stature_tier
+
+    s_tier = normalize_stature_tier(npc_stature)
+    pl_tier = normalize_stature_tier(player_stature)
+
+    stat_display = s_tier.replace("_", " ").title()
+    phys_display = (npc_physique or "Proportionate").strip()
+
+    behavior_lines = []
+
+    # 1. Stature & Spatial Presence
+    if s_tier == "towering":
+        behavior_lines.append(
+            f"- STATURE & SPATIAL PRESENCE (Towering / Imposing): {partner_name} possesses an imposing, towering scale that naturally dwarfs ordinary companions. "
+            f"Actively narrate their physical scale in physical beats: ducking slightly under standard doorframes, resting an arm or hand effortlessly on high shelves or counters, "
+            f"and casting an intimate physical shadow over their partner when leaning in. In close contact, they gaze downward with heavy, deliberate intensity and envelop their partner completely."
+        )
+    elif s_tier == "tall":
+        behavior_lines.append(
+            f"- STATURE & SPATIAL PRESENCE (Tall / Statuesque): {partner_name} has a tall, statuesque silhouette with elegant long-limbed stride and reach. "
+            f"They look downward with an easy, smooth angle, move with fluid strides, and lean down gracefully when closing distance for whispers or kisses."
+        )
+    elif s_tier == "below_average":
+        behavior_lines.append(
+            f"- STATURE & SPATIAL PRESENCE (Below Average / Compact): {partner_name} stands at a compact, below-average height with quick, agile presence. "
+            f"In conversation and close contact, they naturally tilt their chin upward, peering up through their lashes, and rise slightly onto the balls of their feet when leaning in."
+        )
+    elif s_tier == "short":
+        behavior_lines.append(
+            f"- STATURE & SPATIAL PRESENCE (Short / Petite): {partner_name} is distinctly short and compact (or of miniature fantasy stature). "
+            f"They must crane their neck or look directly upward to meet taller companions' eyes, stand on tiptoes or use nearby steps to reach, "
+            f"and can be effortlessly lifted, gathered close, or pulled onto laps during passionate physical moments."
+        )
+    else:  # average
+        behavior_lines.append(
+            f"- STATURE & SPATIAL PRESENCE (Average / Balanced): {partner_name} stands at an average, balanced height that aligns naturally at comfortable eye-level, "
+            f"creating straightforward eye contact and easy shoulder-to-shoulder alignment."
+        )
+
+    # 2. Physique & Tactile Contact Sensations
+    p_low = phys_display.lower()
+    if any(k in p_low for k in ("petite", "delicate")):
+        behavior_lines.append(
+            f"- PHYSIQUE & EMBRACE SENSATIONS (Petite & Delicate): {partner_name}'s build is dainty and delicate: slender wrists, light bone structure, and soft yielding skin. "
+            f"Holding them highlights their vulnerable lightness and fragile grace."
+        )
+    elif any(k in p_low for k in ("hourglass", "slender", "lanky")):
+        behavior_lines.append(
+            f"- PHYSIQUE & EMBRACE SENSATIONS (Slender / Lithe): {partner_name} has a lithe, slender waist and elegant contours. "
+            f"Hands easily span across their narrow waist or ribs during close embraces, emphasizing their graceful, elongated lines."
+        )
+    elif any(k in p_low for k in ("athletic", "toned")):
+        behavior_lines.append(
+            f"- PHYSIQUE & EMBRACE SENSATIONS (Toned & Athletic): {partner_name}'s frame is taut, firm, and athletically sculpted. "
+            f"Defined abdominal and back lines, firm flanks, and athletic poise make every shift of their body feel purposeful and resilient under touch."
+        )
+    elif any(k in p_low for k in ("muscular", "powerful")):
+        behavior_lines.append(
+            f"- PHYSIQUE & EMBRACE SENSATIONS (Muscular & Powerful): {partner_name}'s build is dense, heavy, and powerfully muscled. "
+            f"Broad shoulders, thick forearms, and a solid chest impart an immovable, rock-solid physical density when pressed against or held."
+        )
+    elif any(k in p_low for k in ("full-figured", "voluptuous")):
+        behavior_lines.append(
+            f"- PHYSIQUE & EMBRACE SENSATIONS (Voluptuous & Bountiful): {partner_name}'s silhouette is rich with lush, bountiful curves; "
+            f"full hips, a soft waist, and plush contours yield with deep, intoxicating softness against their partner in every embrace."
+        )
+    elif any(k in p_low for k in ("thick",)):
+        behavior_lines.append(
+            f"- PHYSIQUE & EMBRACE SENSATIONS (Thick & Curvy / Solid): {partner_name}'s frame features heavy, prominent hips, thick thighs, and a substantial, enticing fullness "
+            f"that presses firmly and warmly against their partner, radiating alluring physical presence."
+        )
+    elif any(k in p_low for k in ("stocky",)):
+        behavior_lines.append(
+            f"- PHYSIQUE & EMBRACE SENSATIONS (Stocky & Solid): {partner_name}'s frame is stocky, solid, and barrel-chested; "
+            f"their grounded weight and thick frame feel reassuringly sturdy and unyielding under touch."
+        )
+    elif any(k in p_low for k in ("overweight", "heavy", "plump")):
+        behavior_lines.append(
+            f"- PHYSIQUE & EMBRACE SENSATIONS (Full-Bodied & Soft): {partner_name}'s build is generously full-bodied, soft, and warmly cushioned; "
+            f"their pillowy physical fullness yields comfortably to touch, radiating deep, cozy physical warmth."
+        )
+    else:
+        behavior_lines.append(
+            f"- PHYSIQUE & EMBRACE SENSATIONS ({phys_display}): {partner_name} possesses a well-proportioned, natural build that provides comfortable warmth and grounded physical contours."
+        )
+
+    # 3. Bidirectional Height Contrast Dynamic (NPC vs Player)
+    rank_map = {"short": 1, "below_average": 2, "average": 3, "tall": 4, "towering": 5}
+    npc_rank = rank_map.get(s_tier, 3)
+    pl_rank = rank_map.get(pl_tier, 3)
+    diff = npc_rank - pl_rank
+
+    pl_stat_disp = pl_tier.replace("_", " ").title()
+
+    if diff >= 2:
+        behavior_lines.append(
+            f"- BIDIRECTIONAL HEIGHT DYNAMIC (NPC Significantly Towers): {partner_name} ({stat_display}) significantly towers over the protagonist ({pl_stat_disp})! "
+            f"Emphasize this dramatic scale difference: {partner_name} looking down with an affectionate or commanding gaze, easily resting their chin on the protagonist's head or lifting them off their feet, "
+            f"while the protagonist must crane their neck upward and stand on tiptoes to kiss or whisper to them."
+        )
+    elif diff == 1:
+        behavior_lines.append(
+            f"- BIDIRECTIONAL HEIGHT DYNAMIC (NPC Moderately Taller): {partner_name} ({stat_display}) stands noticeably taller than the protagonist ({pl_stat_disp}). "
+            f"{partner_name} tilts their head down with an easy, protective angle, while the protagonist looks up into their eyes with a slight upward tilt."
+        )
+    elif diff == 0:
+        behavior_lines.append(
+            f"- BIDIRECTIONAL HEIGHT DYNAMIC (Equal Eye-Level): {partner_name} ({stat_display}) and the protagonist ({pl_stat_disp}) are evenly matched in height. "
+            f"Highlight direct eye-level intensity: foreheads resting together, breath mingling evenly, and natural shoulder-to-shoulder alignment without either needing to look up or down."
+        )
+    elif diff == -1:
+        behavior_lines.append(
+            f"- BIDIRECTIONAL HEIGHT DYNAMIC (Protagonist Moderately Taller): The protagonist ({pl_stat_disp}) stands noticeably taller than {partner_name} ({stat_display}). "
+            f"{partner_name} tilts their chin up endearingly to meet the protagonist's eyes, fitting naturally beneath the protagonist's chin or against their chest."
+        )
+    else:  # diff <= -2
+        behavior_lines.append(
+            f"- BIDIRECTIONAL HEIGHT DYNAMIC (Protagonist Significantly Towers): The protagonist ({pl_stat_disp}) significantly towers over {partner_name} ({stat_display})! "
+            f"Emphasize this dramatic scale contrast: {partner_name} looking up through their lashes, rising onto their tiptoes or tugging on the protagonist's lapels/sleeves to pull them down, "
+            f"and the protagonist effortlessly cradling, sheltering, or lifting them."
+        )
+
+    behavior_lines.append(
+        "- MANDATORY NARRATIVE RULE: Weave these physical scales, height differences, and tactile textures seamlessly into character movements, dialogue beats, and physical contact. "
+        "Never portray both characters as identical in height or generic in build."
+    )
+
+    return f"  * [PHYSICAL SCALE & STATURE DYNAMICS ({partner_name} — {stat_display} • {phys_display})]:\n" + "\n".join(f"    {line}" for line in behavior_lines)
+
+
+def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "", race: str = "human", scen_key: str = "fantasy", info_level: int = 1, revealed_flags: Dict[str, Any] = None, intimate_profile: Dict[str, Any] = None) -> Dict[str, Any]:
     """Formats intimate profile categorized sections (Anatomy & Experience, Demeanor & Dynamic, Turn-Ons & Desires, Act Preferences) with discovery metadata."""
-    app_dict = enforce_intimacy_safeguard_invariants(dict(app_dict or {}))
+    app_dict = dict(app_dict or {})
+    if intimate_profile and isinstance(intimate_profile, dict):
+        for k, v in intimate_profile.items():
+            if k not in app_dict or not app_dict[k]:
+                app_dict[k] = v
+        if intimate_profile.get("tracks") and isinstance(intimate_profile["tracks"], dict):
+            t = intimate_profile["tracks"]
+            app_dict["intercourse_experience"] = t.get("intercourse", app_dict.get("intercourse_experience", "virgin"))
+            app_dict["oral_experience"] = t.get("oral", app_dict.get("oral_experience", "inexperienced"))
+            app_dict["manual_experience"] = t.get("manual", app_dict.get("manual_experience", "inexperienced"))
+            app_dict["anal_experience"] = t.get("anal", app_dict.get("anal_experience", "inexperienced"))
+        if intimate_profile.get("disclosure_flags") and isinstance(intimate_profile["disclosure_flags"], dict):
+            revealed_flags = dict(revealed_flags or {})
+            for fk, fv in intimate_profile["disclosure_flags"].items():
+                if fv:
+                    revealed_flags[fk] = True
+
+    app_dict = enforce_intimacy_safeguard_invariants(dict(app_dict or {}), gender=gender)
     revealed_flags = revealed_flags or {}
     intimate_unlocked = (info_level >= 3) or revealed_flags.get("intimate_revealed", False) or revealed_flags.get("all_revealed", False) or app_dict.get("intimate_revealed", False)
 
@@ -530,26 +725,33 @@ def format_intimate_profile_sections(app_dict: Dict[str, Any], gender: str = "",
     anatomy_lines = []
     discovered = {}
 
+    from .appearance import fuse_asset_size_and_texture
+    tex_val = app_dict.get("asset_texture") or ""
+
     # 1. Size
     if is_female:
         if b_size:
-            anatomy_lines.append(f"• **Breast Size**: {b_size.title()}")
-            discovered["size"] = b_size.title()
+            fused_b = fuse_asset_size_and_texture(b_size, tex_val, gender="female") if tex_val else b_size
+            anatomy_lines.append(f"• **Breast Size**: {fused_b}")
+            discovered["size"] = fused_b
         else:
             anatomy_lines.append("• **Breast Size**: *Unknown*")
     elif is_male:
         if (intimate_unlocked or info_level >= 3) and p_size:
-            anatomy_lines.append(f"• **Penis Size**: {p_size.title()}")
-            discovered["size"] = p_size.title()
+            fused_p = fuse_asset_size_and_texture(p_size, tex_val, gender="male") if tex_val else p_size
+            anatomy_lines.append(f"• **Penis Size**: {fused_p}")
+            discovered["size"] = fused_p
         else:
             anatomy_lines.append("• **Penis Size**: *Unknown*")
     else:
         if b_size:
-            anatomy_lines.append(f"• **Breast Size**: {b_size.title()}")
-            discovered["size"] = b_size.title()
+            fused_b = fuse_asset_size_and_texture(b_size, tex_val, gender="female") if tex_val else b_size
+            anatomy_lines.append(f"• **Breast Size**: {fused_b}")
+            discovered["size"] = fused_b
         if (intimate_unlocked or info_level >= 3) and p_size:
-            anatomy_lines.append(f"• **Penis Size**: {p_size.title()}")
-            discovered["penis_size"] = p_size.title()
+            fused_p = fuse_asset_size_and_texture(p_size, tex_val, gender="male") if tex_val else p_size
+            anatomy_lines.append(f"• **Penis Size**: {fused_p}")
+            discovered["penis_size"] = fused_p
         elif p_size:
             anatomy_lines.append("• **Penis Size**: *Unknown*")
 
@@ -798,8 +1000,8 @@ def format_persona_embed_fields(app_dict: Dict[str, Any], gender: str = "", race
     h_color = (app_dict.get("hair_color") or "Unknown").title()
     h_len = (app_dict.get("hair_length") or "").title()
     h_style = (app_dict.get("hair_style") or "").title()
-    stature = (app_dict.get("stature") or "Average").title()
-    physique = (app_dict.get("physique") or "").title()
+    stature = (app_dict.get("stature") or "Average").replace("_", " ").title()
+    physique = (app_dict.get("physique") or "").replace("_", " ").title()
 
     is_dyed = bool(app_dict.get("is_dyed"))
     coat_val = app_dict.get("coat_color")

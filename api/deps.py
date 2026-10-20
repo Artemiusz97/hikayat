@@ -305,6 +305,11 @@ class RetryAdventureRequest(BaseModel):
     user_id: Optional[int] = None
 
 
+class RerollImageRequest(BaseModel):
+    session_id: int
+    user_id: Optional[int] = None
+
+
 class MerchantBuyRequest(BaseModel):
     session_id: int
     user_id: int

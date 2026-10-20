@@ -1,7 +1,7 @@
-# Hikayat (v2.3.0) — Living AI Tabletop RPG & Web Application
+# Hikayat (v2.4.0) — Living AI Tabletop RPG & Web Application
 
 [![Tests](https://github.com/Artemiusz97/hikayat/actions/workflows/tests.yml/badge.svg)](https://github.com/Artemiusz97/hikayat/actions/workflows/tests.yml)
-[![Version](https://img.shields.io/badge/version-2.3.0-blue.svg)](releases/CHANGELOG-v2.3.0.md)
+[![Version](https://img.shields.io/badge/version-2.4.0-blue.svg)](releases/CHANGELOG-v2.4.0.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/react-18.2-61dafb.svg)](web/)
 
@@ -37,9 +37,18 @@ Hikayat is a comprehensive, multi-genre LLM-driven Tabletop RPG engine powered b
 * **Presentation-Decoupled Game Loop**: The turn engine (`services/turn_service.py`) operates as a completely headless core.
 * **100% Platform Parity**: Both the Discord bot (slash commands, button decks, modal sheets) and the React Web SPA (REST endpoints, WebSockets) consume the exact same underlying service, ensuring synchronized state across platforms.
 
-### 7. Multi-Language Internationalization & NPC Pronoun Consistency
-* **Trilingual Localization Engine (`localization/`, `web/src/locales/`)**: Real-time translation and canonicalization of item affixes, inventory lemmas, movement prefixes, and dialogue intents across English, Polish, and Malay.
-* **Grammatical Parity & Anti-Drift Engine**: Strict immutable prompt directives and deterministic narrative sanitizers (`sanitize_npc_pronoun_consistency`) guaranteeing persistent gender and pronoun accuracy across extended sessions.
+### 7. 5-Language Internationalization & Anti-Drift Pronoun Engine
+* **5-Language Localization Engine (localization/, web/src/locales/)**: Real-time translation and canonicalization of item affixes, inventory lemmas, movement prefixes, combat choices, and dialogue intents across English (n), Polish (pl), Malay (ms), German (de), and Simplified Chinese (zh).
+* **Multi-Tier Pronoun Resolver & Anti-Hallucination Guard**: Post-generation pronoun sanitizers and immutable gender directives ensuring zero pronoun drift during long multi-party scenes.
+
+### 8. SDXL Scene Rendering & Living Scene Stage Manager
+* **Automated Visual Grounding (services/image_service.py)**: Synthesizes prompt tokens from narrative prose and renders high-fidelity SDXL scene artwork with local disk persistence, content-hash deduplication, and in-game Smartphone gallery synchronization.
+* **Pre-Turn Stage Manager (stage_manager.py)**: Deterministically tracks spatial presence (*Present in Scene*, *Nearby in Facility*, *Off-Site*), arbitrating plausible arrivals and departures while isolating transient background crowds from persistent NPC cards.
+
+### 9. Spatial Graph Architecture, Dijkstra Navigation & Commitments Ledger
+* **Bidirectional Spatial Graph (spatial_graph.py)**: Models world environments with travel costs and access gates, using Dijkstra shortest-path pathfinding for realistic travel duration calculations.
+* **Sub-Facility Waypoint Preservation**: Retains granular micro-spatial positions (*Zone ➔ Facility ➔ Sub-Facility*) across all movements.
+* **Commitments & Obligations Ledger (commitments_engine.py)**: Tracks scheduled rendezvous, player promises, and deadlines with dynamic social repercussions for broken commitments.
 
 ---
 

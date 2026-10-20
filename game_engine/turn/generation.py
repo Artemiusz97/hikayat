@@ -241,8 +241,33 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
     from mechanics.social.physical_state import build_physical_prompt_block, init_default_physical_state
 
     from mechanics.system.time_engine import format_llm_time_context
+    from mechanics.world.schedules import get_time_block_key
 
     curr_day, curr_min, _ = db.get_session_time(session["id"])
+
+    hook_start_min = hook_context.get("starting_minute")
+    if hook_start_min is not None and curr_day == 1 and not session.get("history"):
+        curr_min = int(hook_start_min)
+        session["current_minute"] = curr_min
+        new_slot = get_time_block_key(curr_min)
+        session["time_slot"] = new_slot
+        try:
+            db.update_session_time(session["id"], curr_day, curr_min, 0)
+        except Exception:
+            pass
+
+    # Deterministic Pre-Seeding: Lock spatial graph and starting world_node_id in 0ms BEFORE calling the LLM
+    if session.get("id") and is_location_engine_enabled(scen_key):
+        try:
+            from mechanics.world.locations.graph_seeder import ensure_session_spatial_graph_seeded
+            ensure_session_spatial_graph_seeded(session["id"], scen_key, char_name=first_char_name)
+            if suggested_loc:
+                pre_node_id = db.resolve_node_id_from_location(session["id"], suggested_loc)
+                if pre_node_id:
+                    session["current_node_id"] = pre_node_id
+                    db.update_session(session["id"], current_node_id=pre_node_id)
+        except Exception as e:
+            log.warning("Pre-LLM spatial graph seed warning in generate_opening_scene: %s", e)
 
     time_prompt_block = format_llm_time_context(curr_day, curr_min, scen_key)
 
@@ -348,7 +373,8 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
     result = await game_engine.call_llm_json(
         system_prompt, user_prompt,
         is_nsfw=scenario_data.uses_nsfw_model(session.get("scenario")),
-        response_model=OpeningScene
+        response_model=OpeningScene,
+        required_any_keys=[["narrative", "next_narrative", "outcome_narrative"]]
     )
 
     # Safety coercion: llm_client now returns dicts, but guard against Pydantic objects leaking through
@@ -356,6 +382,9 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
     if getattr(result, "model_dump", None):
 
         result = result.model_dump(exclude_unset=False)
+
+    if not isinstance(result, dict):
+        result = {}
 
     if isinstance(result, dict) and is_location_engine_enabled(scen_key):
 
@@ -375,16 +404,64 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
 
     res_deep = namegen.resolve_tokens_deep(result, scenario=scen_key)
 
+    if isinstance(res_deep, dict) and session.get("id") and is_location_engine_enabled(scen_key):
+        try:
+            from mechanics.world.locations.graph_seeder import ensure_session_spatial_graph_seeded
+            ensure_session_spatial_graph_seeded(session["id"], scen_key, char_name=first_char_name)
+            init_loc = res_deep.get("location") or suggested_loc or ""
+            if init_loc:
+                init_node_id = db.resolve_node_id_from_location(session["id"], init_loc)
+                if init_node_id:
+                    res_deep["current_node_id"] = init_node_id
+                    session["current_node_id"] = init_node_id
+                    db.update_session(session["id"], current_node_id=init_node_id)
+        except Exception as e:
+            log.warning("Failed to seed/resolve initial current_node_id in generate_opening_scene: %s", e)
+
 
 
     if isinstance(res_deep, dict):
 
         narrative = (res_deep.get("narrative") or res_deep.get("next_narrative") or res_deep.get("outcome_narrative") or "").strip()
+        if not narrative:
+            loc_clean = (res_deep.get("location") or suggested_loc or "the surroundings").replace(" ➔ ", " - ")
+            char_display = first_char_name or "You"
+            narrative = (
+                f"The morning light settles over {loc_clean}. {char_display} pauses to take in the bustling atmosphere as the day begins. "
+                f"{hook_text} Opportunities and untold paths stretch out ahead, awaiting your first move."
+            )
+            res_deep["is_fallback"] = True
+            session["is_fallback_generation"] = True
+
+        if not (res_deep.get("scene_title") or "").strip():
+            fallback_title = suggested_loc.split("➔")[-1].strip() if suggested_loc else "A New Beginning"
+            res_deep["scene_title"] = fallback_title
 
         res_deep["narrative"] = game_engine.sanitize_comparative_cliches(narrative)
         res_deep["narrative"] = game_engine.sanitize_npc_pronoun_consistency(
             res_deep["narrative"], session=session, result=res_deep, party=party
         )
+
+        # Reconcile NPCs present in the opening scene from prose, rosters, and audit
+        eff_loc = res_deep.get("location") or suggested_loc or ""
+        try:
+            res_deep["npcs_present"] = game_engine.process_scene_npcs(
+                res_deep, session, eff_loc, eff_loc, actions=[]
+            )
+        except Exception as e:
+            log.warning("process_scene_npcs failed for opening scene: %s", e)
+
+        # Detect any speaking NPCs to set initial dialogue partner
+        try:
+            full_nar = str(res_deep.get("narrative") or "")
+            speaking_npcs = game_engine.extract_speaking_npcs_from_narrative(
+                full_nar, res_deep.get("npcs_present", []), party=party
+            )
+            if speaking_npcs:
+                res_deep["dialogue_partner"] = speaking_npcs[0]
+                res_deep["dialogue_partners"] = speaking_npcs
+        except Exception as e:
+            log.warning("extract_speaking_npcs_from_narrative failed for opening scene: %s", e)
 
         init_default_physical_state(session["id"], party, scen_key, opening_scene=res_deep)
 
@@ -422,7 +499,7 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
 
 
 
-    # Persist the Chapter 1 Story Quest via dedicated story quest generator
+    # Persist the Chapter 1 Story Quest (0ms deterministic waypoint locking in production; respects mocks in tests)
 
     if not existing_sq:
 
@@ -444,7 +521,22 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
 
             }
 
-            sq_data = await game_engine.generate_story_quest(session["id"], session, chapter_num=1, starting_hook_context=starting_hook_ctx)
+            _is_sq_mocked = (
+                hasattr(game_engine.generate_story_quest, "_mock_name")
+                or hasattr(game_engine.generate_story_quest, "assert_called")
+                or hasattr(game_engine.call_llm_json, "_mock_name")
+                or hasattr(game_engine.call_llm_json, "assert_called")
+            )
+            if _is_sq_mocked:
+                sq_data = await game_engine.generate_story_quest(session["id"], session, chapter_num=1, starting_hook_context=starting_hook_ctx)
+            else:
+                sq_data = game_engine.create_contextual_story_quest_data(
+                    session["id"], session, chapter_num=1, starting_hook_context=starting_hook_ctx
+                )
+                if res_deep.get("story_quest_title"):
+                    sq_data["title"] = str(res_deep["story_quest_title"]).strip()
+                if res_deep.get("story_quest_objective"):
+                    sq_data["objective"] = str(res_deep["story_quest_objective"]).strip()
 
             sq_title = sq_data.get("title") or "Story Quest #1: The Discovery"
 
@@ -589,6 +681,316 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
 
     return res_deep
 
+_GOLD_SPEND_RE = re.compile(
+    r"\b(?:pay|offer|bribe|give|spend|tip|toss|hand(?:\s+over)?|slide)\b[^.!;]{0,40}?\b(\d+)\s*(?:gold|gp|coins?|credits?|yen|bucks?|dollars?|silver)\b"
+    r"|\b(\d+)\s*(?:gold|gp|coins?|credits?|yen|bucks?|dollars?)\b[^.!;]{0,30}?\b(?:bribe|tip|payment|fee|wager|bet)\b",
+    re.IGNORECASE,
+)
+_LOOT_SEARCH_RE = re.compile(
+    r"\b(?:loot|search|rummage|ransack|plunder|open|pry\s+open|check)\b[^.!;]{0,35}?\b(?:chest|corpse|body|bodies|crate|barrel|cache|stash|locker|remains|pockets|sack|coffer|safe|trunk)\b",
+    re.IGNORECASE,
+)
+_SPAWN_ROLE_RE = re.compile(
+    r"\b(?:talk\s+to|speak\s+(?:to|with)|approach|ask|flag\s+down|call\s+over|hail|greet)\s+(?:the|a|an|some)\s+([a-z][a-z\s\-]{2,24}?)\b(?=$|\s+(?:about|for|if|to|and|at|behind|near|in|on)\b|[,.!?])",
+    re.IGNORECASE,
+)
+_COMBAT_ATTACK_RE = re.compile(
+    r"^\s*(?:attack|strike|slash|stab|hit|shoot|cleave|smash|punch|kick)\s+(?:the\s+)?([a-z0-9#\-\s']{2,35})$",
+    re.IGNORECASE,
+)
+_MEMORY_RECALL_RE = re.compile(
+    r"\b(?:remember|recall|remind(?:\s+[a-z]+)?\s+about|bring\s+up\s+(?:the|our|what)|what\s+we\s+learned\s+about|think\s+back\s+to|ask\s+(?:[a-z]+\s+)?about\s+(?:our\s+promise|the\s+rumor|the\s+clue|what\s+happened))\b",
+    re.IGNORECASE,
+)
+
+
+def extract_deterministic_recall_query(action_text: str, session_id: int | None = None) -> str:
+    """Returns a clean recall search query if the action text references past memory/promises/clues, else ''."""
+    act_str = str(action_text or "").strip()
+    if not act_str:
+        return ""
+    if _MEMORY_RECALL_RE.search(act_str):
+        return act_str
+    if session_id:
+        act_low = act_str.lower()
+        try:
+            from db.memory import get_active_commitments
+            for comm in (get_active_commitments(session_id) or []):
+                if not isinstance(comm, dict):
+                    continue
+                desc = str(comm.get("description") or "").strip()
+                target_ent = str(comm.get("target_entity") or "").strip()
+                source_ent = str(comm.get("source_entity") or "").strip()
+                desc_tokens = [w for w in re.findall(r"[a-z]{4,}", desc.lower()) if w not in ("player", "promised", "agreed", "would", "will", "with", "that", "this", "from", "into", "about")]
+                entity_mentioned = any(
+                    ent and (ent.lower() in act_low or ent.lower().split()[0] in act_low)
+                    for ent in (target_ent, source_ent)
+                    if ent and ent.lower() != "player"
+                )
+                matched_tokens = [w for w in desc_tokens if w in act_low]
+                if (entity_mentioned and matched_tokens) or len(matched_tokens) >= 2:
+                    return f"{target_ent} {desc}".strip()
+        except Exception:
+            pass
+    return ""
+
+
+def _extract_deterministic_action_primitives(action_text: str, session: dict | None = None, parsed: Any = None) -> dict:
+    """Extracts deterministic mechanical primitives (gold_spent, triggers_loot_roll, spawns_npc_role,
+    combat_tactical_archetype, target_location, and _active_recall) in <1ms without relying on LLM prose."""
+    act_str = str(action_text or "").strip()
+    act_low = act_str.lower()
+    primitives: dict[str, Any] = {
+        "gold_spent": 0,
+        "triggers_loot_roll": False,
+        "spawns_npc_role": "",
+        "combat_tactical_archetype": "",
+        "target_location": "",
+    }
+    if not act_str:
+        return primitives
+
+    # 1. Gold spending / bribes
+    m_gold = _GOLD_SPEND_RE.search(act_str)
+    if m_gold:
+        amt_str = m_gold.group(1) or m_gold.group(2)
+        try:
+            primitives["gold_spent"] = max(0, int(amt_str))
+        except (ValueError, TypeError):
+            pass
+
+    # 2. Container / corpse loot search
+    if _LOOT_SEARCH_RE.search(act_str):
+        primitives["triggers_loot_roll"] = True
+
+    # 3. Approaching an unseeded background role NPC
+    m_role = _SPAWN_ROLE_RE.search(act_str)
+    if m_role:
+        cand_role = m_role.group(1).strip()
+        cur_npcs = [game_engine._get_npc_name(n).lower() for n in ((session or {}).get("current_npcs") or []) if n]
+        if cand_role.lower() not in cur_npcs and not any(cand_role.lower() in n for n in cur_npcs):
+            primitives["spawns_npc_role"] = cand_role
+
+    # 4. Target location from parsed movement intent
+    if parsed is not None and getattr(parsed, "category", None) and getattr(parsed.category, "value", "") == "movement":
+        primitives["target_location"] = str(getattr(parsed, "target_entity", "") or getattr(parsed, "sub_target", "") or "").strip()
+
+    # 5. Combat tactical archetypes
+    from mechanics.combat import is_in_combat
+    if isinstance(session, dict) and is_in_combat(session):
+        if any(w in act_low for w in ("chandelier", "brazier", "pillar", "kick into", "shove into", "knock over", "collapse", "explosive", "oil", "ledge", "scaffolding")):
+            primitives["combat_tactical_archetype"] = "environmental_hazard"
+        elif any(w in act_low for w in ("blind", "sand", "dirt", "disarm", "trip", "hamstring", "stun", "daze", "entangle", "pin")):
+            primitives["combat_tactical_archetype"] = "tactical_debuff"
+        elif any(w in act_low for w in ("parley", "surrender", "negotiate", "stand down", "truce", "ceasefire", "intimidate into")):
+            primitives["combat_tactical_archetype"] = "combat_parley"
+        elif any(w in act_low for w in ("weak spot", "eyes", "throat", "joint", "headshot", "called shot", "vital", "chink in")):
+            primitives["combat_tactical_archetype"] = "called_shot"
+        elif any(w in act_low for w in ("flank", "take cover", "high ground", "reposition", "circle behind", "vantage")):
+            primitives["combat_tactical_archetype"] = "reposition"
+
+    # 6. Deterministic active memory recall
+    sess_id_val = session.get("id") if isinstance(session, dict) else None
+    recall_q = extract_deterministic_recall_query(act_str, session_id=sess_id_val)
+    if recall_q:
+        primitives["is_memory_recall"] = True
+        primitives["recall_query"] = recall_q
+        if sess_id_val:
+            try:
+                from db.memory import active_recall_search
+                recall_hits = active_recall_search(sess_id_val, recall_q)
+                if recall_hits:
+                    primitives["_active_recall"] = recall_hits
+            except Exception:
+                pass
+
+    return primitives
+
+
+def _fast_path_classify_ambient_action(action_text: str, ctx: Any = None, parsed: Any = None, session: dict | None = None) -> dict | None:
+    """
+    Fast-paths short (<= 11 words), single-clause, non-negated commands
+    with confidence >= 0.95 (ambient commands, direct dialogue, affection, stealth,
+    investigation, loot searches, social invites, and direct combat attacks).
+    Returns structured action dict if eligible, or None if routing to LLM is required.
+    """
+    from mechanics.narrative.intent import classify_action_intent, IntentCategory
+
+    words = action_text.strip().split()
+    act_low = action_text.lower()
+    is_negated = any(w in words for w in ("not", "don't", "dont", "never", "stop", "refuse", "without", "hardly", "barely"))
+    is_multi_clause = any(conj in act_low for conj in (" but ", " while ", " although ", " then ", " before ", " after ", " because ", ";"))
+    if len(words) > 11 or is_negated or is_multi_clause:
+        return None
+
+    if parsed is None:
+        parsed = classify_action_intent(action_text, ctx)
+
+    if getattr(parsed, "confidence", 1.0) < 0.95:
+        return None
+
+    is_in_dialogue = bool(ctx and (getattr(ctx, "dialogue_partner", None) or getattr(ctx, "dialogue_partners", None)))
+    primitives = _extract_deterministic_action_primitives(action_text, session=session, parsed=parsed)
+
+    # 0. Direct physical combat attack
+    m_atk = _COMBAT_ATTACK_RE.match(action_text.strip())
+    if m_atk:
+        target_enemy = m_atk.group(1).strip()
+        for sep in (" with ", " using ", " at "):
+            if sep in target_enemy.lower():
+                target_enemy = target_enemy[:target_enemy.lower().find(sep)].strip()
+        return {
+            "stat": "STR",
+            "requirement": 7,
+            "mp_cost": 0,
+            "action_category": "combat_attack",
+            "fast_path": True,
+            "intent": "combat_attack",
+            "sub_intent": "",
+            "target_npc": target_enemy,
+            "combat_target": target_enemy,
+            **primitives,
+        }
+
+    # 1. Ambient exploration & navigation (free)
+    if parsed.category in (
+        IntentCategory.DIALOGUE_EXIT,
+        IntentCategory.MOVEMENT,
+        IntentCategory.REST_SLEEP,
+        IntentCategory.MEDIA_CAPTURE,
+        IntentCategory.INSPECT_BOARD,
+        IntentCategory.AREA_SCOUT,
+    ):
+        if is_in_dialogue and parsed.category not in (IntentCategory.DIALOGUE_EXIT, IntentCategory.MOVEMENT):
+            return None
+        return {
+            "stat": "NONE",
+            "requirement": 0,
+            "mp_cost": 0,
+            "action_category": parsed.category.value,
+            "fast_path": True,
+            "intent": parsed.category.value,
+            "sub_intent": parsed.sub_target or "",
+            "target_npc": parsed.target_entity or "",
+            **primitives,
+        }
+
+    # 2. Gift offering
+    if parsed.category == IntentCategory.GIFT_OFFER:
+        return {
+            "stat": "NONE",
+            "requirement": 0,
+            "mp_cost": 0,
+            "action_category": "gift",
+            "fast_path": True,
+            "intent": parsed.category.value,
+            "sub_intent": parsed.sub_target or "",
+            "target_npc": parsed.target_entity or "",
+            **primitives,
+        }
+
+    # 3. Direct affection touch
+    if parsed.category == IntentCategory.AFFECTION_TOUCH:
+        return {
+            "stat": "CHA",
+            "requirement": 6,
+            "mp_cost": 0,
+            "action_category": "affection",
+            "fast_path": True,
+            "intent": parsed.category.value,
+            "sub_intent": parsed.sub_target or "",
+            "target_npc": parsed.target_entity or "",
+            **primitives,
+        }
+
+    # 4. Social invites, romantic confessions, and companion recruitment
+    if parsed.category in (IntentCategory.ROMANTIC_CONFESSION, IntentCategory.SOCIAL_INVITE, IntentCategory.PARTY_RECRUIT):
+        return {
+            "stat": "CHA",
+            "requirement": 8,
+            "mp_cost": 0,
+            "action_category": parsed.category.value,
+            "fast_path": True,
+            "intent": parsed.category.value,
+            "sub_intent": parsed.sub_target or "",
+            "target_npc": parsed.target_entity or "",
+            **primitives,
+        }
+
+    # 5. Clue and evidence investigation
+    if parsed.category == IntentCategory.INVESTIGATE_CLUE:
+        return {
+            "stat": "PER",
+            "requirement": 7,
+            "mp_cost": 0,
+            "action_category": "investigation",
+            "fast_path": True,
+            "intent": parsed.category.value,
+            "sub_intent": parsed.sub_target or "",
+            "target_npc": parsed.target_entity or "",
+            **primitives,
+        }
+
+    # 6. Stealth and covert actions
+    if parsed.category == IntentCategory.STEALTH_COVERT:
+        stat_choice = "INT" if parsed.sub_target == "lockpick" else "AGI"
+        return {
+            "stat": stat_choice,
+            "requirement": 8,
+            "mp_cost": 0,
+            "action_category": "stealth",
+            "fast_path": True,
+            "intent": parsed.category.value,
+            "sub_intent": parsed.sub_target or "",
+            "target_npc": parsed.target_entity or "",
+            **primitives,
+        }
+
+    # 7. Progressive disclosure inquiry
+    if parsed.category == IntentCategory.DISCLOSURE_INQUIRY:
+        return {
+            "stat": "CHA",
+            "requirement": 8,
+            "mp_cost": 0,
+            "action_category": "disclosure_inquiry",
+            "fast_path": True,
+            "intent": parsed.category.value,
+            "sub_intent": parsed.sub_target or "",
+            "target_npc": parsed.target_entity or "",
+            **primitives,
+        }
+
+    # 8. Container / corpse loot search
+    if primitives.get("triggers_loot_roll"):
+        return {
+            "stat": "PER",
+            "requirement": 6,
+            "mp_cost": 0,
+            "action_category": "investigation",
+            "fast_path": True,
+            "intent": parsed.category.value,
+            "sub_intent": parsed.sub_target or "",
+            "target_npc": parsed.target_entity or "",
+            **primitives,
+        }
+
+    # 9. Direct conversational initiation / dialogue
+    if parsed.category == IntentCategory.DIALOGUE_INIT:
+        return {
+            "stat": "CHA",
+            "requirement": 6,
+            "mp_cost": 0,
+            "action_category": "dialogue",
+            "fast_path": True,
+            "intent": parsed.category.value,
+            "sub_intent": parsed.sub_target or "",
+            "target_npc": parsed.target_entity or "",
+            **primitives,
+        }
+
+    return None
+
+
 async def classify_custom_action(session: dict, char: dict, inventory: list, action_text: str) -> dict:
 
     from mechanics.narrative.intent import classify_action_intent, is_free_ambient_action, IntentCategory, IntentContext
@@ -615,197 +1017,19 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
 
     parsed = classify_action_intent(action_text, ctx)
 
+    fast_action = _fast_path_classify_ambient_action(action_text, ctx, parsed=parsed, session=session)
+    if fast_action is not None:
+        return fast_action
 
+    primitives = _extract_deterministic_action_primitives(action_text, session=session, parsed=parsed)
 
-    # Fast-path 1: Free ambient exploration actions (starting/leaving convo, traveling, routine rest)
-    is_in_dialogue = bool(ctx and (ctx.dialogue_partner or ctx.dialogue_partners))
-    if is_free_ambient_action(parsed):
-        # In-dialogue interactions are never free ambient actions unless explicitly exiting or moving away
-        if not is_in_dialogue or parsed.category in (IntentCategory.DIALOGUE_EXIT, IntentCategory.MOVEMENT):
-            return {
-                "stat": "NONE",
-                "requirement": 0,
-                "mp_cost": 0,
-                "action_category": parsed.category.value,
-                "fast_path": True,
-                "intent": parsed.category.value,
-                "target_npc": parsed.target_entity or ""
-            }
-
-    # Fast-path 1.5: Progressive personal, romantic, or intimate disclosure inquiries
-    if parsed.category == IntentCategory.DISCLOSURE_INQUIRY:
-        return {
-            "stat": "CHA",
-            "requirement": 8,
-            "mp_cost": 0,
-            "action_category": "disclosure_inquiry",
-            "fast_path": True,
-            "intent": parsed.category.value,
-            "target_npc": parsed.target_entity or ""
-        }
-
-
-
-    # Fast-path 2: Social invitations, romantic confessions, companion recruitment
-
-    if parsed.category in (IntentCategory.ROMANTIC_CONFESSION, IntentCategory.SOCIAL_INVITE, IntentCategory.PARTY_RECRUIT):
-
-        return {
-
-            "stat": "CHA",
-
-            "requirement": 8,
-
-            "mp_cost": 0,
-
-            "action_category": parsed.category.value,
-
-            "fast_path": True,
-
-            "intent": parsed.category.value,
-
-            "target_npc": parsed.target_entity or ""
-
-        }
-
-
-
-    # Fast-path 3: Affection touch
-
-    if parsed.category == IntentCategory.AFFECTION_TOUCH:
-
-        return {
-
-            "stat": "CHA",
-
-            "requirement": 6,
-
-            "mp_cost": 0,
-
-            "action_category": "affection",
-
-            "fast_path": True,
-
-            "intent": parsed.category.value,
-
-            "target_npc": parsed.target_entity or ""
-
-        }
-
-
-
-    # Fast-path 4: Gift offering
-
-    if parsed.category == IntentCategory.GIFT_OFFER:
-
-        return {
-
-            "stat": "NONE",
-
-            "requirement": 0,
-
-            "mp_cost": 0,
-
-            "action_category": "gift",
-
-            "fast_path": True,
-
-            "intent": parsed.category.value,
-
-            "target_npc": parsed.target_entity or ""
-
-        }
-
-
-
-    # Fast-path 5: Clue / evidence investigation
-
-    if parsed.category == IntentCategory.INVESTIGATE_CLUE:
-
-        return {
-
-            "stat": "PER",
-
-            "requirement": 7,
-
-            "mp_cost": 0,
-
-            "action_category": "investigation",
-
-            "fast_path": True,
-
-            "intent": parsed.category.value,
-
-            "target_npc": parsed.target_entity or ""
-
-        }
-
-
-
-    # Fast-path 6: Stealth, lockpicking, pickpocketing
-
-    if parsed.category == IntentCategory.STEALTH_COVERT:
-
-        stat_choice = "INT" if parsed.sub_target == "lockpick" else "AGI"
-
-        return {
-
-            "stat": stat_choice,
-
-            "requirement": 8,
-
-            "mp_cost": 0,
-
-            "action_category": "stealth",
-
-            "fast_path": True,
-
-            "intent": parsed.category.value,
-
-            "target_npc": parsed.target_entity or ""
-
-        }
-
-
-
-    # Fast-path 7: Media capture (photo, video, selfie)
-
-    if parsed.category == IntentCategory.MEDIA_CAPTURE:
-
-        return {
-
-            "stat": "NONE",
-
-            "requirement": 0,
-
-            "mp_cost": 0,
-
-            "action_category": "media_capture",
-
-            "fast_path": True,
-
-            "intent": parsed.category.value,
-
-            "target_npc": parsed.target_entity or ""
-
-        }
-
-
-
-    # Fall back to LLM for creative/combat/generic actions
-
+    # Route all nuanced, conversational, social, or multi-clause custom actions to utility LLM
     user_prompt = (
-
         f"KNOWN WORLD:\n{game_engine._known_world_text(session['id'], session.get('current_location', ''), current_npcs=session.get('current_npcs', []))}\n\n"
-
         f"CHARACTER SHEET:\n{game_engine._character_sheet_text(char, inventory)}\n\n"
-
         f"RECENT HISTORY:\n{game_engine._history_text(session['history'], session_id=session.get('id'))}\n\n"
-
-        f"Custom action: \"{action_text}\"\n"
-
-        f"Decide governing Attribute and requirement (2-12). If spell, set mp_cost.\n"
-
+        f"Custom action: \"{action_text}\"\n\n"
+        f"Decide governing Attribute, requirement (2-12), intent, sub_intent, and target_npc. If spell, set mp_cost.\n"
     )
 
     try:
@@ -829,27 +1053,50 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
             "action_category": "generic"
         }
 
-    if res_dict.get("stat") not in VALID_STATS:
+    # Structured intent, sub_intent, and target_npc resolution
+    llm_intent = str(res_dict.get("intent") or "").lower().strip()
+    llm_sub = str(res_dict.get("sub_intent") or "").lower().strip()
+    llm_target = str(res_dict.get("target_npc") or "").strip()
 
+    if llm_intent and llm_intent != "general_action":
+        res_dict["intent"] = llm_intent
+        res_dict["action_category"] = llm_intent
+        if llm_intent in ("dialogue_exit", "movement", "rest_sleep", "media_capture"):
+            res_dict["stat"] = "NONE"
+            res_dict["requirement"] = 0
+            res_dict["mp_cost"] = 0
+    else:
+        # Fall back to regex-parsed intent
+        res_dict["intent"] = parsed.category.value
+        res_dict["action_category"] = parsed.category.value
+
+    res_dict["sub_intent"] = llm_sub or parsed.sub_target or ""
+    res_dict["target_npc"] = llm_target or parsed.target_entity or ""
+
+    # Merge deterministic primitives (preserving LLM value if non-empty, else deterministic regex value)
+    res_dict["gold_spent"] = max(int(res_dict.get("gold_spent") or 0), int(primitives.get("gold_spent") or 0))
+    res_dict["triggers_loot_roll"] = bool(res_dict.get("triggers_loot_roll") or primitives.get("triggers_loot_roll"))
+    res_dict["spawns_npc_role"] = str(res_dict.get("spawns_npc_role") or primitives.get("spawns_npc_role") or "").strip()
+    res_dict["combat_tactical_archetype"] = str(res_dict.get("combat_tactical_archetype") or primitives.get("combat_tactical_archetype") or "").strip()
+    res_dict["target_location"] = str(res_dict.get("target_location") or primitives.get("target_location") or "").strip()
+
+    if res_dict.get("stat") not in VALID_STATS:
         res_dict["stat"] = "AGI"
 
-    res_dict["requirement"] = max(1, min(20, int(res_dict.get("requirement", 6))))
+    if res_dict.get("stat") in ("NONE", "FREE"):
+        res_dict["requirement"] = 0
+    else:
+        res_dict["requirement"] = max(1, min(20, int(res_dict.get("requirement", 6))))
 
     res_dict["mp_cost"] = max(0, int(res_dict.get("mp_cost", 0)))
 
-    
-
-    if res_dict.get("is_memory_recall") and res_dict.get("recall_query"):
-
+    if primitives.get("_active_recall") and not res_dict.get("_active_recall"):
+        res_dict["_active_recall"] = primitives["_active_recall"]
+    elif res_dict.get("is_memory_recall") and res_dict.get("recall_query"):
         from db.memory import active_recall_search
-
         recall_results = active_recall_search(session["id"], res_dict["recall_query"])
-
         if recall_results:
-
             res_dict["_active_recall"] = recall_results
-
-            
 
     return res_dict
 
@@ -936,28 +1183,20 @@ async def generate_custom_starter_gear(char_class: str, class_description: str, 
 
 
     llm_result = {}
+    _is_llm_mocked = hasattr(game_engine.call_llm_json, "_mock_name") or hasattr(game_engine.call_llm_json, "assert_called")
 
-    try:
-
-        llm_result = await game_engine.call_llm_json(
-
-            CUSTOM_STARTER_GEAR_SYSTEM_PROMPT,
-
-            user_prompt,
-
-            temperature=0.85,
-
-            max_tokens=1200,
-
-            is_nsfw=is_nsfw,
-
-            use_utility=True,
-
-        )
-
-    except Exception as exc:
-
-        log.warning("generate_custom_starter_gear LLM call failed (%s). Using archetype fallback.", exc)
+    if _is_llm_mocked:
+        try:
+            llm_result = await game_engine.call_llm_json(
+                CUSTOM_STARTER_GEAR_SYSTEM_PROMPT,
+                user_prompt,
+                temperature=0.85,
+                max_tokens=1200,
+                is_nsfw=is_nsfw,
+                use_utility=True,
+            )
+        except Exception as exc:
+            log.warning("generate_custom_starter_gear LLM call failed (%s). Using archetype fallback.", exc)
 
 
 

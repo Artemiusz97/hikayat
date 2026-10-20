@@ -52,9 +52,12 @@ def build_save_slot_embed(save_meta: dict, char: dict = None) -> discord.Embed:
     embed.add_field(name="🎬 Scene", value=f"*{scene_title}*", inline=True)
 
     if char:
+        from mechanics.social.races import format_race_display
+        race_display = format_race_display(char.get("race", "human"))
+        gender_display = char.get("gender", "Unknown")
         embed.add_field(
             name="👤 Hero",
-            value=f"**{char['name']}** (Lvl {char['level']} {char['char_class']})",
+            value=f"**{char['name']}** ({race_display} | {gender_display} | Lvl {char['level']} {char['char_class']})",
             inline=True
         )
         embed.add_field(
@@ -71,19 +74,24 @@ def build_save_slot_embed(save_meta: dict, char: dict = None) -> discord.Embed:
 
 def build_saves_list_embed(saves: list[dict], char: dict) -> discord.Embed:
     """Builds an overview embed listing all saved checkpoints for the active character."""
+    from mechanics.social.races import format_race_display
+    race_display = format_race_display(char.get("race", "human"))
+    gender_display = char.get("gender", "Unknown")
     embed = discord.Embed(
         title=f"💾 Adventure Checkpoints: {char['name']}",
-        description=f"Showing **{len(saves)}/10** saved adventure slots for **{char['name']}**.\n"
+        description=f"👤 **Character:** **{char['name']}** ({race_display} | {gender_display} | Lvl {char['level']} {char['char_class']})\n"
+                    f"Showing **{len(saves)}/6** saved adventure slots.\n"
                     f"Select a slot below to inspect details, load, or delete.",
         color=discord.Color.gold()
     )
 
     if not saves:
         embed.description = (
-            f"You have no saved checkpoints for **{char['name']}** yet.\n\n"
-            f"💡 While on an active adventure, use `/adventure save [name]` to save your current story progress!"
+            f"👤 **Character:** **{char['name']}** ({race_display} | {gender_display} | Lvl {char['level']} {char['char_class']})\n\n"
+            f"You have no saved checkpoints for **{char['name']}** yet (0/6 used).\n\n"
+            f"💡 While on an active adventure, use `/save [name]` or `/adventure save [name]` to save your current story progress!"
         )
-        embed.set_footer(text="Save slots are isolated per character (up to 10 slots each).")
+        embed.set_footer(text=f"Save slots are strictly isolated per character (up to 6 slots). Active: {char['name']}")
         return embed
 
     for idx, s in enumerate(saves, start=1):
@@ -109,7 +117,7 @@ def build_saves_list_embed(saves: list[dict], char: dict) -> discord.Embed:
             inline=False
         )
 
-    embed.set_footer(text="Use the dropdown or buttons below to manage your adventure checkpoints.")
+    embed.set_footer(text=f"Save slots are strictly isolated per character (up to 6 slots). Active: {char['name']}")
     return embed
 
 
@@ -266,6 +274,8 @@ class OverwriteConfirmView(discord.ui.View):
             await interaction.response.send_message("This isn't your prompt.", ephemeral=True)
             return
 
+        char = await adb(db.get_character, self.user_id)
+        char_name = char["name"] if char else "Hero"
         try:
             res = await adb(db.save_adventure_slot, self.user_id, self.slot_name, overwrite=True)
         except Exception as e:
@@ -274,7 +284,8 @@ class OverwriteConfirmView(discord.ui.View):
 
         for child in self.children:
             child.disabled = True
-        msg = f"💾 Overwrote save slot **{res['slot_name']}** at location **{res['current_location'] or 'Wilderness'}**!"
+        total_slots = await adb(db.count_character_adventure_saves, char["id"]) if char else 1
+        msg = f"💾 Overwrote save slot **{res['slot_name']}** for **{char_name}** ({total_slots}/6 slots used) at location **{res['current_location'] or 'Wilderness'}**!"
         await interaction.response.edit_message(content=msg, view=self)
         self.stop()
 
@@ -303,9 +314,11 @@ class LoadConfirmView(discord.ui.View):
             await interaction.response.send_message("This isn't your confirmation.", ephemeral=True)
             return
 
+        char = await adb(db.get_character, self.user_id)
+        char_name = char["name"] if char else "Hero"
         for child in self.children:
             child.disabled = True
-        await interaction.response.edit_message(content=f"🔄 Loading checkpoint **{self.slot_name}**...", view=self)
+        await interaction.response.edit_message(content=f"🔄 Loading checkpoint **{self.slot_name}** for **{char_name}**...", view=self)
 
         try:
             session = await adb(db.load_adventure_slot, self.user_id, self.slot_name)
@@ -313,7 +326,7 @@ class LoadConfirmView(discord.ui.View):
             await interaction.followup.send(f"❌ Failed to load save slot: {e}", ephemeral=True)
             return
 
-        await interaction.followup.send(f"✅ Successfully loaded checkpoint **{self.slot_name}**!")
+        await interaction.followup.send(f"✅ Successfully loaded checkpoint **{self.slot_name}** for **{char_name}**!")
         await self.cog._resend_current_scene(interaction, session, use_followup=True)
         self.stop()
 
@@ -343,14 +356,17 @@ class DeleteSaveConfirmView(discord.ui.View):
             await interaction.response.send_message("This isn't your confirmation.", ephemeral=True)
             return
 
+        char = await adb(db.get_character, self.user_id)
+        char_name = char["name"] if char else "Hero"
         deleted = await adb(db.delete_adventure_save, self.user_id, self.slot_name)
         for child in self.children:
             child.disabled = True
 
         if deleted:
-            msg = f"🗑️ Permanently deleted save slot **{self.slot_name}**."
+            rem = await adb(db.count_character_adventure_saves, char["id"]) if char else 0
+            msg = f"🗑️ Permanently deleted save slot **{self.slot_name}** for **{char_name}** ({rem}/6 slots used)."
         else:
-            msg = f"❌ Could not find save slot **{self.slot_name}** to delete."
+            msg = f"❌ Could not find save slot **{self.slot_name}** for active character **{char_name}** to delete."
 
         await interaction.response.edit_message(content=msg, view=self)
         self.stop()
