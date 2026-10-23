@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Any, Optional
 """
 Procedural name generator with scenario-specific name pools.
 

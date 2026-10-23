@@ -1,8 +1,9 @@
+from __future__ import annotations
 import re
 import json
 import random
 import asyncio
-from typing import Any
+from typing import Any, Optional, Dict, List, Tuple
 import db
 import game_engine
 from db import STAT_COLUMN
