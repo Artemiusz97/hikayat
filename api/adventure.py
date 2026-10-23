@@ -532,6 +532,22 @@ async def _trigger_scene_image_broadcast(
         logger.warning(f"Scene image generation failed for session {session_id}: {e}")
         return None
 
+@router.get("/api/adventure/session-image/{session_id}")
+async def get_session_image(session_id: int):
+    """Lightweight polling endpoint returning the latest scene_image_url for active turn reconciliation."""
+    sess = await adb(db.get_session, session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    raw_hist = list(sess.get("history") or [])
+    last_img = raw_hist[-1].get("scene_image_url") if (raw_hist and isinstance(raw_hist[-1], dict)) else None
+    return {
+        "session_id": session_id,
+        "scene_image_url": sess.get("scene_image_url") or last_img,
+        "history_image_url": last_img,
+        "scene_title": sess.get("scene_title", ""),
+    }
+
+
 
 def _fetch_open_lobbies() -> list[dict]:
     with db.get_conn() as conn:

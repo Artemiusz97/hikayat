@@ -21,6 +21,41 @@ export const useGameSession = (user, character) => {
   const reconnectTimeoutRef = useRef(null);
 
   const isInitialLoadRef = useRef(true);
+  const pollForSceneImage = useCallback((sessionId, maxAttempts = 15) => {
+    if (!sessionId) return;
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts++;
+      try {
+        const res = await apiCall(`/api/adventure/session-image/${sessionId}`);
+        if (res && res.scene_image_url) {
+          clearInterval(interval);
+          setSession(prev => {
+            if (!prev || (prev.id !== sessionId && String(prev.id) !== String(sessionId))) return prev;
+            const hist = Array.isArray(prev.history) ? [...prev.history] : [];
+            if (hist.length > 0 && typeof hist[hist.length - 1] === 'object') {
+              hist[hist.length - 1] = {
+                ...hist[hist.length - 1],
+                scene_image_url: res.scene_image_url,
+              };
+            }
+            return {
+              ...prev,
+              scene_image_url: res.scene_image_url,
+              history: hist
+            };
+          });
+        } else if (attempts >= maxAttempts) {
+          clearInterval(interval);
+        }
+      } catch (e) {
+        if (attempts >= maxAttempts) {
+          clearInterval(interval);
+        }
+      }
+    }, 2000);
+  }, []);
+
 
   const fetchActiveSession = useCallback(async (options = {}) => {
     const isInitial = isInitialLoadRef.current;
@@ -134,6 +169,9 @@ export const useGameSession = (user, character) => {
         setWaitingForParty(false);
         setProcessingTurn(false);
         setLastSyncTimestamp(data.sync_timestamp || Date.now());
+        if (data.session?.image_gen_enabled && !data.session?.scene_image_url) {
+          pollForSceneImage(data.session.id);
+        }
       } else if (data.type === 'HEARTBEAT') {
         // Keepalive acknowledged from backend turn engine
       } else if (data.type === 'UPDATE_SCENE') {
@@ -198,13 +236,14 @@ export const useGameSession = (user, character) => {
 
     ws.onclose = (event) => {
       clearInterval(interval);
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      // Auto-reconnect if session still exists and not cleanly closed
-      if (!event.wasClean) {
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connectWebSocket(sessionId);
-        }, 2000);
+      if (socketRef.current === ws) {
+        socketRef.current = null;
       }
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      // Auto-reconnect unconditionally so server restarts or hot-reloads heal seamlessly
+      reconnectTimeoutRef.current = setTimeout(() => {
+        connectWebSocket(sessionId);
+      }, 2000);
     };
 
     ws.onerror = () => {
@@ -350,6 +389,9 @@ export const useGameSession = (user, character) => {
         setStreamingNarrative(null);
         setStreamingState(null);
         setLastSyncTimestamp(Date.now());
+        if (data.session?.image_gen_enabled && !data.session?.scene_image_url) {
+          pollForSceneImage(data.session.id);
+        }
       }
       return data;
     } catch (e) {
