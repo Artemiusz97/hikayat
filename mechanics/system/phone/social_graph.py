@@ -8,10 +8,18 @@ import db
 from skill_check import resolve_check
 
 
+def _safe_get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool = False) -> list[dict]:
+    """Retrieves contacts, falling back gracefully if db.get_contacts is mocked without resolve_relations."""
+    try:
+        return db.get_contacts(session_id, character_id=character_id, resolve_relations=resolve_relations) or []
+    except TypeError:
+        return db.get_contacts(session_id, character_id=character_id) or []
+
+
 def get_mutual_friends_and_ties(session_id: int, user_id: int, target_dict: dict) -> dict:
     """Calculates mutual contacts, shared clubs, and sibling connections with a target NPC."""
     char = db.get_character(user_id)
-    contacts = db.get_contacts(session_id, character_id=char.get("id", 0)) if char else []
+    contacts = _safe_get_contacts(session_id, character_id=char.get("id", 0), resolve_relations=False) if char else []
     contact_names = {c.get("name", "").strip().lower(): c for c in contacts}
 
     sib_name = str(target_dict.get("sibling_name", "")).strip()
@@ -87,7 +95,7 @@ def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dic
 
     # 2. Existing contacts lookup
     if not target_rec:
-        contacts = db.get_contacts(session_id, character_id=char.get("id", 0)) if char else []
+        contacts = _safe_get_contacts(session_id, character_id=char.get("id", 0), resolve_relations=False) if char else []
         for c in contacts:
             c_name = str(c.get("name", "")).lower()
             c_id = str(c.get("npc_id", "")).lower()
@@ -446,7 +454,7 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
 def discover_suggested_peer(session_id: int, user_id: int) -> dict:
     """Discovers an un-contacted student peer or dynamically generates a new one."""
     char = db.get_character(user_id)
-    contacts = db.get_contacts(session_id, character_id=char.get("id", 0)) if char else []
+    contacts = _safe_get_contacts(session_id, character_id=char.get("id", 0), resolve_relations=False) if char else []
     contact_ids = {c["npc_id"].lower() for c in contacts}
 
     roster = db.get_school_roster(session_id)
@@ -493,7 +501,7 @@ def get_suggested_peers(session_id: int, user_id: int, limit: int = 12) -> list[
     party_npcs = db.get_session_party_npcs(session_id)
     party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
 
-    contacts = db.get_contacts(session_id, character_id=char.get("id", 0)) if char else []
+    contacts = _safe_get_contacts(session_id, character_id=char.get("id", 0), resolve_relations=False) if char else []
     from mechanics.social.relationships import is_unlocked_contact
     unlocked_contact_names = {c["name"].lower().strip() for c in contacts if is_unlocked_contact(c, party_names)}
 

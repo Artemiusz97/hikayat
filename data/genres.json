@@ -18,99 +18,390 @@
     "starting_hooks": [
       {
         "archetype": "hub_launchpad",
-        "hook": "in a dimly lit, bustling tavern as mercenaries review contract notices and an informant flags your table",
+        "starting_minute": 540,
+        "hook": "at 09:00 AM in a dimly lit, bustling tavern as mercenaries review contract notices and an informant flags your table",
         "suggested_location": "{session_kingdom} ➔ The Boar's Tusk Tavern ➔ Hearthside Table",
-        "directive": "Open Hub Exploration: Establish ambient tavern atmosphere, 2-3 present patrons/NPCs with distinct rumors, notice board access, and open choices."
+        "directive": "Open Hub Exploration: Establish ambient tavern atmosphere, 2-3 present patrons/NPCs with distinct rumors, notice board access, and open choices.",
+        "focal_point": "Hearthside corner table near the roaring stone fireplace",
+        "scheduled_roles": [
+          "Tavern Barkeep",
+          "Guild Informant"
+        ],
+        "initial_physical_state": {
+          "posture": "sitting",
+          "posture_qualifier": "at the heavy oak table",
+          "holding": "clay ale flagon",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Wax-Sealed Guild Contract",
+          "item_type": "tool",
+          "effect": "A bounty contract from the Adventurers' Guild detailing territorial anomalies"
+        },
+        "visual_cues": "warm hearth firelight, wooden tavern beams, flickering candles, ambient dust, tankards on tables, lively tavern interior"
       },
       {
         "archetype": "hub_launchpad",
-        "hook": "in a vibrant open-air grand bazaar surrounded by aromatic spice stalls, arcane trinket peddlers, and lively caravans",
+        "starting_minute": 600,
+        "hook": "at 10:00 AM in a vibrant open-air grand bazaar surrounded by aromatic spice stalls, arcane trinket peddlers, and lively caravans",
         "suggested_location": "{session_kingdom} ➔ Sunfire Grand Bazaar ➔ Silk Merchant Pavilion",
-        "directive": "Open Hub Exploration: Establish vibrant marketplace bustle, colorful merchants, local rumors, and trade opportunities."
+        "directive": "Open Hub Exploration: Establish vibrant marketplace bustle, colorful merchants, local rumors, and trade opportunities.",
+        "focal_point": "Shaded silk pavilion inspecting exotic trade goods",
+        "scheduled_roles": [
+          "Silk Merchant",
+          "Caravan Guard"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "under colorful silk canopies",
+          "holding": "parchment price ledger",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Merchant Coin Pouch",
+          "item_type": "misc",
+          "effect": "A leather pouch jingling with trade coinage and exotic tokens"
+        },
+        "visual_cues": "bright morning sun, colorful fabric awnings, drifting spice incense, bustling bazaar crowd, vibrant fantasy marketplace"
       },
       {
         "archetype": "hub_launchpad",
-        "hook": "in the grand registration hall of the Adventurers' Guild as scouts report new territorial anomalies and expedition leaders recruit companions",
+        "starting_minute": 510,
+        "hook": "at 08:30 AM in the grand registration hall of the Adventurers' Guild as scouts report new territorial anomalies and expedition leaders recruit companions",
         "suggested_location": "{session_kingdom} ➔ Adventurers' Guild Headquarters ➔ Expedition Registry",
-        "directive": "Open Hub Exploration: Guild hall atmosphere, active bulletin ledger, seasoned adventurers, and mission opportunities."
+        "directive": "Open Hub Exploration: Guild hall atmosphere, active bulletin ledger, seasoned adventurers, and mission opportunities.",
+        "focal_point": "Front counter before the massive ironwood bulletin ledger",
+        "scheduled_roles": [
+          "Guild Registrar",
+          "Veteran Scout"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "at the guild registry counter",
+          "holding": "stamped guild badge",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Adventurer Guild Badge",
+          "item_type": "tool",
+          "effect": "A bronze guild insignia granting access to official quest ledgers and outpost waystations"
+        },
+        "visual_cues": "lofty guild hall, vaulted stone ceilings, sunlight through tall arched windows, parchment notice board, armored guild members"
       },
       {
         "archetype": "hub_launchpad",
-        "hook": "at a high frontier watchtower garrison overlooking the vast wilderness as rangers warm their hands over a stone brazier",
+        "starting_minute": 450,
+        "hook": "at 07:30 AM at a high frontier watchtower garrison overlooking the vast wilderness as rangers warm their hands over a stone brazier",
         "suggested_location": "{session_mountain} ➔ Highwatch Frontier Outpost ➔ Signal Tower Lookout",
-        "directive": "Open Hub Exploration: Frontier outpost atmosphere, vigilant rangers, wilderness scouting maps, and border contracts."
+        "directive": "Open Hub Exploration: Frontier outpost atmosphere, vigilant rangers, wilderness scouting maps, and border contracts.",
+        "focal_point": "Stone lookout parapet gazing across the windswept valley",
+        "scheduled_roles": [
+          "Frontier Ranger",
+          "Garrison Sentinel"
+        ],
+        "initial_physical_state": {
+          "posture": "leaning",
+          "posture_qualifier": "against the stone battlement",
+          "holding": "brass field spyglass",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Frontier Spyglass",
+          "item_type": "tool",
+          "effect": "A brass telescoping lens useful for scouting distant valleys and spotting mountain ambushes"
+        },
+        "visual_cues": "crisp morning mountain dawn, stone battlement, glowing iron brazier, sweeping pine valley view, windblown hair"
       },
       {
         "archetype": "hub_launchpad",
-        "hook": "beneath the towering stained-glass dome of an arcane academy conservatory as scholar-mages debate fluctuating leylines",
+        "starting_minute": 660,
+        "hook": "at 11:00 AM beneath the towering stained-glass dome of an arcane academy conservatory as scholar-mages debate fluctuating leylines",
         "suggested_location": "{session_kingdom} ➔ Grand Arcanum Conservatory ➔ Star-Globe Balcony",
-        "directive": "Open Hub Exploration: Scholarly arcane sanctum, floating grimoires, curious mages, and magical inquiry choices."
+        "directive": "Open Hub Exploration: Scholarly arcane sanctum, floating grimoires, curious mages, and magical inquiry choices.",
+        "focal_point": "Balcony railing beside the floating brass orrery",
+        "scheduled_roles": [
+          "Scholar Mage",
+          "Academy Arcanist"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "beside the revolving star-globe",
+          "holding": "luminescent arcane crystal",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Resonating Leyline Crystal",
+          "item_type": "tool",
+          "effect": "A tuned crystal prism that pulses softly when near magical anomalies or hidden wards"
+        },
+        "visual_cues": "stained glass kaleidoscope light, floating grimoires, polished marble floors, rotating brass armillary sphere, arcane shimmer"
       },
       {
         "archetype": "in_media_res",
-        "hook": "along a rocky mountain pass under sudden attack by mountain raiders as your transport wagon overturns",
+        "starting_minute": 990,
+        "hook": "at 04:30 PM along a rocky mountain pass under sudden attack by mountain raiders as your transport wagon overturns",
         "suggested_location": "{session_mountain} ➔ Mountain Pass Crossing ➔ Overturned Wagon",
-        "directive": "In Media Res: Immediate crisis with weapons drawn, rolling debris, and urgent tactical choices (counter-attack, rescue companion, arcane shield, take cover)."
+        "directive": "In Media Res: Immediate crisis with weapons drawn, rolling debris, and urgent tactical choices (counter-attack, rescue companion, arcane shield, take cover).",
+        "focal_point": "Crouched behind the shattered wagon wheel on the rocky verge",
+        "scheduled_roles": [
+          "Panicked Wagon Driver",
+          "Mountain Raider"
+        ],
+        "initial_physical_state": {
+          "posture": "crouching",
+          "posture_qualifier": "behind splintered wagon wreckage",
+          "holding": "drawn steel dagger",
+          "stance": "Combat Ready",
+          "composure": "adrenaline_spiked",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Sturdy Climbing Piton",
+          "item_type": "tool",
+          "effect": "Heavy steel piton and rope coil useful for securing footholds on steep mountain cliffs"
+        },
+        "visual_cues": "dramatic golden hour lighting, splintered wooden wagon, dust plumes, drawn steel weapons, rocky mountain incline"
       },
       {
         "archetype": "in_media_res",
-        "hook": "atop a wooden frontier palisade as a sudden beast horde charges out from the forest shadows against the outer gates",
+        "starting_minute": 1260,
+        "hook": "at 09:00 PM atop a wooden frontier palisade as a sudden beast horde charges out from the forest shadows against the outer gates",
         "suggested_location": "{session_forest} ➔ Pineguard Palisade ➔ Breached Wooden Gate",
-        "directive": "In Media Res: Desperate outpost defense, crashing gate timbers, charging beasts, and decisive combat/barrier choices."
+        "directive": "In Media Res: Desperate outpost defense, crashing gate timbers, charging beasts, and decisive combat/barrier choices.",
+        "focal_point": "Cracked gate timber bracing against the heavy iron bar",
+        "scheduled_roles": [
+          "Desperate Militia Scout",
+          "Garrison Archer"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "bracing against the shuddering gate beam",
+          "holding": "heavy gate lever",
+          "stance": "Combat Ready",
+          "composure": "tense",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Pineguard Signal Horn",
+          "item_type": "tool",
+          "effect": "A carved ram horn capable of sounding rallying calls across distant outpost garrisons"
+        },
+        "visual_cues": "night battle, blazing pitch torches, splintering wooden palisade, glowing predator eyes in dark woods, glowing embers"
       },
       {
         "archetype": "in_media_res",
-        "hook": "on a swaying stone bridge as a flash-flood river surge fractures the central arch beneath your boots",
+        "starting_minute": 870,
+        "hook": "at 02:30 PM on a swaying stone bridge as a flash-flood river surge fractures the central arch beneath your boots",
         "suggested_location": "{session_mountain} ➔ Ironbridge Crossing ➔ Fractured Stone Span",
-        "directive": "In Media Res: Environmental collapse crisis, roaring white-water rapids, cracking stone, and high-agility reflex choices."
+        "directive": "In Media Res: Environmental collapse crisis, roaring white-water rapids, cracking stone, and high-agility reflex choices.",
+        "focal_point": "Balancing on the crumbling keystone above the raging river gorge",
+        "scheduled_roles": [
+          "Stranded Caravan Scout"
+        ],
+        "initial_physical_state": {
+          "posture": "kneeling",
+          "posture_qualifier": "on the fracturing flagstones",
+          "holding": "frayed safety tether",
+          "stance": "Defensive",
+          "composure": "adrenaline_spiked",
+          "is_wet": 1
+        },
+        "starting_prop": {
+          "name": "Reinforced Grappling Hook",
+          "item_type": "tool",
+          "effect": "A weighted three-pronged steel hook with twenty feet of braided rope"
+        },
+        "visual_cues": "raging whitewater torrent, water spray, fractured stone archway, dramatic mist, desperate grip on wet stones"
       },
       {
         "archetype": "in_media_res",
-        "hook": "outside the capital outer gates as an alarm bell clangs and a rogue magical construct shatters the iron portcullis",
+        "starting_minute": 1140,
+        "hook": "at 07:00 PM outside the capital outer gates as an alarm bell clangs and a rogue magical construct shatters the iron portcullis",
         "suggested_location": "{session_kingdom} ➔ Royal Capital Outer Gates ➔ Smoldering Portcullis",
-        "directive": "In Media Res: Rampaging construct crisis, scattered city guards, electrical sparks, and immediate tactical engagement choices."
+        "directive": "In Media Res: Rampaging construct crisis, scattered city guards, electrical sparks, and immediate tactical engagement choices.",
+        "focal_point": "Ducking beside the smoking gatehouse archway as arcane arcs crackle overhead",
+        "scheduled_roles": [
+          "Wounded City Guard",
+          "Capital Gate Captain"
+        ],
+        "initial_physical_state": {
+          "posture": "crouching",
+          "posture_qualifier": "behind fallen portcullis debris",
+          "holding": "drawn weapon",
+          "stance": "Combat Ready",
+          "composure": "tense",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Arcane Dispelling Glyph",
+          "item_type": "tool",
+          "effect": "A one-use inscribed rune scroll that can short-circuit arcane enchantments and constructs"
+        },
+        "visual_cues": "dusk twilight, clanging bronze alarm bells, crackling blue electrical magic arcs, smoking iron rubble, shattered gate"
       },
       {
         "archetype": "in_media_res",
-        "hook": "deep in a subterranean cavern as an earthquake tremors through the stone, shattering luminescent crystals and opening a chasm",
+        "starting_minute": 780,
+        "hook": "at 01:00 PM deep in a subterranean cavern as an earthquake tremors through the stone, shattering luminescent crystals and opening a chasm",
         "suggested_location": "{session_caves} ➔ Crystal Cavern Tunnel ➔ Fractured Chasm",
-        "directive": "In Media Res: Cavern tremor emergency, falling stalactites, glowing crystal shrapnel, and rapid escape/stabilization choices."
+        "directive": "In Media Res: Cavern tremor emergency, falling stalactites, glowing crystal shrapnel, and rapid escape/stabilization choices.",
+        "focal_point": "Edge of the widening crystal fracture holding back a companion",
+        "scheduled_roles": [
+          "Trapped Cavern Miner",
+          "Dwarven Prospector"
+        ],
+        "initial_physical_state": {
+          "posture": "kneeling",
+          "posture_qualifier": "on jagged crystal-strewn ground",
+          "holding": "unlit mining torch",
+          "stance": "Defensive",
+          "composure": "adrenaline_spiked",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Dwarven Mining Pick",
+          "item_type": "tool",
+          "effect": "A heavy tempered pickaxe suitable for cutting footholds in stone or prying cave rubble"
+        },
+        "visual_cues": "vibrant glowing teal crystal shards, dust motes falling from cavern ceiling, dark yawning chasm, cinematic underground lighting"
       },
       {
         "archetype": "delve_threshold",
-        "hook": "before the ancient overgrown archway of a sunken ruin as a mystical seal hums and glowing runes flare to life",
+        "starting_minute": 390,
+        "hook": "at 06:30 AM before the ancient overgrown archway of a sunken ruin as a mystical seal hums and glowing runes flare to life",
         "suggested_location": "{session_forest} ➔ Sunken Moonwell ➔ Ruined Archway",
-        "directive": "Delve Threshold: Stage the mystery of the ancient ruin threshold, survival/scouting choices, deciphering inscriptions, and preparing expedition gear."
+        "directive": "Delve Threshold: Stage the mystery of the ancient ruin threshold, survival/scouting choices, deciphering inscriptions, and preparing expedition gear.",
+        "focal_point": "Kneeling before the ancient carved threshold stone tracing glowing glyphs",
+        "scheduled_roles": [
+          "Ancient Scribe",
+          "Expedition Scout"
+        ],
+        "initial_physical_state": {
+          "posture": "kneeling",
+          "posture_qualifier": "before the moss-covered lintel",
+          "holding": "parchment rubbing charcoal",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Runic Charcoal Rubbing",
+          "item_type": "tool",
+          "effect": "A transcription of the ancient gate inscriptions showing lock sequences and warning wards"
+        },
+        "visual_cues": "pale dawn mist, ivy-draped stone columns, glowing teal runic glyphs, still moonlit water, ancient mossy stones"
       },
       {
         "archetype": "delve_threshold",
-        "hook": "at the sealed iron ossuary gate of the mountain catacombs where cold subterranean air whispers through ancient carved gargoyles",
+        "starting_minute": 1080,
+        "hook": "at 06:00 PM at the sealed iron ossuary gate of the mountain catacombs where cold subterranean air whispers through ancient carved gargoyles",
         "suggested_location": "{session_mountain} ➔ Whispering Catacombs ➔ Sealed Ossuary Gate",
-        "directive": "Delve Threshold: Dark catacomb expedition threshold, ancient funerary wards, inspecting stone sarcophagi, and lighting torches."
+        "directive": "Delve Threshold: Dark catacomb expedition threshold, ancient funerary wards, inspecting stone sarcophagi, and lighting torches.",
+        "focal_point": "Standing before the heavy iron-barred ossuary grate checking the lock tumblers",
+        "scheduled_roles": [
+          "Grave Keeper",
+          "Catacomb Guide"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "before the rusted iron gate",
+          "holding": "flaring tallow torch",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Ever-Burning Tallow Torch",
+          "item_type": "tool",
+          "effect": "A chemically treated torch that resists damp underground drafts and sheds steady yellow light"
+        },
+        "visual_cues": "crepuscular sunset fading outside, dark stone archway, flickering orange torchlight, carved stone skulls, cold breath mist"
       },
       {
         "archetype": "delve_threshold",
-        "hook": "before the towering shattered vestibule of a ruined arcane spire jutting above the ancient tree canopy",
+        "starting_minute": 480,
+        "hook": "at 08:00 AM before the towering shattered vestibule of a ruined arcane spire jutting above the ancient tree canopy",
         "suggested_location": "{session_ancient_forest} ➔ Spire of the Fallen Archmage ➔ Shattered Vestibule",
-        "directive": "Delve Threshold: High-magic ruin exploration, floating architectural remnants, deciphering arcane wards, and preparing ascent."
+        "directive": "Delve Threshold: High-magic ruin exploration, floating architectural remnants, deciphering arcane wards, and preparing ascent.",
+        "focal_point": "Resting on a floating marble pedestal studying the inverted staircase",
+        "scheduled_roles": [
+          "Arcane Archaeologist"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "on floating marble steps",
+          "holding": "crystal tuning rod",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Harmonic Tuning Rod",
+          "item_type": "tool",
+          "effect": "A silver rod that vibrates near anti-gravity fields and hidden levitation platforms"
+        },
+        "visual_cues": "morning rays filtering through colossal canopy leaves, floating fractured marble blocks, purple arcane motes, towering spire"
       },
       {
         "archetype": "delve_threshold",
-        "hook": "behind a thunderous mountain waterfall where an ancient dwarven blast gate stands half-buried beneath mineral crust",
+        "starting_minute": 900,
+        "hook": "at 03:00 PM behind a thunderous mountain waterfall where an ancient dwarven blast gate stands half-buried beneath mineral crust",
         "suggested_location": "{session_caves} ➔ Deep Iron Under-Vault ➔ Runic Blast Gate",
-        "directive": "Delve Threshold: Subterranean industrial vault mystery, heavy dwarven cogs, analyzing runic locks, and gearing up for the delve."
+        "directive": "Delve Threshold: Subterranean industrial vault mystery, heavy dwarven cogs, analyzing runic locks, and gearing up for the delve.",
+        "focal_point": "Gazing into the massive keyhole mechanism of the sealed dwarven cog-door",
+        "scheduled_roles": [
+          "Dwarven Locksmith"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "on wet slate behind the waterfall curtain",
+          "holding": "heavy iron wrench",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 1
+        },
+        "starting_prop": {
+          "name": "Dwarven Spanner Key",
+          "item_type": "tool",
+          "effect": "A notched brass wrench engineered to turn heavy subterranean pressure gears and vault locks"
+        },
+        "visual_cues": "translucent curtain of falling water, wet dark basalt, colossal iron cogs with verdigris patina, amber glow from runes"
       },
       {
         "archetype": "delve_threshold",
-        "hook": "upon a fog-shrouded moorland ridge before a circle of standing megaliths marking the entrance to a primeval barrow",
-        "suggested_location": "{session_forest} ➔ Ashen Barrowmound ➔ Megalithic Threshold",
-        "directive": "Delve Threshold: Ancient earthen barrow exploration, reading faded ogham stones, checking ground traps, and entering the mound."
-      },
-      {
-        "archetype": "delve_threshold",
-        "hook": "at the tidal entrance of a drowned sea-grotto where luminescent barnacles illuminate a submerged pre-cataclysm archway",
+        "starting_minute": 1020,
+        "hook": "at 05:00 PM at the tidal entrance of a drowned sea-grotto where luminescent barnacles illuminate a submerged pre-cataclysm archway",
         "suggested_location": "{session_forest} ➔ Drowned Leviathan Sanctum ➔ Tidal Archway",
-        "directive": "Delve Threshold: Coastal grotto expedition, checking tidal currents, inspecting luminous sea-runes, and preparing aquatic gear."
+        "directive": "Delve Threshold: Coastal grotto expedition, checking tidal currents, inspecting luminous sea-runes, and preparing aquatic gear.",
+        "focal_point": "Perched on a barnacle-crusted sea boulder watching the ebbing tide reveal the entrance",
+        "scheduled_roles": [
+          "Coastal Smuggler",
+          "Reef Diver"
+        ],
+        "initial_physical_state": {
+          "posture": "sitting",
+          "posture_qualifier": "on a damp tidal rock",
+          "holding": "coiled waterproof diving line",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 1
+        },
+        "starting_prop": {
+          "name": "Luminescent Sea Pearl",
+          "item_type": "tool",
+          "effect": "An enchanted abalone pearl that glows with cold blue light even when submerged in deep water"
+        },
+        "visual_cues": "dusk coastal sunset, crashing turquoise waves, bioluminescent blue barnacles, sea spray, submerged stone arches"
       }
     ]
   },
@@ -133,21 +424,159 @@
     "starting_hooks": [
       {
         "archetype": "hub_launchpad",
-        "hook": "in a crowded planetary spaceport concourse surrounded by alien traders, holographic flight boards, and cargo haulers",
+        "starting_minute": 600,
+        "hook": "at 10:00 AM in a crowded planetary spaceport concourse surrounded by alien traders, holographic flight boards, and cargo haulers",
         "suggested_location": "{session_station} ➔ Concourse Promenade ➔ Observation Lounge",
-        "directive": "Open Hub Exploration: Establish vibrant starport atmosphere, alien merchants, job bulletin terminal, and open choices."
+        "directive": "Open Hub Exploration: Establish vibrant starport atmosphere, alien merchants, job bulletin terminal, and open choices.",
+        "focal_point": "Curved observation deck railing looking out at the starfield",
+        "scheduled_roles": [
+          "Alien Merchant",
+          "Station Customs Officer"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "at the observation deck railing",
+          "holding": "digital boarding pass",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Universal Transit Pass",
+          "item_type": "tool",
+          "effect": "An encrypted orbital transit card clearing checkpoints across civilian space docks"
+        },
+        "visual_cues": "vast observation viewport showing starfield and nebulae, sleek white station architecture, alien travelers, glowing holographic flight boards"
+      },
+      {
+        "archetype": "hub_launchpad",
+        "starting_minute": 840,
+        "hook": "at 02:00 PM inside the orbital station hydroponics biosphere as artificial mist cools lush alien flora and off-duty pilots exchange sector coordinates",
+        "suggested_location": "{session_station} ➔ Hydroponics Biosphere ➔ Arboretum Walkway",
+        "directive": "Open Hub Exploration: Relaxed station biosphere atmosphere, botanical researchers, flight crew rumors, and supply trade opportunities.",
+        "focal_point": "Seated on a bio-luminescent stone bench beside nutrient mist towers",
+        "scheduled_roles": [
+          "Station Botanist",
+          "Off-Duty Pilot"
+        ],
+        "initial_physical_state": {
+          "posture": "sitting",
+          "posture_qualifier": "on an arboretum bench",
+          "holding": "chilled nutrient pouch",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Handheld Bio-Scanner",
+          "item_type": "tool",
+          "effect": "A compact scanner for assessing xenobiological toxicity and plant nutritional purity"
+        },
+        "visual_cues": "lush verdant indoor garden dome, soft teal bioluminescence, misting irrigation, orbital station framework visible through glass ceiling"
       },
       {
         "archetype": "in_media_res",
-        "hook": "inside a starship cargo bay as a red-alert siren blares and an automated airlock seal begins decompression",
+        "starting_minute": 855,
+        "hook": "at 02:15 PM inside a starship cargo bay as a red-alert siren blares and an automated airlock seal begins decompression",
         "suggested_location": "{session_station} ➔ Cargo Bay 3 ➔ Decompression Airlock",
-        "directive": "In Media Res: Immediate hull breach crisis, blinking emergency lights, and urgent tactical choices (override terminal, seal bulkhead, magnetic grapple, evacuate crew)."
+        "directive": "In Media Res: Immediate hull breach crisis, blinking emergency lights, and urgent tactical choices (override terminal, seal bulkhead, magnetic grapple, evacuate crew).",
+        "focal_point": "Clinging to the emergency mag-rail beside the cycling outer airlock",
+        "scheduled_roles": [
+          "Station Quartermaster",
+          "EVA Technician"
+        ],
+        "initial_physical_state": {
+          "posture": "crouching",
+          "posture_qualifier": "gripping the yellow magnetic handrail",
+          "holding": "emergency decompression seal clamp",
+          "stance": "Combat Ready",
+          "composure": "adrenaline_spiked",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Magnetic Anchor Boots",
+          "item_type": "tool",
+          "effect": "High-powered electromagnets integrated into boots that latch securely to metal deck plates in zero-G"
+        },
+        "visual_cues": "flashing red alarm strobes, rushing decompression fog, floating cargo canisters, airlock bulkhead closing"
+      },
+      {
+        "archetype": "in_media_res",
+        "starting_minute": 1350,
+        "hook": "at 10:30 PM inside the station secondary engineering wing as coolant conduits rupture and rogue combat drones breach the blast gate",
+        "suggested_location": "{session_station} ➔ Secondary Engineering Wing ➔ Coolant Manifold",
+        "directive": "In Media Res: Reactor corridor skirmish, scalding coolant mist, charging automated drones, and rapid defensive choices.",
+        "focal_point": "Bracing behind a reinforced steel manifold pillar as sparks shower down",
+        "scheduled_roles": [
+          "Chief Engineer",
+          "Security Android"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "behind an insulated coolant pipe",
+          "holding": "plasma arc cutter",
+          "stance": "Combat Ready",
+          "composure": "tense",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Thermal Induction Torch",
+          "item_type": "tool",
+          "effect": "An engineering torch that cuts through reinforced bulkheads and cauterizes ruptured pipe joints"
+        },
+        "visual_cues": "sparking electrical conduits, cyan reactor glow, scalding coolant mist, sirens blaring, emergency blast doors closing"
       },
       {
         "archetype": "delve_threshold",
-        "hook": "on the high-tech command bridge of a scout vessel entering the orbit of an uncharted world as anomalous energy spikes register",
-        "suggested_location": "{session_planet} ➔ Orbital Approach Vector ➔ Command Bridge",
-        "directive": "Delve Threshold: Stage the frontier orbital scan, planetary sensor telemetry, launch probe/shuttle choices, and crew preparation."
+        "starting_minute": 1260,
+        "hook": "at 09:00 PM outside the unpowered docking port of a derelict alien vessel drifting in deep orbit as anomalous radio echoes pulse through your comms",
+        "suggested_location": "{session_planet} ➔ Derelict Orbital Wreckage ➔ Docking Umbilical Hatch",
+        "directive": "Delve Threshold: Deep-space derelict investigation, docking seal alignment, checking oxygen reserve, and entering the silent alien hull.",
+        "focal_point": "Standing on the docking umbilical clamp examining the unpowered alien portal",
+        "scheduled_roles": [
+          "Xeno-Archaeologist",
+          "Salvage Drone Operator"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "at the pressurized umbilical seal",
+          "holding": "high-intensity EVA halogen lantern",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Encrypted Alien Data Core",
+          "item_type": "tool",
+          "effect": "A recovered crystalline data cube containing fragmented schematics of the derelict vessel"
+        },
+        "visual_cues": "pitch black space, harsh suit lights reflecting off biomechanical alien hull, unpowered jagged airlock, floating stardust"
+      },
+      {
+        "archetype": "delve_threshold",
+        "starting_minute": 420,
+        "hook": "at 07:00 AM on the lowered hydraulic landing ramp of an expedition shuttle touching down on an uncharted jungle planet under dual suns",
+        "suggested_location": "{session_planet} ➔ Landing Zone Alpha ➔ Shuttle Entry Ramp",
+        "directive": "Delve Threshold: Stage the planetary surface descent, analyzing atmospheric readings, prepping environmental suits, and stepping into the alien wild.",
+        "focal_point": "Poised at the edge of the lowered hydraulic ramp scanning strange planetary soil",
+        "scheduled_roles": [
+          "Shuttle Pilot",
+          "Field Surveyor"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "at the threshold of the open cargo ramp",
+          "holding": "spectrometer scanner tablet",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Handheld Atmospheric Spectrometer",
+          "item_type": "tool",
+          "effect": "A ruggedized planetary scanner capable of analyzing air breathable ratios and hazardous gas pockets"
+        },
+        "visual_cues": "alien planetary sunrise, dual suns in pale purple sky, steam hissing from shuttle thrusters, bizarre crystal vegetation"
       }
     ]
   },
@@ -170,21 +599,158 @@
     "starting_hooks": [
       {
         "archetype": "hub_launchpad",
-        "hook": "in a crowded underground synth-wave lounge while waiting to meet a shady corporate fixer beneath flickering holographic signs",
+        "starting_minute": 1230,
+        "hook": "at 08:30 PM in a crowded underground synth-wave lounge while waiting to meet a shady corporate fixer beneath flickering holographic signs",
         "suggested_location": "{session_cyber_city} ➔ The Wiretap Lounge ➔ VIP Synth Booth",
-        "directive": "Open Hub Exploration: Establish gritty neon lounge atmosphere, fixer contacts, data-slate feeds, and open choices."
+        "directive": "Open Hub Exploration: Establish gritty neon lounge atmosphere, fixer contacts, data-slate feeds, and open choices.",
+        "focal_point": "Slumped in a worn synthetic leather booth beneath humming violet neon",
+        "scheduled_roles": [
+          "Corporate Fixer",
+          "Synthwave DJ"
+        ],
+        "initial_physical_state": {
+          "posture": "sitting",
+          "posture_qualifier": "in the corner leather booth",
+          "holding": "luminescent cocktail glass",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Encrypted Fixer Datachip",
+          "item_type": "tool",
+          "effect": "A password-protected shard holding corporate bounty contracts and encrypted dead-drop coordinates"
+        },
+        "visual_cues": "smoky underground lounge, glowing purple and magenta neon tubing, holographic drinks, synthwave bass, chrome cyberware gleam"
+      },
+      {
+        "archetype": "hub_launchpad",
+        "starting_minute": 720,
+        "hook": "at 12:00 PM perched at a crowded street noodle stall under a plastic rain awning as heavy acid drizzle patters against neon billboards and couriers hustle past",
+        "suggested_location": "{session_cyber_city} ➔ Neon Street Arcade ➔ Ramen Stall Counter",
+        "directive": "Open Hub Exploration: Gritty street-level neon market, boiling broth steam, street gossip, black market tech peddlers, and relaxed social choices.",
+        "focal_point": "Perched on a round metal stool steaming broth bowl in hand under the plastic awning",
+        "scheduled_roles": [
+          "Street Noodle Vendor",
+          "Alley Courier"
+        ],
+        "initial_physical_state": {
+          "posture": "sitting",
+          "posture_qualifier": "on a round swivel stool at the counter",
+          "holding": "steaming porcelain broth bowl",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 1
+        },
+        "starting_prop": {
+          "name": "Universal Neural Jack Adapter",
+          "item_type": "tool",
+          "effect": "A versatile cybernetic connector compatible with legacy street terminals and public data kiosks"
+        },
+        "visual_cues": "heavy city rain, neon reflections on wet asphalt, steam rising from boiling broth pots, crowded street umbrella crowd, towering megastructures"
       },
       {
         "archetype": "in_media_res",
-        "hook": "in a rain-slicked back-alley as corporate security drones sweep overhead with active spotlights and sirens blaring",
+        "starting_minute": 1425,
+        "hook": "at 11:45 PM in a rain-slicked back-alley as corporate security drones sweep overhead with active spotlights and sirens blaring",
         "suggested_location": "{session_cyber_city} ➔ Neon Alleyway Sector 4 ➔ Dumpster Barricade",
-        "directive": "In Media Res: Urgent extraction firefight/pursuit, blinding searchlights, and tactical choices (neural breach ICE, suppressing fire, parkour escape, EMP trap)."
+        "directive": "In Media Res: Urgent extraction firefight/pursuit, blinding searchlights, and tactical choices (neural breach ICE, suppressing fire, parkour escape, EMP trap).",
+        "focal_point": "Pressed flat behind a reinforced titanium dumpster as plasma rounds scorch the brick",
+        "scheduled_roles": [
+          "Cornered Smuggler",
+          "Street Enforcer"
+        ],
+        "initial_physical_state": {
+          "posture": "crouching",
+          "posture_qualifier": "behind the dented metal dumpster",
+          "holding": "drawn smart-pistol",
+          "stance": "Combat Ready",
+          "composure": "adrenaline_spiked",
+          "is_wet": 1
+        },
+        "starting_prop": {
+          "name": "Overloaded EMP Spark Grenade",
+          "item_type": "tool",
+          "effect": "An improvised electromagnetic pulse grenade capable of blinding security drones and frying optical cyberware"
+        },
+        "visual_cues": "blinding corporate drone searchlights, rain-slicked alleyway, sparks flying from brick walls, muzzle flashes, dark urban shadows"
+      },
+      {
+        "archetype": "in_media_res",
+        "starting_minute": 1095,
+        "hook": "at 06:15 PM inside a speeding elevated mag-lev commuter train as an alarm siren shrieks and rival street gang hackers blow the carriage security doors",
+        "suggested_location": "{session_cyber_city} ➔ Mag-Lev Skyway Line ➔ Commuter Carriage 4",
+        "directive": "In Media Res: High-speed transit carriage crisis, sparking hacked doors, screaming commuters, and decisive combat/counter-intrusion choices.",
+        "focal_point": "Hanging from the overhead transit hand-rail as rival gang hackers breach the carriage door",
+        "scheduled_roles": [
+          "Panicked Commuter",
+          "Cyber-Guerilla"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "bracing against the swaying metal hand-rail",
+          "holding": "emergency glass-breaker tool",
+          "stance": "Combat Ready",
+          "composure": "tense",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Mag-Lev Emergency Override Key",
+          "item_type": "tool",
+          "effect": "A magnetic bypass key used by transit operators to trigger emergency brakes or open roof hatches"
+        },
+        "visual_cues": "high-speed transit carriage interior, blurred neon skyline rushing past windows, shattered glass, sparks from hacked door console"
       },
       {
         "archetype": "delve_threshold",
-        "hook": "outside the heavy blast door of a derelict underground sub-level lab as your cyberdeck hooks into an encrypted data terminal",
+        "starting_minute": 180,
+        "hook": "at 03:00 AM outside the heavy blast door of a derelict underground sub-level lab as your cyberdeck hooks into an encrypted data terminal",
         "suggested_location": "{session_cyber_city} ➔ Sub-Level Research Vault ➔ Access Hatch",
-        "directive": "Delve Threshold: Deep-net infiltration threshold, power routing, security bypass, and scouting the dark corridor ahead."
+        "directive": "Delve Threshold: Deep-net infiltration threshold, power routing, security bypass, and scouting the dark corridor ahead.",
+        "focal_point": "Kneeling before the severed security terminal with cyberdeck optic cables jacked in",
+        "scheduled_roles": [
+          "Black-Hat Netrunner"
+        ],
+        "initial_physical_state": {
+          "posture": "kneeling",
+          "posture_qualifier": "before the flickering fiber terminal",
+          "holding": "jacked cyberdeck cable",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Military-Grade Cyberdeck",
+          "item_type": "tool",
+          "effect": "A reinforced deck loaded with custom ice-breaker routines and system intrusion daemons"
+        },
+        "visual_cues": "pitch dark server vault sub-level, blinking green server rack LEDs, holographic ICE intrusion display, cables snaking across flooded floor"
+      },
+      {
+        "archetype": "delve_threshold",
+        "starting_minute": 90,
+        "hook": "at 01:30 AM on the rusted service catwalk overlooking a flooded megabuilding sewer duct as your night-vision optics highlight a hidden black-site intake valve",
+        "suggested_location": "{session_cyber_city} ➔ Under-City Drainage Basin ➔ Siphon Catwalk",
+        "directive": "Delve Threshold: Grimy under-city exploration, checking toxic runoff meters, prying security grates, and entering secret conduits.",
+        "focal_point": "Prying open the rusted ventilation grate overlooking the corporate server atrium",
+        "scheduled_roles": [
+          "Rooftop Informant",
+          "Scrap Diver"
+        ],
+        "initial_physical_state": {
+          "posture": "crouching",
+          "posture_qualifier": "on the rusted metal mesh catwalk",
+          "holding": "fiber-optic borescope",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 1
+        },
+        "starting_prop": {
+          "name": "Fiber-Optic Borescope",
+          "item_type": "tool",
+          "effect": "A flexible camera cable that slips through cracks to transmit live video feeds of rooms before entering"
+        },
+        "visual_cues": "dim amber emergency lights, industrial pipes dripping condensation, vast corporate atrium visible below through metal grates"
       }
     ]
   },
@@ -207,21 +773,157 @@
     "starting_hooks": [
       {
         "archetype": "hub_launchpad",
-        "hook": "in an aristocratic Victorian passenger airship lounge as brass-suited inventors demonstrate controversial clockwork contraptions",
+        "starting_minute": 510,
+        "hook": "at 08:30 AM in an aristocratic Victorian passenger airship lounge as brass-suited inventors demonstrate controversial clockwork contraptions",
         "suggested_location": "{session_airship} ➔ Grand Passenger Salon ➔ Observation Balcony",
-        "directive": "Open Hub Exploration: Opulent airship salon, eccentric inventors, social factions, notice ledger, and open choices."
+        "directive": "Open Hub Exploration: Opulent airship salon, eccentric inventors, social factions, notice ledger, and open choices.",
+        "focal_point": "Leaning on the polished brass balustrade sipping tea above the cloud layer",
+        "scheduled_roles": [
+          "Aristocratic Investor",
+          "Clockwork Automaton"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "at the gilded salon balustrade",
+          "holding": "porcelain teacup",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Brass Pocket Chronometer",
+          "item_type": "tool",
+          "effect": "A precision spring-wound clockwork chronometer that measures barometric altitude and pressure shifts"
+        },
+        "visual_cues": "opulent Victorian salon, polished brass fittings, sunlight breaking across fluffy clouds through bay windows, whirring clockwork tea-servants"
+      },
+      {
+        "archetype": "hub_launchpad",
+        "starting_minute": 600,
+        "hook": "at 10:00 AM on the cavernous grand concourse of the Imperial Railway Station as soaring iron arches catch morning sunbeams through billowing steam plumes",
+        "suggested_location": "{session_airship} ➔ Central Railway Terminal ➔ Grand Concourse",
+        "directive": "Open Hub Exploration: Bustling locomotive terminal, newsboys shouting headlines, guild dispatch boards, ticket counters, and lively travel choices.",
+        "focal_point": "Standing under the massive stained-glass timetable clock as steam trains hiss into the terminal",
+        "scheduled_roles": [
+          "Station Master",
+          "Automaton Porter"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "beneath the towering brass clock",
+          "holding": "printed rail timetable",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "First-Class Locomotive Ticket",
+          "item_type": "misc",
+          "effect": "A gold-embossed transit voucher granting priority boarding on trans-continental steam rail lines"
+        },
+        "visual_cues": "vast arched iron railway station, billowing white steam plumes, golden morning sunlight beams, crowds in top hats and brass goggles"
       },
       {
         "archetype": "in_media_res",
-        "hook": "inside a roaring clockwork engine bay as a high-pressure steam valve ruptures and loose gears spin out of control",
+        "starting_minute": 1065,
+        "hook": "at 05:45 PM inside a roaring clockwork engine bay as a high-pressure steam valve ruptures and loose gears spin out of control",
         "suggested_location": "{session_airship} ➔ Boiler Engine Bay ➔ Ruptured Pressure Valve",
-        "directive": "In Media Res: High-pressure industrial emergency, scalding steam, and urgent tactical choices (wrench pressure valve, vent steam chamber, emergency brake, rescue mechanic)."
+        "directive": "In Media Res: High-pressure industrial emergency, scalding steam, and urgent tactical choices (wrench pressure valve, vent steam chamber, emergency brake, rescue mechanic).",
+        "focal_point": "Bracing with an insulated monkey wrench against a screaming steam pipe",
+        "scheduled_roles": [
+          "Lead Stoker",
+          "Chief Machinist"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "bracing against the shaking iron catwalk",
+          "holding": "heavy brass spanner",
+          "stance": "Combat Ready",
+          "composure": "tense",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Heavy Brass Spanner",
+          "item_type": "tool",
+          "effect": "A heavy machinist wrench designed to torque high-pressure steam fittings or bludgeon rogue automata"
+        },
+        "visual_cues": "blinding white steam jet, red pressure gauge dials trembling at limit, glowing coal firebox, roaring mechanical boilers"
+      },
+      {
+        "archetype": "in_media_res",
+        "starting_minute": 1170,
+        "hook": "at 07:30 PM on the open observation deck of an airship as grappling hooks crash into the mahogany railings and masked sky-pirates swing aboard amid screaming wind",
+        "suggested_location": "{session_airship} ➔ Upper Weather Deck ➔ Boarding Gangway",
+        "directive": "In Media Res: High-altitude aerial boarding battle, gusting clouds, grappling cables, and urgent combat/counter-boarding choices.",
+        "focal_point": "Crouched behind a coil of hemp mooring rope as grapples hook into the mahogany deck",
+        "scheduled_roles": [
+          "Airship Helmsman",
+          "Sky-Pirate Raider"
+        ],
+        "initial_physical_state": {
+          "posture": "crouching",
+          "posture_qualifier": "behind the rope locker",
+          "holding": "clockwork flintlock pistol",
+          "stance": "Combat Ready",
+          "composure": "adrenaline_spiked",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Spring-Loaded Grapple Launcher",
+          "item_type": "tool",
+          "effect": "A compact wrist-mounted canister capable of firing fifty feet of wire rope to snag airship rigging"
+        },
+        "visual_cues": "sunset sky stained with copper and violet, wind howling through rigging, swinging iron grappling hooks, sparks from cutlass clashes"
       },
       {
         "archetype": "delve_threshold",
-        "hook": "at the foggy threshold of an abandoned clockwork foundry as automated steam sentinels creak back to life",
+        "starting_minute": 1320,
+        "hook": "at 10:00 PM at the foggy threshold of an abandoned clockwork foundry as automated steam sentinels creak back to life",
         "suggested_location": "{session_airship} ➔ Derelict Foundry Gates ➔ Iron Sluice Chamber",
-        "directive": "Delve Threshold: Victorian industrial ruin exploration, clockwork puzzle deciphering, oiling mechanisms, and gear preparation."
+        "directive": "Delve Threshold: Victorian industrial ruin exploration, clockwork puzzle deciphering, oiling mechanisms, and gear preparation.",
+        "focal_point": "Holding a brass gas lantern before the colossal dormant gear-wall",
+        "scheduled_roles": [
+          "Foundry Night Watchman"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "before the silent cog-gate",
+          "holding": "brass carbine gas lantern",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Brass Carbine Gas Lantern",
+          "item_type": "tool",
+          "effect": "A shielded pressurized gas lamp that casts focused warm light through dense industrial fog and smoke"
+        },
+        "visual_cues": "dense coal smog, shadowy industrial ironwork, massive dormant cogs covered in soot, warm amber lantern glow"
+      },
+      {
+        "archetype": "delve_threshold",
+        "starting_minute": 360,
+        "hook": "at 06:00 AM at the intake basin of a massive subterranean waterworks pump as green canal mist swirls around ancient brass pistons and iron sluices",
+        "suggested_location": "{session_airship} ➔ Sunken Canal Siphon ➔ Pump Room Threshold",
+        "directive": "Delve Threshold: Subterranean aqueduct investigation, inspecting pressure meters, checking chemical neutralizers, and descending into the siphon.",
+        "focal_point": "Peering down the spiral iron stairwell into the flooded pump machinery",
+        "scheduled_roles": [
+          "Alchemical Canal Inspector"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "at the top of the iron spiral stair",
+          "holding": "glass phial of neutralizing salts",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 1
+        },
+        "starting_prop": {
+          "name": "Glass Phial of Neutralizing Salts",
+          "item_type": "tool",
+          "effect": "An alchemical compound that neutralizes toxic industrial runoff and clears murky waterways"
+        },
+        "visual_cues": "early morning river fog, green algae on damp masonry, massive iron siphon pipes dripping into dark swirling canal waters"
       }
     ]
   },
@@ -243,21 +945,157 @@
     "starting_hooks": [
       {
         "archetype": "hub_launchpad",
-        "hook": "in the middle of a bustling fantasy capital marketplace as your glowing status window hovers before your eyes and merchants hawk strange fruits",
+        "starting_minute": 660,
+        "hook": "at 11:00 AM in the middle of a bustling fantasy capital marketplace as your glowing status window hovers before your eyes and merchants hawk strange fruits",
         "suggested_location": "{session_kingdom} ➔ Central Market Square ➔ Fountain Plaza",
-        "directive": "Open Hub Exploration: Modern protagonist in a vibrant fantasy hub, evaluating status screen, talking to curious locals, checking guild boards, and exploring."
+        "directive": "Open Hub Exploration: Modern protagonist in a vibrant fantasy hub, evaluating status screen, talking to curious locals, checking guild boards, and exploring.",
+        "focal_point": "Sitting on the stone rim of the goddess fountain reading your floating blue status window",
+        "scheduled_roles": [
+          "Curious Fruit Vendor",
+          "Rookie Adventurer"
+        ],
+        "initial_physical_state": {
+          "posture": "sitting",
+          "posture_qualifier": "on the fountain rim",
+          "holding": "glowing appraisal screen",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Otherworlder Status Plate",
+          "item_type": "tool",
+          "effect": "A magical slate that displays detailed stat breakdowns and skill trees visible only to its bearer"
+        },
+        "visual_cues": "bright fantasy midday sun, sparkling fountain spray, floating translucent blue holographic status window, fantasy market bustle"
+      },
+      {
+        "archetype": "hub_launchpad",
+        "starting_minute": 780,
+        "hook": "at 01:00 PM seated inside the lively royal adventurer guild feast hall as seasoned companions tackle colossal roasted dragon-fowl and swap dungeon gossip",
+        "suggested_location": "{session_kingdom} ➔ Royal Guild Tavern ➔ Main Banquet Hall",
+        "directive": "Open Hub Exploration: Lively isekai guild tavern atmosphere, eccentric companions, overflowing feast platters, and rookie mission bulletin choices.",
+        "focal_point": "At a corner table marveling at gigantic grilled monster steaks and fantasy drinks",
+        "scheduled_roles": [
+          "Guild Receptionist Elf",
+          "Beastfolk Mercenary"
+        ],
+        "initial_physical_state": {
+          "posture": "sitting",
+          "posture_qualifier": "at the crowded banquet bench",
+          "holding": "carved wooden fork",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Beginner Guild Registration Token",
+          "item_type": "misc",
+          "effect": "An official bronze adventurer medal entitling bearer to guild lodging and rookie quest contracts"
+        },
+        "visual_cues": "lively fantasy guild hall, massive roast meats, cheerful beastfolk and elf adventurers, colorful potion bottles behind bar"
       },
       {
         "archetype": "in_media_res",
-        "hook": "in a radiant summoning chamber as an unstable magic circle fractures and alarmed court mages scramble for protective wards",
+        "starting_minute": 930,
+        "hook": "at 03:30 PM in a radiant summoning chamber as an unstable magic circle fractures and alarmed court mages scramble for protective wards",
         "suggested_location": "{session_kingdom} ➔ Grand Summoning Chamber ➔ Fractured Runed Dais",
-        "directive": "In Media Res: Sudden summoning malfunction, glowing magical discharge, shocked royal guards, and tactical cheat-skill/reflex choices."
+        "directive": "In Media Res: Sudden summoning malfunction, glowing magical discharge, shocked royal guards, and tactical cheat-skill/reflex choices.",
+        "focal_point": "Shielding your eyes as the blinding summoning circle fractures and court mages panic",
+        "scheduled_roles": [
+          "Court Archmage",
+          "Royal Knight Captain"
+        ],
+        "initial_physical_state": {
+          "posture": "kneeling",
+          "posture_qualifier": "in the center of the smoking summoning rune",
+          "holding": "cheat skill activation ring",
+          "stance": "Combat Ready",
+          "composure": "tense",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Cheat Skill Activation Ring",
+          "item_type": "tool",
+          "effect": "A ring granted upon summoning that momentarily triples mana flow during emergencies"
+        },
+        "visual_cues": "shattered marble dais glowing with white arcane lightning, shocked court nobles, floating magical runes, smoking robes"
+      },
+      {
+        "archetype": "in_media_res",
+        "starting_minute": 990,
+        "hook": "at 04:30 PM materialized directly into an overgrown forest clearing as the ground shakes and a stampede of horned dire-boars crashes through the foliage",
+        "suggested_location": "{session_forest} ➔ Dire-Boar Hollow ➔ Stampede Clearing",
+        "directive": "In Media Res: Sudden isekai wilderness drop, thundering monster herd, flying timber, and rapid cheat-power or evasion choices.",
+        "focal_point": "Hiding behind a colossal mossy stump as a herd of horned boars thunders through",
+        "scheduled_roles": [
+          "Panicked Carriage Driver"
+        ],
+        "initial_physical_state": {
+          "posture": "crouching",
+          "posture_qualifier": "behind an uprooted ancient oak",
+          "holding": "modern smartphone with 100% battery",
+          "stance": "Combat Ready",
+          "composure": "adrenaline_spiked",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Infinite-Battery Smartphone",
+          "item_type": "tool",
+          "effect": "Your modern smartphone transported with you; its battery never drains and its camera captures magical traces"
+        },
+        "visual_cues": "dust clouds, massive charging horned fantasy beasts, flying leaves and branches, golden late afternoon forest light"
       },
       {
         "archetype": "delve_threshold",
-        "hook": "at the edge of an enchanted primeval forest where giant glowing flora pulse and your newly unlocked cheat appraisal skill triggers",
+        "starting_minute": 480,
+        "hook": "at 08:00 AM at the edge of an enchanted primeval forest where giant glowing flora pulse and your newly unlocked cheat appraisal skill triggers",
         "suggested_location": "{session_forest} ➔ Edge of Whispering Woods ➔ Mossy Clearing",
-        "directive": "Delve Threshold: First steps into an unknown fantasy wilderness, testing skills, harvesting strange materials, and scouting ahead."
+        "directive": "Delve Threshold: First steps into an unknown fantasy wilderness, testing skills, harvesting strange materials, and scouting ahead.",
+        "focal_point": "Kneeling by a patch of glowing rainbow mushrooms as your appraisal skill activates",
+        "scheduled_roles": [
+          "Herb-Gathering Villager"
+        ],
+        "initial_physical_state": {
+          "posture": "kneeling",
+          "posture_qualifier": "on soft moss beside glowing toadstools",
+          "holding": "appraisal monocle",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Appraisal Eye Monocle",
+          "item_type": "tool",
+          "effect": "A crystal lens that overlays target rarity levels, elemental affinities, and alchemical traits"
+        },
+        "visual_cues": "enchanted fantasy forest, giant glowing flora, morning sun shafts through emerald leaves, floating status text boxes"
+      },
+      {
+        "archetype": "delve_threshold",
+        "starting_minute": 1020,
+        "hook": "at 05:00 PM before the bioluminescent entrance of the Rookie Slime Cavern as translucent slimes bounce harmlessly near the threshold and your starter quest log updates",
+        "suggested_location": "{session_forest} ➔ Slime Caverns Threshold ➔ Glowing Grotto Mouth",
+        "directive": "Delve Threshold: Rookie dungeon threshold, checking beginner equipment, reviewing basic spell slots, and stepping into the glowing cave.",
+        "focal_point": "Standing before the softly glowing cave mouth holding a starter wooden buckler",
+        "scheduled_roles": [
+          "Veteran Guide",
+          "Novice Healer"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "before the cave entrance arch",
+          "holding": "starter wooden staff",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Novice Magic Staff & Spellbook",
+          "item_type": "tool",
+          "effect": "A simple oak wand accompanied by a beginner spellbook detailing basic elemental cantrips"
+        },
+        "visual_cues": "dusk glow outside, cave mouth radiating gentle cyan phosphorescence, translucent bouncing slimes visible within"
       }
     ]
   },
@@ -280,21 +1118,158 @@
     "starting_hooks": [
       {
         "archetype": "hub_launchpad",
-        "hook": "at a sunlit window booth inside an artisanal coffee roastery along the covered shopping arcade as rain patters against the glass and neighborhood regulars trade local gossip",
+        "starting_minute": 510,
+        "hook": "at 08:30 AM at a sunlit window booth inside an artisanal coffee roastery along the covered shopping arcade as rain patters against the glass and neighborhood regulars trade local gossip",
         "suggested_location": "Downtown Shopping Arcade & Café Row ➔ Roastery & Artisanal Café ➔ Window Corner Booth",
-        "directive": "Open Hub Exploration: Warm urban neighborhood hub, friendly regulars, community bulletin board with local gigs/notices, café menu choices, and relaxed social interactions."
+        "directive": "Open Hub Exploration: Warm urban neighborhood hub, friendly regulars, community bulletin board with local gigs/notices, café menu choices, and relaxed social interactions.",
+        "focal_point": "Seated at a small wooden window table watching raindrops trace down the glass",
+        "scheduled_roles": [
+          "Café Barista",
+          "Neighborhood Regular"
+        ],
+        "initial_physical_state": {
+          "posture": "sitting",
+          "posture_qualifier": "in the wooden window booth",
+          "holding": "ceramic coffee mug",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Artisanal Coffee Mug & Local Paper",
+          "item_type": "misc",
+          "effect": "A steaming porcelain mug of house-roast coffee and today's folded neighborhood gazette"
+        },
+        "visual_cues": "warm cozy café interior, rain pattering on windowpane, steam rising from ceramic coffee cup, gentle morning street life outside"
+      },
+      {
+        "archetype": "hub_launchpad",
+        "starting_minute": 840,
+        "hook": "at 02:00 PM lounging on a wooden park bench under a weeping willow along the municipal river greenway as cyclists coast past and sunlight glints off the water",
+        "suggested_location": "Civic Riverwalk & Greenway ➔ Riverside Park Lawn ➔ Shaded Bench",
+        "directive": "Open Hub Exploration: Gentle urban park atmosphere, passing dog-walkers, community events banner, and leisurely afternoon choices.",
+        "focal_point": "Lounging on a wooden park bench under a flowering willow tree",
+        "scheduled_roles": [
+          "Jogging Neighbor",
+          "Bookstore Clerk"
+        ],
+        "initial_physical_state": {
+          "posture": "sitting",
+          "posture_qualifier": "reclined on the wooden slat bench",
+          "holding": "paperback novel with bookmark",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Well-Thumbed Paperback Novel",
+          "item_type": "misc",
+          "effect": "A beloved mystery novel with personal notes and a pressed flower tucked between pages"
+        },
+        "visual_cues": "sunny afternoon park, weeping willow leaves swaying, glinting river water, people walking dogs, warm gentle breeze"
       },
       {
         "archetype": "in_media_res",
-        "hook": "in a neon-lit back-alley behind a basement jazz bar as rowdy street thugs overturn trash cans and corner a local shopkeeper over a protection dispute",
+        "starting_minute": 1080,
+        "hook": "at 06:00 PM in a neon-lit back-alley behind a basement jazz bar as rowdy street thugs overturn trash cans and corner a local shopkeeper over a protection dispute",
         "suggested_location": "Nightlife & Entertainment District ➔ Neon Back-Alley ➔ Rain-Slicked Dead End",
-        "directive": "In Media Res: Immediate street-level urban confrontation, shouting thugs, cornered local resident, and urgent tactical or social de-escalation choices."
+        "directive": "In Media Res: Immediate street-level urban confrontation, shouting thugs, cornered local resident, and urgent tactical or social de-escalation choices.",
+        "focal_point": "Stepping between shouting street toughs and an upset shopkeeper near the brick wall",
+        "scheduled_roles": [
+          "Local Shopkeeper",
+          "Neighborhood Tough"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "between the shopkeeper and the alley wall",
+          "holding": "unlocked smartphone on speed dial",
+          "stance": "Defensive",
+          "composure": "tense",
+          "is_wet": 1
+        },
+        "starting_prop": {
+          "name": "High-Decibel Personal Alarm",
+          "item_type": "tool",
+          "effect": "A compact keychain siren that emits an ear-splitting 130dB screech to deter aggressors and summon police"
+        },
+        "visual_cues": "evening twilight, wet neon-lit alley pavement, overturned trash cans, dramatic streetlamp shadows, neon bar signs"
+      },
+      {
+        "archetype": "in_media_res",
+        "starting_minute": 525,
+        "hook": "at 08:45 AM on a crowded morning train station platform as the rush-hour express train halts and an elder commuter drops a briefcase spilling sensitive papers across the yellow line",
+        "suggested_location": "Central Metro Station ➔ Track 3 Commuter Platform ➔ Boarding Queue",
+        "directive": "In Media Res: Rush-hour station commotion, blaring departure chimes, frantic passengers, and quick choices to assist, recover documents, or navigate crowds.",
+        "focal_point": "Caught in the rush-hour bottleneck as a dropped briefcase spills documents across the yellow safety line",
+        "scheduled_roles": [
+          "Flustered Commuter",
+          "Station Attendant"
+        ],
+        "initial_physical_state": {
+          "posture": "kneeling",
+          "posture_qualifier": "beside the yellow platform safety line",
+          "holding": "handful of scattered business papers",
+          "stance": "Defensive",
+          "composure": "tense",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Loaded Transit IC Card",
+          "item_type": "tool",
+          "effect": "A contactless transit pass loaded with prepaid fare for city subway and bus lines"
+        },
+        "visual_cues": "crowded morning train station platform, silver commuter train arriving, fluttering documents, morning commuter rush"
       },
       {
         "archetype": "delve_threshold",
-        "hook": "before the padlocked chain-link gate of an after-hours harbor warehouse pier while following a late-night lead from a neighborhood contact about missing local goods",
+        "starting_minute": 1230,
+        "hook": "at 08:30 PM before the padlocked chain-link gate of an after-hours harbor warehouse pier while following a late-night lead from a neighborhood contact about missing local goods",
         "suggested_location": "Harbor Pier & Civic Bayfront ➔ Container Pier & Warehouse Lot ➔ Padlocked Chain-Link Gate",
-        "directive": "Delve Threshold: Urban investigation threshold, checking the rusted padlock, scanning for night watchmen, reviewing smartphone clues, and slipping inside."
+        "directive": "Delve Threshold: Urban investigation threshold, checking the rusted padlock, scanning for night watchmen, reviewing smartphone clues, and slipping inside.",
+        "focal_point": "Examining the rusted brass padlock on the pier gate under a lone halogen lamp",
+        "scheduled_roles": [
+          "Night Watchman",
+          "Friendly Fisherman"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "before the chain-link fence gate",
+          "holding": "pocket multi-tool and penlight",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Compact Pocket Multi-Tool",
+          "item_type": "tool",
+          "effect": "A folding stainless steel multi-tool equipped with pliers, screwdrivers, and wire-cutters"
+        },
+        "visual_cues": "dark calm harbor waters at night, reflection of city lights across bay, lone buzzing yellow streetlamp, chain link gate"
+      },
+      {
+        "archetype": "delve_threshold",
+        "starting_minute": 990,
+        "hook": "at 04:30 PM at the foot of the dark wooden cellar staircase inside an eccentric antique curiosity shop as grandfather clocks tick in strange synchronization",
+        "suggested_location": "Historic Old Quarter ➔ Curio & Antiquities Shop ➔ Basement Threshold",
+        "directive": "Delve Threshold: Curiosity shop investigation, examining antique appraisal tags, checking basement floorboards, and deciphering strange relics.",
+        "focal_point": "Standing at the top of the creaking wooden stairs looking into the curiosities below",
+        "scheduled_roles": [
+          "Eccentric Antique Dealer"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "at the top of the dark cellar stairwell",
+          "holding": "antique brass pocket mirror",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Antique Brass Hand Mirror",
+          "item_type": "tool",
+          "effect": "A bevelled Victorian hand mirror whose polished glass catches unusual light reflections"
+        },
+        "visual_cues": "golden late afternoon sunbeam cutting through dusty air, clocks ticking on shelves, vintage gramophones, mysterious dark basement"
       }
     ]
   },
@@ -319,42 +1294,231 @@
         "starting_minute": 420,
         "hook": "at 07:00 AM in your sunlit bedroom as your morning alarm chimes, giving you time to get dressed in your uniform, check your smartphone messages, and prepare before heading to {session_school} for the 08:00 AM bell",
         "suggested_location": "{session_residential} ➔ {session_player_house} ➔ Your Bedroom",
-        "directive": "Open Hub Exploration (07:00 AM Morning Prep): Establish crisp early morning atmosphere at home before school begins at 08:00 AM, checking smartphone notifications or family/neighbor interactions, and heading out toward campus."
+        "directive": "Open Hub Exploration (07:00 AM Morning Prep): Establish crisp early morning atmosphere at home before school begins at 08:00 AM, checking smartphone notifications or family/neighbor interactions, and heading out toward campus.",
+        "focal_point": "Sitting on the edge of your bed reviewing morning phone messages",
+        "scheduled_roles": [
+          "Family Member",
+          "Morning Commuter"
+        ],
+        "initial_physical_state": {
+          "posture": "sitting",
+          "posture_qualifier": "on the mattress edge",
+          "holding": "smartphone displaying 07:00 AM",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Class Schedule & Student ID",
+          "item_type": "tool",
+          "effect": "Your official student identification card granting entry through campus gates and library scanners"
+        },
+        "visual_cues": "morning sunlight streaming through bedroom window blinds, desk with stationery, school uniform on hanger, quiet morning"
       },
       {
         "archetype": "hub_launchpad",
         "starting_minute": 465,
         "hook": "at 07:45 AM walking toward the bustling {session_school} main entrance gates and sakura-lined courtyard as commuting students stream onto campus and club representatives hand out morning flyers before the 08:00 AM bell",
         "suggested_location": "{session_school} ➔ School Main Gates ➔ Front Gate Path",
-        "directive": "Open Hub Exploration (07:45 AM Campus Arrival): Establish lively morning commute atmosphere at the school entrance before the 08:00 AM first bell, chatting with arriving classmates, club reps pitching memberships, and heading inside."
+        "directive": "Open Hub Exploration (07:45 AM Campus Arrival): Establish lively morning commute atmosphere at the school entrance before the 08:00 AM first bell, chatting with arriving classmates, club reps pitching memberships, and heading inside.",
+        "focal_point": "Standing beneath the blooming sakura trees near the main gate",
+        "scheduled_roles": [
+          "Club Representative",
+          "Commuting Classmate"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "under the cherry blossom canopy",
+          "holding": "recruitment flyer stack",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Club Recruitment Pamphlet",
+          "item_type": "misc",
+          "effect": "A colorful leaflet detailing campus club meeting times and faculty advisors"
+        },
+        "visual_cues": "morning sunlight, cherry blossom petals drifting, iron school gates, stream of students in uniforms, lively campus entrance"
       },
       {
         "archetype": "hub_launchpad",
         "starting_minute": 480,
         "hook": "at 08:00 AM seated at your desk in {session_classroom} as the morning homeroom bell rings across {session_school} and classmates settle in while trading morning gossip",
         "suggested_location": "{session_school} ➔ {session_classroom} ➔ {session_player_desk}",
-        "directive": "Open Hub Exploration (08:00 AM Homeroom Bell): Establish vibrant morning classroom atmosphere as first period begins at 08:00 AM, classmates whispering nearby, homeroom announcements, and open social/academic choices."
+        "directive": "Open Hub Exploration (08:00 AM Homeroom Bell): Establish vibrant morning classroom atmosphere as first period begins at 08:00 AM, classmates whispering nearby, homeroom announcements, and open social/academic choices.",
+        "focal_point": "Seated at your window-side wooden desk in {session_classroom}",
+        "scheduled_roles": [
+          "Homeroom Teacher",
+          "Desk Neighbor"
+        ],
+        "initial_physical_state": {
+          "posture": "sitting",
+          "posture_qualifier": "at your wooden homeroom desk",
+          "holding": "stationery pen",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Fresh Class Notebook",
+          "item_type": "tool",
+          "effect": "A lined notebook with class notes and phone numbers scribbled in the margins"
+        },
+        "visual_cues": "bright morning classroom sunlight, rows of wooden desks, chalkboard with morning announcements, chatting high school students"
       },
       {
         "archetype": "in_media_res",
         "starting_minute": 465,
         "hook": "at 07:45 AM in the crowded entrance foyer and shoe lockers of {session_school} as a sudden morning commotion breaks out between the disciplinary committee and a cornered student just fifteen minutes before the 08:00 AM bell",
         "suggested_location": "{session_school} ➔ Entrance Foyer & Shoe Lockers ➔ Main Entrance Lobby",
-        "directive": "In Media Res (07:45 AM Pre-Bell Commotion): Immediate morning campus tension at the shoe lockers before the 08:00 AM first bell, onlookers gathering, and urgent social or tactical choices to intervene, defuse, or investigate."
+        "directive": "In Media Res (07:45 AM Pre-Bell Commotion): Immediate morning campus tension at the shoe lockers before the 08:00 AM first bell, onlookers gathering, and urgent social or tactical choices to intervene, defuse, or investigate.",
+        "focal_point": "Standing by your metal shoe locker ducking past the gathering crowd",
+        "scheduled_roles": [
+          "Disciplinary Committee Prefect",
+          "Cornered Delinquent"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "beside open locker door",
+          "holding": "indoor student slippers",
+          "stance": "Defensive",
+          "composure": "tense",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Official Student Handbook",
+          "item_type": "tool",
+          "effect": "School regulations guidebook useful for quoting campus dress codes and disciplinary rules"
+        },
+        "visual_cues": "crowded high school shoe locker entrance foyer, metal cubbies, tense students arguing, morning campus commotion"
       },
       {
         "archetype": "in_media_res",
         "starting_minute": 480,
         "hook": "at 08:00 AM in the 3F science wing hallway as the first-period bell rings and an accidental morning chemical reaction triggers the fire alarm outside the lab doors",
         "suggested_location": "{session_school} ➔ Chemistry & Science Lab ➔ Lab Benches",
-        "directive": "In Media Res (08:00 AM Morning Class Crisis): School commotion/crisis at the 08:00 AM bell, teachers directing evacuation, trapped project or missing student, and quick tactical/social choices."
+        "directive": "In Media Res (08:00 AM Morning Class Crisis): School commotion/crisis at the 08:00 AM bell, teachers directing evacuation, trapped project or missing student, and quick tactical/social choices.",
+        "focal_point": "Bracing against the lab workbench as amber alarm strobes flash",
+        "scheduled_roles": [
+          "Chemistry Teacher",
+          "Startled Lab Partner"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "beside the lab fume hood",
+          "holding": "safety goggles",
+          "stance": "Combat Ready",
+          "composure": "adrenaline_spiked",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Chemical Safety Goggles",
+          "item_type": "tool",
+          "effect": "Impact-resistant goggles that shield eyes from chemical fumes and irritating smoke"
+        },
+        "visual_cues": "flashing amber emergency strobe lights, haze of harmless colored smoke, black lab benches with beakers, student evacuation"
+      },
+      {
+        "archetype": "in_media_res",
+        "starting_minute": 450,
+        "hook": "at 07:30 AM in the school bicycle sheds as an accidental morning collision tangles several handlebars and a heated dispute erupts between sports club rivals before the 08:00 AM bell",
+        "suggested_location": "{session_school} ➔ School Main Gates ➔ Bicycle Parking Shed",
+        "directive": "In Media Res (07:30 AM Parking Commotion): Morning argument between rival club athletes over fallen bicycles, gathered student onlookers, and quick social or physical intervention choices.",
+        "focal_point": "Untangling bicycle handlebars beside the metal rack as an argument flares up",
+        "scheduled_roles": [
+          "Campus Security Guard",
+          "Flustered Cyclist"
+        ],
+        "initial_physical_state": {
+          "posture": "crouching",
+          "posture_qualifier": "beside the fallen bicycle rack",
+          "holding": "heavy u-lock and keys",
+          "stance": "Defensive",
+          "composure": "tense",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Bicycle U-Lock & Key",
+          "item_type": "tool",
+          "effect": "A hardened steel bicycle lock that can secure gates or serve as an impromptu defensive weight"
+        },
+        "visual_cues": "crisp early morning light, metal bicycle sheds, fallen bicycles on pavement, arguing students, school grounds in background"
       },
       {
         "archetype": "delve_threshold",
         "starting_minute": 450,
         "hook": "at 07:30 AM on the quiet school rooftop in the crisp morning air before the 08:00 AM first bell as rumors of an old campus mystery echo in the breeze",
         "suggested_location": "{session_school} ➔ School Rooftop ➔ Rooftop Benches",
-        "directive": "Delve Threshold (07:30 AM Early Morning Campus): Solitary reflective threshold before 08:00 AM morning classes, uncovering a hidden message or key behind the water tank, and deciding which campus mystery to pursue."
+        "directive": "Delve Threshold (07:30 AM Early Morning Campus): Solitary reflective threshold before 08:00 AM morning classes, uncovering a hidden message or key behind the water tank, and deciding which campus mystery to pursue.",
+        "focal_point": "Leaning against the chain-link fence behind the blue water tank",
+        "scheduled_roles": [
+          "Solitary Upperclassman"
+        ],
+        "initial_physical_state": {
+          "posture": "leaning",
+          "posture_qualifier": "against the rooftop chain-link fence",
+          "holding": "crumpled paper note",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Torn Mystery Note",
+          "item_type": "tool",
+          "effect": "A handwritten note found tucked in the rooftop fence referencing a locked old campus room"
+        },
+        "visual_cues": "crisp early morning sky, chain link fence on rooftop, panoramic view of town, quiet breeze, rusted water tank"
+      },
+      {
+        "archetype": "delve_threshold",
+        "starting_minute": 465,
+        "hook": "at 07:45 AM before the overgrown torii gate of the hidden campus fox shrine tucked in the secluded forest grove behind the athletics field before the 08:00 AM bell",
+        "suggested_location": "{session_school} ➔ Athletics Complex & Fields ➔ Overgrown Shrine Grove",
+        "directive": "Delve Threshold (07:45 AM Shaded Grove): Mysterious secluded shrine on campus grounds, rustling bamboo leaves, strange omens, and occult investigation choices.",
+        "focal_point": "Parting the dense wisteria vines before the forgotten stone fox shrine",
+        "scheduled_roles": [
+          "Occult Club Member"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "before the mossy stone fox statue",
+          "holding": "wooden fox charm",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Carved Wooden Fox Charm",
+          "item_type": "misc",
+          "effect": "A small wooden shrine amulet said to bring luck in tests of wit and social perception"
+        },
+        "visual_cues": "morning shadows under thick wisteria vines, weathered mossy stone shrine, forgotten garden corner, student courtyard"
+      },
+      {
+        "archetype": "delve_threshold",
+        "starting_minute": 480,
+        "hook": "at 08:00 AM standing in the dim dust-moted hallway of the locked Old School Building wing just as the morning bell echoes through the boarded-up windows",
+        "suggested_location": "{session_school} ➔ Abandoned Old Campus Wing ➔ Locked Archive Corridor",
+        "directive": "Delve Threshold (08:00 AM Old Wing Intrigue): Forbidden historic campus wing, peeling paint, creaking floorboards, locked archives, and urban legend investigation choices.",
+        "focal_point": "Checking the rusted padlock on the heavy wooden double doors of the Old Building",
+        "scheduled_roles": [
+          "School Janitor"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "before the chained archive double-doors",
+          "holding": "brass skeleton key replica",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Old Campus Skeleton Key",
+          "item_type": "tool",
+          "effect": "A tarnished brass key that fits several vintage locks in the abandoned building wing"
+        },
+        "visual_cues": "dim dusty wooden hallway, creaking floorboards, locked padlock on vintage wooden doors, morning dust motes in sunbeam"
       }
     ]
   },
@@ -376,25 +1540,159 @@
     "starting_hooks": [
       {
         "archetype": "hub_launchpad",
-        "hook": "in a fortified wasteland trading post built from rusted shipping containers as scavengers barter scrap and clean water",
+        "starting_minute": 600,
+        "hook": "at 10:00 AM in a fortified wasteland trading post built from rusted shipping containers as scavengers barter scrap and clean water",
         "suggested_location": "{session_desert} ➔ Rustfall Trading Post ➔ Container Bar",
-        "directive": "Open Hub Exploration: Rugged wasteland haven, mercenary barter posts, salvage bounty board, and cautious survivor interactions."
+        "directive": "Open Hub Exploration: Rugged wasteland haven, mercenary barter posts, salvage bounty board, and cautious survivor interactions.",
+        "focal_point": "Leaning against the sheet-metal counter sipping filtered rain-water from a tin can",
+        "scheduled_roles": [
+          "Scrap Trader",
+          "Caravan Mercenary"
+        ],
+        "initial_physical_state": {
+          "posture": "leaning",
+          "posture_qualifier": "against the dented sheet-metal bar",
+          "holding": "dented tin water cup",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Pouch of Pre-War Bottlecaps",
+          "item_type": "misc",
+          "effect": "A pouch of stamped metal caps serving as universally recognized barter currency across the wastes"
+        },
+        "visual_cues": "harsh morning wasteland sunlight, corrugated rusted metal shipping containers, scavengers bartering scrap, dusty horizon"
+      },
+      {
+        "archetype": "hub_launchpad",
+        "starting_minute": 960,
+        "hook": "at 04:00 PM inside the domed greenhouse of a survivor oasis settlement as solar moisture evaporators hum and farmers harvest clean hydroponic greens",
+        "suggested_location": "{session_desert} ➔ Oasis Enclave ➔ Hydroponic Greenhouse Dome",
+        "directive": "Open Hub Exploration: Rare verdant wasteland sanctuary, thriving solar agriculture, community barter ledgers, and hopeful survivor choices.",
+        "focal_point": "Resting beside the bubbling water-purification tanks admiring clean tomato plants",
+        "scheduled_roles": [
+          "Oasis Botanist",
+          "Settlement Guard"
+        ],
+        "initial_physical_state": {
+          "posture": "sitting",
+          "posture_qualifier": "on a sandbag by the water pipes",
+          "holding": "clean aluminum canteen",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Purified Water Canteen",
+          "item_type": "tool",
+          "effect": "A military canteen filled with pure, radiation-free drinking water essential for desert travel"
+        },
+        "visual_cues": "cracked greenhouse glass, lush green hydroponic plants in contrast with red desert outside, metal pipes, warm late afternoon sun"
       },
       {
         "archetype": "in_media_res",
-        "hook": "beside an overturned armored buggy in a dusty crater as raider buggy engines roar in the distance",
+        "starting_minute": 780,
+        "hook": "at 01:00 PM beside an overturned armored buggy in a dusty crater as raider buggy engines roar in the distance",
         "suggested_location": "{session_desert} ➔ Crater Convoy Wreck ➔ Overturned Buggy",
-        "directive": "In Media Res: High-octane wasteland skirmish, approaching raiders, limited ammo, and urgent tactical defense/evasion choices."
+        "directive": "In Media Res: High-octane wasteland skirmish, approaching raiders, limited ammo, and urgent tactical defense/evasion choices.",
+        "focal_point": "Crouched behind the smoking roll-cage of your buggy as raider engines roar across the salt flat",
+        "scheduled_roles": [
+          "Wounded Convoy Scout",
+          "Raider Scavenger"
+        ],
+        "initial_physical_state": {
+          "posture": "crouching",
+          "posture_qualifier": "behind the smoking steel roll-cage",
+          "holding": "scavenged pipe-rifle",
+          "stance": "Combat Ready",
+          "composure": "adrenaline_spiked",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "High-Visibility Flare Gun",
+          "item_type": "tool",
+          "effect": "A single-shot rescue flare that can signal distant convoys or blind night-vision raiders"
+        },
+        "visual_cues": "blinding midday desert glare, dust devils, smoking dune buggy wreckage, distant spiked vehicles charging, heat shimmer"
+      },
+      {
+        "archetype": "in_media_res",
+        "starting_minute": 900,
+        "hook": "at 03:00 PM sheltering beneath a fractured highway overpass as a howling radiation dust storm rolls in and green static lightning arcs across the ruins",
+        "suggested_location": "{session_desert} ➔ Highway Overpass Ruins ➔ Concrete Pillar Shelter",
+        "directive": "In Media Res: Environmental wasteland crisis, stinging radioactive winds, falling concrete rebar, and urgent shelter/filtration choices.",
+        "focal_point": "Shivering beneath a collapsed concrete highway slab as radioactive green lightning splits the orange dust clouds",
+        "scheduled_roles": [
+          "Stranded Nomad"
+        ],
+        "initial_physical_state": {
+          "posture": "crouching",
+          "posture_qualifier": "against the cracked concrete pillar",
+          "holding": "respirator mask with clean filter",
+          "stance": "Defensive",
+          "composure": "tense",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Full-Face Respirator Mask",
+          "item_type": "tool",
+          "effect": "A rubber gas mask with a fresh particulate filter protecting lungs from radioactive dust and spores"
+        },
+        "visual_cues": "howling orange sandstorm, eerie green radioactive lightning, concrete rebar rubble, amber respirator lenses glowing"
       },
       {
         "archetype": "delve_threshold",
-        "hook": "before the cracked blast doors of a sealed pre-war bunker as your Geiger counter clicks softly against the iron seal",
+        "starting_minute": 1110,
+        "hook": "at 06:30 PM before the cracked blast doors of a sealed pre-war bunker as your Geiger counter clicks softly against the iron seal",
         "suggested_location": "{session_desert} ➔ Vault 108 Blast Gate ➔ Decontamination Threshold",
-        "directive": "Delve Threshold: Bunker expedition threshold, checking radiation levels, battery power, prying rusted doors, and entering Chamber 1."
+        "directive": "Delve Threshold: Bunker expedition threshold, checking radiation levels, battery power, prying rusted doors, and entering Chamber 1.",
+        "focal_point": "Kneeling before the massive round cog-door prying at the manual emergency release wheel",
+        "scheduled_roles": [
+          "Vault Dweller Scout"
+        ],
+        "initial_physical_state": {
+          "posture": "kneeling",
+          "posture_qualifier": "before the cog door threshold",
+          "holding": "handheld geiger counter",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Handheld Geiger Counter",
+          "item_type": "tool",
+          "effect": "An analog radiation detector whose clicking frequency indicates ambient rads per hour"
+        },
+        "visual_cues": "dusk desert outside fading into deep shadow, massive yellow cog blast door, ticking Geiger counter dial, peeling hazard stripes"
+      },
+      {
+        "archetype": "delve_threshold",
+        "starting_minute": 360,
+        "hook": "at 06:00 AM outside the shattered subterranean delivery bay of an overgrown pre-war commercial superstore as your flashlight beam cuts through thick darkness",
+        "suggested_location": "{session_desert} ➔ Sub-Level Superstore ➔ Loading Bay Roller Shutter",
+        "directive": "Delve Threshold: Ruined shopping complex exploration, checking structural integrity, testing darkness with flares, and looting intact aisles.",
+        "focal_point": "Shining your flashlight through the breached security roller-shutter into the dark aisles",
+        "scheduled_roles": [
+          "Scavenger Partner"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "at the warped metal roller-shutter",
+          "holding": "hand-crank dynamo flashlight",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Heavy Steel Prybar",
+          "item_type": "tool",
+          "effect": "A tempered steel crowbar indispensable for forcing jammed doors, crates, and security grates"
+        },
+        "visual_cues": "pitch black interior, narrow white beam of flashlight illuminating abandoned shopping aisles, water dripping from rusted ceiling pipes"
       }
     ]
   },
-
   "_section_tone_and_modifiers": "==================== TONE & MODIFIERS ====================",
   "grimdark": {
     "name": "Grimdark",

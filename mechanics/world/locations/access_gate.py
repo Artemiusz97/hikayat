@@ -368,7 +368,8 @@ def evaluate_node_access_gate(
                     active_companions.append({"name": dp})
 
     current_action_label = " ".join(str(a.get("label", "") if isinstance(a, dict) else a) for a in (actions or [])).lower()
-    is_breach_action = any(w in current_action_label for w in (
+    has_check = bool(actions and isinstance(actions[0], dict) and (actions[0].get("check") or str(actions[0].get("stat", "NONE")).upper() != "NONE"))
+    is_breach_action = has_check or any(w in current_action_label for w in (
         "sneak", "pick", "climb", "scale", "fence", "lockpick", "force", "break in", "bypass",
         "talk your way", "convince", "excuse", "nurse", "ring the intercom", "buzz", "apologize"
     ))

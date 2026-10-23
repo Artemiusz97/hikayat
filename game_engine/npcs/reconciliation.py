@@ -98,7 +98,7 @@ def _build_canonical_name_resolver(
     return first_to_canon, full_canon_case
 
 
-def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, actions: list = None, staged_npcs: list = None) -> list[dict]:
+def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, actions: list = None, staged_npcs: list = None, party: list = None) -> list[dict]:
 
     """
 
@@ -147,35 +147,72 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
 
     # Collect human player names (all active and inactive characters owned by session members) to strictly exclude from current_npcs
-
     player_names = set()
 
-    if session.get("turn_order"):
+    if party:
+        for p_elem in party:
+            p_char = p_elem[0] if isinstance(p_elem, (list, tuple)) and p_elem else p_elem
+            if isinstance(p_char, dict) and p_char.get("name"):
+                pn = str(p_char["name"]).strip().lower()
+                player_names.add(pn)
+                p_first = (pn.split() or [""])[0]
+                if len(p_first) >= 3:
+                    player_names.add(p_first)
 
-        for uid in session["turn_order"]:
+    if actions:
+        for a in actions:
+            if isinstance(a, dict):
+                c_data = a.get("char")
+                if isinstance(c_data, dict) and c_data.get("name"):
+                    pn = str(c_data["name"]).strip().lower()
+                    player_names.add(pn)
+                    p_first = (pn.split() or [""])[0]
+                    if len(p_first) >= 3:
+                        player_names.add(p_first)
 
+    if session:
+        for k in ("player_name", "character_name", "char_name"):
+            if session.get(k):
+                pn = str(session[k]).strip().lower()
+                player_names.add(pn)
+                p_first = (pn.split() or [""])[0]
+                if len(p_first) >= 3:
+                    player_names.add(p_first)
+        if session.get("party") and isinstance(session["party"], list):
+            for p_elem in session["party"]:
+                p_char = p_elem[0] if isinstance(p_elem, (list, tuple)) and p_elem else p_elem
+                if isinstance(p_char, dict) and p_char.get("name"):
+                    pn = str(p_char["name"]).strip().lower()
+                    player_names.add(pn)
+                    p_first = (pn.split() or [""])[0]
+                    if len(p_first) >= 3:
+                        player_names.add(p_first)
+        if session.get("turn_order"):
+            for uid in session["turn_order"]:
+                try:
+                    with db.get_conn() as conn:
+                        c_rows = conn.execute("SELECT name FROM characters WHERE user_id = ?", (uid,)).fetchall()
+                        for cr in c_rows:
+                            if cr["name"]:
+                                p_name = str(cr["name"]).strip().lower()
+                                player_names.add(p_name)
+                                p_first = (p_name.split() or [""])[0]
+                                if len(p_first) >= 3:
+                                    player_names.add(p_first)
+                except Exception:
+                    pass
+        if session.get("id"):
             try:
-
                 with db.get_conn() as conn:
-
-                    c_rows = conn.execute("SELECT name FROM characters WHERE user_id = ?", (uid,)).fetchall()
-
+                    c_rows = conn.execute("SELECT name FROM characters WHERE session_id = ?", (session["id"],)).fetchall()
                     for cr in c_rows:
-
                         if cr["name"]:
-
                             p_name = str(cr["name"]).strip().lower()
-
                             player_names.add(p_name)
-
                             p_first = (p_name.split() or [""])[0]
-
                             if len(p_first) >= 3:
-
                                 player_names.add(p_first)
-
             except Exception:
-
                 pass
 
 
@@ -990,19 +1027,20 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
         old_primary = get_primary_location_name(old_loc)
         new_primary = get_primary_location_name(new_loc)
 
-        old_node_id = session.get("current_node_id") if session else None
-        new_node_id = result.get("current_node_id") or (db.resolve_node_id_from_location(sess_id, new_loc) if sess_id and new_loc else None)
+        old_node_id = (session.get("previous_node_id") if session and session.get("previous_node_id") else None) or (db.resolve_node_id_from_location(sess_id, old_loc) if sess_id and old_loc else None) or (session.get("current_node_id") if session else None)
+        new_node_id = (db.resolve_node_id_from_location(sess_id, new_loc) if sess_id and new_loc else None) or result.get("current_node_id")
         graph_same_venue = False
-        if sess_id and old_node_id and new_node_id:
+        if sess_id and old_node_id and new_node_id and not (old_primary and new_primary and old_primary.lower() != new_primary.lower()):
             if old_node_id == new_node_id:
                 graph_same_venue = True
             else:
                 old_node = db.get_world_node(sess_id, old_node_id)
                 new_node = db.get_world_node(sess_id, new_node_id)
                 if old_node and new_node:
-                    if old_node.get("parent_id") and old_node.get("parent_id") == new_node.get("parent_id"):
+                    p_id = old_node.get("parent_id")
+                    if p_id and p_id == new_node.get("parent_id") and (getattr(db.get_world_node(sess_id, p_id), "get", lambda *a: "")("node_type", "").upper() != "ZONE" if db.get_world_node(sess_id, p_id) else True):
                         graph_same_venue = True
-                    elif db.is_descendant_of(sess_id, new_node_id, old_node_id) or db.is_descendant_of(sess_id, old_node_id, new_node_id):
+                    elif (db.is_descendant_of(sess_id, new_node_id, old_node_id) or db.is_descendant_of(sess_id, old_node_id, new_node_id)) and old_node.get("node_type", "").upper() != "ZONE" and new_node.get("node_type", "").upper() != "ZONE":
                         graph_same_venue = True
 
         is_same_venue = graph_same_venue or bool(

@@ -1,8 +1,9 @@
+from __future__ import annotations
 import re
 import json
 import random
 import asyncio
-from typing import Any
+from typing import Any, Optional, Dict, List, Tuple
 import db
 import game_engine
 from db import STAT_COLUMN
@@ -310,7 +311,7 @@ def is_exempt_free_action(choice: dict, in_dialogue_mode: bool = False, context 
     parsed_intent = classify_action_intent(raw_label, context)
 
     # 1. Conversational or Intimate Pause/Exit (always free when stat is NONE/FREE or matches exit intent)
-    if is_conversational_exit(raw_label) or parsed_intent.category == IntentCategory.DIALOGUE_EXIT:
+    if choice.get("ends_dialogue") or is_conversational_exit(raw_label) or parsed_intent.category == IntentCategory.DIALOGUE_EXIT:
         return True
     if any(k in lbl for k in INTIMATE_EXIT_KEYWORDS):
         return True
@@ -837,7 +838,8 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
 
             is_intimate_exit_lbl = any(k in lbl for k in INTIMATE_EXIT_KEYWORDS)
             is_exit = (
-                is_intimate_exit_lbl
+                bool(c.get("ends_dialogue"))
+                or is_intimate_exit_lbl
                 or intent_cat == IntentCategory.DIALOGUE_EXIT
                 or is_exempt_free_action(c, in_dialogue_mode=True)
                 or (

@@ -546,7 +546,13 @@ def get_dynamic_starting_hook(scenario: dict | str | None, session_id: int = 0, 
             "archetype": chosen_archetype,
             "hook_text": f"Begin {fallback_hook}.",
             "suggested_location": resolved_location,
-            "directive": "Open Hub Exploration: Establish ambient surroundings, present NPCs, and open choices."
+            "directive": "Open Hub Exploration: Establish ambient surroundings, present NPCs, and open choices.",
+            "starting_minute": 480,
+            "focal_point": s or p,
+            "scheduled_roles": [],
+            "initial_physical_state": {},
+            "starting_prop": None,
+            "visual_cues": "",
         }
         
     chosen_archetype = random.choice(available_archetypes)
@@ -590,12 +596,42 @@ def get_dynamic_starting_hook(scenario: dict | str | None, session_id: int = 0, 
         except Exception:
             starting_min = None
 
+    focal_point_str = chosen_entry.get("focal_point", "")
+    if focal_point_str:
+        focal_point_str = focal_point_str.replace("{starting_zone}", z).replace("{starting_primary}", p).replace("{starting_sub}", s).replace("{starting_location}", resolved_location)
+        focal_point_str = resolve_session_location_tokens(session_id=session_id, template=focal_point_str, scenario_key=scen_key, char_name=char_name)
+    else:
+        focal_point_str = s or p
+
+    scheduled_roles = chosen_entry.get("scheduled_roles", [])
+    if isinstance(scheduled_roles, str):
+        scheduled_roles = [scheduled_roles]
+    elif not isinstance(scheduled_roles, list):
+        scheduled_roles = []
+
+    initial_physical_state = chosen_entry.get("initial_physical_state") or {}
+    if not isinstance(initial_physical_state, dict):
+        initial_physical_state = {}
+
+    starting_prop = chosen_entry.get("starting_prop")
+    if isinstance(starting_prop, str):
+        starting_prop = {"name": starting_prop, "item_type": "tool", "effect": ""}
+    elif not isinstance(starting_prop, dict):
+        starting_prop = None
+
+    visual_cues = chosen_entry.get("visual_cues", "")
+
     return {
         "archetype": chosen_archetype,
         "hook_text": hook_text,
         "suggested_location": resolved_location,
         "directive": directive,
         "starting_minute": starting_min,
+        "focal_point": focal_point_str,
+        "scheduled_roles": scheduled_roles,
+        "initial_physical_state": initial_physical_state,
+        "starting_prop": starting_prop,
+        "visual_cues": visual_cues,
     }
 
 

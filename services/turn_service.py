@@ -10,6 +10,7 @@ from character_data import XP_REWARDS
 from mechanics.combat.merchant import apply_merchant_encounter_result
 
 log = logging.getLogger(__name__)
+logger = log
 
 
 class TurnResponse(BaseModel):
@@ -83,6 +84,11 @@ class TurnService:
         req_intent = raw_pick.get("intent")
         req_target_npc = raw_pick.get("target_npc") or raw_pick.get("target_name")
         is_item_action = bool(raw_pick.get("is_item_action") or raw_pick.get("stat") == "ITEM")
+        is_stealth_req = bool(
+            raw_pick.get("is_stealth")
+            or (raw_pick.get("stance") == "stealth")
+            or (isinstance(raw_pick.get("action"), dict) and (raw_pick["action"].get("is_stealth") or raw_pick["action"].get("stance") == "stealth"))
+        )
 
         if isinstance(raw_pick.get("action"), dict):
             nested = raw_pick["action"]
@@ -300,14 +306,90 @@ class TurnService:
         # ── Intent & Category Normalization ──────────────────────────────────
         act_intent = req_intent or chosen.get("intent") or (classification.get("intent") if is_custom else None)
         act_target = req_target_npc or chosen.get("target_npc") or (classification.get("target_npc") if is_custom else None)
+        act_sub_intent = chosen.get("sub_intent") or (classification.get("sub_intent") if is_custom else "") or ""
+        act_ends_dialogue = bool(chosen.get("ends_dialogue") or (classification.get("ends_dialogue") if is_custom else False))
+
+        intent_source = "choice_tag" if (not is_custom and chosen.get("intent")) else ("utility_llm" if is_custom else "fallback")
         if not act_cat or act_cat == "custom" or not act_intent:
+            logger.warning("[TurnService] Action missing structured intent; falling back to regex classifier for '%s'", label_text)
             parsed_i = classify_action_intent(label_text)
+            intent_source = "regex_fallback"
             if not act_cat or act_cat == "custom":
                 act_cat = classification.get("action_category") or parsed_i.category.value
             if not act_intent:
                 act_intent = parsed_i.category.value
             if not act_target and parsed_i.target_entity:
                 act_target = parsed_i.target_entity
+            if not act_sub_intent and parsed_i.sub_target:
+                act_sub_intent = parsed_i.sub_target
+
+        if act_intent == "dialogue_exit":
+            act_ends_dialogue = True
+
+        resolved_intent = {
+            "intent": act_intent,
+            "sub_intent": act_sub_intent,
+            "target_npc": act_target or "",
+            "ends_dialogue": act_ends_dialogue,
+            "source": intent_source,
+        }
+
+        # ── Stealth Stance & Covert Action Resolution ─────────────────────────
+        from mechanics.stealth import (
+            get_session_stealth_state,
+            toggle_stealth_stance,
+            break_stealth,
+            apply_stealth_distraction,
+            apply_stealth_decay_turn,
+            resolve_stealth_action
+        )
+
+        st_state = get_session_stealth_state(session)
+        is_covert_intent = bool(act_intent == "stealth_covert" or act_cat == "stealth")
+        effective_stealth = bool(
+            is_stealth_req
+            or is_covert_intent
+            or (st_state.get("is_hidden") and raw_pick.get("stance") != "normal")
+        )
+
+        lbl_low = label_text.lower()
+        is_distraction_action = bool(
+            is_covert_intent
+            and any(k in lbl_low for k in ("distract", "throw stone", "small stone", "noise distraction", "divert attention"))
+        )
+        if is_distraction_action and isinstance(session, dict) and session.get("id"):
+            apply_stealth_distraction(session, reduction=30)
+            await adb(db.update_session, session["id"], stealth_state=session["stealth_state"])
+
+        stealth_outcome = None
+        if effective_stealth and isinstance(session, dict):
+            if act_intent in ("rest_sleep", "dialogue_init"):
+                break_stealth(session, reason=act_intent)
+                effective_stealth = False
+                if session.get("id"):
+                    await adb(db.update_session, session["id"], stealth_state=session["stealth_state"])
+            else:
+                session.setdefault("stealth_state", {})["is_hidden"] = True
+                if is_covert_intent or stat == "AGI" or "sneak" in lbl_low:
+                    actor_inventory = await adb(db.get_inventory, user_id)
+                    stealth_outcome = resolve_stealth_action(
+                        session=session,
+                        actor_char=char,
+                        action_data={"label": label_text, "action_type": chosen.get("choice_type", "stealth"), "custom_action_text": label_text},
+                        target_entity={"name": act_target} if act_target else None,
+                        party=None,
+                        equipped_items=actor_inventory,
+                        current_minute=session.get("current_minute", 480),
+                        check_mode=check_mode
+                    )
+                    res = stealth_outcome["check"]
+                    rate = res.chance
+                    if session.get("id"):
+                        await adb(db.update_session, session["id"], stealth_state=session["stealth_state"])
+                else:
+                    apply_stealth_decay_turn(session)
+                    if session.get("id"):
+                        await adb(db.update_session, session["id"], stealth_state=session["stealth_state"])
 
         action = dict(chosen) if not is_custom else {}
         action.update({
@@ -332,6 +414,11 @@ class TurnService:
             "type": action_type,
             "choice_type": chosen.get("choice_type", ""),
             "action_category": act_cat,
+            "intent": act_intent,
+            "sub_intent": act_sub_intent,
+            "target_npc": act_target or "",
+            "ends_dialogue": act_ends_dialogue,
+            "resolved_intent": resolved_intent,
             "spell_id": chosen.get("spell_id", ""),
             "combat_target": combat_target or chosen.get("combat_target") or (classification.get("combat_target") if is_custom else None),
             "combat_tactical_archetype": chosen.get("combat_tactical_archetype") or (classification.get("combat_tactical_archetype", "") if is_custom else ""),
@@ -351,6 +438,10 @@ class TurnService:
             "sub_intent": chosen.get("sub_intent") or (classification.get("sub_intent", "") if is_custom else ""),
             "target_npc": act_target,
             "active_recall": classification.get("_active_recall") if is_custom else chosen.get("_active_recall"),
+            "is_stealth": effective_stealth,
+            "stance": "stealth" if effective_stealth else "normal",
+            "stealth_state": session.get("stealth_state") if isinstance(session, dict) else None,
+            "stealth_outcome": stealth_outcome,
         })
         if not action.get("active_recall") and isinstance(session, dict) and session.get("id") and label_text:
             from game_engine.turn.generation import extract_deterministic_recall_query
@@ -422,7 +513,10 @@ class TurnService:
                 "quest_id": a.get("quest_id"),
                 "sub_obj_id": a.get("sub_obj_id"),
                 "stage_index": a.get("stage_index"),
-                "active_recall": a.get("active_recall")
+                "active_recall": a.get("active_recall"),
+                "is_stealth": a.get("is_stealth", False),
+                "stance": a.get("stance", "normal"),
+                "stealth_state": a.get("stealth_state")
             }
 
         import uuid
@@ -448,6 +542,8 @@ class TurnService:
         # Resolve the turn with the LLM — resolve_turn now always returns a dict
         try:
             outcome = await game_engine.resolve_turn(session, party, actions, stream_callback=stream_callback)
+            if isinstance(outcome, dict) and isinstance(session, dict) and "stealth_state" not in outcome:
+                outcome["stealth_state"] = session.get("stealth_state")
         except BaseException as e:
             # Mark hard failure
             snapshot["status"] = "failed_hard"

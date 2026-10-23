@@ -60,3 +60,57 @@ async def test_resolve_turn_graceful_fallback_on_llm_outage(mock_session):
         assert "outcome_narrative" in outcome and len(outcome["outcome_narrative"]) > 0
         assert "next_narrative" in outcome and len(outcome["next_narrative"]) > 0
         assert len(outcome.get("choices", [])) > 0
+
+
+@pytest.mark.asyncio
+async def test_session_image_polling_endpoint(mock_session):
+    from fastapi.testclient import TestClient
+    import server
+
+    session_id, user_id = mock_session
+    client = TestClient(server.app)
+
+    # Initial state: no image
+    res = client.get(f"/api/adventure/session-image/{session_id}")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["session_id"] == session_id
+    assert data["scene_image_url"] is None
+
+    # Update session with image url
+    db.update_session(session_id, scene_image_url="http://localhost:8000/images/test_scene.png")
+    res = client.get(f"/api/adventure/session-image/{session_id}")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["scene_image_url"] == "http://localhost:8000/images/test_scene.png"
+
+
+@pytest.mark.asyncio
+async def test_connection_manager_broadcast_type_resilience():
+    from api.deps import manager
+
+    # Fake websocket object
+    class DummyWS:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, msg):
+            self.sent.append(msg)
+
+    ws = DummyWS()
+    # Connect with int
+    manager.active_connections[12345] = [{"ws": ws, "user_id": 99}]
+
+    # Broadcast with string session id
+    await manager.broadcast("12345", {"type": "SCENE_IMAGE", "url": "http://test.png"})
+    assert len(ws.sent) == 1
+    assert ws.sent[0]["url"] == "http://test.png"
+
+    # Broadcast with int session id
+    await manager.broadcast(12345, {"type": "SCENE_IMAGE", "url": "http://test2.png"})
+    assert len(ws.sent) == 2
+    assert ws.sent[1]["url"] == "http://test2.png"
+
+    # Cleanup
+    del manager.active_connections[12345]
+

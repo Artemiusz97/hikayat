@@ -559,6 +559,16 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
                 matched_quest = q
                 break
 
+    # Phase 5 Guard: Zero LLM Objective Authority (Q1, Q6)
+    import config
+    if getattr(config, "DETERMINISTIC_QUESTS", True) and outcome is not None:
+        if not matched_quest:
+            return None
+        status = matched_quest.get("status") or "Active"
+        reward_xp = matched_quest.get("reward_xp", reward_xp)
+        reward_gold = matched_quest.get("reward_gold", reward_gold)
+        reward_item = matched_quest.get("reward_item", reward_item)
+
     if matched_quest:
         quest_id = matched_quest["quest_id"]
         if not title:
@@ -2325,6 +2335,32 @@ def resolve_pre_turn_quests_and_clues(
                     directives.append(
                         f"[MANDATORY QUEST OBJECTIVE COMPLETE]: Sub-objective '{so.get('text', so_id)}' for quest '{q.get('title')}' is completed! Narrate the breakthrough/discovery vividly."
                     )
+                    # Phase 5 Q2: Pre-Registered Objective Clue Discovery
+                    c_lead = so.get("clue") or so.get("clue_lead")
+                    if not c_lead:
+                        t_text = str(so.get("text") or "")
+                        if any(k in t_text.lower() for k in ("investigate", "discover", "uncover", "search", "interview", "interrogate", "examine", "clue", "evidence", "find")):
+                            c_lead = f"Discovered lead: {t_text}"
+                    if c_lead and session_id:
+                        try:
+                            from mechanics.narrative.clues import categorize_clue
+                            cur_ch = session.get("chapter", 1) if session else 1
+                            cid = db.add_session_clue(
+                                session_id=session_id,
+                                title=f"Lead: {str(so.get('text', 'Evidence'))[:40]}",
+                                lead_text=str(c_lead),
+                                category=categorize_clue(str(c_lead)),
+                                source_location=cur_loc,
+                                linked_npc=str(so_wp.get("target_npc") if so_wp else "") or str(q.get("target_npc") or ""),
+                                quest_id=qid,
+                                chapter=cur_ch,
+                            )
+                            if cid:
+                                directives.append(
+                                    f"[MANDATORY CLUE DISCOVERY]: Evidence recorded to Caseboard: '{c_lead}'"
+                                )
+                        except Exception as e:
+                            logger.warning("Failed to record pre-registered clue: %s", e)
                     break
             if sub_dirty and session_id:
                 try:
@@ -2350,31 +2386,43 @@ def resolve_pre_turn_quests_and_clues(
                     if q not in completed_quests:
                         completed_quests.append(q)
 
-        # Check if climax action was executed for a story quest
+        # Check if climax action was executed for a story quest (standard or premature per A11)
         if q.get("is_story_quest"):
-            sq, climax_loc = get_story_quest_climax_location(session_id)
+            sq, climax_loc = get_story_quest_climax_location(session_id, allow_premature=True)
             if sq and sq.get("quest_id") == qid:
                 if ("story climax" in act_low or "⚡" in action_str):
+                    sub_objs_done = all(isinstance(s, dict) and s.get("completed") for s in (q.get("sub_objectives") or []))
                     if is_success:
+                        # Auto-mark all sub-objectives as cleared on successful climax
+                        for s in (q.get("sub_objectives") or []):
+                            if isinstance(s, dict):
+                                s["completed"] = True
                         if q not in completed_quests:
                             completed_quests.append(q)
                     else:
-                        strike_res = db.increment_quest_strikes(session_id, qid, delta=2 if check_tier == "critical_failure" else 1)
-                        if strike_res["failed"] or check_tier == "critical_failure":
-                            db.set_quest_resolution_approach(session_id, qid, "pyrrhic_climax")
-                            q["resolution_approach"] = "pyrrhic_climax"
-                            q["reward_xp"] = max(25, int(int(q.get("reward_xp") or 100) * 0.5))
-                            q["reward_gold"] = max(10, int(int(q.get("reward_gold") or 30) * 0.5))
-                            db.apply_hp_mp_delta(party_uids[0], hp_delta=-10)
+                        if not sub_objs_done:
+                            # Phase 5 A11: Premature confrontation failure -> immediate escape/escalation +2 strikes
+                            strike_res = db.increment_quest_strikes(session_id, qid, delta=2)
                             directives.append(
-                                f"[MANDATORY PYRRHIC CLIMAX RESOLUTION]: The Chapter Climax '{q.get('title')}' concluded with bittersweet compromise and dark consequences! Complete the climax and narrate the heavy toll."
+                                f"[PREMATURE CLIMAX FAILED - {strike_res['strikes']}/{strike_res['max_strikes']} STRIKES]: Confronting the threat without full evidence backfired! The suspect evaded capture and opposition is on alert."
                             )
-                            if q not in completed_quests:
-                                completed_quests.append(q)
                         else:
-                            directives.append(
-                                f"[QUEST COMPLICATION - {strike_res['strikes']}/{strike_res['max_strikes']} STRIKES]: The Story Climax check met unexpected resistance! The stakes escalate for the final push."
-                            )
+                            strike_res = db.increment_quest_strikes(session_id, qid, delta=2 if check_tier == "critical_failure" else 1)
+                            if strike_res["failed"] or check_tier == "critical_failure":
+                                db.set_quest_resolution_approach(session_id, qid, "pyrrhic_climax")
+                                q["resolution_approach"] = "pyrrhic_climax"
+                                q["reward_xp"] = max(25, int(int(q.get("reward_xp") or 100) * 0.5))
+                                q["reward_gold"] = max(10, int(int(q.get("reward_gold") or 30) * 0.5))
+                                db.apply_hp_mp_delta(party_uids[0], hp_delta=-10)
+                                directives.append(
+                                    f"[MANDATORY PYRRHIC CLIMAX RESOLUTION]: The Chapter Climax '{q.get('title')}' concluded with bittersweet compromise and dark consequences! Complete the climax and narrate the heavy toll."
+                                )
+                                if q not in completed_quests:
+                                    completed_quests.append(q)
+                            else:
+                                directives.append(
+                                    f"[QUEST COMPLICATION - {strike_res['strikes']}/{strike_res['max_strikes']} STRIKES]: The Story Climax check met unexpected resistance! The stakes escalate for the final push."
+                                )
 
     # Award rewards deterministically for newly completed quests
     import time
@@ -2417,24 +2465,64 @@ def resolve_pre_turn_quests_and_clues(
             f"[MANDATORY QUEST OBJECTIVE COMPLETE]: Quest '{cq.get('title')}' is completed! Narrate the breakthrough/success vividly."
         )
 
-    # Two-Phase Chapter Climax System
+    # Caseboard Deductive Synthesis (Phase 5 Q3)
+    if session_id:
+        try:
+            from mechanics.narrative.clues import evaluate_clue_deduction
+            open_clues = db.get_session_clues(session_id, is_verified=0) or []
+            if len(open_clues) >= 2:
+                for i in range(len(open_clues)):
+                    for j in range(i + 1, len(open_clues)):
+                        ca = open_clues[i]
+                        cb = open_clues[j]
+                        is_valid, b_title, b_text = evaluate_clue_deduction(
+                            ca, cb,
+                            scen_key=session.get("scenario", "fantasy") if session else "fantasy"
+                        )
+                        if is_valid:
+                            db.synthesize_deduction_clue(
+                                session_id, [ca["id"], cb["id"]], b_title, b_text,
+                                chapter=session.get("chapter", 1) if session else 1
+                            )
+                            directives.append(
+                                f"[MANDATORY BREAKTHROUGH DEDUCTION]: Synthesized '{b_title}' from caseboard evidence! {b_text}"
+                            )
+                            break
+                    else:
+                        continue
+                    break
+        except Exception as e:
+            logger.warning("Failed during caseboard deductive synthesis: %s", e)
+
+    # Two-Phase Chapter Climax System (Phase 5 Q4)
     chapter_climax = False
-    active_sq = db.get_active_story_quest(session_id) if session_id else None
-    if not active_sq and session_id:
-        cur_ch = session.get("chapter", 1)
-        if session.get("chapter_climax_phase") == "setup":
-            session["chapter"] = cur_ch + 1
+    cur_ch = session.get("chapter", 1) if session else 1
+    has_completed_sq = bool(completed_quests and any(q.get("is_story_quest") for q in completed_quests))
+
+    if has_completed_sq and session_id:
+        next_ch = cur_ch + 1
+        if isinstance(session, dict):
+            session["chapter"] = next_ch
             session["chapter_climax_phase"] = "resolved"
-            try:
-                db.set_session_chapter(session_id, session["chapter"])
-            except Exception:
-                pass
-            directives.append(
-                f"[MANDATORY CHAPTER CLIMAX RESOLUTION]: Chapter {cur_ch} climax successfully concluded! Transition into Chapter {session['chapter']}."
-            )
-            chapter_climax = True
-        elif completed_quests and any(q.get("is_story_quest") for q in completed_quests):
-            session["chapter_climax_phase"] = "setup"
+        try:
+            db.set_session_chapter(session_id, next_ch)
+        except Exception:
+            pass
+        directives.append(
+            f"[MANDATORY CHAPTER CLIMAX RESOLUTION]: Chapter {cur_ch} climax successfully concluded! Transition into Chapter {next_ch}."
+        )
+        chapter_climax = True
+        try:
+            ensure_story_quest_exists(session)
+        except Exception:
+            pass
+    elif session_id:
+        active_sq = db.get_active_story_quest(session_id)
+        if active_sq:
+            sq_subs = active_sq.get("sub_objectives", []) or []
+            if sq_subs and all(isinstance(s, dict) and s.get("completed") for s in sq_subs):
+                if isinstance(session, dict):
+                    session["chapter_climax_phase"] = "setup" 
 
     res = {
         "completed_quests": [q.get("quest_id") for q in completed_quests],
@@ -2448,4 +2536,88 @@ def resolve_pre_turn_quests_and_clues(
     session["_pre_turn_quest_res"] = res
     return res
 
+def forfeit_side_bounty(session_id: int, quest_id: str, party_user_ids: list[int] = None) -> dict:
+    """
+    Abandons/forfeits an active side bounty per Phase 5 contract A16:
+    - Applies -5 client affinity penalty.
+    - Clears associated waypoints.
+    - Marks quest status = 'Abandoned'.
+    - Queues zero retaliation ambushes.
+    """
+    import db
+    import time
+    q = db.get_quest_by_id(session_id, quest_id)
+    if not q or q.get("is_story_quest"):
+        return {"success": False, "reason": "Cannot forfeit story quest"}
+
+    with db.get_conn() as conn:
+        now = time.time()
+        conn.execute("UPDATE quests SET status='Abandoned', updated_at=? WHERE session_id=? AND quest_id=?", (now, session_id, quest_id))
+        conn.execute("UPDATE quest_waypoints SET status='abandoned', updated_at=? WHERE session_id=? AND quest_id=?", (now, session_id, quest_id))
+
+    client_npc = q.get("client_npc") or ""
+    if client_npc:
+        try:
+            db.update_relationship_score(session_id, client_npc, delta_score=-5)
+        except Exception:
+            pass
+
+    return {
+        "success": True,
+        "quest_id": quest_id,
+        "title": q.get("title", "Bounty"),
+        "client_affinity_delta": -5,
+        "directive": f"[SIDE BOUNTY FORFEITED]: The contract '{q.get('title')}' was abandoned (-5 Affinity with {client_npc or 'the client'})."
+    }
+
+
+def can_accept_side_bounty(session_id: int) -> bool:
+    """Checks if session is below the max active side bounties concurrency cap of 3 (A17)."""
+    import db
+    active_bounties = [
+        q for q in (db.get_session_quests(session_id, status="Active") or [])
+        if not q.get("is_story_quest")
+    ]
+    return len(active_bounties) < 3
+
+
+def check_and_extract_defeated_suspect_evidence(session_id: int, defeated_npc_name: str, cur_loc: str = "") -> dict | None:
+    """
+    Fail-Forward Pocket Evidence Drop per Phase 5 contract A14:
+    If an investigation suspect is defeated in combat before formal interrogation,
+    extracts their vital evidence from personal effects into session_clues.
+    """
+    import db
+    if not session_id or not defeated_npc_name:
+        return None
+    d_low = defeated_npc_name.strip().lower()
+    active_quests = db.get_session_quests(session_id, status="Active") or []
+    for q in active_quests:
+        target_npc = str(q.get("target_npc") or "").strip().lower()
+        sub_objs = q.get("sub_objectives") or []
+        is_suspect = (target_npc and target_npc in d_low) or any(
+            isinstance(so, dict) and d_low in str(so.get("text", "")).lower() for so in sub_objs
+        ) or (d_low in str(q.get("objective", "")).lower())
+        if is_suspect:
+            cur_ch = db.get_session_chapter(session_id) or 1
+            title = f"Pocket Evidence: {defeated_npc_name}"
+            lead_text = f"Recovered from the personal effects of {defeated_npc_name}: an encrypted diary and key confirming their involvement in '{q.get('title')}'."
+            cid = db.add_session_clue(
+                session_id=session_id,
+                title=title,
+                lead_text=lead_text,
+                category="document",
+                source_location=cur_loc,
+                linked_npc=defeated_npc_name,
+                quest_id=q.get("quest_id", ""),
+                chapter=cur_ch,
+            )
+            return {
+                "clue_id": cid,
+                "title": title,
+                "lead_text": lead_text,
+                "quest_id": q.get("quest_id", ""),
+                "directive": f"[FAIL-FORWARD EVIDENCE RECOVERED]: Vital evidence extracted from {defeated_npc_name}'s personal effects!",
+            }
+    return None
 

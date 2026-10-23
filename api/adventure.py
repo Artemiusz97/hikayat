@@ -20,6 +20,7 @@ from .deps import (
     StartAdventureRequest,
     JoinAdventureRequest,
     ActionRequest,
+    ToggleStealthRequest,
     EndAdventureRequest,
     RetryAdventureRequest,
     RerollImageRequest,
@@ -73,6 +74,11 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
 
     session["choices"] = enrich_choices_with_odds(raw_choices, uid)
     session["party_members"] = enrich_session_party_members(session)
+
+    from mechanics.stealth import get_session_stealth_state, get_alert_badge_data
+    st_client = get_session_stealth_state(session)
+    session["stealth_state"] = st_client
+    session["stealth_badge"] = get_alert_badge_data(st_client.get("detection_meter", 0), is_hidden=st_client.get("is_hidden", False))
 
     scen_key_check = session.get("scenario", "fantasy")
     from scenario_data import is_nsfw_scenario, get_scenario_tags, get_scenario_display_name
@@ -207,11 +213,14 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
             if int(enemy.get("hp", 1) or 0) <= 0:
                 continue
             enemy_name = (enemy.get("name") or "Enemy").strip()
+            if party and party[0] and session.get("stealth_state", {}).get("combat_vanished"):
+                party[0][0]["combat_vanished"] = True
             raw_deck = generate_categorized_combat_actions(
                 party=party,
                 monster=enemy,
                 location=location,
                 scenario=scen_key,
+                session=session,
             ) or {}
 
             magic_list = list(raw_deck.get("magic") or [])
@@ -523,6 +532,22 @@ async def _trigger_scene_image_broadcast(
         logger.warning(f"Scene image generation failed for session {session_id}: {e}")
         return None
 
+@router.get("/api/adventure/session-image/{session_id}")
+async def get_session_image(session_id: int):
+    """Lightweight polling endpoint returning the latest scene_image_url for active turn reconciliation."""
+    sess = await adb(db.get_session, session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    raw_hist = list(sess.get("history") or [])
+    last_img = raw_hist[-1].get("scene_image_url") if (raw_hist and isinstance(raw_hist[-1], dict)) else None
+    return {
+        "session_id": session_id,
+        "scene_image_url": sess.get("scene_image_url") or last_img,
+        "history_image_url": last_img,
+        "scene_title": sess.get("scene_title", ""),
+    }
+
+
 
 def _fetch_open_lobbies() -> list[dict]:
     with db.get_conn() as conn:
@@ -827,6 +852,16 @@ async def execute_action(req: ActionRequest):
             session_id=session.get("id"),
         )
 
+        is_stealth_req = bool(
+            getattr(req, "is_stealth", False)
+            or (isinstance(req.action, dict) and req.action.get("is_stealth"))
+            or (getattr(req, "stance", "") == "stealth")
+            or (isinstance(req.action, dict) and req.action.get("stance") == "stealth")
+        )
+        stance_req = getattr(req, "stance", None) or (req.action.get("stance") if isinstance(req.action, dict) else None)
+        if is_stealth_req and not stance_req:
+            stance_req = "stealth"
+
         raw_pick = {
             "choice_index": req.choice_index,
             "custom_action_text": req.custom_action_text,
@@ -834,6 +869,8 @@ async def execute_action(req: ActionRequest):
             "combat_target": req.combat_target,
             "intent": getattr(req, "intent", None),
             "target_npc": getattr(req, "target_npc", None),
+            "is_stealth": is_stealth_req,
+            "stance": stance_req,
             "action": req.action if isinstance(req.action, dict) else None,
         }
         try:
@@ -1033,6 +1070,45 @@ async def execute_action(req: ActionRequest):
             "action": safe_action,
             "xp_gained": turn_response.xp_gained,
             "levels_gained": turn_response.levels_gained
+        }
+
+
+@router.post("/api/adventure/toggle_stealth")
+async def toggle_adventure_stealth(req: ToggleStealthRequest):
+    """Toggles persistent stealth stance ON/OFF for an active adventure session."""
+    async with distributed_session_lock(req.session_id):
+        session_row = await adb(db.get_session, req.session_id)
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        session = dict(session_row)
+        if session["status"] != "active":
+            raise HTTPException(status_code=400, detail="Session is not active")
+
+        from mechanics.stealth import toggle_stealth_stance, get_session_stealth_state, get_alert_badge_data
+        st = get_session_stealth_state(session)
+        new_active = req.active if req.active is not None else not bool(st.get("is_hidden", False))
+        toggle_stealth_stance(session, new_active)
+        await adb(db.update_session, req.session_id, stealth_state=session["stealth_state"])
+        fresh = await adb(db.get_session, req.session_id)
+        fresh = await adb(_enrich_session_for_client, dict(fresh), req.user_id)
+
+        badge_data = get_alert_badge_data(
+            session["stealth_state"].get("detection_meter", 0),
+            is_hidden=session["stealth_state"].get("is_hidden", False)
+        )
+
+        await manager.broadcast(req.session_id, {
+            "type": "STEALTH_STATE_UPDATED",
+            "stealth_state": session["stealth_state"],
+            "stealth_badge": badge_data
+        })
+
+        return {
+            "success": True,
+            "stealth_state": session["stealth_state"],
+            "stealth_badge": badge_data,
+            "session": fresh
         }
 
 

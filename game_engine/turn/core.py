@@ -269,11 +269,17 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                 from mechanics.world.locations import extract_movement_destination, get_zone_location_name
                 prelim_dest_loc = old_loc_val
                 if not is_combat_active and actions:
-                    act_label = actions[0].get("label", "") if isinstance(actions[0], dict) else str(actions[0])
-                    p_zone = get_zone_location_name(old_loc_val) if old_loc_val else ""
-                    dest_pair = extract_movement_destination(act_label, session_id_val, current_zone=p_zone, scen_key=scen_key)
-                    if dest_pair:
-                        prelim_dest_loc = f"{dest_pair[0]} ➔ {dest_pair[1]}"
+                    if isinstance(first_act, dict) and first_act.get("target_location"):
+                        prelim_dest_loc = first_act["target_location"]
+                    elif isinstance(first_act, dict) and first_act.get("target_node_id") and session_id_val:
+                        from mechanics.world.locations.pathfinding import format_node_hierarchy
+                        prelim_dest_loc = format_node_hierarchy(session_id_val, first_act["target_node_id"])
+                    else:
+                        act_label = actions[0].get("label", "") if isinstance(actions[0], dict) else str(actions[0])
+                        p_zone = get_zone_location_name(old_loc_val) if old_loc_val else ""
+                        dest_pair = extract_movement_destination(act_label, session_id_val, current_zone=p_zone, scen_key=scen_key)
+                        if dest_pair:
+                            prelim_dest_loc = f"{dest_pair[0]} ➔ {dest_pair[1]}"
 
                 time_delta = calculate_action_time_cost(
                     first_act,
@@ -312,6 +318,18 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
     effective_location = stage_info["effective_location"]
     pre_turn_stage_npcs = stage_info["stage_npcs"]
     movement_dest_str = stage_info["movement_dest_str"]
+
+    from config import DETERMINISTIC_CAST
+    from mechanics.combat import is_in_combat
+    from game_engine.npcs.cast_planner import plan_pre_turn, render_stage_plan, apply_cast_events
+    cast_plan = None
+    if DETERMINISTIC_CAST:
+        cast_plan = plan_pre_turn(
+            session, party, actions, stage_info=stage_info, is_combat=bool(is_in_combat(session)), new_loc=effective_location
+        )
+        new_partners = cast_plan.dialogue_partners
+        if cast_plan.has_exited_convo:
+            has_exited_convo = True
 
     import db
     from mechanics.world.mobility import get_session_dialogue_partners
@@ -397,6 +415,10 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
         for sdir in stage_info["stage_directives"]:
             if sdir and sdir not in directive_note:
                 directive_note += f"\n{sdir}\n"
+
+    if DETERMINISTIC_CAST and cast_plan is not None:
+        stage_plan_text = render_stage_plan(cast_plan)
+        directive_note += f"\n{stage_plan_text}\n"
 
     # --- DETERMINISTIC PRE-TURN ENGINES (Python-First, 0 Arbiter LLM calls) ---
     from game_engine.state.core import resolve_pre_turn_vitals_and_resources
@@ -810,10 +832,11 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
     if has_exited_convo:
         directive_note += (
             "\n[CONVERSATIONAL DEPARTURE & SCENE TRANSITION DIRECTIVE]:\n"
-            "The player has explicitly concluded the conversation and excused themselves or departed.\n"
+            "The player has explicitly concluded the conversation, stepped away, or left the conversation.\n"
             "- In `outcome_narrative`, narrate only the immediate parting gesture or departure (e.g. nodding, thanking them, stepping away). "
-            "DO NOT reopen the conversation, do not renegotiate previously agreed deals, and do not repeat the partner's prior dialogue.\n"
-            "- In `next_narrative`, transition the scene forward to the new environment, surrounding atmosphere, or the player's next destination.\n"
+            "EVERY character present in the scene MUST STOP talking with the player! DO NOT have any NPCs continue, reopen, or capture dialogue with the player this turn! DO NOT reopen the conversation!\n"
+            "- In `next_narrative`, transition the scene forward into open exploration, room atmosphere, or the player's next move. NO characters should be speaking to the player.\n"
+            "- In `choices`, generate OPEN EXPLORATION, room inspection, or travel choices. DO NOT generate active dialogue choices.\n"
         )
 
     # Check access gate prompt directive from stage_info
@@ -1201,6 +1224,10 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                 result["_pre_turn_gifted"] = list(pre_vitals_res["gifted_items"])
             if pre_vitals_res.get("media_captured"):
                 result["_pre_turn_media_captured"] = list(pre_vitals_res["media_captured"])
+            if pre_vitals_res.get("consumed_items"):
+                result["_pre_turn_consumed"] = list(pre_vitals_res["consumed_items"])
+            if pre_vitals_res.get("loot_items_rolled"):
+                result["_authorized_loot"] = list(pre_vitals_res["loot_items_rolled"])
         if pre_social_res and pre_social_res.get("faction_updates") and not result.get("faction_updates"):
             result["faction_updates"] = list(pre_social_res["faction_updates"])
         if pre_social_res and pre_social_res.get("faction_promotion_result") and not result.get("faction_promotion_result"):
@@ -1434,13 +1461,24 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
     if isinstance(result, dict) and is_location_engine_enabled(scen_key):
         old_loc = session.get("current_location", "")
-        new_loc = effective_location or result.get("location") or old_loc
-        new_node_id = stage_info.get("effective_node_id") or session.get("current_node_id")
+        import config
+        curr_nid = session.get("current_node_id") or (db.resolve_node_id_from_location(session["id"], old_loc) if session.get("id") else None)
+        has_graph = bool(curr_nid)
+        if stage_info.get("is_movement"):
+            new_loc = effective_location or old_loc
+        elif getattr(config, "DETERMINISTIC_MOVEMENT", True) and has_graph and "cast_events" in result:
+            new_loc = old_loc
+        else:
+            new_loc = result.get("location") or old_loc
+        new_node_id = stage_info.get("effective_node_id") or (db.resolve_node_id_from_location(session["id"], new_loc) if session.get("id") and new_loc else None) or session.get("current_node_id")
         focal_point = stage_info.get("focal_point") if stage_info.get("focal_point") is not None else result.get("focal_point")
 
         result["location"] = new_loc
         result["current_node_id"] = new_node_id
-        staged_seed = [dict(n) if isinstance(n, dict) else {"name": str(n)} for n in (pre_turn_stage_npcs or result.get("npcs_present") or [])]
+        if new_loc != old_loc:
+            staged_seed = [dict(n) if isinstance(n, dict) else {"name": str(n)} for n in (result.get("npcs_present") or [])]
+        else:
+            staged_seed = [dict(n) if isinstance(n, dict) else {"name": str(n)} for n in (pre_turn_stage_npcs or result.get("npcs_present") or [])]
         try:
             result["npcs_present"] = game_engine.process_scene_npcs(
                 result,
@@ -1448,10 +1486,14 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                 new_loc=new_loc,
                 old_loc=old_loc,
                 actions=actions,
-                staged_npcs=staged_seed
+                staged_npcs=staged_seed,
+                party=party
             )
         except Exception:
             result["npcs_present"] = staged_seed
+        session["current_location"] = new_loc
+        if new_node_id:
+            session["current_node_id"] = new_node_id
 
         # Rendezvous Convergence on Arrival
         if session.get("id") and new_loc:
@@ -1478,54 +1520,82 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
             except Exception:
                 pass
 
-        # Ring-2 Attentive Peer Chime-In Check (strictly bounded to pre_turn_stage_npcs)
-        if result.get("npcs_present"):
-            s_nar = (result.get("next_narrative") or result.get("narrative") or result.get("outcome_narrative") or "").strip()
-            full_nar = f"{outcome_narrative}\n{next_narrative}\n{s_nar}"
-            pres_names = [game_engine._get_npc_name(n) for n in result["npcs_present"] if game_engine._get_npc_name(n)]
-            retained_partners = [p for p in new_partners if any(game_engine.is_dialogue_partner(p, [pn]) for pn in pres_names)] if not has_exited_convo else []
-            lead_p_name = party[0][0].get("name") if party and party[0] and isinstance(party[0][0], dict) else None
-            speaking_npcs = game_engine.extract_speaking_npcs_from_narrative(
-                full_nar, result["npcs_present"], party=party, player_name=lead_p_name
+        if DETERMINISTIC_CAST and cast_plan is not None and "cast_events" in result:
+            cast_plan.present_npcs = list(result.get("npcs_present") or [])
+            raw_cast_events = result.get("cast_events") or []
+            final_plan, cast_rejections = apply_cast_events(
+                cast_plan, raw_cast_events, session=session, party=party, stage_info=stage_info
             )
-            if not speaking_npcs and not has_exited_convo:
-                from mechanics.world.mobility import is_rendezvous_target
-                for n in result["npcs_present"]:
-                    n_nm = game_engine._get_npc_name(n)
-                    if n_nm and n_nm.lower() != "none" and is_rendezvous_target(n_nm, actions=actions, session_id=session.get("id"), new_loc=new_loc):
-                        speaking_npcs.append(n_nm)
-
-            same_primary = bool(
-                old_loc == new_loc
-                or (
-                    get_primary_location_name(old_loc)
-                    and get_primary_location_name(old_loc).lower() == get_primary_location_name(new_loc).lower()
+            new_partners = final_plan.dialogue_partners
+            result["_cast_rejections"] = cast_rejections
+            if has_exited_convo or cast_plan.has_exited_convo:
+                new_partners = []
+                if result.get("npcs_present"):
+                    for n in result["npcs_present"]:
+                        if isinstance(n, dict):
+                            if n.get("stage_role") == "active_partner":
+                                n["stage_role"] = "room_bystander"
+                            if n.get("attention_ring") == "ring_1_partner":
+                                n["attention_ring"] = "ring_3_bystander"
+                            if isinstance(n.get("micro_blocking"), dict) and n["micro_blocking"].get("proximity") == "conversational_distance":
+                                n["micro_blocking"]["proximity"] = "across_room"
+            # Synchronize authoritative room attendance
+            result["npcs_present"] = final_plan.present_npcs
+            session["current_npcs"] = final_plan.present_npcs
+        else:
+            # Legacy Ring-2 Attentive Peer Chime-In Check (fallback when DETERMINISTIC_CAST is False)
+            if result.get("npcs_present"):
+                s_nar = (result.get("next_narrative") or result.get("narrative") or result.get("outcome_narrative") or "").strip()
+                full_nar = f"{outcome_narrative}\n{next_narrative}\n{s_nar}"
+                pres_names = [game_engine._get_npc_name(n) for n in result["npcs_present"] if game_engine._get_npc_name(n)]
+                retained_partners = [p for p in new_partners if any(game_engine.is_dialogue_partner(p, [pn]) for pn in pres_names)] if not has_exited_convo else []
+                lead_p_name = party[0][0].get("name") if party and party[0] and isinstance(party[0][0], dict) else None
+                speaking_npcs = game_engine.extract_speaking_npcs_from_narrative(
+                    full_nar, result["npcs_present"], party=party, player_name=lead_p_name
                 )
-            )
-            merged = list(retained_partners) if (same_primary and not has_exited_convo) else []
-            # If the player exited conversation with prior partners, do not allow those same exited partners to re-capture dialogue this turn
-            from mechanics.world.mobility import get_session_dialogue_partners
-            exited_partners = get_session_dialogue_partners(session) if has_exited_convo else []
+                if not speaking_npcs and not has_exited_convo:
+                    from mechanics.world.mobility import is_rendezvous_target
+                    for n in result["npcs_present"]:
+                        n_nm = game_engine._get_npc_name(n)
+                        if n_nm and n_nm.lower() != "none" and is_rendezvous_target(n_nm, actions=actions, session_id=session.get("id"), new_loc=new_loc):
+                            speaking_npcs.append(n_nm)
 
-            for sn in speaking_npcs:
-                if has_exited_convo and any(game_engine.is_dialogue_partner(sn, [ep]) for ep in exited_partners):
-                    continue
-                if not any(game_engine.is_dialogue_partner(sn, [m]) for m in merged):
-                    if game_engine.evaluate_scene_attention_transition(
-                        sn,
-                        retained_partners=retained_partners,
-                        actions=actions,
-                        narrative=full_nar,
-                        session=session,
-                        party=party,
-                        npcs_present=result["npcs_present"],
-                    ):
-                        merged.append(sn)
-            if merged:
-                new_partners = merged
-                has_exited_convo = False
-            else:
-                new_partners = retained_partners if not has_exited_convo else []
+                same_primary = bool(
+                    old_loc == new_loc
+                    or (
+                        get_primary_location_name(old_loc)
+                        and get_primary_location_name(old_loc).lower() == get_primary_location_name(new_loc).lower()
+                    )
+                )
+                if has_exited_convo:
+                    new_partners = []
+                    if result.get("npcs_present"):
+                        for n in result["npcs_present"]:
+                            if isinstance(n, dict):
+                                if n.get("stage_role") == "active_partner":
+                                    n["stage_role"] = "room_bystander"
+                                if n.get("attention_ring") == "ring_1_partner":
+                                    n["attention_ring"] = "ring_3_bystander"
+                                if isinstance(n.get("micro_blocking"), dict) and n["micro_blocking"].get("proximity") == "conversational_distance":
+                                    n["micro_blocking"]["proximity"] = "across_room"
+                else:
+                    merged = list(retained_partners) if same_primary else []
+                    for sn in speaking_npcs:
+                        if not any(game_engine.is_dialogue_partner(sn, [m]) for m in merged):
+                            if game_engine.evaluate_scene_attention_transition(
+                                sn,
+                                retained_partners=retained_partners,
+                                actions=actions,
+                                narrative=full_nar,
+                                session=session,
+                                party=party,
+                                npcs_present=result["npcs_present"],
+                            ):
+                                merged.append(sn)
+                    if merged:
+                        new_partners = merged
+                    else:
+                        new_partners = retained_partners
 
         if result.get("npcs_present") and new_partners:
             pres_names = [game_engine._get_npc_name(n) for n in result["npcs_present"] if game_engine._get_npc_name(n)]
@@ -1535,6 +1605,7 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
         result["dialogue_partners"] = new_partners
         result["dialogue_partner"] = new_partners[0] if new_partners else None
+        result["has_exited_convo"] = has_exited_convo
 
         if session.get("id") and new_node_id:
             try:
@@ -1712,11 +1783,21 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
         if "focal_point" in stage_info:
             res["focal_point"] = stage_info["focal_point"]
             session["focal_point"] = stage_info["focal_point"]
-            if session.get("id"):
-                try:
-                    db.update_session(session["id"], focal_point=stage_info["focal_point"] or "")
-                except Exception:
-                    pass
+        if session.get("id"):
+            try:
+                db_updates = {}
+                if "focal_point" in stage_info:
+                    db_updates["focal_point"] = stage_info["focal_point"] or ""
+                if res.get("location"):
+                    db_updates["current_location"] = res["location"]
+                if res.get("current_node_id"):
+                    db_updates["current_node_id"] = res["current_node_id"]
+                if "previous_node_id" in session:
+                    db_updates["extra"] = {"previous_node_id": session["previous_node_id"]}
+                if db_updates:
+                    db.update_session(session["id"], **db_updates)
+            except Exception:
+                pass
         if stage_info.get("schedule_departed_npcs"):
             res["schedule_departed_npcs"] = stage_info["schedule_departed_npcs"]
 

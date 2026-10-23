@@ -1,4 +1,6 @@
 import re
+# [DEPRECATED in Phase 3]: Narrative regex scrapers retired under DETERMINISTIC_ECONOMY = True.
+# Maintained only as legacy fallback when DETERMINISTIC_ECONOMY is explicitly set to False.
 _GOLD_GAIN_RE = re.compile(r'\b(?:gain|find\w*|found|earn|award|reward|receiv|collect|giv|contain|grant|hand)\w*\s+(?:(?:you|them|us)\s+)?(?:with\s+)?(?:a total of\s+)?(\d+)\s+(?:gold|coins?|credits?|dollars?|bucks?)', re.I)
 _GOLD_LOSS_RE = re.compile(r'\b(?:paid?|los[st]|spent?|hand\w*\s+over|drop\w*|steal|stolen|cost\w*|part\w*\s+with)\s+(\d+)\s+(?:gold|coins?|credits?|dollars?|bucks?)', re.I)
 _DAMAGE_RE = re.compile(r'\b(?:take|takes?|suffer\w*|sustain\w*|inflict\w*|dealt?|receiv\w*|trigger\w*,?\s*deal\w*|deal\w*)\s+(\d+)\s+(?:points?\s+of\s+)?(?:damage|injury|harm|wound)', re.I)

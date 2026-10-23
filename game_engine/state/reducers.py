@@ -13,6 +13,9 @@ import logging
 log = logging.getLogger(__name__)
 logger = log
 import game_engine
+import db
+import config
+from config import DETERMINISTIC_INTIMACY, DETERMINISTIC_ECONOMY
 
 from game_engine.core import CONFESSION_KEYWORDS, NPC_ORAL_RECEIVE_KEYWORDS, NPC_ORAL_GIVE_KEYWORDS, NPC_MANUAL_RECEIVE_KEYWORDS, NPC_MANUAL_GIVE_KEYWORDS, NPC_ANAL_RECEIVE_KEYWORDS, NPC_ANAL_GIVE_KEYWORDS, ANAL_KEYWORDS, INTERCOURSE_KEYWORDS, KISS_KEYWORDS, DATE_KEYWORDS, ROMANCE_KEYWORDS
 def _evaluate_npc_milestones(
@@ -199,6 +202,241 @@ def _evaluate_npc_milestones(
             app_dict["anal_revealed"] = True
             app_dict["underwear_revealed"] = True
 
+    if DETERMINISTIC_INTIMACY:
+        # Strict Check Failure Gate (Decision Q4)
+        if not overall_check_success:
+            app_dict["anal_experience"] = current_anal
+            return None, current_intercourse, current_oral, current_manual, track, False, 0
+
+        # Action and Intent Resolution (Decision Q1)
+        action = actions[0] if (actions and isinstance(actions[0], dict)) else {}
+        r_intent = action.get("resolved_intent") if isinstance(action.get("resolved_intent"), dict) else {}
+
+        sub_intent = str(r_intent.get("sub_intent") or action.get("sub_intent") or "").lower().strip()
+        intent_name = str(r_intent.get("intent") or action.get("intent") or "").lower().strip()
+        is_player_perspective = bool(sub_intent)
+
+        # Fallback to boolean flags if structured intent is not stamped on action (backwards compatibility)
+        if not intent_name:
+            if is_player_confession_action:
+                intent_name = "romantic_confession"
+            elif is_player_romantic_action:
+                intent_name = "social_invite"
+            elif is_player_intimate_action or is_player_intercourse_action or is_player_oral_action or (actions and any(kw in str(action.get("label", "")).lower() for kw in ("kiss", "touch", "caress", "embrace", "undress"))):
+                intent_name = "intimate_act"
+
+        if not sub_intent:
+            a_lbl = str(action.get("label") or "").lower()
+            if milestone_ev and milestone_ev != "none":
+                if milestone_ev in ("oral_give", "oral_receive"):
+                    if has_rec_cues and not has_give_cues:
+                        milestone_ev = "oral_receive"
+                    elif has_give_cues and not has_rec_cues:
+                        milestone_ev = "oral_give"
+                elif milestone_ev in ("manual_give", "manual_receive"):
+                    if has_m_rec and not has_m_give:
+                        milestone_ev = "manual_receive"
+                    elif has_m_give and not has_m_rec:
+                        milestone_ev = "manual_give"
+                elif milestone_ev in ("anal_give", "anal_receive"):
+                    if has_a_rec and not has_a_give:
+                        milestone_ev = "anal_receive"
+                    elif has_a_give and not has_a_rec:
+                        milestone_ev = "anal_give"
+                sub_intent = milestone_ev
+                is_player_perspective = False
+            elif npc_low and npc_low in a_lbl:
+                if any(w in a_lbl for w in ("thrust", "intercourse", "penetrat", "fuck", "breed")) and (f"into {npc_low}" in a_lbl or f"inside {npc_low}" in a_lbl or f"with {npc_low}" in a_lbl):
+                    sub_intent = "intercourse"
+                elif "kiss" in a_lbl and ("kissing her" in a_lbl or "kissing him" in a_lbl or f"kiss {npc_low}" in a_lbl or f"kissing {npc_low}" in a_lbl or "embrace, kissing" in a_lbl):
+                    sub_intent = "kiss"
+                elif is_player_intercourse_action:
+                    sub_intent = "intercourse"
+                elif is_player_oral_action:
+                    if has_give_cues or any(kw in a_lbl for kw in ("inside her mouth", "in her mouth", "blowjob", "suck my", "on her face", "inside his mouth", "in his mouth")):
+                        sub_intent = "oral_give"
+                    else:
+                        sub_intent = "oral_receive"
+                elif has_a_rec:
+                    sub_intent = "anal_receive"
+                elif has_a_give:
+                    sub_intent = "anal_give"
+                elif has_m_rec:
+                    sub_intent = "manual_receive"
+                elif has_m_give:
+                    sub_intent = "manual_give"
+                is_player_perspective = False
+            elif has_a_rec:
+                sub_intent = "anal_receive"
+                is_player_perspective = False
+            elif has_a_give:
+                sub_intent = "anal_give"
+                is_player_perspective = False
+            elif has_m_rec:
+                sub_intent = "manual_receive"
+                is_player_perspective = False
+            elif has_m_give:
+                sub_intent = "manual_give"
+                is_player_perspective = False
+            elif is_player_intercourse_action:
+                sub_intent = "intercourse"
+                is_player_perspective = False
+            elif is_player_oral_action:
+                if has_give_cues or any(kw in a_lbl for kw in ("inside her mouth", "in her mouth", "blowjob", "suck my", "on her face", "inside his mouth", "in his mouth")):
+                    sub_intent = "oral_give"
+                else:
+                    sub_intent = "oral_receive"
+                is_player_perspective = False
+
+        # Target Isolation & Multi-Partner Disambiguation (Decision Q5 & A5)
+        raw_target = str(action.get("target_npc") or r_intent.get("target_npc") or confession_target_npc or affection_target_npc or "").strip()
+        if not raw_target and session:
+            sess_dps = get_session_dialogue_partners(session) if isinstance(session, dict) else []
+            a_lbl = str(action.get("label") or "").lower()
+            matching_dps = [dp for dp in sess_dps if dp and (dp.lower() in a_lbl or (len(dp.split()[0]) >= 3 and dp.split()[0].lower() in a_lbl))]
+            if matching_dps:
+                raw_target = ",".join(matching_dps)
+            elif sess_dps:
+                raw_target = sess_dps[0]
+
+        if not raw_target:
+            # No target specified or isolated call (session is None / single_update): default target is npc_name
+            is_target = True
+        else:
+            target_tokens = [t.strip().lower() for t in raw_target.split(",") if t.strip()]
+            is_target = False
+            for t in target_tokens:
+                if not t:
+                    continue
+                t_fst = t.split()[0]
+                if npc_low == t or (npc_tokens and npc_tokens & {t, t_fst}) or (len(t_fst) >= 3 and t_fst in npc_low):
+                    is_target = True
+                    break
+
+        if not is_target:
+            # Target Isolation: spectators are untouched
+            app_dict["anal_experience"] = current_anal
+            return None, current_intercourse, current_oral, current_manual, track, False, 0
+
+        _INTIMATE_SUB_INTENTS = {
+            "kiss", "foreplay", "manual_give", "manual_receive",
+            "oral_give", "oral_receive", "oral_mutual", "intercourse",
+            "anal_give", "anal_receive", "aftercare", "confession", "date"
+        }
+        _INTIMATE_INTENTS = {
+            "intimate_act", "romantic_confession", "affection_touch", "social_invite"
+        }
+        is_intimate_intent = (intent_name in _INTIMATE_INTENTS) or (sub_intent in _INTIMATE_SUB_INTENTS)
+        if not is_intimate_intent:
+            app_dict["anal_experience"] = current_anal
+            return None, current_intercourse, current_oral, current_manual, track, False, 0
+
+        # Redress action: no intimate escalation
+        if sub_intent == "redress" or intent_name == "redress":
+            app_dict["anal_experience"] = current_anal
+            return None, current_intercourse, current_oral, current_manual, track, False, 0
+
+        # Romantic Confession (Decision Q3, A7)
+        if intent_name == "romantic_confession" or sub_intent == "confession":
+            track = "romantic"
+            _reveal_intimacy("confession")
+            new_mem = format_milestone_memory("confession", first_char_name, custom_summary)
+            app_dict["anal_experience"] = current_anal
+            return new_mem, current_intercourse, current_oral, current_manual, track, True, delta_boost
+
+        # Date (Decision Q3)
+        if sub_intent == "date" or (intent_name == "social_invite" and "date" in str(action.get("label", "")).lower()):
+            track = "romantic"
+            _reveal_intimacy("date")
+            new_mem = format_milestone_memory("date", first_char_name, custom_summary)
+            app_dict["anal_experience"] = current_anal
+            return new_mem, current_intercourse, current_oral, current_manual, track, True, delta_boost
+
+        # Non-escalated Foreplay (Decision Q1)
+        if not sub_intent or sub_intent == "foreplay":
+            _reveal_intimacy("foreplay")
+            app_dict["anal_experience"] = current_anal
+            return None, current_intercourse, current_oral, current_manual, track, True, delta_boost
+
+        # Directional Translation (Decision Q2)
+        _DIR_MAP = {
+            "oral_give": "oral_receive",
+            "oral_receive": "oral_give",
+            "manual_give": "manual_receive",
+            "manual_receive": "manual_give",
+            "anal_give": "anal_receive",
+            "anal_receive": "anal_give",
+            "oral_mutual": "oral_mutual",
+            "intercourse": "intercourse",
+            "kiss": "kiss",
+        }
+        if is_player_perspective:
+            mapped_act = _DIR_MAP.get(sub_intent, sub_intent)
+        else:
+            mapped_act = sub_intent
+
+        if mapped_act == "kiss":
+            has_kissed = bool(app_dict.get("had_first_kiss"))
+            if not has_kissed and session and session.get("id"):
+                try:
+                    mems = db.get_npc_memories(session["id"], npc_name)
+                    if any("kiss" in str(m.get("summary", "")).lower() or "kiss" in str(m.get("event", "")).lower() for m in mems):
+                        has_kissed = True
+                except Exception:
+                    pass
+            if not has_kissed:
+                mapped_act = "first_kiss"
+                app_dict["had_first_kiss"] = True
+            _reveal_intimacy(mapped_act)
+            new_mem = format_milestone_memory(mapped_act, first_char_name, custom_summary)
+        elif mapped_act == "intercourse":
+            current_intercourse = "non_virgin"
+            app_dict["had_first_time_with_player"] = True
+            _reveal_intimacy("intercourse")
+            new_mem = format_milestone_memory("intercourse", first_char_name, custom_summary)
+        elif mapped_act == "oral_give":
+            current_oral = transition_oral_experience(current_oral, "oral_give")
+            _reveal_intimacy("oral_give")
+            new_mem = format_milestone_memory("oral_give", first_char_name, custom_summary)
+        elif mapped_act == "oral_receive":
+            current_oral = transition_oral_experience(current_oral, "oral_receive")
+            _reveal_intimacy("oral_receive")
+            new_mem = format_milestone_memory("oral_receive", first_char_name, custom_summary)
+        elif mapped_act == "manual_give":
+            current_manual = transition_manual_experience(current_manual, "manual_give")
+            _reveal_intimacy("manual_give")
+            new_mem = format_milestone_memory("manual_give", first_char_name, custom_summary)
+        elif mapped_act == "manual_receive":
+            current_manual = transition_manual_experience(current_manual, "manual_receive")
+            _reveal_intimacy("manual_receive")
+            new_mem = format_milestone_memory("manual_receive", first_char_name, custom_summary)
+        elif mapped_act == "anal_give":
+            current_anal = transition_anal_experience(current_anal, "anal_give")
+            _reveal_intimacy("anal_give")
+            new_mem = format_milestone_memory("anal_give", first_char_name, custom_summary)
+        elif mapped_act == "anal_receive":
+            current_anal = transition_anal_experience(current_anal, "anal_receive")
+            _reveal_intimacy("anal_receive")
+            new_mem = format_milestone_memory("anal_receive", first_char_name, custom_summary)
+        elif mapped_act == "oral_mutual":
+            current_oral = transition_oral_experience(current_oral, "oral_give")
+            _reveal_intimacy("oral_give")
+            new_mem = format_milestone_memory("oral_give", first_char_name, custom_summary)
+        else:
+            _reveal_intimacy(mapped_act)
+
+        # Premature finish exit penalty (Decision A6)
+        if session and isinstance(session.get("physical_state"), dict):
+            excit = session["physical_state"].get("excitement") or {}
+            if excit.get("premature_finish") and excit.get("partner_demanded"):
+                if action.get("ends_dialogue") or r_intent.get("ends_dialogue"):
+                    delta_boost = -5
+                    excit["premature_finish"] = False
+                    excit["partner_demanded"] = False
+
+        app_dict["anal_experience"] = current_anal
+        return new_mem, current_intercourse, current_oral, current_manual, track, is_intimate_act, delta_boost
+
     is_session_dp = bool(session and game_engine.is_dialogue_partner(npc_name, session=session))
     explicit_confession_target_match = bool(
         (confession_target_npc and (npc_low == confession_target_npc.lower().strip() or npc_fst == (confession_target_npc.lower().split() or [""])[0]))
@@ -376,6 +614,15 @@ def _reduce_quests_and_waypoints(session_id: int, session: dict, party_uids: lis
       # Process quest_updates array from OUTCOME_SCHEMA (preserving any pre-turn deterministic rewards/sub-quests)
     quest_reward_notices = list(outcome.get("_quest_reward_notices") or [])
     completed_sub_quests = list(outcome.get("_completed_sub_quests") or [])
+    # Phase 5: Reconcile pre-turn quest & climax notices
+    pre_q = session.get("_pre_turn_quest_res") if isinstance(session, dict) else None
+    if pre_q and isinstance(pre_q, dict):
+        for rn in pre_q.get("reward_notices", []):
+            if rn not in quest_reward_notices:
+                quest_reward_notices.append(rn)
+        for csq in pre_q.get("completed_sub_quests", []):
+            if csq not in completed_sub_quests:
+                completed_sub_quests.append(csq)
     newly_discovered_clues = []
     already_claimed_qids = {
         str(rn.get("quest_id"))
@@ -454,10 +701,26 @@ def _reduce_quests_and_waypoints(session_id: int, session: dict, party_uids: lis
                     if added_id is not None:
                         items_gained_by_user.setdefault(uid, []).append(ritem)
                     else:
-                        items_gained_by_user.setdefault(uid, []).append(f"{ritem} (Lost: Inventory Full!)")
+                        if getattr(config, "DETERMINISTIC_ECONOMY", True):
+                            p_state = (db.get_session_physical_state(session_id) if session_id else None) or (
+                                session.get("physical_state") if isinstance(session, dict) else {}
+                            ) or {}
+                            dropped_items = p_state.setdefault("dropped_items", [])
+                            if ritem not in dropped_items:
+                                dropped_items.append(ritem)
+                            if isinstance(session, dict):
+                                session["physical_state"] = p_state
+                            if session_id:
+                                try:
+                                    db.update_session_physical_state(session_id, p_state)
+                                except Exception:
+                                    pass
+                            items_gained_by_user.setdefault(uid, []).append(f"{ritem} (Lost: Inventory Full! Dropped to ground)")
+                        else:
+                            items_gained_by_user.setdefault(uid, []).append(f"{ritem} (Lost: Inventory Full!)")
             rn["_item_granted_in_db"] = True
 
-def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, outcome: dict, mp_already_spent: dict, scen_key: str, is_combat: bool, items_gained_by_user: dict):
+def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, outcome: dict, mp_already_spent: dict, scen_key: str, is_combat: bool, items_gained_by_user: dict, actions: list | None = None):
     """Extracted Phase 2B Reducer for Character HP/MP, Status Effects, and Loot."""
     import db, re
     from mechanics.system.phone import scenario_has_smartphone
@@ -497,15 +760,96 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
           temp_hp_delta = 0
           
       import scenario_data
-      if not is_combat and scenario_data.is_non_combat_scenario(scen_key):
-          if hp_delta < 0:
-              hp_delta = 0
-          if temp_hp_delta < 0:
-              temp_hp_delta = 0
+      if getattr(config, "DETERMINISTIC_ECONOMY", True):
+          if not is_combat:
+              pre_vit = outcome.get("_pre_turn_vitals") or {}
+              auth_hazard_dmg = int(pre_vit.get("hp_delta", 0) or 0)
+              if auth_hazard_dmg == 0 and actions:
+                  for a in actions:
+                      if isinstance(a, dict):
+                          c = a.get("check")
+                          succ = (c.succeeded if hasattr(c, "succeeded") else (c.get("succeeded") if isinstance(c, dict) else True)) if c is not None else True
+                          st = str(a.get("stat") or "").upper()
+                          if not succ and st in ("STR", "AGI", "END"):
+                              tier_str = str(getattr(c, "tier", None) or (c.get("tier") if isinstance(c, dict) else "")).lower()
+                              pct = 0.10 if "crit" in tier_str else 0.05
+                              auth_hazard_dmg -= max(1, min(25, int(round(char.get("max_hp", 100) * pct))))
+              if hp_delta < 0:
+                  if auth_hazard_dmg < 0:
+                      hp_delta = auth_hazard_dmg
+                  else:
+                      hp_delta = 0
+
+          # Currency Closed Loop
+          if gold_delta < 0:
+              auth_spend = 0
+              if actions:
+                  for a in actions:
+                      if isinstance(a, dict):
+                          raw_sp = int(a.get("gold_spent") or 0)
+                          if raw_sp > 0:
+                              if a.get("_gold_already_deducted"):
+                                  auth_spend = 0
+                              else:
+                                  auth_spend += raw_sp
+              gold_delta = -auth_spend if auth_spend > 0 else 0
+          elif gold_delta > 0:
+              pre_vit = outcome.get("_pre_turn_vitals") or {}
+              auth_gain = int(pre_vit.get("gold_delta", 0) or 0)
+              if auth_gain <= 0:
+                  auth_gain = int(outcome.get("_combat_gold", 0) or outcome.get("_authorized_gold_gain", 0) or 0)
+              if auth_gain <= 0 and actions:
+                  for a in actions:
+                      if isinstance(a, dict) and a.get("sub_intent") == "pickpocket":
+                          c = a.get("check")
+                          succ = (c.succeeded if hasattr(c, "succeeded") else (c.get("succeeded") if isinstance(c, dict) else True)) if c is not None else True
+                          if succ:
+                              auth_gain = 25
+              gold_delta = max(0, auth_gain)
+
+          # Non-combat Temp HP expiration and social damage clamping
+          if not is_combat:
+              if char.get("temp_hp", 0) > 0 and temp_hp_delta <= 0:
+                  temp_hp_delta = -char.get("temp_hp", 0)
+              elif temp_hp_delta < 0:
+                  temp_hp_delta = 0
+      else:
+          if not is_combat and scenario_data.is_non_combat_scenario(scen_key):
+              if hp_delta < 0:
+                  hp_delta = 0
+              if temp_hp_delta < 0:
+                  temp_hp_delta = 0
 
       db.apply_hp_mp_delta(user_id, hp_delta, mp_delta, gold_delta, temp_hp_delta)
   
       gained = co.get("items_gained", []) or []
+      if getattr(config, "DETERMINISTIC_ECONOMY", True):
+          is_game_turn = bool(session_id and session)
+          if is_game_turn:
+              auth_loot_names = set()
+              for itm in (outcome.get("_authorized_loot", []) or []):
+                  auth_loot_names.add(str(itm).strip().lower())
+              for itm in (outcome.get("_pre_turn_loot", []) or []):
+                  auth_loot_names.add(str(itm).strip().lower())
+              for itm in (outcome.get("_combat_loot", []) or []):
+                  auth_loot_names.add(str(itm).strip().lower())
+              pre_vit = outcome.get("_pre_turn_vitals") or {}
+              for itm in (pre_vit.get("loot_items_rolled", []) or []):
+                  auth_loot_names.add(str(itm).strip().lower())
+              for rn in (outcome.get("_quest_reward_notices", []) or []):
+                  if isinstance(rn, dict) and rn.get("item"):
+                      auth_loot_names.add(str(rn["item"]).strip().lower())
+
+              filtered_gained = []
+              for itm in gained:
+                  itm_low = str(itm).strip().lower()
+                  is_media = any(k in itm_low for k in ("photo", "selfie", "video", "snapshot", "recording", "clip"))
+                  if is_media and scenario_has_smartphone(scen_key):
+                      filtered_gained.append(itm)
+                  elif any(al in itm_low or itm_low in al for al in auth_loot_names):
+                      filtered_gained.append(itm)
+              gained = filtered_gained
+
       for item_name in gained:
           is_media = any(k in item_name.lower() for k in ("photo", "selfie", "video", "snapshot", "recording", "clip"))
           if is_media and scenario_has_smartphone(scen_key):
@@ -528,8 +872,49 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
           if added_id is not None:
               items_gained_by_user.setdefault(user_id, []).append(gain_lbl)
           else:
-              items_gained_by_user.setdefault(user_id, []).append(f"{gain_lbl} (Lost: Inventory Full!)")
-      for item_name in co.get("items_lost", []) or []:
+              if getattr(config, "DETERMINISTIC_ECONOMY", True):
+                  p_state = (db.get_session_physical_state(session_id) if session_id else None) or (
+                      session.get("physical_state") if isinstance(session, dict) else {}
+                  ) or {}
+                  dropped_items = p_state.setdefault("dropped_items", [])
+                  if gain_lbl not in dropped_items:
+                      dropped_items.append(gain_lbl)
+                  if isinstance(session, dict):
+                      session["physical_state"] = p_state
+                  if session_id:
+                      try:
+                          db.update_session_physical_state(session_id, p_state)
+                      except Exception:
+                          pass
+                  items_gained_by_user.setdefault(user_id, []).append(f"{gain_lbl} (Lost: Inventory Full! Dropped to ground)")
+              else:
+                  items_gained_by_user.setdefault(user_id, []).append(f"{gain_lbl} (Lost: Inventory Full!)")
+
+      lost_items = co.get("items_lost", []) or []
+      if getattr(config, "DETERMINISTIC_ECONOMY", True):
+          auth_lost = set()
+          pre_vit = outcome.get("_pre_turn_vitals") or {}
+          for itm in (pre_vit.get("consumed_items", []) or outcome.get("_pre_turn_consumed", []) or []):
+              if isinstance(itm, dict):
+                  auth_lost.add(str(itm.get("item_name", "")).strip().lower())
+              else:
+                  auth_lost.add(str(itm).strip().lower())
+          for itm in (pre_vit.get("gifted_items", []) or outcome.get("_pre_turn_gifted", []) or []):
+              if isinstance(itm, dict):
+                  auth_lost.add(str(itm.get("item_name", "")).strip().lower())
+              else:
+                  auth_lost.add(str(itm).strip().lower())
+          for itm in (outcome.get("_authorized_items_lost", []) or []):
+              auth_lost.add(str(itm).strip().lower())
+
+          filtered_lost = []
+          for itm in lost_items:
+              itm_low = str(itm).strip().lower()
+              if any(al in itm_low or itm_low in al for al in auth_lost):
+                  filtered_lost.append(itm)
+          lost_items = filtered_lost
+
+      for item_name in lost_items:
           db.remove_item_by_name(user_id, item_name)
   
       status_raw = co.get("status_effects", []) or []
@@ -2508,10 +2893,23 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
             props_dict[target_k] = "Dropped on the floor"
         updated_phys["dropped_items"] = []
 
-    # 10. Handle explicit Redress action
+    # 10. Handle explicit Redress action (Decision A2 & EC1)
     is_redressing = False
     for a in actions:
         if isinstance(a, dict):
+            r_intent = a.get("resolved_intent") if isinstance(a.get("resolved_intent"), dict) else {}
+            if (
+                a.get("sub_intent") == "redress"
+                or r_intent.get("sub_intent") == "redress"
+                or a.get("intent") == "redress"
+                or r_intent.get("intent") == "redress"
+                or a.get("ends_dialogue")
+                or r_intent.get("ends_dialogue")
+                or a.get("intent") in ("movement", "travel")
+                or r_intent.get("intent") in ("movement", "travel")
+            ):
+                is_redressing = True
+                break
             act_text = f"{a.get('label', '')} {a.get('action', '')} {a.get('text', '')}".lower()
             if any(w in act_text for w in ("redress", "get dressed", "put on clothes", "don clothes")):
                 is_redressing = True
@@ -2519,6 +2917,9 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
     if is_redressing:
         from mechanics.social.physical_state import restore_equipped_outfit
         updated_phys = restore_equipped_outfit(updated_phys, party, scen_key=scen_key, session_id=session_id)
+        updated_phys["intimate_contact"] = "none"
+        if isinstance(updated_phys.get("excitement"), dict):
+            updated_phys["excitement"]["active"] = False
 
     # 11. Handle putting down carried burden or breaking free from physical restraint
     lead_char = party[0][0] if party and isinstance(party[0], (tuple, list)) else (party[0] if party and isinstance(party[0], dict) else None)

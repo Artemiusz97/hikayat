@@ -773,15 +773,38 @@ def _scene_context_text(session_id: int, current_location: str,
         try:
             from mechanics.social.school_roster import ensure_school_directory_exists, get_facility_ambient_characters
             ensure_school_directory_exists(session)
-            ambient_chars = get_facility_ambient_characters(session_id, current_location, limit=2)
+            active_npc_names = set()
+            if current_npcs:
+                for npc in current_npcs:
+                    if isinstance(npc, dict) and npc.get("name"):
+                        active_npc_names.add(str(npc["name"]).lower().strip())
+            if session and isinstance(session.get("party"), list):
+                for pm in session["party"]:
+                    if isinstance(pm, dict) and pm.get("name"):
+                        active_npc_names.add(str(pm["name"]).lower().strip())
+
+            current_day = int(session.get("current_day") or 1) if session else 1
+            current_minute = int(session.get("current_minute") or 480) if session else 480
+            ambient_chars = get_facility_ambient_characters(
+                session_id,
+                current_location,
+                limit=2,
+                current_day=current_day,
+                current_minute=current_minute,
+                active_npc_names=active_npc_names,
+            )
             if ambient_chars:
                 dir_entries = []
                 for ac in ambient_chars:
+                    name_str = ac.get("name", "Student")
+                    grade_str = ac.get("grade", "Student")
+                    role_str = ac.get("role", "Student")
                     sib_str = f" (Sibling of {ac['sibling_name']})" if ac.get("sibling_name") else ""
                     club_str = f" [{ac['club']}]" if ac.get("club") and ac["club"] != "None" else ""
                     gen_str = f", {ac['gender'].title()}" if ac.get("gender") else ""
                     race_str = f", {format_race_display(ac['race'])}" if ac.get("race") else ""
-                    dir_entries.append(f"{ac['name']} ({ac['grade']}{gen_str}{race_str} — {ac['role']}{club_str}{sib_str})")
+                    act_str = f" — Activity: {ac['activity']}" if ac.get("activity") else ""
+                    dir_entries.append(f"{name_str} ({grade_str}{gen_str}{race_str} — {role_str}{club_str}{sib_str}{act_str})")
                 lines.append("Campus Directory & Ambient Residents (Stationed/frequenting this facility): " + "; ".join(dir_entries))
                 lines.append("FACILITY POPULATION DIRECTIVE: Feel free to depict these canonical facility residents in ambient descriptions or dialogue choices if appropriate.")
         except Exception:

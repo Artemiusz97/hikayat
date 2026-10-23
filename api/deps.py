@@ -19,25 +19,37 @@ class ConnectionManager:
 
     async def connect(self, session_id: int, user_id: int, websocket: WebSocket):
         await websocket.accept()
-        if session_id not in self.active_connections:
-            self.active_connections[session_id] = []
-        self.active_connections[session_id].append({"ws": websocket, "user_id": user_id})
-        logger.info(f"User {user_id} connected to WebSocket session {session_id}")
-        await self.broadcast_presence(session_id)
+        try:
+            clean_sid = int(session_id)
+        except (ValueError, TypeError):
+            clean_sid = session_id
+        if clean_sid not in self.active_connections:
+            self.active_connections[clean_sid] = []
+        self.active_connections[clean_sid].append({"ws": websocket, "user_id": user_id})
+        logger.info(f"User {user_id} connected to WebSocket session {clean_sid}")
+        await self.broadcast_presence(clean_sid)
 
     def disconnect(self, session_id: int, websocket: WebSocket):
-        if session_id in self.active_connections:
-            self.active_connections[session_id] = [
-                c for c in self.active_connections[session_id] if c["ws"] != websocket
+        try:
+            clean_sid = int(session_id)
+        except (ValueError, TypeError):
+            clean_sid = session_id
+        if clean_sid in self.active_connections:
+            self.active_connections[clean_sid] = [
+                c for c in self.active_connections[clean_sid] if c["ws"] != websocket
             ]
-            if not self.active_connections[session_id]:
-                del self.active_connections[session_id]
+            if not self.active_connections[clean_sid]:
+                del self.active_connections[clean_sid]
 
     async def broadcast_presence(self, session_id: int):
-        if session_id not in self.active_connections:
+        try:
+            clean_sid = int(session_id)
+        except (ValueError, TypeError):
+            clean_sid = session_id
+        if clean_sid not in self.active_connections:
             return
-        members = await adb(db.get_session_members, session_id)
-        connected_uids = [c["user_id"] for c in self.active_connections[session_id]]
+        members = await adb(db.get_session_members, clean_sid)
+        connected_uids = [c["user_id"] for c in self.active_connections[clean_sid]]
 
         member_profiles = []
         for uid in members:
@@ -51,15 +63,24 @@ class ConnectionManager:
 
         payload = {
             "type": "PRESENCE_UPDATE",
-            "session_id": session_id,
+            "session_id": clean_sid,
             "members": member_profiles
         }
-        await self.broadcast(session_id, payload)
+        await self.broadcast(clean_sid, payload)
 
     async def broadcast(self, session_id: int, message: dict):
-        if session_id not in self.active_connections:
+        try:
+            clean_sid = int(session_id)
+        except (ValueError, TypeError):
+            clean_sid = session_id
+        conns = self.active_connections.get(clean_sid, [])
+        if not conns and isinstance(clean_sid, int):
+            conns = self.active_connections.get(str(clean_sid), [])
+        elif not conns and isinstance(clean_sid, str) and clean_sid.isdigit():
+            conns = self.active_connections.get(int(clean_sid), [])
+        if not conns:
             return
-        for conn in list(self.active_connections[session_id]):
+        for conn in list(conns):
             try:
                 await conn["ws"].send_json(message)
             except Exception as e:
@@ -293,6 +314,14 @@ class ActionRequest(BaseModel):
     action: Optional[Dict[str, Any]] = None
     direct_choice: Optional[Dict[str, Any]] = None
     combat_target: Optional[str] = None
+    is_stealth: Optional[bool] = False
+    stance: Optional[str] = None
+
+
+class ToggleStealthRequest(BaseModel):
+    session_id: int
+    user_id: int
+    active: Optional[bool] = None
 
 
 class EndAdventureRequest(BaseModel):

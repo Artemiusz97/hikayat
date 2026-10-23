@@ -631,7 +631,7 @@ def try_complete_on_skill_check(
     return notice
 
 
-def get_story_quest_climax_location(session_id: int) -> tuple[Optional[dict], Optional[str]]:
+def get_story_quest_climax_location(session_id: int, allow_premature: bool = False) -> tuple[Optional[dict], Optional[str]]:
     """
     Returns (story_quest_dict, climax_location_str) if the active story quest has
     completed all sub-objectives and is ready for the Climax Encounter.
@@ -643,8 +643,9 @@ def get_story_quest_climax_location(session_id: int) -> tuple[Optional[dict], Op
         return None, None
 
     sub_objs = story_quest.get("sub_objectives", []) or []
-    if not sub_objs or not all(isinstance(so, dict) and so.get("completed") for so in sub_objs):
-        return None, None
+    if not allow_premature:
+        if not sub_objs or not all(isinstance(so, dict) and so.get("completed") for so in sub_objs):
+            return None, None
 
     # All sub-objectives are done! Resolve the Climax Encounter location
     qid = story_quest.get("quest_id", "")
@@ -657,6 +658,10 @@ def get_story_quest_climax_location(session_id: int) -> tuple[Optional[dict], Op
         ).fetchone()
         if row and row["target_location"]:
             return story_quest, row["target_location"]
+
+        # Phase 5 A11: For premature confrontation, only an explicit showdown venue (sub_obj_id IS NULL) qualifies
+        if allow_premature and not (sub_objs and all(isinstance(so, dict) and so.get("completed") for so in sub_objs)):
+            return None, None
 
         # 2. Check the target location of the highest sub_obj_id waypoint
         row_sub = conn.execute(

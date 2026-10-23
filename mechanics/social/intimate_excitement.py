@@ -1363,7 +1363,9 @@ def compute_excitement_step(
     partner_contact: Optional[Dict[str, Any]] = None,
     session: Optional[Dict[str, Any]] = None,
     narrative_str: str = "",
-    partner_contacts: Optional[List[Dict[str, Any]]] = None
+    partner_contacts: Optional[List[Dict[str, Any]]] = None,
+    sub_intent: Optional[str] = None,
+    target_npc: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Executes a turn step on the intimate excitement meters.
@@ -1548,37 +1550,78 @@ def compute_excitement_step(
     any_act_genital_or_cont = any(act_has_genital_or_cont.values())
 
     partner_classifications: Dict[str, Dict[str, Any]] = {}
-    for n_k, n_d, pc in partner_actor_tuples:
-        is_targeted = named_in_act[n_k] if any_named_in_act else True
-        is_in_nar = is_name_in_turn(n_k, turn_low)
-        other_names = [t[0] for t in partner_actor_tuples if t[0] != n_k]
-        restrict_to_scoped_act = (
-            len(partner_actor_tuples) > 1
-            and any_act_genital_or_cont
-            and not act_has_genital_or_cont.get(n_k, False)
-        )
-        scoped_nar = (
-            ""
-            if restrict_to_scoped_act
-            else (
-                scope_text_to_partner(narrative_str, n_k, other_names)
-                if (narrative_str and is_in_nar and is_targeted and other_names)
-                else (narrative_str if (is_in_nar and is_targeted) else "")
-            )
-        )
-        p_cl = classify_intimate_act(
-            action_str=scoped_acts[n_k],
-            intimate_contact_str="" if restrict_to_scoped_act else (curr_ic if is_targeted else ""),
-            player_name=player_name,
-            partner_name=n_k,
-            partner_contact=pc,
-            narrative_str=scoped_nar
-        )
-        if any_named_in_act and not is_targeted:
-            p_cl["partner_stimulated"] = False
-            p_cl["player_stimulated"] = False
+    from config import DETERMINISTIC_INTIMACY
+    if DETERMINISTIC_INTIMACY and sub_intent:
+        _ACT_MAP = {
+            "intercourse": "penetrative",
+            "oral_give": "oral_give",
+            "oral_receive": "oral_receive",
+            "oral_mutual": "oral_mutual",
+            "manual_give": "manual_give",
+            "manual_receive": "manual_receive",
+            "anal_give": "anal_give",
+            "anal_receive": "anal_receive",
+            "kiss": "foreplay_nongenital",
+            "foreplay": "foreplay_nongenital",
+            "aftercare": "none",
+            "redress": "none",
+        }
+        mapped_type = _ACT_MAP.get(sub_intent, "foreplay_nongenital")
+        target_tokens = [t.strip().lower() for t in (target_npc or "").split(",") if t.strip()]
 
-        partner_classifications[n_k] = p_cl
+        for n_k, n_d, pc in partner_actor_tuples:
+            is_targeted = any(t in n_k.lower() or n_k.lower() in t for t in target_tokens) if target_tokens else True
+            if is_targeted:
+                p_cl = {
+                    "act_type": mapped_type,
+                    "player_stimulated": sub_intent in ("intercourse", "oral_receive", "oral_mutual", "manual_receive", "anal_receive", "kiss", "foreplay"),
+                    "partner_stimulated": sub_intent in ("intercourse", "oral_give", "oral_mutual", "manual_give", "anal_give", "kiss", "foreplay"),
+                    "sensitive_spot_matched": False,
+                    "matched_spot": None,
+                    "turn_off_triggered": False,
+                }
+            else:
+                p_cl = {
+                    "act_type": "none",
+                    "player_stimulated": False,
+                    "partner_stimulated": False,
+                    "sensitive_spot_matched": False,
+                    "matched_spot": None,
+                    "turn_off_triggered": False,
+                }
+            partner_classifications[n_k] = p_cl
+    else:
+        for n_k, n_d, pc in partner_actor_tuples:
+            is_targeted = named_in_act[n_k] if any_named_in_act else True
+            is_in_nar = is_name_in_turn(n_k, turn_low)
+            other_names = [t[0] for t in partner_actor_tuples if t[0] != n_k]
+            restrict_to_scoped_act = (
+                len(partner_actor_tuples) > 1
+                and any_act_genital_or_cont
+                and not act_has_genital_or_cont.get(n_k, False)
+            )
+            scoped_nar = (
+                ""
+                if restrict_to_scoped_act
+                else (
+                    scope_text_to_partner(narrative_str, n_k, other_names)
+                    if (narrative_str and is_in_nar and is_targeted and other_names)
+                    else (narrative_str if (is_in_nar and is_targeted) else "")
+                )
+            )
+            p_cl = classify_intimate_act(
+                action_str=scoped_acts[n_k],
+                intimate_contact_str="" if restrict_to_scoped_act else (curr_ic if is_targeted else ""),
+                player_name=player_name,
+                partner_name=n_k,
+                partner_contact=pc,
+                narrative_str=scoped_nar
+            )
+            if any_named_in_act and not is_targeted:
+                p_cl["partner_stimulated"] = False
+                p_cl["player_stimulated"] = False
+
+            partner_classifications[n_k] = p_cl
 
     primary_class = partner_classifications[partner_name]
 
@@ -2593,14 +2636,17 @@ def build_intimate_choice_blueprints(
         lbl_low = lbl.lower()
         if c.get("stat") in ("NONE", "FREE") or lbl == ex_lbl:
             c["intent"] = "dialogue_exit"
+            c["ends_dialogue"] = True
             c["sub_intent"] = "aftercare" if "aftercare" in lbl_low else ""
             c["target_npc"] = default_partner
         elif "aftercare" in lbl_low:
             c["intent"] = "affection_touch"
+            c["ends_dialogue"] = False
             c["sub_intent"] = "aftercare"
             c["target_npc"] = default_partner
         else:
             c["intent"] = "intimate_act"
+            c["ends_dialogue"] = False
             if any(w in lbl_low for w in ("anal", "pegging", "rear", "anus")):
                 c["sub_intent"] = "anal_receive" if any(w in lbl_low for w in ("pegs", "takes you", "into your rear")) else "anal_give"
             elif any(w in lbl_low for w in ("thrust", "drive deeper", "penetrat", "intercourse", "ride his", "ride her", "deeper angle")):
@@ -2622,7 +2668,15 @@ def build_intimate_choice_blueprints(
             else:
                 c["sub_intent"] = act_nm if act_nm in ("kiss", "foreplay", "manual_give", "manual_receive", "oral_give", "oral_receive", "oral_mutual", "intercourse", "anal_give", "anal_receive", "aftercare") else "foreplay"
 
-            c["target_npc"] = default_partner
+            # Check if an individual partner is specifically addressed in label (Decision A5)
+            matched_p = None
+            if partner_actors:
+                for pa in partner_actors:
+                    pa_name = str(pa.get("name") or "").strip()
+                    if pa_name and (pa_name.lower() in lbl_low or (pa_name.split() and len(pa_name.split()[0]) >= 3 and pa_name.split()[0].lower() in lbl_low)):
+                        matched_p = pa_name
+                        break
+            c["target_npc"] = matched_p or default_partner
         return c
 
     # ─────────────────────────────────────────────────────────────────────────────
@@ -3318,15 +3372,45 @@ def resolve_pre_turn_intimacy_and_clothing(
 
     primary_contact = partner_contacts[0] if partner_contacts else {"name": partner_name}
 
-    act_class = classify_intimate_act(
-        action_str=action_str,
-        intimate_contact_str=str(physical_state.get("intimate_contact") or ""),
-        player_name=player_name,
-        partner_name=partner_name,
-        partner_contact=primary_contact,
-    )
+    from config import DETERMINISTIC_INTIMACY
 
-    act_type = act_class.get("act_type", "none")
+    first_act_dict = actions[0] if (actions and isinstance(actions[0], dict)) else {}
+    r_intent = first_act_dict.get("resolved_intent") if isinstance(first_act_dict.get("resolved_intent"), dict) else {}
+    sub_intent = str(r_intent.get("sub_intent") or first_act_dict.get("sub_intent") or "").lower().strip()
+    target_npc = str(r_intent.get("target_npc") or first_act_dict.get("target_npc") or "").strip()
+
+    if DETERMINISTIC_INTIMACY and sub_intent:
+        _ACT_MAP = {
+            "intercourse": "penetrative",
+            "oral_give": "oral_give",
+            "oral_receive": "oral_receive",
+            "oral_mutual": "oral_mutual",
+            "manual_give": "manual_give",
+            "manual_receive": "manual_receive",
+            "anal_give": "anal_give",
+            "anal_receive": "anal_receive",
+            "kiss": "foreplay_nongenital",
+            "foreplay": "foreplay_nongenital",
+            "aftercare": "none",
+            "redress": "none",
+        }
+        act_type = _ACT_MAP.get(sub_intent, "foreplay_nongenital")
+        act_class = {
+            "act_type": act_type,
+            "player_stimulated": sub_intent in ("intercourse", "oral_receive", "oral_mutual", "manual_receive", "anal_receive", "kiss", "foreplay"),
+            "partner_stimulated": sub_intent in ("intercourse", "oral_give", "oral_mutual", "manual_give", "anal_give", "kiss", "foreplay"),
+            "target_partner": target_npc or partner_name,
+        }
+    else:
+        act_class = classify_intimate_act(
+            action_str=action_str,
+            intimate_contact_str=str(physical_state.get("intimate_contact") or ""),
+            player_name=player_name,
+            partner_name=partner_name,
+            partner_contact=primary_contact,
+        )
+        act_type = act_class.get("act_type", "none")
+
     is_genital_or_escalated = act_type in (
         "oral_give", "oral_receive", "oral_mutual", "manual_give",
         "manual_receive", "penetrative", "anal_give", "anal_receive"
@@ -3335,7 +3419,12 @@ def resolve_pre_turn_intimacy_and_clothing(
     # Displace clothing for participating actors when check succeeds
     if is_genital_or_escalated and is_check_success:
         actors_dict = physical_state.setdefault("actors", {})
-        participating_names = [player_name] + [c.get("name") for c in partner_contacts if c.get("name")]
+        if DETERMINISTIC_INTIMACY and target_npc:
+            target_list = [t.strip() for t in target_npc.split(",") if t.strip()]
+            participating_names = [player_name] + target_list
+        else:
+            participating_names = [player_name, partner_name]
+
         for p_n in participating_names:
             if not p_n:
                 continue
@@ -3364,6 +3453,17 @@ def resolve_pre_turn_intimacy_and_clothing(
                         continue
                     cloth[slot] = "Disheveled"
 
+    if DETERMINISTIC_INTIMACY:
+        if first_act_dict.get("ends_dialogue") or r_intent.get("ends_dialogue") or sub_intent in ("aftercare", "redress"):
+            physical_state["intimate_contact"] = "none"
+            if isinstance(physical_state.get("excitement"), dict):
+                physical_state["excitement"]["active"] = False
+        elif is_check_success and is_genital_or_escalated:
+            t_str = target_npc or partner_name
+            physical_state["intimate_contact"] = f"{sub_intent} with {t_str}"
+        elif not is_check_success:
+            physical_state["intimate_contact"] = "none"
+
     is_erotic = is_erotic_intimate_contact(physical_state.get("intimate_contact", "")) or (act_type not in ("none", "") and is_check_success)
     excitement_res = None
     directives: List[str] = []
@@ -3377,6 +3477,8 @@ def resolve_pre_turn_intimacy_and_clothing(
             session=session,
             narrative_str="",
             partner_contacts=partner_contacts,
+            sub_intent=sub_intent if DETERMINISTIC_INTIMACY else None,
+            target_npc=target_npc if DETERMINISTIC_INTIMACY else None,
         )
         session["_pre_turn_excitement_res"] = excitement_res
 

@@ -348,6 +348,11 @@ def calculate_tactical_damage(
                 convert_pct = float(sm_v)
                 break
 
+    is_ambush = False
+    is_backstab = False
+    is_versatile_2h = False
+    is_dual_wield = False
+
     if is_enemy_attacker:
         target_hp = max(30, defender_max_hp)
         offensive_stat = matk if is_magical else atk
@@ -390,12 +395,14 @@ def calculate_tactical_damage(
         if is_dual_wield:
             base_dmg *= 1.15
 
-        # Tag Synergy: Stealth / Silent Step (Ambush Strike +20% on Turn 1)
+        # Stealth Ambush & Flanking Backstab (+50% damage & surprise round)
         has_stealth = any(t in attacker_tags for t in ("stealth", "silent_step"))
         turn_one = attacker_attrs.get("combat_turn", 1) <= 1
-        is_ambush = bool(attacker_attrs.get("is_ambush") or (has_stealth and turn_one))
-        if is_ambush:
-            base_dmg *= 1.20
+        is_combat_vanished = bool(attacker_attrs.get("combat_vanished") or stance == "stealth")
+        is_ambush = bool(attacker_attrs.get("is_ambush") or (has_stealth and turn_one) or is_combat_vanished)
+        is_backstab = bool(is_combat_vanished or attacker_attrs.get("is_backstab"))
+        if is_ambush or is_backstab:
+            base_dmg *= 1.50
 
     effective_matchup = elem_mult if is_magical else phys_mult
 
@@ -411,7 +418,8 @@ def calculate_tactical_damage(
     final_dmg = base_dmg * tier_mult
 
     is_blocked = False
-    if block_chance > 0 and tier != "crit_success":
+    can_block = not ((is_ambush or is_backstab) and not is_enemy_attacker)
+    if block_chance > 0 and tier != "crit_success" and can_block:
         if random.randint(1, 100) <= block_chance:
             is_blocked = True
             final_dmg *= 0.40  # Shield absorbs 60% of damage
@@ -436,6 +444,8 @@ def calculate_tactical_damage(
     raw_ap = float(weapon_meta.get("armor_penetration", weapon_meta.get("armor_piercing", 0.0)))
     if raw_ap <= 0:
         raw_ap = float(weapon_meta.get("stat_modifiers", {}).get("armor_penetration", 0.0))
+    if (is_ambush or is_backstab) and not is_enemy_attacker:
+        raw_ap = max(0.50, raw_ap)
     final_ap = min(0.75, max(0.0, raw_ap))
 
     return {
@@ -447,7 +457,8 @@ def calculate_tactical_damage(
         "glancing_strike": is_glancing,
         "ap_ratio": final_ap,
         "brawler_synergy": brawler_synergy_active,
-        "ambush_strike": is_ambush if not is_enemy_attacker else False,
+        "ambush_strike": (is_ambush and not is_backstab) if not is_enemy_attacker else False,
+        "flanking_backstab": is_backstab if not is_enemy_attacker else False,
         "versatile_2h": is_versatile_2h if not is_enemy_attacker else False,
         "dual_wield": (stance == "dual_wield") if not is_enemy_attacker else False,
         "stagger_inflicted": stagger_inflicted,

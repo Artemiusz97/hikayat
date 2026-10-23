@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional, Any, Dict, List
 import db
 import asyncio
 import json
@@ -120,6 +122,16 @@ def get_session(session_id: int):
                     d.update(extra_dict)
             except Exception:
                 pass
+        if "stealth_state" not in d or not isinstance(d["stealth_state"], dict):
+            d["stealth_state"] = {
+                "is_hidden": False,
+                "alert_level": "unaware",
+                "detection_meter": 0,
+                "noise_level": 0,
+                "last_alert_cause": None,
+                "unpatrolled_turns": 0,
+                "combat_vanished": False
+            }
         return d
 
 
@@ -227,8 +239,13 @@ def update_session(session_id: int, **kwargs):
     if not kwargs:
         return
 
-    # Handle 'extra' dictionary if supplied (e.g. pending_promotion)
+    # Handle 'extra' dictionary and stealth_state if supplied
+    st_val = kwargs.pop("stealth_state", None)
     extra_update = kwargs.pop("extra", None)
+    if st_val is not None:
+        if extra_update is None or not isinstance(extra_update, dict):
+            extra_update = {}
+        extra_update["stealth_state"] = st_val
     if extra_update and isinstance(extra_update, dict):
         try:
             with get_conn() as conn:

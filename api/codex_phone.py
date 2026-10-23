@@ -308,24 +308,14 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
                     if c:
                         score = int(c.get("relationship_score", 0) or 0)
 
-                    # A character is strictly discovered if met in person (including past turns via last_in_person_ts or story lore), has active affinity, or is an unlocked contact
+                    # A character is strictly discovered if met in person (scene, turn history, party), has active affinity, or is an explicit contact
                     from mechanics.social.relationships import is_unlocked_contact
                     has_last_in_person = bool(c and (c.get("last_in_person_ts") or (c.get("basic_info") or {}).get("last_in_person_ts")))
-                    is_custom_story_lore = bool(
-                        not it_dict.get("faction")
-                        and (
-                            it_dict.get("mannerisms")
-                            or it_dict.get("motivation")
-                            or (isinstance(it_dict.get("appearance"), dict) and it_dict["appearance"].get("distinctive_features"))
-                        )
-                    )
                     is_discovered = bool(
-                        debug_reveal_all
-                        or p_name in met_in_story_names
+                        p_name in met_in_story_names
                         or score != 0
-                        or (c is not None and is_unlocked_contact(c, party_names))
+                        or (c is not None and (c.get("contact_added") or c.get("is_contact") or is_unlocked_contact(c, party_names)))
                         or has_last_in_person
-                        or is_custom_story_lore
                     )
 
                     # Filter out unencountered background faction / directory placeholders
@@ -422,6 +412,7 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
                     enriched_person = _enrich_contact_record(it_dict, session_id, scen_key, debug_reveal_all, phys_st=phys_st)
                     it_dict.update(enriched_person)
                     it_dict["is_contact"] = bool(c is not None)
+                    it_dict["is_discovered"] = True
 
                     discovered_people_names.add(p_name)
                     all_entities.append(it_dict)
@@ -439,8 +430,7 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
             score = int(c.get("relationship_score", 0) or 0)
             from mechanics.social.relationships import is_unlocked_contact
             is_discovered_c = bool(
-                debug_reveal_all
-                or c_name_lower in met_in_story_names
+                c_name_lower in met_in_story_names
                 or score != 0
                 or is_unlocked_contact(c, party_names)
                 or bool(c.get("last_in_person_ts") or (c.get("basic_info") or {}).get("last_in_person_ts"))
@@ -481,6 +471,7 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
             p_dict["basic_info"] = b_info
             p_dict["relationship_score"] = score
             p_dict["is_contact"] = True
+            p_dict["is_discovered"] = True
 
             enriched_p = _enrich_contact_record(p_dict, session_id, scen_key, debug_reveal_all, phys_st=phys_st)
             p_dict.update(enriched_p)
@@ -502,6 +493,7 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
             display_name = (r_entry.get("name") if r_entry else None) or (matched_curr_npc.get("name") if matched_curr_npc else met_name_lower.title())
             p_dict = {
                 "name": display_name,
+                "formal_title": (r_entry.get("formal_title") if r_entry else "") or "",
                 "role": (r_entry.get("role") if r_entry else None) or (matched_curr_npc.get("role") if matched_curr_npc else "Acquaintance"),
                 "grade": (r_entry.get("grade") if r_entry else "") or "",
                 "club": (r_entry.get("club") if r_entry else "") or "",

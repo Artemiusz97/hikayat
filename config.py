@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.5.0"
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -40,6 +40,16 @@ LLM_REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "300.0"))
 
 # Dynamic multi-pass turn engine settings
 ENABLE_DYNAMIC_MULTIPASS = os.getenv("ENABLE_DYNAMIC_MULTIPASS", "true").lower() in ("true", "1", "yes")
+# Feature Flag: Deterministic Cast & Dialogue Authority (Phase 1)
+DETERMINISTIC_CAST = os.getenv("DETERMINISTIC_CAST", "true").lower() in ("true", "1", "yes")
+# Feature Flag: Deterministic Intimacy & Physical Milestone Engine (Phase 2)
+DETERMINISTIC_INTIMACY = os.getenv("DETERMINISTIC_INTIMACY", "true").lower() in ("true", "1", "yes")
+# Feature Flag: Deterministic Vitals, Currency / Economy & Inventory Engine (Phase 3)
+DETERMINISTIC_ECONOMY = os.getenv("DETERMINISTIC_ECONOMY", "true").lower() in ("true", "1", "yes")
+# Feature Flag: Deterministic Spatial Movement & Zone Transitions (Phase 4)
+DETERMINISTIC_MOVEMENT = os.getenv("DETERMINISTIC_MOVEMENT", "true").lower() in ("true", "1", "yes")
+# Feature Flag: Deterministic Quests, Clues & Story Progression (Phase 5)
+DETERMINISTIC_QUESTS = os.getenv("DETERMINISTIC_QUESTS", "true").lower() in ("true", "1", "yes")
 LLM_PASS1_TIMEOUT = float(os.getenv("LLM_PASS1_TIMEOUT", "90.0"))
 LLM_PASS2_TIMEOUT = float(os.getenv("LLM_PASS2_TIMEOUT", str(LLM_REQUEST_TIMEOUT)))
 

@@ -406,7 +406,10 @@ class SocialInvariantAuditor:
         for name, sib in dir_siblings.items():
             name_parts = [p.lower() for p in name.split()]
             sib_parts = [p.lower() for p in sib.split()]
-            shared_surnames = set(name_parts) & set(sib_parts)
+            import namegen
+            n_base = namegen.normalize_base_surname(namegen.extract_first_and_last_name(name)[1]).lower()
+            s_base = namegen.normalize_base_surname(namegen.extract_first_and_last_name(sib)[1]).lower()
+            shared_surnames = (set(name_parts) & set(sib_parts)) or (bool(n_base and s_base and n_base == s_base))
 
             # 1. Biological siblings must share family surname (supporting Western and Eastern name order)
             if name_parts and sib_parts and not shared_surnames:
@@ -423,7 +426,8 @@ class SocialInvariantAuditor:
             if sib in dir_siblings:
                 reciprocal = dir_siblings[sib]
                 reciprocal_parts = [p.lower() for p in reciprocal.split()]
-                reciprocal_shared = (set(reciprocal_parts) & set(sib_parts)) | (set(reciprocal_parts) & set(name_parts))
+                r_base = namegen.normalize_base_surname(namegen.extract_first_and_last_name(reciprocal)[1]).lower()
+                reciprocal_shared = (set(reciprocal_parts) & set(sib_parts)) | (set(reciprocal_parts) & set(name_parts)) or (bool(r_base and (r_base == s_base or r_base == n_base)))
                 if reciprocal_parts and not reciprocal_shared:
                     violations.append(SocialViolation(
                         turn=turn,

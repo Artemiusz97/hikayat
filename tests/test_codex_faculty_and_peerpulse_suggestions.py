@@ -288,3 +288,61 @@ async def test_get_lorebook_strictly_discovered_characters_only(monkeypatch):
     # Raphaël Ito (in contacts table with score 0 and never met) MUST be strictly excluded
     assert "Raphaël Ito" not in person_names
 
+
+
+@pytest.mark.asyncio
+async def test_get_lorebook_debug_reveal_does_not_leak_unmet_characters(monkeypatch):
+    """Ensure debug_reveal_all_info=1 does NOT cause un-met strangers with score 0 to leak into lorebook person entities."""
+    from api.codex_phone import get_lorebook
+
+    session_id = 99992
+    mock_session = {
+        "id": session_id,
+        "scenario": "high_school_drama",
+        "current_turn": 2,
+        "history": [
+            {
+                "turn": 1,
+                "witnessed_by": ["Dr. Kento Satou"],
+                "dialogue_partner": "Dr. Kento Satou",
+            }
+        ],
+    }
+    mock_grouped = {
+        "person": [
+            {"name": "Dr. Kento Satou", "entity_type": "person", "role": "Teacher"},
+            {"name": "Harry Johnson", "entity_type": "person", "role": "Faction Leader", "relationship_score": 0},
+            {"name": "Henry Sterling", "entity_type": "person", "role": "Student", "relationship_score": 10},
+        ]
+    }
+    mock_contacts = [
+        {"name": "Harry Johnson", "relationship_score": 0},
+        {"name": "Henry Sterling", "relationship_score": 10},
+        {"name": "Raphaël Ito", "relationship_score": 0},
+    ]
+
+    monkeypatch.setattr("db.get_session", lambda sid: mock_session)
+    monkeypatch.setattr("db.get_character", lambda uid: {"id": 1, "name": "Artem"})
+    # DEBUG REVEAL ALL IS ENABLED
+    monkeypatch.setattr("db.get_settings", lambda uid: {"debug_reveal_all_info": 1})
+    monkeypatch.setattr("db.get_lorebook", lambda sid: mock_grouped)
+    monkeypatch.setattr("db.get_active_commitments", lambda sid: [])
+    monkeypatch.setattr("db.get_contacts", lambda sid: mock_contacts)
+    monkeypatch.setattr("db.get_school_roster", lambda sid: [])
+    monkeypatch.setattr("db.get_session_party_npcs", lambda sid: [])
+
+    result = await get_lorebook(session_id)
+    person_entities = [e for e in result["entities"] if e.get("entity_type") == "person"]
+    person_names = {p["name"] for p in person_entities}
+
+    # Dr. Satou (witnessed in turn history) MUST be included
+    assert "Dr. Kento Satou" in person_names
+
+    # Henry Sterling (current NPC + score > 0) MUST be included
+    assert "Henry Sterling" in person_names
+
+    # Harry Johnson (never met, score 0, faction leader) MUST be strictly excluded even with debug_reveal_all_info: 1
+    assert "Harry Johnson" not in person_names
+
+    # Raphaël Ito (in contacts table with score 0 and never met) MUST be strictly excluded even with debug_reveal_all_info: 1
+    assert "Raphaël Ito" not in person_names

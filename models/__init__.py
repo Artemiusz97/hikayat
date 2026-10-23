@@ -10,6 +10,9 @@ from .trackers import (
 )
 from .llm_schemas import (
     Choice,
+    CastEvent,
+    DeterministicTurnNarration,
+    DeterministicCombatNarration,
     TurnOutcome,
     ActionClassification,
     OpeningScene,
@@ -30,6 +33,9 @@ __all__ = [
     "RelationshipUpdate",
     "FactionUpdate",
     "Choice",
+    "CastEvent",
+    "DeterministicTurnNarration",
+    "DeterministicCombatNarration",
     "TurnOutcome",
     "ActionClassification",
     "OpeningScene",

@@ -328,7 +328,21 @@ def _build_player_actions_text(actions: list, session: dict | None = None) -> st
             f"- {c_name} chose to: \"{action_lbl}\"{mp_note} -> "
             f"Outcome (already determined, do not contradict): {tier_directive}{chance_note}"
         )
-    actions_text = "\n".join(action_lines)
+    stealth_directives = []
+    if isinstance(session, dict) and session.get("stealth_state"):
+        from mechanics.stealth.core import format_stealth_truth_directive
+        s_dir = format_stealth_truth_directive(session)
+        if s_dir:
+            stealth_directives.append(s_dir.strip())
+    elif any(isinstance(a, dict) and (a.get("is_stealth") or a.get("stance") == "stealth") for a in (actions or [])):
+        from mechanics.stealth.core import format_stealth_truth_directive
+        s_dir = format_stealth_truth_directive(session or {})
+        if s_dir:
+            stealth_directives.append(s_dir.strip())
+
+    if stealth_directives:
+        action_lines.append("\n" + "\n\n".join(stealth_directives))
+
     return "\n".join(action_lines)
 
 async def _build_history_context(session: dict, ctx, budget=None) -> str:

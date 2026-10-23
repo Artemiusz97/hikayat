@@ -2127,15 +2127,24 @@ def create_household(
         if existing:
             return existing["id"]
 
-        cursor = conn.execute(
-            """INSERT INTO households (
-                session_id, household_key, surname, father_json, mother_json,
-                narrative_siblings_json, residence_location, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (session_id, household_key, surname, father_json, mother_json,
-             narrative_siblings_json, residence_location or "", now, now)
-        )
-        return cursor.lastrowid
+        try:
+            cursor = conn.execute(
+                """INSERT INTO households (
+                    session_id, household_key, surname, father_json, mother_json,
+                    narrative_siblings_json, residence_location, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (session_id, household_key, surname, father_json, mother_json,
+                 narrative_siblings_json, residence_location or "", now, now)
+            )
+            return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            existing = conn.execute(
+                "SELECT id FROM households WHERE session_id = ? AND household_key = ?",
+                (session_id, household_key)
+            ).fetchone()
+            if existing:
+                return existing["id"]
+            raise
 
 
 def _parse_household_row(row: sqlite3.Row | dict) -> dict:
@@ -3077,20 +3086,23 @@ def get_school_roster(session_id: int) -> list[dict]:
         ).fetchall()
         return [dict(r) for r in rows]
 
-def get_school_characters_by_facility(session_id: int, location_str: str, limit: int = 3) -> list[dict]:
+def get_school_characters_by_facility(session_id: int, location_str: str, limit: int = 3, allow_off_campus: bool = False) -> list[dict]:
     """
     Returns characters stationed at or frequenting the specified facility/room.
     Matches against primary_facility, secondary_facility, or location leaf tokens.
+    If allow_off_campus is True, also permits matching recognized town youth hangout nodes
+    during extracurricular or weekend hours.
     """
     if not location_str or not session_id:
         return []
 
     loc_clean = str(location_str).strip()
-    loc_parts = [p.strip() for p in re.split(r'➔|->|>', loc_clean) if p.strip()]
+    loc_parts = [p.strip() for p in re.split(r'➔|->|>|→', loc_clean) if p.strip()]
     leaf = loc_parts[-1] if loc_parts else loc_clean
     primary_place = loc_parts[1] if len(loc_parts) > 1 else leaf
 
     parsed = None
+    is_campus = True
     try:
         from mechanics.world.locations import (
             parse_tiered_location,
@@ -3114,10 +3126,26 @@ def get_school_characters_by_facility(session_id: int, location_str: str, limit:
             parsed = parse_tiered_location(loc_clean, scen, session_id=session_id)
             loc_zone = parsed[0] if parsed else (loc_parts[0] if loc_parts else "")
             is_campus = any(cz and (cz.lower() in loc_zone.lower() or loc_zone.lower() in cz.lower()) for cz in campus_zones) or any(k in loc_zone.lower() for k in ("academy", "school", "athletics", "commons", "annex", "old campus"))
-            if not is_campus:
+            if not is_campus and not allow_off_campus:
                 return []
     except Exception:
         pass
+
+    if not is_campus and allow_off_campus:
+        is_youth_hangout = any(k in loc_clean.lower() for k in (
+            "arcade", "game center", "velvet mug", "cafe", "coffee", "park", "pier",
+            "beach", "convenience store", "karaoke", "lookout", "lake"
+        ))
+        if not is_youth_hangout:
+            return []
+        with get_conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM school_directory
+                   WHERE session_id=? AND lower(grade) != 'faculty' AND lower(role) NOT LIKE '%teacher%' AND lower(role) NOT LIKE '%staff%'
+                   ORDER BY is_hydrated ASC, id ASC LIMIT ?""",
+                (session_id, limit)
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     cand_places = []
     if parsed:

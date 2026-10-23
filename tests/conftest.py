@@ -1,10 +1,18 @@
 import os
+import tempfile
 os.environ.setdefault("DISCORD_TOKEN", "mock_test_discord_token")
 os.environ.setdefault("LLM_API_KEY", "mock_test_llm_api_key")
 import shutil
 import random
 import pytest
 import db
+
+# Isolate database at worker import time before test collection begins
+_xdist_worker = os.environ.get("PYTEST_XDIST_WORKER")
+if _xdist_worker:
+    _temp_db_dir = os.path.join(tempfile.gettempdir(), f"pytest_hikayat_{_xdist_worker}_{os.getpid()}")
+    os.makedirs(_temp_db_dir, exist_ok=True)
+    db.DB_PATH = os.path.join(_temp_db_dir, f"hikayat_{_xdist_worker}.db")
 
 
 @pytest.fixture(scope="session", autouse=True)

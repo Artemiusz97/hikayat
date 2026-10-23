@@ -1295,7 +1295,6 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
     """
 
     if not is_location_engine_enabled(scen_key):
-
         return result_loc or current_loc or ""
 
 

@@ -102,7 +102,9 @@ PLAYER_ORAL_ACTION_KEYWORDS = NPC_ORAL_RECEIVE_KEYWORDS + NPC_ORAL_GIVE_KEYWORDS
     "suck her", "suck his", "sucking", "suck",
     "taste her", "taste his", "tasting",
     "tongue on", "tongue against", "tongue along", "with your tongue", "with his tongue", "with her tongue",
-    "trace the edges of her clitoris", "focus on her clitoris", "focusing on her clitoris", "licking"
+    "trace the edges of her clitoris", "focus on her clitoris", "focusing on her clitoris", "licking",
+    "inside her mouth", "inside his mouth", "in her mouth", "in his mouth", "on her face", "on his face",
+    "swallow", "swallowing", "deepthroat", "take her release", "take his release"
 )
 
 ORAL_GIVE_KEYWORDS = NPC_ORAL_GIVE_KEYWORDS
@@ -1370,6 +1372,39 @@ def sanitize_npc_pronoun_consistency(
 
         active_dp_name = str(session.get("dialogue_partner") or "").strip().lower() if isinstance(session, dict) else ""
         active_dp_gender = char_genders.get(active_dp_name) or (char_genders.get(active_dp_name.split()[0]) if active_dp_name else None)
+
+        # Check for mixed pronouns and protagonist gender boundaries
+        has_masc_pronouns = bool(re.search(r'\b(?:he|him|his|himself)\b', nar_only, re.I))
+        has_fem_pronouns = bool(re.search(r'\b(?:she|her|hers|herself)\b', nar_only, re.I))
+
+        # Unpack lead protagonist gender cleanly handling nested lists or session fields
+        lead_g_canon = ""
+        if isinstance(session, dict) and session.get("lead_character_gender"):
+            lead_g_canon = str(session["lead_character_gender"]).strip().lower()
+        if not lead_g_canon and party:
+            p0 = party[0]
+            if isinstance(p0, (list, tuple)) and p0:
+                p0 = p0[0]
+            if isinstance(p0, dict) and p0.get("gender"):
+                lead_g_canon = str(p0["gender"]).strip().lower()
+        if not lead_g_canon:
+            lead_g_canon = "male"
+
+        is_lead_female = any(kw in lead_g_canon for kw in ("female", "woman", "girl", "fem"))
+        is_lead_male = not is_lead_female
+
+        # CRITICAL SAFEGUARD: If paragraph contains mixed pronouns, or if the opposite-gender pronouns
+        # belong to the protagonist in third-person narrative, NEVER do a blind whole-paragraph rewrite!
+        # This prevents mangling 'his ears as he stands alone in his search' -> 'her ears as she stands alone...'
+        # and 'gaze lingering on him' -> 'gaze lingering on her' when female NPCs are present.
+        is_mixed_discourse = has_masc_pronouns and has_fem_pronouns
+        if (is_lead_male and has_masc_pronouns and female_matches) or (is_lead_female and has_fem_pronouns and male_matches):
+            is_mixed_discourse = True
+
+        if is_mixed_discourse:
+            # Fall through - preserve multi-character protagonist & NPC discourse as written
+            processed_paragraphs.append(para)
+            continue
 
         # If the paragraph matches opposite gender NPCs, but active dialogue partner or existing narrative
         # already uses the partner's canon gender, do NOT do a blanket rewrite! Fall through to sentence-by-sentence.

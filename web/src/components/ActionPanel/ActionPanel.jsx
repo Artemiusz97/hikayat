@@ -943,25 +943,6 @@ const ActionPanel = ({
             </button>
           )}
 
-          {/* Desktop Phone Launcher */}
-          {phoneHook?.isSupported && onOpenPhone && (
-            <button
-              type="button"
-              onClick={() => phoneOpen && onClosePhone ? onClosePhone() : onOpenPhone()}
-              title={phoneOpen ? "Close Smartphone Window" : `Open ${phoneHook?.branding?.device_name || 'Smartphone'}`}
-              className={`shrink-0 hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-mono text-xs font-bold transition-all shadow-sm ${
-                phoneOpen
-                  ? 'bg-pink-950/80 border border-pink-500 text-pink-100 ring-2 ring-pink-500/40'
-                  : 'bg-black/70 hover:bg-neutral-900 border border-neutral-700 hover:border-pink-500/70 text-gray-200 hover:text-pink-300'
-              }`}
-            >
-              <Smartphone size={13} className={phoneOpen ? "text-pink-300 animate-pulse" : "text-pink-400"} />
-              <span className="font-sans">{t('actions.phone')}</span>
-              {(phoneHook?.appointments?.length > 0 || phoneHook?.mediaGallery?.length > 0) && (
-                <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-pulse" />
-              )}
-            </button>
-          )}
 
           {/* Collapsible Custom Action Section */}
           {isCustomCollapsed ? (

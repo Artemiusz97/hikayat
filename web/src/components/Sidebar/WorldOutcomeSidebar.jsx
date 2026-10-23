@@ -221,7 +221,7 @@ const WorldOutcomeSidebar = ({
   const dialoguePartners = new Set(
     (() => {
       let list = [];
-      if (Array.isArray(session?.dialogue_partners) && session.dialogue_partners.length > 0) {
+      if (Array.isArray(session?.dialogue_partners)) {
         list = session.dialogue_partners;
       } else if (session?.dialogue_partner) {
         const dp = session.dialogue_partner;

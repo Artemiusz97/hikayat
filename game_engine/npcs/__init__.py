@@ -1,3 +1,11 @@
+from .cast_planner import (
+    CastPlan,
+    plan_pre_turn,
+    render_stage_plan,
+    apply_cast_events,
+    get_cast_state,
+    save_cast_state,
+)
 """NPC dialogue tracking, room presence, and post-turn entity reconciliation."""
 from .dialogue_tracking import (
     DIALOGUE_STALL_VERBS,
@@ -36,6 +44,12 @@ from .stage_manager import (
 )
 
 __all__ = [
+    "CastPlan",
+    "plan_pre_turn",
+    "render_stage_plan",
+    "apply_cast_events",
+    "get_cast_state",
+    "save_cast_state",
     "DIALOGUE_STALL_VERBS",
     "DIALOGUE_TITLE_WORDS",
     "count_dialogue_stall_turns",

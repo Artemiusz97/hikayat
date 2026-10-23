@@ -125,17 +125,19 @@ def remove_item_by_name(user_id: int, name: str) -> bool:
     if not target_clean:
         return False
 
+    was_equipped = False
+    removed = False
     with get_conn() as conn:
         # 1. Exact case-insensitive match
         row = conn.execute(
-            "SELECT id FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND LOWER(name)=? LIMIT 1",
+            "SELECT id, equipped, slot FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND LOWER(name)=? LIMIT 1",
             (char_id, user_id, target_clean)
         ).fetchone()
 
         # 2. Substring match
         if not row:
             rows = conn.execute(
-                "SELECT id, name FROM inventory WHERE character_id=? OR (character_id IS NULL AND user_id=?)",
+                "SELECT id, name, equipped, slot FROM inventory WHERE character_id=? OR (character_id IS NULL AND user_id=?)",
                 (char_id, user_id)
             ).fetchall()
             for r in rows:
@@ -159,20 +161,43 @@ def remove_item_by_name(user_id: int, name: str) -> bool:
                     row = best_match
 
         if row:
+            was_equipped = bool(row["equipped"])
             cur = conn.execute("DELETE FROM inventory WHERE id=?", (row["id"],))
-            return cur.rowcount > 0
-    return False
+            removed = cur.rowcount > 0
+
+    if removed and was_equipped:
+        try:
+            _sync_equipment_to_physical_state(user_id)
+        except Exception:
+            pass
+    return removed
 
 def remove_item(user_id: int, item_id: int) -> bool:
     char = db.get_character(user_id)
     if not char:
         return False
+    was_equipped = False
+    removed = False
     with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, equipped FROM inventory WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
+            (item_id, char["id"], user_id),
+        ).fetchone()
+        if not row:
+            return False
+        was_equipped = bool(row["equipped"])
         cur = conn.execute(
             "DELETE FROM inventory WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
             (item_id, char["id"], user_id),
         )
-        return cur.rowcount > 0
+        removed = cur.rowcount > 0
+
+    if removed and was_equipped:
+        try:
+            _sync_equipment_to_physical_state(user_id)
+        except Exception:
+            pass
+    return removed
 
 def get_inventory(user_id: int):
     char = db.get_character(user_id)

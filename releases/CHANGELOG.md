@@ -23,6 +23,7 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v2.5.0** | 2026-10-23 | Minor | Deterministic State Engine Phases 1–5, Stealth & Infiltration Package, Tactical Action Dock & Quick Belt, Graph Pathfinding & Access Gating, CI Concurrency Hardening. |
 | **v2.4.0** | 2026-10-21 | Minor | SDXL Scene Image Generation, Living Scene Stage Manager, World Schedules, Spatial Graph & Dijkstra Navigation, Commitments Engine, Intimacy Ledger & 5-Language Localization. |
 | **v2.3.0** | 2026-10-13 | Minor | Multi-Language Localization, NPC Gender & Pronoun Consistency, Combat Stance & Affinity Synergy, Sub-Facility Waypoints, Web UI Internationalization. |
 | **v2.2.0** | 2026-10-12 | Minor | Deterministic Affinity Engine, In-Game Smartphone Narrative Bridge, Engine Auditor, Equipment Expansion & Web UI Overhaul. |
@@ -43,6 +44,31 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 ---
 
 ## Release Details
+
+### [v2.5.0] - 2026-10-23
+
+#### Added & Enhanced
+- **Deterministic State Engine Architecture (Phases 1–5)**:
+  - **Phase 1: Cast & Dialogue Authority (`game_engine/npcs/cast_planner.py`)**: `CastPlanner` deterministically arbitrates scene attendance, active dialogue partners, bystanders, and departures. Dialogue exits immediately drop conversational state across all present NPCs, preventing phantom responses.
+  - **Phase 2: Physical & Intimacy Milestones (`game_engine/state/reducers.py`, `mechanics/social/`)**: Metaphor Guard ensures metaphorical expressions (*"kiss of death"*, *"penetrate armor"*) never trigger physical milestones. Enforces directional inversion, check failure gates, and strict spectator target isolation.
+  - **Phase 3: Vitals, Currency & Economy (`game_engine/state/core.py`, `mechanics/combat/`)**: Ungrounded items invented by the LLM in narrative outcomes are automatically intercepted and rejected. Merchant transactions, item durability, encumbrance limits, and gold balances are strictly code-authorized.
+  - **Phase 4: Spatial Movement & Pathfinding (`mechanics/world/locations/pathfinding.py`)**: Multi-edge Dijkstra/BFS shortest-path traversal across SQLite world edges with 3-tier canonical hierarchy (`Zone ➔ Facility ➔ Room`), access key/lockpicking gates, fog of war, combat flee displacement, and transit fare gating.
+  - **Phase 5: Quests & Story Progression (`game_engine/quests.py`)**: Deterministic pre-turn quest progression, clue deduplication, suspect evidence extraction upon defeat, and two-phase climax waypoint discovery.
+- **Stealth & Infiltration Mechanics Package (`mechanics/stealth/`)**:
+  - **4-Stage Alert Tracker**: Models escalation through `UNAWARE` (0–25), `SUSPICIOUS` (26–60), `SEARCHING` (61–99), and `DETECTED` (100) with natural decay over unobserved turns.
+  - **Acoustic & Environmental Modifiers**: Computes armor noise penalties, companion noise drag, action noise, and ambient lighting modifiers.
+  - **Opposed Perception Checks**: Resolves opposed stealth checks deterministically against NPC perception and provides truth directives bounding narrative prose.
+  - **Stealth Stance Toggle**: Allows players to enter or break stealth stances dynamically during exploration.
+- **Tactical Action Dock & Quick Belt Hotbar (`web/src/components/`)**:
+  - **Tactical Action Dock (`TacticalActionDock.jsx`)**: Persistent sidebar dock featuring one-click stealth toggles, combat target selectors, quick phone access, and modal openers.
+  - **Quick Belt Popover (`QuickBeltPopover.jsx`)**: Instant-access popover displaying belt potions, remedies, snacks, and consumables for immediate one-click usage.
+  - **Give Gift Modal (`GiveGiftModal.jsx`)**: Contextual gift-giving interface filtering player inventory items with immediate affinity calculation and NPC preference tracking.
+  - **Time Skip Modal (`TimeSkipModal.jsx`)**: Direct time advancement interface allowing players to wait or rest while triggering appropriate world schedule migrations.
+- **CI Concurrency Hardening & xdist Database Isolation**:
+  - Isolated worker SQLite databases at process import time in `tests/conftest.py` via `PYTEST_XDIST_WORKER`, ensuring complete database separation during the collection phase.
+  - Removed top-level unconditional `db.init_db()` from `server.py` (initialization is safely handled by FastAPI's startup lifespan).
+  - Configured `PRAGMA busy_timeout = 30000` immediately upon connection in `db/core.py` and converted migration tracking to `INSERT OR IGNORE INTO schema_migrations`.
+  - Re-exported `generate_faction_bounty_board` in `game_engine/core.py` to satisfy AST codebase contracts.
 
 ### [v2.4.0] - 2026-10-21
 

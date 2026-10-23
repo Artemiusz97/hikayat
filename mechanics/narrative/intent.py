@@ -501,8 +501,9 @@ INVESTIGATE_CLUE_RE = re.compile(
 
 # --- STEALTH, LOCKPICKING & SUBTERFUGE ---
 STEALTH_COVERT_RE = re.compile(
-    r'\b(?:pick\s+(?:the\s+)?lock|picklock|crack\s+the\s+safe|bypass\s+(?:the\s+)?lock|tamper\s+with\s+(?:the\s+)?lock)\b|'
-    r'\b(?:pickpocket|pick\s+the\s+pocket|steal\s+from|lift\s+(?:the|a)\s+(?:wallet|keycard|key|creds?|credits)|palm\s+the\s+item)\b|'
+    r'\b(?:pick\s+(?:the\s+)?(?:[a-zA-Z_\-]+\s+){0,3}lock|picklock|crack\s+(?:the\s+)?safe|bypass\s+(?:the\s+)?(?:[a-zA-Z_\-]+\s+){0,2}lock|tamper\s+with\s+(?:the\s+)?(?:[a-zA-Z_\-]+\s+){0,2}lock)\b|'
+    r'\b(?:pickpocket|pick\s+the\s+pocket|steal\s+from|lift\s+(?:the|a)\s+(?:[a-zA-Z_\-]+\s+){0,2}(?:wallet|keycard|key|creds?|credits)|palm\s+(?:the|a)\s+item)\b|'
+    r'\b(?:distract|distraction|throw\s+(?:a\s+)?(?:stone|rock|pebble)|divert\s+(?:their\s+|the\s+)?attention|create\s+(?:a\s+)?distraction|noise\s+distraction)\b|'
     r'\b(?:sneak|sneaks|sneaking|sneaked|snuck|slip\s+past|creep|creeping|tiptoe|skulk|skulking|infiltrate|infiltrating|blend\s+into\s+shadows?|move\s+silently|stealthily\s+(?:approach|move|step)|stay\s+hidden|hide\s+in\s+the\s+shadows?)\b',
     re.I
 )
@@ -920,10 +921,12 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
         # Priority 7.5: Stealth, Lockpicking & Covert Actions
         # ----------------------------------------------------------------------
         if STEALTH_COVERT_RE.search(act_lower):
-            if any(k in act_lower for k in ("pick lock", "pick the lock", "picklock", "crack the safe", "bypass")):
+            if "lock" in act_lower or any(k in act_lower for k in ("safe", "bypass", "tamper", "picklock")):
                 sub_t = "lockpick"
             elif any(k in act_lower for k in ("pickpocket", "pick the pocket", "steal from", "lift")):
                 sub_t = "pickpocket"
+            elif any(k in act_lower for k in ("distract", "throw stone", "throw a stone", "stone", "pebble", "diversion")):
+                sub_t = "distraction"
             else:
                 sub_t = "sneak"
             target = _extract_target_npc(raw_text, ctx) or "Shadows"
@@ -1127,6 +1130,73 @@ def resolve_action_intent(
     if explicit_sub_intent and not parsed.sub_target:
         parsed.sub_target = explicit_sub_intent
     return parsed
+
+
+def get_resolved_intent(action: Any) -> Dict[str, Any]:
+    """Retrieve normalized {intent, sub_intent, target_npc, ends_dialogue, source} from an action.
+    
+    If the action already has 'resolved_intent', returns it directly.
+    Otherwise extracts 'intent', 'sub_intent', 'target_npc', 'ends_dialogue' if present,
+    or resolves via resolve_action_intent as a fallback.
+    """
+    if isinstance(action, dict):
+        if "resolved_intent" in action and isinstance(action["resolved_intent"], dict):
+            return dict(action["resolved_intent"])
+        intent = action.get("intent") or action.get("action_category") or ""
+        sub_intent = action.get("sub_intent") or ""
+        target_npc = action.get("target_npc") or action.get("target_entity") or ""
+        ends_dialogue = bool(action.get("ends_dialogue") or intent == "dialogue_exit")
+        if intent and intent != "general_action":
+            return {
+                "intent": intent,
+                "sub_intent": sub_intent,
+                "target_npc": target_npc,
+                "ends_dialogue": ends_dialogue,
+                "source": "choice_tag",
+            }
+        res = resolve_action_intent(action)
+        return {
+            "intent": res.category.value,
+            "sub_intent": sub_intent or res.sub_target or "",
+            "target_npc": target_npc or res.target_entity or "",
+            "ends_dialogue": ends_dialogue or res.category.value == "dialogue_exit",
+            "source": "regex_fallback",
+        }
+    if isinstance(action, str):
+        res = classify_action_intent(action)
+        return {
+            "intent": res.category.value,
+            "sub_intent": res.sub_target or "",
+            "target_npc": res.target_entity or "",
+            "ends_dialogue": res.category.value == "dialogue_exit",
+            "source": "regex_fallback",
+        }
+    return {
+        "intent": "general_action",
+        "sub_intent": "",
+        "target_npc": "",
+        "ends_dialogue": False,
+        "source": "default",
+    }
+
+
+def is_dialogue_exit_action(action: Any) -> bool:
+    """Return True if action explicitly ends dialogue via ends_dialogue, dialogue_exit intent, or exit phrasing."""
+    if not action:
+        return False
+    if isinstance(action, dict):
+        if action.get("ends_dialogue"):
+            return True
+        r_intent = action.get("resolved_intent")
+        if isinstance(r_intent, dict) and (r_intent.get("ends_dialogue") or r_intent.get("intent") == "dialogue_exit"):
+            return True
+        if action.get("intent") == "dialogue_exit":
+            return True
+        label = str(action.get("label") or action.get("text") or "")
+        return is_conversational_exit(label)
+    if isinstance(action, str):
+        return is_conversational_exit(action)
+    return False
 
 
 # ==============================================================================

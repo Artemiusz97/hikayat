@@ -21,6 +21,41 @@ export const useGameSession = (user, character) => {
   const reconnectTimeoutRef = useRef(null);
 
   const isInitialLoadRef = useRef(true);
+  const pollForSceneImage = useCallback((sessionId, maxAttempts = 15) => {
+    if (!sessionId) return;
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts++;
+      try {
+        const res = await apiCall(`/api/adventure/session-image/${sessionId}`);
+        if (res && res.scene_image_url) {
+          clearInterval(interval);
+          setSession(prev => {
+            if (!prev || (prev.id !== sessionId && String(prev.id) !== String(sessionId))) return prev;
+            const hist = Array.isArray(prev.history) ? [...prev.history] : [];
+            if (hist.length > 0 && typeof hist[hist.length - 1] === 'object') {
+              hist[hist.length - 1] = {
+                ...hist[hist.length - 1],
+                scene_image_url: res.scene_image_url,
+              };
+            }
+            return {
+              ...prev,
+              scene_image_url: res.scene_image_url,
+              history: hist
+            };
+          });
+        } else if (attempts >= maxAttempts) {
+          clearInterval(interval);
+        }
+      } catch (e) {
+        if (attempts >= maxAttempts) {
+          clearInterval(interval);
+        }
+      }
+    }, 2000);
+  }, []);
+
 
   const fetchActiveSession = useCallback(async (options = {}) => {
     const isInitial = isInitialLoadRef.current;
@@ -134,6 +169,9 @@ export const useGameSession = (user, character) => {
         setWaitingForParty(false);
         setProcessingTurn(false);
         setLastSyncTimestamp(data.sync_timestamp || Date.now());
+        if (data.session?.image_gen_enabled && !data.session?.scene_image_url) {
+          pollForSceneImage(data.session.id);
+        }
       } else if (data.type === 'HEARTBEAT') {
         // Keepalive acknowledged from backend turn engine
       } else if (data.type === 'UPDATE_SCENE') {
@@ -181,6 +219,12 @@ export const useGameSession = (user, character) => {
           .filter(m => m && m.online)
           .map(m => m.user_id);
         setOnlineUserIds(online);
+      } else if (data.type === 'STEALTH_STATE_UPDATED') {
+        setSession(prev => prev ? ({
+          ...prev,
+          stealth_state: data.stealth_state,
+          stealth_badge: data.stealth_badge || prev.stealth_badge
+        }) : prev);
       }
     };
 
@@ -192,13 +236,14 @@ export const useGameSession = (user, character) => {
 
     ws.onclose = (event) => {
       clearInterval(interval);
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      // Auto-reconnect if session still exists and not cleanly closed
-      if (!event.wasClean) {
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connectWebSocket(sessionId);
-        }, 2000);
+      if (socketRef.current === ws) {
+        socketRef.current = null;
       }
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      // Auto-reconnect unconditionally so server restarts or hot-reloads heal seamlessly
+      reconnectTimeoutRef.current = setTimeout(() => {
+        connectWebSocket(sessionId);
+      }, 2000);
     };
 
     ws.onerror = () => {
@@ -235,24 +280,51 @@ export const useGameSession = (user, character) => {
   }, [user]);
 
   const startSession = async (scenarioKey, mode = 'solo', options = {}) => {
-    const data = await apiCall('/api/adventure/start', {
-      method: 'POST',
-      body: JSON.stringify({
-        user_id: user.user_id,
-        scenario: scenarioKey,
-        mode: mode,
-        capacity: options.capacity,
-        tags: options.tags,
-        ...options
-      })
+    // Immediately transition to narration UI with active processing banner
+    setPausedOnDashboard(false);
+    setProcessingTurn(true);
+    setPendingAction({ label: 'Embarking on new journey...' });
+    setSession({
+      id: 'embarking',
+      scenario: scenarioKey,
+      scenario_display_name: options.scenario_display_name || scenarioKey,
+      current_location: 'Beginning Journey...',
+      narrative: '',
+      history: [],
+      choices: [],
+      party_members: user ? [user] : [],
+      party_npcs: [],
+      nearby_enemies: [],
     });
 
-    setSession(data.session);
-    setPausedOnDashboard(false);
-    setPartyChatMessages([]);
-    connectWebSocket(data.session.id);
-    setLastSyncTimestamp(Date.now());
-    return data;
+    try {
+      const data = await apiCall('/api/adventure/start', {
+        timeout: 180000,
+        method: 'POST',
+        body: JSON.stringify({
+          user_id: user.user_id,
+          scenario: scenarioKey,
+          mode: mode,
+          capacity: options.capacity,
+          tags: options.tags,
+          ...options
+        })
+      });
+
+      setSession(data.session);
+      setPartyChatMessages([]);
+      connectWebSocket(data.session.id);
+      setLastSyncTimestamp(Date.now());
+      return data;
+    } catch (err) {
+      setSession(null);
+      setPausedOnDashboard(true);
+      setActionError(err.message || 'Failed to embark on adventure.');
+      throw err;
+    } finally {
+      setProcessingTurn(false);
+      setPendingAction(null);
+    }
   };
 
   const joinSession = async (joinCode) => {
@@ -291,9 +363,12 @@ export const useGameSession = (user, character) => {
         custom_action_text: actionData?.custom_action_text || actionData?.custom_text || null,
         direct_choice: actionData?.direct_choice || null,
         combat_target: actionData?.combat_target || null,
+        is_stealth: Boolean(actionData?.is_stealth),
+        stance: actionData?.stance || null,
         action: actionData
       };
       const data = await apiCall('/api/adventure/action', {
+        timeout: 180000,
         method: 'POST',
         body: JSON.stringify(payload)
       });
@@ -314,7 +389,11 @@ export const useGameSession = (user, character) => {
         setStreamingNarrative(null);
         setStreamingState(null);
         setLastSyncTimestamp(Date.now());
+        if (data.session?.image_gen_enabled && !data.session?.scene_image_url) {
+          pollForSceneImage(data.session.id);
+        }
       }
+      return data;
     } catch (e) {
       console.warn('Action API error or timeout, checking active session recovery...', e);
       const errMsg = e?.detail || e?.message || 'The action could not be completed. Please try again.';
@@ -383,6 +462,7 @@ export const useGameSession = (user, character) => {
     setProcessingTurn(true);
     try {
       const data = await apiCall('/api/adventure/retry', {
+        timeout: 180000,
         method: 'POST',
         body: JSON.stringify({
           session_id: session.id,

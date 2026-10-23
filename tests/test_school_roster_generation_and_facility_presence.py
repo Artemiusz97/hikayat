@@ -75,7 +75,10 @@ class TestSchoolRosterGenerationAndFacilityPresence(unittest.TestCase):
             sib_partner = next((c for c in roster if c["name"] == sib["sibling_name"]), None)
             self.assertIsNotNone(sib_partner)
             self.assertEqual(sib_partner["sibling_name"], sib["name"])
-            self.assertEqual(sib["name"].split()[-1], sib_partner["name"].split()[-1])
+            import namegen
+            sib_sur = namegen.normalize_base_surname(namegen.extract_first_and_last_name(sib["name"])[1])
+            partner_sur = namegen.normalize_base_surname(namegen.extract_first_and_last_name(sib_partner["name"])[1])
+            self.assertEqual(sib_sur.lower(), partner_sur.lower())
 
     def test_seed_and_retrieve_from_database(self):
         """Verify ensure_school_directory_exists saves and retrieves the roster in SQLite."""
@@ -210,6 +213,102 @@ class TestSchoolRosterGenerationAndFacilityPresence(unittest.TestCase):
         roster_human = school_roster.generate_campus_directory(session_id=self.test_session_id, scen_key="high_school_drama")
         for c in roster_human:
             self.assertEqual(c["race"], "human")
+
+
+
+
+class TestSchoolRosterModernization(unittest.TestCase):
+    def setUp(self):
+        db.init_db()
+        self.session_id = 99881122
+
+    def tearDown(self):
+        with db.get_conn() as conn:
+            conn.execute("DELETE FROM sessions WHERE id=?", (self.session_id,))
+            conn.execute("DELETE FROM school_directory WHERE session_id=?", (self.session_id,))
+            conn.execute("DELETE FROM contacts WHERE session_id=?", (self.session_id,))
+            conn.execute("DELETE FROM lorebook WHERE session_id=?", (self.session_id,))
+            conn.commit()
+
+    def test_dynamic_cultural_surnames_and_lineages(self):
+        """Verify directories across different seeds sample diverse cultural family lineages."""
+        roster_a = school_roster.generate_campus_directory(session_id=111, scen_key="high_school_drama")
+        roster_b = school_roster.generate_campus_directory(session_id=999, scen_key="high_school_drama")
+
+        sibs_a = {c["sibling_name"] for c in roster_a if c.get("sibling_name")}
+        sibs_b = {c["sibling_name"] for c in roster_b if c.get("sibling_name")}
+        self.assertGreaterEqual(len(sibs_a), 6)
+        self.assertGreaterEqual(len(sibs_b), 6)
+
+        import namegen
+        # Diverse session seeds should produce different sibling surname pools
+        surnames_a = {namegen.normalize_base_surname(namegen.extract_first_and_last_name(n)[1]) for n in sibs_a}
+        surnames_b = {namegen.normalize_base_surname(namegen.extract_first_and_last_name(n)[1]) for n in sibs_b}
+        self.assertNotEqual(surnames_a, surnames_b)
+
+    def test_sibling_kinship_labels_and_pronoun_fidelity(self):
+        """Verify sibling peer generation formats correct pronouns and computes kinship kinematics."""
+        contact_ref = {
+            "name": "Maya Kowalska",
+            "gender": "female",
+            "basic_info": {"grade": "Junior"},
+            "relations": {
+                "family": [
+                    {"name": "Jakub Kowalski", "gender": "male", "relation": "older brother", "grade": "Senior"}
+                ]
+            }
+        }
+        # Generate male sibling peer
+        peer = school_roster.generate_sibling_student_peer(
+            session_id=self.session_id,
+            sibling_name="Jakub Kowalski",
+            known_contact=contact_ref,
+            scen_key="high_school_drama",
+            grade_override="Senior",
+            gender="male",
+            relation_type="older brother"
+        )
+        self.assertEqual(peer["gender"], "male")
+        # Ensure pronouns in summary and mannerisms are masculine
+        summary_and_manners = f"{peer['personality_summary']} {peer['mannerisms']}"
+        self.assertNotIn("her heels", summary_and_manners)
+        self.assertNotIn("her knuckles", summary_and_manners)
+        self.assertNotIn("her own", summary_and_manners)
+
+        # Test Kinship resolution helper directly
+        self.assertEqual(school_roster._resolve_sibling_relation("Senior", "male", "Freshman"), "Older brother")
+        self.assertEqual(school_roster._resolve_sibling_relation("Freshman", "female", "Senior"), "Younger sister")
+        self.assertEqual(school_roster._resolve_sibling_relation("Junior", "male", "Junior"), "Twin brother")
+
+    def test_faculty_hydration_and_formal_titles(self):
+        """Verify that faculty members hydrate into contacts with platonic mentor track and formal titles."""
+        roster = school_roster.generate_campus_directory(session_id=self.session_id, scen_key="high_school_drama")
+        fac_member = next(c for c in roster if c["grade"] == "Faculty")
+        self.assertTrue(bool(fac_member.get("formal_title")))
+
+        success = school_roster.hydrate_school_character(self.session_id, fac_member)
+        self.assertTrue(success)
+
+        contact = db.get_contact(self.session_id, fac_member["npc_id"])
+        self.assertIsNotNone(contact)
+        self.assertEqual(contact["track"], "platonic")
+        self.assertTrue(contact["basic_info"]["is_faculty"])
+        self.assertIn("Faculty /", contact["basic_info"]["role"])
+        self.assertEqual(contact["basic_info"]["disposition"], "faculty_mentor")
+        self.assertEqual(contact["basic_info"]["formal_title"], fac_member["formal_title"])
+
+    def test_dynamic_peer_species_and_schema_parity(self):
+        """Verify generate_dynamic_student_peer sets normalized race and structured mannerisms."""
+        peer = school_roster.generate_dynamic_student_peer(
+            session_id=self.session_id,
+            scen_key="nsfw_furry_high_school_drama",
+            seed=42
+        )
+        self.assertTrue(bool(peer.get("race")))
+        self.assertNotEqual(peer["race"], "human")
+        self.assertTrue(bool(peer.get("mannerisms")))
+        self.assertTrue(bool(peer.get("speech_style")))
+        self.assertEqual(peer["is_hydrated"], 0)
 
 
 if __name__ == "__main__":
