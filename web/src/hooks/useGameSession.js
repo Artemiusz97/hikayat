@@ -181,6 +181,12 @@ export const useGameSession = (user, character) => {
           .filter(m => m && m.online)
           .map(m => m.user_id);
         setOnlineUserIds(online);
+      } else if (data.type === 'STEALTH_STATE_UPDATED') {
+        setSession(prev => prev ? ({
+          ...prev,
+          stealth_state: data.stealth_state,
+          stealth_badge: data.stealth_badge || prev.stealth_badge
+        }) : prev);
       }
     };
 
@@ -235,24 +241,51 @@ export const useGameSession = (user, character) => {
   }, [user]);
 
   const startSession = async (scenarioKey, mode = 'solo', options = {}) => {
-    const data = await apiCall('/api/adventure/start', {
-      method: 'POST',
-      body: JSON.stringify({
-        user_id: user.user_id,
-        scenario: scenarioKey,
-        mode: mode,
-        capacity: options.capacity,
-        tags: options.tags,
-        ...options
-      })
+    // Immediately transition to narration UI with active processing banner
+    setPausedOnDashboard(false);
+    setProcessingTurn(true);
+    setPendingAction({ label: 'Embarking on new journey...' });
+    setSession({
+      id: 'embarking',
+      scenario: scenarioKey,
+      scenario_display_name: options.scenario_display_name || scenarioKey,
+      current_location: 'Beginning Journey...',
+      narrative: '',
+      history: [],
+      choices: [],
+      party_members: user ? [user] : [],
+      party_npcs: [],
+      nearby_enemies: [],
     });
 
-    setSession(data.session);
-    setPausedOnDashboard(false);
-    setPartyChatMessages([]);
-    connectWebSocket(data.session.id);
-    setLastSyncTimestamp(Date.now());
-    return data;
+    try {
+      const data = await apiCall('/api/adventure/start', {
+        timeout: 180000,
+        method: 'POST',
+        body: JSON.stringify({
+          user_id: user.user_id,
+          scenario: scenarioKey,
+          mode: mode,
+          capacity: options.capacity,
+          tags: options.tags,
+          ...options
+        })
+      });
+
+      setSession(data.session);
+      setPartyChatMessages([]);
+      connectWebSocket(data.session.id);
+      setLastSyncTimestamp(Date.now());
+      return data;
+    } catch (err) {
+      setSession(null);
+      setPausedOnDashboard(true);
+      setActionError(err.message || 'Failed to embark on adventure.');
+      throw err;
+    } finally {
+      setProcessingTurn(false);
+      setPendingAction(null);
+    }
   };
 
   const joinSession = async (joinCode) => {
@@ -291,9 +324,12 @@ export const useGameSession = (user, character) => {
         custom_action_text: actionData?.custom_action_text || actionData?.custom_text || null,
         direct_choice: actionData?.direct_choice || null,
         combat_target: actionData?.combat_target || null,
+        is_stealth: Boolean(actionData?.is_stealth),
+        stance: actionData?.stance || null,
         action: actionData
       };
       const data = await apiCall('/api/adventure/action', {
+        timeout: 180000,
         method: 'POST',
         body: JSON.stringify(payload)
       });
@@ -315,6 +351,7 @@ export const useGameSession = (user, character) => {
         setStreamingState(null);
         setLastSyncTimestamp(Date.now());
       }
+      return data;
     } catch (e) {
       console.warn('Action API error or timeout, checking active session recovery...', e);
       const errMsg = e?.detail || e?.message || 'The action could not be completed. Please try again.';
@@ -383,6 +420,7 @@ export const useGameSession = (user, character) => {
     setProcessingTurn(true);
     try {
       const data = await apiCall('/api/adventure/retry', {
+        timeout: 180000,
         method: 'POST',
         body: JSON.stringify({
           session_id: session.id,

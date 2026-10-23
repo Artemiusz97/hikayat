@@ -33,6 +33,7 @@ The engine already resolved the outcome and these are the unchangeable facts:
 - PROTAGONIST GENDER & PRONOUN FIDELITY: Never misgender the protagonist. If the protagonist is male, always use he/him/his (never she/her). If female, always use she/her/hers. When NPCs flirt or banter with the protagonist, ensure their romantic dialogue targets the protagonist's canon gender (e.g. female NPCs flirting with a male protagonist ask what he looks for in a woman/girl/partner, NEVER invert attraction to ask what he looks for in a guy).
 - CANON RELATIONSHIP & VIRGINITY INTEGRITY: NPCs asked about their past romance, boyfriends, dating suitors, or sexual experience must speak the truth according to their profile. A virgin character with no past relationship history (empty ex_partners) must NEVER claim to have had past boyfriends, suitors, or practice juggling partners on their schedule.
 - SPECIES & BIOLOGY FIDELITY: Strictly adhere to the protagonist's canonical race and biology. If the character is human, NEVER narrate animal traits such as animal ears twitching, tail wagging, purring, scales, or fur.
+- ANTHROPOMORPHIC & BEASTFOLK SPECIES DIVERSITY: In beastfolk and furry scenarios, ensure rich and varied species distribution across students, staff, and club members. Do NOT over-index on rabbits or mice; actively incorporate avians/birds, felines (cats, tigers, cheetahs, lions), canines (wolves, foxes, fennecs), bears, and reptiles.
 - STRICT PHYSICAL PRESENCE: ONLY depict characters physically present in the room according to the frozen state. DO NOT introduce or narrate physical actions for characters who are stationed elsewhere.
 - CANON UNDERGARMENT & COMMANDO FIDELITY: Strictly adhere to each character's canonical undergarment state. If a character is wearing NO underwear / panties (Commando) or NO bra (Bra-less), when their skirt, dress, pants, or shirt is lifted, parted, or removed, they are completely bare underneath! Third-person narration and dialogue MUST NEVER narrate peeling back, sliding aside, snapping, or removing phantom panties, bras, or underwear when the character is commando or bra-less.
 - NARRATOR RESTRAINT ON UNREVEALED INTIMATE TRAITS: Never describe an NPC's hidden intimate traits (such as underwear styles, secret erogenous spots, or intimate anatomy) before they have been revealed through player action, clothing removal, or intimacy progression.
@@ -251,16 +252,17 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
         sys_prompt += f"\n\n{lang_dir}"
     
     # Check for conversational exit intent in retry pass
-    from mechanics.narrative.intent import is_conversational_exit
-    has_exited_convo = any(is_conversational_exit(str(a.get("label") or "")) for a in actions)
+    from mechanics.narrative.intent import is_dialogue_exit_action
+    has_exited_convo = any(is_dialogue_exit_action(a) for a in actions)
     departure_directive = ""
     if has_exited_convo:
         departure_directive = (
             "\n\n[CONVERSATIONAL DEPARTURE & SCENE TRANSITION DIRECTIVE]:\n"
-            "The player has explicitly concluded the conversation and excused themselves or departed.\n"
+            "The player has explicitly concluded the conversation, stepped away, or departed.\n"
             "- In `outcome_narrative`, narrate only the immediate parting gesture or departure (e.g. nodding, thanking them, stepping away). "
-            "DO NOT reopen the conversation, do not renegotiate previously agreed deals, and do not repeat previous dialogue.\n"
-            "- In `next_narrative`, transition the scene forward to the new environment, surrounding atmosphere, or next destination."
+            "EVERY character present in the scene MUST STOP talking with the player! DO NOT have any NPCs continue or initiate conversation with the player this turn! DO NOT reopen the conversation!\n"
+            "- In `next_narrative`, transition the scene forward into open exploration, room atmosphere, or next destination. NO NPC should be talking to the player.\n"
+            "- In `choices`, generate OPEN EXPLORATION, room inspection, or travel choices. DO NOT generate active dialogue choices."
         )
 
     user_prompt = f"Context & Lore:\n{context_str}\n\nPlease generate the narration and next choices now based strictly on the frozen mechanics.{departure_directive}"

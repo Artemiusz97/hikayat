@@ -212,7 +212,7 @@ def classify_scene_npcs(
 
     active_dialogue_names = set()
 
-    old_primary_loc = get_primary_location_name(session.get("current_location", ""))
+    old_primary_loc = get_primary_location_name(old_primary) or old_primary or get_primary_location_name(session.get("current_location", ""))
 
     is_same_primary = bool(old_primary_loc and dest_primary and old_primary_loc.lower() == dest_primary.lower())
 
@@ -693,6 +693,12 @@ def extract_departed_npcs_from_narrative(narrative_text: str, candidate_npcs: li
                     has_narr_departure = True
                     break
 
+                # Pattern E: Farewell & movement away: "Catch you later!", "See you around!", "weaves through crowd", "pivots on heel", "stands alone"
+                if re.search(r'\b(?:catch\s+you\s+(?:later|around)|see\s+you\s+(?:later|around)|until\s+next\s+time)\b', narr_lower):
+                    if re.search(r'\b(?:pivots?|pivoted|turns?|turned)\s+on\s+(?:his|her|their)\s+heel|weaves?\s+through\s+the\s+(?:crowd|students)|heading\s+toward|strides?\s+away|walks?\s+away|stands?\s+alone\b', narr_lower):
+                        has_narr_departure = True
+                        break
+
 
 
         if has_narr_departure:
@@ -703,7 +709,25 @@ def extract_departed_npcs_from_narrative(narrative_text: str, candidate_npcs: li
 
 
 
-        # 2. Player action dismissal / farewell intent
+        # 2. Player action dismissal / farewell intent (Structured Intent Primacy)
+        is_dismissed = False
+        for a in (actions or []):
+            if isinstance(a, dict):
+                a_intent = a.get("intent") or (a.get("action") or {}).get("intent") if isinstance(a.get("action"), dict) else None
+                a_target = a.get("target_npc") or (a.get("action") or {}).get("target_npc") if isinstance(a.get("action"), dict) else None
+                if a_intent == "dialogue_exit":
+                    a_lbl = str(a.get("label") or "").lower()
+                    if (
+                        (a_target and game_engine.is_dialogue_partner(c_name, [a_target]))
+                        or c_lower in a_lbl
+                        or (len(first_name) >= 3 and first_name in a_lbl)
+                    ):
+                        is_dismissed = True
+                        break
+
+        if is_dismissed:
+            departed.append(c_name)
+            continue
 
         if action_combined:
 
@@ -741,7 +765,13 @@ def extract_departed_npcs_from_narrative(narrative_text: str, candidate_npcs: li
 
                         re.search(r'\b(?:see|seeing|sees|saw)\s+' + n_pat + r'\s+out\b', act_txt) or
 
-                        re.search(r'\b(?:send|sends|sending|sent|dismiss|dismisses|dismissed)\s+' + n_pat + r'(?:\s+(?:home|away|out))?\b', act_txt)):
+                        re.search(r'\b(?:send|sends|sending|sent|dismiss|dismisses|dismissed)\s+' + n_pat + r'(?:\s+(?:home|away|out))?\b', act_txt) or
+
+                        re.search(r'\b(?:thank|thanks|thanking)\s+(?:the\s+)?' + n_pat + r'\b.*?\b(?:excuse\s+(?:yourself|myself)|leave|depart|step\s+away|walk\s+away)\b', act_txt) or
+
+                        re.search(r'\b(?:excuse\s+(?:yourself|myself)|leave\s+(?:the\s+)?conversation|part\s+ways|walk\s+away|step\s+away)\b.*?\b' + n_pat + r'\b', act_txt) or
+
+                        (re.search(r'\b(?:thank|thanks)\s+(?:the\s+)?' + n_pat + r'\b', act_txt) and "excuse" in act_txt)):
 
                         is_dismissed = True
 

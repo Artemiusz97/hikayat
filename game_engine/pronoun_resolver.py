@@ -255,45 +255,63 @@ def tag_narrative_pronouns(
         tagged_sentences = []
 
         for sentence in sentences:
-            # Check for actor name mentions in this sentence OUTSIDE quotes
-            # Text inside quotes is dialogue spoken to addressees/listeners, not narrative speaker attribution
-            quote_parts = re.split(r'("[^"]*"|[“][^”]*[”])', sentence)
-            nar_parts = [p for p in quote_parts if not ((p.startswith('"') and p.endswith('"')) or (p.startswith('“') and p.endswith('”')))]
-            sent_nar_text = " ".join(nar_parts)
+            # Identify quote spans in sentence to protect interior dialogue
+            quote_spans = []
+            for qm in re.finditer(r'("[^"]*"|[“][^”]*[”])', sentence):
+                quote_spans.append((qm.start(), qm.end()))
 
+            def _in_quotes(pos: int) -> bool:
+                return any(qs <= pos < qe for qs, qe in quote_spans)
+
+            # Collect narrative actor mention events and pronoun events strictly in sentence order
+            events = []
             for act, pat in actor_patterns:
-                if pat.search(sent_nar_text):
-                    if act.get("gender") == "female":
-                        current_female = act
-                    elif act.get("gender") == "male":
-                        current_male = act
+                for m in pat.finditer(sentence):
+                    if not _in_quotes(m.start()):
+                        events.append((m.start(), m.end(), "actor", act, m.group(0)))
 
-            # Replace pronouns in this sentence
-            def _replace_pronoun(m: re.Match) -> str:
-                word = m.group(1)
-                w_low = word.lower()
-                target_actor = None
+            for m in PRONOUN_REGEX.finditer(sentence):
+                if not _in_quotes(m.start()):
+                    events.append((m.start(), m.end(), "pronoun", None, m.group(0)))
 
-                if w_low in FEMININE_PRONOUNS:
-                    target_actor = current_female
-                elif w_low in MASCULINE_PRONOUNS:
-                    target_actor = current_male
+            events.sort(key=lambda x: x[0])
 
-                # If sentence addresses the player in 2nd person ("you/your"), third-person pronouns
-                # in speech attribution or perspective cannot refer to the player
-                if target_actor and target_actor.get("is_player"):
-                    if re.search(r'\b(?:you|your|yours|yourself)\b', sentence, re.I):
+            # Left-to-right sequential discourse attribution:
+            # Pronouns directly following an actor reference that actor immediately,
+            # avoiding forward-overwriting by characters mentioned later in the sentence.
+            out_parts = []
+            last_idx = 0
+            has_2nd_person = bool(re.search(r'\b(?:you|your|yours|yourself)\b', sentence, re.I))
+
+            for start, end, ev_type, data, tok_text in events:
+                if start < last_idx:
+                    continue
+                out_parts.append(sentence[last_idx:start])
+
+                if ev_type == "actor":
+                    if data.get("gender") == "female":
+                        current_female = data
+                    elif data.get("gender") == "male":
+                        current_male = data
+                    out_parts.append(tok_text)
+                elif ev_type == "pronoun":
+                    w_low = tok_text.lower()
+                    target_actor = current_female if w_low in FEMININE_PRONOUNS else current_male
+
+                    if target_actor and target_actor.get("is_player") and has_2nd_person:
                         alt_cands = [a for a in actors if a.get("gender") == target_actor.get("gender") and not a.get("is_player")]
                         target_actor = alt_cands[0] if alt_cands else None
 
-                if target_actor and target_actor.get("name"):
-                    role_attr = f' role="{target_actor["role"]}"' if target_actor.get("role") else ""
-                    return f'<ref char="{target_actor["name"]}"{role_attr}>{word}</ref>'
+                    if target_actor and target_actor.get("name"):
+                        role_attr = f' role="{target_actor["role"]}"' if target_actor.get("role") else ""
+                        out_parts.append(f'<ref char="{target_actor["name"]}"{role_attr}>{tok_text}</ref>')
+                    else:
+                        out_parts.append(tok_text)
 
-                return word
+                last_idx = end
 
-            tagged_sentence = PRONOUN_REGEX.sub(_replace_pronoun, sentence)
-            tagged_sentences.append(tagged_sentence)
+            out_parts.append(sentence[last_idx:])
+            tagged_sentences.append("".join(out_parts))
 
         resolved_paragraphs.append("".join(tagged_sentences))
 

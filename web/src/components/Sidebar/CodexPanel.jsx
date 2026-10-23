@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { 
   BookOpen, Users, Flag, Globe, Heart, Shield, 
-  Sparkles, Search, MessageCircle, MapPin, ChevronDown, ChevronRight, User, UserPlus, UserMinus,
+  Sparkles, Search, MessageCircle, MapPin, ChevronDown, ChevronRight, User, UserMinus,
   Crown, ShoppingBag, Swords, BedDouble, Lock, Scroll, Calendar, Clock
 } from 'lucide-react';
 import { StatusEffectBadge } from './CharacterSheet';
@@ -229,6 +229,13 @@ const CodexPanel = ({
   const [loreFilter, setLoreFilter] = useState('all'); // 'all' | 'commitments'
   const [companionBusy, setCompanionBusy] = useState(null);
   const [factionBusy, setFactionBusy] = useState(null);
+  const [debugToggleOverrides, setDebugToggleOverrides] = useState({});
+  const toggleDebugReveal = (npcKey, currentRevealed) => {
+    setDebugToggleOverrides(prev => ({
+      ...prev,
+      [npcKey]: !currentRevealed,
+    }));
+  };
   const [companionFeedback, setCompanionFeedback] = useState(null);
 
   useEffect(() => {
@@ -315,13 +322,54 @@ const CodexPanel = ({
   };
 
 
-  // Filter contacts
-  const filteredContacts = contacts.filter(c => {
+  // Build unified discovered characters list combining contacts and any discovered person entities
+  const knownCharacters = useMemo(() => {
+    const list = [...contacts];
+    const seen = new Set(list.map(c => (c.name || '').toLowerCase().trim()));
+
+    const personEntities = (lorebook.entities || []).filter(e => e.entity_type === 'person');
+    personEntities.forEach(p => {
+      const pName = (p.name || '').toLowerCase().trim();
+      const hasMet = Boolean(
+        p.is_discovered ||
+        p.relationship_score ||
+        p.affinity ||
+        p.is_contact ||
+        p.contact_added ||
+        p.last_in_person_ts
+      );
+      if (pName && !seen.has(pName) && hasMet) {
+        seen.add(pName);
+        list.push({
+          ...p,
+          id: p.id || p.npc_id || p.name,
+          relationship_score: p.relationship_score || p.affinity || 0,
+          basic_info: p.basic_info || {
+            role: p.role,
+            grade: p.grade,
+            club: p.club,
+            mannerisms: p.mannerisms,
+            description: p.description,
+            gender: p.gender,
+            race: p.race,
+            age: p.age,
+          },
+          appearance: p.appearance || {},
+        });
+      }
+    });
+    return list;
+  }, [contacts, lorebook.entities]);
+
+  // Filter known characters
+  const filteredContacts = knownCharacters.filter(c => {
     const q = searchQuery.toLowerCase();
     const name = (c.name || '').toLowerCase();
-    const role = (c.basic_info?.role || c.basic_info?.occupation || '').toLowerCase();
-    const faction = (c.basic_info?.faction || '').toLowerCase();
-    return name.includes(q) || role.includes(q) || faction.includes(q);
+    const role = (c.basic_info?.role || c.basic_info?.occupation || c.role || '').toLowerCase();
+    const faction = (c.basic_info?.faction || c.faction || '').toLowerCase();
+    const grade = (c.basic_info?.grade || c.grade || '').toLowerCase();
+    const club = (c.basic_info?.club || c.club || '').toLowerCase();
+    return name.includes(q) || role.includes(q) || faction.includes(q) || grade.includes(q) || club.includes(q);
   });
 
   // Filter factions
@@ -332,13 +380,14 @@ const CodexPanel = ({
     return name.includes(q) || desc.includes(q);
   });
 
-  // Lorebook entities & commitments
-  const loreEntities = lorebook.entities || [];
+  // World lore entities (strictly non-person entries: world events, locations, factions, artifacts, history)
+  const loreEntities = (lorebook.entities || []).filter(e => e.entity_type !== 'person');
   const filteredLore = loreEntities.filter(e => {
     const q = searchQuery.toLowerCase();
     const name = (e.name || '').toLowerCase();
     const desc = (e.description || '').toLowerCase();
-    return name.includes(q) || desc.includes(q);
+    const loc = (e.location || '').toLowerCase();
+    return name.includes(q) || desc.includes(q) || loc.includes(q);
   });
 
   const filteredCommitments = (commitments || []).filter(c => {
@@ -360,12 +409,12 @@ const CodexPanel = ({
           </div>
           <span className="text-[10px] font-mono text-gray-400">
             {subTab === 'contacts'
-              ? t('codex.npcs_count', { count: contacts.length, defaultValue: `${contacts.length} NPCs` })
+              ? t('codex.npcs_count', { count: filteredContacts.length, defaultValue: `${filteredContacts.length} Characters` })
               : subTab === 'factions'
               ? t('codex.factions_count', { count: factions.length, defaultValue: `${factions.length} Factions` })
               : subTab === 'agenda'
               ? `${(commitments || []).length} Commitments`
-              : t('codex.lore_count', { count: loreEntities.length, defaultValue: `${loreEntities.length} Lore` })}
+              : t('codex.lore_count', { count: filteredLore.length, defaultValue: `${filteredLore.length} Lore` })}
           </span>
         </div>
 
@@ -380,7 +429,7 @@ const CodexPanel = ({
             }`}
           >
             <Users size={11} />
-            <span>{t('codex.contacts', 'Contacts')}</span>
+            <span>{t('codex.known_characters', 'Known Characters')}</span>
           </button>
 
           <button
@@ -456,12 +505,13 @@ const CodexPanel = ({
       ) : (
         <div className="space-y-3 flex-1 flex flex-col">
           
-          {/* 1. CONTACTS TAB */}
+          {/* 1. KNOWN CHARACTERS TAB */}
           {subTab === 'contacts' && (
             filteredContacts.length === 0 ? (
               <div className="text-center py-8 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
                 <Users size={24} className="mx-auto mb-1.5 opacity-40" />
-                <p className="text-xs">{t('codex.no_contacts', 'No matching contacts recorded yet.')}</p>
+                <p className="text-xs">{t('codex.no_characters', 'No characters discovered in the world yet.')}</p>
+                <p className="text-[10px] text-gray-500 mt-1">Explore locations and meet characters in the story to reveal them here.</p>
               </div>
             ) : (
               filteredContacts.map(npc => {
@@ -474,7 +524,8 @@ const CodexPanel = ({
                 const isMerchant = /merchant|shopkeeper|vendor|apothecary|peddler|trader/i.test(basic.role || basic.occupation || npc.name || '');
                 const isNonCombatScen = ['high_school_drama', 'high_school', 'slice_of_life', 'cozy_cafe'].includes((session?.scenario || '').toLowerCase());
                 const isDialoguePartner = Boolean(session?.dialogue_partner && (session.dialogue_partner.toLowerCase() === (npc.name || '').toLowerCase()));
-                const isDetailedUnlocked = score >= 100 || isInParty || isDialoguePartner;
+                const isDebugRevealed = (npc.id || npc.name) in debugToggleOverrides ? debugToggleOverrides[npc.id || npc.name] : Boolean(isDebugRevealed);
+                const isDetailedUnlocked = score >= 100 || isInParty || isDialoguePartner || isDebugRevealed || Boolean(npc.debug_profile);
                 const canRecruit = !isNonCombatScen && !isMerchant;
                 const traits = npc.unlocked_traits || [];
                 const rawDislikes = npc.dislikes || basic.dislikes || [];
@@ -591,41 +642,135 @@ const CodexPanel = ({
                       />
                     </div>
 
+                    {/* Discovered Character Summary: Basic Info & Appearance Badges */}
+                    <div className="pt-1.5 space-y-1.5 text-[11px]">
+                      {/* Basic Info Badges */}
+                      <div className="flex flex-wrap items-center gap-1">
+                        {(basic.role || basic.occupation || npc.role) && (
+                          <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-200 border border-fantasy-border/50 text-[10.5px]">
+                            Role: <strong className="text-gray-100">{basic.role || basic.occupation || npc.role}</strong>
+                          </span>
+                        )}
+                        {(basic.grade || npc.grade) && (
+                          <span className="px-1.5 py-0.5 rounded bg-purple-950/40 text-purple-300 border border-purple-800/40 text-[10.5px]">
+                            {formatTitle(basic.grade || npc.grade)}
+                          </span>
+                        )}
+                        {(basic.club || npc.club) && (
+                          <span className="px-1.5 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40 text-[10.5px]">
+                            Club: {formatTitle(basic.club || npc.club)}
+                          </span>
+                        )}
+                        {(basic.race || npc.race) && (
+                          <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
+                            {formatRace(basic.race || npc.race)}
+                          </span>
+                        )}
+                        {(basic.gender || npc.gender) && (
+                          <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
+                            {formatTitle(basic.gender || npc.gender)}
+                          </span>
+                        )}
+                        {(basic.age || npc.age) && (
+                          <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
+                            Age {basic.age || npc.age}
+                          </span>
+                        )}
+                        {(basic.mannerisms || npc.mannerisms) && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-950/30 text-amber-300/90 border border-amber-800/30 text-[10.5px] truncate max-w-full">
+                            🎭 {basic.mannerisms || npc.mannerisms}
+                          </span>
+                        )}
+                        {(basic.location || npc.location) && (
+                          <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-400 border border-fantasy-border/30 text-[10.5px] flex items-center gap-1">
+                            <MapPin size={9} className="text-fantasy-accent" />
+                            <span>{basic.location || npc.location}</span>
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Appearance Summary Line */}
+                      {(() => {
+                        const eyeColor = appearance.eye_color || appearance.eyes;
+                        const hairColor = appearance.hair_color;
+                        const stature = appearance.stature || appearance.height;
+                        const physique = appearance.physique;
+                        const coatColor = appearance.coat_color || appearance.fur_color || appearance.scale_color || appearance.skin_color;
+                        const outfitStyle = appearance.outfit_style || appearance.clothing;
+                        const hasAnyApp = Boolean(eyeColor || hairColor || stature || physique || coatColor || outfitStyle);
+                        if (!hasAnyApp) return null;
+                        return (
+                          <div className="text-[10.5px] text-gray-400 bg-black/30 p-1.5 rounded border border-fantasy-border/30 flex flex-wrap gap-x-2 gap-y-0.5">
+                            {(stature || physique) && <span>📐 <strong>Build:</strong> {[stature, physique].filter(Boolean).map(formatTitle).join(' • ')}</span>}
+                            {eyeColor && <span>👁️ <strong>Eyes:</strong> {formatTitle(eyeColor)}</span>}
+                            {hairColor && <span>💇 <strong>Hair:</strong> {formatTitle(hairColor)}</span>}
+                            {coatColor && <span>✨ <strong>Skin/Coat:</strong> {formatTitle(coatColor)}</span>}
+                            {outfitStyle && <span>👔 <strong>Outfit:</strong> {formatTitle(outfitStyle)}</span>}
+                            {isNsfwScenario && (isMale ? appearance.penis_size : appearance.breast_size) && (
+                              <span className="text-pink-400/90 font-medium">
+                                🔞 {isMale ? `Size: ${appearance.penis_size}` : `Bust: ${appearance.breast_size}`}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {/* View Full Profile & Debug Action Buttons */}
+                      <div className="flex items-center justify-between pt-1 border-t border-fantasy-border/30 gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedNpc(isExpanded ? null : (npc.id || npc.name));
+                          }}
+                          className="flex items-center gap-1.5 py-1 px-2.5 rounded text-[11px] font-bold border bg-fantasy-accent/10 hover:bg-fantasy-accent/20 border-fantasy-accent/40 text-fantasy-accent transition-all cursor-pointer select-none"
+                        >
+                          {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                          <span>{isExpanded ? t('codex.view_summary', 'Summary View') : t('codex.view_full_profile', 'View Full Profile')}</span>
+                        </button>
+                        {isDebugRevealed && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-950/80 text-purple-300 border border-purple-700/60 font-mono">
+                            {t('codex.debug_revealed_badge', 'DEBUG: Full Profile Revealed')}
+                          </span>
+                        )}
+                        {npc.debug_profile && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleDebugReveal(npc.id || npc.name, isDebugRevealed);
+                            }}
+                            className="text-[10px] px-2 py-0.5 rounded border border-purple-800/40 bg-purple-950/40 text-purple-300 hover:bg-purple-900/50 transition-all font-mono cursor-pointer select-none"
+                          >
+                            {isDebugRevealed ? '🔒 Mask' : '🔓 ' + t('codex.debug_reveal', 'Debug Reveal')}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
                     {/* Expanded Details */}
                     {isExpanded && (
                       <div className="space-y-3 pt-2.5 border-t border-fantasy-border/40 text-xs text-gray-300">
                         
-                        {/* Companion Recruit / Dismiss Action */}
-                        <div className="flex items-center justify-between bg-black/40 p-2.5 rounded-lg border border-fantasy-border/40">
-                          <span className="text-xs text-gray-300">
-                            {isInParty
-                              ? t('codex.in_party_desc', 'Currently traveling in your party.')
-                              : isNonCombatScen
-                                ? t('codex.non_combat_recruit_desc', 'Party companion recruitment is disabled in non-combat scenarios.')
-                                : isMerchant
-                                  ? t('codex.merchant_recruit_desc', 'Merchants cannot be recruited into your party.')
-                                  : score >= 100
-                                    ? t('codex.can_recruit_desc', 'Friendly standing reached! Ready to join party freely.')
-                                    : t('codex.recruit_gold_desc', 'Recruitable via gold contract or higher affinity.')}
-                          </span>
-                          {(isInParty || canRecruit) && (
+                        {/* Companion In-Party Status & Dismiss Action (Recruitment only occurs via story narrative/dialogue choices) */}
+                        {isInParty && (
+                          <div className="flex items-center justify-between bg-black/40 p-2.5 rounded-lg border border-fantasy-border/40">
+                            <span className="text-xs text-gray-300">
+                              {t('codex.in_party_desc', 'Currently traveling in your party.')}
+                            </span>
                             <button
                               disabled={companionBusy === npc.name}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleToggleCompanion(npc.name, isInParty);
+                                handleToggleCompanion(npc.name, true);
                               }}
-                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold border transition-all shrink-0 ${
-                                isInParty
-                                  ? 'bg-red-950/50 border-red-800/60 text-red-300 hover:bg-red-900/60'
-                                  : 'bg-emerald-950/50 border-emerald-700/60 text-emerald-300 hover:bg-emerald-900/60'
-                              }`}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold border transition-all shrink-0 bg-red-950/50 border-red-800/60 text-red-300 hover:bg-red-900/60 cursor-pointer"
                             >
-                              {isInParty ? <UserMinus size={13} /> : <UserPlus size={13} />}
-                              <span>{companionBusy === npc.name ? '...' : (isInParty ? t('codex.dismiss', 'Dismiss') : t('codex.recruit', 'Recruit'))}</span>
+                              <UserMinus size={13} />
+                              <span>{companionBusy === npc.name ? '...' : t('codex.dismiss', 'Dismiss')}</span>
                             </button>
-                          )}
-                        </div>
+                          </div>
+                        )}
 
                         {!isDetailedUnlocked ? (
                           <div className="p-4 text-center border border-dashed border-fantasy-border/40 rounded-md bg-black/40 space-y-1">
@@ -1044,7 +1189,7 @@ const CodexPanel = ({
                                       <span className="text-gray-300">
                                         💔 {romData.ex_partners.map(p => typeof p === 'object' && p.locked ? p.message : formatPersonEntity(p)).filter(Boolean).join(', ')}
                                       </span>
-                                    ) : (romData.revealed || infoLevel >= 2 || npc.debug_revealed) ? (
+                                    ) : (romData.revealed || infoLevel >= 2 || isDebugRevealed) ? (
                                       <span className="text-gray-400 italic">None (No prior romantic partners)</span>
                                     ) : (
                                       <span className="text-gray-500 italic">🔒 Locked (Requires Info Level 2+)</span>
@@ -1091,7 +1236,7 @@ const CodexPanel = ({
 
                               {/* Footer Disclosure Level */}
                               <div className="text-[11px] text-gray-500 font-mono pt-1.5 border-t border-fantasy-border/20">
-                                Information Disclosure Level: {infoLevel}/3 • Social Graph & Lineage Dossier{npc.debug_revealed ? ' • [🛠️ DEBUG: Revealed]' : ''}
+                                Information Disclosure Level: {infoLevel}/3 • Social Graph & Lineage Dossier{isDebugRevealed ? ' • [🛠️ DEBUG: Revealed]' : ''}
                               </div>
                             </div>
                           );
@@ -1109,12 +1254,12 @@ const CodexPanel = ({
                           const bTitle = bSize.charAt(0).toUpperCase() + bSize.slice(1);
                           const pSize = (appearance.penis_size || 'Average');
                           const pTitle = pSize.charAt(0).toUpperCase() + pSize.slice(1);
-                          const sizeDisplay = isMale ? ((infoLevel >= 3 || npc.debug_revealed) ? pTitle : 'Unknown') : bTitle;
+                          const sizeDisplay = isMale ? ((infoLevel >= 3 || isDebugRevealed) ? pTitle : 'Unknown') : bTitle;
 
-                          const iExpDisp = (appearance.experience && appearance.experience.toLowerCase() !== 'unknown') ? appearance.experience : (infoLevel >= 3 || npc.debug_revealed ? (appearance.intercourse_experience === 'virgin' ? 'Virgin' : 'Non-Virgin') : 'Unknown');
-                          const oExpDisp = (infoLevel >= 3 || npc.debug_revealed) ? (appearance.oral_experience || 'Inexperienced') : 'Unknown';
-                          const mExpDisp = (infoLevel >= 3 || npc.debug_revealed) ? (appearance.manual_experience || 'Inexperienced') : 'Unknown';
-                          const aExpDisp = (infoLevel >= 3 || npc.debug_revealed) ? (appearance.anal_experience || 'Inexperienced') : 'Unknown';
+                          const iExpDisp = (appearance.experience && appearance.experience.toLowerCase() !== 'unknown') ? appearance.experience : (infoLevel >= 3 || isDebugRevealed ? (appearance.intercourse_experience === 'virgin' ? 'Virgin' : 'Non-Virgin') : 'Unknown');
+                          const oExpDisp = (infoLevel >= 3 || isDebugRevealed) ? (appearance.oral_experience || 'Inexperienced') : 'Unknown';
+                          const mExpDisp = (infoLevel >= 3 || isDebugRevealed) ? (appearance.manual_experience || 'Inexperienced') : 'Unknown';
+                          const aExpDisp = (infoLevel >= 3 || isDebugRevealed) ? (appearance.anal_experience || 'Inexperienced') : 'Unknown';
 
                           const underObj = typeof appearance.undergarments === 'object' && appearance.undergarments !== null ? appearance.undergarments : {};
                           const rawBra = underObj.bra || appearance.bra || (typeof appearance.undergarments === 'string' && appearance.undergarments.includes('Bra:') ? appearance.undergarments.split('•')[0]?.replace('Bra:', '').trim() : '');
@@ -1122,7 +1267,7 @@ const CodexPanel = ({
                           const braVal = rawBra ? rawBra.replace(/\bNude\s*\/\s*Beige\b/gi, 'Beige / Skin-Tone') : '';
                           const undVal = rawUnd ? rawUnd.replace(/\bNude\s*\/\s*Beige\b/gi, 'Beige / Skin-Tone') : '';
 
-                          const isHistoryUnlocked = infoLevel >= 2 || npc.intimate_revealed || npc.history_revealed || npc.debug_revealed;
+                          const isHistoryUnlocked = infoLevel >= 2 || npc.intimate_revealed || npc.history_revealed || isDebugRevealed;
                           const hasHistoryEntries = Boolean(npc.past_intimate_history || (npc.past_intimate_entries && npc.past_intimate_entries.length > 0));
                           const ROMANTIC_KEYWORDS = [
                             'kiss', 'confess', 'date', 'intercourse', 'oral', 'manual', 'anal', 'virgin',
@@ -1178,9 +1323,9 @@ const CodexPanel = ({
                                   renderBulletPoints(intSec.dynamic)
                                 ) : (
                                   <div className="space-y-1 text-gray-300 leading-relaxed">
-                                    <div>• <strong className="text-gray-100">Demeanor</strong>: {(infoLevel >= 3 || npc.debug_revealed) && appearance.intimate_demeanor ? appearance.intimate_demeanor : <span className="text-gray-500 italic">Unknown</span>}</div>
-                                    <div>• <strong className="text-gray-100">Dynamic</strong>: {(infoLevel >= 3 || npc.debug_revealed) && appearance.intimate_dynamic ? appearance.intimate_dynamic : <span className="text-gray-500 italic">Unknown</span>}</div>
-                                    <div>• <strong className="text-gray-100">Openness</strong>: {(infoLevel >= 3 || npc.debug_revealed) && (appearance.erotic_openness || appearance.openness) ? (appearance.erotic_openness || appearance.openness) : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                    <div>• <strong className="text-gray-100">Demeanor</strong>: {(infoLevel >= 3 || isDebugRevealed) && appearance.intimate_demeanor ? appearance.intimate_demeanor : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                    <div>• <strong className="text-gray-100">Dynamic</strong>: {(infoLevel >= 3 || isDebugRevealed) && appearance.intimate_dynamic ? appearance.intimate_dynamic : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                    <div>• <strong className="text-gray-100">Openness</strong>: {(infoLevel >= 3 || isDebugRevealed) && (appearance.erotic_openness || appearance.openness) ? (appearance.erotic_openness || appearance.openness) : <span className="text-gray-500 italic">Unknown</span>}</div>
                                   </div>
                                 )}
                               </div>
@@ -1195,9 +1340,9 @@ const CodexPanel = ({
                                 ) : (
                                   <div className="space-y-1 text-gray-300 leading-relaxed">
                                     {!isMale && (
-                                      <div>• <strong className="text-gray-100">Bra</strong>: {(infoLevel >= 3 || npc.debug_revealed) && braVal ? braVal : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                      <div>• <strong className="text-gray-100">Bra</strong>: {(infoLevel >= 3 || isDebugRevealed) && braVal ? braVal : <span className="text-gray-500 italic">Unknown</span>}</div>
                                     )}
-                                    <div>• <strong className="text-gray-100">Underwear</strong>: {(infoLevel >= 3 || npc.debug_revealed) && undVal ? undVal : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                    <div>• <strong className="text-gray-100">Underwear</strong>: {(infoLevel >= 3 || isDebugRevealed) && undVal ? undVal : <span className="text-gray-500 italic">Unknown</span>}</div>
                                   </div>
                                 )}
                               </div>
@@ -1211,7 +1356,7 @@ const CodexPanel = ({
                                   renderBulletPoints(intSec.sensitive_spots || intSec.sensitivities.filter(s => s.toLowerCase().includes('sensitive spot')))
                                 ) : (
                                   <div className="space-y-1 text-gray-300 leading-relaxed">
-                                    <div>• <strong className="text-gray-100">Sensitive Spots</strong>: {(infoLevel >= 3 || npc.debug_revealed) && appearance.sensitive_spots ? appearance.sensitive_spots : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                    <div>• <strong className="text-gray-100">Sensitive Spots</strong>: {(infoLevel >= 3 || isDebugRevealed) && appearance.sensitive_spots ? appearance.sensitive_spots : <span className="text-gray-500 italic">Unknown</span>}</div>
                                   </div>
                                 )}
                               </div>
@@ -1225,8 +1370,8 @@ const CodexPanel = ({
                                   renderBulletPoints(intSec.desires_and_turn_offs || intSec.sensitivities.filter(s => !s.toLowerCase().includes('sensitive spot')))
                                 ) : (
                                   <div className="space-y-1 text-gray-300 leading-relaxed">
-                                    <div>• <strong className="text-gray-100">Desires & Kinks</strong>: {(infoLevel >= 3 || npc.debug_revealed) && (appearance.desires_and_kinks || appearance.turn_ons) ? (Array.isArray(appearance.desires_and_kinks || appearance.turn_ons) ? (appearance.desires_and_kinks || appearance.turn_ons).join(', ') : (appearance.desires_and_kinks || appearance.turn_ons)) : <span className="text-gray-500 italic">Unknown</span>}</div>
-                                    <div>• <strong className="text-red-300">Turn-Offs</strong>: {(infoLevel >= 3 || npc.debug_revealed) && appearance.turn_offs ? (Array.isArray(appearance.turn_offs) ? appearance.turn_offs.join(', ') : appearance.turn_offs) : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                    <div>• <strong className="text-gray-100">Desires & Kinks</strong>: {(infoLevel >= 3 || isDebugRevealed) && (appearance.desires_and_kinks || appearance.turn_ons) ? (Array.isArray(appearance.desires_and_kinks || appearance.turn_ons) ? (appearance.desires_and_kinks || appearance.turn_ons).join(', ') : (appearance.desires_and_kinks || appearance.turn_ons)) : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                    <div>• <strong className="text-red-300">Turn-Offs</strong>: {(infoLevel >= 3 || isDebugRevealed) && appearance.turn_offs ? (Array.isArray(appearance.turn_offs) ? appearance.turn_offs.join(', ') : appearance.turn_offs) : <span className="text-gray-500 italic">Unknown</span>}</div>
                                   </div>
                                 )}
                               </div>
@@ -1240,8 +1385,8 @@ const CodexPanel = ({
                                   renderBulletPoints(intSec.act_preferences)
                                 ) : (
                                   <div className="space-y-1 text-gray-300 leading-relaxed">
-                                    <div>• <strong className="text-gray-100">Preferred / Likes</strong>: {(infoLevel >= 3 || npc.debug_revealed) && (appearance.favorite_acts || appearance.act_likes) ? (Array.isArray(appearance.favorite_acts) ? appearance.favorite_acts.join(', ') : (appearance.act_likes || 'None')) : <span className="text-gray-500 italic">Unknown</span>}</div>
-                                    <div>• <strong className="text-gray-100">Aversions / Dislikes</strong>: {(infoLevel >= 3 || npc.debug_revealed) && (appearance.disliked_acts || appearance.act_dislikes) ? (Array.isArray(appearance.disliked_acts) ? appearance.disliked_acts.join(', ') : (appearance.act_dislikes || 'None')) : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                    <div>• <strong className="text-gray-100">Preferred / Likes</strong>: {(infoLevel >= 3 || isDebugRevealed) && (appearance.favorite_acts || appearance.act_likes) ? (Array.isArray(appearance.favorite_acts) ? appearance.favorite_acts.join(', ') : (appearance.act_likes || 'None')) : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                    <div>• <strong className="text-gray-100">Aversions / Dislikes</strong>: {(infoLevel >= 3 || isDebugRevealed) && (appearance.disliked_acts || appearance.act_dislikes) ? (Array.isArray(appearance.disliked_acts) ? appearance.disliked_acts.join(', ') : (appearance.act_dislikes || 'None')) : <span className="text-gray-500 italic">Unknown</span>}</div>
                                   </div>
                                 )}
                               </div>
@@ -1299,7 +1444,7 @@ const CodexPanel = ({
 
                               {/* Footer Disclosure Level */}
                               <div className="text-[11px] text-gray-500 font-mono pt-1.5 border-t border-fantasy-border/20">
-                                Information Disclosure Level: {infoLevel}/3 • Intimate Dossier{npc.debug_revealed ? ' • [🛠️ DEBUG: Revealed]' : ''}
+                                Information Disclosure Level: {infoLevel}/3 • Intimate Dossier{isDebugRevealed ? ' • [🛠️ DEBUG: Revealed]' : ''}
                               </div>
                             </div>
                           );
@@ -1560,71 +1705,14 @@ const CodexPanel = ({
           )}
 
 
-          {/* 3. LOREBOOK TAB */}
+          {/* 3. WORLD LORE TAB (strictly world events, places, factions, artifacts, history) */}
           {subTab === 'lore' && (
             <div className="space-y-2.5">
-              {/* Lore vs Commitments Filter Pills */}
-              <div className="flex gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setLoreFilter('all')}
-                  className={`flex-1 py-1 px-2 rounded text-[10px] font-bold uppercase tracking-wider border transition-colors ${
-                    loreFilter === 'all'
-                      ? 'bg-fantasy-accent/20 text-fantasy-accent border-fantasy-accent/50'
-                      : 'bg-black/40 text-gray-400 border-fantasy-border/50 hover:text-gray-200'
-                  }`}
-                >
-                  📖 {t('codex.world_lore', 'World Lore')} ({loreEntities.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLoreFilter('commitments')}
-                  className={`flex-1 py-1 px-2 rounded text-[10px] font-bold uppercase tracking-wider border transition-colors ${
-                    loreFilter === 'commitments'
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
-                      : 'bg-black/40 text-gray-400 border-fantasy-border/50 hover:text-gray-200'
-                  }`}
-                >
-                  🤝 {t('codex.commitments', 'Commitments')} ({(commitments || []).length})
-                </button>
-              </div>
-
-              {loreFilter === 'commitments' ? (
-                filteredCommitments.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
-                    <Shield size={24} className="mx-auto mb-1.5 opacity-40" />
-                    <p className="text-xs">{t('codex.no_commitments', 'No active promises, debts, secrets, or pacts recorded.')}</p>
-                  </div>
-                ) : (
-                  filteredCommitments.map((c, idx) => (
-                    <div
-                      key={c.id || idx}
-                      className="bg-black/50 border border-amber-700/40 rounded-lg p-3 space-y-1.5"
-                    >
-                      <div className="flex justify-between items-start gap-1">
-                        <h5 className="font-semibold text-xs text-amber-200">
-                          {c.title || c.npc_name || c.target_npc || 'Active Commitment'}
-                        </h5>
-                        <span className="text-[9px] px-1.5 py-0.2 bg-amber-950/60 text-amber-300 rounded uppercase font-bold border border-amber-700/50">
-                          {c.commitment_type || c.type || 'Promise'}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-gray-300 leading-snug">
-                        {c.description || c.summary || c.promise}
-                      </p>
-                      {(c.npc_name || c.status) && (
-                        <div className="flex items-center justify-between text-[10px] text-gray-400 pt-1 border-t border-fantasy-border/30">
-                          {c.npc_name && <span>👤 With: <strong>{c.npc_name}</strong></span>}
-                          {c.status && <span className="font-mono text-amber-300">{c.status}</span>}
-                        </div>
-                      )}
-                    </div>
-                  ))
-                )
-              ) : filteredLore.length === 0 ? (
+              {filteredLore.length === 0 ? (
                 <div className="text-center py-8 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
                   <Globe size={24} className="mx-auto mb-1.5 opacity-40" />
-                  <p className="text-xs">{t('codex.no_lore', 'No lore entries documented yet.')}</p>
+                  <p className="text-xs">{t('codex.no_lore', 'No world details documented yet.')}</p>
+                  <p className="text-[10px] text-gray-500 mt-1">Discover world events, locations, artifacts, and historical lore as your adventure unfolds.</p>
                 </div>
               ) : (
                 filteredLore.map((ent, idx) => (
@@ -1648,20 +1736,6 @@ const CodexPanel = ({
                         <MapPin size={10} />
                         <span>{ent.location}</span>
                       </span>
-                    )}
-
-                    {ent.entity_type === 'person' && (
-                      <div className="flex flex-wrap gap-2 text-[10px] text-gray-400 pt-1 border-t border-fantasy-border/30">
-                        {ent.role && <span>Role: <strong className="text-gray-300">{ent.role}</strong></span>}
-                        {ent.race && <span>Race: <strong className="text-gray-300">{formatRace(ent.race)}</strong></span>}
-                        {ent.gender && <span>Gender: <strong className="text-gray-300">{formatTitle(ent.gender)}</strong></span>}
-                        {ent.relationship_score !== undefined && ent.relationship_score !== null && (
-                          <span className="flex items-center gap-0.5 text-fantasy-accent">
-                            <Heart size={10} />
-                            <span>Affinity: <strong>{ent.relationship_score > 0 ? `+${ent.relationship_score}` : ent.relationship_score}</strong></span>
-                          </span>
-                        )}
-                      </div>
                     )}
                   </div>
                 ))

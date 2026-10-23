@@ -256,6 +256,80 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         except Exception:
             pass
 
+    # Modernized starting hook integrations: focal point, scheduled roles, physical state, starting prop, visual cues
+    hook_focal_point = hook_context.get("focal_point", "")
+    if hook_focal_point:
+        session["focal_point"] = hook_focal_point
+        try:
+            db.update_session(session["id"], focal_point=hook_focal_point)
+        except Exception as e:
+            log.warning("Failed updating focal_point in generate_opening_scene: %s", e)
+
+    scheduled_roles = hook_context.get("scheduled_roles", [])
+    if scheduled_roles:
+        try:
+            from game_engine.npcs.stage_manager import _spawn_canonical_role_npc_pre_turn
+            from mechanics.social.persona.actor_card import derive_initial_micro_blocking
+            curr_npcs = list(session.get("current_npcs") or [])
+            curr_npc_names = {game_engine._get_npc_name(n).lower() for n in curr_npcs if n}
+            for role_title in scheduled_roles:
+                if role_title:
+                    spawned = _spawn_canonical_role_npc_pre_turn(session, role_title, suggested_loc or "")
+                    if spawned and spawned.get("name"):
+                        sp_name = spawned["name"]
+                        if sp_name.lower() not in curr_npc_names:
+                            micro = derive_initial_micro_blocking(
+                                spawned,
+                                current_location=suggested_loc or "",
+                                time_slot=session.get("time_slot", "morning"),
+                                stage_role="room_bystander"
+                            )
+                            spawned["spot_and_posture"] = micro.get("spot_and_posture", "")
+                            spawned["active_prop"] = micro.get("active_prop", "")
+                            curr_npcs.append(spawned)
+                            curr_npc_names.add(sp_name.lower())
+            session["current_npcs"] = curr_npcs
+            db.update_session(session["id"], current_npcs_json=json.dumps(curr_npcs))
+        except Exception as e:
+            log.warning("Failed spawning scheduled_roles in generate_opening_scene: %s", e)
+
+    initial_phys = hook_context.get("initial_physical_state") or {}
+    if initial_phys and session.get("id"):
+        try:
+            from mechanics.social.physical_state import upsert_actor_physical_state
+            for p_entry in party:
+                p_char = p_entry[0] if isinstance(p_entry, (tuple, list)) else p_entry
+                if isinstance(p_char, dict) and p_char.get("name"):
+                    upsert_actor_physical_state(session["id"], p_char["name"], initial_phys)
+        except Exception as e:
+            log.warning("Failed applying initial_physical_state in generate_opening_scene: %s", e)
+
+    starting_prop = hook_context.get("starting_prop")
+    if starting_prop and party:
+        lead_uid = None
+        first_elem = party[0]
+        if isinstance(first_elem, (tuple, list)) and len(first_elem) >= 1 and isinstance(first_elem[0], dict):
+            lead_uid = first_elem[0].get("user_id")
+        elif isinstance(first_elem, (tuple, list)) and len(first_elem) >= 2 and isinstance(first_elem[1], int):
+            lead_uid = first_elem[1]
+        elif isinstance(first_elem, dict):
+            lead_uid = first_elem.get("user_id")
+        if lead_uid and isinstance(starting_prop, dict) and starting_prop.get("name"):
+            try:
+                db.add_item(
+                    user_id=lead_uid,
+                    name=starting_prop["name"],
+                    item_type=starting_prop.get("item_type", "tool"),
+                    effect=starting_prop.get("effect", ""),
+                    force=True
+                )
+            except Exception as e:
+                log.warning("Failed adding starting_prop to inventory in generate_opening_scene: %s", e)
+
+    visual_cues = hook_context.get("visual_cues", "")
+    if visual_cues:
+        session["opening_visual_cues"] = visual_cues
+
     # Deterministic Pre-Seeding: Lock spatial graph and starting world_node_id in 0ms BEFORE calling the LLM
     if session.get("id") and is_location_engine_enabled(scen_key):
         try:
@@ -341,12 +415,19 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
 
 
 
+    from mechanics.system.time_engine import get_time_of_day_phase, format_clock
+    phase_name, emoji, lighting_desc = get_time_of_day_phase(curr_min)
+    clock_str = format_clock(curr_min)
     temporal_mandate = (
         f"STRICT TEMPORAL CONSISTENCY MANDATE:\n"
-        f"- Active starting clock time: {curr_min // 60:02d}:{curr_min % 60:02d} (Day {curr_day}).\n"
-        f"- All narrative descriptions (lighting, sun position, ambient sounds, student and town activities) MUST STRICTLY conform to this active morning hour.\n"
-        f"- STRICTLY FORBIDDEN: Do NOT narrate sunset, dusk, evening, twilight, or night when the clock indicates morning! Describe morning sunlight, students arriving, homeroom preparations, or morning routines.\n\n"
+        f"- Active starting clock time: {clock_str} ({phase_name} {emoji}, Day {curr_day}).\n"
+        f"- Ambient lighting & atmosphere: {lighting_desc}.\n"
+        f"- All narrative descriptions (lighting, shadows, sky condition, ambient sounds, and activities) MUST STRICTLY conform to this active time ({clock_str} - {phase_name}).\n"
+        f"- Do NOT contradict the current clock time ({clock_str}) or lighting conditions!\n\n"
     )
+
+    focal_line = f"MICRO FOCAL POINT & STANCE: {hook_focal_point}\n" if hook_focal_point else ""
+    visual_line = f"SCENE ATMOSPHERE & VISUAL CUES: {visual_cues}\n" if visual_cues else ""
 
     if party and not session.get("lead_character_gender"):
         lead_c = party[0][0] if isinstance(party[0], (tuple, list)) else party[0]
@@ -361,6 +442,8 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         f"{temporal_mandate}"
         f"OPENING INCITING INCIDENT [{arch_title}]: {hook_text}\n"
         f"ARCHETYPE DIRECTIVE: {arch_directive}\n\n"
+        f"{focal_line}"
+        f"{visual_line}"
         f"{loc_anchor_line}"
         f"KNOWN WORLD:\n{game_engine._known_world_text(session['id'], suggested_loc or '')}\n\n"
         f"{time_prompt_block}\n"
@@ -453,17 +536,29 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
 
         # Detect any speaking NPCs to set initial dialogue partner
         try:
-            full_nar = str(res_deep.get("narrative") or "")
-            speaking_npcs = game_engine.extract_speaking_npcs_from_narrative(
-                full_nar, res_deep.get("npcs_present", []), party=party
-            )
-            if speaking_npcs:
-                res_deep["dialogue_partner"] = speaking_npcs[0]
-                res_deep["dialogue_partners"] = speaking_npcs
+            from config import DETERMINISTIC_CAST
+            if DETERMINISTIC_CAST:
+                audit_speaking = (res_deep.get("entity_audit") or {}).get("speaking_characters") or []
+                if audit_speaking:
+                    res_deep["dialogue_partner"] = audit_speaking[0]
+                    res_deep["dialogue_partners"] = audit_speaking
+            else:
+                full_nar = str(res_deep.get("narrative") or "")
+                speaking_npcs = game_engine.extract_speaking_npcs_from_narrative(
+                    full_nar, res_deep.get("npcs_present", []), party=party
+                )
+                if speaking_npcs:
+                    res_deep["dialogue_partner"] = speaking_npcs[0]
+                    res_deep["dialogue_partners"] = speaking_npcs
         except Exception as e:
-            log.warning("extract_speaking_npcs_from_narrative failed for opening scene: %s", e)
+            log.warning("dialogue partner extraction failed for opening scene: %s", e)
 
         init_default_physical_state(session["id"], party, scen_key, opening_scene=res_deep)
+
+        if hook_focal_point and not res_deep.get("focal_point"):
+            res_deep["focal_point"] = hook_focal_point
+        if visual_cues and not res_deep.get("visual_cues"):
+            res_deep["visual_cues"] = visual_cues
 
 
 
@@ -1027,7 +1122,7 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
     user_prompt = (
         f"KNOWN WORLD:\n{game_engine._known_world_text(session['id'], session.get('current_location', ''), current_npcs=session.get('current_npcs', []))}\n\n"
         f"CHARACTER SHEET:\n{game_engine._character_sheet_text(char, inventory)}\n\n"
-        f"RECENT HISTORY:\n{game_engine._history_text(session['history'], session_id=session.get('id'))}\n\n"
+        f"RECENT HISTORY:\n{game_engine._history_text(session.get('history', []), session_id=session.get('id'))}\n\n"
         f"Custom action: \"{action_text}\"\n\n"
         f"Decide governing Attribute, requirement (2-12), intent, sub_intent, and target_npc. If spell, set mp_cost.\n"
     )

@@ -32,15 +32,24 @@ class TestNamegenCultures(unittest.TestCase):
                 name = namegen.generate_person_name("modern", culture=alias, cross_culture_chance=0.0)
                 self.assertTrue(len(name.split()) >= 2)
 
-    def test_default_equal_weights_and_chance(self):
-        """Verifies default cross-cultural chance (0.25) and equal weights in namegen_data."""
+    def test_default_culture_weights_and_chance(self):
+        """Verifies default cross-cultural chance (0.25) and demographic weights:
+        - East Asian: 30%
+        - English + European: 55% (Anglo: 15%, Western & Central: 10%, Latin & Med: 10%, Nordic: 10%, Slavic: 10%)
+        - Rest of the World: 15%
+        """
         d = namegen._get_scenario_data("default", "person")
         self.assertAlmostEqual(d.get("cross_culture_chance"), 0.25)
         
         weights = d.get("culture_weights", {})
-        self.assertTrue(len(weights) >= 28)
-        weight_values = list(weights.values())
-        self.assertTrue(all(w == weight_values[0] for w in weight_values))
+        self.assertEqual(len(weights), 28)
+        self.assertAlmostEqual(sum(weights[c] for c in ("japanese", "korean", "chinese")), 30.0)
+        self.assertAlmostEqual(sum(weights[c] for c in ("english", "scottish", "irish")), 15.0)
+        self.assertAlmostEqual(sum(weights[c] for c in ("french", "german", "dutch")), 10.0)
+        self.assertAlmostEqual(sum(weights[c] for c in ("hispanic", "italian", "portuguese", "greek")), 10.0)
+        self.assertAlmostEqual(sum(weights[c] for c in ("swedish", "norwegian", "danish", "icelandic")), 10.0)
+        self.assertAlmostEqual(sum(weights[c] for c in ("polish", "russian", "ukrainian", "slavic")), 10.0)
+        self.assertAlmostEqual(sum(weights[c] for c in ("arabic", "indian", "vietnamese", "african", "turkish", "persian", "malay")), 15.0)
 
     def test_east_asian_surname_first_pure(self):
         """Pure East Asian and Vietnamese names must format as [Surname] [First Name]."""
@@ -273,6 +282,71 @@ class TestNamegenCultures(unittest.TestCase):
         self.assertEqual(first_to_canon.get("zhang"), "Zhang Wei")
         self.assertEqual(first_to_canon.get("danial"), "Danial bin Ismail")
         self.assertNotIn("bin", first_to_canon)
+
+
+    def test_high_school_drama_namegen_respects_cultural_pools(self):
+        """Verifies high_school_drama uses the 28 cultural pools with ~75% intra-cultural names."""
+        d = namegen._get_scenario_data("default", "person")
+        cultures = d.get("cultures") or {}
+        intra_cultural = 0
+        total = 200
+        for i in range(total):
+            name = namegen.generate_person_name("high_school_drama", seed=i * 19 + 7)
+            first, last = namegen.extract_first_and_last_name(name)
+            self.assertTrue(bool(first and last), f"Expected full name, got: {name}")
+            s_cult = namegen.infer_surname_culture(last)
+            if s_cult in cultures:
+                c_pool = cultures[s_cult]
+                all_firsts = set(c_pool.get("male", []) + c_pool.get("female", []))
+                if first in all_firsts:
+                    intra_cultural += 1
+
+        # Expected ~75% (150/200). Assert >= 125 (62.5%) to account for binomial variance.
+        self.assertGreaterEqual(intra_cultural, 125, f"Expected >= 125/200 intra-cultural names, got {intra_cultural}")
+
+    def test_generate_person_name_with_surname_cultural_matching(self):
+        """Verifies generate_person_name_with_surname inherits the surname's cultural pool."""
+        # Yamada (Japanese)
+        yamada_names = [namegen.generate_person_name_with_surname("Yamada", "high_school_drama", gender="male", seed=i) for i in range(20)]
+        for nm in yamada_names:
+            first, last = namegen.extract_first_and_last_name(nm)
+            self.assertEqual(last, "Yamada")
+            # If both Japanese, surname comes first: "Yamada Ren"
+            if namegen.infer_first_name_culture(first) == "japanese":
+                self.assertTrue(nm.startswith("Yamada "), f"Pure East Asian name should start with surname: {nm}")
+
+        # Kowalski (Polish female inflection)
+        kowalski_females = [namegen.generate_person_name_with_surname("Kowalski", "high_school_drama", gender="female", seed=i) for i in range(20)]
+        for nm in kowalski_females:
+            self.assertIn("Kowalska", nm, f"Polish female surname should inflect to Kowalska: {nm}")
+
+    def test_campus_directory_deterministic_cultural_roster(self):
+        """Verifies 50 campus directory characters have cultural names and proper sibling lineages."""
+        from mechanics.social.school_roster import generate_campus_directory
+        roster1 = generate_campus_directory(9999)
+        roster2 = generate_campus_directory(9999)
+
+        self.assertEqual(len(roster1), 50)
+        self.assertEqual([c["name"] for c in roster1], [c["name"] for c in roster2])
+
+        # Sibling lineages
+        siblings = [c for c in roster1 if c.get("sibling_name")]
+        self.assertEqual(len(siblings), 10)  # Exactly 5 pairs = 10 students
+
+        for sib in siblings:
+            partner = next(c for c in roster1 if c["name"] == sib["sibling_name"])
+            self.assertEqual(partner["sibling_name"], sib["name"])
+            s_sur = namegen.normalize_base_surname(namegen.extract_first_and_last_name(sib["name"])[1])
+            p_sur = namegen.normalize_base_surname(namegen.extract_first_and_last_name(partner["name"])[1])
+            self.assertEqual(s_sur.lower(), p_sur.lower())
+
+    def test_past_partner_name_cultural_generation(self):
+        """Verifies generate_past_partner_name generates full cultural names."""
+        from mechanics.social.persona.intimacy.generation import generate_past_partner_name
+        for i in range(10):
+            p_name = generate_past_partner_name("high_school_drama", partner_gender="female", hash_val=i * 29 + 7)
+            parts = p_name.split()
+            self.assertGreaterEqual(len(parts), 2, f"Expected at least first + last name, got: {p_name}")
 
 
 if __name__ == "__main__":

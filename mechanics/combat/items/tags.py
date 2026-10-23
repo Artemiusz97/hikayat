@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Dict, Any, List, Optional
+import copy
 
 HANDEDNESS = ["1H", "2H", "Versatile"]
 MASS = ["light", "medium", "heavy"]
@@ -75,7 +76,7 @@ def make_narrative_metadata(metadata: dict) -> dict:
     """
     if not isinstance(metadata, dict):
         return metadata
-    m = dict(metadata)
+    m = copy.deepcopy(metadata)
     m["is_narrative"] = True
     m["multiplier"] = 1.0
     m["crit_bonus"] = 0
@@ -90,11 +91,12 @@ def make_narrative_metadata(metadata: dict) -> dict:
 
     tags = m.get("tags")
     if isinstance(tags, dict):
-        traits = list(tags.get("special_traits", []))
+        tags_copy = copy.deepcopy(tags)
+        traits = list(tags_copy.get("special_traits", []))
         if "narrative" not in traits:
             traits.append("narrative")
-        tags["special_traits"] = traits
-        m["tags"] = tags
+        tags_copy["special_traits"] = traits
+        m["tags"] = tags_copy
     elif isinstance(tags, list):
         tag_list = list(tags)
         if "narrative" not in tag_list:

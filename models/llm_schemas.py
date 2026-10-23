@@ -20,7 +20,7 @@ _VALID_INTENTS = {
 _VALID_SUB_INTENTS = {
     "", "kiss", "foreplay", "manual_give", "manual_receive",
     "oral_give", "oral_receive", "oral_mutual", "intercourse",
-    "anal_give", "anal_receive", "aftercare", "lockpick", "pickpocket",
+    "anal_give", "anal_receive", "aftercare", "redress", "date", "lockpick", "pickpocket",
     "hide", "eavesdrop", "combat_attack", "combat_magic", "combat_tactic", "combat_flee"
 }
 
@@ -32,6 +32,16 @@ class Choice(BaseModel):
     intent: str = Field(default="general_action")
     sub_intent: Optional[str] = Field(default="")
     target_npc: Optional[str] = Field(default="")
+    target_node_id: Optional[str] = Field(default="")
+    target_location: Optional[str] = Field(default="")
+    ends_dialogue: bool = Field(default=False)
+    dismisses_npc: bool = Field(default=False)
+    quest_id: Optional[str] = Field(default="")
+    sub_obj_id: Optional[Any] = Field(default=None)
+    stage_index: Optional[int] = Field(default=0)
+    is_quest_action: bool = Field(default=False)
+    is_climax_action: bool = Field(default=False)
+    breakthrough_leveraged: bool = Field(default=False)
 
     @field_validator("stat", mode="before")
     @classmethod
@@ -57,7 +67,18 @@ class Choice(BaseModel):
         s = str(v).lower().strip()
         return s if s in _VALID_INTENTS else "general_action"
 
-    @field_validator("sub_intent", "target_npc", mode="before")
+    @field_validator("ends_dialogue", mode="before")
+    @classmethod
+    def coerce_ends_dialogue(cls, v: Any) -> bool:
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        if isinstance(v, str):
+            return v.strip().lower() in ("true", "1", "yes")
+        return False
+
+    @field_validator("sub_intent", "target_npc", "target_node_id", "target_location", mode="before")
     @classmethod
     def coerce_str_empty(cls, v: Any) -> str:
         if v is None:
@@ -232,6 +253,24 @@ class PhysicalUpdate(BaseModel):
             return [str(x).replace("\x00", "").strip()[:100] for x in v if str(x).strip()]
         return []
 
+class ClueDiscovery(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    clue_id: Optional[str] = Field(default="")
+    quest_id: Optional[str] = Field(default="")
+    lead_text: str = Field(default="", description="Concrete investigative evidence text")
+    title: Optional[str] = Field(default="Evidence Lead")
+    category: str = Field(default="physical", description="physical, testimonial, archival, digital, supernatural")
+    linked_npc: Optional[str] = Field(default="")
+    source_location: Optional[str] = Field(default="")
+    importance: str = Field(default="medium")
+
+class BreakthroughLeverage(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    title: str = Field(default="Breakthrough Leverage")
+    target_npc: str = Field(default="")
+    quest_id: str = Field(default="")
+    deduction_text: str = Field(default="")
+
 class SubQuestDefinition(BaseModel):
     id: int
     archetype: str
@@ -298,6 +337,24 @@ class QuestUpdate(BaseModel):
                 clean[k] = val
         return clean
 
+class CastEvent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    type: Literal["arrive", "depart", "engage"] = Field(..., description="arrive (walk into scene), depart (walk out of scene), or engage (walk up to player to initiate conversation)")
+    npc: str = Field(..., description="Exact NPC name")
+    reason: Optional[str] = Field(default="", description="Narrative rationale for the event")
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def coerce_type(cls, v: Any) -> str:
+        s = str(v or "").strip().lower()
+        return s if s in ("arrive", "depart", "engage") else "arrive"
+
+    @field_validator("npc", "reason", mode="before")
+    @classmethod
+    def coerce_str(cls, v: Any) -> str:
+        return str(v or "").strip()
+
+
 class DictAccessibleModel(BaseModel):
     """Base Pydantic model that provides dict-like subscripting and .get() for legacy consumer compatibility."""
     def __getitem__(self, item: str) -> Any:
@@ -360,6 +417,7 @@ class DeterministicTurnNarration(DictAccessibleModel):
     actor_poses: Dict[str, Union[CosmeticActorPose, Dict[str, Any]]] = Field(default_factory=dict)
     episodic_memory: Optional[str] = Field(default=None)
     image_prompt: Optional[str] = Field(default=None)
+    cast_events: List[CastEvent] = Field(default_factory=list)
 
     @field_validator("outcome_narrative", "next_narrative", "scene_title", mode="before")
     @classmethod
@@ -432,6 +490,7 @@ class DeterministicCombatNarration(DictAccessibleModel):
     actor_poses: Dict[str, Union[CosmeticActorPose, Dict[str, Any]]] = Field(default_factory=dict)
     episodic_memory: Optional[str] = Field(default=None)
     image_prompt: Optional[str] = Field(default=None)
+    cast_events: List[CastEvent] = Field(default_factory=list)
 
     @field_validator("outcome_narrative", "next_narrative", "scene_title", mode="before")
     @classmethod
@@ -468,6 +527,7 @@ class TurnOutcome(DictAccessibleModel):
     npcs_present: List[TrackerEntity] = Field(default_factory=list)
     npc_departures: List[str] = Field(default_factory=list)
     nearby_enemies: List[TrackerEntity] = Field(default_factory=list)
+    cast_events: List[CastEvent] = Field(default_factory=list)
     merchant_encounter: Optional[MerchantEncounter] = None
     faction_updates: List[FactionUpdate] = Field(default_factory=list)
     faction_promotion_result: Optional[str] = None
@@ -723,7 +783,16 @@ class ActionClassification(DictAccessibleModel):
     intent: str = Field(default="general_action")
     sub_intent: Optional[str] = Field(default="")
     target_npc: Optional[str] = Field(default="")
+    target_node_id: Optional[str] = Field(default="")
     target_location: Optional[str] = Field(default="")
+    ends_dialogue: bool = Field(default=False)
+    dismisses_npc: bool = Field(default=False)
+    quest_id: Optional[str] = Field(default="")
+    sub_obj_id: Optional[Any] = Field(default=None)
+    stage_index: Optional[int] = Field(default=0)
+    is_quest_action: bool = Field(default=False)
+    is_climax_action: bool = Field(default=False)
+    breakthrough_leveraged: bool = Field(default=False)
     combat_tactical_archetype: Optional[str] = Field(default="")
     gold_spent: int = Field(default=0, ge=0)
     spawns_npc_role: Optional[str] = Field(default="")
@@ -746,7 +815,18 @@ class ActionClassification(DictAccessibleModel):
         s = str(v).lower().strip()
         return s if s in _VALID_INTENTS else "general_action"
 
-    @field_validator("sub_intent", "target_npc", "target_location", "spawns_npc_role", mode="before")
+    @field_validator("ends_dialogue", mode="before")
+    @classmethod
+    def coerce_action_ends_dialogue(cls, v: Any) -> bool:
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        if isinstance(v, str):
+            return v.strip().lower() in ("true", "1", "yes")
+        return False
+
+    @field_validator("sub_intent", "target_npc", "target_node_id", "target_location", "spawns_npc_role", mode="before")
     @classmethod
     def coerce_str_empty(cls, v: Any) -> str:
         if v is None:
@@ -796,6 +876,7 @@ class ActionCommand(DictAccessibleModel):
     crit: bool = False
     roll: float = 100.0
     target_npc: Optional[str] = None
+    target_node_id: str = ""
     target_location: str = ""
     combat_target: Optional[str] = None
     combat_tactical_archetype: str = ""

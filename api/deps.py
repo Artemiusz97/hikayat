@@ -293,6 +293,14 @@ class ActionRequest(BaseModel):
     action: Optional[Dict[str, Any]] = None
     direct_choice: Optional[Dict[str, Any]] = None
     combat_target: Optional[str] = None
+    is_stealth: Optional[bool] = False
+    stance: Optional[str] = None
+
+
+class ToggleStealthRequest(BaseModel):
+    session_id: int
+    user_id: int
+    active: Optional[bool] = None
 
 
 class EndAdventureRequest(BaseModel):

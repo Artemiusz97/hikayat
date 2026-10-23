@@ -106,7 +106,17 @@ def _party_vitals_text(session: dict) -> str:
         if session.get("mode") != "sync" and uid == db.current_turn_user_id(session):
             marker = "▶️ "
         status = _parse_status_effects(char.get("status_effects"))
-        status_text = ", ".join(str(s.get("name", s)) if isinstance(s, dict) else str(s) for s in status if s) if status else "None"
+        status_items = [str(s.get("name", s)) if isinstance(s, dict) else str(s) for s in status if s]
+        st = session.get("stealth_state") or {}
+        has_vanished_buff = any("Hidden in Shadows" in s for s in status_items)
+        turn_order = session.get("turn_order", [])
+        if has_vanished_buff or (st.get("combat_vanished") and len(turn_order) <= 1):
+            status_items = [s for s in status_items if "Hidden in Shadows" not in s]
+            status_items.insert(0, "💨 Vanished")
+        elif st.get("is_hidden"):
+            meter = int(st.get("detection_meter", 0))
+            status_items.insert(0, f"🥷 Sneaking ({meter}%)")
+        status_text = ", ".join(status_items) if status_items else "None"
         lines.append(f"{marker}Lvl {char.get('level', 1)} **{char.get('name', 'Hero')}** — ❤️ {char.get('hp', 100)}/{char.get('max_hp', 100)} | "
                      f"💙 {char.get('mp', 50)}/{char.get('max_mp', 50)} | Status: {status_text}")
 

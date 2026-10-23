@@ -42,6 +42,16 @@ def get_active_companion_for_waypoint(session_id: int | dict, wp: dict) -> dict 
     if not sid:
         return None
     try:
+        # Phase 5 A18: Companion Assistance Privacy Gate
+        sess = session_id if isinstance(session_id, dict) else db.get_session(sid)
+        if isinstance(sess, dict):
+            cur_nid = sess.get("current_node_id") or ""
+            curr_node = db.get_world_node(sid, cur_nid) if cur_nid else None
+            if curr_node and curr_node.get("privacy_level") == "private":
+                intimate_active = bool(sess.get("_intimate_active") or sess.get("intimate_contact"))
+                if not intimate_active:
+                    return None
+
         party = list(db.get_session_party_npcs(sid) or [])
         temp_comps = list(db.get_temporary_companions(sid) or [])
         all_raw = party + temp_comps
@@ -118,17 +128,23 @@ def generate_quest_action_choices(
 
     quest_choices = []
 
-    # 1. Check if Story Quest is in Climax Ready state
-    story_quest, climax_loc = get_story_quest_climax_location(session_id)
+    # 1. Check if Story Quest is in Climax Ready state (or premature showdown)
+    story_quest, climax_loc = get_story_quest_climax_location(session_id, allow_premature=True)
     if story_quest and climax_loc and check_location_matches_waypoint(current_location, climax_loc):
         sq_title = story_quest.get("title", "Story Quest")
+        sub_objs = story_quest.get("sub_objectives", []) or []
+        is_premature = bool(sub_objs and not all(isinstance(so, dict) and so.get("completed") for so in sub_objs))
         stat = "CHA" if "high_school" in scen_key or "modern" in scen_key else ("INT" if "sci" in scen_key else "STR")
         req = 6
         if char and isinstance(char.get("stats"), dict):
             c_stat = int(char["stats"].get(stat, 5))
             req = max(4, min(10, c_stat))
+        if is_premature:
+            req += 4  # Phase 5 A11: +4 DC penalty for premature confrontation
 
-        if "high_school" in scen_key or "modern" in scen_key:
+        if is_premature:
+            climax_label = f"⚡ [Story Climax - Premature Showdown] Confront the threat for '{sq_title}' without full evidence ({stat})"
+        elif "high_school" in scen_key or "modern" in scen_key:
             climax_label = f"⚡ [Story Climax] Present your resolution plan for '{sq_title}' and coordinate the student body ({stat})"
         elif "cyberpunk" in scen_key or "scifi" in scen_key:
             climax_label = f"⚡ [Story Climax] Execute the final operation and secure '{sq_title}' ({stat})"
@@ -153,6 +169,7 @@ def generate_quest_action_choices(
             "stage_index": 99,
             "is_quest_action": True,
             "is_climax_action": True,
+            "is_premature_climax": is_premature,
             "contract_type": "climax"
         })
 

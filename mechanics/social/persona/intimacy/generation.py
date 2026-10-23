@@ -272,17 +272,18 @@ def generate_dynamic_intimate_experience(hash_val: int, openness: str = "moderat
     - Males: can give anal to females, and can give or receive anal with males.
     """
     o_low = str(openness or "moderate").lower()
-    mod = 0
-    if "prude" in o_low or "modest" in o_low:
-        mod = -5
+    if "prude" in o_low or "modest" in o_low or "chaste" in o_low:
+        exp_rate = 10  # 90% virgin
+        anal_rate = 3
     elif "shameless" in o_low or "lewd" in o_low:
-        mod = 20
+        exp_rate = 40  # 60% virgin
+        anal_rate = 20
     elif "bold" in o_low or "uninhibited" in o_low:
-        mod = 10
-    else:
-        mod = 0
-
-    exp_rate = max(0, min(100, 15 + mod))
+        exp_rate = 30  # 70% virgin
+        anal_rate = 12
+    else:  # moderate
+        exp_rate = 20  # 80% virgin
+        anal_rate = 7
 
     # 1. Intercourse Track
     roll_intercourse = hash_val % 100
@@ -315,7 +316,6 @@ def generate_dynamic_intimate_experience(hash_val: int, openness: str = "moderat
         manual_val = "inexperienced"
 
     # 4. Anal Intimacy Track
-    anal_rate = max(0, min(100, 8 + mod))
     roll_anal = (hash_val // 19) % 100
     if roll_anal < anal_rate:
         raw_g = str(gender or "").lower()
@@ -419,38 +419,13 @@ def generate_past_partner_role(scenario: str = "fantasy", hash_val: int = 0) -> 
         return "Former Classmate"
 
 def generate_past_partner_name(scenario: str = "fantasy", partner_gender: str = "male", hash_val: int = 0) -> str:
-    """Dynamically generates a past partner name from namegen_data according to scenario and gender."""
+    """Dynamically generates a past partner name from namegen according to scenario, gender, and cultural rules."""
     try:
-        from namegen import _get_scenario_data
-        data = _get_scenario_data(scenario, "person")
+        import namegen
+        return namegen.generate_person_name(scenario=scenario, gender=partner_gender, seed=hash_val if hash_val else None)
     except Exception:
-        data = {}
-
-    male_pool = data.get("male") or [
-        "Julian", "Marcus", "Leon", "Adrian", "Lucas", "Darius", "Ethan", "Cyrus",
-        "Alexander", "Cedric", "Damian", "Soren", "Felix", "Tristan", "Victor", "Gabriel"
-    ]
-    female_pool = data.get("female") or [
-        "Elena", "Seraphina", "Cassandra", "Valerie", "Vivian", "Chloe", "Camilla", "Iris",
-        "Morgan", "Hana", "Maya", "Lyra", "Giselle", "Natalia", "Astrid", "Evelyn"
-    ]
-    last_pool = data.get("last") or [
-        "Vance", "Reed", "Drake", "Cross", "Sterling", "Thorne", "Cole", "Black",
-        "Wright", "Finch", "Blackwood", "Mercer", "Ashwood", "Volkov", "Ward", "Hayes"
-    ]
-
-    is_female = ("female" in partner_gender.lower() or "woman" in partner_gender.lower() or "girl" in partner_gender.lower())
-    pool = female_pool if is_female else male_pool
-
-    first_idx = (hash_val * 37 + 11) % len(pool)
-    first = pool[first_idx]
-
-    surname_chance = data.get("surname_chance", 0.8)
-    if last_pool and ((hash_val * 13 + 7) % 100) < int(surname_chance * 100):
-        last_idx = (hash_val * 53 + 23) % len(last_pool)
-        last = last_pool[last_idx]
-        return f"{first} {last}"
-    return first
+        is_female = ("female" in partner_gender.lower() or "woman" in partner_gender.lower() or "girl" in partner_gender.lower())
+        return "Elena Vance" if is_female else "Julian Vance" 
 
 def generate_past_intimate_history(
     hash_val: int = 0,

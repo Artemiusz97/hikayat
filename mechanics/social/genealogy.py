@@ -671,6 +671,31 @@ def generate_relationship_status(
     desc_str = (str(contact.get("description", "")) + " " + str((contact.get("basic_info") or {}).get("description", ""))).lower()
     is_explicitly_single = "single" in desc_str or "unmarried" in desc_str or "unattached" in desc_str
 
+    # Openness-scaled romantic and intimate history rates
+    open_str = str(
+        app_data.get("erotic_openness")
+        or app_data.get("openness")
+        or contact.get("openness")
+        or (contact.get("basic_info") or {}).get("openness")
+        or "moderate"
+    ).lower()
+    if "prude" in open_str or "modest" in open_str or "chaste" in open_str:
+        curr_partner_rate = 8
+        ex_partner_rate = 10
+        affair_rate = 1
+    elif "shameless" in open_str or "lewd" in open_str:
+        curr_partner_rate = 35
+        ex_partner_rate = 40
+        affair_rate = 6
+    elif "bold" in open_str or "uninhibited" in open_str:
+        curr_partner_rate = 25
+        ex_partner_rate = 30
+        affair_rate = 4
+    else:  # moderate
+        curr_partner_rate = 15
+        ex_partner_rate = 20
+        affair_rate = 2
+
     if is_player_partner:
         player_name = resolve_player_character_name(contact, session_id=contact.get("session_id", 0))
         score = contact.get("relationship_score", 0)
@@ -682,8 +707,8 @@ def generate_relationship_status(
         }
         status = "In a Relationship"
     else:
-        # 2. Current Partner roll (15% chance, suppressed if player interest or explicitly single)
-        has_current_partner = (((abs(hash_val) * 29 + 11) % 100) < 15) and not is_player_interest and not is_explicitly_single
+        # 2. Current Partner roll (openness-scaled chance, suppressed if player interest or explicitly single)
+        has_current_partner = (((abs(hash_val) * 29 + 11) % 100) < curr_partner_rate) and not is_player_interest and not is_explicitly_single
         current_partner = None
         if has_current_partner:
             c_partner_first = get_deterministic_firstname(scenario, partner_gender, hash_val * 41 + 13)
@@ -696,8 +721,8 @@ def generate_relationship_status(
             }
         status = "In a Relationship" if current_partner else "Single"
 
-    # 3. Secret Affair roll (3% chance)
-    has_secret_affair = ((abs(hash_val) * 31 + 23) % 100) < 3
+    # 3. Secret Affair roll (openness-scaled chance)
+    has_secret_affair = ((abs(hash_val) * 31 + 23) % 100) < affair_rate
     secret_partner = None
     if has_secret_affair:
         s_partner_first = get_deterministic_firstname(scenario, partner_gender, hash_val * 53 + 7)
@@ -709,8 +734,8 @@ def generate_relationship_status(
             "relationship_type": "Secret Affair / Lover"
         }
 
-    # 4. Ex-Partners roll (15% chance, or guaranteed if past intimate history exists)
-    has_ex = ((abs(hash_val) * 37 + 19) % 100) < 15 or bool(past_partner_name)
+    # 4. Ex-Partners roll (openness-scaled chance, or guaranteed if past intimate history exists)
+    has_ex = ((abs(hash_val) * 37 + 19) % 100) < ex_partner_rate or bool(past_partner_name)
     ex_partners = []
     if past_partner_name:
         ex_partners.append({
@@ -1309,6 +1334,11 @@ def get_or_create_household(
         c_unique = contact.get("id") or contact.get("npc_id") or abs(hash(contact.get("name", "")))
         canonical_key = f"{clean_surname.lower()}_{session_id}_{c_unique}"
 
+    hh = db.get_household_by_key(session_id, canonical_key)
+    if hh:
+        _link_contact_to_household(session_id, contact, hh["id"])
+        return _hydrate_household_entity(hh, contact, scenario)
+
     child_race = _resolve_child_race(contact, session_id, scenario)
     child_appearance = contact.get("appearance") or {}
     household_seed = f"{session_id}_household_{clean_surname.lower()}_v3".encode("utf-8")
@@ -1804,7 +1834,9 @@ def ensure_contact_relations(
                             scen_key=scenario,
                             grade_override=fam_grade,
                             role_override=fam.get("occupation", ""),
-                            club_override=fam.get("club", "")
+                            club_override=fam.get("club", ""),
+                            gender=fam.get("gender", ""),
+                            relation_type=r_type
                         )
                         new_recs.append(rec)
                         existing_names.add(fam_name.lower())
@@ -1946,7 +1978,9 @@ def ensure_contact_relations(
                             scen_key=scenario,
                             grade_override=fam_grade,
                             role_override=fam.get("occupation", ""),
-                            club_override=fam.get("club", "")
+                            club_override=fam.get("club", ""),
+                            gender=fam.get("gender", ""),
+                            relation_type=r_type
                         )
                         new_recs.append(rec)
                         existing_names.add(fam_name.lower())

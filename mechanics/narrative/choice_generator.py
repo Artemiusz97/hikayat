@@ -187,7 +187,7 @@ def _get_class_ability(char: dict, scenario: str, enemy_name: str) -> tuple[str,
     )
     return stat, atype, tmpl.format(enemy=enemy_name)
 
-def generate_categorized_combat_actions(party: list, monster: dict, location: str = "area", scenario: str = "fantasy") -> dict:
+def generate_categorized_combat_actions(party: list, monster: dict, location: str = "area", scenario: str = "fantasy", session: Optional[dict] = None) -> dict:
     """
     Generates structured, categorized combat actions:
     - attacks: list of basic weapon / unarmed strikes using ACC - EVA %
@@ -518,6 +518,26 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
                 "action_category": "attack"
             })
 
+    # Flanking Backstab from Shadows
+    is_vanished = bool(
+        char.get("combat_vanished")
+        or (isinstance(session, dict) and session.get("stealth_state", {}).get("combat_vanished"))
+        or any("Hidden in Shadows" in str(s) for s in char.get("status_effects", []))
+    )
+    if is_vanished:
+        attacks.insert(0, {
+            "label": f"🗡️ Flanking Backstab / Critical Snipe ({min(100, hit_pct + 15)}% • AGI)",
+            "stat": "AGI",
+            "requirement": 0,
+            "hit_chance": min(100, hit_pct + 15),
+            "mp_cost": 0,
+            "choice_type": "MELEE_SLASHING_PIERCING",
+            "attack_type": "pierce",
+            "action_category": "attack",
+            "stance": "stealth",
+            "label_detail": "Strike from unseen angle: +50% surprise damage, 50% armor pierce, and high critical rate"
+        })
+
     # 2. MAGIC & SPELLS CATEGORY
     magic = []
     from mechanics.combat.spells import get_spell, get_starter_spells, format_spell_choice_label
@@ -624,6 +644,21 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
         "choice_type": "DEFENSIVE_GUARD",
         "action_category": "tactics"
     })
+
+    # AGI Tactic: Vanish into Shadows (only if not already vanished)
+    if not is_vanished:
+        dc_vanish = calculate_opposed_dc(p_agi if 'p_agi' in locals() else _get_stat_val(char, "AGI"), m_per, player_luk)
+        pct_vanish = _dc_to_pct(dc_vanish)
+        tactics.append({
+            "label": f"💨 Vanish into Shadows ({pct_vanish}% • AGI)",
+            "stat": "AGI",
+            "requirement": dc_vanish,
+            "hit_chance": pct_vanish,
+            "mp_cost": 0,
+            "choice_type": "STEALTH_VANISH",
+            "action_category": "tactics",
+            "label_detail": "Slip into shadows: sheds enemy aggro onto companions and primes Flanking Backstab (+50% dmg)"
+        })
 
     # 4. FLEE CATEGORY
     p_agi = _get_stat_val(char, "AGI")

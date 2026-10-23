@@ -270,6 +270,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         }
       }
 
+      onClose();
       await onEmbark({
         scenario,
         mode,
@@ -288,7 +289,6 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         penis_size: finalPSize,
         asset_texture: assetTexture,
       });
-      onClose();
     } catch (err) {
       setError(err.message || 'Embarkation failed');
     } finally {

@@ -57,21 +57,157 @@
     "starting_hooks": [
       {
         "archetype": "hub_launchpad",
-        "hook": "within a bleak, fortified enclave where weary sentinels drink watered ale and murmur grim warnings about the encroaching dark",
+        "starting_minute": 1050,
+        "hook": "at 05:30 PM within a bleak, fortified enclave where weary sentinels drink watered ale and murmur grim warnings about the encroaching dark",
         "suggested_location": "{session_kingdom} ➔ The Iron Bastion ➔ Barracks Hearth",
-        "directive": "Open Hub Exploration: Tense military haven, scarred veterans, grim bounty ledger, and cautious social choices."
+        "directive": "Open Hub Exploration: Tense military haven, scarred veterans, grim bounty ledger, and cautious social choices.",
+        "focal_point": "Huddled near the cracked stone hearth drinking watered ale with scarred sentinels before the twilight gates close",
+        "scheduled_roles": [
+          "Scarred Veteran",
+          "Bleak Quartermaster"
+        ],
+        "initial_physical_state": {
+          "posture": "sitting",
+          "posture_qualifier": "on a rough wooden bench by the hearth",
+          "holding": "iron cup of bitter ale",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Tarnished Silver Sigil",
+          "item_type": "tool",
+          "effect": "A blessed silver amulet that burns cold against the skin when undead or cursed blood draw near"
+        },
+        "visual_cues": "grim twilight seeping through narrow arrow-slits, guttering iron hearth fire, scarred armored sentinels, bleak gothic stone masonry"
+      },
+      {
+        "archetype": "hub_launchpad",
+        "starting_minute": 660,
+        "hook": "at 11:00 AM in the cobblestone square of a plague-shadowed cathedral town where beaked physicians burn sulfur incense and flagellants chant beneath iron gallows",
+        "suggested_location": "{session_kingdom} ➔ Gallows Plaza ➔ Chapel Steps",
+        "directive": "Open Hub Exploration: Gothic plague-town atmosphere, sulfur-choked air, desperate townsfolk, ominous bounty posts, and cautious exploration choices.",
+        "focal_point": "Standing on the bloodstained chapel steps watching silent plague doctors in beaked masks distribute tallow rations",
+        "scheduled_roles": [
+          "Beaked Plague Doctor",
+          "Weeping Penitent"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "on the worn chapel steps",
+          "holding": "brass incense censer",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Aromatic Censer of Dried Thyme",
+          "item_type": "tool",
+          "effect": "A small brass burner emitting pungent herbal smoke to mask charnel stench and repel airborne miasma"
+        },
+        "visual_cues": "pale sickly midday sun veiled by ash clouds, gallows on cobblestones, black-robed plague doctors, stone chapel gargoyles"
       },
       {
         "archetype": "in_media_res",
-        "hook": "in the muddy aftermath of a brutal ambush surrounded by burning barricades as shadows stalk the treeline",
+        "starting_minute": 1320,
+        "hook": "at 10:00 PM in the muddy aftermath of a brutal ambush surrounded by burning barricades as shadows stalk the treeline",
         "suggested_location": "{session_ancient_forest} ➔ Ashen Battlefield ➔ Muddy Trench",
-        "directive": "In Media Res: Visceral blood-soaked crisis, enemy closing in, wounded allies, and desperate survival choices."
+        "directive": "In Media Res: Visceral blood-soaked crisis, enemy closing in, wounded allies, and desperate survival choices.",
+        "focal_point": "Crawling through bloodstained mud behind burning wooden barricades as horned shadows stalk the tree line",
+        "scheduled_roles": [
+          "Dying Militia Soldier",
+          "Gothic Enforcer"
+        ],
+        "initial_physical_state": {
+          "posture": "crouching",
+          "posture_qualifier": "in the muddy trench",
+          "holding": "notched black iron dagger",
+          "stance": "Combat Ready",
+          "composure": "adrenaline_spiked",
+          "is_wet": 1
+        },
+        "starting_prop": {
+          "name": "Notched Black Iron Dagger",
+          "item_type": "tool",
+          "effect": "A wicked trench blade forged from meteorite iron that leaves necrotic black marks on monstrous flesh"
+        },
+        "visual_cues": "midnight darkness illuminated by burning wooden stakes, thick black mud, heavy fog, silhouetted monstrous shadows in woods"
+      },
+      {
+        "archetype": "in_media_res",
+        "starting_minute": 180,
+        "hook": "at 03:00 AM trapped in the belfry of a half-collapsed cathedral as a blood-red moon rises and leathery-winged gargoyle beasts smash through the gothic stained glass",
+        "suggested_location": "{session_ancient_forest} ➔ Ruined Cathedral Belfry ➔ Shattered Rose Window",
+        "directive": "In Media Res: Desperate high-altitude gothic siege, howling nocturnal predators, falling stained glass shards, and violent tactical choices.",
+        "focal_point": "Bracing against the cracked bronze cathedral bell as leathery wings buffet the narrow belfry arches",
+        "scheduled_roles": [
+          "Terrified Bell-Ringer"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "behind the cracked bronze bell",
+          "holding": "heavy iron bell-hammer",
+          "stance": "Combat Ready",
+          "composure": "tense",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Vial of Consecrated Blood",
+          "item_type": "tool",
+          "effect": "A stoppered glass vial of blessed martyr blood capable of burning occult abominations like boiling acid"
+        },
+        "visual_cues": "blood-red moon hanging in stormy sky, cracked colossal bronze bell, lunging gothic gargoyle beast, stone debris falling"
       },
       {
         "archetype": "delve_threshold",
-        "hook": "before the yawning maw of a desecrated crypt as cold fog spills across mossy gravestones and crows scatter",
+        "starting_minute": 1140,
+        "hook": "at 07:00 PM before the yawning maw of a desecrated crypt as cold fog spills across mossy gravestones and crows scatter",
         "suggested_location": "{session_caves} ➔ Desecrated Crypt ➔ Iron Sarcophagus Threshold",
-        "directive": "Delve Threshold: Dread expedition threshold, occult ward examination, lighting torches, and steeling resolve."
+        "directive": "Delve Threshold: Dread expedition threshold, occult ward examination, lighting torches, and steeling resolve.",
+        "focal_point": "Standing before the yawning maw of the mossy crypt as freezing subterranean mist spills across gravestones",
+        "scheduled_roles": [
+          "Grave Robber",
+          "Tortured Ghost"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "at the crypt entrance arch",
+          "holding": "cold iron crowbar",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Cold Iron Crowbar",
+          "item_type": "tool",
+          "effect": "An iron prybar inscribed with wards that can pry heavy crypt seals without triggering occult curses"
+        },
+        "visual_cues": "dusk cold blue fog, cracked tilted gravestones, crows scattering from dead trees, yawning dark stone staircase into crypt"
+      },
+      {
+        "archetype": "delve_threshold",
+        "starting_minute": 1260,
+        "hook": "at 09:00 PM on the rotting wooden boardwalk above a stagnant black bog before a circle of bleached ribcage bones marking a witch-coven threshold",
+        "suggested_location": "{session_swamp} ➔ Witch-Hollow Bog ➔ Bone Cairn Threshold",
+        "directive": "Delve Threshold: Cursed mire exploration, testing unstable boardwalks, deciphering witch marks, and entering the sunken hollow.",
+        "focal_point": "Kneeling at the threshold of a half-submerged wooden hut built from twisted willow roots in stagnant black water",
+        "scheduled_roles": [
+          "Bog Hermit"
+        ],
+        "initial_physical_state": {
+          "posture": "kneeling",
+          "posture_qualifier": "on the damp mossy bog planks",
+          "holding": "bone talisman on leather cord",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 1
+        },
+        "starting_prop": {
+          "name": "Bone Witch-Talisman",
+          "item_type": "tool",
+          "effect": "A fetish carved from raven bone that pulses when traversing invisible curse boundaries or illusion wards"
+        },
+        "visual_cues": "moonlit stagnant swamp water, gnarled willow roots, eerie green will-o'-the-wisps, skulls mounted on wooden poles"
       }
     ]
   },
@@ -153,7 +289,7 @@
       "nsfw",
       "non_combat"
     ],
-    "description": "A vibrant modern high school landscape where social status, academic pressure, and explicit romance intertwine in a thriving anthropomorphic student body. Furry and beastfolk students (cat, fox, wolf, rabbit, and bear sub-races) navigate campus life, clubs, and passionate relationships.",
+    "description": "A vibrant modern high school landscape where social status, academic pressure, and explicit romance intertwine in a thriving anthropomorphic student body. A diverse anthropomorphic student body spanning felines (cats, tigers, cheetahs, lions), canines (wolves, foxes, fennecs), avians/birds, bears, reptiles, and lagomorphs/rodents navigate campus life, clubs, and passionate relationships.",
     "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose focusing on emotional intensity, social drama, personal growth, and passionate, explicit romantic encounters in an academic setting. Use explicit sexual terms, sexual acts & vulgar words. Avoid euphemisms and coy phrasing like 'length,' 'member,' or 'grow', use direct and explicit anatomical and sexual terms instead (e.g., dick, cock, pussy, tits, ass, fuck, cum."
   },
   "slice_of_life": {

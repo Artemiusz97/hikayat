@@ -37,7 +37,7 @@ FACULTY_TEMPLATES = [
         "gender": "female",
         "club": "Math Olympiad Coach",
         "clique": "Faculty",
-        "primary_facility": "{school_name} ➔ Classroom 2-B (Homeroom) ➔ Teacher's Podium",
+        "primary_facility": "{school_name} ➔ {classroom_name} ➔ Teacher's Podium",
         "secondary_facility": "{school_name} ➔ Teachers' Staff Room ➔ Homeroom Teacher's Desk",
         "personality_summary": "Demanding and sharp-witted, but rewards earnest effort."
     },
@@ -68,7 +68,7 @@ FACULTY_TEMPLATES = [
         "club": "Gardening & Botany Club",
         "clique": "Faculty",
         "primary_facility": "{school_name} ➔ Chemistry & Science Lab ➔ Chemical Storage Closet",
-        "secondary_facility": "School Grounds & Athletics ➔ Central Courtyard ➔ Old Cherry Tree",
+        "secondary_facility": "{athletics_name} ➔ Central Courtyard ➔ Old Cherry Tree",
         "personality_summary": "Hands-on nature lover who often brings botanical specimens to class."
     },
     {
@@ -296,25 +296,18 @@ STUDENT_SENSORY_QUIRKS: List[str] = [
 ]
 
 
-def _generate_unique_name(first_candidates: list[str], last_name: str, used_names: set[str], seed_offset: int, gender: str = "") -> str:
-    eff_last = namegen.format_cultural_full_name(
-        "X", last_name, first_culture="english", gender=gender, use_patronymic=False
-    ).split()[-1] if last_name else last_name
-    for idx in range(len(first_candidates)):
-        first = first_candidates[(seed_offset + idx) % len(first_candidates)]
-        cand = f"{first} {eff_last}".strip()
-        if cand.lower() not in used_names:
-            used_names.add(cand.lower())
-            return cand
-    for idx in range(len(first_candidates)):
-        first = first_candidates[idx % len(first_candidates)]
-        cand = f"{first} {eff_last} {idx + 1}".strip()
-        if cand.lower() not in used_names:
-            used_names.add(cand.lower())
-            return cand
-    cand = f"Student {seed_offset} {eff_last}".strip()
-    used_names.add(cand.lower())
-    return cand
+def _resolve_sibling_relation(m1_grade: str, m1_gender: str, m2_grade: str) -> str:
+    """Computes authentic, grade-aware kinship labels (e.g. Older brother, Younger sister, Twin)."""
+    grade_order = {"Freshman": 1, "Sophomore": 2, "Junior": 3, "Senior": 4}
+    g1 = grade_order.get(m1_grade, 3)
+    g2 = grade_order.get(m2_grade, 3)
+    is_male = (m1_gender == "male")
+    if g1 > g2:
+        return "Older brother" if is_male else "Older sister"
+    elif g1 < g2:
+        return "Younger brother" if is_male else "Younger sister"
+    else:
+        return "Twin brother" if is_male else "Twin sister"
 
 
 def generate_campus_directory(session_id: int, scen_key: str = "high_school_drama") -> List[Dict[str, Any]]:
@@ -324,7 +317,7 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
     - 12 Homeroom 3-B Classmates
     - 14 Upperclassmen (Seniors & Juniors)
     - 12 Underclassmen (Sophomores & Freshmen)
-    - 4 to 6 Sibling connections across grades
+    - 5 Sibling connections across grades with cultural grammar & kinship
     - 4-Layer Psychological Architecture (Role + Core Drive + Friction + Sensory Quirk)
     """
     from mechanics.world.locations import (
@@ -343,6 +336,7 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
     abandoned_name = get_session_abandoned_campus_name(session_id, scen_key) or "Abandoned Old Campus Building"
     fmt_kwargs = {
         "school_name": school_name,
+        "classroom_name": classroom_name,
         "athletics_name": athletics_name,
         "commons_name": commons_name,
         "arts_name": arts_name,
@@ -356,7 +350,26 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
     from mechanics.social.races import normalize_race
 
     # Sibling surname pools (to link 5 sibling pairs across homeroom, upperclassmen, and underclassmen)
-    sibling_surnames = ["Sterling", "Yamada", "Vance", "Halloway", "Kowalski"]
+    # Dynamically seed 5 distinct cultural family lineages for the campus
+    sibling_surnames: List[str] = []
+    sibling_surnames_lower: set[str] = set()
+    for s_idx in range(5):
+        for attempt in range(30):
+            cand = namegen.generate_person_name(scen_key, gender="male", seed=seed_val + 500 + s_idx * 23 + attempt * 101)
+            raw_sur = namegen.extract_first_and_last_name(cand)[1]
+            base_sur = namegen.normalize_base_surname(raw_sur)
+            if base_sur and base_sur.lower() not in sibling_surnames_lower:
+                sibling_surnames.append(base_sur)
+                sibling_surnames_lower.add(base_sur.lower())
+                break
+    if len(sibling_surnames) < 5:
+        fallback_pool = ["Sterling", "Yamada", "Vance", "Halloway", "Kowalski"]
+        for fb in fallback_pool:
+            if fb.lower() not in sibling_surnames_lower:
+                sibling_surnames.append(fb)
+                sibling_surnames_lower.add(fb.lower())
+                if len(sibling_surnames) == 5:
+                    break
 
     # Pre-seed consistent family races for sibling lineages
     family_races = {
@@ -367,13 +380,24 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
     # 1. Faculty & Staff (12)
     for idx, f_tmpl in enumerate(FACULTY_TEMPLATES):
         g = f_tmpl["gender"]
-        first_pool = namegen._get_scenario_data(scen_key, "person").get(g, ["Alex"])
-        first = first_pool[(seed_val + idx * 7) % len(first_pool)]
-        last_pool = namegen._get_scenario_data(scen_key, "person").get("last", ["Vance", "Thorne", "Harrison", "Gable", "Faust", "Bailey", "Sterling", "Mercer", "Moreau", "Bennett", "Hayes", "Chen"])
-        last = last_pool[idx % len(last_pool)]
         title_prefix = "Dr." if "Chemistry" in f_tmpl["role"] else ("Coach" if "Coach" in f_tmpl["role"] else ("Nurse" if "Nurse" in f_tmpl["role"] else ("Principal" if "Principal" in f_tmpl["role"] else ("Madame" if "Foreign" in f_tmpl["role"] else ("Mr." if g == "male" else "Ms.")))))
-        full_name = f"{title_prefix} {first} {last}".strip()
-        used_names.add(full_name.lower())
+        fac_cult = "french" if "Madame" in title_prefix else None
+
+        full_name = ""
+        for attempt in range(25):
+            cand = namegen.generate_person_name(scen_key, gender=g, culture=fac_cult, seed=seed_val + idx * 7 + attempt * 101)
+            full_cand = f"{title_prefix} {cand}".strip()
+            if full_cand.lower() not in used_names:
+                full_name = full_cand
+                used_names.add(full_name.lower())
+                break
+        if not full_name:
+            full_name = f"{title_prefix} Faculty {idx + 1}"
+            used_names.add(full_name.lower())
+
+        cand_last = namegen.extract_first_and_last_name(full_name)[1]
+        cand_base_last = namegen.normalize_base_surname(cand_last) or cand_last
+        formal_title = f"{title_prefix} {cand_base_last}".strip()
 
         twists = FACULTY_TWISTS.get(f_tmpl["role"], ["Methodical and observant in the classroom."])
         twist = twists[(seed_val + idx * 5) % len(twists)]
@@ -385,6 +409,7 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
             "session_id": session_id,
             "npc_id": full_name.lower().replace(" ", "_").replace(".", ""),
             "name": full_name,
+            "formal_title": formal_title,
             "gender": g,
             "race": fac_race,
             "role": f_tmpl["role"],
@@ -404,17 +429,31 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
     for idx, h_tmpl in enumerate(HOMEROOM_TEMPLATES):
         is_female = (idx % 2 == 1)
         g = "female" if is_female else "male"
-        first_pool = namegen._get_scenario_data(scen_key, "person").get(g, ["Alex"])
-        
+
         # Link first 2 homeroom peers as siblings to existing surnames
         if idx < 2:
             last = sibling_surnames[idx]
+            full_name = ""
+            for attempt in range(25):
+                cand = namegen.generate_person_name_with_surname(last, scen_key, gender=g, seed=seed_val + 50 + idx * 11 + attempt * 103)
+                if cand.lower() not in used_names:
+                    full_name = cand
+                    used_names.add(full_name.lower())
+                    break
         else:
-            raw_last_pool = namegen._get_scenario_data(scen_key, "person").get("last", ["Reed", "Carter", "Nakamura", "Brooks", "Sinclair", "Mercer", "Novak", "Price", "Davenport", "Fletcher"])
-            last_pool = [l for l in raw_last_pool if l not in sibling_surnames] or raw_last_pool
-            last = last_pool[(idx + 3) % len(last_pool)]
-        
-        full_name = _generate_unique_name(first_pool, last, used_names, seed_val + 50 + idx * 11, gender=g)
+            last = ""
+            full_name = ""
+            for attempt in range(25):
+                cand = namegen.generate_person_name(scen_key, gender=g, seed=seed_val + 50 + idx * 11 + attempt * 103)
+                c_sur = namegen.normalize_base_surname(namegen.extract_first_and_last_name(cand)[1]).lower()
+                if c_sur not in sibling_surnames_lower and cand.lower() not in used_names:
+                    full_name = cand
+                    last = c_sur
+                    used_names.add(full_name.lower())
+                    break
+        if not full_name:
+            full_name = f"Student {idx + 1}"
+            used_names.add(full_name.lower())
 
         drive = STUDENT_CORE_DRIVES[(seed_val + 50 + idx * 7) % len(STUDENT_CORE_DRIVES)]
         friction = STUDENT_FRICTIONS[(seed_val + 50 + idx * 11 + 3) % len(STUDENT_FRICTIONS)]
@@ -447,16 +486,30 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
     for idx, u_tmpl in enumerate(UPPERCLASSMEN_TEMPLATES):
         is_female = ((idx + 1) % 2 == 1)
         g = "female" if is_female else "male"
-        first_pool = namegen._get_scenario_data(scen_key, "person").get(g, ["Julian"])
-        
-        if idx < 3:
-            last = sibling_surnames[idx + 2]  # Vance, Halloway, Kowalski
-        else:
-            raw_last_pool = namegen._get_scenario_data(scen_key, "person").get("last", ["Cross", "Hale", "Blackwood", "Fontaine", "West", "Rhodes", "Lennox", "Kensington", "Sutton", "Valentine", "Mercer"])
-            last_pool = [l for l in raw_last_pool if l not in sibling_surnames] or raw_last_pool
-            last = last_pool[idx % len(last_pool)]
 
-        full_name = _generate_unique_name(first_pool, last, used_names, seed_val + 100 + idx * 13, gender=g)
+        if idx < 3:
+            last = sibling_surnames[idx + 2]  # lineages 2, 3, 4
+            full_name = ""
+            for attempt in range(25):
+                cand = namegen.generate_person_name_with_surname(last, scen_key, gender=g, seed=seed_val + 100 + idx * 13 + attempt * 107)
+                if cand.lower() not in used_names:
+                    full_name = cand
+                    used_names.add(full_name.lower())
+                    break
+        else:
+            last = ""
+            full_name = ""
+            for attempt in range(25):
+                cand = namegen.generate_person_name(scen_key, gender=g, seed=seed_val + 100 + idx * 13 + attempt * 107)
+                c_sur = namegen.normalize_base_surname(namegen.extract_first_and_last_name(cand)[1]).lower()
+                if c_sur not in sibling_surnames_lower and cand.lower() not in used_names:
+                    full_name = cand
+                    last = c_sur
+                    used_names.add(full_name.lower())
+                    break
+        if not full_name:
+            full_name = f"Upperclassman {idx + 1}"
+            used_names.add(full_name.lower())
 
         drive = STUDENT_CORE_DRIVES[(seed_val + 100 + idx * 7 + 2) % len(STUDENT_CORE_DRIVES)]
         friction = STUDENT_FRICTIONS[(seed_val + 100 + idx * 11 + 5) % len(STUDENT_FRICTIONS)]
@@ -489,17 +542,31 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
     for idx, un_tmpl in enumerate(UNDERCLASSMEN_TEMPLATES):
         is_female = (idx % 2 == 0)
         g = "female" if is_female else "male"
-        first_pool = namegen._get_scenario_data(scen_key, "person").get(g, ["Maya"])
-        
+
         # Link freshmen/sophomores as younger siblings to the established sibling surnames
         if idx < 5:
-            last = sibling_surnames[idx]  # Sterling, Yamada, Vance, Halloway, Kowalski
+            last = sibling_surnames[idx]  # lineages 0, 1, 2, 3, 4
+            full_name = ""
+            for attempt in range(25):
+                cand = namegen.generate_person_name_with_surname(last, scen_key, gender=g, seed=seed_val + 200 + idx * 17 + attempt * 109)
+                if cand.lower() not in used_names:
+                    full_name = cand
+                    used_names.add(full_name.lower())
+                    break
         else:
-            raw_last_pool = namegen._get_scenario_data(scen_key, "person").get("last", ["Park", "Kim", "Patel", "Torres", "Jensen", "Morrison", "Alvarez"])
-            last_pool = [l for l in raw_last_pool if l not in sibling_surnames] or raw_last_pool
-            last = last_pool[idx % len(last_pool)]
-
-        full_name = _generate_unique_name(first_pool, last, used_names, seed_val + 200 + idx * 17, gender=g)
+            last = ""
+            full_name = ""
+            for attempt in range(25):
+                cand = namegen.generate_person_name(scen_key, gender=g, seed=seed_val + 200 + idx * 17 + attempt * 109)
+                c_sur = namegen.normalize_base_surname(namegen.extract_first_and_last_name(cand)[1]).lower()
+                if c_sur not in sibling_surnames_lower and cand.lower() not in used_names:
+                    full_name = cand
+                    last = c_sur
+                    used_names.add(full_name.lower())
+                    break
+        if not full_name:
+            full_name = f"Underclassman {idx + 1}"
+            used_names.add(full_name.lower())
 
         drive = STUDENT_CORE_DRIVES[(seed_val + 200 + idx * 7 + 4) % len(STUDENT_CORE_DRIVES)]
         friction = STUDENT_FRICTIONS[(seed_val + 200 + idx * 11 + 7) % len(STUDENT_FRICTIONS)]
@@ -529,23 +596,29 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
         })
 
     # 5. Link Designated Sibling Pairs
-    # Sibling pairs were deliberately seeded between Homeroom / Upperclassmen and Underclassmen
-    # using sibling_surnames. Only link these explicitly seeded pairs to avoid falsely pairing
-    # unrelated students who happen to share common scenario surnames (e.g. Ito, Yamamoto).
-    for s_name in sibling_surnames[:5]:
-        members = [
-            e for e in directory
-            if e["grade"] != "Faculty"
-            and namegen.normalize_base_surname(namegen.extract_first_and_last_name(e["name"])[1]).lower() == s_name.lower()
-        ]
-        if len(members) == 2:
-            m1, m2 = members[0], members[1]
+    # Sibling pairs were deliberately seeded between Homeroom (idx 0,1) / Upperclassmen (idx 0,1,2)
+    # and Underclassmen (idx 0,1,2,3,4) using the 5 dynamic sibling family lineages.
+    # Directory offsets: Faculty=12, Homeroom=12 (12..23), Upperclassmen=14 (24..37), Underclassmen=12 (38..49)
+    sibling_pairs = [
+        (12, 38, sibling_surnames[0]),  # Homeroom 0 <-> Underclassman 0
+        (13, 39, sibling_surnames[1]),  # Homeroom 1 <-> Underclassman 1
+        (24, 40, sibling_surnames[2]),  # Upperclassman 0 <-> Underclassman 2
+        (25, 41, sibling_surnames[3]),  # Upperclassman 1 <-> Underclassman 3
+        (26, 42, sibling_surnames[4]),  # Upperclassman 2 <-> Underclassman 4
+    ]
+    for m1_idx, m2_idx, s_name in sibling_pairs:
+        if m1_idx < len(directory) and m2_idx < len(directory):
+            m1, m2 = directory[m1_idx], directory[m2_idx]
             m1["sibling_name"] = m2["name"]
             m2["sibling_name"] = m1["name"]
+            m1_rel = _resolve_sibling_relation(m1["grade"], m1["gender"], m2["grade"])
+            m2_rel = _resolve_sibling_relation(m2["grade"], m2["gender"], m1["grade"])
+            m1["sibling_relation"] = m1_rel
+            m2["sibling_relation"] = m2_rel
             shared_race = family_races.get(s_name.lower()) or m1.get("race") or m2.get("race")
             m1["race"] = m2["race"] = shared_race
-            m1["personality_summary"] = f"{m1['personality_summary']} Family: Sibling of {m2['name']} ({m2['grade']})."
-            m2["personality_summary"] = f"{m2['personality_summary']} Family: Sibling of {m1['name']} ({m1['grade']})."
+            m1["personality_summary"] = f"{m1['personality_summary']} Family: {m1_rel} of {m2['name']} ({m2['grade']})."
+            m2["personality_summary"] = f"{m2['personality_summary']} Family: {m2_rel} of {m1['name']} ({m1['grade']})."
 
     return directory
 
@@ -597,7 +670,9 @@ def ensure_school_directory_exists(session: dict) -> list[dict]:
                                 scen_key=scen_key,
                                 grade_override=fam_grade,
                                 role_override=fam.get("occupation", ""),
-                                club_override=fam.get("club", "")
+                                club_override=fam.get("club", ""),
+                                gender=fam.get("gender", ""),
+                                relation_type=rel_type
                             )
                             missing_siblings.append(sib_rec)
                             existing_names.add(fam_name.lower())
@@ -618,11 +693,13 @@ def generate_sibling_student_peer(
     scen_key: str = "high_school_drama",
     grade_override: str = "",
     role_override: str = "",
-    club_override: str = ""
+    club_override: str = "",
+    gender: str = "",
+    relation_type: str = ""
 ) -> dict:
     """
     Generates an authentic, quirky student record for a character's sibling.
-    Gives them a distinct role, club, and rich mannerisms instead of repetitive generic text.
+    Gives them a distinct role, club, pronoun-accurate mannerisms, and rich personality.
     """
     c_name = known_contact.get("name", "") if known_contact else ""
     b = (known_contact.get("basic_info") or {}) if known_contact else {}
@@ -632,13 +709,44 @@ def generate_sibling_student_peer(
     # Determine grade relative to sibling
     fam_grade = grade_override if grade_override else ("Freshman" if c_grade == "Junior" else ("Sophomore" if c_grade == "Senior" else "Junior"))
 
+    clean_name = str(sibling_name).strip()
+    npc_id = clean_name.lower().replace(" ", "_").replace(".", "")
+
+    # Determine gender with high fidelity: explicit argument -> contact family tree -> persona inference
+    sib_gender = (gender or "").lower().strip()
+    if sib_gender not in ("male", "female") and known_contact:
+        relations = known_contact.get("relations") or {}
+        for fam in relations.get("family", []):
+            fn = str(fam.get("name") or f"{fam.get('first_name', '')} {fam.get('surname', '')}").strip()
+            if fn.lower() == clean_name.lower():
+                fam_g = fam.get("gender")
+                if fam_g in ("male", "female"):
+                    sib_gender = fam_g
+                elif "brother" in str(fam.get("relation", "")).lower():
+                    sib_gender = "male"
+                elif "sister" in str(fam.get("relation", "")).lower():
+                    sib_gender = "female"
+                break
+    if sib_gender not in ("male", "female") and relation_type:
+        if "brother" in relation_type.lower():
+            sib_gender = "male"
+        elif "sister" in relation_type.lower():
+            sib_gender = "female"
+    if sib_gender not in ("male", "female"):
+        from mechanics.social.persona import infer_contact_gender
+        sib_gender = infer_contact_gender({"name": clean_name}) or "female"
+
+    subj = "he" if sib_gender == "male" else "she"
+    obj = "him" if sib_gender == "male" else "her"
+    poss = "his" if sib_gender == "male" else "her"
+
     templates = [
         {
             "role": "Student Council Junior Aide",
             "club": "Student Council",
             "clique": "Academics",
-            "summary": f"Observant and quick-witted, managing logistics and files with practiced efficiency. Determined to build her own campus reputation alongside {c_name} with playful humor.",
-            "mannerisms": "Bounces slightly on her heels while talking, twirls a stylus between her fingers, playfully rolls her eyes when campus rumors get wild.",
+            "summary": f"Observant and quick-witted, managing logistics and files with practiced efficiency. Determined to build {poss} own campus reputation alongside {c_name} with playful humor.",
+            "mannerisms": f"Bounces slightly on {poss} heels while talking, twirls a stylus between {poss} fingers, playfully rolls {poss} eyes when campus rumors get wild.",
             "speech_style": "Brisk, witty, casually sarcastic with friends, direct and energetic."
         },
         {
@@ -646,7 +754,7 @@ def generate_sibling_student_peer(
             "club": "Science & Robotics Club",
             "clique": "Gamers",
             "summary": f"Analytical tinkerer with boundless creative energy, carrying notebooks filled with schematics and custom device designs.",
-            "mannerisms": "Taps her fingers rhythmically on tables, tilts head quizzically when curious, gestures animatedly when explaining ideas.",
+            "mannerisms": f"Taps {poss} fingers rhythmically on tables, tilts head quizzically when curious, gestures animatedly when explaining ideas.",
             "speech_style": "Sharp, energetic, uses tech and gaming metaphors, affectionately teasing."
         },
         {
@@ -654,15 +762,15 @@ def generate_sibling_student_peer(
             "club": "Athletic Directorate",
             "clique": "Athletes",
             "summary": f"High-stamina, spirited underclassman with boundless energy. Balances cardio drills with casual cafeteria humor, driven by fierce athletic determination.",
-            "mannerisms": "Stretches shoulders casually while leaning against lockers, flashes a confident grin, taps feet impatiently when waiting.",
+            "mannerisms": f"Stretches shoulders casually while leaning against lockers, flashes a confident grin, taps feet impatiently when waiting.",
             "speech_style": "Lively, spirited, uses athletic banter, honest and upfront."
         },
         {
             "role": "Campus Photojournalist",
             "club": "Journalism & Media",
             "clique": "Media",
-            "summary": f"Rarely seen without a strap camera around her neck. Observant and candid, catching unscripted campus moments with a keen eye for human expressions.",
-            "mannerisms": "Hangs camera from one shoulder, tilts head to frame visual angles, speaks with quiet observational wit.",
+            "summary": f"Rarely seen without a strap camera around {poss} neck. Observant and candid, catching unscripted campus moments with a keen eye for human expressions.",
+            "mannerisms": f"Hangs camera from one shoulder, tilts head to frame visual angles, speaks with quiet observational wit.",
             "speech_style": "Candid, perceptive, dryly humorous, curious."
         },
         {
@@ -670,17 +778,13 @@ def generate_sibling_student_peer(
             "club": "Fine Arts Guild",
             "clique": "Artists",
             "summary": f"Imaginative and thoughtful, designing elaborate stage sets and digital sketches. Soft-spoken in large assemblies but vividly expressive in small groups.",
-            "mannerisms": "Occasionally has pastel or paint smudges on her knuckles, tucks hair behind ear, sketches in margins during conversation.",
+            "mannerisms": f"Occasionally has pastel or paint smudges on {poss} knuckles, tucks hair behind ear, sketches in margins during conversation.",
             "speech_style": "Gentle, wryly amusing, thoughtful, highly descriptive."
         }
     ]
 
-    # Deterministic selection based on name hash so it stays consistent
-    seed_idx = sum(ord(ch) for ch in (sibling_name or "A")) % len(templates)
+    seed_idx = sum(ord(ch) for ch in (clean_name or "A")) % len(templates)
     chosen = templates[seed_idx]
-
-    clean_name = str(sibling_name).strip()
-    npc_id = clean_name.lower().replace(" ", "_").replace(".", "")
 
     from mechanics.social.races import normalize_race
     _sib_base_last = namegen.normalize_base_surname(namegen.extract_first_and_last_name(clean_name)[1]) or clean_name.split()[-1]
@@ -689,11 +793,14 @@ def generate_sibling_student_peer(
     final_role = role_override if (role_override and role_override.lower() != "student") else chosen["role"]
     final_club = club_override if club_override else chosen["club"]
 
-    from mechanics.world.locations import get_session_school_name, get_session_classroom_name
+    from mechanics.world.locations import (
+        get_session_school_name,
+        get_session_classroom_name,
+        get_session_student_commons_name
+    )
     school_name = get_session_school_name(session_id, scen_key) or "Westlake Academy"
-    classroom_name = get_session_classroom_name(session_id, scen_key) or "Classroom 3-B"
-    from mechanics.social.persona import infer_contact_gender
-    sib_gender = infer_contact_gender({"name": clean_name}) or "female"
+    classroom_name = get_session_classroom_name(session_id, scen_key) or "Classroom 2-B (Homeroom)"
+    commons_name = get_session_student_commons_name(session_id, scen_key) or "Student Commons & Central Plaza"
 
     return {
         "session_id": session_id,
@@ -705,7 +812,7 @@ def generate_sibling_student_peer(
         "club": final_club,
         "clique": chosen["clique"],
         "primary_facility": f"{school_name} ➔ {classroom_name} ➔ Student Desks Cluster",
-        "secondary_facility": "School Grounds & Athletics ➔ Central Courtyard ➔ Courtyard Fountain",
+        "secondary_facility": f"{commons_name} ➔ Central Courtyard ➔ Courtyard Fountain",
         "sibling_name": c_name,
         "personality_summary": chosen["summary"],
         "mannerisms": chosen["mannerisms"],
@@ -715,14 +822,591 @@ def generate_sibling_student_peer(
     }
 
 
-def get_facility_ambient_characters(session_id: int, current_location: str, limit: int = 2) -> list[dict]:
+def _matches_student_facility_schedule(
+    student: dict,
+    location_str: str,
+    phase: str,
+    current_day: int,
+    current_minute: int,
+    is_campus: bool,
+    is_abandoned: bool,
+    scen_key: str = "high_school_drama",
+    session_id: int = 0
+) -> bool:
     """
-    Returns 1 to 2 school directory characters who naturally reside in or frequent the current facility.
-    Used for just-in-time LLM prompt injection with zero context bloat.
+    Evaluates whether an ambient student/faculty naturally inhabits or visits
+    location_str during (phase, current_day, current_minute).
+    """
+    loc_clean = str(location_str or "").strip()
+    loc_low = loc_clean.lower()
+    role_low = str(student.get("role", "")).lower()
+    grade_low = str(student.get("grade", "")).lower()
+    club_low = str(student.get("club", "")).lower()
+    clique_low = str(student.get("clique", "")).lower()
+    prim_fac = str(student.get("primary_facility", "")).lower()
+    sec_fac = str(student.get("secondary_facility", "")).lower()
+    is_faculty = any(w in role_low for w in ("teacher", "faculty", "coach", "nurse", "librarian", "principal", "janitor", "counselor")) or "faculty" in grade_low
+
+    from mechanics.world.schedules import is_weekend
+    weekend = is_weekend(current_day)
+
+    # 1. NIGHT CURFEW (20:00 - 07:00 / safe_minute >= 1200 or < 420)
+    if phase == "night":
+        if is_abandoned:
+            return bool("occult" in club_low or "occult" in role_low or "paranormal" in role_low or "delinquent" in role_low or "delinquent" in clique_low)
+        if any(k in loc_low for k in ("behind gym", "shed", "roof")):
+            return bool("delinquent" in role_low or "delinquent" in clique_low or "rebel" in clique_low)
+        if any(k in loc_low for k in ("staff room", "staff_room", "teachers' staff room")):
+            return bool(is_faculty)
+        # All other campus facilities and regular off-campus venues are locked/empty of students
+        return False
+
+    # 2. WEEKENDS (Saturday - Sunday, 07:00 - 20:00)
+    if weekend:
+        if is_campus:
+            # Academic wing and regular classrooms are locked on weekends
+            if any(k in loc_low for k in ("classroom", "homeroom", "academic wing", "science wing", "lab", "staff room")):
+                return False
+
+            # Dedicated athletic and club training on campus
+            if 420 <= current_minute < 720:  # Morning practice (07:00 - 12:00)
+                if "pool" in loc_low and ("swim" in role_low or "pool" in prim_fac or "swim" in club_low or ("coach" in role_low and "athletics" in club_low)):
+                    return True
+                if any(k in loc_low for k in ("track", "field", "stadium")) and any(c in f"{role_low} {club_low} {prim_fac}" for c in ("track", "soccer", "running", "sprinter", "field", "athletics")):
+                    return True
+                if "gym" in loc_low and any(c in f"{role_low} {club_low} {prim_fac}" for c in ("gym", "basketball", "volleyball", "cheer", "athletics", "coach")):
+                    return True
+                if any(k in loc_low for k in ("dojo", "martial")) and any(c in f"{role_low} {club_low} {prim_fac}" for c in ("martial", "kendo", "judo", "karate", "dojo")):
+                    return True
+                if is_abandoned and "occult" in club_low:
+                    return True
+                if "art" in loc_low and any(c in club_low for c in ("art", "painting", "drawing")):
+                    return True
+                if "music" in loc_low and any(c in club_low for c in ("music", "band", "choir")):
+                    return True
+                if "courtyard" in loc_low and not is_faculty:
+                    return True
+                if ("gym" in loc_low or "field" in loc_low or "track" in loc_low) and "coach" in role_low:
+                    return True
+                return False
+            else:  # Afternoon / Evening on campus (12:00 - 20:00)
+                # Training winds down, limited courtyard / sports field presence
+                if any(k in loc_low for k in ("track", "field", "gym", "courtyard")) and not is_faculty:
+                    return bool(any(c in club_low for c in ("track", "soccer", "basketball", "gym", "athletics")))
+                return False
+        else:
+            # Off-Campus Town Roaming on Weekends (07:00 - 20:00)
+            if not is_faculty:
+                is_youth_hangout = any(k in loc_low for k in (
+                    "arcade", "game center", "velvet mug", "cafe", "coffee", "park", "pier",
+                    "beach", "convenience store", "karaoke", "lookout", "lake"
+                ))
+                return is_youth_hangout
+            return False
+
+    # 3. WEEKDAYS: COMMUTE & MORNING ARRIVAL (07:00 - 08:00)
+    if phase == "commute":
+        if any(k in loc_low for k in ("gate", "foyer", "locker", "courtyard")):
+            return not is_faculty
+        if any(k in loc_low for k in ("classroom", "homeroom")):
+            return bool("homeroom" in prim_fac or "classroom" in prim_fac)
+        if any(k in loc_low for k in ("staff room", "staff_room", "library")):
+            return bool(is_faculty)
+        return False
+
+    # 4. WEEKDAYS: CLASS PERIODS (08:00 - 12:00 & 13:00 - 15:00)
+    if phase in ("morning", "class_afternoon"):
+        if not is_campus:
+            # Students are forbidden from leaving campus during school hours
+            return False
+
+        # Homeroom / Active Classroom
+        if any(k in loc_low for k in ("classroom", "homeroom")) and "empty" not in loc_low:
+            if "empty" in prim_fac or "outside" in prim_fac or "hallway" in prim_fac:
+                return False
+            return bool("homeroom" in prim_fac or ("classroom" in prim_fac and ("desks" in prim_fac or "podium" in prim_fac)))
+
+        # Chemistry & Science Lab
+        if any(k in loc_low for k in ("chemistry", "science", "lab")):
+            if "chemistry" in role_low or "science" in role_low:
+                return True
+            if any(k in prim_fac for k in ("chemistry", "science", "lab")) or any(k in club_low for k in ("science", "robotics", "chem")):
+                return True
+            return False
+
+        # School Library
+        if "librar" in loc_low:
+            if "librarian" in role_low:
+                return True
+            if "librar" in prim_fac or "bookworm" in role_low or "studious" in role_low:
+                return True
+            return False
+
+        # Infirmary
+        if "infirmary" in loc_low:
+            return bool("nurse" in role_low or "infirmary" in prim_fac)
+
+        # Staff Room
+        if any(k in loc_low for k in ("staff room", "staff_room", "teachers' staff room")):
+            return bool(is_faculty)
+
+        # Hallways, Courtyards, Vending Pavilion during class hours
+        if any(k in loc_low for k in ("courtyard", "corridor", "hallway", "vending", "gate")):
+            # Truants / delinquents skipping class, student council reps with hall passes, or patrolling faculty
+            if "delinquent" in role_low or "delinquent" in clique_low:
+                return True
+            if "council" in club_low or "rep" in role_low:
+                return True
+            if is_faculty:
+                return True
+            return False
+
+        # Athletic facilities during class
+        if any(k in loc_low for k in ("gym", "pool", "field", "track", "dojo")):
+            return bool("coach" in role_low or "pe" in role_low)
+
+        # Clubrooms / Abandoned Building: empty during class
+        return False
+
+    # 5. WEEKDAYS: LUNCH BREAK (12:00 - 13:00)
+    if phase == "lunch":
+        if not is_campus:
+            return False
+        if "cafeteria" in loc_low:
+            return not is_faculty or "teacher" in role_low
+        if any(k in loc_low for k in ("courtyard", "fountain", "commons")):
+            return bool("courtyard" in sec_fac or "fountain" in sec_fac or "commons" in sec_fac or any(c in clique_low for c in ("athlete", "popular", "social")) or not is_faculty)
+        if "roof" in loc_low:
+            return bool("roof" in sec_fac or "delinquent" in role_low or "loner" in clique_low or "quiet" in role_low)
+        if "vending" in loc_low:
+            return not is_faculty
+        if "librar" in loc_low:
+            return bool("librarian" in role_low or "studious" in role_low or "bookworm" in role_low)
+        if any(k in loc_low for k in ("classroom", "homeroom")):
+            return bool("homeroom" in prim_fac or "classroom" in prim_fac)
+        if any(k in loc_low for k in ("staff room", "staff_room")):
+            return bool(is_faculty)
+        return False
+
+    # 6. WEEKDAYS: EXTRACURRICULAR PERIOD (15:00 - 20:00)
+    if phase == "extracurricular":
+        if is_campus:
+            if "pool" in loc_low:
+                return bool("swim" in role_low or "pool" in prim_fac or "swim" in club_low or ("coach" in role_low and "athletics" in club_low))
+            if any(k in loc_low for k in ("track", "field", "stadium")):
+                return bool(any(c in f"{role_low} {club_low} {prim_fac}" for c in ("track", "soccer", "running", "sprinter", "field", "athletics")) or ("coach" in role_low and "athletics" in club_low))
+            if "gym" in loc_low:
+                return bool(any(c in f"{role_low} {club_low} {prim_fac}" for c in ("gym", "basketball", "volleyball", "cheer", "athletics", "coach")))
+            if any(k in loc_low for k in ("dojo", "martial")):
+                return bool(any(c in f"{role_low} {club_low} {prim_fac}" for c in ("martial", "kendo", "judo", "karate", "dojo")))
+            if any(k in loc_low for k in ("auditorium", "stage")):
+                return bool(any(c in club_low for c in ("drama", "theater", "theatre", "acting")))
+            if "art" in loc_low:
+                return bool(any(c in club_low for c in ("art", "drawing", "painting", "sculpture")))
+            if "music" in loc_low:
+                return bool(any(c in club_low for c in ("music", "band", "choir", "orchestra")))
+            if "council" in loc_low:
+                return bool("council" in club_low or "president" in role_low)
+            if any(k in loc_low for k in ("broadcast", "newspaper", "media")):
+                return bool(any(c in club_low for c in ("broadcast", "newspaper", "media", "journalism")))
+            if any(k in loc_low for k in ("greenhouse", "garden", "botany")):
+                return bool(any(c in club_low for c in ("garden", "botany", "plant")))
+            if is_abandoned or "storage" in loc_low:
+                return bool("occult" in club_low or "delinquent" in role_low)
+            if any(k in loc_low for k in ("behind gym", "shed")):
+                return bool("delinquent" in role_low or "delinquent" in clique_low)
+            if "roof" in loc_low:
+                return bool("roof" in sec_fac or any(c in f"{role_low} {clique_low}" for c in ("delinquent", "loner", "quiet", "rebel")))
+            if any(k in loc_low for k in ("staff room", "staff_room")):
+                return bool(is_faculty)
+            if "librar" in loc_low:
+                return bool("librarian" in role_low or "studious" in role_low or "bookworm" in role_low or any(c in club_low for c in ("book", "literature", "library")))
+            if any(k in loc_low for k in ("courtyard", "vending")):
+                return not is_faculty and (club_low in ("none", "", "unaffiliated") or "courtyard" in sec_fac)
+            return False
+        else:
+            # Off-Campus Town Youth Hangouts (15:00 - 20:00)
+            if is_faculty:
+                return False
+            if "arcade" in loc_low:
+                return bool("gamer" in clique_low or "tech" in role_low or "esports" in club_low or "delinquent" in clique_low or club_low in ("none", "", "unaffiliated"))
+            if any(k in loc_low for k in ("cafe", "coffee", "velvet")):
+                return bool("cafe" in sec_fac or "studious" in role_low or "class rep" in role_low or "popular" in clique_low or club_low in ("none", "", "unaffiliated"))
+            if "park" in loc_low:
+                return bool("park" in sec_fac or "track" in club_low or club_low in ("none", "", "unaffiliated"))
+            if "convenience" in loc_low:
+                return not is_faculty
+            if any(k in loc_low for k in ("beach", "pier", "karaoke")):
+                return not is_faculty
+            return False
+
+    return False
+
+
+def _score_ambient_student_candidate(
+    cand: dict,
+    session_id: int,
+    current_day: int,
+    phase: str,
+    established_contacts: list[dict],
+    party_names: set[str],
+    location_str: str = ""
+) -> int:
+    """Scores an eligible candidate by facility match, unhydrated status, social affinity ties, and day/phase hash rotation."""
+    score = 0
+    cand_name = str(cand.get("name", "")).strip()
+    cand_role = str(cand.get("role", "")).lower()
+    cand_club = str(cand.get("club", "")).lower()
+    cand_grade = str(cand.get("grade", "")).lower()
+    cand_sib = str(cand.get("sibling_name", "")).strip().lower()
+
+    # 0. Facility direct relevance boost
+    loc_low = str(location_str or "").lower()
+    for kw in ("chemistry", "nurse", "librarian", "coach", "principal", "art", "music", "swim", "kendo", "martial", "occult", "drama", "broadcast", "robotics"):
+        if kw in loc_low and (kw in cand_role or kw in cand_club):
+            score += 2000
+
+    # 1. Unhydrated priority (encourage meeting fresh peers)
+    if not cand.get("is_hydrated", 0):
+        score += 1000
+
+    cand_sur = ""
+    try:
+        cand_sur = namegen.normalize_base_surname(namegen.extract_first_and_last_name(cand_name)[1]).lower()
+    except Exception:
+        pass
+
+    # 2. Social connection weighting
+    for contact in established_contacts:
+        c_name = str(contact.get("name", "")).strip()
+        try:
+            c_affinity = int(contact.get("relationship_score") or contact.get("affinity", 0) or 0)
+        except (TypeError, ValueError):
+            c_affinity = 0
+        is_party = c_name.lower() in party_names
+        is_close = c_affinity >= 50 or is_party
+
+        if not is_close:
+            continue
+
+        weight_mult = 2 if is_party else 1
+
+        # Check sibling / family connection
+        if cand_sib and cand_sib == c_name.lower():
+            score += 150 * weight_mult
+        elif cand_sur:
+            try:
+                c_sur = namegen.normalize_base_surname(namegen.extract_first_and_last_name(c_name)[1]).lower()
+                if c_sur and c_sur == cand_sur:
+                    score += 150 * weight_mult
+            except Exception:
+                pass
+
+        # Check club match
+        c_club = str(contact.get("club", "")).lower()
+        if c_club and c_club not in ("none", "unaffiliated", "faculty") and c_club == cand_club:
+            score += 100 * weight_mult
+
+        # Check grade/cohort match
+        c_grade = str(contact.get("grade", "")).lower()
+        if c_grade and c_grade == cand_grade:
+            score += 40 * weight_mult
+
+    # 3. Deterministic day/phase rotation hash
+    cand_id = str(cand.get("npc_id", cand_name))
+    h_str = f"{session_id}_{cand_id}_{current_day}_{phase}"
+    rot_val = int(hashlib.md5(h_str.encode("utf-8")).hexdigest(), 16) % 100
+    score += rot_val
+
+    return score
+
+
+def _generate_straggler_activity(student: dict, location_str: str, phase: str) -> str:
+    """Generates a plausible activity tag for a lone straggler in an otherwise quiet facility."""
+    loc_low = location_str.lower()
+    role_low = str(student.get("role", "")).lower()
+    if "greenhouse" in loc_low or "garden" in loc_low:
+        return "Quietly inspecting a flowering potted succulent on the shelf"
+    if "librar" in loc_low:
+        return "Skimming through a tall bookshelf in search of a misfiled volume"
+    if "art" in loc_low:
+        return "Retrieving a forgotten charcoal sketch from an easel"
+    if "music" in loc_low:
+        return "Tuning a solitary acoustic guitar in the quiet room corner"
+    if any(k in loc_low for k in ("hallway", "corridor")):
+        return "Hurrying through the corridor clutching a signed hall-pass slip"
+    if "delinquent" in role_low:
+        return "Hiding out in the corner to enjoy a few minutes of uninterrupted peace"
+    return "Hurrying through on a quick errand to deliver a paperwork slip"
+
+
+def generate_student_schedule_activity(
+    student: dict,
+    phase: str,
+    is_imminent: bool,
+    next_phase: str,
+    location_str: str,
+    current_minute: int = 480
+) -> str:
+    """
+    Generates an evocative, schedule-grounded activity snippet for prompt injection.
+    Reflects imminent pre-bell transitions or current phase tasks.
+    """
+    loc_low = location_str.lower()
+    role_low = str(student.get("role", "")).lower()
+    club_low = str(student.get("club", "")).lower()
+
+    if is_imminent:
+        if next_phase == "morning":
+            rush_opts = [
+                "Rushing frantically through the gate before the 8:00 AM late bell",
+                "Slamming shoe locker shut and sprinting up the stairs toward homeroom",
+                "Tying sneaker laces in a hurry while checking wristwatch"
+            ]
+            return rush_opts[(current_minute + len(role_low)) % len(rush_opts)]
+        if next_phase == "lunch":
+            lunch_opts = [
+                "Packing up textbooks and eyeing the doorway for the lunch bell",
+                "Whispering lunch plans with friends while teacher wraps up lecture",
+                "Pulling a bento box from the bottom shelf of desk"
+            ]
+            return lunch_opts[(current_minute + len(role_low)) % len(lunch_opts)]
+        if next_phase in ("class_afternoon", "afternoon"):
+            aft_opts = [
+                "Finishing the last of lunch and packing up bento box",
+                "Jogging back toward the academic wing before the warning chime",
+                "Refilling water bottle at the drinking fountain before class"
+            ]
+            return aft_opts[(current_minute + len(role_low)) % len(aft_opts)]
+        if next_phase == "extracurricular":
+            club_opts = [
+                "Zipping up club gear bag and stretching before practice starts",
+                "Changing into athletic sneakers and heading toward the locker rooms",
+                "Putting away class notes and eagerly chatting about after-school plans"
+            ]
+            return club_opts[(current_minute + len(role_low)) % len(club_opts)]
+        if next_phase == "night":
+            night_opts = [
+                "Packing gear quickly as facility lights begin shutting down for curfew",
+                "Saying evening goodbyes and heading toward the exit gates",
+                "Locking up equipment lockers before campus gates close"
+            ]
+            return night_opts[(current_minute + len(role_low)) % len(night_opts)]
+
+    # Standard Phase Activities Grounded in Location & Role
+    if "pool" in loc_low or "swim" in loc_low:
+        if "coach" in role_low:
+            return "Pacing the pool deck with a digital stopwatch and whistle"
+        return "Practicing freestyle flip turns and interval laps in the water"
+
+    if any(k in loc_low for k in ("track", "field", "stadium")):
+        if "coach" in role_low:
+            return "Observing sprint intervals with a clipboard and whistle"
+        if "soccer" in club_low:
+            return "Running passing drills and striking balls toward the goal net"
+        return "Running 200m interval sprints around the synthetic track"
+
+    if "dojo" in loc_low or "martial" in loc_low:
+        return "Practicing formal posture drills and kata with a bamboo shinai"
+
+    if "gym" in loc_low or "court" in loc_low:
+        if "coach" in role_low:
+            return "Supervising equipment drills while writing on a clipboard"
+        if "volleyball" in club_low:
+            return "Practicing jump serves over the regulation volleyball net"
+        return "Shooting free-throw drills and rebounding off the backboard"
+
+    if any(k in loc_low for k in ("science", "chem", "lab")):
+        if "teacher" in role_low:
+            return "Supervising student workstations and monitoring chemical reagents"
+        return "Measuring chemical solutions with a glass pipette and graduated cylinder"
+
+    if any(k in loc_low for k in ("classroom", "homeroom")):
+        if "teacher" in role_low:
+            return "Delivering a lecture at the teacher's podium while writing on the board"
+        if phase == "lunch":
+            return "Eating lunch at desk while chatting with neighboring classmates"
+        return "Copying lecture notes from the blackboard while listening intently"
+
+    if "librar" in loc_low:
+        if "librarian" in role_low:
+            return "Scanning returned books and cataloging newly arrived paperbacks"
+        return "Quietly skimming reference volumes at a secluded corner study desk"
+
+    if "infirmary" in loc_low:
+        if "nurse" in role_low:
+            return "Organizing medicine cabinet supplies and updating student health logs"
+        return "Resting quietly on an infirmary cot behind drawn privacy curtains"
+
+    if "staff" in loc_low:
+        return "Grading a tall stack of student assignment sheets with a red fountain pen"
+
+    if "cafeteria" in loc_low:
+        return "Eating a lunch tray while chatting animatedly with tablemates"
+
+    if any(k in loc_low for k in ("courtyard", "commons", "fountain")):
+        if phase == "lunch":
+            return "Sharing a bento box on a shaded bench under the cherry trees"
+        if phase == "commute":
+            return "Strolling through the morning sunshine toward the shoe lockers"
+        return "Sitting on the fountain ledge chatting with nearby friends"
+
+    if "roof" in loc_low:
+        return "Leaning against the safety fence with an iced canned drink"
+
+    if any(k in loc_low for k in ("shed", "behind gym")):
+        return "Loitering in the shadows away from campus hall monitors"
+
+    try:
+        from mechanics.world.schedules import is_abandoned_school_node
+        if is_abandoned_school_node(location_str=location_str) or "storage" in loc_low:
+            return "Arranging dusty occult books and tracing symbols on the creaky floorboards"
+    except Exception:
+        if "storage" in loc_low or "abandoned" in loc_low:
+            return "Arranging dusty occult books and tracing symbols on the creaky floorboards"
+
+    if "arcade" in loc_low:
+        return "Chaining high-score combos on a loud rhythm arcade cabinet"
+
+    if any(k in loc_low for k in ("cafe", "velvet")):
+        return "Sipping iced tea while reviewing study notes with a peer"
+
+    if "convenience" in loc_low:
+        return "Browsing snack aisle shelves for an after-school pork bun"
+
+    if "park" in loc_low:
+        return "Sitting on a park bench watching pigeons and checking phone"
+
+    if any(k in loc_low for k in ("beach", "pier")):
+        return "Leaning against the seaside railing feeling the ocean breeze"
+
+    if "karaoke" in loc_low:
+        return "Flipping through the song selection tablet while singing into the mic"
+
+    if "council" in loc_low:
+        return "Reviewing school festival budget proposals and stamp-authorizing forms"
+
+    if "broadcast" in loc_low:
+        return "Adjusting audio mixer faders and testing campus microphone levels"
+
+    if any(k in loc_low for k in ("greenhouse", "garden")):
+        return "Watering seedling flats and pruning wilted leaves on a potting bench"
+
+    if "art" in loc_low:
+        return "Mixing oil pigments on a wooden palette in front of an easel"
+
+    if "music" in loc_low:
+        return "Practicing sheet music scales on a woodwind instrument"
+
+    return "Attending to daily routine and chatting with nearby peers"
+
+
+def get_facility_ambient_characters(
+    session_id: int,
+    current_location: str,
+    limit: int = 2,
+    current_day: int | None = None,
+    current_minute: int | None = None,
+    active_npc_names: set[str] | None = None,
+) -> list[dict]:
+    """
+    Returns 1 to 2 school directory characters who naturally reside in or frequent the current facility
+    at the active day and time-of-day phase.
+    Respects curfew lockouts, homeroom class hours, club assignments, weekend roaming,
+    imminent bell transitions, anti-duplication, and social graph affinity.
     """
     if not session_id or not current_location:
         return []
-    return db.get_school_characters_by_facility(session_id, current_location, limit=limit)
+
+    sess = db.get_session(session_id)
+    scen_key = sess.get("scenario", "high_school_drama") if sess else "high_school_drama"
+
+    from mechanics.world.mobility import is_campus_scenario
+    if not is_campus_scenario(scen_key):
+        return []
+
+    safe_day = int(current_day) if current_day is not None else int(sess.get("current_day") or 1 if sess else 1)
+    safe_minute = int(current_minute) if current_minute is not None else int(sess.get("current_minute") or 480 if sess else 480)
+    safe_active_names = {str(n).lower().strip() for n in active_npc_names if n} if active_npc_names else set()
+
+    # If active session has party companions, ensure they are also excluded
+    if sess and isinstance(sess.get("party"), list):
+        for pm in sess["party"]:
+            if isinstance(pm, dict) and pm.get("name"):
+                safe_active_names.add(str(pm["name"]).lower().strip())
+
+    # Ensure roster exists in database
+    ensure_school_directory_exists(sess or {"id": session_id, "scenario": scen_key})
+    roster = db.get_school_roster(session_id)
+    if not roster:
+        return []
+
+    from mechanics.world.schedules import (
+        get_detailed_npc_time_phase,
+        is_schedule_transition_imminent,
+        is_weekend,
+        is_campus_node_or_location,
+        is_abandoned_school_node,
+    )
+
+    phase = get_detailed_npc_time_phase(safe_minute, current_day=safe_day, scen_key=scen_key)
+    is_imminent, cur_block, next_block, mins_left = is_schedule_transition_imminent(
+        safe_minute, window_minutes=15, current_day=safe_day, scen_key=scen_key
+    )
+    is_campus = is_campus_node_or_location(location_str=current_location, session_id=session_id, scen_key=scen_key)
+    is_abandoned = is_abandoned_school_node(location_str=current_location)
+
+    # 1. Filter candidates matching schedule and facility
+    eligible_candidates: list[dict] = []
+    for cand in roster:
+        c_name = str(cand.get("name", "")).strip()
+        c_id = str(cand.get("npc_id", "")).strip().lower()
+        if c_name.lower() in safe_active_names or c_id in safe_active_names:
+            continue
+
+        if _matches_student_facility_schedule(
+            cand, current_location, phase, safe_day, safe_minute, is_campus, is_abandoned, scen_key, session_id
+        ):
+            eligible_candidates.append(cand)
+
+    # 2. Score and rank candidates
+    established_contacts = db.get_contacts(session_id) or []
+    scored_candidates = []
+    for cand in eligible_candidates:
+        score = _score_ambient_student_candidate(
+            cand, session_id, safe_day, phase, established_contacts, safe_active_names, location_str=current_location
+        )
+        scored_candidates.append((score, cand))
+
+    scored_candidates.sort(key=lambda x: x[0], reverse=True)
+    selected = [c for _, c in scored_candidates[:limit]]
+
+    # 3. If zero eligible candidates match: 15% Straggler Roll (unless locked at night)
+    if not selected and phase != "night" and is_campus:
+        straggler_roll = int(hashlib.md5(f"{session_id}_{safe_day}_{safe_minute}_{current_location}".encode("utf-8")).hexdigest(), 16) % 100
+        if straggler_roll < 15:
+            available_stragglers = [
+                c for c in roster
+                if str(c.get("name", "")).lower() not in safe_active_names
+                and str(c.get("npc_id", "")).lower() not in safe_active_names
+                and not c.get("is_hydrated", 0)
+            ]
+            if available_stragglers:
+                s_idx = int(hashlib.md5(f"{session_id}_{safe_minute}".encode("utf-8")).hexdigest(), 16) % len(available_stragglers)
+                straggler = dict(available_stragglers[s_idx])
+                straggler["activity"] = _generate_straggler_activity(straggler, current_location, phase)
+                return [straggler]
+
+    # 4. Attach activity tags to selected students
+    result = []
+    for cand in selected:
+        cand_dict = dict(cand)
+        cand_dict["activity"] = generate_student_schedule_activity(
+            cand_dict, phase, is_imminent, next_block, current_location, safe_minute
+        )
+        result.append(cand_dict)
+
+    return result
 
 
 def hydrate_school_character(session_id: int, char_dict: dict) -> bool:
@@ -810,31 +1494,59 @@ def hydrate_school_character(session_id: int, char_dict: dict) -> bool:
 
     mannerisms_val = char_dict.get("mannerisms") or extracted_mannerism or ""
 
-    if grade != "Faculty":
-        db.upsert_contact(
-            session_id=session_id,
-            npc_id=npc_id,
-            name=name,
-            character_id=0,
-            delta_score=0,
-            race=char_race,
-            gender=char_gender,
-            appearance=char_app,
-            basic_info={
-                "location": fac or school_name,
-                "role": clean_role,
-                "grade": grade,
-                "club": club,
-                "clique": clique,
-                "description": full_desc,
-                "sibling_name": sib,
-                "mannerisms": mannerisms_val,
-                "speech_style": char_dict.get("speech_style", ""),
-                "disposition": "friendly_peer" if sib else "neutral_student"
-            },
-            track="platonic"
-        )
-    
+    is_faculty = (grade == "Faculty")
+    contact_role = f"Faculty / {clean_role}" if is_faculty else clean_role
+    contact_disposition = "faculty_mentor" if is_faculty else ("friendly_peer" if sib else "neutral_student")
+
+    formal_title = char_dict.get("formal_title", "")
+    if not formal_title and is_faculty:
+        import namegen
+        f_last = namegen.extract_first_and_last_name(name)[1]
+        f_base = namegen.normalize_base_surname(f_last) or f_last
+        f_title = "Dr." if "chemistry" in role.lower() else ("Coach" if "coach" in role.lower() else ("Nurse" if "nurse" in role.lower() else ("Principal" if "principal" in role.lower() else ("Mr." if char_gender == "male" else "Ms."))))
+        formal_title = f"{f_title} {f_base}".strip()
+
+    db.upsert_contact(
+        session_id=session_id,
+        npc_id=npc_id,
+        name=name,
+        character_id=0,
+        delta_score=0,
+        race=char_race,
+        gender=char_gender,
+        appearance=char_app,
+        basic_info={
+            "location": fac or school_name,
+            "role": contact_role,
+            "grade": grade,
+            "club": club,
+            "clique": clique,
+            "description": full_desc,
+            "sibling_name": sib,
+            "mannerisms": mannerisms_val,
+            "speech_style": char_dict.get("speech_style", ""),
+            "disposition": contact_disposition,
+            "is_faculty": is_faculty,
+            "formal_title": formal_title,
+            "initial_activity": char_dict.get("activity", "")
+        },
+        track="platonic"
+    )
+
+    # Reciprocal sibling sync into contacts relations and relationship graph
+    if sib:
+        try:
+            from mechanics.social.genealogy import ensure_contact_relations
+            c_entry = db.get_contact(session_id, npc_id)
+            if c_entry:
+                ensure_contact_relations(c_entry, session_id=session_id, scenario=scen_key)
+            sib_npc_id = sib.lower().replace(" ", "_").replace(".", "")
+            sib_c = db.get_contact(session_id, sib_npc_id)
+            if sib_c:
+                ensure_contact_relations(sib_c, session_id=session_id, scenario=scen_key)
+        except Exception:
+            pass
+
     # Also ensure entry exists in lorebook with appearance, mannerisms, and traits
     db.upsert_lorebook_entity(
         session_id=session_id,
@@ -851,7 +1563,7 @@ def hydrate_school_character(session_id: int, char_dict: dict) -> bool:
     return True
 
 
-def generate_dynamic_student_peer(session_id: int, scen_key: str = "high_school_drama") -> dict:
+def generate_dynamic_student_peer(session_id: int, scen_key: str = "high_school_drama", seed: int | None = None) -> dict:
     """
     Generates an authentic, quirky student peer on the fly and persists them into school_directory.
     Used for 'Find Friends' / peer discovery when initial directory candidates are already befriended.
@@ -859,16 +1571,23 @@ def generate_dynamic_student_peer(session_id: int, scen_key: str = "high_school_
     existing = db.get_school_roster(session_id) or []
     used_names = {str(c.get("name", "")).strip().lower() for c in existing}
 
+    rng = random.Random(seed) if seed is not None else random
     grades = ["Sophomore", "Junior", "Senior", "Freshman"]
-    grade = random.choice(grades)
-    is_female = random.choice([True, False])
+    grade = rng.choice(grades)
+    is_female = rng.choice([True, False])
     g = "female" if is_female else "male"
 
-    first_pool = namegen._get_scenario_data(scen_key, "person").get(g, ["Alex", "Jordan", "Taylor", "Morgan", "Sam", "Chris", "Jamie", "Riley", "Maya", "Daniel", "Chloe", "Ethan"])
-    last_pool = namegen._get_scenario_data(scen_key, "person").get("last", ["Reed", "Carter", "Nakamura", "Brooks", "Sinclair", "Mercer", "Novak", "Price", "Davenport", "Fletcher", "Sato", "Kim", "Tanaka", "Park", "Morrison", "Kovacs", "O'Connor"])
-
-    seed_val = (int(session_id or 1234) * 37 + len(existing) * 19 + random.randint(1, 999))
-    full_name = _generate_unique_name(first_pool, random.choice(last_pool), used_names, seed_val)
+    seed_val = (int(session_id or 1234) * 37 + len(existing) * 19 + (seed if seed is not None else random.randint(1, 999)))
+    full_name = ""
+    for attempt in range(25):
+        cand = namegen.generate_person_name(scen_key, gender=g, seed=seed_val + attempt * 101)
+        if cand.lower() not in used_names:
+            full_name = cand
+            used_names.add(full_name.lower())
+            break
+    if not full_name:
+        full_name = f"Student {len(existing) + 1}"
+        used_names.add(full_name.lower())
 
     archetypes = [
         {"role": "Exchange Student", "clique": "International", "club": "Language & Culture Club", "summary": "Charming accent, fascinated by local customs, always trying new cafeteria dishes."},
@@ -882,31 +1601,37 @@ def generate_dynamic_student_peer(session_id: int, scen_key: str = "high_school_
         {"role": "Amateur Astronomer", "clique": "Academics", "club": "Astronomy & Physics Circle", "summary": "Stays up stargazing on the roof, speaks with poetic wonder about constellations."},
         {"role": "Acoustic Guitarist", "clique": "Musicians", "club": "Arts & Music Wing", "summary": "Plays mellow indie chords behind the bleachers between periods."},
     ]
-    arch = random.choice(archetypes)
-    drive = random.choice(STUDENT_CORE_DRIVES)
-    friction = random.choice(STUDENT_FRICTIONS)
-    quirk = random.choice(STUDENT_SENSORY_QUIRKS)
+    arch = rng.choice(archetypes)
+    drive = rng.choice(STUDENT_CORE_DRIVES)
+    friction = rng.choice(STUDENT_FRICTIONS)
+    quirk = rng.choice(STUDENT_SENSORY_QUIRKS)
     personality = f"{arch['summary']} Drive: {drive} Flaw: {friction} Mannerism: {quirk}"
 
+    from mechanics.social.races import normalize_race
+    char_race = normalize_race("", scen_key, seed=f"{session_id}:dynamic_peer:{full_name.lower()}")
+
     npc_id = full_name.lower().replace(" ", "_").replace(".", "")
-    from mechanics.world.locations import get_session_school_name
+    from mechanics.world.locations import get_session_school_name, get_session_student_commons_name
     school_name = get_session_school_name(session_id, scen_key) or "Westlake Academy"
+    commons_name = get_session_student_commons_name(session_id, scen_key) or "Student Commons & Central Plaza"
     char_dict = {
         "session_id": session_id,
         "npc_id": npc_id,
         "name": full_name,
+        "gender": g,
+        "race": char_race,
         "role": arch["role"],
         "grade": grade,
         "club": arch["club"],
         "clique": arch["clique"],
-        "primary_facility": "School Grounds & Athletics ➔ Central Courtyard ➔ Courtyard Fountain",
+        "primary_facility": f"{commons_name} ➔ Central Courtyard ➔ Courtyard Fountain",
         "secondary_facility": f"{school_name} ➔ Cafeteria ➔ Corner Tables",
         "sibling_name": "",
         "personality_summary": personality,
+        "mannerisms": quirk,
+        "speech_style": "Casual, friendly student vernacular.",
         "is_hydrated": 0
     }
 
     db.save_school_roster(session_id, [char_dict])
     return char_dict
-
-

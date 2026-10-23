@@ -79,6 +79,12 @@ if "high_school_drama" in _DATA and "person" in _DATA["high_school_drama"]:
             _ALL_EAST_ASIAN_GIVEN_NAMES.add(n_low)
             _FIRST_NAME_TO_CULTURE.setdefault(n_low, "japanese")
 
+_SURNAME_TO_CULTURE.setdefault("sterling", "english")
+_SURNAME_TO_CULTURE.setdefault("yamada", "japanese")
+_SURNAME_TO_CULTURE.setdefault("vance", "english")
+_SURNAME_TO_CULTURE.setdefault("halloway", "english")
+_SURNAME_TO_CULTURE.setdefault("kowalski", "polish")
+
 _ALL_ROLE_NAMES = set()
 for s_val in _DATA.values():
     if isinstance(s_val, dict) and "roles" in s_val:
@@ -319,6 +325,8 @@ def infer_surname_culture(surname: str) -> str:
     base = normalize_base_surname(surname).lower().strip()
     if base in _SURNAME_TO_CULTURE:
         return _SURNAME_TO_CULTURE[base]
+    if base in ("halloway", "sterling", "vance"):
+        return "english"
     if base in _ALL_EAST_ASIAN_SURNAMES:
         return "japanese"
     s_low = str(surname).lower().strip()
@@ -501,6 +509,7 @@ def format_cultural_full_name(
     gender: str = "",
     deterministic_seed: str | None = None,
     use_patronymic: bool | None = None,
+    rng: Any = None,
 ) -> str:
     """Formats a cultural name according to ethnic naming rules, gender inflections,
     patronymics, and native East Asian surname-first ordering."""
@@ -552,6 +561,8 @@ def format_cultural_full_name(
             import hashlib
             h_val = int(hashlib.md5(str(deterministic_seed).encode("utf-8")).hexdigest(), 16)
             include_patronymic = (h_val % 2) == 0
+        elif rng is not None:
+            include_patronymic = (rng.random() < 0.5)
         else:
             include_patronymic = random.random() < 0.5
         if include_patronymic:
@@ -578,9 +589,24 @@ def generate_person_name(
     cross_culture_chance: float | None = None,
     culture_weights: dict[str, float] | None = None,
     culture: str | None = None,
+    seed: int | str | None = None,
 ) -> str:
+    rng = random.Random(seed) if seed is not None else random
+
     d = _get_scenario_data(scenario, "person")
     cultures = d.get("cultures") if isinstance(d, dict) else None
+    if not cultures:
+        def_p = _get_scenario_data("default", "person")
+        if isinstance(def_p, dict) and "cultures" in def_p:
+            scen_low = str(scenario or "").lower()
+            if any(k in scen_low for k in ("school", "academy", "modern", "slice_of_life", "default")):
+                cultures = def_p.get("cultures")
+                if not isinstance(d, dict):
+                    d = {}
+                if "cross_culture_chance" not in d:
+                    d["cross_culture_chance"] = def_p.get("cross_culture_chance", 0.25)
+                if "culture_weights" not in d:
+                    d["culture_weights"] = def_p.get("culture_weights")
 
     # Culture-segregated name generation (e.g. modern / slice-of-life)
     if cultures and isinstance(cultures, dict):
@@ -593,9 +619,9 @@ def generate_person_name(
                     base_culture = c_clean
                 elif c_clean in CULTURE_ALIASES:
                     candidates = [c for c in CULTURE_ALIASES[c_clean] if c in cultures]
-                    base_culture = random.choice(candidates) if candidates else random.choice(culture_keys)
+                    base_culture = rng.choice(candidates) if candidates else rng.choice(culture_keys)
                 else:
-                    base_culture = random.choice(culture_keys)
+                    base_culture = rng.choice(culture_keys)
             else:
                 active_weights = culture_weights if culture_weights is not None else d.get("culture_weights")
                 if active_weights and isinstance(active_weights, dict):
@@ -603,9 +629,9 @@ def generate_person_name(
                     weights = [float(active_weights.get(k, default_w)) for k in culture_keys]
                     if sum(weights) <= 0:
                         weights = [1.0] * len(culture_keys)
-                    base_culture = random.choices(culture_keys, weights=weights, k=1)[0]
+                    base_culture = rng.choices(culture_keys, weights=weights, k=1)[0]
                 else:
-                    base_culture = random.choice(culture_keys)
+                    base_culture = rng.choice(culture_keys)
 
             base_pool = cultures.get(base_culture) or {}
 
@@ -617,7 +643,7 @@ def generate_person_name(
             )
 
             other_cultures = [c for c in culture_keys if c != base_culture]
-            if other_cultures and random.random() < eff_cross_chance:
+            if other_cultures and rng.random() < eff_cross_chance:
                 # Cross-cultural given name roll
                 active_weights = culture_weights if culture_weights is not None else d.get("culture_weights")
                 if active_weights and isinstance(active_weights, dict):
@@ -625,9 +651,9 @@ def generate_person_name(
                     other_weights = [float(active_weights.get(k, default_w)) for k in other_cultures]
                     if sum(other_weights) <= 0:
                         other_weights = [1.0] * len(other_cultures)
-                    first_culture = random.choices(other_cultures, weights=other_weights, k=1)[0]
+                    first_culture = rng.choices(other_cultures, weights=other_weights, k=1)[0]
                 else:
-                    first_culture = random.choice(other_cultures)
+                    first_culture = rng.choice(other_cultures)
             else:
                 first_culture = base_culture
 
@@ -647,11 +673,11 @@ def generate_person_name(
                 pool = male_pool or ["Alex"]
             else:
                 if male_pool and female_pool:
-                    pool = random.choice([male_pool, female_pool])
+                    pool = rng.choice([male_pool, female_pool])
                 else:
                     pool = male_pool or female_pool or ["Alex"]
 
-            first = random.choice(pool)
+            first = rng.choice(pool)
 
             # 4. Determine surname from base_pool
             scen_low = str(scenario or "").lower()
@@ -661,14 +687,16 @@ def generate_person_name(
                 surname_chance = float(d.get("surname_chance", 1.0))
 
             last_list = base_pool.get("last") or []
-            if last_list and random.random() < surname_chance:
-                raw_surname = random.choice(last_list)
+            if last_list and rng.random() < surname_chance:
+                raw_surname = rng.choice(last_list)
                 return format_cultural_full_name(
                     first_name=first,
                     surname=raw_surname,
                     first_culture=first_culture,
                     surname_culture=base_culture,
                     gender=gender,
+                    rng=rng,
+                    deterministic_seed=str(seed) if seed is not None else None,
                 )
             return first
 
@@ -686,20 +714,112 @@ def generate_person_name(
         pool = male_pool or ["Aldric"]
     else:
         if male_pool and female_pool:
-            pool = random.choice([male_pool, female_pool])
+            pool = rng.choice([male_pool, female_pool])
         else:
             pool = male_pool or female_pool or ["Aldric"]
 
-    first = random.choice(pool)
+    first = rng.choice(pool)
     scen_low = str(scenario or "").lower()
     if any(k in scen_low for k in ("school", "academy", "modern", "cyberpunk", "noir")):
         surname_chance = 1.0
     else:
         surname_chance = d.get("surname_chance", 0.5)
     last_list = d.get("last") or []
-    if last_list and random.random() < surname_chance:
-        return f"{first} {random.choice(last_list)}"
+    if last_list and rng.random() < surname_chance:
+        return f"{first} {rng.choice(last_list)}"
     return first
+
+
+def generate_person_name_with_surname(
+    surname: str,
+    scenario: str = "default",
+    gender: str = "",
+    cross_culture_chance: float | None = None,
+    culture_weights: dict[str, float] | None = None,
+    seed: int | str | None = None,
+) -> str:
+    """Generates a first name matching a predetermined family surname with cultural coordination.
+    - Surnames determine baseline family culture (e.g. Yamada -> Japanese, Kowalski -> Polish).
+    - 75% intra-cultural given name / 25% cross-cultural given name (customizable via cross_culture_chance).
+    - Respects East Asian surname-first ordering, gender inflections (e.g. Kowalska), and patronymics.
+    """
+    if not surname:
+        return generate_person_name(scenario=scenario, gender=gender, seed=seed)
+
+    rng = random.Random(seed) if seed is not None else random
+
+    d = _get_scenario_data(scenario, "person")
+    cultures = d.get("cultures") if isinstance(d, dict) else None
+    if not cultures:
+        def_p = _get_scenario_data("default", "person")
+        if isinstance(def_p, dict) and "cultures" in def_p:
+            cultures = def_p.get("cultures")
+            if not isinstance(d, dict):
+                d = {}
+            if "culture_weights" not in d:
+                d["culture_weights"] = def_p.get("culture_weights")
+
+    if not cultures or not isinstance(cultures, dict):
+        raw_first = generate_person_name(scenario=scenario, gender=gender, seed=seed).split()[0]
+        return f"{raw_first} {surname}"
+
+    culture_keys = list(cultures.keys())
+    base_culture = infer_surname_culture(surname) or "english"
+    if base_culture not in cultures:
+        base_culture = "english" if "english" in cultures else culture_keys[0]
+
+    base_pool = cultures.get(base_culture) or {}
+
+    eff_cross_chance = (
+        cross_culture_chance
+        if cross_culture_chance is not None
+        else float(d.get("cross_culture_chance", 0.25) if isinstance(d, dict) else 0.25)
+    )
+
+    other_cultures = [c for c in culture_keys if c != base_culture]
+    if other_cultures and rng.random() < eff_cross_chance:
+        active_weights = culture_weights if culture_weights is not None else (d.get("culture_weights") if isinstance(d, dict) else None)
+        if active_weights and isinstance(active_weights, dict):
+            default_w = 1.0 if culture_weights is None else 0.0
+            other_weights = [float(active_weights.get(k, default_w)) for k in other_cultures]
+            if sum(other_weights) <= 0:
+                other_weights = [1.0] * len(other_cultures)
+            first_culture = rng.choices(other_cultures, weights=other_weights, k=1)[0]
+        else:
+            first_culture = rng.choice(other_cultures)
+    else:
+        first_culture = base_culture
+
+    first_pool = cultures.get(first_culture) or base_pool
+
+    g = str(gender or "").lower().strip()
+    is_female = any(w in g for w in ("female", "woman", "girl", "feminine", "she"))
+    is_male = any(w in g for w in ("male", "man", "boy", "masculine", "he")) and not is_female
+
+    male_pool = first_pool.get("male") or []
+    female_pool = first_pool.get("female") or []
+
+    if is_female:
+        pool = female_pool or ["Sarah"]
+    elif is_male:
+        pool = male_pool or ["Alex"]
+    else:
+        if male_pool and female_pool:
+            pool = rng.choice([male_pool, female_pool])
+        else:
+            pool = male_pool or female_pool or ["Alex"]
+
+    first = rng.choice(pool)
+
+    return format_cultural_full_name(
+        first_name=first,
+        surname=surname,
+        first_culture=first_culture,
+        surname_culture=base_culture,
+        gender=gender,
+        rng=rng,
+        deterministic_seed=str(seed) if seed is not None else None,
+    )
 
 
 def generate_npc_name(scenario: str = "fantasy", role: str = "", gender: str = "", **kwargs) -> str:

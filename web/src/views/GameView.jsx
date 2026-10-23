@@ -14,6 +14,10 @@ import SettingsModal from '../components/Settings/SettingsModal';
 import WorldMapModal from '../components/Modals/WorldMapModal';
 import StoryFeed from '../components/StoryFeed/StoryFeed';
 import ActionPanel from '../components/ActionPanel/ActionPanel';
+import TacticalActionDock from '../components/Sidebar/TacticalActionDock';
+import TimeSkipModal from '../components/Modals/TimeSkipModal';
+import QuickBeltPopover from '../components/Modals/QuickBeltPopover';
+import GiveGiftModal from '../components/Modals/GiveGiftModal';
 import { useTranslation } from 'react-i18next';
 import LanguageSwitcher from '../components/Common/LanguageSwitcher';
 import { useInventory } from '../hooks/useInventory';
@@ -63,6 +67,10 @@ const GameView = ({
   const [selectedCombatTarget, setSelectedCombatTarget] = useState(null);
   const [headerCopied, setHeaderCopied] = useState(false);
   const [targetContactName, setTargetContactName] = useState(null);
+  const [isStealthActive, setIsStealthActive] = useState(false);
+  const [timeSkipModalOpen, setTimeSkipModalOpen] = useState(false);
+  const [quickBeltModalOpen, setQuickBeltModalOpen] = useState(false);
+  const [giveGiftModalOpen, setGiveGiftModalOpen] = useState(false);
 
   const handleSelectContact = (name) => {
     setTargetContactName(name);
@@ -120,8 +128,64 @@ const GameView = ({
     }
   }, [lastSyncTimestamp]);
 
+  // Bi-directional synchronization with server stealth state
+  useEffect(() => {
+    const serverStealth = session?.stealth_state;
+    if (serverStealth && typeof serverStealth.is_hidden === 'boolean') {
+      setIsStealthActive(serverStealth.is_hidden);
+    }
+  }, [session?.stealth_state?.is_hidden]);
+
+  const handleToggleStealth = async () => {
+    const nextState = !isStealthActive;
+    setIsStealthActive(nextState);
+    if (session?.id && user?.user_id) {
+      try {
+        const res = await apiCall('/api/adventure/toggle_stealth', {
+          method: 'POST',
+          body: JSON.stringify({
+            session_id: session.id,
+            user_id: user.user_id,
+            active: nextState
+          })
+        });
+        if (res?.session && setSession) {
+          setSession(prev => ({
+            ...res.session,
+            scene_image_url: res.session?.scene_image_url || prev?.scene_image_url || null
+          }));
+        }
+      } catch (err) {
+        console.warn('Failed to sync stealth stance to server:', err);
+      }
+    }
+  };
+
   const handleAction = async (actionData) => {
-    await submitAction(actionData);
+    let finalAction = { ...actionData };
+    if (isStealthActive) {
+      finalAction.is_stealth = true;
+      finalAction.stance = 'stealth';
+      if (
+        finalAction.custom_action_text &&
+        !finalAction.custom_action_text.toLowerCase().includes('sneak') &&
+        !finalAction.custom_action_text.toLowerCase().includes('stealth')
+      ) {
+        finalAction.custom_action_text = `[Stealth] ${finalAction.custom_action_text}`;
+      }
+    }
+
+    // Smart auto-break: resting or speaking openly breaks stealth stance
+    const intent = finalAction.intent || '';
+    if (intent === 'rest_sleep' || intent === 'dialogue_init') {
+      setIsStealthActive(false);
+    }
+
+    const outcome = await submitAction(finalAction);
+    const updatedStealth = outcome?.session?.stealth_state || outcome?.stealth_state;
+    if (updatedStealth && typeof updatedStealth.is_hidden === 'boolean') {
+      setIsStealthActive(updatedStealth.is_hidden);
+    }
     refreshAllSidebars();
   };
 
@@ -362,6 +426,26 @@ const GameView = ({
         {/* Scrollable Tab Content */}
         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 sm:p-3.5 flex flex-col">
           {renderSidebarContent()}
+        </div>
+
+        {/* Pinned Tactical Action Dock (Desktop) */}
+        <div className="shrink-0 p-2.5 bg-black/85 border-t border-fantasy-border/80 backdrop-blur-md">
+          <TacticalActionDock
+            session={session}
+            inventoryHook={inventory}
+            phoneHook={phone}
+            isStealthActive={isStealthActive}
+            onToggleStealth={handleToggleStealth}
+            onOpenPhone={() => setPhoneModalOpen(true)}
+            onClosePhone={() => setPhoneModalOpen(false)}
+            phoneOpen={phoneModalOpen}
+            onAction={handleAction}
+            selectedCombatTarget={selectedCombatTarget}
+            processing={processingTurn}
+            onOpenTimeSkip={() => setTimeSkipModalOpen(true)}
+            onOpenQuickBelt={() => setQuickBeltModalOpen(true)}
+            onOpenGiveGift={() => setGiveGiftModalOpen(true)}
+          />
         </div>
       </aside>
 
@@ -661,6 +745,39 @@ const GameView = ({
             <div className="flex-1 overflow-y-auto custom-scrollbar p-3 flex flex-col min-h-0">
               {renderSidebarContent()}
             </div>
+
+            {/* Pinned Tactical Action Dock in Mobile Drawer */}
+            <div className="shrink-0 p-2 bg-black/85 border-t border-fantasy-border/80 backdrop-blur-md">
+              <TacticalActionDock
+                session={session}
+                inventoryHook={inventory}
+                phoneHook={phone}
+                isStealthActive={isStealthActive}
+                onToggleStealth={handleToggleStealth}
+                onOpenPhone={() => {
+                  setMobileDrawerOpen(false);
+                  setPhoneModalOpen(true);
+                }}
+                onClosePhone={() => setPhoneModalOpen(false)}
+                phoneOpen={phoneModalOpen}
+                onAction={handleAction}
+                selectedCombatTarget={selectedCombatTarget}
+                processing={processingTurn}
+                onOpenTimeSkip={() => {
+                  setMobileDrawerOpen(false);
+                  setTimeSkipModalOpen(true);
+                }}
+                onOpenQuickBelt={() => {
+                  setMobileDrawerOpen(false);
+                  setQuickBeltModalOpen(true);
+                }}
+                onOpenGiveGift={() => {
+                  setMobileDrawerOpen(false);
+                  setGiveGiftModalOpen(true);
+                }}
+                isMobile={true}
+              />
+            </div>
           </div>
         </div>
       )}
@@ -753,6 +870,37 @@ const GameView = ({
         onSessionUpdated={handleSessionLoaded}
         onRefreshCharacter={refreshCharacter}
         onRefreshCodex={codex.refreshCodex}
+      />
+
+      {/* Quick-Belt Consumables Popover */}
+      <QuickBeltPopover
+        isOpen={quickBeltModalOpen}
+        onClose={() => setQuickBeltModalOpen(false)}
+        inventoryHook={inventory}
+        inCombat={Boolean(session?.in_combat || session?.combat_state?.in_combat || (session?.nearby_enemies && session.nearby_enemies.length > 0))}
+        onAction={handleAction}
+        onRefreshCharacter={refreshCharacter}
+        processing={processingTurn}
+      />
+
+      {/* Give Gift to NPC Modal */}
+      <GiveGiftModal
+        isOpen={giveGiftModalOpen}
+        onClose={() => setGiveGiftModalOpen(false)}
+        session={session}
+        inventoryHook={inventory}
+        onAction={handleAction}
+        processing={processingTurn}
+      />
+
+      {/* Genshin-Style Time Skip Chronos Dial Modal */}
+      <TimeSkipModal
+        isOpen={timeSkipModalOpen}
+        onClose={() => setTimeSkipModalOpen(false)}
+        session={session}
+        phoneHook={phone}
+        onAction={handleAction}
+        processing={processingTurn}
       />
 
     </div>

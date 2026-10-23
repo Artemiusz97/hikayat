@@ -339,6 +339,19 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
         player_attrs["acc"] += 5
 
     action = actions[0] if actions else {"choice_type": "MELEE_ATTACK", "label": "Attack"}
+    st_state = session.get("stealth_state", {}) if isinstance(session, dict) else {}
+    is_hidden_now = bool(st_state.get("is_hidden") or action.get("is_stealth") or action.get("stance") == "stealth")
+    is_vanished = bool(st_state.get("combat_vanished") or any("Hidden in Shadows" in str(s) for s in acting_char_data.get("status_effects", [])))
+    player_attrs["combat_vanished"] = is_vanished
+    player_attrs["is_ambush"] = bool(session.get("is_ambush") or (is_hidden_now and player_attrs["combat_turn"] <= 1))
+
+    # Pre-Combat Ambush Surprise Round on Turn 1
+    if player_attrs["is_ambush"] and player_attrs["combat_turn"] <= 1:
+        for m in enemies:
+            if m.get("hp", 0) > 0 and not any("Surprised" in str(s) for s in m.get("status_effects", [])):
+                m.setdefault("status_effects", []).append("Surprised [1 turn]")
+        combat_log.append("⚡ **Surprise Round!** Caught completely off-guard by the ambush, enemies are stunned for Turn 1!")
+
     c_type = action.get("choice_type", "MELEE_ATTACK")
     stat_name = action.get("stat", "STR")
     req_val = action.get("requirement", 10)
@@ -753,6 +766,23 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
             else:
                 combat_log.append(f"🏃 **{acting_char_name}** attempted to disengage, but was cut off by **{target_enemy['name']}**!")
 
+        # 8. VANISH INTO SHADOWS / COVERT STEALTH
+        elif (
+            c_type == "STEALTH_VANISH"
+            or action.get("action_category") == "stealth"
+            or "vanish" in action.get("label", "").lower()
+            or "hide in shadows" in action.get("label", "").lower()
+        ):
+            if tier in ("crit_success", "success"):
+                if isinstance(session, dict):
+                    session.setdefault("stealth_state", {})["is_hidden"] = True
+                    session["stealth_state"]["combat_vanished"] = True
+                crit_note = " *(Perfect Shadow Blend!)*" if tier == "crit_success" else ""
+                acting_char_data.setdefault("status_effects", []).append("Hidden in Shadows [+50% Next Attack, Aggro Shed] [1 turn]")
+                combat_log.append(f"💨 **{acting_char_name}** slipped into the shadows and vanished from enemy sight!{crit_note}")
+            else:
+                combat_log.append(f"💨 **{acting_char_name}** attempted to vanish into the shadows, but **{target_enemy['name']}** kept line-of-sight!")
+
         # 7. ENVIRONMENTAL TRAP OR FREEFORM ENVIRONMENTAL HAZARD
         elif (
             c_type == "ENVIRONMENTAL_TRAP"
@@ -839,6 +869,10 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
 
         # 11. FREEFORM CALLED SHOT (Precision Targeted Strike + 40% DT Pierce + Body-Part Debuff)
         elif action.get("combat_tactical_archetype") == "called_shot":
+            if is_vanished:
+                acting_char_data["status_effects"] = [s for s in acting_char_data.get("status_effects", []) if "Hidden in Shadows" not in str(s)]
+                if isinstance(session, dict) and "stealth_state" in session:
+                    session["stealth_state"]["combat_vanished"] = False
             if tier in ("crit_success", "success"):
                 reduced_armor = dict(enemy_armor)
                 reduced_armor["base_dt"] = int(reduced_armor.get("base_dt", 0) * 0.60)
@@ -908,8 +942,15 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                     tags_log.append("*(Dual-Wield Flurry! +15% damage)*")
                 if tactical_res.get("versatile_2h"):
                     tags_log.append("*(Two-Handed Grip! +15% damage)*")
-                if tactical_res.get("ambush_strike"):
-                    tags_log.append("*(Ambush Strike! +20% damage)*")
+                if tactical_res.get("flanking_backstab"):
+                    tags_log.append("*(Flanking Backstab! +50% damage)*")
+                    acting_char_data["status_effects"] = [s for s in acting_char_data.get("status_effects", []) if "Hidden in Shadows" not in str(s)]
+                    if isinstance(session, dict) and "stealth_state" in session:
+                        session["stealth_state"]["combat_vanished"] = False
+                elif tactical_res.get("ambush_strike"):
+                    tags_log.append("*(Ambush Strike! +50% surprise damage)*")
+                    if isinstance(session, dict) and "stealth_state" in session:
+                        session["stealth_state"]["is_hidden"] = False
                 if tactical_res.get("brawler_synergy"):
                     tags_log.append("*(Brawler Synergy! +25% unarmed strike)*")
                 if tactical_res.get("ap_ratio", 0) > 0:
@@ -918,6 +959,13 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                 tag_str = (" " + " ".join(tags_log)) if tags_log else ""
                 combat_log.append(f"⚔️ **{acting_char_name}** attacked **{target_enemy['name']}**: Dealt **{m_dmg} damage**{tag_str}.")
             else:
+                if tactical_res.get("flanking_backstab") or is_vanished:
+                    acting_char_data["status_effects"] = [s for s in acting_char_data.get("status_effects", []) if "Hidden in Shadows" not in str(s)]
+                    if isinstance(session, dict) and "stealth_state" in session:
+                        session["stealth_state"]["combat_vanished"] = False
+                if tactical_res.get("ambush_strike") or player_attrs.get("is_ambush"):
+                    if isinstance(session, dict) and "stealth_state" in session:
+                        session["stealth_state"]["is_hidden"] = False
                 combat_log.append(f"⚔️ **{acting_char_name}** attacked **{target_enemy['name']}**: Attack failed / deflected.")
 
             if tactical_res.get("stagger_inflicted"):
@@ -985,7 +1033,7 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                         
             # Check for Crowd-Control Turn Suppression
             enemy_effects = [str(s).lower() for s in enemy.get("status_effects", [])]
-            cc_keywords = ("stunned", "staggered", "frozen", "paralyzed", "asleep", "sleep")
+            cc_keywords = ("stunned", "staggered", "frozen", "paralyzed", "asleep", "sleep", "surprised")
             active_cc = next((s for s in enemy_effects if any(k in s for k in cc_keywords)), None)
             
             if active_cc:
@@ -997,17 +1045,28 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
             if not active_targets:
                 break
 
+            # Covert Vanish Rule: Enemies cannot target a vanished/hidden player if visible companions are present!
+            is_player_vanished = bool(
+                (isinstance(session, dict) and session.get("stealth_state", {}).get("combat_vanished"))
+                or any("Hidden in Shadows" in str(s) for s in acting_char_data.get("status_effects", []))
+            )
+            visible_targets = [
+                a for a in active_targets
+                if not (is_player_vanished and ((acting_user_id and a.get("user_id") == acting_user_id) or a.get("name") == acting_char_name))
+            ]
+            target_pool = visible_targets if visible_targets else active_targets
+
             # Archetype-Aware Targeting (Using normalized _get_entity_stat)
             if enemy_arch in ("Stalker", "Assassin", "Chrome Cyberhound"):
-                chosen_target = min(active_targets, key=lambda t: t.get("hp", 100))
+                chosen_target = min(target_pool, key=lambda t: t.get("hp", 100))
             elif enemy_arch in ("Caster", "Psionic Alien", "Netrunner Spec-Op"):
                 # Caster targets lowest LUK
-                chosen_target = min(active_targets, key=lambda t: _get_entity_stat(t, "LUK"))
+                chosen_target = min(target_pool, key=lambda t: _get_entity_stat(t, "LUK"))
             elif enemy_arch in ("Brute", "Heavy Mech", "Heavy Borg"):
                 # Brute targets highest STR (the tank/melee)
-                chosen_target = max(active_targets, key=lambda t: _get_entity_stat(t, "STR"))
+                chosen_target = max(target_pool, key=lambda t: _get_entity_stat(t, "STR"))
             else:
-                chosen_target = random.choice(active_targets)
+                chosen_target = random.choice(target_pool)
 
             target_name = chosen_target.get("name", "Hero")
             target_max_hp = chosen_target.get("max_hp", 100)
@@ -1317,6 +1376,9 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
     session["nearby_enemies"] = surviving_enemies
     session["current_npcs"] = current_npcs
 
+    if (not surviving_enemies or fled_battle) and isinstance(session, dict) and "stealth_state" in session:
+        session["stealth_state"]["combat_vanished"] = False
+
     # Narrative Directive for LLM
     directive_lines = [
         "### DETERMINISTIC COMBAT ROUND OUTCOME (Follow in Story Narrative):",
@@ -1482,6 +1544,8 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
 
     # IF ALL ENEMIES DEFEATED -> Clear combat state and ensure dynamic post-combat choices!
     if not enemies:
+        if isinstance(session, dict) and "stealth_state" in session:
+            session["stealth_state"]["combat_vanished"] = False
         loc = session.get("current_location") or "area"
         llm_choices = llm_outcome.get("next_choices") or llm_outcome.get("choices") or []
 

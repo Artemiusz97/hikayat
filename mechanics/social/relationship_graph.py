@@ -1483,8 +1483,37 @@ def seed_contact_social_graph(
             get_or_create_person(session_id, p_name, person_key=p_key, role=p_role, origin="procedural", conn=c)
             form_tie(session_id, c_key, p_key, TIETYPE_DATING, closeness=70, origin="procedural", turn=0, materialize=False, conn=c)
         elif not is_explicitly_single:
-            # 15% taken roll - Decision 4
-            is_taken = ((abs(hash_val) % 100) < 15)
+            # Openness-scaled taken roll - Decision 4
+            rg_app = contact.get("appearance") or {}
+            if isinstance(rg_app, str):
+                try:
+                    import json
+                    rg_app = json.loads(rg_app)
+                except Exception:
+                    rg_app = {}
+            rg_binfo = contact.get("basic_info") or {}
+            if isinstance(rg_binfo, str):
+                try:
+                    import json
+                    rg_binfo = json.loads(rg_binfo)
+                except Exception:
+                    rg_binfo = {}
+            rg_open = str(
+                rg_app.get("erotic_openness")
+                or rg_app.get("openness")
+                or contact.get("openness")
+                or rg_binfo.get("openness")
+                or "moderate"
+            ).lower()
+            if "prude" in rg_open or "modest" in rg_open or "chaste" in rg_open:
+                taken_rate = 8
+            elif "shameless" in rg_open or "lewd" in rg_open:
+                taken_rate = 35
+            elif "bold" in rg_open or "uninhibited" in rg_open:
+                taken_rate = 25
+            else:
+                taken_rate = 15
+            is_taken = ((abs(hash_val) % 100) < taken_rate)
             if is_taken:
                 from mechanics.social.genealogy import get_deterministic_firstname, get_deterministic_surname
                 import namegen

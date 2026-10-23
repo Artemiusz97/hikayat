@@ -1,5 +1,5 @@
 export const apiCall = async (endpoint, options = {}) => {
-  const timeoutMs = options.timeout || 90000;
+  const timeoutMs = options.timeout || 120000;
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
 

@@ -385,7 +385,14 @@ def apply_hp_mp_delta(user_id: int, hp_delta: int = 0, mp_delta: int = 0, gold_d
         
     # Apply explicit temp HP buffs/drains
     if temp_hp_delta != 0:
-        new_temp_hp = max(0, new_temp_hp + temp_hp_delta)
+        if temp_hp_delta > 0:
+            import config
+            if getattr(config, 'DETERMINISTIC_ECONOMY', True):
+                new_temp_hp = max(current_temp_hp, temp_hp_delta)
+            else:
+                new_temp_hp = max(0, new_temp_hp + temp_hp_delta)
+        else:
+            new_temp_hp = max(0, new_temp_hp + temp_hp_delta)
         
     new_mp = max(0, min(char.get("max_mp", 50), char.get("mp", 0) + mp_delta))
     new_gold = max(0, char.get("gold", 0) + gold_delta)

@@ -101,7 +101,7 @@ class TestTagsScenariosRefactor(unittest.TestCase):
         scenarios = load_scenarios()
         self.assertEqual(scenarios["sci_fi"]["tags"], ["space"])
         self.assertEqual(scenarios["dark_fantasy"]["tags"], ["fantasy", "grimdark"])
-        self.assertEqual(len(scenarios["dark_fantasy"].get("starting_hooks", [])), 3)
+        self.assertEqual(len(scenarios["dark_fantasy"].get("starting_hooks", [])), 6)
         self.assertEqual(scenarios["isekai_fantasy"]["tags"], ["isekai", "fantasy"])
         self.assertEqual(scenarios["nsfw_isekai_fantasy"]["tags"], ["isekai", "fantasy", "nsfw"])
         self.assertEqual(scenarios["high_school_drama"]["tags"], ["high_school", "non_combat"])

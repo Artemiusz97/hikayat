@@ -305,8 +305,8 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                     tier = str(a_check.get("tier", "success")).lower()
             overall_check_success = is_check_success(a_check, default_if_none=True)
   
-            from mechanics.narrative.intent import is_conversational_exit
-            is_exit = is_conversational_exit(label_low)
+            from mechanics.narrative.intent import is_dialogue_exit_action
+            is_exit = is_dialogue_exit_action(a)
             if is_exit:
                 continue
   
@@ -1212,11 +1212,25 @@ def resolve_pre_turn_social_and_disclosures(
     if not sess_dps and session.get("dialogue_partner"):
         sess_dps.append(session["dialogue_partner"])
 
-    primary_target = sess_dps[0] if sess_dps else ""
     first_action = actions[0] if (actions and isinstance(actions[0], dict)) else ({"label": str(actions[0])} if actions else {})
     act_label = str(first_action.get("label") or first_action.get("action") or "")
     act_low = act_label.lower()
     is_success = is_check_success(first_action.get("check"), default_if_none=True)
+
+    if not sess_dps:
+        act_tgt = str(first_action.get("target_npc") or "").strip()
+        if act_tgt:
+            sess_dps.append(act_tgt)
+        else:
+            c_npcs = session.get("current_npcs") or []
+            if isinstance(c_npcs, list):
+                for cn in c_npcs:
+                    n_name = cn.get("name") if isinstance(cn, dict) else str(cn)
+                    if n_name and len(n_name) >= 3 and n_name.lower() in act_low:
+                        sess_dps.append(n_name)
+                        break
+
+    primary_target = sess_dps[0] if sess_dps else "" 
 
     affinity_deltas: Dict[str, int] = {}
     directives: List[str] = []

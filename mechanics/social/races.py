@@ -78,18 +78,18 @@ def resolve_generic_beastfolk_species(seed: str = "") -> str:
     """Deterministically (via seed) resolves generic 'beastfolk', 'anthro', 'furry', or 'half-beast'
     into one of the canonical beastfolk species according to weighted scenario rates."""
     species_pool = (
-        ["cat"] * 15 +
-        ["fox"] * 15 +
-        ["wolf"] * 7 +
-        ["tiger"] * 7 +
-        ["lion"] * 7 +
-        ["cheetah"] * 7 +
-        ["fennec"] * 7 +
-        ["rabbit"] * 7 +
-        ["mouse"] * 7 +
-        ["bear"] * 7 +
-        ["bird"] * 7 +
-        ["reptile"] * 7
+        ["cat"] * 14 +
+        ["fox"] * 14 +
+        ["wolf"] * 12 +
+        ["bird"] * 12 +
+        ["tiger"] * 10 +
+        ["lion"] * 8 +
+        ["cheetah"] * 8 +
+        ["fennec"] * 8 +
+        ["bear"] * 6 +
+        ["reptile"] * 4 +
+        ["rabbit"] * 2 +
+        ["mouse"] * 2
     )
     if seed:
         import hashlib
@@ -170,11 +170,11 @@ FURRY_HIGH_SCHOOL_RACES = [
 FURRY_HIGH_SCHOOL_WEIGHTS = [
     0.05,                           # Human (5%)
     0.10, 0.10,                     # Cat (10%), Fox (10%) (20% total)
-    0.045, 0.045, 0.045, 0.045, 0.045, # Wolf, Fennec, Tiger, Cheetah, Lion (22.5% total)
-    0.045, 0.045, 0.045, 0.045, 0.045, # Mouse, Rabbit, Bear, Bird, Reptile (22.5% total)
+    0.06, 0.05, 0.05, 0.05, 0.05,   # Wolf (6%), Fennec (5%), Tiger (5%), Cheetah (5%), Lion (5%) (26% total)
+    0.015, 0.015, 0.04, 0.06, 0.04, # Mouse (1.5%), Rabbit (1.5%), Bear (4%), Bird (6%), Reptile (4%) (17% total)
     0.05, 0.05,                     # Half-Beast Cat (5%), Half-Beast Fox (5%) (10% total)
-    0.02, 0.02, 0.02, 0.02, 0.02,   # Half-Beast Wolf, Tiger, Lion, Cheetah, Fennec (10% total)
-    0.02, 0.02, 0.02, 0.02, 0.02    # Half-Beast Rabbit, Mouse, Bear, Bird, Reptile (10% total)
+    0.03, 0.025, 0.025, 0.025, 0.025, # Half-Beast Wolf, Tiger, Lion, Cheetah, Fennec (13% total)
+    0.01, 0.01, 0.02, 0.03, 0.02    # Half-Beast Rabbit (1%), Mouse (1%), Bear (2%), Bird (3%), Reptile (2%) (9% total)
 ]
 
 

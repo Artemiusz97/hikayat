@@ -6,6 +6,7 @@ import logging
 import re
 
 import db
+import config
 from mechanics.combat import is_in_combat
 from game_engine.npcs.presence import classify_scene_npcs
 from game_engine.core import _get_npc_name
@@ -215,15 +216,19 @@ def compute_pre_turn_stage(
 
     sess_id = session.get("id")
     scen_key = session.get("scenario", "fantasy")
-    if sess_id and not session.get("current_node_id") and is_location_engine_enabled(scen_key):
-        try:
-            from mechanics.world.locations.graph_seeder import migrate_session_to_spatial_graph
-            mig_res = migrate_session_to_spatial_graph(sess_id)
-            if mig_res and mig_res.get("current_node_id"):
-                session["current_node_id"] = mig_res["current_node_id"]
-        except Exception:
-            pass
     raw_curr = session.get("current_location", "")
+    if sess_id and not session.get("current_node_id") and is_location_engine_enabled(scen_key):
+        resolved_nid = db.resolve_node_id_from_location(sess_id, raw_curr) if raw_curr else None
+        if resolved_nid:
+            session["current_node_id"] = resolved_nid
+        elif not raw_curr:
+            try:
+                from mechanics.world.locations.graph_seeder import migrate_session_to_spatial_graph
+                mig_res = migrate_session_to_spatial_graph(sess_id)
+                if mig_res and mig_res.get("current_node_id"):
+                    session["current_node_id"] = mig_res["current_node_id"]
+            except Exception:
+                pass
     old_primary = get_primary_location_name(raw_curr)
     parsed_z = get_zone_location_name(raw_curr) if raw_curr else ""
 
@@ -317,72 +322,169 @@ def compute_pre_turn_stage(
         except Exception:
             pass
 
+    # Check combat retreat / flee (A7, A12)
+    is_flee = any(
+        (isinstance(a, dict) and (a.get("sub_intent") == "combat_flee" or a.get("intent") == "combat_flee"))
+        for a in (actions or [])
+    )
+    if is_flee and getattr(config, "DETERMINISTIC_MOVEMENT", True) and sess_id:
+        from mechanics.world.locations.pathfinding import resolve_flee_destination
+        curr_nid = session.get("current_node_id") or db.resolve_node_id_from_location(sess_id, raw_curr)
+        prev_nid = session.get("previous_node_id") or (session.get("extra") or {}).get("previous_node_id")
+        flee_nid, flee_loc = resolve_flee_destination(sess_id, curr_nid, prev_nid)
+        if flee_nid and flee_loc:
+            is_movement = True
+            effective_location = flee_loc
+            effective_node_id = flee_nid
+            movement_dest_str = flee_loc
+            session["current_node_id"] = flee_nid
+            stage_directives.append(f"[STAGE DIRECTION — COMBAT RETREAT]: Fled combat back to {flee_loc}.")
+
     # Check movement intent across actions (only when not in active combat)
-    if not is_in_combat(session) and actions:
+    if not is_movement and not is_in_combat(session) and actions:
+        target_nid = None
+        target_loc_candidate = None
         for a in actions:
-            label = a.get("label", "") if isinstance(a, dict) else str(a)
-            action_dest = extract_movement_destination(label, sess_id, current_zone=parsed_z, scen_key=scen_key)
-            if action_dest:
-                dest_z, dest_p = action_dest
-                movement_dest_str = f"{dest_z} ➔ {dest_p}"
-                is_crit_fail = bool(a.get("check") and getattr(a["check"], "tier", "") == "crit_fail") if isinstance(a, dict) else False
-
-                if not is_crit_fail:
-                    is_movement = True
-                    # Classify companions traveling vs left behind
-                    t_comps, l_patrons = classify_scene_npcs(session, actions, old_primary=old_primary, dest_primary=dest_p)
-                    traveling_companions = t_comps or []
-                    left_behind_patrons = l_patrons or []
-
-                    # Scan facility residents for target station
-                    lbl_lower = (label or "").lower()
-                    facility_residents = []
-                    if sess_id:
-                        try:
-                            facility_residents = db.get_school_characters_by_facility(sess_id, f"{dest_z} ➔ {dest_p}", limit=6)
-                        except Exception:
-                            facility_residents = []
-
-                    for fr in facility_residents:
-                        fr_nm = (fr.get("name") or "").strip().lower()
-                        if fr_nm and (fr_nm in lbl_lower or (len(fr_nm.split()) > 1 and fr_nm.split()[0] in lbl_lower)):
-                            fr_fac = fr.get("primary_facility") or ""
-                            if fr_fac:
-                                _, _, fr_s = parse_tiered_location(fr_fac, scen_key, session_id=sess_id)
-                                if fr_s and fr_s not in ("Main Area", ""):
-                                    target_station_sub = fr_s
-                                    target_resident_name = fr.get("name")
-                                    break
-
-                    # Check quest sub-objectives if target station not found
-                    if not target_station_sub and sess_id:
-                        try:
-                            with db.get_conn() as _c_conn:
-                                q_rows = _c_conn.execute(
-                                    "SELECT sub_objectives_json FROM quests WHERE session_id=? AND status='Active'",
-                                    (sess_id,)
-                                ).fetchall()
-                                for qr in q_rows:
-                                    sub_objs = json.loads(qr["sub_objectives_json"] or "[]")
-                                    for so in sub_objs:
-                                        if not so.get("completed"):
-                                             t_loc = so.get("target_location", "")
-                                             t_npc = (so.get("target_npc") or "").strip().lower()
-                                             if t_loc:
-                                                 qz, qp, qs = parse_tiered_location(t_loc, scen_key, session_id=sess_id)
-                                                 if qp.lower() == dest_p.lower() and qs and qs not in ("Main Area", ""):
-                                                     if not t_npc or (t_npc in lbl_lower or (len(t_npc.split()) > 1 and t_npc.split()[0] in lbl_lower)):
-                                                         target_station_sub = qs
-                                                         target_resident_name = so.get("target_npc")
-                                                         break
-                                    if target_station_sub:
-                                        break
-                        except Exception:
-                            pass
-
-                    loc_prompt_target = target_station_sub or "Main Area"
-                    effective_location = f"{dest_z} ➔ {dest_p} ➔ {loc_prompt_target}"
+            if not isinstance(a, dict):
+                continue
+            if a.get("target_node_id"):
+                target_nid = a["target_node_id"]
                 break
+            if a.get("target_location"):
+                target_loc_candidate = a["target_location"]
+                break
+
+        if not target_nid and target_loc_candidate and sess_id:
+            target_nid = db.resolve_node_id_from_location(sess_id, target_loc_candidate)
+
+        curr_nid = session.get("current_node_id") or (db.resolve_node_id_from_location(sess_id, raw_curr) if sess_id else None)
+
+        # Freeform text matching (A10)
+        if not target_nid and getattr(config, "DETERMINISTIC_MOVEMENT", True) and sess_id and curr_nid:
+            from mechanics.world.locations.pathfinding import match_freeform_spatial_destination
+            for a in actions:
+                lbl = a.get("label", "") if isinstance(a, dict) else str(a)
+                matched_nid = match_freeform_spatial_destination(sess_id, curr_nid, lbl)
+                if matched_nid:
+                    target_nid = matched_nid
+                    break
+
+        if target_nid and getattr(config, "DETERMINISTIC_MOVEMENT", True) and sess_id:
+            from mechanics.world.locations.pathfinding import find_spatial_path, evaluate_spatial_route
+            if not curr_nid or target_nid == curr_nid:
+                route = [target_nid]
+            else:
+                route = find_spatial_path(sess_id, curr_nid, target_nid)
+
+            if not route:
+                dest_node = db.get_world_node(sess_id, target_nid)
+                if dest_node and dest_node.get("is_hidden") == 1:
+                    stage_directives.append("[STAGE DIRECTION — ACCESS BLOCKED]: Location is hidden or undiscovered.")
+            else:
+                dest_node = db.get_world_node(sess_id, target_nid)
+                dest_primary = (dest_node.get("name") if dest_node else "") or ""
+                t_comps, l_patrons = classify_scene_npcs(session, actions, old_primary=old_primary, dest_primary=dest_primary)
+                traveling_companions = list(t_comps or [])
+                existing_comp_names = {_get_npc_name(c).lower() for c in traveling_companions if _get_npc_name(c)}
+                for tc in (session.get("temporary_companions") or []):
+                    tc_name = _get_npc_name(tc)
+                    if tc_name and tc_name.lower() not in existing_comp_names:
+                        traveling_companions.append(tc)
+                        existing_comp_names.add(tc_name.lower())
+                for pn in (session.get("party_npcs") or []):
+                    pn_name = _get_npc_name(pn)
+                    if pn_name and pn_name.lower() not in existing_comp_names:
+                        traveling_companions.append(pn)
+                        existing_comp_names.add(pn_name.lower())
+                left_behind_patrons = l_patrons or []
+
+                route_res = evaluate_spatial_route(
+                    sess_id, route, session,
+                    party=party, actions=actions,
+                    traveling_companions=traveling_companions
+                )
+                is_movement = True
+                effective_location = route_res["effective_location"]
+                effective_node_id = route_res["effective_node_id"]
+                movement_dest_str = effective_location
+                if curr_nid:
+                    session["previous_node_id"] = curr_nid
+                    if "extra" not in session or not isinstance(session["extra"], dict):
+                        session["extra"] = {}
+                    session["extra"]["previous_node_id"] = curr_nid
+                session["current_node_id"] = effective_node_id
+                session["travel_minutes_elapsed"] = route_res["travel_minutes"]
+                traveling_companions = route_res["traveling_companions"]
+                stage_directives.extend(route_res["stage_directives"])
+                access_gate_info = route_res.get("access_gate") or {"gated": route_res["gated"], "barrier_node_id": route_res["barrier_node_id"]}
+
+        # Legacy movement fallback (runs if movement wasn't resolved by spatial graph,
+        # or when session does not have a spatial graph)
+        if not is_movement and (not getattr(config, "DETERMINISTIC_MOVEMENT", True) or not curr_nid):
+            for a in actions:
+                label = a.get("label", "") if isinstance(a, dict) else str(a)
+                action_dest = extract_movement_destination(label, sess_id, current_zone=parsed_z, scen_key=scen_key)
+                if action_dest:
+                    dest_z, dest_p = action_dest
+                    movement_dest_str = f"{dest_z} ➔ {dest_p}"
+                    is_crit_fail = bool(a.get("check") and getattr(a["check"], "tier", "") == "crit_fail") if isinstance(a, dict) else False
+
+                    if not is_crit_fail:
+                        is_movement = True
+                        # Classify companions traveling vs left behind
+                        t_comps, l_patrons = classify_scene_npcs(session, actions, old_primary=old_primary, dest_primary=dest_p)
+                        traveling_companions = t_comps or []
+                        left_behind_patrons = l_patrons or []
+
+                        # Scan facility residents for target station
+                        lbl_lower = (label or "").lower()
+                        facility_residents = []
+                        if sess_id:
+                            try:
+                                facility_residents = db.get_school_characters_by_facility(sess_id, f"{dest_z} ➔ {dest_p}", limit=6)
+                            except Exception:
+                                facility_residents = []
+
+                        for fr in facility_residents:
+                            fr_nm = (fr.get("name") or "").strip().lower()
+                            if fr_nm and (fr_nm in lbl_lower or (len(fr_nm.split()) > 1 and fr_nm.split()[0] in lbl_lower)):
+                                fr_fac = fr.get("primary_facility") or ""
+                                if fr_fac:
+                                    _, _, fr_s = parse_tiered_location(fr_fac, scen_key, session_id=sess_id)
+                                    if fr_s and fr_s not in ("Main Area", ""):
+                                        target_station_sub = fr_s
+                                        target_resident_name = fr.get("name")
+                                        break
+
+                        # Check quest sub-objectives if target station not found
+                        if not target_station_sub and sess_id:
+                            try:
+                                with db.get_conn() as _c_conn:
+                                    q_rows = _c_conn.execute(
+                                        "SELECT sub_objectives_json FROM quests WHERE session_id=? AND status='Active'",
+                                        (sess_id,)
+                                    ).fetchall()
+                                    for qr in q_rows:
+                                        sub_objs = json.loads(qr["sub_objectives_json"] or "[]")
+                                        for so in sub_objs:
+                                            if not so.get("completed"):
+                                                 t_loc = so.get("target_location", "")
+                                                 t_npc = (so.get("target_npc") or "").strip().lower()
+                                                 if t_loc:
+                                                     qz, qp, qs = parse_tiered_location(t_loc, scen_key, session_id=sess_id)
+                                                     if qp.lower() == dest_p.lower() and qs and qs not in ("Main Area", ""):
+                                                         if not t_npc or (t_npc in lbl_lower or (len(t_npc.split()) > 1 and t_npc.split()[0] in lbl_lower)):
+                                                             target_station_sub = qs
+                                                             target_resident_name = so.get("target_npc")
+                                                             break
+                                        if target_station_sub:
+                                            break
+                            except Exception:
+                                pass
+
+                        loc_prompt_target = target_station_sub or "Main Area"
+                        effective_location = f"{dest_z} ➔ {dest_p} ➔ {loc_prompt_target}"
+                    break
 
         # If not moving between primary facilities, evaluate hybrid sublocation or tactical focal point
         if not is_movement and actions:
@@ -412,7 +514,7 @@ def compute_pre_turn_stage(
     # Compute stage_npcs
     stage_npcs: list[dict] = []
     seen_stage_names = set()
-    access_gate_info = {"gated": False}
+    access_gate_info = access_gate_info if ('access_gate_info' in locals() and access_gate_info and access_gate_info.get("gated")) else {"gated": False}
 
     def _add_stage_npc(npc_dict: dict):
         if not isinstance(npc_dict, dict):
@@ -430,10 +532,10 @@ def compute_pre_turn_stage(
         for c in traveling_companions:
             _add_stage_npc(c)
 
-        effective_node_id = db.resolve_node_id_from_location(sess_id, effective_location) if (sess_id and effective_location) else None
+        if not ('effective_node_id' in locals() and effective_node_id):
+            effective_node_id = db.resolve_node_id_from_location(sess_id, effective_location) if (sess_id and effective_location) else None
 
-        access_gate_info = {"gated": False}
-        if sess_id and effective_node_id:
+        if sess_id and effective_node_id and not access_gate_info.get("gated") and not getattr(config, "DETERMINISTIC_MOVEMENT", True):
             try:
                 from mechanics.world.locations.access_gate import evaluate_node_access_gate
                 access_gate_info = evaluate_node_access_gate(
