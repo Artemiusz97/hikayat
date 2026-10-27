@@ -128,6 +128,26 @@ SCENARIO_LOCATIONS: Dict[str, List[str]] = {
         "Capital City ➔ Royal Plaza ➔ Grand Belltower",
         "Capital City ➔ Magic Academy ➔ Lecture Hall",
     ],
+    "slice_of_life": [
+        "Downtown Commercial Core ➔ Artisanal Coffee Roastery ➔ Window Booth",
+        "Downtown Commercial Core ➔ Basement Jazz Bar ➔ Main Lounge",
+        "Municipal River Greenway ➔ Riverside Park ➔ Weeping Willow Bench",
+    ],
+    "anomalous_incursions": [
+        "Central Operations Headquarters ➔ Command Complex ➔ Briefing Room",
+        "Downtown Commercial District ➔ Transit Plaza ➔ Subway Entrance",
+        "University & Parapsychology Campus ➔ Research Annex ➔ Containment Lab",
+    ],
+    "urban_anomalies": [
+        "Central Operations Headquarters ➔ Command Complex ➔ Briefing Room",
+        "Downtown Commercial District ➔ Transit Plaza ➔ Subway Entrance",
+        "University & Parapsychology Campus ➔ Research Annex ➔ Containment Lab",
+    ],
+    "urban_fantasy": [
+        "Central Operations Headquarters ➔ Command Complex ➔ Briefing Room",
+        "Old Eastern Quarter & Night Market ➔ Lantern Alley ➔ Apothecary Stall",
+        "Eastern Grand Temple & Sanctuary ➔ Inner Courtyard ➔ Main Shrine",
+    ],
 }
 
 
@@ -256,9 +276,18 @@ class NarrativeSimulator:
                     "check": check_res,
                 }]
 
-                # E. Dialogue Partner Resolution
+                # E. Dialogue Partner & Pre-Turn Deterministic Stage Planning (Phase 4 engine parity)
+                from game_engine.npcs import compute_pre_turn_stage
+                from game_engine.npcs.cast_planner import plan_pre_turn
+                stage_info = compute_pre_turn_stage(session, action_objs, party=party)
+                effective_loc = stage_info.get("effective_location") or session.get("current_location", "")
+                cast_plan = plan_pre_turn(
+                    session, party, action_objs, stage_info=stage_info, is_combat=False, new_loc=effective_loc
+                )
+
                 former_partner = session.get("dialogue_partner")
-                new_partners, has_exited = _compute_dialogue_intent(session, action_objs)
+                new_partners = cast_plan.dialogue_partners if (cast_plan and cast_plan.dialogue_partners) else stage_info.get("new_partners", [])
+                has_exited = bool((cast_plan.has_exited_convo if cast_plan else False) or stage_info.get("has_exited_convo", False))
 
                 # Apply dialogue partner update to database session
                 active_partner = new_partners[0] if new_partners else None
@@ -328,8 +357,14 @@ class NarrativeSimulator:
                     pres_names = [_get_npc_name(n) for n in reconciled_npcs if _get_npc_name(n)]
                     retained_partners = [p for p in new_partners if any(is_dialogue_partner(p, [pn]) for pn in pres_names)]
 
-                    from game_engine.npcs import extract_speaking_npcs_from_narrative, evaluate_scene_attention_transition
-                    speaking_npcs = extract_speaking_npcs_from_narrative(full_nar, reconciled_npcs)
+                    from game_engine.npcs import evaluate_scene_attention_transition
+                    speaking_npcs = []
+                    for ev in (mock_outcome.get("cast_events") or []):
+                        if isinstance(ev, dict) and str(ev.get("type") or "").lower() == "engage":
+                            ev_npc = str(ev.get("npc") or ev.get("name") or "").strip()
+                            matched_ev = next((_get_npc_name(n) for n in reconciled_npcs if is_dialogue_partner(ev_npc, [_get_npc_name(n)])), None)
+                            if matched_ev and matched_ev not in speaking_npcs:
+                                speaking_npcs.append(matched_ev)
                     audit_speaking = (mock_outcome.get("entity_audit") or {}).get("speaking_characters") or []
                     if isinstance(audit_speaking, list):
                         for asp in audit_speaking:
@@ -755,6 +790,8 @@ class NarrativeSimulator:
             "steampunk",
             "dark_fantasy",
             "isekai_fantasy",
+            "slice_of_life",
+            "anomalous_incursions",
         ] if scenario == "all" else [scenario]
 
         archetypes_to_test = [

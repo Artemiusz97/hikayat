@@ -221,8 +221,9 @@ class TestActorPhysicalStateEngine(unittest.TestCase):
         self.assertEqual(warrior["holding"], "Dropped / Empty hands")
         self.assertTrue(any("Warhammer" in it for it in merged["dropped_items"]))
 
-    def test_08_lazy_migration_from_legacy_json(self):
-        """Invariant 6: Legacy physical_state_json hydrates seamlessly into relational tables on read."""
+    def test_08_startup_cutover_migration_from_legacy_json(self):
+        """Invariant 6 (Clean Cutover): Migration 30 migrates legacy physical_state_json actors into relational tables once and strips actors JSON."""
+        from db.core import _migrate_clean_cutover_v30
         legacy_state = {
             "actors": {
                 "Sora": {
@@ -240,12 +241,11 @@ class TestActorPhysicalStateEngine(unittest.TestCase):
             "props": {"Tea Table": "Set with kettle"},
             "intimate_contact": "none",
         }
-        db.update_session_physical_state(self.session_id, legacy_state, sync_tables=False)
-
-        # Clear relational table to test pure lazy migration
         with db.get_conn() as conn:
             conn.execute("DELETE FROM actor_physical_states WHERE session_id=?", (self.session_id,))
             conn.execute("DELETE FROM actor_garments WHERE session_id=?", (self.session_id,))
+            conn.execute("UPDATE sessions SET physical_state_json=? WHERE id=?", (json.dumps(legacy_state), self.session_id))
+            _migrate_clean_cutover_v30(conn)
 
         migrated = ps.get_actor_physical_state(self.session_id, "Sora")
         self.assertIsNotNone(migrated)
@@ -253,6 +253,10 @@ class TestActorPhysicalStateEngine(unittest.TestCase):
         self.assertEqual(migrated["posture"], "Sitting on sofa")
         self.assertEqual(migrated["holding"], "Teacup")
         self.assertIn("top", migrated["clothing"])
+        with db.get_conn() as conn:
+            raw_meta = json.loads(conn.execute("SELECT physical_state_json FROM sessions WHERE id=?", (self.session_id,)).fetchone()["physical_state_json"] or "{}")
+            self.assertNotIn("actors", raw_meta)
+            self.assertIn("Tea Table", raw_meta.get("props", {}))
 
     def test_09_save_load_cloning_persistence(self):
         """Invariant 15: Saving and loading adventure slot clones actor_physical_states and actor_garments."""
@@ -695,19 +699,23 @@ class TestActorPhysicalStateEngine(unittest.TestCase):
         self.assertIn("Elena", hydrated.get("actors", {}))
         self.assertEqual(hydrated["actors"]["Elena"]["holding"], "Tea Cup")
 
-        # 2. Relational tables are empty, but physical_state_json has legacy state
+        # 2. Clean-cutover Migration 30 migrates legacy physical_state_json actors into relational tables and strips actors from sessions
+        from db.core import _migrate_clean_cutover_v30
         with get_conn() as conn:
             conn.execute("DELETE FROM actor_physical_states WHERE session_id=?", (self.session_id,))
             conn.execute("DELETE FROM actor_garments WHERE session_id=?", (self.session_id,))
             legacy_data = {
                 "actors": {
                     "Marcus": {"posture": "Standing guard", "holding": "Halberd", "clothing": {"top": "Chainmail", "bottom": "Breeches"}}
-                }
+                },
+                "props": {"Banner": "Hanging on wall"},
             }
             conn.execute("UPDATE sessions SET physical_state_json=? WHERE id=?", (json.dumps(legacy_data), self.session_id))
+            _migrate_clean_cutover_v30(conn)
 
         retrieved = db.get_session_physical_state(self.session_id)
         self.assertIn("Marcus", retrieved.get("actors", {}))
+        self.assertEqual(retrieved.get("props", {}).get("Banner"), "Hanging on wall")
 
         # Verify relational tables were migrated
         all_actors = ps.get_all_actor_physical_states(self.session_id)

@@ -98,8 +98,8 @@ class TestAcademicZoneIntegrityAndStartingHooks(unittest.TestCase):
             preferred_hint=resolved_hint
         )
         self.assertEqual(z, school_name)
-        self.assertEqual(p, "School Rooftop")
-        self.assertIn(s, ("Rooftop Benches", "Behind Water Tank", "Rooftop Fence Line"))
+        self.assertEqual(p, "Main Campus Building")
+        self.assertEqual(s, "School Rooftop")
 
     def test_starting_hook_tokens_resolved_before_archetype_location(self):
         """Issue 2 Regression Test: get_dynamic_starting_hook resolves template tokens in suggested_location before matching."""

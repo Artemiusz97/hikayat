@@ -34,6 +34,10 @@ SUPPORTED_SCENARIOS = [
     "steampunk",
     "dark_fantasy",
     "isekai_fantasy",
+    "slice_of_life",
+    "anomalous_incursions",
+    "urban_anomalies",
+    "urban_fantasy",
 ]
 
 
@@ -101,7 +105,13 @@ def format_report_summary(report: SocialSimulationReport) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description="Hikayat Social Dynamics & Persona Simulator")
-    parser.add_argument("--simulations", "-n", type=int, default=20, help="Number of simulated journeys (default: 20)")
+    parser.add_argument(
+        "--simulations", "--count", "--journeys", "-n",
+        type=int,
+        default=20,
+        dest="simulations",
+        help="Number of simulated journeys (default: 20)",
+    )
     parser.add_argument(
         "--scenario", "-s",
         type=str,
@@ -189,6 +199,25 @@ def main():
                     safe_print(f"    -> [CRASH] {res.error}")
 
         safe_print("\n" + format_report_summary(report))
+
+        failed_results = [r for r in report.results if r.violations or r.error]
+        if failed_results:
+            os.makedirs("reports/failures", exist_ok=True)
+            for fr in failed_results[:10]:
+                failure_path = f"reports/failures/social_seed_{fr.seed}.json"
+                with open(failure_path, "w", encoding="utf-8") as f:
+                    json.dump({
+                        "journey_id": fr.journey_id,
+                        "seed": fr.seed,
+                        "scenario": fr.scenario,
+                        "archetype": fr.archetype,
+                        "turns": fr.total_turns,
+                        "success": fr.success,
+                        "error": fr.error,
+                        "history": fr.history,
+                        "violations": [{"category": v.category, "message": v.message, "severity": v.severity} for v in fr.violations],
+                    }, f, indent=2, default=str)
+            safe_print(f"\nSaved {min(10, len(failed_results))} failure reproduction payloads to reports/failures/")
 
         if args.json_report:
             report_data = {

@@ -70,7 +70,8 @@ class TestScenePacingAndHubExploration(unittest.TestCase):
             self.test_session_id,
             current_location="Ancient Woods ➔ Forest Perimeter ➔ Mist Trail"
         )
-        self.assertIn("Player must travel to", wp_block_away)
+        self.assertIn("[STRICT LOCATION LOCK]", wp_block_away)
+        self.assertIn("Offer ONLY travel or navigation choices toward", wp_block_away)
         self.assertNotIn("ACTIVE LOCAL QUEST OBJECTIVE AT CURRENT LOCATION", wp_block_away)
 
         # 2. Player IS at target location

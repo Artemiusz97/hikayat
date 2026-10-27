@@ -143,16 +143,23 @@ class GameLoopMixin:
 
 
                     if new_char["hp"] <= 0:
-                        embed = discord.Embed(
-                            title="💀 The Party Has Fallen" if len(session["turn_order"]) > 1 else "💀 You have fallen",
-                            description=outcome.get("outcome_narrative", "Darkness takes you."),
-                            color=discord.Color.red())
-                        embed.add_field(name="Result", value=result_summary)
-                        if loot_text:
-                            embed.add_field(name="🎒 Loot", value=loot_text, inline=False)
-                        await adb(db.finish_session, session_id)
-                        await self._safe_send(interaction, embed=embed)
-                        return
+                        import scenario_data
+                        if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
+                            from mechanics.world.anomalous_events import resolve_anomalous_emergency_extraction
+                            await adb(resolve_anomalous_emergency_extraction, session_id, user_id)
+                            new_char = await adb(db.get_character, user_id)
+                            session = await adb(db.get_session, session_id)
+                        else:
+                            embed = discord.Embed(
+                                title="💀 The Party Has Fallen" if len(session["turn_order"]) > 1 else "💀 You have fallen",
+                                description=outcome.get("outcome_narrative", "Darkness takes you."),
+                                color=discord.Color.red())
+                            embed.add_field(name="Result", value=result_summary)
+                            if loot_text:
+                                embed.add_field(name="🎒 Loot", value=loot_text, inline=False)
+                            await adb(db.finish_session, session_id)
+                            await self._safe_send(interaction, embed=embed)
+                            return
 
                     outcome_embeds = build_outcome_embeds(
                         outcome=outcome,
@@ -242,11 +249,14 @@ class GameLoopMixin:
                     raw_next_choices, next_narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
                         outcome, session=session
                     )
-                    new_choices = self._clean_choices(
-                        raw_next_choices, scenario=scen_curr, location=loc_curr, char=char,
-                        dialogue_partner=partner_arg, current_npcs=npcs_arg, session_id=session_id,
-                        departed_npcs=outcome.get("departed_characters") or outcome.get("departed_npcs"),
-                    )
+                    if isinstance(outcome, dict) and outcome.get("_hybrid_choices_built") and raw_next_choices:
+                        new_choices = list(raw_next_choices)
+                    else:
+                        new_choices = self._clean_choices(
+                            raw_next_choices, scenario=scen_curr, location=loc_curr, char=char,
+                            dialogue_partner=partner_arg, current_npcs=npcs_arg, session_id=session_id,
+                            departed_npcs=outcome.get("departed_characters") or outcome.get("departed_npcs"),
+                        )
                     outcome["next_narrative"] = next_narrative
                     outcome["scene_title"] = scene_title
                 
@@ -255,7 +265,9 @@ class GameLoopMixin:
                                            next_narrative, new_choices, new_history,
                                            location=outcome.get("location"), nearby_enemies=outcome.get("nearby_enemies"),
                                            current_npcs=outcome.get("npcs_present", []),
-                                           dialogue_partner=partner_arg)
+                                           dialogue_partner=partner_arg,
+                                           current_node_id=outcome.get("current_node_id"),
+                                           focal_point=outcome.get("focal_point"))
                     merchant = session.get("merchant", {}) # Don't re-apply merchant state
                     items_gained_by_user = {}
                     loot_text = ""
@@ -454,16 +466,23 @@ class GameLoopMixin:
                         await interaction.followup.send(f"⚠️ The LLM failed to resolve this round: {e}")
                         return
 
-                    mp_already_spent = {a["char"]["user_id"]: a["mp_spent"] for a in actions}
-                    items_gained_by_user = game_engine.apply_outcome(session_id, party, outcome, mp_already_spent, actions=actions)
+                    mp_already_spent = {
+                        a["char"]["user_id"]: a["mp_spent"]
+                        for a in actions
+                        if a.get("_mp_already_deducted")
+                    }
+                    items_gained_by_user = await adb(
+                        game_engine.apply_outcome, session_id, party, outcome, mp_already_spent, actions=actions
+                    )
 
                     summaries, all_levels = [], []
                     xp_by_name = {}
+                    deduction_xp_bonus = int(outcome.get("_deduction_xp_bonus") or 0) if isinstance(outcome, dict) else 0
                     for uid, action in zip(member_ids, actions):
-                        bonus_xp = 0
+                        bonus_xp = deduction_xp_bonus
                         for co in outcome.get("character_outcomes", []):
                             if isinstance(co, dict) and co.get("name", "").lower() == action["char"]["name"].lower():
-                                bonus_xp = _safe_int(co.get("xp_change"), default=0)
+                                bonus_xp += _safe_int(co.get("xp_change"), default=0)
                                 break
                         
                         levels_gained = self._apply_xp(uid, action["check"])
@@ -524,7 +543,9 @@ class GameLoopMixin:
                                            next_narrative, new_choices, new_history,
                                            location=outcome.get("location"), nearby_enemies=outcome.get("nearby_enemies"),
                                            current_npcs=outcome.get("npcs_present", []),
-                                           dialogue_partner=partner_arg)
+                                           dialogue_partner=partner_arg,
+                                           current_node_id=outcome.get("current_node_id"),
+                                           focal_point=outcome.get("focal_point"))
                     merchant = _apply_merchant_encounter_result(session_id, outcome.get("merchant_encounter"))
 
                     loot_text = _format_items_gained_multi(items_gained_by_user, party)

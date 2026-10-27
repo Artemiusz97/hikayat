@@ -465,13 +465,55 @@ def _extract_json(raw: str) -> dict:
 
 
 
-def _is_response_complete(raw_text: str, finish_reason: str | None) -> bool:
-    if finish_reason == "length":
+def _is_openai_official(base_url: str) -> bool:
+    return "api.openai.com" in (base_url or "").lower()
+
+
+def _model_supports_json_schema(base_url: str, model_name: str) -> bool:
+    lower_m = (model_name or "").lower()
+    # Gemma models on third-party endpoints (like Nano-GPT / vLLM / Outlines) have a known bug
+    # where tokenizer control tokens generate infinite whitespace loops under constrained grammar/schema mode.
+    if "gemma" in lower_m and not _is_openai_official(base_url):
         return False
+    return True
+
+
+def _model_supports_json_mode(base_url: str, model_name: str) -> bool:
+    lower_m = (model_name or "").lower()
+    # Gemma models on third-party endpoints (like Nano-GPT / vLLM / Outlines) have a known bug
+    # where tokenizer control tokens generate infinite whitespace loops under constrained json_object mode.
+    if "gemma" in lower_m and not _is_openai_official(base_url):
+        return False
+    return True
+
+
+def _is_response_complete(
+    raw_text: str,
+    finish_reason: str | None,
+    response_model: Type[BaseModel] | None = None,
+    required_any_keys: list[list[str]] | None = None,
+) -> bool:
     if not raw_text or not raw_text.strip():
         return False  # Explicit empty / blank guard
     clean = raw_text.strip()
     clean = re.sub(r"```(?:json)?\s*$", "", clean).strip()  # triple-backtick fence strip
+
+    if finish_reason == "length":
+        # Check if the JSON is actually already complete (e.g. trailing whitespace/newlines after valid JSON)
+        try:
+            parsed = _extract_json(clean)
+            if isinstance(parsed, dict) and parsed:
+                if required_any_keys:
+                    for key_group in required_any_keys:
+                        if not any(k in parsed for k in key_group):
+                            return False
+                if response_model:
+                    response_model.model_validate(parsed)
+                return True
+        except Exception:
+            return False
+        return False
+
     if not clean.endswith("}") and not clean.endswith("]"):
         return False
     return True
@@ -557,22 +599,33 @@ async def probe_model_capabilities(client: AsyncOpenAI, model_name: str) -> dict
     if model_name in _MODEL_CAPABILITIES:
         return _MODEL_CAPABILITIES[model_name]
 
+    base_url = str(getattr(client, "base_url", ""))
+    can_json_mode = _model_supports_json_mode(base_url, model_name)
+    can_json_schema = _model_supports_json_schema(base_url, model_name)
     info = {
         "model": model_name,
-        "json_mode": False,
+        "json_mode": can_json_mode,
+        "json_schema": can_json_schema,
         "status": "unknown",
         "error": None,
     }
     async with _semaphore:
         try:
-            await client.chat.completions.create(
-                model=model_name,
-                messages=[{"role": "user", "content": "Return JSON: {\"status\": \"ok\"}"}],
-                response_format={"type": "json_object"},
-                max_tokens=60,
-                timeout=15.0,
-            )
-            info["json_mode"] = True
+            if can_json_mode:
+                await client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": "Return JSON: {\"status\": \"ok\"}"}],
+                    response_format={"type": "json_object"},
+                    max_tokens=60,
+                    timeout=15.0,
+                )
+            else:
+                await client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": "Return JSON: {\"status\": \"ok\"}"}],
+                    max_tokens=60,
+                    timeout=15.0,
+                )
             info["status"] = "ok"
         except Exception as e:
             err_msg = str(e).lower()
@@ -768,9 +821,10 @@ async def call_llm_json_stream(system_prompt: str | list, user_prompt: str,
                     "timeout": req_timeout,
                 }
                 
-                cache_key = (str(getattr(client, "base_url", "")), model_name)
+                base_url = str(getattr(client, "base_url", ""))
+                cache_key = (base_url, model_name)
                 known_cap = _MODEL_CAPABILITIES.get(cache_key) or _MODEL_CAPABILITIES.get(model_name)
-                supports_json_mode = known_cap.get("json_mode", True) if known_cap else True
+                supports_json_mode = known_cap.get("json_mode", _model_supports_json_mode(base_url, model_name)) if known_cap else _model_supports_json_mode(base_url, model_name)
                 
                 try:
                     if supports_json_mode:
@@ -981,11 +1035,12 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
                         "timeout": req_timeout,
                     }
 
-                    cache_key = (str(getattr(client, "base_url", "")), model_name)
+                    base_url = str(getattr(client, "base_url", ""))
+                    cache_key = (base_url, model_name)
                     known_cap = _MODEL_CAPABILITIES.get(cache_key) or _MODEL_CAPABILITIES.get(model_name)
-                    supports_json_mode = known_cap.get("json_mode", True) if known_cap else True
+                    supports_json_mode = known_cap.get("json_mode", _model_supports_json_mode(base_url, model_name)) if known_cap else _model_supports_json_mode(base_url, model_name)
                     supports_json_schema = (
-                        known_cap.get("json_schema", True) if known_cap else True
+                        known_cap.get("json_schema", _model_supports_json_schema(base_url, model_name)) if known_cap else _model_supports_json_schema(base_url, model_name)
                     ) and supports_json_mode
                     response = None
 
@@ -1102,7 +1157,7 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
                                     usage_obj.prompt_tokens_details = {"cached_tokens": 0}
                                 usage_obj.prompt_tokens_details["cached_tokens"] += cached
                             
-                        if _is_response_complete(raw, choice.finish_reason):
+                        if _is_response_complete(raw, choice.finish_reason, response_model=response_model, required_any_keys=required_any_keys):
                             break
 
                         if continuation_count >= 2:
@@ -1113,7 +1168,8 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
 
                             
                         log.warning(f"LLM model '{model_name}' output was truncated. Attempting auto-continuation (pass {continuation_count})...")
-                        clean_raw_for_context = re.sub(r"\s*```(?:json)?\s*$", "", raw).rstrip()
+                        clean_raw_for_context = re.sub(r"(\n\s*){4,}", "\n", raw)
+                        clean_raw_for_context = re.sub(r"\s*```(?:json)?\s*$", "", clean_raw_for_context).rstrip()
                         if clean_raw_for_context.count('"') % 2 != 0:
                             clean_raw_for_context += '"'
                         
@@ -1274,7 +1330,7 @@ GM_SHARED_RULES = """You are the Game Master for Hikayat. The PRIMARY STORY QUES
 13. NPC DISPOSITION & PEER ELIGIBILITY:
    - In combat scenarios: In `new_entities`, assign natural dispositions: `friendly` (allies, helpers), `neutral` (bystanders, officials), `hostile` (enemies, bandits).
    - In non-combat and high school drama scenarios: Combat disposition is disabled; all social dynamics, rivalries, and friendships are governed fluidly by personality, dialogue, and the -100 to +100 Relationship Meter. Romantic routes, contact affinity, and phone directory entries are strictly reserved for fellow students and contemporaries (classmates, council members, club peers, rivals). Faculty, parents, and store clerks are story-only figures who must NEVER receive relationship meters or romance routes.
-14. PARTY COMPANION RECRUITMENT (COMBAT SCENARIOS ONLY): When in dialogue with a friendly, neutral, or allied NPC in combat scenarios (and total party member count is under 4), offer a dedicated [CHA] skill check in `next_choices` to invite them to join the party as a permanent companion (e.g. '🤝 [CHA] Invite [NPC Name] to join your party as a permanent companion'). In non-combat scenarios, party recruitment is disabled.
+14. PARTY COMPANION RECRUITMENT (COMBAT SCENARIOS ONLY): When in dialogue with a friendly, neutral, or allied NPC in combat scenarios (and total party member count is under 4), offer a dedicated [CHA] skill check in `next_choices` to invite them to team up using natural, genre-appropriate phrasing (e.g. 'Invite [NPC Name] to join your party and travel together', 'Ask [NPC Name] to join forces and travel with your retinue', 'Ask [NPC Name] to team up and travel with your group', or 'Ask [NPC Name] to partner up and join your field team'). In both choices and narration, use natural phrasing ('team up', 'partner up', 'join your team/group/retinue/crew') — NEVER use meta-phrases like 'as a permanent companion' and NEVER treat 'party' as a social mixer. In non-combat scenarios, party recruitment is disabled.
 15. CHARACTER STATUS & MOOD DUAL PURPOSE:
    - In combat: `status_effects` tracks functional tactical condition tags (e.g. "Bleeding", "Stunned", "Exhausted", "Shielded", "Exposed") and intense combat mental states ("Enraged", "Terrified").
    - In narrative, social, and non-combat scenes: `status_effects` conveys the character's active emotional mood and demeanor (e.g. "Angry", "Confused", "Scared", "Flustered", "Aroused", "Intrigued", "Amused", "Calm", "Neutral"). Every present character should reflect their current mood (defaulting to "Neutral" if unaffected).

@@ -81,6 +81,13 @@ class ChoiceDropdown(discord.ui.Select):
         actor_uid = (actor_char.get("user_id") or actor_char.get("id")) if actor_char else None
         actor_settings = db.get_settings(actor_uid) if actor_uid else {}
         show_percentages = bool(actor_settings.get("show_percentages", session.get("show_percentages", 1))) if actor_char else bool(session.get("show_percentages", 1))
+        from mechanics.stealth import compute_choice_stealth_odds
+        actor_inv = None
+        if actor_uid and session and not is_sync:
+            try:
+                actor_inv = db.get_inventory(actor_uid) or []
+            except Exception:
+                actor_inv = None
 
         for idx, choice in enumerate(choices[:24]):
             raw_text = choice.get("label", "")
@@ -132,7 +139,13 @@ class ChoiceDropdown(discord.ui.Select):
                     chance_str = "100%"
                 else:
                     stat_col = STAT_COLUMN.get(stat, "agi_")
-                    chance_str = "/".join(f"{char['name']} {success_chance(char.get(stat_col, 5), choice['requirement'])}%" for char, _ in party)
+                    parts_pct = []
+                    for char, inv in party:
+                        c_uid = char.get("user_id") or char.get("id")
+                        st_pct = compute_choice_stealth_odds(session, char, choice, equipped_items=inv, user_id=c_uid) if session else None
+                        pct_val = st_pct if st_pct is not None else success_chance(char.get(stat_col, 5), choice["requirement"])
+                        parts_pct.append(f"{char['name']} {pct_val}%")
+                    chance_str = "/".join(parts_pct)
             else:
                 if is_free:
                     chance_str = "100%"
@@ -140,7 +153,21 @@ class ChoiceDropdown(discord.ui.Select):
                     actor_settings = db.get_settings(actor_char["user_id"]) if actor_char else {}
                     check_mode = actor_settings.get("debug_check_mode", "off")
                     stat_col = STAT_COLUMN.get(stat, "agi_")
-                    chance = success_chance(actor_char.get(stat_col, 5), choice["requirement"], check_mode=check_mode) if actor_char else 50
+                    st_pct = (
+                        compute_choice_stealth_odds(
+                            session,
+                            actor_char,
+                            choice,
+                            equipped_items=actor_inv,
+                            user_id=actor_uid,
+                        )
+                        if (actor_char and session and check_mode in ("off", "", None))
+                        else None
+                    )
+                    if st_pct is not None:
+                        chance = int(st_pct)
+                    else:
+                        chance = success_chance(actor_char.get(stat_col, 5), choice["requirement"], check_mode=check_mode) if actor_char else 50
                     chance_str = f"{chance}%"
                 
             prefix = f"{chance_str} " if show_percentages else ""
@@ -219,15 +246,19 @@ class ChoiceView(discord.ui.View):
 
         if self.in_combat:
             from mechanics.narrative.choice_generator import generate_categorized_combat_actions
+            from mechanics.stealth import is_actor_combat_vanished
             inv = db.get_inventory(turn_user_id) if turn_user_id else []
-            party_loadout = [(actor_char, inv)]
+            actor_char_dict = dict(actor_char)
+            if is_actor_combat_vanished(session, turn_user_id):
+                actor_char_dict["combat_vanished"] = True
+            party_loadout = [(actor_char_dict, inv)]
             hostiles = session.get("nearby_enemies", [])
             self.hostiles = [m for m in hostiles if isinstance(m, dict) and m.get("hp", 1) > 0]
             if not hasattr(self, "target_idx") or self.target_idx >= len(self.hostiles):
                 self.target_idx = 0
             monster = self.hostiles[self.target_idx] if self.hostiles else (hostiles[0] if hostiles else {"name": "Enemy", "stats": {}})
             current_loc = session.get("current_location", "area") if session else "area"
-            self.categorized = generate_categorized_combat_actions(party_loadout, monster, current_loc, scen_key)
+            self.categorized = generate_categorized_combat_actions(party_loadout, monster, current_loc, scen_key, session=session)
 
             actor_settings = db.get_settings(turn_user_id) if turn_user_id else {}
             combat_style = actor_settings.get("combat_ui_style", session.get("combat_ui_style", "battle_deck") if session else "battle_deck")
@@ -247,7 +278,10 @@ class ChoiceView(discord.ui.View):
         )
         is_fb = any(choice.get("is_fallback") for choice in choices) or is_fallback_narr or bool(session.get("is_truncated_generation"))
 
-        self.add_item(ChoiceDropdown(cog, session_id, choices, actor_char, is_sync=False, turn_user_id=turn_user_id))
+        self._choices = choices
+        self._actor_char = actor_char
+        self._choice_dropdown = ChoiceDropdown(cog, session_id, choices, actor_char, is_sync=False, turn_user_id=turn_user_id)
+        self.add_item(self._choice_dropdown)
 
         if is_fb:
             retry_button = discord.ui.Button(label="Retry generation",
@@ -264,6 +298,20 @@ class ChoiceView(discord.ui.View):
                                             style=discord.ButtonStyle.secondary, emoji="🎒")
         use_item_button.callback = self._use_item_callback
         self.add_item(use_item_button)
+
+        from mechanics.stealth import is_actor_hidden, get_session_stealth_state
+        st_state = get_session_stealth_state(session)
+        is_hidden = is_actor_hidden(session, turn_user_id)
+        detection = int(st_state.get("detection_meter", 0))
+        stealth_label = f"Sneaking ({detection}%)" if is_hidden else "Stealth"
+        stealth_style = discord.ButtonStyle.primary if is_hidden else discord.ButtonStyle.secondary
+        self.stealth_btn = discord.ui.Button(
+            label=stealth_label,
+            style=stealth_style,
+            emoji="🥷"
+        )
+        self.stealth_btn.callback = self._stealth_callback
+        self.add_item(self.stealth_btn)
 
         from mechanics.system.phone import scenario_has_smartphone, get_phone_branding, build_phone_home_embed, PhoneMainView
         if scenario_has_smartphone(scen_key) and not self.in_combat:
@@ -333,10 +381,10 @@ class ChoiceView(discord.ui.View):
                         if is_matching_contact_dialogue_partner(c, dp):
                             if not any(mc.get("name") == c.get("name") for mc in matching_contacts):
                                 matching_contacts.append(c)
+                import namegen
                 for contact in matching_contacts:
                     c_name = str(contact.get("name") or "Contact").strip()
-                    first_name = c_name.split()[0] if c_name else "Contact"
-                    label_name = first_name if len(c_name) > 15 else c_name
+                    label_name = namegen.get_display_short_name(c_name, max_len=15)
                     profile_btn = discord.ui.Button(
                         label=f"Profile: {label_name}"[:80],
                         style=discord.ButtonStyle.secondary,
@@ -620,6 +668,67 @@ class ChoiceView(discord.ui.View):
         view = SceneItemSelectView(self.cog, self.session_id, interaction.user.id, carried, sync=False)
         await interaction.response.send_message("🎒 Select an item from your bag to use:", view=view, ephemeral=True)
 
+    async def _stealth_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.turn_user_id:
+            await interaction.response.send_message(
+                f"It's not your turn — waiting on <@{self.turn_user_id}>.", ephemeral=True
+            )
+            return
+
+        from mechanics.system.concurrency import distributed_session_lock, LockAcquisitionError
+        from mechanics.stealth import toggle_stealth_stance, is_actor_hidden
+
+        try:
+            async with distributed_session_lock(self.session_id, raise_http_error=False):
+                session = await adb(db.get_session, self.session_id)
+                if not session:
+                    await interaction.response.send_message("Session not found.", ephemeral=True)
+                    return
+
+                new_active = not is_actor_hidden(session, interaction.user.id)
+                toggle_stealth_stance(session, new_active, user_id=interaction.user.id)
+                await adb(db.update_session, self.session_id, stealth_state=session["stealth_state"])
+                self.session["stealth_state"] = session["stealth_state"]
+        except LockAcquisitionError:
+            await interaction.response.send_message(
+                "Turn resolution is currently in progress. Please wait a moment.", ephemeral=True
+            )
+            return
+
+        meter = session["stealth_state"].get("detection_meter", 0)
+        self.stealth_btn.label = f"Sneaking ({meter}%)" if new_active else "Stealth"
+        self.stealth_btn.style = discord.ButtonStyle.primary if new_active else discord.ButtonStyle.secondary
+
+        try:
+            if getattr(self, "_choice_dropdown", None) is not None and getattr(self, "_choices", None) is not None:
+                refreshed_dd = await adb(
+                    ChoiceDropdown,
+                    self.cog,
+                    self.session_id,
+                    self._choices,
+                    self._actor_char,
+                    False,
+                    self.turn_user_id,
+                )
+                self._choice_dropdown.options = refreshed_dd.options
+        except Exception:
+            pass
+
+        status_msg = (
+            f"🥷 **Stealth Stance Active**: You melt into the shadows ({meter}% detection). Actions will remain quiet until broken."
+            if new_active else
+            "🚶 **Stealth Stance Disengaged**: You step out of concealment into plain sight."
+        )
+
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.edit_message(view=self)
+                await interaction.followup.send(status_msg, ephemeral=True)
+            else:
+                await interaction.followup.send(status_msg, ephemeral=True)
+        except (discord.NotFound, discord.HTTPException):
+            pass
+
     async def _move_location_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.turn_user_id:
             msg = f"It's not your turn — waiting on <@{self.turn_user_id}>."
@@ -788,7 +897,9 @@ class SyncChoiceView(discord.ui.View):
         )
         is_fb = any(choice.get("is_fallback") for choice in choices) or is_fallback_narr or bool(session.get("is_truncated_generation"))
         
-        self.add_item(ChoiceDropdown(cog, session_id, choices, is_sync=True, party=party))
+        self._choices = choices
+        self._choice_dropdown = ChoiceDropdown(cog, session_id, choices, is_sync=True, party=party)
+        self.add_item(self._choice_dropdown)
 
         if is_fb:
             retry_button = discord.ui.Button(label="Retry generation",
@@ -805,6 +916,20 @@ class SyncChoiceView(discord.ui.View):
                                             style=discord.ButtonStyle.secondary, emoji="🎒")
         use_item_button.callback = self._use_item_callback
         self.add_item(use_item_button)
+
+        from mechanics.stealth import any_actor_hidden, get_session_stealth_state
+        st_state = get_session_stealth_state(session)
+        is_hidden = any_actor_hidden(session)
+        detection = int(st_state.get("detection_meter", 0))
+        stealth_label = f"Sneaking ({detection}%)" if is_hidden else "Stealth"
+        stealth_style = discord.ButtonStyle.primary if is_hidden else discord.ButtonStyle.secondary
+        self.stealth_btn = discord.ui.Button(
+            label=stealth_label,
+            style=stealth_style,
+            emoji="🥷"
+        )
+        self.stealth_btn.callback = self._stealth_callback
+        self.add_item(self.stealth_btn)
 
         session = db.get_session(session_id) or {}
         scen_key = session.get("scenario", "fantasy")
@@ -880,10 +1005,10 @@ class SyncChoiceView(discord.ui.View):
                         if is_matching_contact_dialogue_partner(c, dp):
                             if not any(mc.get("name") == c.get("name") for mc in matching_contacts):
                                 matching_contacts.append(c)
+                import namegen
                 for contact in matching_contacts:
                     c_name = str(contact.get("name") or "Contact").strip()
-                    first_name = c_name.split()[0] if c_name else "Contact"
-                    label_name = first_name if len(c_name) > 15 else c_name
+                    label_name = namegen.get_display_short_name(c_name, max_len=15)
                     profile_btn = discord.ui.Button(
                         label=f"Profile: {label_name}"[:80],
                         style=discord.ButtonStyle.secondary,
@@ -948,6 +1073,70 @@ class SyncChoiceView(discord.ui.View):
                     raise
         return _profile_callback
 
+
+    async def _stealth_callback(self, interaction: discord.Interaction):
+        if interaction.user.id not in self.member_ids:
+            await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
+            return
+
+        from mechanics.system.concurrency import distributed_session_lock, LockAcquisitionError
+        from mechanics.stealth import toggle_stealth_stance, is_actor_hidden, any_actor_hidden
+
+        try:
+            async with distributed_session_lock(self.session_id, raise_http_error=False):
+                session = await adb(db.get_session, self.session_id)
+                if not session:
+                    await interaction.response.send_message("Session not found.", ephemeral=True)
+                    return
+
+                if str(interaction.user.id) in session.get("pending_picks", {}):
+                    await interaction.response.send_message("You've already locked in your action this round.", ephemeral=True)
+                    return
+
+                new_active = not is_actor_hidden(session, interaction.user.id)
+                toggle_stealth_stance(session, new_active, user_id=interaction.user.id)
+                await adb(db.update_session, self.session_id, stealth_state=session["stealth_state"])
+        except LockAcquisitionError:
+            await interaction.response.send_message(
+                "Turn resolution is currently in progress. Please wait a moment.", ephemeral=True
+            )
+            return
+
+        meter = session["stealth_state"].get("detection_meter", 0)
+        any_hidden = any_actor_hidden(session)
+        self.stealth_btn.label = f"Sneaking ({meter}%)" if any_hidden else "Stealth"
+        self.stealth_btn.style = discord.ButtonStyle.primary if any_hidden else discord.ButtonStyle.secondary
+
+        try:
+            if getattr(self, "_choice_dropdown", None) is not None and getattr(self, "_choices", None) is not None:
+                refreshed_dd = await adb(
+                    ChoiceDropdown,
+                    self.cog,
+                    self.session_id,
+                    self._choices,
+                    None,
+                    True,
+                    None,
+                    self.party,
+                )
+                self._choice_dropdown.options = refreshed_dd.options
+        except Exception:
+            pass
+
+        status_msg = (
+            f"🥷 **Stealth Stance Active**: Moving in concealment ({meter}% detection). Actions will remain quiet until broken."
+            if new_active else
+            "🚶 **Stealth Stance Disengaged**: Stepped out of concealment into plain sight."
+        )
+
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.edit_message(view=self)
+                await interaction.followup.send(status_msg, ephemeral=True)
+            else:
+                await interaction.followup.send(status_msg, ephemeral=True)
+        except (discord.NotFound, discord.HTTPException):
+            pass
 
     async def _move_location_callback(self, interaction: discord.Interaction):
         if interaction.user.id not in self.member_ids:

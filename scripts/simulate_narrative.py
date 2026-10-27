@@ -39,6 +39,10 @@ SUPPORTED_SCENARIOS = [
     "steampunk",
     "dark_fantasy",
     "isekai_fantasy",
+    "slice_of_life",
+    "anomalous_incursions",
+    "urban_anomalies",
+    "urban_fantasy",
 ]
 
 
@@ -95,7 +99,7 @@ def main():
         choices=["turn", "intent", "choices", "memory-stress"],
         help="Execution mode (default: turn)",
     )
-    parser.add_argument("--simulations", "-n", type=int, default=10, help="Number of simulated journeys (default: 10)")
+    parser.add_argument("--simulations", "--count", "--journeys", "-n", type=int, default=10, dest="simulations", help="Number of simulated journeys in turn mode (default: 10)")
     parser.add_argument(
         "--scenario", "-s",
         type=str,
@@ -112,7 +116,7 @@ def main():
         "--fuzz", "-f",
         type=str,
         default="clean",
-        choices=["clean", "realistic_llm", "adversarial_stress"],
+        choices=["clean", "realistic_llm", "adversarial_stress", "realistic", "stress"],
         help="Fuzzing perturbation level (default: clean)",
     )
     parser.add_argument("--turns", "-t", type=int, default=10, help="Max turns per journey (default: 10)")
@@ -127,6 +131,10 @@ def main():
     parser.add_argument("--live-db", action="store_true", help="Run against production database (NOT recommended)")
 
     args = parser.parse_args()
+    if args.fuzz == "realistic":
+        args.fuzz = "realistic_llm"
+    elif args.fuzz == "stress":
+        args.fuzz = "adversarial_stress" 
 
     if args.with_llm:
         os.environ.setdefault("LLM_VERIFY_SSL", "false")
@@ -249,6 +257,25 @@ def main():
                         safe_print(f"    -> [CRASH] {res.error}")
 
             safe_print("\n" + format_report_summary(report))
+
+            failed_results = [r for r in report.results if r.violations or r.error]
+            if failed_results:
+                os.makedirs("reports/failures", exist_ok=True)
+                for fr in failed_results[:10]:
+                    failure_path = f"reports/failures/narrative_seed_{fr.seed}.json"
+                    with open(failure_path, "w", encoding="utf-8") as f:
+                        json.dump({
+                            "journey_id": fr.journey_id,
+                            "seed": fr.seed,
+                            "scenario": fr.scenario,
+                            "archetype": fr.archetype,
+                            "turns": fr.total_turns,
+                            "success": fr.success,
+                            "error": fr.error,
+                            "history": fr.history,
+                            "violations": [{"category": v.category, "message": v.message, "severity": v.severity} for v in fr.violations],
+                        }, f, indent=2, default=str)
+                safe_print(f"\nSaved {min(10, len(failed_results))} failure reproduction payloads to reports/failures/")
 
             if args.json_report:
                 report_data = {

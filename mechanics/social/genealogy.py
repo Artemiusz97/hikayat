@@ -30,9 +30,75 @@ from mechanics.social.races import (
 )
 
 
+def _strip_nee_suffix(name: str) -> str:
+    """Strips '(née ...)' / '(nee ...)' maiden-name annotations for canonical full-name comparisons."""
+    return re.sub(r"\s*\((?:née|nee)\s+[^)]*\)", "", str(name or ""), flags=re.IGNORECASE).strip()
+
+
+def resolve_all_player_names(session_id: int) -> set[str]:
+    """Returns lowercase full names of all player characters associated with a session."""
+    names: set[str] = set()
+    if not session_id:
+        return names
+    try:
+        import db
+        with db.get_conn() as conn:
+            rows = conn.execute(
+                """SELECT c.name FROM characters c
+                   JOIN sessions s ON (s.character_id = c.id OR c.active_session_id = s.id)
+                   WHERE s.id = ?""",
+                (session_id,),
+            ).fetchall()
+            for r in rows:
+                if r["name"]:
+                    names.add(str(r["name"]).strip().lower())
+            sm_rows = conn.execute(
+                """SELECT c.name FROM characters c
+                   JOIN session_members sm ON c.user_id = sm.user_id
+                   WHERE sm.session_id = ? AND c.is_active = 1""",
+                (session_id,),
+            ).fetchall()
+            for r in sm_rows:
+                if r["name"]:
+                    names.add(str(r["name"]).strip().lower())
+    except Exception:
+        pass
+    return names
+
+
 def resolve_player_character_name(contact: dict, session_id: int = 0) -> str:
-    """Attempts to find the player character's name associated with this contact."""
-    # 1. Try from intimate memories (e.g. "Maya accepted Artemiusz's request...")
+    """Attempts to find the player character's name associated with this contact (SQLite authoritative first)."""
+    char_id = contact.get("character_id", 0)
+    sess_id = session_id or contact.get("session_id", 0)
+    try:
+        import db
+        if char_id:
+            char = db.get_character_by_id(char_id)
+            if char and char.get("name"):
+                return char["name"]
+        if sess_id:
+            with db.get_conn() as conn:
+                row_sess = conn.execute(
+                    """SELECT c.name FROM characters c
+                       JOIN sessions s ON (s.character_id = c.id OR c.active_session_id = s.id)
+                       WHERE s.id = ? LIMIT 1""",
+                    (sess_id,),
+                ).fetchone()
+                if row_sess and row_sess["name"]:
+                    return row_sess["name"]
+
+                row = conn.execute(
+                    """SELECT c.name FROM characters c
+                       JOIN session_members sm ON c.user_id = sm.user_id
+                       WHERE sm.session_id = ? AND c.is_active = 1 LIMIT 1""",
+                    (sess_id,),
+                ).fetchone()
+                if row and row["name"]:
+                    return row["name"]
+    except Exception:
+        pass
+
+    # Offline fallback only when no DB session character exists
     mems = contact.get("intimate_memories") or []
     if isinstance(mems, str):
         try:
@@ -47,35 +113,6 @@ def resolve_player_character_name(contact: dict, session_id: int = 0) -> str:
             cand = match.group(1).strip()
             if cand.lower() not in ("her", "his", "their", "the", "a", "an"):
                 return cand
-
-    # 2. Try from database character lookup
-    char_id = contact.get("character_id", 0)
-    sess_id = session_id or contact.get("session_id", 0)
-    try:
-        import db
-        if char_id:
-            char = db.get_character_by_id(char_id)
-            if char and char.get("name"):
-                return char["name"]
-        if sess_id:
-            with db.get_conn() as conn:
-                row = conn.execute(
-                    """SELECT c.name FROM characters c
-                       JOIN session_members sm ON c.user_id = sm.user_id
-                       WHERE sm.session_id = ? AND c.is_active = 1 LIMIT 1""",
-                    (sess_id,)
-                ).fetchone()
-                if row and row["name"]:
-                    return row["name"]
-
-                row_alt = conn.execute(
-                    "SELECT name FROM characters WHERE active_session_id=? AND is_active=1 LIMIT 1",
-                    (sess_id,)
-                ).fetchone()
-                if row_alt and row_alt["name"]:
-                    return row_alt["name"]
-    except Exception:
-        pass
 
     return "Player"
 
@@ -127,6 +164,19 @@ def extract_surname_and_firstname(name: str) -> Tuple[str, str]:
     return (first or "Unknown", last)
 
 
+def _get_cultures_dict_for_scenario(scenario: str, data: dict) -> tuple[Optional[dict], Optional[dict]]:
+    cultures_dict = data.get("cultures") if isinstance(data.get("cultures"), dict) else None
+    weights_dict = data.get("culture_weights") if isinstance(data.get("culture_weights"), dict) else None
+    if not cultures_dict:
+        scen_low = str(scenario or "").lower()
+        if any(k in scen_low for k in ("school", "academy", "modern", "slice_of_life", "default", "anomalous", "urban_fantasy", "urban_anomalies")):
+            default_person = namegen._DATA.get("default", {}).get("person", {})
+            if isinstance(default_person, dict) and isinstance(default_person.get("cultures"), dict):
+                cultures_dict = default_person["cultures"]
+                weights_dict = default_person.get("culture_weights")
+    return cultures_dict, weights_dict
+
+
 def get_deterministic_firstname(scenario: str, gender: str, hash_val: int, culture: str = "") -> str:
     """Deterministically rolls a gendered first name using hash_val, scenario data, and optional family culture."""
     data = namegen._get_scenario_data(scenario, "person")
@@ -136,22 +186,37 @@ def get_deterministic_firstname(scenario: str, gender: str, hash_val: int, cultu
     is_female = ("female" in g or "woman" in g or "girl" in g or "feminine" in g or "she" in g)
     is_male = ("male" in g or "man" in g or "boy" in g or "masculine" in g or "he" in g) and not is_female
 
+    cultures_dict, weights_dict = _get_cultures_dict_for_scenario(scenario, data)
+
     # If a specific family culture is known and intra-cultural roll succeeds (75%), pull from that culture's pool
     c_key = str(culture or "").lower().strip()
-    if c_key and c_key != "english" and ((abs(hash_val) * 19 + 7) % 100) < 75:
-        cultures_dict = data.get("cultures") if isinstance(data.get("cultures"), dict) else None
-        if not cultures_dict:
-            default_person = namegen._DATA.get("default", {}).get("person", {})
-            if isinstance(default_person, dict) and isinstance(default_person.get("cultures"), dict):
-                cultures_dict = default_person["cultures"]
-        if cultures_dict and c_key in cultures_dict:
-            c_pool_dict = cultures_dict[c_key]
+    if cultures_dict and c_key and c_key in cultures_dict and ((abs(hash_val) * 19 + 7) % 100) < 75:
+        c_pool_dict = cultures_dict[c_key]
+        c_male = c_pool_dict.get("male") or []
+        c_female = c_pool_dict.get("female") or []
+        c_pool = c_female if is_female else (c_male if is_male else (c_male + c_female))
+        if c_pool:
+            idx = (abs(hash_val) * 31 + 17) % len(c_pool)
+            return c_pool[idx]
+
+    if cultures_dict:
+        import random as _rnd
+        rng = _rnd.Random(abs(hash_val) * 29 + 13)
+        c_keys = [k for k in cultures_dict.keys() if k != c_key] if c_key else list(cultures_dict.keys())
+        if c_keys:
+            if weights_dict:
+                w_list = [float(weights_dict.get(k, 1.0)) for k in c_keys]
+                if sum(w_list) <= 0:
+                    w_list = [1.0] * len(c_keys)
+                chosen_c = rng.choices(c_keys, weights=w_list, k=1)[0]
+            else:
+                chosen_c = rng.choice(c_keys)
+            c_pool_dict = cultures_dict.get(chosen_c) or {}
             c_male = c_pool_dict.get("male") or []
             c_female = c_pool_dict.get("female") or []
             c_pool = c_female if is_female else (c_male if is_male else (c_male + c_female))
             if c_pool:
-                idx = (abs(hash_val) * 31 + 17) % len(c_pool)
-                return c_pool[idx]
+                return rng.choice(c_pool)
 
     male_pool = data.get("male") or [
         "Marcus", "Julian", "Leon", "Adrian", "Lucas", "Darius", "Ethan", "Cyrus",
@@ -167,17 +232,54 @@ def get_deterministic_firstname(scenario: str, gender: str, hash_val: int, cultu
     return pool[idx]
 
 
-def get_deterministic_surname(scenario: str, hash_val: int) -> str:
-    """Deterministically rolls a scenario-appropriate surname."""
+def get_deterministic_surname(scenario: str, hash_val: int, culture: str = "") -> str:
+    """Deterministically rolls a scenario-appropriate surname, respecting cultural pools when available."""
     data = namegen._get_scenario_data(scenario, "person")
     if not isinstance(data, dict):
         data = {}
+    cultures_dict, weights_dict = _get_cultures_dict_for_scenario(scenario, data)
+    c_key = str(culture or "").lower().strip()
+    if cultures_dict:
+        if c_key and c_key in cultures_dict and ((abs(hash_val) * 23 + 11) % 100) < 75:
+            c_last = cultures_dict[c_key].get("last") or []
+            if c_last:
+                return c_last[(abs(hash_val) * 43 + 19) % len(c_last)]
+        import random as _rnd
+        rng = _rnd.Random(abs(hash_val) * 43 + 19)
+        c_keys = list(cultures_dict.keys())
+        if c_keys:
+            if weights_dict:
+                w_list = [float(weights_dict.get(k, 1.0)) for k in c_keys]
+                if sum(w_list) <= 0:
+                    w_list = [1.0] * len(c_keys)
+                chosen_c = rng.choices(c_keys, weights=w_list, k=1)[0]
+            else:
+                chosen_c = rng.choice(c_keys)
+            c_last = (cultures_dict.get(chosen_c) or {}).get("last") or []
+            if c_last:
+                return rng.choice(c_last)
+
     last_pool = data.get("last") or [
         "Anderson", "Vance", "Reed", "Drake", "Cross", "Sterling", "Thorne", "Cole",
         "Black", "Wright", "Finch", "Blackwood", "Mercer", "Ashwood", "Volkov", "Ward", "Hayes"
     ]
     idx = (abs(hash_val) * 43 + 19) % len(last_pool)
     return last_pool[idx]
+
+
+def generate_deterministic_full_name(scenario: str, gender: str, hash_val: int) -> str:
+    """Deterministically generates a culturally coordinated full name (First + Surname, with cultural ordering and inflections)."""
+    full_name = namegen.generate_person_name(scenario=scenario, gender=gender, seed=abs(hash_val) * 37 + 11).strip()
+    first, last = namegen.extract_first_and_last_name(full_name)
+    if not last:
+        fallback_last = get_deterministic_surname(scenario, abs(hash_val) * 43 + 17)
+        full_name = namegen.format_cultural_full_name(
+            first or full_name,
+            fallback_last,
+            gender=gender,
+            deterministic_seed=f"det_full_{hash_val}",
+        ).strip()
+    return full_name
 
 
 def get_parent_role(scenario: str, gender: str, hash_val: int) -> str:
@@ -215,7 +317,8 @@ def reverse_generate_parents(
     child_appearance: dict,
     child_surname: str = "",
     scenario: str = "fantasy",
-    hash_val: int = 0
+    hash_val: int = 0,
+    exclude_first_names: Optional[set[str]] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Works backward from the child character to generate Father and Mother:
@@ -278,24 +381,59 @@ def reverse_generate_parents(
     # Surnames
     family_surname = namegen.normalize_base_surname(child_surname) if child_surname else get_deterministic_surname(scenario, hash_val)
     s_culture = namegen.infer_surname_culture(family_surname)
-    maiden_surname = get_deterministic_surname(scenario, hash_val * 7 + 13)
-    if maiden_surname.lower() == family_surname.lower():
-        maiden_surname = get_deterministic_surname(scenario, hash_val * 11 + 29)
+    maiden_surname = get_deterministic_surname(scenario, hash_val * 7 + 13, culture=s_culture)
+    for m_step in range(1, 12):
+        if maiden_surname.lower() != family_surname.lower():
+            break
+        maiden_surname = get_deterministic_surname(scenario, hash_val * 11 + 29 + m_step * 43, culture=s_culture)
 
-    father_first = get_deterministic_firstname(scenario, "male", hash_val * 3 + 5, culture=s_culture)
+    excluded = {str(x).strip().lower() for x in (exclude_first_names or set()) if x}
+    is_malay_patronymic_family = (
+        s_culture == "malay"
+        and family_surname.lower() not in namegen._INDONESIAN_NON_PATRONYMIC_SURNAMES
+        and family_surname.lower() not in excluded
+    )
+
+    if is_malay_patronymic_family:
+        father_first = family_surname
+        grandfather_first = get_deterministic_firstname(scenario, "male", hash_val * 3 + 5, culture="malay")
+        for step in range(1, 16):
+            if grandfather_first.strip().lower() not in excluded and grandfather_first.strip().lower() != father_first.lower():
+                break
+            grandfather_first = get_deterministic_firstname(scenario, "male", hash_val * 3 + 5 + step * 37, culture="malay")
+        father_name = f"{father_first} bin {grandfather_first}".strip()
+    else:
+        father_first = get_deterministic_firstname(scenario, "male", hash_val * 3 + 5, culture=s_culture)
+        for step in range(1, 16):
+            if father_first.strip().lower() not in excluded:
+                break
+            father_first = get_deterministic_firstname(scenario, "male", hash_val * 3 + 5 + step * 37, culture=s_culture)
+        father_name = namegen.format_cultural_full_name(
+            father_first, family_surname, gender="male", surname_culture=s_culture,
+            use_patronymic=False if s_culture == "malay" else None,
+            deterministic_seed=f"father_{family_surname}_{hash_val}"
+        ).strip()
+
     mother_first = get_deterministic_firstname(scenario, "female", hash_val * 5 + 11, culture=s_culture)
+    for step in range(1, 16):
+        if mother_first.strip().lower() not in excluded and mother_first.strip().lower() != father_first.strip().lower():
+            break
+        mother_first = get_deterministic_firstname(scenario, "female", hash_val * 5 + 11 + step * 41, culture=s_culture)
 
-    father_name = namegen.format_cultural_full_name(
-        father_first, family_surname, gender="male", surname_culture=s_culture,
-        deterministic_seed=f"father_{family_surname}_{hash_val}"
-    ).strip()
     mother_married_name = namegen.format_cultural_full_name(
         mother_first, family_surname, gender="female", surname_culture=s_culture,
+        use_patronymic=False if s_culture == "malay" else None,
         deterministic_seed=f"mother_{family_surname}_{hash_val}"
     ).strip()
-    maiden_inflected = namegen.format_cultural_full_name(
-        "X", maiden_surname, first_culture="english", gender="female", use_patronymic=False
-    ).split()[-1] if maiden_surname else maiden_surname
+    if maiden_surname:
+        _, extracted_maiden = namegen.extract_first_and_last_name(
+            namegen.format_cultural_full_name(
+                "Sarah", maiden_surname, first_culture="english", gender="female", use_patronymic=False
+            )
+        )
+        maiden_inflected = extracted_maiden or maiden_surname
+    else:
+        maiden_inflected = maiden_surname
     mother_name = f"{mother_married_name} (née {maiden_inflected})".strip()
 
     father_role = get_parent_role(scenario, "male", hash_val * 2 + 1)
@@ -502,6 +640,11 @@ def generate_siblings(
         ("Student", "General Academy")
     ]
 
+    malay_use_patronymic = (
+        None
+        if s_culture != "malay"
+        else (False if family_surname.lower() in namegen._INDONESIAN_NON_PATRONYMIC_SURNAMES else ((abs(hash_val) % 2) == 0))
+    )
     siblings = []
     for i in range(siblings_to_generate):
         sib_idx = existing_sibling_count + i + 1
@@ -518,6 +661,7 @@ def generate_siblings(
             sib_first = get_deterministic_firstname(scenario, gender, sib_hash * 3 + 17, culture=s_culture)
         sib_name = namegen.format_cultural_full_name(
             sib_first, family_surname, gender=gender, surname_culture=s_culture,
+            use_patronymic=malay_use_patronymic,
             deterministic_seed=f"sib_{sib_first}_{family_surname}_{sib_hash}"
         ).strip()
         sib_race = roll_sibling_race(father.get("race", "human"), mother.get("race", "human"), base_species, sib_hash)
@@ -671,6 +815,31 @@ def generate_relationship_status(
     desc_str = (str(contact.get("description", "")) + " " + str((contact.get("basic_info") or {}).get("description", ""))).lower()
     is_explicitly_single = "single" in desc_str or "unmarried" in desc_str or "unattached" in desc_str
 
+    # Openness-scaled romantic and intimate history rates
+    open_str = str(
+        app_data.get("erotic_openness")
+        or app_data.get("openness")
+        or contact.get("openness")
+        or (contact.get("basic_info") or {}).get("openness")
+        or "moderate"
+    ).lower()
+    if "prude" in open_str or "modest" in open_str or "chaste" in open_str:
+        curr_partner_rate = 8
+        ex_partner_rate = 10
+        affair_rate = 1
+    elif "shameless" in open_str or "lewd" in open_str:
+        curr_partner_rate = 35
+        ex_partner_rate = 40
+        affair_rate = 6
+    elif "bold" in open_str or "uninhibited" in open_str:
+        curr_partner_rate = 25
+        ex_partner_rate = 30
+        affair_rate = 4
+    else:  # moderate
+        curr_partner_rate = 15
+        ex_partner_rate = 20
+        affair_rate = 2
+
     if is_player_partner:
         player_name = resolve_player_character_name(contact, session_id=contact.get("session_id", 0))
         score = contact.get("relationship_score", 0)
@@ -682,35 +851,33 @@ def generate_relationship_status(
         }
         status = "In a Relationship"
     else:
-        # 2. Current Partner roll (15% chance, suppressed if player interest or explicitly single)
-        has_current_partner = (((abs(hash_val) * 29 + 11) % 100) < 15) and not is_player_interest and not is_explicitly_single
+        # 2. Current Partner roll (openness-scaled chance, suppressed if player interest or explicitly single)
+        has_current_partner = (((abs(hash_val) * 29 + 11) % 100) < curr_partner_rate) and not is_player_interest and not is_explicitly_single
         current_partner = None
         if has_current_partner:
-            c_partner_first = get_deterministic_firstname(scenario, partner_gender, hash_val * 41 + 13)
-            c_partner_last = get_deterministic_surname(scenario, hash_val * 43 + 17)
+            c_partner_name = generate_deterministic_full_name(scenario, partner_gender, hash_val * 41 + 13)
             c_partner_role = namegen.generate_role(scenario, hash_val=hash_val * 47 + 19)
             current_partner = {
-                "name": f"{c_partner_first} {c_partner_last}",
+                "name": c_partner_name,
                 "role": c_partner_role,
                 "relationship_type": "Dating / Partner"
             }
         status = "In a Relationship" if current_partner else "Single"
 
-    # 3. Secret Affair roll (3% chance)
-    has_secret_affair = ((abs(hash_val) * 31 + 23) % 100) < 3
+    # 3. Secret Affair roll (openness-scaled chance)
+    has_secret_affair = ((abs(hash_val) * 31 + 23) % 100) < affair_rate
     secret_partner = None
     if has_secret_affair:
-        s_partner_first = get_deterministic_firstname(scenario, partner_gender, hash_val * 53 + 7)
-        s_partner_last = get_deterministic_surname(scenario, hash_val * 59 + 11)
+        s_partner_name = generate_deterministic_full_name(scenario, partner_gender, hash_val * 53 + 7)
         s_partner_role = namegen.generate_role(scenario, hash_val=hash_val * 61 + 13)
         secret_partner = {
-            "name": f"{s_partner_first} {s_partner_last}",
+            "name": s_partner_name,
             "role": s_partner_role,
             "relationship_type": "Secret Affair / Lover"
         }
 
-    # 4. Ex-Partners roll (15% chance, or guaranteed if past intimate history exists)
-    has_ex = ((abs(hash_val) * 37 + 19) % 100) < 15 or bool(past_partner_name)
+    # 4. Ex-Partners roll (openness-scaled chance, or guaranteed if past intimate history exists)
+    has_ex = ((abs(hash_val) * 37 + 19) % 100) < ex_partner_rate or bool(past_partner_name)
     ex_partners = []
     if past_partner_name:
         ex_partners.append({
@@ -719,11 +886,10 @@ def generate_relationship_status(
             "notes": "Past Romantic / Intimate Partner"
         })
     elif has_ex:
-        ex_first = get_deterministic_firstname(scenario, partner_gender, hash_val * 67 + 31)
-        ex_last = get_deterministic_surname(scenario, hash_val * 71 + 37)
+        ex_name = generate_deterministic_full_name(scenario, partner_gender, hash_val * 67 + 31)
         ex_role = namegen.generate_role(scenario, hash_val=hash_val * 73 + 41)
         ex_partners.append({
-            "name": f"{ex_first} {ex_last}",
+            "name": ex_name,
             "role": ex_role,
             "notes": "Former High School Romance"
         })
@@ -751,11 +917,10 @@ def generate_friends_and_rivals(
     for i in range(friend_count):
         f_hash = hash_val * 83 + (i + 1) * 97
         f_gender = "female" if ((abs(f_hash) % 2) == 0) else "male"
-        f_first = get_deterministic_firstname(scenario, f_gender, f_hash)
-        f_last = get_deterministic_surname(scenario, f_hash * 3 + 7)
+        f_name = generate_deterministic_full_name(scenario, f_gender, f_hash)
         f_role = namegen.generate_role(scenario, hash_val=f_hash)
         friends.append({
-            "name": f"{f_first} {f_last}",
+            "name": f_name,
             "role": f_role,
             "closeness": "Close Friend / Confidant" if i == 0 else "Good Friend"
         })
@@ -763,11 +928,10 @@ def generate_friends_and_rivals(
     # Rival (1)
     r_hash = hash_val * 101 + 53
     r_gender = contact_gender
-    r_first = get_deterministic_firstname(scenario, r_gender, r_hash)
-    r_last = get_deterministic_surname(scenario, r_hash * 5 + 17)
+    r_name = generate_deterministic_full_name(scenario, r_gender, r_hash)
     r_role = namegen.generate_role(scenario, hash_val=r_hash)
     rivals = [{
-        "name": f"{r_first} {r_last}",
+        "name": r_name,
         "role": r_role,
         "type": "Fierce Rival / Competitor"
     }]
@@ -923,14 +1087,15 @@ def _apply_non_traditional_family_status(father: dict, mother: dict, contact: di
             mother["status"] = "Estranged"
 
 
-def _link_contact_to_household(session_id: int, contact: dict, household_id: int):
+def _link_contact_to_household(session_id: int, contact: dict, household_id: int, household_role: str = "child"):
     contact["household_id"] = household_id
+    contact["household_role"] = household_role
     c_id = contact.get("id")
     c_nid = contact.get("npc_id") or contact.get("name")
     if session_id and (c_id or c_nid):
         try:
             import db
-            db.assign_contact_household(session_id, c_id or c_nid, household_id)
+            db.assign_contact_household(session_id, c_id or c_nid, household_id, household_role=household_role)
         except Exception:
             pass
 
@@ -976,12 +1141,16 @@ def _generate_narrative_siblings(
     sib_linked = (known_contact.get("basic_info") or {}).get("sibling_name")
     if sib_linked and sib_linked.lower() not in existing_contacts_names:
         s_first, s_last = extract_surname_and_firstname(sib_linked)
+        has_own_last = bool(namegen.extract_first_and_last_name(sib_linked)[1])
         if not s_last:
             s_last = clean_surname
         from namegen import is_known_female_name, is_known_male_name
         s_gen = "female" if is_known_female_name(s_first) else ("male" if is_known_male_name(s_first) else "female")
+        sib_full = sib_linked.strip() if has_own_last else namegen.format_cultural_full_name(
+            s_first, s_last, gender=s_gen, deterministic_seed=f"narr_sib_{s_first}_{s_last}"
+        ).strip()
         narrative_siblings.append({
-            "name": f"{s_first} {s_last}",
+            "name": sib_full,
             "first_name": s_first,
             "surname": s_last,
             "relation": "Sister" if s_gen == "female" else "Brother",
@@ -1028,7 +1197,22 @@ def _generate_narrative_siblings(
     return narrative_siblings
 
 
-def _hydrate_household_entity(hh: dict, contact: dict, scenario: str) -> dict:
+def _match_parent_role(member_name: str, member_role_hint: Optional[str], father_name: str, mother_name: str) -> Optional[str]:
+    """Determines if a member is 'father' or 'mother' strictly via explicit household_role or full stripped name."""
+    hint = str(member_role_hint or "").strip().lower()
+    if hint in ("father", "mother"):
+        return hint
+    m_clean = _strip_nee_suffix(member_name).lower()
+    if not m_clean:
+        return None
+    if father_name and m_clean == _strip_nee_suffix(father_name).lower():
+        return "father"
+    if mother_name and (m_clean == _strip_nee_suffix(mother_name).lower() or member_name.strip().lower() == mother_name.strip().lower()):
+        return "mother"
+    return None
+
+
+def _hydrate_household_entity(hh: dict, contact: dict, scenario: str, conn: Any = None) -> dict:
     import db
     household = dict(hh)
     if isinstance(household.get("father"), str):
@@ -1057,8 +1241,6 @@ def _hydrate_household_entity(hh: dict, contact: dict, scenario: str) -> dict:
     m_info = household.get("mother") or {}
     f_name = f_info.get("name", "")
     m_name_val = m_info.get("name", "")
-    f_first, _ = extract_surname_and_firstname(f_name) if f_name else ("", "")
-    m_first, _ = extract_surname_and_firstname(m_name_val) if m_name_val else ("", "")
 
     # Query active contact members from SQLite
     if household.get("id"):
@@ -1066,21 +1248,18 @@ def _hydrate_household_entity(hh: dict, contact: dict, scenario: str) -> dict:
         for m in members:
             m_name = m.get("name", "")
             m_first_c, _ = extract_surname_and_firstname(m_name)
+            m_role_hint = m.get("household_role") or (m.get("basic_info") or {}).get("household_role")
+            p_match = _match_parent_role(m_name, m_role_hint, f_name, m_name_val)
 
-            # Check if this member is the father or mother; if so, link and do not add to children
-            is_parent = False
-            if f_name and (m_name.lower() == f_name.lower() or (m_first_c and f_first and m_first_c.lower() == f_first.lower())):
+            if p_match == "father":
                 household["father"]["id"] = m.get("id")
                 household["father"]["npc_id"] = m.get("npc_id")
                 household["father"]["is_contactable"] = True
-                is_parent = True
-            elif m_name_val and (m_name.lower() == m_name_val.lower() or (m_first_c and m_first and m_first_c.lower() == m_first.lower())):
+                continue
+            elif p_match == "mother":
                 household["mother"]["id"] = m.get("id")
                 household["mother"]["npc_id"] = m.get("npc_id")
                 household["mother"]["is_contactable"] = True
-                is_parent = True
-
-            if is_parent:
                 continue
 
             m_b = m.get("basic_info") or {}
@@ -1108,7 +1287,7 @@ def _hydrate_household_entity(hh: dict, contact: dict, scenario: str) -> dict:
 
     # Add narrative siblings
     for ns in household.get("narrative_siblings", []):
-        ns_first = ns.get("first_name") or ns.get("name", "").split()[0]
+        ns_first = ns.get("first_name") or extract_surname_and_firstname(ns.get("name", ""))[0]
         if ns_first.lower() not in children_dict:
             ns_gr = ns.get("grade", "Junior")
             children_dict[ns_first.lower()] = {
@@ -1129,14 +1308,14 @@ def _hydrate_household_entity(hh: dict, contact: dict, scenario: str) -> dict:
     # Also ensure calling contact itself is included (unless it is father or mother)
     c_name = contact.get("name", "")
     c_first, _ = extract_surname_and_firstname(c_name)
-    is_calling_parent = False
-    if f_name and (c_name.lower() == f_name.lower() or (c_first and f_first and c_first.lower() == f_first.lower())):
-        is_calling_parent = True
+    c_role_hint = contact.get("household_role") or (contact.get("basic_info") or {}).get("household_role")
+    calling_p_match = _match_parent_role(c_name, c_role_hint, f_name, m_name_val)
+    is_calling_parent = bool(calling_p_match)
+    if calling_p_match == "father":
         household["father"]["id"] = contact.get("id")
         household["father"]["npc_id"] = contact.get("npc_id")
         household["father"]["is_contactable"] = True
-    elif m_name_val and (c_name.lower() == m_name_val.lower() or (c_first and m_first and c_first.lower() == m_first.lower())):
-        is_calling_parent = True
+    elif calling_p_match == "mother":
         household["mother"]["id"] = contact.get("id")
         household["mother"]["npc_id"] = contact.get("npc_id")
         household["mother"]["is_contactable"] = True
@@ -1204,14 +1383,30 @@ def get_or_create_household(
     Retrieves or creates the normalized household entity in SQLite for a character.
     Guarantees 100% symmetric family trees and single source of truth across all siblings.
     """
+    c_raw_name = str(contact.get("name") or "").strip()
+    if contact.get("is_player") or (session_id and c_raw_name.lower() in resolve_all_player_names(session_id)):
+        return {
+            "id": 0,
+            "session_id": session_id,
+            "household_key": "player_protected",
+            "surname": surname or "",
+            "father": {},
+            "mother": {},
+            "children": [],
+            "narrative_siblings": [],
+            "residence_location": "",
+        }
+
     clean_surname = namegen.normalize_base_surname((surname or "").strip())
     if not clean_surname:
-        first, last = extract_surname_and_firstname(contact.get("name", ""))
+        first, last = extract_surname_and_firstname(c_raw_name)
         if last:
             clean_surname = last
         else:
             name_seed = int(hashlib.md5(f"{session_id}_{first}".encode("utf-8")).hexdigest(), 16)
             clean_surname = get_deterministic_surname(scenario, name_seed)
+
+    c_first, _ = extract_surname_and_firstname(c_raw_name)
 
     # 1. If session_id is 0 / offline, generate in-memory household
     if not session_id:
@@ -1224,7 +1419,8 @@ def get_or_create_household(
             child_appearance=child_appearance,
             child_surname=clean_surname,
             scenario=scenario,
-            hash_val=household_hash
+            hash_val=household_hash,
+            exclude_first_names={c_first.lower()} if c_first else None,
         )
         hh = {
             "id": 0,
@@ -1247,7 +1443,41 @@ def get_or_create_household(
         if hh:
             return _hydrate_household_entity(hh, contact, scenario)
 
-    c_first, _ = extract_surname_and_firstname(contact.get("name", ""))
+    # 2b. Check if this contact matches an existing household's Father, Mother, or Narrative Sibling
+    c_stripped_low = _strip_nee_suffix(c_raw_name).lower()
+    if c_stripped_low:
+        try:
+            with db.get_conn() as conn:
+                hh_rows = conn.execute(
+                    "SELECT * FROM households WHERE session_id = ?",
+                    (session_id,),
+                ).fetchall()
+            for hhr in hh_rows:
+                hhd = dict(hhr)
+                try:
+                    f_obj = json.loads(hhd.get("father_json") or "{}")
+                    m_obj = json.loads(hhd.get("mother_json") or "{}")
+                    ns_list = json.loads(hhd.get("narrative_siblings_json") or "[]")
+                except Exception:
+                    f_obj, m_obj, ns_list = {}, {}, []
+                f_n = _strip_nee_suffix(f_obj.get("name", "")).lower()
+                m_n = _strip_nee_suffix(m_obj.get("name", "")).lower()
+                if f_n and c_stripped_low == f_n:
+                    _link_contact_to_household(session_id, contact, hhd["id"], household_role="father")
+                    hh = db.get_household_by_id(hhd["id"])
+                    return _hydrate_household_entity(hh, contact, scenario)
+                if m_n and (c_stripped_low == m_n or c_raw_name.lower() == str(m_obj.get("name", "")).strip().lower()):
+                    _link_contact_to_household(session_id, contact, hhd["id"], household_role="mother")
+                    hh = db.get_household_by_id(hhd["id"])
+                    return _hydrate_household_entity(hh, contact, scenario)
+                for ns in ns_list:
+                    if isinstance(ns, dict) and _strip_nee_suffix(ns.get("name", "")).lower() == c_stripped_low:
+                        _link_contact_to_household(session_id, contact, hhd["id"], household_role="child")
+                        hh = db.get_household_by_id(hhd["id"])
+                        return _hydrate_household_entity(hh, contact, scenario)
+        except Exception:
+            pass
+
     sib_linked = (contact.get("basic_info") or {}).get("sibling_name")
     is_anderson = clean_surname.lower() == "anderson" and any(k in (c_first.lower(), (sib_linked or "").lower()) for k in ("sofia", "maya", "amanda"))
     is_vance = clean_surname.lower() == "vance" and any(k in (c_first.lower(), (sib_linked or "").lower()) for k in ("su-bin", "subin", "ayane", "andrew", "mia"))
@@ -1261,12 +1491,12 @@ def get_or_create_household(
     if canonical_key:
         hh = db.get_household_by_key(session_id, canonical_key)
         if hh:
-            _link_contact_to_household(session_id, contact, hh["id"])
+            _link_contact_to_household(session_id, contact, hh["id"], household_role=contact.get("household_role") or "child")
             return _hydrate_household_entity(hh, contact, scenario)
 
     # 3. Check existing contacts in the session for matching household
     session_contacts = db.get_contacts(session_id, resolve_relations=False, ensure_scene=False) or []
-    target_names = {contact.get("name", "").lower(), c_first.lower()}
+    target_names = {c_raw_name.lower(), c_first.lower()}
     if sib_linked:
         target_names.add(sib_linked.lower())
         s_first, _ = extract_surname_and_firstname(sib_linked)
@@ -1289,9 +1519,9 @@ def get_or_create_household(
             is_linked = False
             if other_sib and any(tn in other_sib.lower() for tn in target_names):
                 is_linked = True
-            elif any(o_first.lower() in tn or o_name.lower() in tn for tn in target_names):
+            elif any(o_first.lower() == tn or o_name.lower() == tn for tn in target_names):
                 is_linked = True
-            elif any(any(tn in fn for tn in target_names) for fn in other_fam):
+            elif any(any(tn == fn for tn in target_names) for fn in other_fam):
                 is_linked = True
             elif is_anderson and o_first.lower() in ("sofia", "maya", "amanda") and c_first.lower() in ("sofia", "maya", "amanda"):
                 is_linked = True
@@ -1301,13 +1531,18 @@ def get_or_create_household(
             if is_linked:
                 hh = db.get_household_by_id(other_c["household_id"])
                 if hh:
-                    _link_contact_to_household(session_id, contact, hh["id"])
+                    _link_contact_to_household(session_id, contact, hh["id"], household_role=contact.get("household_role") or "child")
                     return _hydrate_household_entity(hh, contact, scenario)
 
     # 4. Create new household record in SQLite
     if not canonical_key:
-        c_unique = contact.get("id") or contact.get("npc_id") or abs(hash(contact.get("name", "")))
+        c_unique = contact.get("npc_id") or contact.get("id") or abs(hash(c_raw_name))
         canonical_key = f"{clean_surname.lower()}_{session_id}_{c_unique}"
+
+    hh = db.get_household_by_key(session_id, canonical_key)
+    if hh:
+        _link_contact_to_household(session_id, contact, hh["id"], household_role=contact.get("household_role") or "child")
+        return _hydrate_household_entity(hh, contact, scenario)
 
     child_race = _resolve_child_race(contact, session_id, scenario)
     child_appearance = contact.get("appearance") or {}
@@ -1319,7 +1554,8 @@ def get_or_create_household(
         child_appearance=child_appearance,
         child_surname=clean_surname,
         scenario=scenario,
-        hash_val=household_hash
+        hash_val=household_hash,
+        exclude_first_names={c_first.lower()} if c_first else None,
     )
 
     _apply_non_traditional_family_status(father, mother, contact)
@@ -1388,7 +1624,8 @@ def get_canonical_family_unit(
 def build_family_tree_for_member(
     household: Dict[str, Any],
     member_name: str,
-    scenario: str = "fantasy"
+    scenario: str = "fantasy",
+    member_role: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Constructs the family tree from the perspective of a specific member in the household.
@@ -1398,20 +1635,20 @@ def build_family_tree_for_member(
       and children are listed with relation='Son'/'Daughter'.
     Active contact members include their contact id, npc_id, and is_contactable=True for UI navigation.
     """
-    father = dict(household["father"])
-    mother = dict(household["mother"])
+    father = dict(household.get("father") or {})
+    mother = dict(household.get("mother") or {})
     children = household.get("children", [])
+    if not father and not mother and not children:
+        return []
 
     grade_order = {"Faculty": 5, "Senior": 4, "Junior": 3, "Sophomore": 2, "Freshman": 1}
 
     f_name = father.get("name", "")
     m_name_val = mother.get("name", "")
-    f_first, _ = extract_surname_and_firstname(f_name) if f_name else ("", "")
-    m_first, _ = extract_surname_and_firstname(m_name_val) if m_name_val else ("", "")
-
     m_target_first, _ = extract_surname_and_firstname(member_name)
-    is_father = bool(f_name and (member_name.lower() == f_name.lower() or (m_target_first and f_first and m_target_first.lower() == f_first.lower())))
-    is_mother = bool(m_name_val and (member_name.lower() == m_name_val.lower() or (m_target_first and m_first and m_target_first.lower() == m_first.lower())))
+    matched_p = _match_parent_role(member_name, member_role, f_name, m_name_val)
+    is_father = (matched_p == "father")
+    is_mother = (matched_p == "mother")
 
     if is_father or is_mother:
         # Build children list from parent's perspective
@@ -1524,16 +1761,18 @@ def build_family_tree_for_member(
 def build_family_tree_from_household(
     household: Dict[str, Any],
     contact_name: str,
-    scenario: str = "fantasy"
+    scenario: str = "fantasy",
+    member_role: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Constructs the perspective family tree from a normalized household entity."""
-    return build_family_tree_for_member(household, contact_name, scenario=scenario)
+    return build_family_tree_for_member(household, contact_name, scenario=scenario, member_role=member_role)
 
 
 def hydrate_parent_to_contact(session_id: int, household_id: int, parent_role: str = "father") -> dict:
     """
     Promotes a lightweight parent JSON from the household entity into an active contact
     in the contacts table when met or interacted with in the narrative.
+    Marks explicit household_role and adult non-student status so High School never turns parents into club students.
     """
     if not session_id or not household_id:
         return {}
@@ -1546,7 +1785,6 @@ def hydrate_parent_to_contact(session_id: int, household_id: int, parent_role: s
     if not parent or not parent.get("name"):
         return {}
     p_name = parent["name"]
-    p_first, _ = extract_surname_and_firstname(p_name)
     p_gender = parent.get("gender", "female" if role_key == "mother" else "male")
     p_race = parent.get("race", "human")
     p_role = parent.get("occupation", "Parent")
@@ -1554,6 +1792,9 @@ def hydrate_parent_to_contact(session_id: int, household_id: int, parent_role: s
 
     basic_info = {
         "role": p_role,
+        "grade": "Adult",
+        "household_role": role_key,
+        "is_adult_family": True,
         "description": p_desc,
         "status_effects": [],
         "traits": [p_role, f"{hh.get('surname', '')} Household"],
@@ -1561,7 +1802,7 @@ def hydrate_parent_to_contact(session_id: int, household_id: int, parent_role: s
     appearance = {
         "features": parent.get("features", "")
     }
-    npc_id = p_name.lower().replace(" ", "_").replace("(", "").replace(")", "").replace("née", "nee").replace("'", "")
+    npc_id = _strip_nee_suffix(p_name).lower().replace(" ", "_").replace("'", "")
     contact = db.upsert_contact(
         session_id=session_id,
         npc_id=npc_id,
@@ -1569,12 +1810,46 @@ def hydrate_parent_to_contact(session_id: int, household_id: int, parent_role: s
         basic_info=basic_info,
         race=p_race,
         gender=p_gender,
-        appearance=appearance
+        appearance=appearance,
+        household_role=role_key,
     )
     if contact and contact.get("id"):
-        db.assign_contact_household(session_id, contact["id"], household_id)
+        db.assign_contact_household(session_id, contact["id"], household_id, household_role=role_key)
         contact["household_id"] = household_id
+        contact["household_role"] = role_key
     return contact
+
+
+def maybe_promote_scene_parent(session_id: int, npc_name: str) -> Optional[dict]:
+    """
+    If an NPC encountered in-scene matches an unhydrated Father or Mother in any session household,
+    promotes them into a Contact linked to that household with explicit adult parent role.
+    """
+    if not session_id or not npc_name:
+        return None
+    clean_target = _strip_nee_suffix(npc_name).lower()
+    if not clean_target:
+        return None
+    try:
+        import db
+        with db.get_conn() as conn:
+            hh_rows = conn.execute(
+                "SELECT id, father_json, mother_json FROM households WHERE session_id = ?",
+                (session_id,),
+            ).fetchall()
+        for hhr in hh_rows:
+            hid = hhr["id"]
+            for r_key, raw_json in (("father", hhr["father_json"]), ("mother", hhr["mother_json"])):
+                try:
+                    p_obj = json.loads(raw_json or "{}")
+                except Exception:
+                    p_obj = {}
+                p_name = p_obj.get("name", "")
+                if p_name and (_strip_nee_suffix(p_name).lower() == clean_target or p_name.strip().lower() == npc_name.strip().lower()):
+                    return hydrate_parent_to_contact(session_id, hid, parent_role=r_key)
+    except Exception:
+        pass
+    return None
 
 
 # ==============================================================================
@@ -1583,15 +1858,18 @@ def hydrate_parent_to_contact(session_id: int, household_id: int, parent_role: s
 
 def add_friend_relation(contact_dict: dict, friend_name: str, role: str = "Student", closeness: str = "Good Friend", session_id: int = 0) -> dict:
     """Dynamically adds or upgrades a friend in the contact's relations record."""
-    if session_id:
+    eff_sid = int(session_id or contact_dict.get("session_id") or 0)
+    if eff_sid:
         try:
             import mechanics.social.relationship_graph as rg
             a_key = rg.canonical_person_key(contact_dict.get("name", ""))
             b_key = rg.canonical_person_key(friend_name)
-            closeness_val = 80 if any(k in str(closeness).lower() for k in ("close", "best")) else 65
-            rg.get_or_create_person(session_id, friend_name, person_key=b_key, role=role)
-            rg.form_tie(session_id, a_key, b_key, rg.TIETYPE_FRIEND, closeness=closeness_val)
-            mat = rg.materialize_relations(session_id, contact_dict)
+            closeness_val = int(closeness) if isinstance(closeness, (int, float)) else (80 if any(k in str(closeness).lower() for k in ("close", "best", "sworn")) else 65)
+            meta = {"closeness_label": closeness} if isinstance(closeness, str) and closeness.strip() else None
+            rg.get_or_create_person(eff_sid, contact_dict.get("name", ""), person_key=a_key, origin="contact", contact_npc_id=contact_dict.get("npc_id"))
+            rg.get_or_create_person(eff_sid, friend_name, person_key=b_key, role=role)
+            rg.form_tie(eff_sid, a_key, b_key, rg.TIETYPE_FRIEND, closeness=closeness_val, metadata=meta)
+            mat = rg.materialize_relations(eff_sid, contact_dict)
             if mat:
                 contact_dict["relations"] = mat
                 return mat
@@ -1615,14 +1893,17 @@ def add_friend_relation(contact_dict: dict, friend_name: str, role: str = "Stude
 
 def add_rival_relation(contact_dict: dict, rival_name: str, role: str = "Student", rival_type: str = "Class Rival", session_id: int = 0) -> dict:
     """Dynamically adds or upgrades a rival/enemy in the contact's relations record."""
-    if session_id:
+    eff_sid = int(session_id or contact_dict.get("session_id") or 0)
+    if eff_sid:
         try:
             import mechanics.social.relationship_graph as rg
             a_key = rg.canonical_person_key(contact_dict.get("name", ""))
             b_key = rg.canonical_person_key(rival_name)
-            rg.get_or_create_person(session_id, rival_name, person_key=b_key, role=role)
-            rg.form_tie(session_id, a_key, b_key, rg.TIETYPE_RIVAL, closeness=50)
-            mat = rg.materialize_relations(session_id, contact_dict)
+            meta = {"rival_type": rival_type} if isinstance(rival_type, str) and rival_type.strip() else None
+            rg.get_or_create_person(eff_sid, contact_dict.get("name", ""), person_key=a_key, origin="contact", contact_npc_id=contact_dict.get("npc_id"))
+            rg.get_or_create_person(eff_sid, rival_name, person_key=b_key, role=role)
+            rg.form_tie(eff_sid, a_key, b_key, rg.TIETYPE_RIVAL, closeness=50, metadata=meta)
+            mat = rg.materialize_relations(eff_sid, contact_dict)
             if mat:
                 contact_dict["relations"] = mat
                 return mat
@@ -1646,13 +1927,14 @@ def add_rival_relation(contact_dict: dict, rival_name: str, role: str = "Student
 
 def remove_relation(contact_dict: dict, target_name: str, session_id: int = 0) -> dict:
     """Removes a character from both friends and rivals."""
-    if session_id:
+    eff_sid = int(session_id or contact_dict.get("session_id") or 0)
+    if eff_sid:
         try:
             import mechanics.social.relationship_graph as rg
             a_key = rg.canonical_person_key(contact_dict.get("name", ""))
             b_key = rg.canonical_person_key(target_name)
-            rg.end_tie(session_id, a_key, b_key, reason="removed")
-            mat = rg.materialize_relations(session_id, contact_dict)
+            rg.end_tie(eff_sid, a_key, b_key, reason="removed")
+            mat = rg.materialize_relations(eff_sid, contact_dict)
             if mat:
                 contact_dict["relations"] = mat
                 return mat
@@ -1668,19 +1950,21 @@ def remove_relation(contact_dict: dict, target_name: str, session_id: int = 0) -
 
 def set_romantic_partner(contact_dict: dict, partner_name: str, role: str = "Lover / Soulmate", status: str = "In a Relationship", session_id: int = 0) -> dict:
     """Dynamically sets an active romantic partner."""
-    if session_id:
+    eff_sid = int(session_id or contact_dict.get("session_id") or 0)
+    if eff_sid:
         try:
             import mechanics.social.relationship_graph as rg
             a_key = rg.canonical_person_key(contact_dict.get("name", ""))
-            b_key = rg.canonical_person_key(partner_name)
+            b_key = "player" if rg.is_player_person_key(partner_name) else rg.canonical_person_key(partner_name)
             tie_type = rg.TIETYPE_DATING
             if "married" in status.lower():
                 tie_type = rg.TIETYPE_MARRIED
             elif "engaged" in status.lower():
                 tie_type = rg.TIETYPE_ENGAGED
-            rg.get_or_create_person(session_id, partner_name, person_key=b_key, role=role)
-            rg.form_tie(session_id, a_key, b_key, tie_type, closeness=75, supersede=True)
-            mat = rg.materialize_relations(session_id, contact_dict)
+            rg.get_or_create_person(eff_sid, contact_dict.get("name", ""), person_key=a_key, origin="contact", contact_npc_id=contact_dict.get("npc_id"))
+            rg.get_or_create_person(eff_sid, partner_name, person_key=b_key, role=role)
+            rg.form_tie(eff_sid, a_key, b_key, tie_type, closeness=75, supersede=True)
+            mat = rg.materialize_relations(eff_sid, contact_dict)
             if mat:
                 contact_dict["relations"] = mat
                 return mat
@@ -1703,14 +1987,15 @@ def set_romantic_partner(contact_dict: dict, partner_name: str, role: str = "Lov
 
 def break_up_romantic_partner(contact_dict: dict, session_id: int = 0) -> dict:
     """Breaks up with current partner, moving them to ex-partners."""
-    if session_id:
+    eff_sid = int(session_id or contact_dict.get("session_id") or 0)
+    if eff_sid:
         try:
             import mechanics.social.relationship_graph as rg
             a_key = rg.canonical_person_key(contact_dict.get("name", ""))
-            curr = rg.get_current_partner(session_id, a_key)
+            curr = rg.get_current_partner(eff_sid, a_key)
             if curr:
-                rg.end_tie(session_id, a_key, curr["person_key"], curr["tie_type"], reason="breakup")
-            mat = rg.materialize_relations(session_id, contact_dict)
+                rg.end_tie(eff_sid, a_key, curr["person_key"], curr["tie_type"], reason="breakup")
+            mat = rg.materialize_relations(eff_sid, contact_dict)
             if mat:
                 contact_dict["relations"] = mat
                 return mat
@@ -1748,9 +2033,13 @@ def ensure_contact_relations(
     name = contact.get("name", "Unknown NPC")
     first_name, surname = extract_surname_and_firstname(name)
 
-    # Protect Player Character from procedural family invention (Decision 8)
-    player_name = resolve_player_character_name(contact, session_id=session_id or contact.get("session_id", 0))
-    if contact.get("is_player") or (name and player_name and name.strip().lower() == player_name.strip().lower() and not contact.get("household_id")):
+    # Protect Player Character(s) from procedural family invention (Decision 8)
+    sess_check = session_id or contact.get("session_id", 0)
+    player_names = resolve_all_player_names(sess_check)
+    player_name = resolve_player_character_name(contact, session_id=sess_check)
+    if player_name and player_name.lower() != "player":
+        player_names.add(player_name.strip().lower())
+    if contact.get("is_player") or (name and name.strip().lower() in player_names):
         existing = contact.get("relations")
         if not isinstance(existing, dict):
             existing = {}
@@ -1758,7 +2047,8 @@ def ensure_contact_relations(
 
     # 1. Resolve canonical family household unit
     household = get_or_create_household(session_id, surname, contact=contact, scenario=scenario)
-    family_tree = build_family_tree_from_household(household, name, scenario=scenario)
+    c_role_hint = contact.get("household_role") or (contact.get("basic_info") or {}).get("household_role")
+    family_tree = build_family_tree_for_member(household, name, scenario=scenario, member_role=c_role_hint)
 
     seed_str = f"{session_id}_{name}_relations_v2".encode("utf-8")
     hash_val = int(hashlib.md5(seed_str).hexdigest(), 16)
@@ -1804,7 +2094,9 @@ def ensure_contact_relations(
                             scen_key=scenario,
                             grade_override=fam_grade,
                             role_override=fam.get("occupation", ""),
-                            club_override=fam.get("club", "")
+                            club_override=fam.get("club", ""),
+                            gender=fam.get("gender", ""),
+                            relation_type=r_type
                         )
                         new_recs.append(rec)
                         existing_names.add(fam_name.lower())
@@ -1813,8 +2105,7 @@ def ensure_contact_relations(
         except Exception:
             pass
 
-    # Normalized Relationship Graph Integration (Phase 2 & 3)
-    is_romantic_track = str(contact.get("track") or "").strip().lower() == "romantic"
+    # Normalized Relationship Graph Integration (Read-Safe Projection + One-Time Initial Seed)
     if session_id:
         try:
             import mechanics.social.relationship_graph as rg
@@ -1827,33 +2118,22 @@ def ensure_contact_relations(
                 gender=contact.get("gender") or "", origin="contact", contact_npc_id=p_npc
             )
 
-            # Check if graph ties are already seeded
+            # One-time procedural background seeding ONLY when contact has zero non-player ties in graph
             ties = rg.get_ties(session_id, c_key, active_only=False)
-            if not ties:
+            has_non_player_ties = any(not rg.is_player_person_key(t.get("other_person_key", "")) for t in ties)
+            if not has_non_player_ties:
                 rg.seed_contact_social_graph(contact, session_id=session_id, scenario=scenario, hash_val=hash_val)
-
-            # Romance track synchronization in graph
-            if is_romantic_track:
-                char_id = contact.get("character_id") or "default"
-                player_key = rg.player_person_key(char_id)
-                curr_partner = rg.get_current_partner(session_id, c_key)
-                if not curr_partner or curr_partner.get("person_key") != player_key:
-                    rg.form_tie(session_id, player_key, c_key, rg.TIETYPE_DATING, closeness=80, supersede=True)
-            else:
-                curr_partner = rg.get_current_partner(session_id, c_key)
-                if curr_partner and curr_partner.get("person_key", "").startswith("player:"):
-                    rg.end_tie(session_id, curr_partner["person_key"], c_key, rg.TIETYPE_DATING, reason="track_transition")
-
-                # If contact has an established NON-PLAYER background partner in relations dict, preserve it into graph
+                # Preserve non-player background partner only on initial seed if none exists
                 if isinstance(existing.get("romance"), dict):
                     bg_p = existing["romance"].get("current_partner")
                     if bg_p and isinstance(bg_p, dict) and bg_p.get("name"):
                         bg_name = bg_p["name"].strip()
-                        if bg_name.lower() not in ("player", "you") and not bg_name.lower().startswith("player:"):
+                        if not rg.is_player_person_key(bg_name):
                             bg_key = rg.canonical_person_key(bg_name)
                             rg.get_or_create_person(session_id, bg_name, person_key=bg_key, role=bg_p.get("role", "Partner"))
-                            if not curr_partner or curr_partner.get("person_key") != bg_key:
-                                rg.form_tie(session_id, c_key, bg_key, rg.TIETYPE_DATING, closeness=70, supersede=True)
+                            curr_partner = rg.get_current_partner(session_id, c_key)
+                            if not curr_partner and not rg.get_current_partner(session_id, bg_key) and not rg.get_secret_affairs(session_id, c_key):
+                                rg.form_tie(session_id, c_key, bg_key, rg.TIETYPE_DATING, closeness=70, origin="procedural", supersede=False)
 
             mat = rg.materialize_relations(session_id, contact)
             if mat:
@@ -1946,7 +2226,9 @@ def ensure_contact_relations(
                             scen_key=scenario,
                             grade_override=fam_grade,
                             role_override=fam.get("occupation", ""),
-                            club_override=fam.get("club", "")
+                            club_override=fam.get("club", ""),
+                            gender=fam.get("gender", ""),
+                            relation_type=r_type
                         )
                         new_recs.append(rec)
                         existing_names.add(fam_name.lower())
@@ -2015,7 +2297,9 @@ def format_relations_for_disclosure(
                 if not m_copy.get("name"):
                     first = m_copy.get("first_name", "").strip()
                     last = m_copy.get("surname", "").strip()
-                    m_copy["name"] = f"{first} {last}".strip() or "Unknown"
+                    m_copy["name"] = namegen.format_cultural_full_name(
+                        first, last, gender=m_copy.get("gender", ""), use_patronymic=False
+                    ).strip() or "Unknown"
                 norm_members.append(m_copy)
             else:
                 norm_members.append(m)

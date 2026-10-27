@@ -32,7 +32,10 @@
     "party": "Gruppe",
     "quests": "Quests",
     "codex": "Kodex",
-    "outcomes": "Welt-Chronik"
+    "outcomes": "Welt-Chronik",
+    "menu": "Menü",
+    "journal": "Tagebuch & Werkzeuge",
+    "contacts": "Kontakte"
   },
   "stats": {
     "str": "Stärke",
@@ -220,7 +223,27 @@
       "neutral": "Neutral",
       "unfavorable": "Unvorteilhaft",
       "hostile_rival": "Feindselig / Rivale"
-    }
+    },
+    "agenda": "Terminplan",
+    "no_agenda": "Keine aktiven Verpflichtungen oder Treffen",
+    "cancel_commitment": "Absagen",
+    "cancelled_commitment": "„{{title}}“ abgesagt.",
+    "profile_locked": "Persönliches Dossier gesperrt",
+    "profile_locked_desc": "Erreiche Freund-Status (100+ Zuneigung) oder rekrutiere sie in deine Gruppe, um das vollständige Profil anzusehen.",
+    "special_agent": "Spezialagent",
+    "civilian": "Zivilist",
+    "deceased": "Verstorben",
+    "operative_dossier": "Einsatz-Kampfdossier",
+    "innate_abilities": "Angeborene Spezialfähigkeiten",
+    "abilities_locked_note": "Erreiche Freund-Status (100+ Zuneigung) oder rekrutiere sie in deine Gruppe, um Spezialfähigkeiten freizuschalten.",
+    "civilian_classification": "Zivile Einstufung",
+    "civilian_party_note": "Gewöhnlicher Bürger ohne Mana oder Spezialfähigkeiten. Als Kontakt verfügbar, kann aber nicht in die Einsatzgruppe rekrutiert werden.",
+    "civilian_deceased_note": "Während einer anomalen Inkursion mangels angeborenen Manaschutzes dauerhaft ums Leben gekommen.",
+    "saved_contact": "Gespeicherter Kontakt",
+    "open_in_contacts": "In Kontakten öffnen",
+    "search_known_characters": "Bekannte Charaktere durchsuchen...",
+    "unlock_contact_hint": "Als Kontakt freischalten, um das persönliche Dossier einzusehen",
+    "operational_info": "Einsatzstatus"
   },
   "scene": {
     "title": "Szene & Welt",
@@ -278,7 +301,7 @@
   },
   "settings": {
     "title": "Spieleinstellungen",
-    "modal_title": "Chronik-Einstellungen & Telemetrie",
+    "modal_title": "Einstellungen",
     "tab_preferences": "Präferenzen",
     "tab_telemetry": "Telemetrie & Sandbox",
     "language": "Sprache",
@@ -339,7 +362,9 @@
     "new_adventure_desc": "Wähle Welt & Klasse, um die Reise zu beginnen",
     "hero_stats_preview": "Heldenwerte-Vorschau",
     "configure_loadout": "Ausrüstung konfigurieren →",
-    "logout": "Abmelden"
+    "logout": "Abmelden",
+    "level_short": "Stf.",
+    "welcome_title": "Beginne deine Chronik"
   },
   "outcomes": {
     "turn_outcome": "Ergebnis von Runde #{{turn}}",
@@ -370,7 +395,8 @@
     "shop": "LADEN",
     "browse": "Stöbern",
     "fallback_warning": "Für diese Runde wurde eine Ausweich-Szenengenerierung verwendet.",
-    "truncated_warning": "Die Szenenerzählung wirkt ungewöhnlich kurz oder abgeschnitten."
+    "truncated_warning": "Die Szenenerzählung wirkt ungewöhnlich kurz oder abgeschnitten.",
+    "resolving": "Wird aufgelöst..."
   },
   "party": {
     "roster": "Gruppenübersicht",
@@ -406,5 +432,70 @@
     "discord_link": "Discord-Verknüpfung",
     "discord_placeholder": "Discord-ID oder Benutzername...",
     "connect_discord": "Discord verbinden"
+  },
+  "embark": {
+    "starting_faction_legend": "Start-Fraktionszugehörigkeit",
+    "starting_faction_hint": "Bestimmt Start-HQ, Uniform-Ausrüstung, tägliche Pflichtaufträge, Händlerrabatte und Agentenfreigabe.",
+    "default_badge": "Standard",
+    "faction_public_name": "Öffentliche Eindämmungsbehörde",
+    "faction_public_desc": "Tagesgehalt (50G–300G) • 50% HQ-Rabatt • Täglicher Pflichtauftrag • 0G/0 Beute bei Behördenaufträgen • Start im Behörden-HQ",
+    "faction_private_name": "Private Eindämmungsagentur #1",
+    "faction_private_desc": "100% Kopfgeld & Beute behalten • Hochwertige Waffenkammer (+35% Preis) • Öffentliche Verträge • Pflichtauftrag • Start im Konzern-HQ",
+    "faction_private_2_name": "Private Eindämmungsagentur #2 (Rivalensyndikat)",
+    "faction_private_2_desc": "100% Kopfgeld & Beute behalten • Syndikats-Waffenkammer (+35% Preis) • Öffentliche Verträge • Pflichtauftrag • Start im Syndikats-HQ",
+    "faction_monastic_name": "Östlicher Schrein-Exorzistenorden",
+    "faction_monastic_desc": "Täglich 2–3 kostenlose Relikte • Kampfbeute behalten • Kostenlose Tempelheilung • Pflichtauftrag • Start im Großtempel",
+    "faction_freelancer_name": "Unabhängiger Freelancer",
+    "faction_freelancer_desc": "Keine täglichen Pflichtquoten • Volle Auszahlung bei Verträgen & Freelance-App • Start im Vorstadthaus"
+  },
+  "theme": {
+    "title": "Design",
+    "appearance": "Erscheinungsbild",
+    "appearance_desc": "Lass die Oberfläche deinem Szenario folgen oder wähle deinen Lieblingslook.",
+    "auto": "Szenario folgen",
+    "auto_desc": "Passt die Farben an die Welt an, die du spielst",
+    "auto_active": "Folgt der Welt · {{name}}",
+    "names": {
+      "ember": "Glut",
+      "nebula": "Nebel",
+      "neon": "Neon",
+      "brass": "Messing",
+      "crimson": "Karmesin",
+      "containment": "Eindämmung",
+      "wasteland": "Ödland",
+      "daylight": "Tageslicht",
+      "aero": "Frutiger Aero",
+      "midas": "Protzig"
+    }
+  },
+  "stealth_dock": {
+    "stealth": "Schleichen",
+    "sneaking": "Verdeckt",
+    "hide": "Verbergen",
+    "backstab": "Hinterhalt",
+    "vanished": "VERBORGEN",
+    "on": "AN",
+    "throw": "Werfen",
+    "distract": "Ablenken",
+    "tooltip_combat_hide": "Versuche in den Schatten zu verschwinden (AGI gegen Gegner-PER)",
+    "tooltip_combat_backstab": "Schlage aus den Schatten mit einem Flankenangriff zu",
+    "tooltip_drop_stealth": "Schleichmodus verlassen",
+    "tooltip_enter_stealth": "Schleichhaltung einnehmen (Verdeckte Aktionen)",
+    "tooltip_throw": "Waffe/Projektil auf aktives Ziel werfen (AGI)",
+    "tooltip_distract": "Ablenkung werfen, um Aufmerksamkeit umzulenken (AGI)"
+  },
+  "contacts": {
+    "title": "Kontakte",
+    "count": "{{count}} gespeichert",
+    "search_placeholder": "Kontakte durchsuchen...",
+    "no_contacts": "Noch keine persönlichen Kontakte freigeschaltet.",
+    "unlock_hint": "Frage im Gespräch nach der Nummer, füge sie auf PeerPulse hinzu oder erreiche Freund-Status (100+).",
+    "message_btn": "Nachricht",
+    "blocked_badge": "Blockiert"
+  },
+  "phone": {
+    "alerts_dispatch": "Warnungen / Leitstelle",
+    "read_only_broadcast": "Automatisierter offizieller Rundfunkkanal — Schreibgeschützt",
+    "blocked_notice": "Dieser Kontakt hat deine Nummer wegen Feindseligkeit blockiert. Versöhne dich zuerst persönlich."
   }
 }

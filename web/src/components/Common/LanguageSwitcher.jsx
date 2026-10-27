@@ -2,12 +2,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Globe, ChevronDown, Check, Monitor, Sparkles } from 'lucide-react';
 import { AVAILABLE_LANGUAGES } from '../../i18n';
+import AnchoredPopover from './AnchoredPopover';
 
 export const LanguageSwitcher = ({ settingsHook, className = '' }) => {
   const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('ui'); // 'ui' | 'narration'
-  const containerRef = useRef(null);
+  const btnRef = useRef(null);
 
   const currentUiLang = (i18n.language || 'en').split('-')[0].toLowerCase();
   const currentNarrLang = (settingsHook?.settings?.narration_language || settingsHook?.settings?.language || 'en').split('-')[0].toLowerCase();
@@ -15,15 +16,6 @@ export const LanguageSwitcher = ({ settingsHook, className = '' }) => {
   const activeUiOption = AVAILABLE_LANGUAGES.find(l => l.code === currentUiLang) || AVAILABLE_LANGUAGES[0];
   const activeNarrOption = AVAILABLE_LANGUAGES.find(l => l.code === currentNarrLang) || AVAILABLE_LANGUAGES[0];
 
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   const handleSelectUi = (code) => {
     i18n.changeLanguage(code);
@@ -47,11 +39,13 @@ export const LanguageSwitcher = ({ settingsHook, className = '' }) => {
     : `${activeUiOption.short} / ${activeNarrOption.short}`;
 
   return (
-    <div className={`relative inline-block text-left ${className}`} ref={containerRef}>
+    <div className={`relative inline-block text-left ${className}`}>
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-2 py-1 bg-black/60 hover:bg-neutral-900 border border-neutral-700 hover:border-fantasy-accent/60 rounded-lg text-xs font-medium text-gray-200 transition-all shadow-sm focus:outline-none"
+        aria-expanded={open}
+        className="hk-icon-btn text-xs font-medium"
         title="Language Settings"
       >
         <Globe size={13} className="text-fantasy-accent" />
@@ -59,8 +53,8 @@ export const LanguageSwitcher = ({ settingsHook, className = '' }) => {
         <ChevronDown size={11} className={`text-gray-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {open && (
-        <div className="absolute right-0 mt-1.5 w-52 rounded-lg bg-neutral-950 border border-neutral-800 shadow-xl z-50 overflow-hidden backdrop-blur-md animate-in fade-in zoom-in-95 duration-100">
+      <AnchoredPopover anchorRef={btnRef} open={open} onClose={() => setOpen(false)} width={224} label="Language Settings">
+        <div>
           {/* Dual Toggle Tabs */}
           <div className="flex border-b border-neutral-800/80 bg-black/50 p-1 gap-1">
             <button
@@ -133,7 +127,7 @@ export const LanguageSwitcher = ({ settingsHook, className = '' }) => {
             })}
           </div>
         </div>
-      )}
+      </AnchoredPopover>
     </div>
   );
 };

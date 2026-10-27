@@ -114,10 +114,10 @@ const SavesModal = ({ isOpen, onClose, user, onSessionLoaded }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
       <div className="fixed inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
 
-      <div className="relative w-full max-w-md bg-fantasy-panel border border-fantasy-border rounded-xl shadow-2xl overflow-hidden z-10 flex flex-col max-h-[85vh]">
+      <div className="relative w-full max-w-md bg-fantasy-panel border border-fantasy-border rounded-xl shadow-2xl overflow-hidden z-10 flex flex-col max-h-[calc(var(--app-height,100dvh)-3rem)]">
         {/* Header */}
         <div className="p-4 border-b border-fantasy-border bg-black/50 flex items-center justify-between">
           <div className="flex items-center gap-2">

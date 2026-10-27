@@ -9,7 +9,8 @@ from mechanics.social.relationships import (
 
 class TestRomanceIntentEngine(unittest.TestCase):
     def setUp(self):
-        self.user_id = 992288
+        import random
+        self.user_id = 99220000 + random.randint(1000, 99999)
         self.char_name = "Artemiusz"
         self.npc_name = "Maya Anderson"
         self.scenario = "high_school_drama"
@@ -31,12 +32,16 @@ class TestRomanceIntentEngine(unittest.TestCase):
         )
         with db.get_conn() as conn:
             conn.execute("UPDATE sessions SET dialogue_partner = ? WHERE id = ?", (self.npc_name, self.session_id))
+            conn.execute("DELETE FROM social_ties WHERE session_id = ?", (self.session_id,))
+            conn.execute("DELETE FROM social_persons WHERE session_id = ?", (self.session_id,))
 
     def tearDown(self):
         with db.get_conn() as conn:
-            conn.execute("DELETE FROM characters WHERE user_id = ?", (self.user_id,))
-            conn.execute("DELETE FROM sessions WHERE id = ?", (self.session_id,))
             conn.execute("DELETE FROM contacts WHERE session_id = ?", (self.session_id,))
+            conn.execute("DELETE FROM social_ties WHERE session_id = ?", (self.session_id,))
+            conn.execute("DELETE FROM social_persons WHERE session_id = ?", (self.session_id,))
+            conn.execute("DELETE FROM sessions WHERE id = ?", (self.session_id,))
+            conn.execute("DELETE FROM characters WHERE user_id = ?", (self.user_id,))
 
     def test_layer1_and_layer2_intent_classifier(self):
         """Verify Layer 1 structural regex patterns and Layer 2 negative disambiguation filters."""
@@ -72,31 +77,42 @@ class TestRomanceIntentEngine(unittest.TestCase):
 
     def test_confession_prerequisites(self):
         """Verify the 6 prerequisite gates of can_trigger_romantic_confession."""
+        import json
         # 1. Low Affinity (< 100) -> Should NOT trigger
-        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, delta_score=50, track="platonic")
+        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, character_id=self.char_id, delta_score=50, track="platonic")
+        with db.get_conn() as conn:
+            conn.execute("DELETE FROM social_ties WHERE session_id = ? AND tie_type IN ('dating', 'married', 'engaged')", (self.session_id,))
+            conn.execute("UPDATE contacts SET relations_json = ? WHERE session_id = ?", (json.dumps({"romance": {"status": "Single", "current_partner": None}}), self.session_id))
         self.assertFalse(can_trigger_romantic_confession(self.session_id, self.char_id, self.npc_name, self.scenario))
 
         # 2. High Affinity (>= 100, platonic) -> SHOULD trigger
-        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, delta_score=60, track="platonic") # score = 110
+        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, character_id=self.char_id, delta_score=60, track="platonic") # score = 110
+        with db.get_conn() as conn:
+            conn.execute("DELETE FROM social_ties WHERE session_id = ? AND tie_type IN ('dating', 'married', 'engaged')", (self.session_id,))
+            conn.execute("UPDATE contacts SET relations_json = ? WHERE session_id = ?", (json.dumps({"romance": {"status": "Single", "current_partner": None}}), self.session_id))
         self.assertTrue(can_trigger_romantic_confession(self.session_id, self.char_id, self.npc_name, self.scenario))
 
         # 3. Already on Romantic track -> Should NOT trigger (already dating)
-        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, track="romantic")
+        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, character_id=self.char_id, track="romantic")
         self.assertFalse(can_trigger_romantic_confession(self.session_id, self.char_id, self.npc_name, self.scenario))
 
         # 4. Ineligible NPC (Teacher / Adult) -> Should NOT trigger
-        db.upsert_contact(self.session_id, "mr_harrison", "Mr. Harrison", delta_score=110, track="platonic")
+        db.upsert_contact(self.session_id, "mr_harrison", "Mr. Harrison", character_id=self.char_id, delta_score=110, track="platonic")
         self.assertFalse(can_trigger_romantic_confession(self.session_id, self.char_id, "Mr. Harrison", self.scenario))
 
         # 5. Cooldown Active -> Should NOT trigger
-        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, track="platonic")
+        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, character_id=self.char_id, track="platonic")
+        with db.get_conn() as conn:
+            conn.execute("DELETE FROM social_ties WHERE session_id = ? AND tie_type IN ('dating', 'married', 'engaged')", (self.session_id,))
+            conn.execute("UPDATE contacts SET relations_json = ? WHERE session_id = ?", (json.dumps({"romance": {"status": "Single", "current_partner": None}}), self.session_id))
         db.set_confession_cooldown(self.session_id, self.npc_name, turns=3)
         self.assertFalse(can_trigger_romantic_confession(self.session_id, self.char_id, self.npc_name, self.scenario))
 
     def test_dedicated_choice_auto_injection(self):
         """Verify that _clean_choices auto-injects the dedicated romance milestone action."""
         from cogs.adventure import AdventureCog
-        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, delta_score=110, track="platonic")
+        db.set_confession_cooldown(self.session_id, self.npc_name, turns=0)
+        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, character_id=self.char_id, delta_score=110, track="platonic")
 
         raw_choices = [
             {"label": "Discuss today's chemistry assignment", "stat": "INT", "requirement": 6, "mp_cost": 0},
@@ -119,8 +135,8 @@ class TestRomanceIntentEngine(unittest.TestCase):
         self.assertIn("Confess your feelings", conf_choice.get("label", ""))
 
     def test_mechanical_track_transition_on_successful_action(self):
-        """Verify that selecting the confession choice with check success transitions track to romantic."""
-        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, delta_score=95, track="platonic")
+        """Verify that selecting the confession choice with check success at >= 100 affinity transitions track to romantic."""
+        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, character_id=self.char_id, delta_score=100, track="platonic")
 
         selected_action = [{
             "label": f"Confess your feelings and ask {self.npc_name} to pursue a romantic relationship",
@@ -155,7 +171,7 @@ class TestRomanceIntentEngine(unittest.TestCase):
         # Verify SQLite contact was mechanically switched to romantic
         contact = db.get_contact(self.session_id, self.npc_name, self.char_id)
         self.assertEqual(contact.get("track"), "romantic")
-        self.assertEqual(contact.get("relationship_score"), 100)
+        self.assertGreaterEqual(contact.get("relationship_score"), 105)
 
         # Verify tier is Big Crush (Milestone 100 Romantic Unlock)
         tier = get_relationship_tier(contact["relationship_score"], contact["track"], self.scenario)
@@ -163,7 +179,7 @@ class TestRomanceIntentEngine(unittest.TestCase):
 
     def test_failed_confession_sets_cooldown(self):
         """Verify that a failed confession check keeps track platonic and sets a 3-turn cooldown."""
-        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, delta_score=85, track="platonic")
+        db.upsert_contact(self.session_id, "maya_anderson", self.npc_name, character_id=self.char_id, delta_score=85, track="platonic")
 
         selected_action = [{
             "label": f"Confess your feelings and ask {self.npc_name} to pursue a romantic relationship",

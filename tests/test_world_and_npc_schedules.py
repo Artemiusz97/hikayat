@@ -40,6 +40,7 @@ from game_engine.npcs.stage_manager import compute_pre_turn_stage
 @pytest.fixture(autouse=True)
 def init_test_db(tmp_path, monkeypatch):
     test_db_path = str(tmp_path / "test_world_npc_schedules.db")
+    monkeypatch.setattr(db, "DB_PATH", test_db_path)
     monkeypatch.setattr(db.core, "DB_PATH", test_db_path)
     db.init_db(force=True)
     yield
@@ -169,13 +170,15 @@ def test_weekday_school_hours_truancy_gatekeeper_and_late_arrival():
 
 
 def test_extracurricular_weekend_and_after_hours_facility_locks():
-    # 1. Extracurricular Period (15:00–20:00 Mon–Fri): Empty Classroom is locked, Sports & Club HQs are open
+    # 1. Extracurricular Period (15:00–20:00 Mon–Fri): Discreet Empty Classroom stays open until 20:00; Rooftop is locked; Sports & Club HQs are open
     sess_extra = _create_hs_session(504, current_day=1, current_minute=960) # 16:00 Monday
     acc_empty = get_node_effective_access_info(504, "loc_empty_class", current_day=1, current_minute=960)
-    assert acc_empty["schedule_locked"] is True
-    assert acc_empty["status_badge"] == "Locked (After-School)"
-    gate_empty = evaluate_node_access_gate(504, "loc_empty_class", sess_extra, actions=[{"label": "Enter Empty Classroom"}])
-    assert gate_empty["gated"] is True
+    assert acc_empty["schedule_locked"] is False
+    acc_roof = get_node_effective_access_info(504, "loc_rooftop", current_day=1, current_minute=960)
+    assert acc_roof["schedule_locked"] is True
+    assert acc_roof["status_badge"] == "Locked (After-School)"
+    gate_roof = evaluate_node_access_gate(504, "loc_rooftop", sess_extra, actions=[{"label": "Enter School Rooftop"}])
+    assert gate_roof["gated"] is True
 
     acc_aud = get_node_effective_access_info(504, "loc_auditorium_stage", current_day=1, current_minute=960)
     assert acc_aud["schedule_locked"] is False
@@ -295,10 +298,12 @@ class TestAuditFixesRegression:
         res_roof = evaluate_world_schedule_node_access(rooftop_node, parent_node, scen_key="high_school_drama", current_day=1, current_minute=600)
         assert res_roof["force_open"] is False
 
-        # 16:00 (extracurriculars) - Empty classroom and rooftop are locked
+        # 16:00 (extracurriculars) - Discreet Empty Classroom stays open until 20:00; Rooftop is locked
         res_1600 = evaluate_world_schedule_node_access(empty_node, parent_node, scen_key="high_school_drama", current_day=1, current_minute=960)
-        assert res_1600["schedule_locked"] is True
-        assert res_1600["force_open"] is False
+        assert res_1600["schedule_locked"] is False
+        res_roof_1600 = evaluate_world_schedule_node_access(rooftop_node, parent_node, scen_key="high_school_drama", current_day=1, current_minute=960)
+        assert res_roof_1600["schedule_locked"] is True
+        assert res_roof_1600["force_open"] is False
 
     def test_imminent_transition_day_aware(self):
         from mechanics.world.npc_schedule import is_schedule_transition_imminent
@@ -406,12 +411,12 @@ class TestAuditFixesRegression:
         assert bed_node == "sub_player_bedroom"
 
         # Hook 2: Front gate
-        gate_node = db.resolve_node_id_from_location(522, "Main Academy Campus ➔ School Main Gates ➔ Front Gate Path")
-        assert gate_node == "sub_entrance_path"
+        gate_node = db.resolve_node_id_from_location(522, "Main Academy Campus ➔ Main Campus Building ➔ School Main Gates")
+        assert gate_node == "loc_school_gate"
 
         # Hook 3: Homeroom desk
-        desk_node = db.resolve_node_id_from_location(522, "Main Academy Campus ➔ Homeroom Classroom ➔ Alex's Desk")
-        assert desk_node == "sub_player_desk"
+        desk_node = db.resolve_node_id_from_location(522, "Main Academy Campus ➔ Main Campus Building ➔ Homeroom Classroom")
+        assert desk_node == "loc_homeroom"
 
     def test_discord_embed_lock_indicator_formatting(self):
         from mechanics.world.locations.formatting import get_zone_summary_tree
@@ -443,5 +448,150 @@ class TestAuditFixesRegression:
         assert "AFTER-HOURS TRESPASSING" not in fantasy_block
         assert "CAMPUS CURFEW" not in fantasy_block
         assert "students and teachers have returned home" not in fantasy_block
+
+
+class TestScheduleAndAgentRosterIntegration:
+    def test_high_school_sport_specialization_faculty_stations_and_midnight_staging(self):
+        from mechanics.social.school_roster import get_facility_ambient_characters
+
+        sess = _create_hs_session(530, current_day=1, current_minute=600)  # Monday 10:00 AM
+
+        # 1. Athletic Directorate sports resolve to specific venues via role/primary_facility
+        swim_capt = {
+            "name": "Mina Sato",
+            "role": "Varsity Swim Captain",
+            "club": "Athletic Directorate",
+            "primary_facility": "Main Academy Campus ➔ School Grounds & Athletics ➔ Swimming Pool Facility",
+        }
+        kendo_lead = {
+            "name": "Kenji Mori",
+            "role": "Martial Arts Club Lead",
+            "club": "Athletic Directorate",
+            "primary_facility": "Main Academy Campus ➔ School Grounds & Athletics ➔ Martial Arts Dojo",
+        }
+        track_ace = {
+            "name": "Hana Takahashi",
+            "role": "Track Sprinter",
+            "club": "Athletic Directorate",
+            "primary_facility": "Main Academy Campus ➔ School Grounds & Athletics ➔ Athletic Field",
+        }
+        assert get_npc_scheduled_node_id(swim_capt, current_minute=960, scen_key="high_school_drama", current_day=1) == "loc_pool"
+        assert get_npc_scheduled_node_id(kendo_lead, current_minute=960, scen_key="high_school_drama", current_day=1) == "loc_martial_arts_dojo"
+        assert get_npc_scheduled_node_id(track_ace, current_minute=960, scen_key="high_school_drama", current_day=1) == "loc_sports_field"
+
+        # 2. Subject teachers teach in their subject rooms during morning/afternoon class periods
+        chem_teacher = {"name": "Dr. Arata", "role": "Chemistry Teacher", "club": "Faculty"}
+        pe_coach = {"name": "Coach Daiki", "role": "Athletics Coach", "club": "Faculty"}
+        assert get_npc_scheduled_node_id(chem_teacher, current_minute=600, scen_key="high_school_drama", current_day=1) == "loc_science_lab"
+        assert get_npc_scheduled_node_id(pe_coach, current_minute=810, scen_key="high_school_drama", current_day=1) == "loc_gymnasium"
+
+        # 3. Empty Classroom and Abandoned School never spawn straggler students during active class hours
+        for check_min in (540, 600, 810, 840):
+            assert get_facility_ambient_characters(
+                530, "Main Academy Campus ➔ Main Campus Building ➔ Empty Classroom 3-C",
+                limit=2, current_day=1, current_minute=check_min,
+            ) == []
+            assert get_facility_ambient_characters(
+                530, "Main Academy Campus ➔ Abandoned Old Campus Building ➔ Derelict Gymnasium",
+                limit=2, current_day=1, current_minute=check_min,
+            ) == []
+
+        # 4. Midnight campus movement (e.g. unlocked via keycard) never stages ghost daytime residents
+        from mechanics.world.locations.access_gate import record_node_unlock
+        record_node_unlock(530, "loc_science_lab", unlock_type="day", current_day=1, reason="key")
+        sess["current_minute"] = 1380  # 23:00
+        sess["current_location"] = "Main Academy Campus ➔ Main Campus Building ➔ School Hallway"
+        sess["current_node_id"] = "loc_school_hallway"
+        db.update_session(530, current_minute=1380, current_location=sess["current_location"], current_node_id="loc_school_hallway")
+        stage = compute_pre_turn_stage(sess, [{"label": "Enter Chemistry & Science Lab"}])
+        assert stage["stage_npcs"] == []
+
+    def test_anomalous_incursions_special_agent_roster_and_theme_park_shift(self):
+        from mechanics.world.anomalous_events import bootstrap_anomalous_session
+        from mechanics.social.agent_roster import (
+            ensure_anomalous_agent_roster,
+            get_anomalous_facility_ambient_agents,
+        )
+        from mechanics.world.schedules import is_npc_nocturnal_or_night_shift
+        from mechanics.world.waypoints.matching import get_waypoint_npc_schedule_info
+        from mechanics.world.locations.formatting import build_node_sensory_and_memory_block
+        from game_engine.context import _scene_context_text
+
+        sid = db.create_session(1, "solo", 1, "standard", "immersive", False, channel_id=2001, scenario="anomalous_incursions")
+        bootstrap_anomalous_session(sid, "anomalous_incursions", 2001, "public_agency", "Operative Kira")
+        roster = ensure_anomalous_agent_roster(sid, "anomalous_incursions")
+        assert len(roster) == 44
+
+        session_node_ids = {n["node_id"] for n in db.get_session_world_nodes(sid)}
+
+        # 1. Zero {session_school} leaks & Private Agency #2 strictly maps to sub_priv2_*
+        for ag in roster:
+            assert "{session_" not in ag["primary_facility"]
+            assert "{session_" not in ag["secondary_facility"]
+            assert ag["primary_node_id"] in session_node_ids
+            assert ag["secondary_node_id"] in session_node_ids
+            if ag["faction_id"] == "private_agency_2":
+                assert ag["primary_node_id"].startswith("sub_priv2_")
+
+            # Verify no agent ever falls back to medieval Fantasy schedule nodes/strings
+            sched_map = get_npc_schedule(ag, scen_key="anomalous_incursions", session_id=sid, current_day=1)
+            for loc_val in sched_map.values():
+                assert "Adventurer's Guild" not in loc_val
+                assert "Tavern Inn" not in loc_val
+
+        # 2. Cult & Syndicate operatives are nocturnal and remain On-Duty for night waypoints
+        cult_agents = [a for a in roster if a["faction_id"] == "cult_faction"]
+        veiled_acolyte = next(a for a in cult_agents if "veiled acolyte" in a["role"].lower())
+        assert is_npc_nocturnal_or_night_shift(veiled_acolyte, scen_key="anomalous_incursions", current_day=1) is True
+        # At 23:00 (1380), Veiled Acolyte converges on Theme Park Hall of Mirrors Anomaly!
+        assert get_npc_scheduled_node_id(veiled_acolyte, current_minute=1380, scen_key="anomalous_incursions", current_day=1) == "loc_tp_mirror_labyrinth"
+
+        db.upsert_contact(
+            session_id=sid,
+            character_id=0,
+            npc_id=veiled_acolyte["npc_id"],
+            name=veiled_acolyte["name"],
+            delta_score=0,
+            basic_info={"role": veiled_acolyte["role"], "faction_id": "cult_faction", "secondary_node_id": "loc_tp_mirror_labyrinth"},
+        )
+        db.update_session(sid, current_minute=1380, current_day=1)
+        wp_night = get_waypoint_npc_schedule_info(
+            sid,
+            {
+                "target_npc": veiled_acolyte["name"],
+                "target_location": veiled_acolyte["primary_facility"],
+                "follow_npc_schedule": True,
+            },
+        )
+        assert wp_night["is_off_duty"] is False
+        assert wp_night["status_label"] == "On-Duty"
+        assert "Hall of Mirrors" in wp_night["effective_location"]
+
+        # 3. Context injection surfaces on-shift Special Agents at HQ & Theme Park Night Shift
+        hq_exec_loc = roster[0]["primary_facility"]
+        db.update_session(sid, current_minute=540, current_day=1, current_location=hq_exec_loc, current_node_id="loc_hq_executive_dispatch")
+        sess_day = db.get_session(sid)
+        amb_hq = get_anomalous_facility_ambient_agents(sid, hq_exec_loc, limit=2, current_day=1, current_minute=540)
+        assert len(amb_hq) >= 1
+        ctx_text = _scene_context_text(sid, hq_exec_loc, [])
+        assert "Metropolitan Operatives & Ambient Special Agents" in ctx_text
+
+        # 4. Theme Park 21:45 Closing Warning vs 22:30 Anomalous Shift access & sensory block
+        tp_node = db.get_world_node(sid, "loc_tp_main_midway")
+        pre_shift_state = get_world_schedule_state("anomalous_incursions", current_day=1, current_minute=1305)
+        assert "22:00 closing announcements" in pre_shift_state["narrative_directive"]
+        pre_sensory = build_node_sensory_and_memory_block(sid, tp_node, current_day=1, current_minute=1305, scen_key="anomalous_incursions")
+        assert "THEME PARK CLOSING WARNING" in pre_sensory
+
+        shift_sensory = build_node_sensory_and_memory_block(sid, tp_node, current_day=1, current_minute=1350, scen_key="anomalous_incursions")
+        assert "THEME PARK ANOMALOUS SHIFT (22:00–08:00)" in shift_sensory
+        assert "calliope" in shift_sensory.lower()
+
+        db.update_session(sid, current_minute=1350, current_day=1)
+        sess_night = db.get_session(sid)
+        tp_gate = evaluate_node_access_gate(sid, "loc_tp_main_midway", sess_night, actions=[{"label": "Investigate Theme Park"}])
+        assert tp_gate["gated"] is False
+        assert tp_gate.get("anomalous_shift_active") is True
+
 
 

@@ -374,6 +374,9 @@ def compose_turn_image_prompt(
     location = outcome.get("location") or session.get("current_location") or ""
     scene_title = outcome.get("scene_title") or session.get("scene_title") or ""
     scenery_tags = format_scenery_tags(location=location, scene_title=scene_title)
+    opening_cues = str(outcome.get("visual_cues") or session.get("opening_visual_cues") or "").strip()
+    if opening_cues:
+        scenery_tags = _join_tags(scenery_tags, opening_cues)
 
     # Check tier & action context
     check = action.get("check")

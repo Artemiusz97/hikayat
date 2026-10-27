@@ -25,14 +25,18 @@ from mechanics.social.persona.intimacy.formatting import format_persona_embed_fi
 
 class TestStatureAndPhysiqueDiversity(unittest.TestCase):
     def test_canonical_stature_tiers_and_normalization(self):
-        """Verifies the 5 canonical stature tiers and normalization aliases."""
-        self.assertEqual(STATURE_TIERS, ("short", "below_average", "average", "tall", "towering"))
+        """Verifies the 6 canonical stature tiers and normalization aliases."""
+        self.assertEqual(STATURE_TIERS, ("miniature", "short", "below_average", "average", "tall", "towering"))
         for tier in STATURE_TIERS:
             self.assertIn(tier, STATURES)
 
         # Aliases and normalization
+        self.assertEqual(normalize_stature_tier("miniature"), "miniature")
+        self.assertEqual(normalize_stature_tier("dwarf"), "miniature")
+        self.assertEqual(normalize_stature_tier("halfling"), "miniature")
+        self.assertEqual(normalize_stature_tier("gnome"), "miniature")
+        self.assertEqual(normalize_stature_tier("diminutive"), "miniature")
         self.assertEqual(normalize_stature_tier("short"), "short")
-        self.assertEqual(normalize_stature_tier("dwarf"), "short")
         self.assertEqual(normalize_stature_tier("petite"), "short")
         self.assertEqual(normalize_stature_tier("below average"), "below_average")
         self.assertEqual(normalize_stature_tier("below-average"), "below_average")
@@ -45,11 +49,12 @@ class TestStatureAndPhysiqueDiversity(unittest.TestCase):
 
     def test_race_stature_distribution_weights(self):
         """Verifies exact user-requested probability weights per species archetype and gender."""
-        # 1. Miniature races: 100% short for both genders
+        # 1. Miniature races: 100% miniature for both genders
         for mini_race in ["dwarf", "gnome", "halfling", "goblin"]:
             for g in ["male", "female"]:
                 dist = get_stature_distribution_for_race(mini_race, gender=g)
-                self.assertEqual(dist["short"], 1.0)
+                self.assertEqual(dist["miniature"], 1.0)
+                self.assertEqual(dist["short"], 0.0)
                 self.assertEqual(dist["below_average"], 0.0)
                 self.assertEqual(dist["average"], 0.0)
                 self.assertEqual(dist["tall"], 0.0)
@@ -137,12 +142,12 @@ class TestStatureAndPhysiqueDiversity(unittest.TestCase):
 
     def test_roll_dynamic_stature_outcomes(self):
         """Verifies dynamic rolling behavior and miniature locking with gender awareness."""
-        # Dwarf is always short
+        # Dwarf is always miniature
         for seed in range(50):
             stat_m = roll_dynamic_stature("dwarf", gender="male", seed=f"dwarf_seed_m_{seed}")
-            self.assertEqual(stat_m, "short")
+            self.assertEqual(stat_m, "miniature")
             stat_f = roll_dynamic_stature("dwarf", gender="female", seed=f"dwarf_seed_f_{seed}")
-            self.assertEqual(stat_f, "short")
+            self.assertEqual(stat_f, "miniature")
 
         # Female rabbit is predominantly short (55%) or below average (35%)
         fem_rabbit_rolls = [roll_dynamic_stature("rabbit", gender="female", seed=f"fem_rab_{i}") for i in range(100)]
@@ -263,7 +268,23 @@ class TestStatureAndPhysiqueDiversity(unittest.TestCase):
         self.assertIn("[PHYSICAL SCALE & STATURE DYNAMICS (Mimi — Short • Petite & Soft)]", dir_short)
         self.assertIn("Petite & Delicate", dir_short)
         self.assertIn("Protagonist Significantly Towers", dir_short)
-        self.assertIn("effortlessly lifted", dir_short)
+        self.assertIn("drawn in close", dir_short)
+
+        # 2b. Miniature NPC (Dwarf) vs Tall Protagonist
+        dir_mini = format_stature_and_physique_narrative_directive(
+            partner_name="Gimla",
+            npc_stature="miniature",
+            npc_physique="Stocky & Thick",
+            npc_gender="female",
+            npc_race="dwarf",
+            player_stature="tall",
+            player_physique="Broad Shoulders & Lean",
+            player_gender="male"
+        )
+        self.assertIn("[PHYSICAL SCALE & STATURE DYNAMICS (Gimla — Miniature • Stocky & Thick)]", dir_mini)
+        self.assertIn("Miniature / Diminutive", dir_mini)
+        self.assertIn("effortlessly lifted", dir_mini)
+        self.assertIn("Protagonist Significantly Towers", dir_mini)
 
         # 3. Equal Eye-Level Height
         dir_equal = format_stature_and_physique_narrative_directive(

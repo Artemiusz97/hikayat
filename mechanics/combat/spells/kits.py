@@ -16,6 +16,60 @@ def _matches_theme(words: tuple[str, ...], text: str) -> bool:
                 return True
     return False
 
+def get_anomalous_starting_innate_abilities(
+    char_class: str = "",
+    scenario: str = "anomalous_incursions",
+    class_description: str = "",
+    seed: Any = None,
+) -> List[str]:
+    """
+    Returns strictly 5 Fixed Innate Special Abilities (4 tactical Tier 3/2 abilities
+    + 1 high-cost Tier 1 Signature Ultimate) for the Anomalous Incursions scenario.
+    New abilities cannot be learned from spellbooks; additional spells only come
+    from equipping anomalous items with embedded granted_spell metadata.
+    """
+    cls_text = f"{str(char_class or '')} {str(class_description or '')}".lower()
+
+    # 1. Eastern Exorcist / Shrine / Monastic / Ward-Master
+    if _matches_theme(("exorcist", "shrine", "monk", "monastic", "miko", "onmyoji", "priest", "cleric", "paladin", "holy", "ward", "talisman", "seal"), cls_text):
+        return [
+            "sacred_ofuda_purge_t3_st",
+            "reality_anchor_ward_t3_st",
+            "cellular_resuscitate_t3_st",
+            "summon_shikigami_hounds_t2_st",
+            "heavenly_seal_exorcism_t1_st",
+        ]
+
+    # 2. Occult / Cult / Ritualist / Esoteric / Shadow / Blood
+    if _matches_theme(("cult", "occult", "ritual", "warlock", "necro", "blood", "shadow", "dark", "void", "esoteric", "whisper"), cls_text):
+        return [
+            "cognito_suppress_t3_st",
+            "spatial_vector_dart_t3_st",
+            "entropy_siphon_t2_st",
+            "resonance_cascade_t2_aoe",
+            "ouroboros_event_horizon_t1_aoe",
+        ]
+
+    # 3. Psychic / Esper / Investigator / Containment / Analyst / Tactician
+    if _matches_theme(("psychic", "esper", "telekinetic", "investigator", "detective", "analyst", "research", "scholar", "containment", "mage", "caster"), cls_text):
+        return [
+            "spatial_vector_dart_t3_st",
+            "cognito_suppress_t3_st",
+            "reality_anchor_ward_t3_st",
+            "telekinetic_crush_t2_st",
+            "singularity_collapse_t1_aoe",
+        ]
+
+    # 4. Vanguard / Enforcer / Operative / Striker / Mercenary / Default Field Agent
+    return [
+        "spatial_vector_dart_t3_st",
+        "reality_anchor_ward_t3_st",
+        "cellular_resuscitate_t3_st",
+        "resonance_cascade_t2_aoe",
+        "zero_point_rupture_t1_st",
+    ]
+
+
 def get_starter_spells(
     scenario: str = "fantasy",
     char_class: str = "",
@@ -24,16 +78,18 @@ def get_starter_spells(
 ) -> List[str]:
     """
     Returns an INT-scaled, thematically tailored starter package of spells.
-    
-    INT Scaling Rules:
-    - Tier 3 Spells: base 3 + (INT // 2) (Capped at 7).
-    - Tier 2 Spells: max(0, (INT - 3) // 2) (Requires INT >= 5, grants 1-3 advanced spells).
-    - Tier 1 Spells: 1 if INT >= 10, else 0 (Preserved for dungeon/grimoire discovery).
-    
-    Thematic Heuristics:
-    Matches custom class names & descriptions (e.g. Necromancer -> Dark/Summon, Frost -> Ice, Druid -> Nature/Summon).
+    For Anomalous Incursions scenarios, returns strictly 5 Fixed Innate Special Abilities
+    (4 tactical + 1 Signature Ultimate).
     """
+    try:
+        from scenario_data import is_anomalous_incursions_scenario
+        if is_anomalous_incursions_scenario(scenario):
+            return get_anomalous_starting_innate_abilities(char_class, scenario, class_description)
+    except Exception:
+        pass
     scen = str(scenario or "fantasy").lower()
+    if any(k in scen for k in ("anomalous_incursions", "urban_anomalies")):
+        return get_anomalous_starting_innate_abilities(char_class, scenario, class_description)
     cls_text = f"{str(char_class or '')} {str(class_description or '')}".lower()
     int_val = max(1, int(int_stat or 5))
 
@@ -187,7 +243,9 @@ def calculate_spell_damage(
     Step 3 — 20% Bleed-Through Floor:
         final_net = max(raw * 0.20, penetrating)
     """
-    power_mult = spell.get("power_mult", 1.0)
+    power_mult = float(spell.get("power_mult", 1.0))
+    if spell.get("duplicate_empowered"):
+        power_mult *= 1.20
     damage_type = spell.get("damage_type", "magical")
     raw_damage = max(1.0, float(caster_matk) * power_mult * affinity_multiplier)
 

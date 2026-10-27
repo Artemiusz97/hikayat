@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 import time
 from fastapi import APIRouter, HTTPException
@@ -7,11 +8,14 @@ import db
 from db import adb
 import game_engine
 import skill_check
+import scenario_data
+import character_data as cd
 from scenario_data import get_scenario_display_name
 from mechanics.social.relationships import is_contact_eligible
 from services.turn_service import TurnService
 from mechanics.system.concurrency import distributed_session_lock, distributed_user_lock
 from .deps import (
+    ResumeSessionRequest,
     logger,
     manager,
     _serializable_action,
@@ -20,6 +24,7 @@ from .deps import (
     StartAdventureRequest,
     JoinAdventureRequest,
     ActionRequest,
+    ToggleStealthRequest,
     EndAdventureRequest,
     RetryAdventureRequest,
     RerollImageRequest,
@@ -45,34 +50,29 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
 
     raw_choices = session.get("choices") or []
     char = db.get_character(uid) if uid else None
-    raw_choices = game_engine.sanitize_and_diversify_choices(
-        raw_choices,
-        scenario=session.get("scenario", "fantasy"),
-        location=session.get("current_location", ""),
-        char=dict(char) if char else None,
-        dialogue_partner=session.get("dialogue_partner"),
-        current_npcs=session.get("current_npcs", []),
-        session_id=session.get("id")
-    )
-    if not in_combat and session.get("id") and session.get("current_location"):
-        if not any(isinstance(c, dict) and c.get("is_quest_action") for c in raw_choices):
-            try:
-                from mechanics.world.waypoints import tag_and_enrich_quest_choices
-                raw_choices = tag_and_enrich_quest_choices(
-                    raw_choices,
-                    session["id"],
-                    session.get("current_location", ""),
-                    scen_key=session.get("scenario", "fantasy"),
-                    char=dict(char) if char else None,
-                    dialogue_partner=session.get("dialogue_partner"),
-                    current_npcs=session.get("current_npcs", []),
-                    allow_fallback=True,
-                )
-            except Exception:
-                pass
+    if not raw_choices or any(not isinstance(c, dict) for c in raw_choices):
+        raw_choices = game_engine.sanitize_and_diversify_choices(
+            raw_choices,
+            scenario=session.get("scenario", "fantasy"),
+            location=session.get("current_location", ""),
+            char=dict(char) if char else None,
+            dialogue_partner=session.get("dialogue_partner"),
+            current_npcs=session.get("current_npcs", []),
+            session_id=session.get("id")
+        )
+    else:
+        raw_choices = [dict(c) for c in raw_choices if isinstance(c, dict)]
 
-    session["choices"] = enrich_choices_with_odds(raw_choices, uid)
+    session["choices"] = enrich_choices_with_odds(raw_choices, uid, session=session)
     session["party_members"] = enrich_session_party_members(session)
+
+    from mechanics.stealth import project_stealth_state_for_user, get_alert_badge_data
+    st_client = project_stealth_state_for_user(session, uid)
+    session["stealth_state"] = st_client
+    session["stealth_badge"] = get_alert_badge_data(
+        st_client.get("detection_meter", 0),
+        is_hidden=st_client.get("is_hidden", False),
+    )
 
     scen_key_check = session.get("scenario", "fantasy")
     from scenario_data import is_nsfw_scenario, get_scenario_tags, get_scenario_display_name
@@ -80,6 +80,13 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
     session["scenario_tags"] = get_scenario_tags(scen_key_check)
     session["scenario_display_name"] = get_scenario_display_name(scen_key_check)
     current_loc_check = session.get("current_location") or ""
+    from mechanics.system.time_engine import get_location_sleep_context
+    session["sleep_context"] = get_location_sleep_context(
+        current_loc_check,
+        props=session.get("physical_state", {}).get("props") if isinstance(session.get("physical_state"), dict) else None,
+        scenario=scen_key_check,
+        session_id=session.get("id"),
+    )
     merchant_state = session.get("merchant") or {}
     is_school = is_school_scenario(scen_key_check)
     has_shop_loc = location_has_merchant_shop(current_loc_check, scen_key=scen_key_check)
@@ -134,10 +141,6 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
     session["formatted_time"] = f"Day {day} • {(minute // 60) % 24:02d}:{minute % 60:02d}"
 
     narr_lower = str(session.get("narrative") or "").lower()
-    has_fallback_choice = any(
-        isinstance(c, dict) and c.get("is_fallback")
-        for c in (session.get("choices") or [])
-    )
 
     # Also inspect latest history entry for fallback markers
     hist = session.get("history") or []
@@ -154,6 +157,22 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
             or hist[-1].get("_is_fallback_narrative")
         )
 
+    non_exit_choices = [
+        c for c in (session.get("choices") or [])
+        if isinstance(c, dict)
+        and not c.get("_pinned_dialogue_exit")
+        and c.get("intent") != "dialogue_exit"
+    ]
+    all_choices_fallback_on_empty_narr = bool(
+        not narr_lower
+        and not last_hist_narr
+        and non_exit_choices
+        and all(
+            c.get("is_fallback") and not c.get("_deterministic_supplement")
+            for c in non_exit_choices
+        )
+    )
+
     fallback_keywords = (
         "threads of fate shimmer",
         "temporary fallback",
@@ -161,6 +180,7 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
         "llm connection failed",
         "deliberate intent",
         "carefully observe the surroundings",
+        "the atmosphere settles around",
     )
     has_fallback_narrative = any(
         phrase in narr_lower or phrase in last_hist_narr
@@ -169,7 +189,7 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
     session["is_fallback_generation"] = bool(
         session.get("is_fallback_generation")
         or last_hist_is_fallback
-        or has_fallback_choice
+        or all_choices_fallback_on_empty_narr
         or has_fallback_narrative
     )
 
@@ -207,11 +227,15 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
             if int(enemy.get("hp", 1) or 0) <= 0:
                 continue
             enemy_name = (enemy.get("name") or "Enemy").strip()
+            from mechanics.stealth import is_actor_combat_vanished
+            if party and party[0] and is_actor_combat_vanished(session, uid):
+                party[0][0]["combat_vanished"] = True
             raw_deck = generate_categorized_combat_actions(
                 party=party,
                 monster=enemy,
                 location=location,
                 scenario=scen_key,
+                session=session,
             ) or {}
 
             magic_list = list(raw_deck.get("magic") or [])
@@ -366,6 +390,9 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
                 a_effs = n_act_data.get("status_effects")
                 if isinstance(a_effs, list):
                     raw_effs.extend(a_effs)
+                comp_val = str(n_act_data.get("composure") or "").strip().lower()
+                if comp_val and comp_val != "composed":
+                    raw_effs.append(comp_val.capitalize())
             if isinstance(n_dict.get("status_effects"), list):
                 raw_effs.extend(n_dict.get("status_effects"))
             n_dict["status_effects"] = cd.sanitize_status_effects(raw_effs)
@@ -434,6 +461,20 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
                 n_dict["excitement_status"] = exc_status
                 n_dict["excitement_climaxed"] = exc_climaxed
                 n_dict["excitement_active"] = True
+
+            if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
+                try:
+                    from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag
+                    anom_source = dict(c_rec) if isinstance(c_rec, dict) else {}
+                    anom_source.update(n_dict)
+                    t_tag = classify_anomalous_npc_tag(anom_source, session_id=sess_id, scen_key=str(session.get("scenario") or ""))
+                    n_dict["anomalous_npc_tag"] = t_tag
+                    n_dict["anomalous_tag_label"] = "Special Agent" if t_tag == "special_agent" else "Civilian"
+                    n_dict["is_special_agent"] = (t_tag == "special_agent")
+                    if isinstance(c_rec, dict) and (c_rec.get("basic_info") or {}).get("deceased"):
+                        n_dict["deceased"] = True
+                except Exception:
+                    pass
 
             return n_dict
 
@@ -523,6 +564,22 @@ async def _trigger_scene_image_broadcast(
         logger.warning(f"Scene image generation failed for session {session_id}: {e}")
         return None
 
+@router.get("/api/adventure/session-image/{session_id}")
+async def get_session_image(session_id: int):
+    """Lightweight polling endpoint returning the latest scene_image_url for active turn reconciliation."""
+    sess = await adb(db.get_session, session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    raw_hist = list(sess.get("history") or [])
+    last_img = raw_hist[-1].get("scene_image_url") if (raw_hist and isinstance(raw_hist[-1], dict)) else None
+    return {
+        "session_id": session_id,
+        "scene_image_url": sess.get("scene_image_url") or last_img,
+        "history_image_url": last_img,
+        "scene_title": sess.get("scene_title", ""),
+    }
+
+
 
 def _fetch_open_lobbies() -> list[dict]:
     with db.get_conn() as conn:
@@ -560,6 +617,42 @@ async def list_open_lobbies():
     return {"lobbies": lobbies}
 
 
+@router.get("/api/adventure/character-sessions/{character_id}")
+async def get_character_sessions_endpoint(character_id: int):
+    """Returns all active sessions for a character across their 6 slots."""
+    char = await adb(db.get_character_by_id, character_id)
+    if not char:
+        return {"sessions": []}
+    sessions = await adb(db.get_character_sessions, character_id)
+    user_id = char["user_id"]
+    enriched = []
+    for s in sessions:
+        es = await adb(_enrich_session_for_client, s, user_id)
+        enriched.append(es)
+    return {"sessions": enriched}
+
+
+@router.post("/api/adventure/resume")
+async def resume_session_endpoint(req: ResumeSessionRequest):
+    """Switches the active adventure to the selected session/slot and returns enriched session state."""
+    session_row = await adb(db.get_session, req.session_id)
+    if not session_row:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    char = None
+    if req.character_id:
+        char = await adb(db.get_character_by_id, req.character_id)
+    if not char:
+        char = await adb(db.get_character, req.user_id)
+    
+    if char:
+        with db.get_conn() as conn:
+            conn.execute("UPDATE characters SET active_session_id=? WHERE id=?", (req.session_id, char["id"]))
+    
+    enriched = await adb(_enrich_session_for_client, dict(session_row), req.user_id)
+    return {"success": True, "session": enriched}
+
+
 @router.get("/api/adventure/active-session/{user_id}")
 async def get_active_session(user_id: int):
     """Gets the active adventure session for a user."""
@@ -583,13 +676,18 @@ async def get_active_session(user_id: int):
 async def start_adventure(req: StartAdventureRequest):
     """Starts a new adventure session (Solo or Multiplayer) and generates the opening scene."""
     async with distributed_user_lock(req.user_id):
-        char = await adb(db.get_character, req.user_id)
+        char = None
+        if req.character_id:
+            char = await adb(db.get_character_by_id, req.character_id)
+        if not char:
+            char = await adb(db.get_character, req.user_id)
         if not char:
             raise HTTPException(status_code=404, detail="Character not found. Create a character first!")
 
-        active_id = await adb(db.get_active_session_id_for_user, req.user_id)
-        if active_id:
-            await adb(db.finish_session, active_id)
+        target_slot = req.slot if req.slot and 1 <= req.slot <= 6 else 1
+        existing_in_slot = await adb(db.get_character_session_in_slot, char["id"], target_slot)
+        if existing_in_slot:
+            await adb(db.finish_session, existing_in_slot["id"])
 
         mode = req.mode.lower()
         if mode == "multi":
@@ -614,17 +712,38 @@ async def start_adventure(req: StartAdventureRequest):
 
         await adb(db.reset_character_for_new_adventure, req.user_id, scenario_key)
 
-        if req.char_class:
+        is_anomalous_scen = scenario_data.is_anomalous_incursions_scenario(scenario_key)
+        chosen_starting_faction = (req.starting_faction or "public_agency").strip() if is_anomalous_scen else ""
+
+        eff_char_class = req.char_class or (char.get("char_class") if is_anomalous_scen else "") or ("Anomaly Investigator" if is_anomalous_scen else "")
+        if eff_char_class:
+            eff_loadout = req.starter_loadout
+            if is_anomalous_scen and not eff_loadout:
+                eff_loadout = await adb(
+                    cd.generate_starter_equipment_loadout,
+                    scenario_key,
+                    eff_char_class,
+                    char.get("gender", "Male"),
+                    char.get("race", "Human"),
+                    req.weapon_name or "",
+                    3,
+                    chosen_starting_faction,
+                )
+            eff_starting_items = (
+                req.starting_items
+                if req.starting_items is not None
+                else await adb(cd.get_starting_items, scenario_key, eff_char_class, chosen_starting_faction)
+            )
             await adb(
                 db.apply_adventure_loadout,
                 req.user_id,
                 scenario_key,
-                req.char_class,
-                req.class_description,
-                req.weapon_name,
-                req.weapon_description,
-                req.starter_loadout,
-                req.starting_items
+                eff_char_class,
+                req.class_description or "",
+                req.weapon_name or "",
+                req.weapon_description or "",
+                eff_loadout,
+                eff_starting_items,
             )
         
         if req.str_val is not None:
@@ -661,10 +780,23 @@ async def start_adventure(req: StartAdventureRequest):
             show_percentages=show_percentages,
             language=language,
             narration_language=narration_language,
+            character_id=char["id"],
+            slot=target_slot,
         )
 
         await adb(db.add_session_member, session_id, req.user_id)
         await adb(db.set_session_active, session_id, [req.user_id])
+
+        if is_anomalous_scen:
+            from mechanics.world.anomalous_events import bootstrap_anomalous_session
+            await adb(
+                bootstrap_anomalous_session,
+                session_id,
+                scenario_key,
+                req.user_id,
+                chosen_starting_faction,
+                char.get("name", ""),
+            )
 
         char_row = await adb(db.get_character, req.user_id)
         inv = await adb(db.get_inventory, req.user_id) if char_row else []
@@ -681,15 +813,22 @@ async def start_adventure(req: StartAdventureRequest):
             raw_choices, narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
                 scene, session=session
             )
+            _open_partners = (
+                [partner_arg]
+                if isinstance(partner_arg, str) and partner_arg.strip()
+                else (list(partner_arg) if isinstance(partner_arg, list) else [])
+            )
             raw_choices = await adb(
-                game_engine.sanitize_and_diversify_choices,
+                game_engine.build_hybrid_turn_choices,
                 raw_choices,
-                scenario=scenario_key,
-                location=scene.get("location") or "",
-                char=dict(char_row) if char_row else None,
-                dialogue_partner=partner_arg,
-                current_npcs=npcs_arg,
-                session_id=session_id,
+                session=session,
+                party=party,
+                result={
+                    **(scene if isinstance(scene, dict) else {}),
+                    "location": scene.get("location") or session.get("current_location") or "",
+                    "npcs_present": npcs_arg,
+                    "dialogue_partners": _open_partners,
+                },
             )
             await adb(
                 db.save_session_scene,
@@ -698,11 +837,11 @@ async def start_adventure(req: StartAdventureRequest):
                 narrative,
                 raw_choices,
                 [],
-                location=scene.get("location"),
+                location=scene.get("location") or session.get("current_location"),
                 nearby_enemies=scene.get("nearby_enemies"),
                 current_npcs=npcs_arg,
                 dialogue_partner=partner_arg,
-                current_node_id=scene.get("current_node_id"),
+                current_node_id=scene.get("current_node_id") or session.get("current_node_id"),
             )
             char_id = char_row["id"] if char_row else 0
             enemy_names = {game_engine._get_npc_name(e).lower() for e in scene.get("nearby_enemies", []) if e}
@@ -717,6 +856,7 @@ async def start_adventure(req: StartAdventureRequest):
                             b_info["description"] = npc.get("description", "")
                     if not b_info.get("location"):
                         b_info["location"] = scene.get("location") or session.get("current_location", "")
+                    b_info["met_in_person"] = True
                     if is_contact_eligible(name=n_name, role=b_info.get("role", ""), description=b_info.get("description", ""), scenario=scenario_key, session_id=session_id):
                         await adb(db.upsert_contact,
                             session_id=session_id,
@@ -816,24 +956,41 @@ async def execute_action(req: ActionRequest):
             raise HTTPException(status_code=404, detail="Character not found")
 
         raw_db_choices = session.get("choices", []) or []
-        choices = await adb(
-            game_engine.sanitize_and_diversify_choices,
-            raw_db_choices,
-            scenario=session.get("scenario", "fantasy"),
-            location=session.get("current_location", ""),
-            char=dict(char) if char else None,
-            dialogue_partner=session.get("dialogue_partner"),
-            current_npcs=session.get("current_npcs", []),
-            session_id=session.get("id"),
+        if not raw_db_choices or any(not isinstance(c, dict) for c in raw_db_choices):
+            choices = await adb(
+                game_engine.sanitize_and_diversify_choices,
+                raw_db_choices,
+                scenario=session.get("scenario", "fantasy"),
+                location=session.get("current_location", ""),
+                char=dict(char) if char else None,
+                dialogue_partner=session.get("dialogue_partner"),
+                current_npcs=session.get("current_npcs", []),
+                session_id=session.get("id"),
+            )
+        else:
+            choices = [dict(c) for c in raw_db_choices if isinstance(c, dict)]
+
+        is_stealth_req = bool(
+            getattr(req, "is_stealth", False)
+            or (isinstance(req.action, dict) and req.action.get("is_stealth"))
+            or (getattr(req, "stance", "") == "stealth")
+            or (isinstance(req.action, dict) and req.action.get("stance") == "stealth")
         )
+        stance_req = getattr(req, "stance", None) or (req.action.get("stance") if isinstance(req.action, dict) else None)
+        if is_stealth_req and not stance_req:
+            stance_req = "stealth"
 
         raw_pick = {
             "choice_index": req.choice_index,
             "custom_action_text": req.custom_action_text,
             "direct_choice": req.direct_choice,
             "combat_target": req.combat_target,
-            "intent": getattr(req, "intent", None),
-            "target_npc": getattr(req, "target_npc", None),
+            "intent": getattr(req, "intent", None) or (req.action.get("intent") if isinstance(req.action, dict) else None),
+            "target_npc": getattr(req, "target_npc", None) or (req.action.get("target_npc") if isinstance(req.action, dict) else None),
+            "skip_minutes": getattr(req, "skip_minutes", None) if getattr(req, "skip_minutes", None) is not None else (req.action.get("skip_minutes") if isinstance(req.action, dict) else None),
+            "sleep_mode": getattr(req, "sleep_mode", None) or (req.action.get("sleep_mode") if isinstance(req.action, dict) else None),
+            "is_stealth": is_stealth_req,
+            "stance": stance_req,
             "action": req.action if isinstance(req.action, dict) else None,
         }
         try:
@@ -991,6 +1148,7 @@ async def execute_action(req: ActionRequest):
                 await manager.broadcast(req.session_id, {"type": "STREAM_ERROR", "error": str(e)})
             raise
         except Exception as e:
+            logger.error("Failed to resolve turn for session %s: %s", req.session_id, e, exc_info=True)
             if "started_streaming" in locals() and started_streaming:
                 await manager.broadcast(req.session_id, {"type": "STREAM_ERROR", "error": str(e)})
             snapshot = await adb(db.get_turn_snapshot, req.session_id)
@@ -1036,6 +1194,52 @@ async def execute_action(req: ActionRequest):
         }
 
 
+@router.post("/api/adventure/toggle_stealth")
+async def toggle_adventure_stealth(req: ToggleStealthRequest):
+    """Toggles persistent stealth stance ON/OFF for an active adventure session."""
+    async with distributed_session_lock(req.session_id):
+        session_row = await adb(db.get_session, req.session_id)
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        session = dict(session_row)
+        if session["status"] != "active":
+            raise HTTPException(status_code=400, detail="Session is not active")
+
+        from mechanics.stealth import (
+            toggle_stealth_stance,
+            is_actor_hidden,
+            project_stealth_state_for_user,
+            get_alert_badge_data,
+        )
+        currently_hidden = is_actor_hidden(session, req.user_id)
+        new_active = req.active if req.active is not None else not currently_hidden
+        toggle_stealth_stance(session, new_active, user_id=req.user_id)
+        await adb(db.update_session, req.session_id, stealth_state=session["stealth_state"])
+        fresh = await adb(db.get_session, req.session_id)
+        fresh = await adb(_enrich_session_for_client, dict(fresh), req.user_id)
+
+        projected_st = project_stealth_state_for_user(session, req.user_id)
+        badge_data = get_alert_badge_data(
+            projected_st.get("detection_meter", 0),
+            is_hidden=projected_st.get("is_hidden", False),
+        )
+
+        await manager.broadcast(req.session_id, {
+            "type": "STEALTH_STATE_UPDATED",
+            "user_id": req.user_id,
+            "stealth_state": projected_st,
+            "stealth_badge": badge_data,
+        })
+
+        return {
+            "success": True,
+            "stealth_state": projected_st,
+            "stealth_badge": badge_data,
+            "session": fresh,
+        }
+
+
 @router.post("/api/adventure/end")
 async def end_adventure(req: EndAdventureRequest):
     """Ends/finishes an active adventure session."""
@@ -1069,7 +1273,16 @@ async def retry_adventure_scene(req: RetryAdventureRequest):
         history = list(session.get("history") or [])
         if not history:
             # Turn 0: Opening scene retry
-            # Reset stale state from previous aborted attempts so stale NPCs/enemies never bleed into fresh scene rolls
+            # Purge Turn 0 child rows + previously granted starting_prop so stale entities/props never bleed into fresh scene rolls
+            await adb(db.reset_session_for_opening_retry, req.session_id, uid or 0)
+            session = await adb(db.get_session, req.session_id) or session
+            party = []
+            for m_uid in members:
+                c = await adb(db.get_character, m_uid)
+                if c:
+                    inv = await adb(db.get_inventory, m_uid)
+                    party.append((dict(c), inv))
+            actor_char = party[0][0] if party else actor_char
             session["current_npcs"] = []
             session["dialogue_partner"] = None
             session["nearby_enemies"] = []
@@ -1084,15 +1297,22 @@ async def retry_adventure_scene(req: RetryAdventureRequest):
                     scene, session=session
                 )
                 location = scene.get("location") or session.get("current_location", "")
+                _retry_partners = (
+                    [partner_arg]
+                    if isinstance(partner_arg, str) and partner_arg.strip()
+                    else (list(partner_arg) if isinstance(partner_arg, list) else [])
+                )
                 raw_choices = await adb(
-                    game_engine.sanitize_and_diversify_choices,
+                    game_engine.build_hybrid_turn_choices,
                     raw_choices,
-                    scenario=session.get("scenario", "fantasy"),
-                    location=location,
-                    char=dict(actor_char) if actor_char else None,
-                    dialogue_partner=partner_arg,
-                    current_npcs=npcs_arg,
-                    session_id=req.session_id,
+                    session=session,
+                    party=party,
+                    result={
+                        **(scene if isinstance(scene, dict) else {}),
+                        "location": location,
+                        "npcs_present": npcs_arg,
+                        "dialogue_partners": _retry_partners,
+                    },
                 )
                 init_node_id = await adb(db.resolve_node_id_from_location, req.session_id, location)
                 await adb(
@@ -1122,6 +1342,7 @@ async def retry_adventure_scene(req: RetryAdventureRequest):
                                 b_info["description"] = npc.get("description", "")
                         if not b_info.get("location"):
                             b_info["location"] = location
+                        b_info["met_in_person"] = True
                         if is_contact_eligible(name=n_name, role=b_info.get("role", ""), description=b_info.get("description", ""), scenario=session.get("scenario", "fantasy"), session_id=req.session_id):
                             await adb(db.upsert_contact,
                                 session_id=req.session_id,
@@ -1187,17 +1408,18 @@ async def retry_adventure_scene(req: RetryAdventureRequest):
                 if npcs_arg is None
                 else npcs_arg
             )
-            raw_choices = await adb(
-                game_engine.sanitize_and_diversify_choices,
-                raw_choices,
-                scenario=session.get("scenario", "fantasy"),
-                location=outcome.get("location") or session.get("current_location", ""),
-                char=dict(actor_char) if actor_char else None,
-                dialogue_partner=effective_partner,
-                current_npcs=effective_npcs,
-                session_id=req.session_id,
-                departed_npcs=outcome.get("departed_characters") or outcome.get("departed_npcs"),
-            )
+            if not (isinstance(outcome, dict) and outcome.get("_hybrid_choices_built") and raw_choices):
+                raw_choices = await adb(
+                    game_engine.sanitize_and_diversify_choices,
+                    raw_choices,
+                    scenario=session.get("scenario", "fantasy"),
+                    location=outcome.get("location") or session.get("current_location", ""),
+                    char=dict(actor_char) if actor_char else None,
+                    dialogue_partner=effective_partner,
+                    current_npcs=effective_npcs,
+                    session_id=req.session_id,
+                    departed_npcs=outcome.get("departed_characters") or outcome.get("departed_npcs"),
+                )
             
             # The history dict was already updated by retry_narration, so we just use the fresh one
             updated_history = list(turn_response.session.get("history", []))
@@ -1360,10 +1582,11 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
             clean_target = sanitize_location_target(target_loc, session_id=session_id, scen_key=scen_key, char_name=char_name)
             process_llm_location_update(session_id, clean_target, scen_key, char_name=char_name)
 
-    # Seed any active phone appointment rendezvous destinations
-    appts = (db.get_phone_appointments(session_id, status="pending") or []) + (db.get_phone_appointments(session_id, status="arrived") or [])
+    # Seed any active rendezvous commitment destinations
+    from mechanics.system.commitments_engine import get_active_commitments
+    appts = get_active_commitments(session_id, commitment_type="rendezvous", limit=25) if session_id else []
     for appt in appts:
-        appt_loc = (appt.get("rendezvous_location") or "").strip()
+        appt_loc = (appt.get("target_location") or appt.get("rendezvous_location") or "").strip()
         if appt_loc:
             clean_appt_loc = sanitize_location_target(appt_loc, session_id=session_id, scen_key=scen_key, char_name=char_name)
             process_llm_location_update(session_id, clean_appt_loc, scen_key, char_name=char_name)
@@ -1400,16 +1623,36 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
 
     for appt in appts:
         tgt = appt.get("target_node_id")
-        if not tgt and appt.get("rendezvous_location"):
-            tgt = db.resolve_node_id_from_location(session_id, appt["rendezvous_location"], prefer_facility=True)
+        a_loc = appt.get("target_location") or appt.get("rendezvous_location") or ""
+        if not tgt and a_loc:
+            tgt = db.resolve_node_id_from_location(session_id, a_loc, prefer_facility=True)
         if tgt:
             tgt_node = next((n for n in all_nodes if n["node_id"] == tgt), None)
             fac_id = tgt_node.get("parent_id") if (tgt_node and tgt_node.get("node_type") == "ROOM") else tgt
             if fac_id:
                 occ = _get_occ_entry(fac_id)
-                a_nm = appt.get("npc_name", "")
+                a_nm = appt.get("npc_name") or ""
+                if not a_nm and appt.get("participants"):
+                    for pt in appt["participants"]:
+                        if pt.get("role") != "organizer" and pt.get("person_key") != "player":
+                            a_nm = pt.get("name") or pt.get("person_key") or ""
+                            break
+                if not a_nm and appt.get("target_entity") and appt.get("target_entity") not in ("player", "group"):
+                    a_nm = str(appt["target_entity"]).replace("_", " ").title()
                 if a_nm and not any(kn["name"].lower() == a_nm.lower() for kn in occ["known_npcs"]):
                     occ["known_npcs"].append({"name": a_nm, "status": "Rendezvous"})
+
+    player_restrained = False
+    if session_id:
+        try:
+            from mechanics.social.physical_state import find_player_actor_key, is_actor_restrained
+            phys_map = db.get_session_physical_state(session_id)
+            if phys_map and isinstance(phys_map.get("actors"), dict):
+                pk_m = find_player_actor_key(phys_map["actors"], session_id=session_id)
+                if pk_m and is_actor_restrained(phys_map["actors"].get(pk_m) or {}):
+                    player_restrained = True
+        except Exception:
+            pass
 
     contact_names_lower = set()
     for c in contacts:
@@ -1460,16 +1703,24 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
                     any(n.get("parent_id") == p_node_id and n["node_id"] in adjacent_node_ids for n in all_nodes)
                 )
             )
-            can_travel = bool(p_copy["is_current_place"] or is_adjacent or (player_at_transit_hub and is_transit_hub) or not all_nodes)
+            can_travel = bool(
+                p_copy["is_current_place"]
+                or (not player_restrained and (is_adjacent or (player_at_transit_hub and is_transit_hub) or not all_nodes))
+            )
 
-            if is_adjacent:
-                p_copy["travel_tag"] = "Adjacent Path"
-            elif player_at_transit_hub and is_transit_hub:
-                p_copy["travel_tag"] = "Transit Hub Fast-Travel"
-            elif is_same_zone:
-                p_copy["travel_tag"] = "Local Walk"
+            if p_copy["is_current_place"]:
+                p_copy["travel_tag"] = "Here"
+                p_copy["travel_minutes"] = 0
             else:
-                p_copy["travel_tag"] = "Inter-Zone Travel"
+                eta_tag = p_copy.get("travel_tag")
+                if not eta_tag or eta_tag in ("Travel", "Instant Local", "Inter-Zone Travel"):
+                    from mechanics.world.locations.formatting import format_travel_eta_tag
+                    t_mins = int(p_copy.get("travel_minutes") or (4 if is_same_zone else 15))
+                    eta_tag = format_travel_eta_tag(t_mins, is_same_zone=is_same_zone, scen_key=scen_key, is_here=False)
+                if player_at_transit_hub and is_transit_hub and not is_same_zone and "transit" not in eta_tag.lower():
+                    p_copy["travel_tag"] = f"Transit • {eta_tag}"
+                else:
+                    p_copy["travel_tag"] = eta_tag
 
             access_info = get_node_effective_access_info(session_id, p_node_id, current_day=curr_day, current_minute=curr_min, scen_key=scen_key) if p_node_id else {}
             occ_data = occupancy_by_node.get(p_node_id, {"known_npcs": [], "unmet_count": 0}) if p_node_id else {"known_npcs": [], "unmet_count": 0}
@@ -1484,7 +1735,7 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
             p_copy["schedule_locked"] = access_info.get("schedule_locked", False)
             p_copy["is_trespassing"] = access_info.get("is_trespassing", False)
             p_copy["is_unlocked"] = access_info.get("is_unlocked", False)
-            p_copy["scene_residue"] = access_info.get("scene_residue", "")
+            p_copy["scene_residue"] = access_info.get("scene_residue") or p_copy.get("scene_residue") or ""
             p_copy["known_npcs_here"] = occ_data["known_npcs"][:3]
             p_copy["unmet_activity_count"] = occ_data["unmet_count"]
 
@@ -1499,6 +1750,8 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
                     "is_current_place": p_copy["is_current_place"],
                     "is_transit_hub": is_transit_hub,
                     "can_travel": can_travel,
+                    "travel_tag": p_copy.get("travel_tag", ""),
+                    "travel_minutes": p_copy.get("travel_minutes", 0),
                 })
         primaries.sort(
             key=lambda item: (

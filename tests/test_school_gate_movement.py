@@ -41,12 +41,13 @@ class TestSchoolGateMovement(unittest.TestCase):
             conn.commit()
 
     def test_school_main_gates_seeded(self):
-        """Verify School Main Gates and its sub-locations are seeded for the session."""
+        """Verify School Main Gates room and its props are seeded for the session."""
+        from mechanics.world.locations.seeds import get_node_props
         locs = db.get_session_locations(self.session_id)
-        gate_locs = [l for l in locs if l.get("primary_name") == "School Main Gates"]
-        self.assertTrue(len(gate_locs) >= 4, f"Expected at least 4 gate sub-locations, got {len(gate_locs)}")
-        
-        sub_names = {l.get("sub_name") for l in gate_locs}
+        gate_locs = [l for l in locs if l.get("sub_name") == "School Main Gates"]
+        self.assertTrue(len(gate_locs) >= 1, f"Expected School Main Gates room in session_locations, got {len(gate_locs)}")
+        self.assertEqual(gate_locs[0].get("primary_name"), "Main Campus Building")
+        sub_names = set(get_node_props("loc_school_gate", "School Main Gates", HIGH_SCHOOL_SCENARIO))
         self.assertIn("Entrance Path & Archway", sub_names)
         self.assertIn("Gate Checkpoint", sub_names)
         self.assertIn("Notice Board & Club Banners", sub_names)
@@ -113,8 +114,8 @@ class TestSchoolGateMovement(unittest.TestCase):
             char_name=self.char_name
         )
         self.assertIn(school_name, res_empty)
+        self.assertIn("Main Campus Building", res_empty)
         self.assertIn("School Main Gates", res_empty)
-        self.assertIn("Entrance Path & Archway", res_empty)
 
         # 2. When LLM echoes previous location string (lazy model)
         res_echo = reconcile_movement_location(
@@ -127,8 +128,8 @@ class TestSchoolGateMovement(unittest.TestCase):
             char_name=self.char_name
         )
         self.assertIn(school_name, res_echo)
+        self.assertIn("Main Campus Building", res_echo)
         self.assertIn("School Main Gates", res_echo)
-        self.assertIn("Entrance Path & Archway", res_echo)
 
     def test_narrative_gate_arrival_fallback_without_destination_in_action(self):
         """Verify narrative proximity scanner catches gate arrival even if action didn't name school."""

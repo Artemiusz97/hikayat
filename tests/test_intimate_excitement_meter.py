@@ -4447,10 +4447,18 @@ class TestIntimateExcitementMeter(unittest.TestCase):
         disheveled_under = {
             "top": "School Uniform Shirt",
             "bottom": "Pleated Skirt",
-            "under_top": "None (Bra-less)",
+            "under_top": "Removed (Bra)",
             "under_bottom": "Worn",
         }
         self.assertEqual(compute_clothing_summary_badge(disheveled_under), "Disheveled 👔")
+
+        braless_intact = {
+            "top": "School Uniform Shirt",
+            "bottom": "Pleated Skirt",
+            "under_top": "None (Bra-less)",
+            "under_bottom": "Worn",
+        }
+        self.assertEqual(compute_clothing_summary_badge(braless_intact), "Fully Clothed 👕")
 
         # 4. Topless
         topless = {

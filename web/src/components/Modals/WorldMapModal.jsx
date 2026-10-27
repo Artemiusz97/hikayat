@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Map, Compass, MapPin, Navigation, Sparkles, X, RefreshCw, ArrowRight, Target } from 'lucide-react';
 import { apiCall } from '../../api/client';
+import { formatCleanLocation, cleanProseLocations } from '../../utils/locationFormat';
 
 const FACILITY_BADGE_LABELS = [
   { icon: '📋', label: '📋 Notice Board', color: 'bg-amber-950/60 text-amber-300 border-amber-700/50' },
@@ -105,8 +106,8 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-      <div className="bg-fantasy-panel border border-fantasy-border rounded-xl shadow-2xl w-full max-w-4xl max-h-[88vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+      <div className="bg-fantasy-panel border border-fantasy-border rounded-xl shadow-2xl w-full max-w-4xl max-h-[calc(var(--app-height,100dvh)-2rem)] flex flex-col overflow-hidden">
         
         {/* Top Modal Header */}
         <div className="px-5 py-3.5 border-b border-fantasy-border flex items-center justify-between bg-black/50">
@@ -188,11 +189,11 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                     }`}
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="text-[11px] font-bold text-amber-300 truncate">
-                        📍 {qd.zone_name} ➔ {qd.place_name}
+                      <div className="text-[11px] font-bold text-amber-300 truncate" title={formatCleanLocation(`${qd.zone_name} ➔ ${qd.place_name}`)}>
+                        📍 {formatCleanLocation(`${qd.zone_name} ➔ ${qd.place_name}`)}
                       </div>
-                      <div className="text-[10px] text-gray-300 truncate" title={qd.marker}>
-                        {qd.marker}
+                      <div className="text-[10px] text-gray-300 truncate" title={cleanProseLocations(qd.marker)}>
+                        {cleanProseLocations(qd.marker)}
                       </div>
                     </div>
                     {qd.is_current_place ? (
@@ -211,7 +212,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                           traveling ? 'opacity-50 cursor-not-allowed' : ''
                         }`}
                       >
-                        <span>{traveling ? 'Traveling...' : 'Travel'}</span>
+                        <span>{traveling ? 'Traveling...' : (qd.travel_tag && qd.travel_tag !== 'Here' ? `Travel (${qd.travel_tag})` : 'Travel')}</span>
                         <ArrowRight size={10} />
                       </button>
                     )}
@@ -290,6 +291,11 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                               <span>⭐ {questCount} Quest{questCount > 1 ? 's' : ''}</span>
                             </span>
                           )}
+                          {!z.is_current && z.travel_tag && (
+                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-950/50 text-cyan-300 border border-cyan-800/50">
+                              ⏱️ {z.travel_tag}
+                            </span>
+                          )}
                           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/60 text-gray-400 border border-fantasy-border/50">
                             {z.places_count || (z.primary_locations?.length ?? 0)}
                           </span>
@@ -364,7 +370,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                       )}
                     </div>
                     <span className="text-[10px] font-mono text-fantasy-accent bg-fantasy-accent/10 px-2.5 py-1 rounded border border-fantasy-accent/30 shrink-0">
-                      { activeZoneObj.is_current ? '⚡ Same Region (Instant Local)' : '🧭 Cross-Region Travel' }
+                      { activeZoneObj.is_current ? '📍 Current Region' : `🧭 ${activeZoneObj.travel_tag || 'Cross-Region Travel'}` }
                     </span>
                   </div>
 
@@ -387,11 +393,13 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                       </div>
                     ) : (
                       primaryPlaces.map((place, idx) => {
-                        const isInstant = place.travel_tag === 'Instant Local';
                         const isHere = Boolean(place.is_current_place);
+                        const isShortWalk = Boolean(isHere || place.is_adjacent || (place.travel_minutes != null && place.travel_minutes <= 6));
                         const placeName = place.name;
                         const destValue = place.value || `${activeZoneObj.zone_name} ➔ ${placeName}`;
-                        const subLocations = Array.isArray(place.sub_locations) ? place.sub_locations : [];
+                        const subLocationItems = (Array.isArray(place.sub_location_details) && place.sub_location_details.length > 0)
+                          ? place.sub_location_details
+                          : (Array.isArray(place.sub_locations) ? place.sub_locations : []);
                         const questMarkers = Array.isArray(place.quest_markers) ? place.quest_markers : [];
                         const hasQuest = Boolean(place.quest_tag) || questMarkers.length > 0;
                         const rawBadges = String(place.badges || '');
@@ -424,13 +432,13 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                     </span>
                                   )}
                                   <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border ${
-                                    place.is_adjacent || isInstant
+                                    isShortWalk
                                       ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60'
-                                      : place.travel_tag?.includes('Transit')
+                                      : place.travel_tag?.toLowerCase().includes('transit')
                                         ? 'bg-cyan-950/60 text-cyan-300 border-cyan-800/60'
                                         : 'bg-amber-950/60 text-amber-300 border-amber-800/60'
                                   }`}>
-                                    {place.travel_tag || 'Travel'}
+                                    ⏱️ {place.travel_tag || 'Travel'}
                                   </span>
                                   {place.archetype && (
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/60 text-gray-400 border border-fantasy-border/60">
@@ -550,24 +558,51 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                               </div>
                             )}
 
-                            {/* 3rd-Tier Sub-Locations Chips */}
-                            {subLocations.length > 0 && (
+                            {/* 3rd-Tier Rooms / Wings Chips */}
+                            {subLocationItems.length > 0 && (
                               <div className="pt-2 border-t border-fantasy-border/40 flex flex-wrap items-center gap-1.5">
-                                <span className="text-[10px] font-mono uppercase text-gray-500 mr-1">Sub-Areas:</span>
-                                {subLocations.map((sub, sIdx) => {
-                                  const subName = typeof sub === 'string' ? sub : (sub.name || sub.label);
+                                <span className="text-[10px] font-mono uppercase text-gray-500 mr-1">Rooms / Wings:</span>
+                                {subLocationItems.map((sub, sIdx) => {
+                                  const isObj = typeof sub === 'object' && sub !== null;
+                                  const subName = isObj ? (sub.name || sub.label) : sub;
                                   if (!subName) return null;
+                                  const subHere = Boolean(isObj && sub.is_current_room);
+                                  const subEta = isObj ? (sub.travel_tag || '') : '';
+                                  const subBadge = isObj ? String(sub.access_badge || '') : '';
+                                  const subLocked = Boolean(
+                                    isObj && !sub.is_unlocked && (
+                                      subBadge.includes('Closed') ||
+                                      subBadge.includes('Locked') ||
+                                      subBadge === 'Restricted' ||
+                                      subBadge === 'Private'
+                                    )
+                                  );
+                                  const subProps = (isObj && Array.isArray(sub.props) && sub.props.length > 0)
+                                    ? `Props: ${sub.props.join(', ')}`
+                                    : '';
+                                  const tooltip = [subName, subEta, subBadge && subBadge !== 'Open' ? `[${subBadge}]` : '', subProps]
+                                    .filter(Boolean)
+                                    .join(' • ');
+
                                   return (
                                     <button
                                       key={`${subName}-${sIdx}`}
                                       type="button"
-                                      disabled={traveling}
+                                      title={tooltip}
+                                      disabled={traveling || subHere}
                                       onClick={() => handleTravel(`${activeZoneObj.zone_name} ➔ ${placeName} ➔ ${subName}`)}
-                                      className={`px-2 py-0.5 rounded-full bg-black/60 hover:bg-fantasy-accent/25 text-gray-300 hover:text-fantasy-accent border border-fantasy-border/70 hover:border-fantasy-accent/50 text-[10px] font-medium transition-colors flex items-center gap-1 ${
-                                        traveling ? 'opacity-50 cursor-not-allowed' : ''
-                                      }`}
+                                      className={`px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors flex items-center gap-1 border ${
+                                        subHere
+                                          ? 'bg-emerald-950/70 text-emerald-300 border-emerald-700/60 cursor-default'
+                                          : subLocked
+                                            ? 'bg-rose-950/40 hover:bg-rose-900/50 text-rose-200 border-rose-800/60'
+                                            : 'bg-black/60 hover:bg-fantasy-accent/25 text-gray-300 hover:text-fantasy-accent border-fantasy-border/70 hover:border-fantasy-accent/50'
+                                      } ${traveling ? 'opacity-50 cursor-not-allowed' : ''}`}
                                     >
-                                      <span>↳ {subName}</span>
+                                      <span>{subHere ? '📍' : (subLocked ? '🔒' : '↳')} {subName}</span>
+                                      {!subHere && subEta && (
+                                        <span className="text-[9px] font-mono text-gray-400">({subEta.replace(' walk', '').replace(' transit', '').replace(' trek', '')})</span>
+                                      )}
                                     </button>
                                   );
                                 })}

@@ -773,17 +773,79 @@ def _scene_context_text(session_id: int, current_location: str,
         try:
             from mechanics.social.school_roster import ensure_school_directory_exists, get_facility_ambient_characters
             ensure_school_directory_exists(session)
-            ambient_chars = get_facility_ambient_characters(session_id, current_location, limit=2)
+            active_npc_names = set()
+            if current_npcs:
+                for npc in current_npcs:
+                    if isinstance(npc, dict) and npc.get("name"):
+                        active_npc_names.add(str(npc["name"]).lower().strip())
+            if session and isinstance(session.get("party"), list):
+                for pm in session["party"]:
+                    if isinstance(pm, dict) and pm.get("name"):
+                        active_npc_names.add(str(pm["name"]).lower().strip())
+
+            current_day = int(session.get("current_day") or 1) if session else 1
+            current_minute = int(session.get("current_minute") or 480) if session else 480
+            ambient_chars = get_facility_ambient_characters(
+                session_id,
+                current_location,
+                limit=2,
+                current_day=current_day,
+                current_minute=current_minute,
+                active_npc_names=active_npc_names,
+            )
             if ambient_chars:
                 dir_entries = []
                 for ac in ambient_chars:
+                    name_str = ac.get("name", "Student")
+                    grade_str = ac.get("grade", "Student")
+                    role_str = ac.get("role", "Student")
                     sib_str = f" (Sibling of {ac['sibling_name']})" if ac.get("sibling_name") else ""
                     club_str = f" [{ac['club']}]" if ac.get("club") and ac["club"] != "None" else ""
                     gen_str = f", {ac['gender'].title()}" if ac.get("gender") else ""
                     race_str = f", {format_race_display(ac['race'])}" if ac.get("race") else ""
-                    dir_entries.append(f"{ac['name']} ({ac['grade']}{gen_str}{race_str} — {ac['role']}{club_str}{sib_str})")
+                    act_str = f" — Activity: {ac['activity']}" if ac.get("activity") else ""
+                    dir_entries.append(f"{name_str} ({grade_str}{gen_str}{race_str} — {role_str}{club_str}{sib_str}{act_str})")
                 lines.append("Campus Directory & Ambient Residents (Stationed/frequenting this facility): " + "; ".join(dir_entries))
                 lines.append("FACILITY POPULATION DIRECTIVE: Feel free to depict these canonical facility residents in ambient descriptions or dialogue choices if appropriate.")
+        except Exception:
+            pass
+    elif scenario_data.is_anomalous_incursions_scenario(scen_key):
+        try:
+            from mechanics.social.agent_roster import get_anomalous_facility_ambient_agents
+            active_npc_names = set()
+            if current_npcs:
+                for npc in current_npcs:
+                    if isinstance(npc, dict) and npc.get("name"):
+                        active_npc_names.add(str(npc["name"]).lower().strip())
+            if session and isinstance(session.get("party"), list):
+                for pm in session["party"]:
+                    if isinstance(pm, dict) and pm.get("name"):
+                        active_npc_names.add(str(pm["name"]).lower().strip())
+
+            current_day = int(session.get("current_day") or 1) if session else 1
+            current_minute = int(session.get("current_minute") or 480) if session else 480
+            ambient_agents = get_anomalous_facility_ambient_agents(
+                session_id,
+                current_location,
+                limit=2,
+                current_day=current_day,
+                current_minute=current_minute,
+                active_npc_names=active_npc_names,
+            )
+            if ambient_agents:
+                ag_entries = []
+                for ag in ambient_agents:
+                    name_str = ag.get("name", "Operative")
+                    grade_str = ag.get("grade") or f"Tier {ag.get('agent_tier', 1)}"
+                    role_str = ag.get("role", "Special Agent")
+                    fac_str = f" [{ag['faction_name']}]" if ag.get("faction_name") else ""
+                    sib_str = f" (Sibling of {ag['sibling_name']})" if ag.get("sibling_name") else ""
+                    gen_str = f", {ag['gender'].title()}" if ag.get("gender") else ""
+                    race_str = f", {format_race_display(ag['race'])}" if ag.get("race") else ""
+                    act_str = f" — Activity: {ag['activity']}" if ag.get("activity") else ""
+                    ag_entries.append(f"{name_str} ({grade_str}{gen_str}{race_str} — {role_str}{fac_str}{sib_str}{act_str})")
+                lines.append("Metropolitan Operatives & Ambient Special Agents (On-shift/frequenting this site): " + "; ".join(ag_entries))
+                lines.append("FACILITY POPULATION DIRECTIVE: Feel free to depict these canonical Special Agents in ambient descriptions or dialogue choices if appropriate.")
         except Exception:
             pass
 
@@ -823,19 +885,37 @@ def _scene_context_text(session_id: int, current_location: str,
         # Faction HQ Grounding: If current location matches a faction HQ, explicitly state the resident roster
         if current_location:
             loc_lower = str(current_location).lower()
+            curr_hq_nid = ""
+            if session_id:
+                try:
+                    curr_hq_nid = (session.get("current_node_id") if session else "") or db.resolve_node_id_from_location(session_id, current_location) or ""
+                except Exception:
+                    curr_hq_nid = ""
             for f in factions:
-                hq_name = str(f.get("hq_location_id") or "").strip().lower()
+                hq_raw = str(f.get("hq_location_id") or "").strip()
+                hq_name = hq_raw.lower()
                 fac_name = str(f.get("name") or "").strip().lower()
-                if (hq_name and hq_name in loc_lower) or (fac_name and fac_name in loc_lower):
+                is_hq_node_match = bool(
+                    session_id and curr_hq_nid and hq_raw.startswith(("loc_", "zone_", "sub_"))
+                    and (curr_hq_nid == hq_raw or db.is_descendant_of(session_id, curr_hq_nid, hq_raw))
+                )
+                if is_hq_node_match or (hq_name and hq_name in loc_lower) or (fac_name and fac_name in loc_lower):
                     roster = f.get("leadership_roster", [])
                     if roster:
                         roster_parts = [f"{r.get('name')} ({r.get('title')})" for r in roster if r.get('name') and not r.get('is_player')]
                         if roster_parts:
-                            lines.append(
-                                f"FACTION TERRITORY RESIDENTS ({f['name']}): This room/area is the official station of {f['name']}. "
-                                f"Resident active leadership present: {', '.join(roster_parts)}. "
-                                f"When writing the scene, portray their presence/observations and report them in `npcs_present` and `entity_audit`."
-                            )
+                            if scenario_data.is_anomalous_incursions_scenario(scen_key):
+                                lines.append(
+                                    f"FACTION TERRITORY ({f['name']}): This facility belongs to {f['name']}. "
+                                    f"Known division roster: {', '.join(roster_parts[:6])}. "
+                                    f"Only depict operatives in `npcs_present` if they are currently on-shift in this room or actively addressed."
+                                )
+                            else:
+                                lines.append(
+                                    f"FACTION TERRITORY RESIDENTS ({f['name']}): This room/area is the official station of {f['name']}. "
+                                    f"Resident active leadership present: {', '.join(roster_parts)}. "
+                                    f"When writing the scene, portray their presence/observations and report them in `npcs_present` and `entity_audit`."
+                                )
 
     return "\n".join(lines)
 

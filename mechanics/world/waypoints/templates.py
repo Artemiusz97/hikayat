@@ -144,6 +144,16 @@ ARCHETYPE_WAYPOINT_TEMPLATES: dict[str, list[dict]] = {
         {"stage_index": 2, "stage_label": "Slip past hall monitors and security cameras into the restricted facility", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
         {"stage_index": 3, "stage_label": "Complete the covert campus task and extract cleanly before detection", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
     ],
+    "secure non-hostile anomalous entity": [
+        {"stage_index": 1, "stage_label": "Arrive at the anomaly coordinates and observe the entity's temperament", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": "Encounter and contain the non-hostile anomalous entity alive without provoking or losing it", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+        {"stage_index": 3, "stage_label": "Deliver the sealed containment unit to your client for vault intake", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+    ],
+    "non-hostile": [
+        {"stage_index": 1, "stage_label": "Arrive at the anomaly coordinates and observe the entity's temperament", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": "Encounter and contain the non-hostile anomalous entity alive without provoking or losing it", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+        {"stage_index": 3, "stage_label": "Deliver the sealed containment unit to your client for vault intake", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+    ],
     "default": [
         {"stage_index": 1, "stage_label": "Travel to the quest objective threshold", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
         {"stage_index": 2, "stage_label": "Investigate the site and overcome the local obstacle", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
@@ -408,7 +418,22 @@ def parse_zone_primary(location_str: str) -> tuple[str, str]:
                 break
     if not parts:
         return ("", "")
-    if len(parts) >= 2:
+    if len(parts) >= 3:
+        p0 = parts[0].lower().strip()
+        p1 = parts[1].lower().strip()
+        p2 = parts[2].lower().strip()
+        is_multi_room_building = (
+            p1 == "main campus building"
+            or any(k in p1 for k in ("wing", "complex", "commons", "promenade", "agency hq", "headquarters", "administration", "campus building"))
+        )
+        is_prop_or_main = (
+            p2 in ("main area", "area", "main", "")
+            or any(k in p2 for k in ("desk", "table", "chair", "bench", "bed", "counter", "shelf", "shelves", "cabinet", "locker", "turnstile", "bleacher", "fountain", "tree", "podium", "window"))
+        )
+        if is_multi_room_building and not is_prop_or_main:
+            return (p0, p2)
+        return (p0, p1)
+    if len(parts) == 2:
         return (parts[0].lower().strip(), parts[1].lower().strip())
     return ("", parts[0].lower().strip())
 

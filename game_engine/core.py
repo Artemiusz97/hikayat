@@ -67,7 +67,12 @@ from skill_check import CheckResult
 from .keywords import *
 from .prompts import *
 from .schemas import *
-from mechanics.narrative.bounty import BOUNTY_BOARD_SCHEMA, BOUNTY_BOARD_SYSTEM_PROMPT, generate_bounty_board
+from mechanics.narrative.bounty import (
+    BOUNTY_BOARD_SCHEMA,
+    BOUNTY_BOARD_SYSTEM_PROMPT,
+    generate_bounty_board,
+    generate_faction_bounty_board,
+)
 
 MAX_CAMPAIGN_CHAPTERS = 10
 

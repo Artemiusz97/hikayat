@@ -215,7 +215,9 @@ class SpatialInvariantAuditor:
         # ---------------------------------------------------------
         if len(self.location_history) >= 6:
             recent_locs = [h[1] for h in self.location_history[-6:]]
-            if recent_locs[0] == recent_locs[2] == recent_locs[4] and recent_locs[1] == recent_locs[3] == recent_locs[5] and recent_locs[0] != recent_locs[1]:
+            if recent_locs[0].strip().lower() == recent_locs[2].strip().lower() == recent_locs[4].strip().lower() and \
+               recent_locs[1].strip().lower() == recent_locs[3].strip().lower() == recent_locs[5].strip().lower() and \
+               recent_locs[0].strip().lower() != recent_locs[1].strip().lower():
                 if (turn - self.last_progress_turn) >= 4:
                     turn_violations.append(SpatialViolation(
                         turn=turn,

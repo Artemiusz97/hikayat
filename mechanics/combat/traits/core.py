@@ -85,7 +85,9 @@ def is_gift_item(text: str) -> bool:
         "cookie", "cookies", "snack", "snacks", "food", "dessert", "desserts", "candy",
         "pen", "stationery", "keychain", "plush", "pendant", "amulet", "music box", "candle",
         "record", "sketchbook", "novelty", "novelties", "perfume", "accessories", "accessory",
-        "knick-knacks", "plushie", "badge", "figurine", "scarf", "ribbon", "box", "set"
+        "knick-knacks", "plushie", "badge", "figurine", "scarf", "ribbon", "box", "set",
+        "blouse", "shirt", "sweater", "cardigan", "jacket", "coat", "dress", "skirt", "slacks",
+        "lingerie", "corset", "bracelet", "necklace", "locket", "ring", "watch", "hairpin", "earrings", "choker"
     }
     return any(pk in t_low for pk in physical_item_keywords)
 

@@ -8,20 +8,22 @@ TRACKER_ENTITY_FIELD = """{"name": "string", "level": "integer (only if friendly
 
 MERCHANT_ENCOUNTER_FIELD = """{"present": boolean, "name": "string (token if new)", "description": "short flavor sentence"}"""
 
-RELATIONSHIP_UPDATE_FIELD = """{"npc_name": "string", "delta_score": integer (-10 to +10, scale: +1..+3 minor chat, +4..+6 helpful/check success, +7..+10 major milestone), "track": "platonic|romantic", "interaction_tone": "warm|neutral|hostile|flirtatious|prying", "trait_alignment": "resonated|clashed|none", "milestone_event": "first_kiss|kiss|date|confession|oral_give|oral_receive|intercourse|none", "memory_summary": "string (1 short evocative sentence describing milestone, or empty)", "revealed_attributes": ["sensitive_spots", "turn_ons", "fetishes", "demeanor", "dynamic", "intercourse_experience", "oral_experience", "all_intimate"], "intercourse_experience": "virgin|non_virgin|unknown", "oral_experience": "virgin|has_given|has_received|has_given_and_received|unknown", "intimate_revealed": boolean, "sensitive_spots_revealed": boolean, "turn_ons_revealed": boolean, "fetishes_revealed": boolean, "demeanor_revealed": boolean, "dynamic_revealed": boolean, "intercourse_revealed": boolean, "oral_revealed": boolean, "new_sensitive_spots": "string or empty", "new_turn_ons": "string or empty", "new_fetishes": "string or empty", "new_demeanor": "string or empty", "new_dynamic": "string or empty", "new_traits": ["short 1-2 word personality trait"], "new_preferences": ["short 1-3 word preference tag"]}"""
+RELATIONSHIP_UPDATE_FIELD = """{"npc_name": "string", "delta_score": integer (-10 to +10, scale: +1..+3 minor chat, +4..+6 helpful/check success, +7..+10 major bond moment), "interaction_tone": "warm|neutral|hostile|flirtatious|prying", "trait_alignment": "resonated|clashed|none", "memory_summary": "string (1 short evocative sentence describing notable bond moment, or empty)", "revealed_attributes": ["sensitive_spots", "turn_ons", "fetishes", "demeanor", "dynamic"], "new_sensitive_spots": "string or empty", "new_turn_ons": "string or empty", "new_fetishes": "string or empty", "new_demeanor": "string or empty", "new_dynamic": "string or empty", "new_traits": ["short 1-2 word personality trait"], "new_preferences": ["short 1-3 word preference tag"]}"""
 
 FACTION_UPDATE_FIELD = """{"faction_name": "string", "delta_score": integer, "notes": "string"}"""
 
-PHYSICAL_UPDATE_FIELD = """{"actors": {"Character Name": {"posture": "standing|seated|kneeling|prone", "holding": "item name or empty", "clothing": {"top": "clothed|off|disheveled", "bottom": "clothed|off", "under_top": "worn|off", "under_bottom": "worn|off"}, "stance": "Guarded|Melee|Cover|Ready"}}, "props": [{"name": "string", "state": "string"}], "intimate_contact": "string or null", "combat_focus": "string or null", "player_climaxed": boolean, "partner_climaxed": boolean}"""
+PHYSICAL_UPDATE_FIELD = """{"actors": {"Character Name": {"posture": "standing|seated|kneeling|prone", "holding": "item name or empty", "stance": "Guarded|Melee|Cover|Ready"}}, "props": [{"name": "string", "state": "string"}], "combat_focus": "string or null"}"""
 
-ENTITY_AUDIT_FIELD = """{"present_named_characters": ["string, list of EVERY named individual physically present in the immediate room right now"], "speaking_characters": ["string, list of NPCs who speak aloud in this scene"], "departed_characters": ["string, list of NPCs who departed, exited, said goodbye, or left during this turn"]}"""
+ENTITY_AUDIT_FIELD = """{"present_named_characters": ["string, list of EVERY named individual physically present in the immediate room right now"]}"""
+
+CAST_EVENT_FIELD = """{"type": "arrive|depart|engage", "npc": "string, exact NPC name", "reason": "short 1-phrase rationale"}"""
 
 SCENE_SCHEMA = f"""{{
   "scene_title": "string, 2-5 word atmospheric narrative chapter heading (e.g. 'Echoes in the Stacks')",
   "entity_audit": {ENTITY_AUDIT_FIELD},
   "narrative": "string, paragraphs establishing scene setting, environment, and upcoming choice context. FOLLOW THE ACTIVE STYLE DIRECTIVE for paragraph count and vocabulary tone.",
   "choices": [
-    {{"label": "string (concise, max 6-8 words)", "stat": "STR|PER|END|CHA|INT|AGI|LUK|ITEM|NONE", "requirement": 0-12, "mp_cost": 0, "intent": "general_action|dialogue_init|dialogue_exit|movement|social_invite|phone_contact_exchange|romantic_confession|affection_touch|intimate_act|disclosure_inquiry|investigate_clue|area_scout|stealth_covert|rest_sleep|party_recruit|gift_offer|merchant_trade|inspect_board|media_capture|phone_comm", "sub_intent": "string (optional: kiss|foreplay|manual_give|manual_receive|oral_give|oral_receive|intercourse|anal_give|anal_receive|aftercare|lockpick|pickpocket or empty)", "target_npc": "string (exact NPC name if targeting an NPC, else empty)"}}
+    {{"label": "string (concise, max 6-8 words)", "stat": "STR|PER|END|CHA|INT|AGI|LUK|ITEM|NONE", "requirement": 0-12, "mp_cost": 0, "intent": "general_action|dialogue_init|dialogue_exit|movement|social_invite|phone_contact_exchange|romantic_confession|affection_touch|intimate_act|disclosure_inquiry|investigate_clue|area_scout|stealth_covert|rest_sleep|party_recruit|gift_offer|merchant_trade|inspect_board|media_capture|phone_comm", "sub_intent": "string (optional: kiss|foreplay|manual_give|manual_receive|manual_mutual|oral_give|oral_receive|oral_mutual|intercourse|anal_give|anal_receive|anal_mutual|aftercare|redress|date|confession|lockpick|pickpocket|gamble|use_item|deduce_clues|explore|combat_flee or empty)", "target_npc": "string (exact NPC name if targeting an NPC, else empty)", "ends_dialogue": false, "dismisses_npc": false, "gold_spent": 0, "triggers_loot_roll": false}}
   ],
   "campaign_end_goals": [
     {{"id": "G1", "title": "string, 1st long-term campaign victory condition relevant to scenario", "description": "string, 1-sentence goal description"}},
@@ -30,34 +32,14 @@ SCENE_SCHEMA = f"""{{
   ],
   "new_entities": [{{"type": "person|place|faction", "name": "string (token if new)", "race": "string if person", "species": "cat|fox|wolf|rabbit|tiger|lion|cheetah|fennec|mouse|bear|bird|reptile|snake|dragon|human", "social_role_type": "student_peer|faculty_staff|adult_service|general", "gender": "male|female|other (if person)", "appearance": {{"eye_color": "string (e.g. sapphire blue, emerald green, glowing purple, ruby red, amethyst, heterochromatic blue-green)", "hair_color": "string", "hair_length": "string", "hair_style": "string", "stature": "string", "skin_color": "string (humanoids)", "skin_type": "furry|feathered|scaly|synthetic|skin", "coat_color": "string (beastfolk/monsters e.g. snow white fur, midnight black, pastel pink, cerulean blue, golden-cream, lavender, calico)", "distinctive_features": "string (tails, ears, scars, tattoos)", "outfit_style": "string (clothing style)", "breast_size": "string (NSFW female only: tactile-fused cup e.g. 'Bouncy & Sensitive DD-Cup', 'Soft & Downy Chest Fur B-Cup', 'Tender & Delicate Petite A-Cup')", "penis_size": "string (NSFW male only: tactile-fused size e.g. 'Veined & Firm 7.5\"', 'Sleek Scaled Base & Firm 8\"', 'Warm & Pulsing Average')", "intercourse_experience": "virgin|non_virgin|unknown (NSFW only)", "oral_experience": "virgin|has_given|has_received|has_given_and_received|unknown (NSFW only)", "intimate_demeanor": "string (NSFW only: private demeanor)", "intimate_dynamic": "string (NSFW only: power dynamic, proactivity, & drive)", "sensitive_spots": "string (NSFW only: 1-3 spots or None)", "turn_ons": "string (NSFW only: 1-3 triggers or None)", "fetishes": "string (NSFW only: 1-3 kinks or None/Vanilla)"}}, "description": "short sentence", "disposition": "friendly|neutral|hostile", "traits": ["2-3 traits"], "motivation": "string", "mannerisms": "string"}}],
   "npcs_present": [{TRACKER_ENTITY_FIELD}],
-  "npc_departures": ["string, exact names of NPCs who departed, exited, or left"],
   "nearby_enemies": [{TRACKER_ENTITY_FIELD}],
   "merchant_encounter": {MERCHANT_ENCOUNTER_FIELD},
   "props": [{{"name": "string, 1-3 prominent interactive objects or furniture in the room", "state": "string (e.g. 'Present')"}}],
   "physical_updates": {PHYSICAL_UPDATE_FIELD},
-  "destination_node_id": "string or null, exact node ID from available travel edges if moving, or null/empty if staying in the same macro area",
   "focal_point": "string, immediate local micro focal point or stance within the room (e.g. 'Player\\'s Desk', 'By the glass window', 'Sitting on the bench')",
   "location": "string, 3-tiered physical location: Zone ➔ Primary Place ➔ Sub-Area (e.g. 'Oakhaven Private Academy ➔ Class 2-1 (Homeroom) ➔ Player\\'s Desk')",
   "image_prompt": "string, a short (1-2 sentence) visual description of the opening scene"
 }}"""
-
-STATE_ARBITER_SCHEMA = """{
-  "director_reasoning": "string, 1 concise sentence explaining the mechanical and dramatic consequence of the action and check tier",
-  "departed_characters": ["string, exact names of NPCs who departed, exited, or left the room during this turn"],
-  "present_characters": ["string, exact names of NPCs who remain physically present in the room right now"],
-  "speaking_characters": ["string, exact names of NPCs who speak aloud in this scene"],
-  "deceased_characters": ["string, exact names of NPCs or enemies who are definitively killed or slain this turn"],
-  "character_outcomes": [
-    {"name": "string, exact character name", "hp_change": integer, "mp_change": integer, "gold_change": integer, "items_gained": ["string"], "items_lost": ["string"], "status_effects": ["short condition tag"]}
-  ],
-  "quest_progress": {
-    "completed_sub_quest_id": 0,
-    "clue_discovered": "string or empty"
-  },
-  "fail_forward_complication": "string or empty (if Failure/Crit Fail, the irreversible complication, ambush, or twist)",
-  "fulfilled_commitments": [0], 
-  "broken_commitments": [0]
-}"""
 
 ACTOR_POSE_FIELD = """{"Character Name": {"posture": "standing|seated|kneeling|leaning|...", "holding": "item name or Empty hands"}}"""
 
@@ -66,8 +48,9 @@ OUTCOME_SCHEMA = f"""{{
   "outcome_narrative": "string, paragraphs narrating exclusively the execution and immediate consequence of the NEW action: (1) how the player carries out their immediate choice with class/race flavor, (2) the immediate outcome and instant NPC reaction based on the check tier. Focus strictly on executing the player's immediate decision. NEVER repeat, recap, or re-quote past dialogue/events from RECENT HISTORY; start immediately from the new action and move forward. FOLLOW THE ACTIVE STYLE DIRECTIVE for paragraph count and vocabulary tone. For 'Failure' or 'Critical Failure', enforce FAIL-FORWARD: narrate complications, escalations, or success-at-a-cost rather than static roadblocks. Do NOT contradict the check tier.",
   "next_narrative": "string, paragraphs establishing exclusively the subsequent scene aftermath: environmental shifts, physical atmosphere, what NPCs do or say next, and new tension leading into the upcoming choices. Do NOT re-narrate or re-hash the action execution from `outcome_narrative`. FOLLOW THE ACTIVE STYLE DIRECTIVE for paragraph count and vocabulary tone. FOLLOW THE ACTIVE DIALOGUE DIRECTIVE for how much spoken dialogue to include.",
   "next_choices": [
-    {{"label": "string (concise contextual roleplay or exploration action, max 6-8 words)", "stat": "STR|PER|END|CHA|INT|AGI|LUK|ITEM|NONE", "requirement": 0-12, "mp_cost": 0}}
+    {{"label": "string (concise contextual roleplay or exploration action, max 6-8 words)", "stat": "STR|PER|END|CHA|INT|AGI|LUK|ITEM|NONE", "requirement": 0-12, "mp_cost": 0, "intent": "general_action|dialogue_init|dialogue_exit|movement|social_invite|phone_contact_exchange|romantic_confession|affection_touch|intimate_act|disclosure_inquiry|investigate_clue|area_scout|stealth_covert|rest_sleep|party_recruit|gift_offer|merchant_trade|inspect_board|media_capture|phone_comm", "sub_intent": "string (optional: kiss|foreplay|manual_give|manual_receive|manual_mutual|oral_give|oral_receive|oral_mutual|intercourse|anal_give|anal_receive|anal_mutual|aftercare|redress|date|confession|lockpick|pickpocket|gamble|use_item|deduce_clues|explore|combat_flee or empty)", "target_npc": "string (exact NPC name if targeting an NPC, else empty)", "ends_dialogue": false, "dismisses_npc": false, "gold_spent": 0, "triggers_loot_roll": false}}
   ],
+  "cast_events": [{CAST_EVENT_FIELD}],
   "actor_poses": {ACTOR_POSE_FIELD},
   "episodic_memory": "string or null, 1 concise sentence summarizing any notable personal fact, promise, or emotional moment the active NPC will remember from this turn, or null if routine",
   "image_prompt": "string, a short (1-2 sentence) visual description of NEW scene"
@@ -77,6 +60,7 @@ COMBAT_OUTCOME_SCHEMA = f"""{{
   "scene_title": "string, 2-5 word atmospheric combat chapter heading",
   "outcome_narrative": "string, vivid combat paragraphs narrating the player's action and the enemy counter-attack according to the pre-computed combat directive. FOLLOW THE ACTIVE STYLE DIRECTIVE for paragraph count and vocabulary tone.",
   "next_narrative": "string, paragraphs describing the immediate battlefield aftermath, enemy stances, and tension. FOLLOW THE ACTIVE STYLE DIRECTIVE for paragraph count and vocabulary tone.",
+  "cast_events": [{CAST_EVENT_FIELD}],
   "actor_poses": {ACTOR_POSE_FIELD},
   "episodic_memory": "string or null, 1 concise sentence if a memorable combat turning point occurred, else null",
   "image_prompt": "string, a short (1-2 sentence) visual description of the combat scene"
@@ -85,33 +69,6 @@ COMBAT_OUTCOME_SCHEMA = f"""{{
 SOCIAL_ARBITER_SCHEMA = f"""{{
   "relationship_updates": [{RELATIONSHIP_UPDATE_FIELD}],
   "new_entities": [{{"type": "person|place|faction", "name": "string (token if new)", "race": "string if person", "species": "cat|fox|wolf|rabbit|tiger|lion|cheetah|fennec|mouse|bear|bird|reptile|snake|dragon|human", "social_role_type": "student_peer|faculty_staff|adult_service|general", "gender": "male|female|other (if person)", "appearance": {{"eye_color": "string (e.g. sapphire blue, emerald green, glowing purple, ruby red, amethyst, heterochromatic blue-green)", "hair_color": "string", "hair_length": "string", "hair_style": "string", "stature": "string", "skin_color": "string (humanoids)", "skin_type": "furry|feathered|scaly|synthetic|skin", "coat_color": "string (beastfolk/monsters e.g. snow white fur, midnight black, pastel pink, cerulean blue, golden-cream, lavender, calico)", "distinctive_features": "string (tails, ears, scars, tattoos)", "outfit_style": "string (clothing style)", "breast_size": "string (NSFW female only: tactile-fused cup e.g. 'Bouncy & Sensitive DD-Cup', 'Soft & Downy Chest Fur B-Cup', 'Tender & Delicate Petite A-Cup')", "penis_size": "string (NSFW male only: tactile-fused size e.g. 'Veined & Firm 7.5\"', 'Sleek Scaled Base & Firm 8\"', 'Warm & Pulsing Average')", "intercourse_experience": "virgin|non_virgin|unknown (NSFW only)", "oral_experience": "virgin|has_given|has_received|has_given_and_received|unknown (NSFW only)", "intimate_demeanor": "string (NSFW only: private demeanor)", "intimate_dynamic": "string (NSFW only: power dynamic, proactivity, & drive)", "sensitive_spots": "string (NSFW only: 1-3 spots or None)", "turn_ons": "string (NSFW only: 1-3 triggers or None)", "fetishes": "string (NSFW only: 1-3 kinks or None/Vanilla)"}}, "description": "short sentence", "disposition": "friendly|neutral|hostile", "traits": ["2-3 traits"], "motivation": "string", "mannerisms": "string"}}],
-  "quest_updates": [
-    {{
-      "quest_id": "string, exact ID from context",
-      "title": "string",
-      "quest_type": "Story Quest|Side Bounty|...",
-      "archetype": "string, creative main quest archetype",
-      "objective": "string, rich main objective explaining story goals (can be multi-sentence)",
-      "completed_sub_quest_ids": [1],
-      "goal_progress_updates": {{"G1": 35}},
-      "progress": "string e.g. 1/3 Cleared",
-      "current_clues": "string, bullet points joined by \\n",
-      "status": "Active|Completed|Failed",
-      "reward_xp": integer,
-      "reward_gold": integer,
-      "reward_item": "string or empty",
-      "next_chapter_quest": {{
-        "title": "string, unique evocative title for Chapter N+1",
-        "archetype": "string, creative main quest archetype for Chapter N+1",
-        "objective": "string, rich main objective for Chapter N+1",
-        "sub_quests": [
-          {{"id": 1, "archetype": "string, creative sub-quest archetype", "text": "string, sub-quest goal 1"}},
-          {{"id": 2, "archetype": "string, creative sub-quest archetype", "text": "string, sub-quest goal 2"}},
-          {{"id": 3, "archetype": "string, creative sub-quest archetype", "text": "string, sub-quest goal 3"}}
-        ]
-      }}
-    }}
-  ],
   "npc_memories": [
     {{"npc_name": "string", "memory_fact": "string, what they specifically remember about the player's action this turn", "sentiment_delta": 1, "importance": 1, "emotional_tone": "grateful|flustered|suspicious|resentful|curious|warm|amused|guarded", "open_thread": "unresolved question, promise, or tension to follow up later, or empty"}}
   ]
@@ -122,8 +79,14 @@ CLASSIFY_SCHEMA = """{
   "requirement": 2-12,
   "mp_cost": 0,
   "intent": "general_action|dialogue_init|dialogue_exit|movement|social_invite|phone_contact_exchange|romantic_confession|affection_touch|intimate_act|disclosure_inquiry|investigate_clue|area_scout|stealth_covert|rest_sleep|party_recruit|gift_offer|merchant_trade|inspect_board|media_capture|phone_comm",
-  "sub_intent": "string (optional: kiss|foreplay|manual_give|manual_receive|oral_give|oral_receive|intercourse|anal_give|anal_receive|aftercare|lockpick|pickpocket or empty)",
+  "sub_intent": "string (optional: kiss|foreplay|manual_give|manual_receive|manual_mutual|oral_give|oral_receive|oral_mutual|intercourse|anal_give|anal_receive|anal_mutual|aftercare|redress|date|confession|lockpick|pickpocket|gamble|use_item|deduce_clues|explore|combat_flee or empty)",
   "target_npc": "string (exact NPC name if targeting an NPC, else empty)",
+  "target_location": "string (destination place name if intent is movement, else empty)",
+  "ends_dialogue": false,
+  "dismisses_npc": false,
+  "gold_spent": 0,
+  "triggers_loot_roll": false,
+  "breakthrough_leveraged": false,
   "is_memory_recall": false,
   "recall_query": "string (if is_memory_recall is true, output the core subject/entity the player is trying to remember, otherwise empty)",
   "reasoning": "string, one sentence"

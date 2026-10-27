@@ -30,7 +30,7 @@ def merchant_prompt_note(triggered: bool = False, scen_key: str = None) -> str:
 
 MERCHANT_ENCOUNTER_FIELD = """{"present": boolean, "name": "string (token if new)", "description": "short flavor sentence"}"""
 
-MERCHANT_STOCK_ITEM_FIELD = ('{"name": "string", "item_type": "Weapon|Shield|Armor|Head|Top|Bottom|Gloves|Shoes|'
+MERCHANT_STOCK_ITEM_FIELD = ('{"name": "string", "item_type": "Weapon|Shield|Armor|Head|Top|Bottom|Gloves|Shoes|Accessory|Clothing|Lingerie|'
                              'Consumable|Item|Gift|Novelty|Potion|Food|Spellbook", "description": "short flavor sentence", "price": integer, "quantity": integer 1-5}')
 
 MERCHANT_SHOP_SCHEMA = f"""{{
@@ -101,11 +101,11 @@ MERCHANT_ARCHETYPES: dict[str, dict] = {
         "tier_focus": [3, 3, 3, 2],
     },
     "adult_store_merchant": {
-        "title": "Erotic Boutique & Novelties",
+        "title": "Velvet Curtain Adult Boutique",
         "emoji": "🔞",
-        "intro_template": "Dim velvet lighting and alluring scents greet you. Looking for something discreet and exciting?",
-        "instruction": "Generate adult NSFW items: sensual lingerie/corsets, bondage whips/cuffs, aphrodisiac philters, massage oils, and adult novelties suitable for intimate roleplay.",
-        "allowed_types": ["Top", "Bottom", "Accessory", "Consumable", "Weapon", "Novelty"],
+        "intro_template": "Dim velvet lighting and alluring scents greet you. Looking for sensual lingerie, discreet accessories, or intimate novelties?",
+        "instruction": "Generate adult NSFW items: sensual lace lingerie, silk corsets, garter sets, satin cuffs/collars, massage oils, and adult novelties suitable for intimate roleplay.",
+        "allowed_types": ["Lingerie", "Top", "Bottom", "Accessory", "Consumable", "Weapon", "Novelty"],
         "tier_focus": [2, 2, 1, 3],
     },
     # Non-Combat / High School Archetypes
@@ -118,28 +118,76 @@ MERCHANT_ARCHETYPES: dict[str, dict] = {
         "tier_focus": [3, 3, 2],
     },
     "cafe_merchant": {
-        "title": "Downtown Café & Bakery",
+        "title": "Local Café & Bakery",
         "emoji": "☕",
         "intro_template": "Welcome! Would you like a warm matcha latte, fresh croissant, or artisanal dessert parfait?",
-        "instruction": "Generate cafe beverages (matcha latte, iced coffee, boba), pastries (croissants, melon pan), cakes, and artisanal bento lunches.",
+        "instruction": "Exclusively generate cafe beverages (coffees, matcha lattes, teas, boba, smoothies), bakery pastries (croissants, melon pan, scones), artisanal cakes/desserts, and light cafe snacks. Keep heavy hot restaurant entrees for the diner.",
         "allowed_types": ["Food", "Consumable"],
         "tier_focus": [3, 2, 2, 1],
     },
-    "clothes_merchant": {
-        "title": "Fashion Boutique",
-        "emoji": "👗",
-        "intro_template": "Welcome to the boutique! Browse trendy casual outfits, designer jackets, ribbons, and footwear.",
-        "instruction": "Generate stylish casual clothes, chic jackets, fashionable dresses, designer shoes, and hair accessories.",
-        "allowed_types": ["Top", "Bottom", "Shoes", "Accessory"],
+    "restaurant_merchant": {
+        "title": "Downtown Diner & Family Restaurant",
+        "emoji": "🍽️",
+        "intro_template": "Welcome to a booth! Can we start you off with sizzling hamburger steak, omurice, tonkotsu ramen, or an ice-cold melon float?",
+        "instruction": "Exclusively generate hearty hot restaurant meals, savory diner entrees (omurice, ramen, curry rice, steak platters, pasta, burgers), and soft drinks/floats across Tiers 3, 2, and 1.",
+        "allowed_types": ["Food", "Consumable"],
         "tier_focus": [3, 2, 2, 1],
     },
+    "convenience_merchant": {
+        "title": "24-Hour Convenience Store",
+        "emoji": "🏪",
+        "intro_template": "Fluorescent konbini aisles hum quietly—fresh onigiri, warm steamed buns, chilled sodas, and everyday sundries line the shelves.",
+        "instruction": "Generate convenience store items: onigiri rice balls, konbini bentos, instant noodles, canned coffee, sodas, vinyl umbrellas, and daily sundries (Tier 3 and Tier 2).",
+        "allowed_types": ["Food", "Consumable", "Item"],
+        "tier_focus": [3, 3, 2],
+    },
+    "clothes_merchant": {
+        "title": "Streetwear & Casual Apparel",
+        "emoji": "👕",
+        "intro_template": "Welcome in! Browse everyday streetwear, hoodies, casual blouses, pleated skirts, slacks, and sneakers.",
+        "instruction": "Generate everyday casual clothes and streetwear (Tier 3 Standard and Tier 2 Stylish): hoodies, graphic tees, blouses, sweaters, jeans, skirts, slacks, and casual sneakers.",
+        "allowed_types": ["Top", "Bottom", "Shoes", "Clothing"],
+        "tier_focus": [3, 3, 2, 2],
+    },
+    "brand_clothes_merchant": {
+        "title": "Luxury Designer Boutique",
+        "emoji": "✨",
+        "intro_template": "Polished marble floors and spotlighted mannequins welcome you. Allow our stylist to present this season's high-fashion collection.",
+        "instruction": "Exclusively generate high-tier luxury designer fashion (Tier 2 Stylish and Tier 1 Masterwork Haute Couture): tailored cashmere coats, silk blouses, runway dresses, bespoke slacks, and designer footwear.",
+        "allowed_types": ["Top", "Bottom", "Shoes", "Accessory", "Clothing"],
+        "tier_focus": [2, 1, 2, 1],
+    },
+    "accessories_merchant": {
+        "title": "Accessories & Bijoux Emporium",
+        "emoji": "💍",
+        "intro_template": "Glass display cases gleam with silver lockets, delicate charm bracelets, wristwatches, silk ribbons, and designer eyewear.",
+        "instruction": "Exclusively generate wearable accessories and jewelry across Tiers 3, 2, and 1: silver lockets, pendant necklaces, rings, charm bracelets, wristwatches, hairpins, silk ribbons, scarves, and stylish glasses.",
+        "allowed_types": ["Accessory", "Gift"],
+        "tier_focus": [3, 2, 1, 2],
+    },
     "gift_merchant": {
-        "title": "Gift & Merchandise Shop",
+        "title": "Curio & Gift Shop",
         "emoji": "🎁",
-        "intro_template": "Looking for the perfect present? Check out our plushies, music boxes, and lucky charms.",
-        "instruction": "Generate giftable items: plush toys, music boxes, lucky shrine amulets, scented candles, souvenir keychains, and idol merch.",
+        "intro_template": "Looking for the perfect present? Check out our plushies, music boxes, scented candles, and keepsake charms.",
+        "instruction": "Generate giftable items: plush toys, music boxes, lucky shrine amulets, scented candles, souvenir keychains, pressed-flower frames, and idol merch.",
         "allowed_types": ["Gift", "Accessory", "Item"],
         "tier_focus": [3, 2, 1, 2],
+    },
+    "night_market_merchant": {
+        "title": "Lantern Night Market Bazaar",
+        "emoji": "🏮",
+        "intro_template": "String lanterns glow overhead while smoky grills sizzle! Grab hot street skewers, candied fruit, and handmade festival trinkets!",
+        "instruction": "Generate vibrant night market street food (yakitori skewers, takoyaki, taiyaki, candied strawberries, ramune) alongside artisanal bazaar charms, hairpins, and trinkets.",
+        "allowed_types": ["Food", "Consumable", "Gift", "Accessory"],
+        "tier_focus": [3, 2, 2, 1],
+    },
+    "nightclub_merchant": {
+        "title": "Neon Pulse VIP Lounge Bar",
+        "emoji": "🍸",
+        "intro_template": "Bass reverberates beneath neon strobes as the bartender slides a frosted menu across the glowing counter.",
+        "instruction": "Generate nightclub lounge beverages and upscale bar bites: glowing house cocktails, sparkling mocktails, energy mixers, VIP bottle service, and lounge tapas.",
+        "allowed_types": ["Consumable", "Food"],
+        "tier_focus": [2, 2, 1, 3],
     },
     "student_merchant": {
         "title": "Student Dealer",
@@ -160,12 +208,217 @@ MERCHANT_ARCHETYPES: dict[str, dict] = {
     "online_merchant": {
         "title": "Online Delivery Store",
         "emoji": "📱",
-        "intro_template": "ChronoStore delivery app: Add items to cart for instant delivery to your inventory.",
-        "instruction": "Generate a diverse modern catalog of snacks, drinks, study supplies, electronics, and daily essentials.",
-        "allowed_types": ["Item", "Food", "Consumable", "Accessory"],
-        "tier_focus": [3, 3, 2, 1],
+        "intro_template": "ChronoStore delivery app: Order everyday snacks, drinks, stationery, and study essentials for instant delivery.",
+        "instruction": "Exclusively generate everyday snacks, bottled/canned drinks, stationery, study supplies, and basic daily essentials (Tier 3 and Tier 2 only). Specialty Downtown fashion, jewelry, gifts, hot diner meals, and adult boutique goods require in-person visits.",
+        "allowed_types": ["Item", "Food", "Consumable"],
+        "tier_focus": [3, 3, 2],
     }
 }
+
+
+def get_anomalous_shop_faction_context(
+    session: dict | None,
+    location: str = "",
+    is_phone_shop: bool = False,
+    user_id: int | None = None,
+) -> dict:
+    """
+    Resolves Faction Merchant pricing, quality bias, access gates, and daily free stock rules
+    for the Anomalous Incursions scenario.
+    """
+    ctx = {
+        "is_anomalous": False,
+        "allowed": True,
+        "access_denied_reason": "",
+        "shop_faction_archetype": None,
+        "player_faction_archetype": "freelancer",
+        "price_multiplier": 1.0,
+        "private_agency_bonus": False,
+        "is_monastic_free_shop": False,
+        "is_monastic_free_ration": False,
+        "shrine_free_remaining": 0,
+        "is_public_discounted_shop": False,
+        "pricing_badge": None,
+    }
+    if not session or is_phone_shop:
+        return ctx
+    scen_key = session.get("scenario", "")
+    if not scenario_data.is_anomalous_incursions_scenario(scen_key):
+        return ctx
+
+    ctx["is_anomalous"] = True
+    session_id = session.get("id")
+    loc_str = str(location or session.get("current_location") or "").lower().strip()
+    loc_id = str(session.get("current_node_id") or session.get("current_location_id") or "").lower().strip()
+
+    from mechanics.social.factions import get_anomalous_faction_state
+    a_state = get_anomalous_faction_state(session_id, user_id=user_id) if session_id else {}
+    player_arch = str(
+        a_state.get("faction_archetype_key")
+        or a_state.get("primary_faction_archetype")
+        or "freelancer"
+    )
+    ctx["player_faction_archetype"] = player_arch
+    suspended = bool(a_state.get("salary_ration_suspended", False))
+
+    # Determine which faction owns the current shop location (or active Quartermaster shop)
+    merch_state = session.get("merchant") or {}
+    qm_arch = (
+        str(merch_state.get("quartermaster_faction_arch") or "").strip().lower()
+        if isinstance(merch_state, dict) and merch_state.get("is_faction_quartermaster") and not location
+        else ""
+    )
+    shop_arch = qm_arch or None
+    if not shop_arch and isinstance(merch_state, dict) and merch_state.get("is_faction_quartermaster") and merch_state.get("quartermaster_faction_arch"):
+        # If player opened a Quartermaster catalogue explicitly, honor its faction archetype
+        active_sk = str(merch_state.get("active_store_key") or "")
+        if active_sk.startswith("faction_"):
+            shop_arch = str(merch_state.get("quartermaster_faction_arch")).strip().lower()
+
+    priv1_hq_name = ""
+    priv2_hq_name = ""
+    if session_id:
+        try:
+            for fac in (db.get_factions(session_id) or []):
+                f_arch = str(fac.get("category") or fac.get("archetype_key") or "").lower()
+                if f_arch == "private_agency_1":
+                    priv1_hq_name = str(fac.get("name") or "").lower()
+                elif f_arch == "private_agency_2":
+                    priv2_hq_name = str(fac.get("name") or "").lower()
+        except Exception:
+            pass
+
+    if shop_arch:
+        pass
+    elif (
+        loc_id.startswith("sub_priv1_")
+        or loc_id in ("loc_private_hq_1_armory", "loc_private_hq_1", "loc_private_hq_1_lobby")
+        or "regional tower hq" in loc_str
+        or "tower hq" in loc_str
+        or (priv1_hq_name and priv1_hq_name in loc_str)
+    ):
+        shop_arch = "private_agency_1"
+    elif (
+        loc_id.startswith("sub_priv2_")
+        or loc_id in ("loc_private_hq_2_armory", "loc_private_hq_2", "loc_private_hq_2_lobby")
+        or "operations spire hq" in loc_str
+        or "operations hq" in loc_str
+        or (priv2_hq_name and priv2_hq_name in loc_str)
+    ):
+        shop_arch = "private_agency_2"
+    elif any(k in loc_str for k in (
+        "syndicate anomalous armory", "syndicate tactical armory", "requisition shop",
+        "requisition depot", "bespoke ballistic outfitter", "corporate trauma", "skyline executive espresso",
+    )):
+        shop_arch = player_arch if player_arch in ("private_agency_1", "private_agency_2") else "private_agency_1"
+    elif (
+        loc_id in ("loc_et_omikuji_shop", "loc_et_torii_approach", "loc_et_main_sanctuary", "loc_eastern_temple", "zone_eastern_temple")
+        or any(k in loc_str for k in ("omikuji", "talisman stand", "grand shrine", "eastern temple", "eastern grand temple"))
+    ):
+        shop_arch = "monastic_order"
+    elif (
+        loc_id in (
+            "loc_hq_tactical_armory", "loc_hq_field_outfitter", "loc_hq_cleansing_bay", "loc_hq_canteen_cafe",
+            "loc_hq_armory", "loc_hq_outfitter", "loc_hq_medical_bay", "loc_hq_cafe", "zone_agency_hq",
+        )
+        or (
+            any(k in loc_str for k in (
+                "tactical armory", "ordnance depot", "field outfitter", "ballistic tailor",
+                "psychic cleansing bay", "bureau canteen", "containment armory", "agents' breakroom",
+                "agency hq", "headquarters",
+            ))
+            and "shadow exchange" not in loc_str
+        )
+    ):
+        shop_arch = "public_agency"
+
+    ctx["shop_faction_archetype"] = shop_arch
+
+    if shop_arch == "public_agency":
+        if player_arch == "public_agency":
+            ctx["price_multiplier"] = 0.50
+            ctx["is_public_discounted_shop"] = True
+            ctx["pricing_badge"] = "🏛️ Public Agency Requisition (-50% Official Discount)"
+        else:
+            ctx["price_multiplier"] = 1.0
+            ctx["pricing_badge"] = "🏛️ Public Agency Storefront (1.0x Standard Price for External Operatives)"
+    elif shop_arch in ("private_agency_1", "private_agency_2"):
+        ctx["private_agency_bonus"] = True
+        if player_arch == shop_arch:
+            ctx["price_multiplier"] = 1.35
+            ctx["pricing_badge"] = "🏢 Private Syndicate Armory (1.35x Markup • +20% Anomalous & High-Tier Stock)"
+        else:
+            ctx["allowed"] = False
+            ctx["access_denied_reason"] = (
+                "Private Syndicate Armory access is restricted exclusively to contracted operatives of this agency."
+            )
+            ctx["price_multiplier"] = 1.35
+            ctx["pricing_badge"] = "🔒 Private Syndicate Armory (Members Only)"
+    elif shop_arch == "monastic_order":
+        if player_arch == "monastic_order":
+            max_daily = int(a_state.get("shrine_free_max_daily", 3) or 3)
+            claimed = int(a_state.get("shrine_free_claims_today", a_state.get("shrine_free_claimed_today", 0)) or 0)
+            rem = 0 if suspended else max(0, max_daily - claimed)
+            ctx["shrine_free_remaining"] = rem
+            if not suspended and rem > 0:
+                ctx["is_monastic_free_shop"] = True
+                ctx["is_monastic_free_ration"] = True
+                ctx["price_multiplier"] = 0.0
+                ctx["pricing_badge"] = f"⛩️ Sacred Shrine Provision (FREE 0G • {rem}/{max_daily} Daily Grants Left)"
+            elif suspended:
+                ctx["price_multiplier"] = 1.0
+                ctx["pricing_badge"] = "⚠️ Sacred Rations Suspended (0 Rep — Complete Mandatory Rite to Restore Free Grants)"
+            else:
+                ctx["shrine_daily_exhausted"] = True
+                ctx["price_multiplier"] = 0.0
+                ctx["pricing_badge"] = f"⛩️ Daily Sacred Grants Exhausted ({claimed}/{max_daily} Claimed Today — Refreshes Tomorrow)"
+        else:
+            ctx["price_multiplier"] = 1.0
+            ctx["pricing_badge"] = "⛩️ Shrine Talisman & Curio Stand (Standard Visitor Pricing)"
+
+    return ctx
+
+
+def compute_anomalous_resale_price(item_dict: dict, default_sell_price: int) -> int:
+    """
+    Enforces Anti-Exploit Resale Rules in Anomalous Incursions:
+    - Monastic Shrine free items (`shrine_sacred_grant: True`) -> 0G resale value.
+    - Public Agency 50%-discounted items (`purchase_price_paid`) -> capped at <= 50% of price paid.
+    """
+    if not item_dict or not isinstance(item_dict, dict):
+        return default_sell_price
+    from mechanics.combat.equipment import parse_equipment_metadata
+    from mechanics.combat.items import parse_consumable_metadata
+
+    eq_meta = parse_equipment_metadata(item_dict) or {}
+    cons_meta = parse_consumable_metadata(item_dict) or {}
+    raw_eff = str(item_dict.get("effect") or "")
+
+    if (
+        item_dict.get("shrine_sacred_grant")
+        or eq_meta.get("shrine_sacred_grant")
+        or cons_meta.get("shrine_sacred_grant")
+        or '"shrine_sacred_grant": true' in raw_eff.lower()
+        or '"shrine_sacred_grant":true' in raw_eff.lower()
+    ):
+        return 0
+
+    paid = (
+        item_dict.get("purchase_price_paid")
+        if item_dict.get("purchase_price_paid") is not None
+        else (
+            eq_meta.get("purchase_price_paid")
+            if eq_meta.get("purchase_price_paid") is not None
+            else cons_meta.get("purchase_price_paid")
+        )
+    )
+    if paid is not None:
+        try:
+            paid_int = int(paid)
+            return min(default_sell_price, max(0, int(paid_int * 0.50)))
+        except (TypeError, ValueError):
+            pass
+    return default_sell_price
 
 
 def calculate_balanced_price(item_type: str, item_name: str, tier: int = 3, scen_key: str = "fantasy") -> int:
@@ -185,7 +438,7 @@ def calculate_balanced_price(item_type: str, item_name: str, tier: int = 3, scen
         else:
             return random.randint(10, 20)
 
-    elif item_type_lower in ("weapon", "shield", "armor", "head", "top", "bottom", "gloves", "shoes", "accessory"):
+    elif item_type_lower in ("weapon", "shield", "armor", "head", "top", "bottom", "gloves", "shoes", "accessory", "clothing", "lingerie", "outerwear"):
         if t == 1:
             return random.randint(450, 950)
         elif t == 2:
@@ -229,14 +482,40 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
     arch_instruction = archetype["instruction"]
     arch_intro = archetype["intro_template"]
 
+    active_hs_clerk = None
+    if not is_phone_shop and merchant_type != "online_merchant":
+        from mechanics.world.locations import is_school_scenario
+        if is_school_scenario(scen_key) and isinstance(session, dict) and session.get("id"):
+            try:
+                from mechanics.social.town_roster import get_active_shop_clerk_for_location
+                lead_uid = None
+                if party and isinstance(party[0], (tuple, list)) and len(party[0]) > 1:
+                    lead_uid = party[0][1]
+                elif isinstance(party[0], dict) if party else False:
+                    lead_uid = party[0].get("user_id")
+                active_hs_clerk = get_active_shop_clerk_for_location(
+                    session_id=int(session["id"]),
+                    location_str=str(session.get("current_location") or ""),
+                    merchant_type=merchant_type,
+                    user_id=lead_uid,
+                )
+                if active_hs_clerk and (
+                    not merchant_name
+                    or merchant_name.strip().lower() in ("merchant", "clerk", "shopkeeper", "vendor", arch_title.lower())
+                ):
+                    merchant_name = active_hs_clerk["name"]
+                    merchant_description = active_hs_clerk.get("description") or merchant_description
+            except Exception:
+                active_hs_clerk = None
+
     if is_phone_shop or merchant_type == "online_merchant":
         from mechanics.system.phone import get_phone_branding
         branding = get_phone_branding(scen_key)
         shop_title = branding["shop_app_name"]
         system_prompt = (
             f"Generate catalog wares for an in-game online storefront / delivery app ({shop_title}) appropriate to the active scenario.\n"
-            f"- Intro narrative: A short, welcoming 1-2 sentence app interface greeting or catalog summary (e.g. 'Welcome to {shop_title}! Select your snacks, study supplies, and essentials for immediate delivery.').\n"
-            f"- Stock: 8-12 themed items (snacks, beverages, stationery, study aids, gifts, electronic accessories, recovery items), quantity 1-5 each.\n"
+            f"- Intro narrative: A short, welcoming 1-2 sentence app interface greeting or catalog summary (e.g. 'Welcome to {shop_title}! Select your everyday snacks, drinks, study supplies, and daily essentials for immediate delivery.').\n"
+            f"- Stock: 6-10 everyday items strictly limited to packaged snacks, bottled/canned drinks, stationery, study aids, and basic daily essentials (Tier 3 and Tier 2 only; NO luxury fashion, jewelry, boutique gifts, hot restaurant meals, or adult items), quantity 1-5 each.\n"
             f"- Rumors: Return empty list [] (rumors are browsed separately via the Gossip Feed app).\n"
             f"Respond with ONLY a single valid JSON object matching the schema exactly, no prose or code fences."
         )
@@ -263,35 +542,246 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
         )
 
     _is_llm_mocked = hasattr(call_llm_json, "_mock_name")
+    shop_ctx = get_anomalous_shop_faction_context(session, location=session.get("current_location", ""), is_phone_shop=is_phone_shop)
+    priv_bonus = bool(shop_ctx.get("private_agency_bonus", False))
+    tier_choices = [2, 2, 1, 2] if priv_bonus else [3, 3, 2]
+
     if _is_llm_mocked:
         result = await call_llm_json(system_prompt, user_prompt, temperature=0.8,
                                       is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
         result = namegen.resolve_tokens_deep(result, scenario=scen_key)
     else:
-        from mechanics.combat.items import generate_random_equipment as _gen_eq
+        from mechanics.combat.items import generate_random_equipment as _gen_eq, generate_random_clothing as _gen_clothing
         from mechanics.combat.items.consumables import generate_procedural_potion, generate_procedural_food, generate_procedural_drink
+        from mechanics.combat.items.envelope import serialize_item as _serialize_item
         procedural_stock = []
-        if merchant_type in ("blacksmith", "armorer", "weaponsmith", "quartermaster", "general_merchant"):
-            slots = ["Weapon", "Armor", "Shield", "Top", "Bottom", "Gloves", "Shoes"]
+        if is_phone_shop or merchant_type == "online_merchant":
+            procedural_stock.extend([
+                generate_procedural_food(tier=3, taste_tags=["savory"], genre=scen_key),
+                generate_procedural_drink(tier=3, genre=scen_key),
+                {
+                    "name": "Spiral Study Notebook & Gel Pens",
+                    "item_type": "Item",
+                    "description": "Everyday campus stationery bundle delivered in a padded mailer.",
+                    "price": 18,
+                    "quantity": 3,
+                    "tier": 3,
+                },
+                {
+                    "name": "Pocket Flashcard & Highlighter Kit",
+                    "item_type": "Item",
+                    "description": "Color-coded revision tabs and study cards for exam prep.",
+                    "price": 32,
+                    "quantity": 2,
+                    "tier": 2,
+                },
+            ])
+        elif merchant_type in ("blacksmith", "armorer", "weaponsmith", "quartermaster", "general_merchant", "weapon_merchant", "armor_merchant"):
+            slots = ["Weapon", "Weapon", "Armor", "Shield", "Top", "Accessory 1", "Gloves", "Shoes"]
             random.shuffle(slots)
             for s in slots[:4]:
-                eq = _gen_eq(scenario=scen_key, slot=s, tier=random.choice([3, 3, 2]))
+                eq = _gen_eq(scenario=scen_key, slot=s, tier=random.choice(tier_choices), private_agency_bonus=priv_bonus)
                 if eq:
                     eq["price"] = calculate_balanced_price(eq.get("item_type", "Item"), eq.get("name", ""), tier=eq.get("tier", 3), scen_key=scen_key)
                     eq["quantity"] = 1
                     procedural_stock.append(eq)
         elif merchant_type == "potion_merchant":
-            p1 = generate_procedural_potion(tier=3, genre=scen_key)
-            p2 = generate_procedural_potion(tier=2, genre=scen_key)
+            p1 = generate_procedural_potion(tier=2 if priv_bonus else 3, genre=scen_key)
+            p2 = generate_procedural_potion(tier=1 if priv_bonus else 2, genre=scen_key)
             procedural_stock.extend([p1, p2])
         elif merchant_type in ("food_merchant", "cafe_merchant", "tavern_merchant"):
-            f1 = generate_procedural_food(tier=3, genre=scen_key)
+            f1 = generate_procedural_food(tier=3, taste_tags=["sweet", "bakery"] if merchant_type == "cafe_merchant" else None, genre=scen_key)
             d1 = generate_procedural_drink(tier=3, genre=scen_key)
             procedural_stock.extend([f1, d1])
+        elif merchant_type == "restaurant_merchant":
+            procedural_stock.extend([
+                generate_procedural_food(tier=3, taste_tags=["savory", "comfort"], genre=scen_key),
+                generate_procedural_food(tier=2, taste_tags=["savory", "comfort"], genre=scen_key),
+                generate_procedural_food(tier=1, taste_tags=["savory", "gourmet"], genre=scen_key),
+                generate_procedural_drink(tier=3, genre=scen_key),
+            ])
+        elif merchant_type == "convenience_merchant":
+            procedural_stock.extend([
+                generate_procedural_food(tier=3, taste_tags=["savory"], genre=scen_key),
+                generate_procedural_drink(tier=3, genre=scen_key),
+                {
+                    "name": "Clear Vinyl Umbrella",
+                    "item_type": "Item",
+                    "description": "Sturdy transparent umbrella racked beside the konbini entrance.",
+                    "price": 15,
+                    "quantity": 4,
+                    "tier": 3,
+                },
+                {
+                    "name": "Chilled Konbini Bento Box",
+                    "item_type": "Food",
+                    "description": "Balanced convenience store bento ready to warm behind the counter.",
+                    "price": 24,
+                    "quantity": 3,
+                    "tier": 3,
+                },
+            ])
+        elif merchant_type == "clothes_merchant":
+            for s, t in (("Top", 3), ("Bottom", 3), ("Top", 2), ("Bottom", 2)):
+                cl = _gen_clothing(scenario=scen_key, slot=s, tier=t)
+                if cl:
+                    cl["price"] = calculate_balanced_price("Clothing", cl.get("name", ""), tier=t, scen_key=scen_key)
+                    cl["quantity"] = 1
+                    procedural_stock.append(cl)
+        elif merchant_type == "brand_clothes_merchant":
+            for s, t in (("Top", 2), ("Bottom", 2), ("Top", 1), ("Bottom", 1)):
+                cl = _gen_clothing(scenario=scen_key, slot=s, tier=t)
+                if cl:
+                    cl["price"] = calculate_balanced_price("Clothing", cl.get("name", ""), tier=t, scen_key=scen_key)
+                    cl["quantity"] = 1
+                    procedural_stock.append(cl)
+        elif merchant_type == "accessories_merchant":
+            for t in (3, 2, 2, 1):
+                eq = _gen_eq(scenario=scen_key, slot="Accessory 1", tier=t, private_agency_bonus=False)
+                if eq:
+                    eq["item_type"] = "Accessory"
+                    eq["price"] = calculate_balanced_price("Accessory", eq.get("name", ""), tier=t, scen_key=scen_key)
+                    eq["quantity"] = 1
+                    procedural_stock.append(eq)
+        elif merchant_type == "gift_merchant":
+            procedural_stock.extend([
+                {
+                    "name": "Soft Pastel Plush Mascot",
+                    "item_type": "Gift",
+                    "description": "Huggable stitched plushie wrapped in a satin ribbon.",
+                    "price": 28,
+                    "quantity": 3,
+                    "tier": 3,
+                },
+                {
+                    "name": "Artisanal Lavender Scented Candle",
+                    "item_type": "Gift",
+                    "description": "Hand-poured glass jar candle with calming floral notes.",
+                    "price": 75,
+                    "quantity": 2,
+                    "tier": 2,
+                },
+                {
+                    "name": "Handcrafted Silver Music Box",
+                    "item_type": "Gift",
+                    "description": "Delicate mechanical music box that plays a nostalgic crystalline melody.",
+                    "price": 290,
+                    "quantity": 1,
+                    "tier": 1,
+                },
+            ])
+        elif merchant_type == "night_market_merchant":
+            procedural_stock.extend([
+                generate_procedural_food(tier=3, taste_tags=["savory"], genre=scen_key),
+                generate_procedural_food(tier=2, taste_tags=["sweet"], genre=scen_key),
+                generate_procedural_drink(tier=3, genre=scen_key),
+                {
+                    "name": "Hand-Painted Lantern Hairpin",
+                    "item_type": "Accessory",
+                    "description": "Artisanal bazaar hairpin enameled with warm festival motifs.",
+                    "price": 95,
+                    "quantity": 2,
+                    "tier": 2,
+                },
+            ])
+        elif merchant_type == "nightclub_merchant":
+            procedural_stock.extend([
+                generate_procedural_drink(tier=2, genre=scen_key),
+                generate_procedural_drink(tier=1, genre=scen_key),
+                generate_procedural_food(tier=2, taste_tags=["savory"], genre=scen_key),
+            ])
+        elif merchant_type == "adult_store_merchant":
+            lace_meta = {
+                "name": "Sheer Midnight Lace Lingerie Set",
+                "tier": 2,
+                "tier_name": "Superior",
+                "slot": "Lingerie",
+                "item_type": "Lingerie",
+                "base_dt": 0,
+                "dt": 0,
+                "type_dt": {},
+                "social_modifiers": {"cha": 1},
+                "stat_modifiers": {"cha": 1},
+                "social_affinity_bonus": 2,
+                "social_flags": ["seductive", "delicate", "intimate"],
+            }
+            corset_meta = {
+                "name": "Crimson Silk Couture Corset & Garter",
+                "tier": 1,
+                "tier_name": "Masterwork",
+                "slot": "Lingerie",
+                "item_type": "Lingerie",
+                "base_dt": 0,
+                "dt": 0,
+                "type_dt": {},
+                "social_modifiers": {"cha": 1},
+                "stat_modifiers": {"cha": 1},
+                "social_affinity_bonus": 4,
+                "social_flags": ["seductive", "luxury", "intimate"],
+            }
+            procedural_stock.extend([
+                {
+                    "name": lace_meta["name"],
+                    "item_type": "Lingerie",
+                    "slot": "Lingerie",
+                    "description": "Delicate scalloped black lace lingerie set boxed in discreet velvet tissue.",
+                    "price": 165,
+                    "quantity": 2,
+                    "tier": 2,
+                    "metadata": lace_meta,
+                    "effect": _serialize_item(lace_meta),
+                },
+                {
+                    "name": corset_meta["name"],
+                    "item_type": "Lingerie",
+                    "slot": "Lingerie",
+                    "description": "Bespoke crimson silk corset with matching satin garter straps.",
+                    "price": 520,
+                    "quantity": 1,
+                    "tier": 1,
+                    "metadata": corset_meta,
+                    "effect": _serialize_item(corset_meta),
+                },
+                {
+                    "name": "Velvet Ribbon Wrist Cuffs",
+                    "item_type": "Accessory",
+                    "description": "Plush satin-lined cuffs secured with a quick-release silver clasp.",
+                    "price": 130,
+                    "quantity": 2,
+                    "tier": 2,
+                },
+                {
+                    "name": "Warm Jasmine Massage Oil",
+                    "item_type": "Consumable",
+                    "description": "Aromatic warming body oil bottled in dark amber glass.",
+                    "price": 65,
+                    "quantity": 3,
+                    "tier": 2,
+                },
+            ])
+        elif merchant_type == "school_merchant":
+            procedural_stock.extend([
+                {
+                    "name": "Campus Co-op Notebook Set",
+                    "item_type": "Item",
+                    "description": "Crisp grid-lined notebooks stamped with the academy crest.",
+                    "price": 15,
+                    "quantity": 5,
+                    "tier": 3,
+                },
+                {
+                    "name": "Spare Silk Uniform Ribbon & Tie",
+                    "item_type": "Accessory",
+                    "description": "Freshly pressed replacement academy neckwear.",
+                    "price": 35,
+                    "quantity": 3,
+                    "tier": 3,
+                },
+            ])
         else:
             slots = ["Weapon", "Accessory 1", "Top", "Shoes"]
             for s in slots[:3]:
-                eq = _gen_eq(scenario=scen_key, slot=s, tier=3)
+                eq = _gen_eq(scenario=scen_key, slot=s, tier=random.choice(tier_choices), private_agency_bonus=priv_bonus)
                 if eq:
                     eq["price"] = calculate_balanced_price(eq.get("item_type", "Item"), eq.get("name", ""), tier=eq.get("tier", 3), scen_key=scen_key)
                     eq["quantity"] = 1
@@ -306,30 +796,45 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
         }
 
     from mechanics.combat.items import parse_item_tier
+    from mechanics.world.locations import is_school_scenario as _is_hs_scen
     stock = []
     for entry in result.get("stock", []) or []:
         if not isinstance(entry, dict) or not entry.get("name"):
             continue
         item_name = str(entry["name"])[:60]
         item_type = str(entry.get("item_type", "Item"))[:30]
+        if scenario_data.is_anomalous_incursions_scenario(scen_key) and (
+            item_type.lower() == "spellbook"
+            or any(item_name.lower().startswith(p) for p in ("spellbook:", "grimoire:", "tome:", "scroll:"))
+        ):
+            continue
+        if (is_phone_shop or merchant_type == "online_merchant") and _is_hs_scen(scen_key):
+            if item_type.lower() in ("lingerie", "weapon", "shield", "armor", "spellbook"):
+                continue
         desc = str(entry.get("description", ""))[:200]
-        tier = parse_item_tier({"name": item_name, "description": desc, "item_type": item_type})
+        tier = parse_item_tier({"name": item_name, "description": desc, "item_type": item_type, "metadata": entry.get("metadata")})
+        if (is_phone_shop or merchant_type == "online_merchant") and _is_hs_scen(scen_key) and tier == 1:
+            tier = 2
 
         # Calculate balanced pricing
-        balanced_price = calculate_balanced_price(item_type, item_name, tier=tier, scen_key=scen_key)
+        balanced_price = int(entry.get("price") or 0) or calculate_balanced_price(item_type, item_name, tier=tier, scen_key=scen_key)
         try:
             quantity = max(1, min(9, int(entry.get("quantity", 1))))
         except (TypeError, ValueError):
             quantity = 1
 
-        stock.append({
+        st_entry = {
             "name": item_name,
             "item_type": item_type,
             "description": desc,
             "price": balanced_price,
             "quantity": quantity,
-            "tier": tier
-        })
+            "tier": tier,
+        }
+        for keep_k in ("effect", "metadata", "slot", "slot_cost"):
+            if entry.get(keep_k) is not None:
+                st_entry[keep_k] = entry[keep_k]
+        stock.append(st_entry)
 
     # Integrate Procedural Potions for Potion Merchants
     if merchant_type == "potion_merchant":
@@ -376,8 +881,12 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
                 f_t1 = generate_procedural_food(tier=1, genre=scen_key)
                 stock.insert(2, f_t1)
 
-    # Integrate Learnable Spellbooks if spellbook merchant or general magic store
-    if scenario_data.is_combat_enabled(scen_key) and (merchant_type in ("spellbook_merchant", "magic_merchant", "general_merchant")):
+    # Integrate Learnable Spellbooks if spellbook merchant or general magic store (Disabled in Anomalous Incursions)
+    if (
+        scenario_data.is_combat_enabled(scen_key)
+        and not scenario_data.is_anomalous_incursions_scenario(scen_key)
+        and (merchant_type in ("spellbook_merchant", "magic_merchant", "general_merchant"))
+    ):
         from mechanics.combat.spells import get_all_spells
         all_spells = get_all_spells()
         available_keys = list(all_spells.keys())
@@ -413,26 +922,202 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
             })
 
     from mechanics.combat.equipment import enrich_equipment_item
-    EQUIP_TYPES = {"weapon", "armor", "shield", "head", "top", "bottom", "gloves", "shoes", "accessory", "clothing", "headwear"}
+    from mechanics.combat.items.anomalous_gear import apply_anomalous_incursions_gear_rules
+    EQUIP_TYPES = {"weapon", "armor", "shield", "head", "top", "bottom", "gloves", "shoes", "accessory", "clothing", "headwear", "lingerie", "outerwear"}
     for item in stock:
         itype = str(item.get("item_type", "")).lower()
         if not item.get("effect"):
-            if itype in EQUIP_TYPES or any(k in item.get("name", "").lower() for k in ["sword", "axe", "bow", "dagger", "shield", "armor", "helm", "glove", "boot", "ring", "amulet", "robe", "tunic"]):
+            if itype in EQUIP_TYPES or any(k in item.get("name", "").lower() for k in ["sword", "axe", "bow", "dagger", "shield", "armor", "helm", "glove", "boot", "ring", "amulet", "robe", "tunic", "pistol", "rifle", "shotgun", "katana", "baton"]):
                 enrich_equipment_item(item, scenario=scen_key)
+                if scenario_data.is_anomalous_incursions_scenario(scen_key):
+                    apply_anomalous_incursions_gear_rules(
+                        item,
+                        scenario=scen_key,
+                        slot=item.get("slot", "Weapon"),
+                        tier=item.get("tier", 3),
+                        private_agency_bonus=priv_bonus,
+                    )
+
+    # Monastic Shrine Order member daily stock cap (2-3 items/day, quantity 1 each)
+    if (
+        shop_ctx.get("shop_faction_archetype") == "monastic_order"
+        and shop_ctx.get("player_faction_archetype") == "monastic_order"
+    ):
+        stock = stock[:3]
+        for s_it in stock:
+            s_it["quantity"] = 1
 
     llm_rumors = [str(r)[:300] for r in (result.get("rumors") or []) if str(r).strip()]
-    rumors = llm_rumors[:3]
-    while len(rumors) < 3 and not (is_phone_shop or merchant_type == "online_merchant"):
-        rumors.append("The merchant has nothing more to share on that front.")
+    if is_phone_shop or merchant_type == "online_merchant":
+        rumor_entries = []
+    else:
+        rumor_entries = generate_grounded_merchant_rumors(
+            session.get("id") if isinstance(session, dict) else None,
+            scen_key=scen_key,
+            fallback_rumors=llm_rumors,
+        )
 
     default_intro = f"{merchant_name or arch_title} welcomes you into the shop."
-    return {
-        "intro_narrative": (str(result.get("intro_narrative", "")) or default_intro),
+    intro_text = str(result.get("intro_narrative", "")) or default_intro
+
+    if active_hs_clerk:
+        mult = float(active_hs_clerk.get("price_multiplier") or 1.0)
+        if mult < 1.0:
+            for s_it in stock:
+                s_it["price"] = max(1, round(int(s_it.get("price") or 1) * mult))
+        if active_hs_clerk.get("pricing_badge"):
+            hookup_note = (
+                f"{merchant_name} spots you from behind the counter with a warm grin and quietly rings you up with a friend hookup."
+            )
+            if merchant_name.lower() not in intro_text.lower():
+                intro_text = f"{hookup_note} {intro_text}".strip()
+            else:
+                intro_text = f"{intro_text.rstrip()} {hookup_note}".strip()
+
+    out_shop = {
+        "intro_narrative": intro_text,
         "stock": stock,
-        "rumors": [{"text": r, "revealed": False} for r in rumors],
+        "rumors": rumor_entries,
         "merchant_type": merchant_type,
     }
+    if active_hs_clerk:
+        out_shop["merchant_name"] = merchant_name
+        out_shop["is_student_part_timer"] = bool(active_hs_clerk.get("is_student_part_timer"))
+        if active_hs_clerk.get("pricing_badge"):
+            out_shop["pricing_badge"] = active_hs_clerk["pricing_badge"]
+    return out_shop
 
+
+
+def reveal_hidden_node_from_rumor(session_id: int, node_id: str) -> bool:
+    """Marks a hidden spatial node as discovered in world_nodes.state_json when revealed by a grounded rumor (D19)."""
+    if not session_id or not node_id:
+        return False
+    try:
+        with db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT state_json FROM world_nodes WHERE session_id = ? AND node_id = ?",
+                (session_id, node_id),
+            ).fetchone()
+            if not row:
+                return False
+            try:
+                st = json.loads(row["state_json"] or "{}") if row["state_json"] else {}
+            except Exception:
+                st = {}
+            if not isinstance(st, dict):
+                st = {}
+            st["is_hidden"] = False
+            st["discovered"] = True
+            conn.execute(
+                "UPDATE world_nodes SET state_json = ? WHERE session_id = ? AND node_id = ?",
+                (json.dumps(st), session_id, node_id),
+            )
+            return True
+    except Exception:
+        return False
+
+
+def generate_grounded_merchant_rumors(
+    session_id: int | None,
+    scen_key: str = "fantasy",
+    fallback_rumors: list | None = None,
+) -> list[dict]:
+    """
+    Deterministically generates up to 3 merchant rumors grounded in active/available quests
+    or hidden world_nodes (D19). Ambient fallback rumors carry no linked_quest_id/linked_node_id
+    so they never pollute session_clues.
+    """
+    rumor_entries: list[dict] = []
+    seen_texts: set[str] = set()
+
+    if session_id:
+        try:
+            quests = (db.get_session_quests(session_id, status="Active") or []) + (
+                db.get_session_quests(session_id, status="Available") or []
+            )
+            for q in quests:
+                if len(rumor_entries) >= 2:
+                    break
+                qid = str(q.get("quest_id") or "").strip()
+                if not qid:
+                    continue
+                q_title = str(q.get("title") or "an ongoing matter").strip()
+                wp = db.get_active_waypoint(session_id, qid, None)
+                if not wp and isinstance(q.get("sub_objectives"), list):
+                    for so in q["sub_objectives"]:
+                        if isinstance(so, dict) and not so.get("completed") and so.get("id") is not None:
+                            wp = db.get_active_waypoint(session_id, qid, so["id"])
+                            if wp:
+                                break
+                t_loc = str((wp or {}).get("target_location") or "").strip()
+                t_npc = str((wp or {}).get("target_npc") or q.get("target_npc") or "").strip()
+                if t_npc and t_loc:
+                    r_txt = f"Word around here is {t_npc} was recently spotted near {t_loc} regarding {q_title}."
+                elif t_loc:
+                    r_txt = f"Locals keep whispering about unusual activity around {t_loc} tied to {q_title}."
+                elif t_npc:
+                    r_txt = f"People have been asking quiet questions about {t_npc} and {q_title}."
+                else:
+                    obj_txt = str(q.get("objective") or q_title).strip().rstrip(".")
+                    r_txt = f"Have you heard about {q_title}? Folks say someone needs to {obj_txt[:120].lower()}."
+                if r_txt.lower() not in seen_texts:
+                    seen_texts.add(r_txt.lower())
+                    rumor_entries.append({
+                        "text": r_txt[:300],
+                        "revealed": False,
+                        "linked_quest_id": qid,
+                        "linked_npc": t_npc,
+                        "linked_location": t_loc,
+                    })
+        except Exception:
+            pass
+
+        if len(rumor_entries) < 3:
+            try:
+                from mechanics.world.locations.pathfinding import is_node_hidden
+                nodes = db.get_session_world_nodes(session_id) or []
+                node_by_id = {n.get("node_id"): n for n in nodes if isinstance(n, dict)}
+                for n in nodes:
+                    if len(rumor_entries) >= 3:
+                        break
+                    if not isinstance(n, dict) or not is_node_hidden(n):
+                        continue
+                    nid = str(n.get("node_id") or "").strip()
+                    nname = str(n.get("name") or "").strip()
+                    if not nid or not nname:
+                        continue
+                    parent_obj = node_by_id.get(n.get("parent_id")) or {}
+                    p_name = str(parent_obj.get("name") or "nearby").strip()
+                    r_txt = f"Not many outsiders know this, but there's a hidden passage to {nname} tucked away near {p_name}."
+                    if r_txt.lower() not in seen_texts:
+                        seen_texts.add(r_txt.lower())
+                        rumor_entries.append({
+                            "text": r_txt[:300],
+                            "revealed": False,
+                            "linked_node_id": nid,
+                            "linked_location": nname,
+                        })
+            except Exception:
+                pass
+
+    for raw_r in (fallback_rumors or []):
+        if len(rumor_entries) >= 3:
+            break
+        txt = str(raw_r.get("text") if isinstance(raw_r, dict) else raw_r or "").strip()[:300]
+        if txt and txt.lower() not in seen_texts:
+            seen_texts.add(txt.lower())
+            rumor_entries.append({"text": txt, "revealed": False})
+
+    while len(rumor_entries) < 3:
+        amb = "Business has been steady lately, though everyone's keeping a close eye on local affairs."
+        if len(rumor_entries) == 1:
+            amb = "Regulars say supplies have been tighter than usual this week."
+        elif len(rumor_entries) == 2:
+            amb = "The merchant has nothing more to share on that front."
+        rumor_entries.append({"text": amb, "revealed": False})
+
+    return rumor_entries[:3]
 
 
 SELL_EVALUATION_SCHEMA = """{
@@ -455,7 +1140,8 @@ async def evaluate_items_for_sale(items: list) -> dict:
         for i in items:
             t = parse_item_tier(i)
             p = calculate_balanced_price(i.get("item_type", "Item"), i.get("name", ""), tier=t)
-            prices[str(i["name"])] = max(1, p // 3)
+            sell_p = compute_anomalous_resale_price(i, max(1, p // 3))
+            prices[str(i["name"])] = sell_p
         return prices
 
     lines = "\n".join(f"- {i['name']} ({i['item_type']}): {i['effect'] or ''}" for i in items)
@@ -464,6 +1150,7 @@ async def evaluate_items_for_sale(items: list) -> dict:
         f"Respond with JSON matching exactly this schema:\n{SELL_EVALUATION_SCHEMA}"
     )
     result = await call_llm_json(SELL_EVALUATION_SYSTEM_PROMPT, user_prompt, temperature=0.5, use_utility=True)
+    by_name = {str(i.get("name")): i for i in items if isinstance(i, dict) and i.get("name")}
     prices = {}
     for entry in result.get("prices", []) or []:
         if not isinstance(entry, dict) or not entry.get("name"):
@@ -472,6 +1159,9 @@ async def evaluate_items_for_sale(items: list) -> dict:
             price = max(1, int(entry.get("price", 3)))
         except (TypeError, ValueError):
             price = 3
+        orig_it = by_name.get(str(entry["name"]))
+        if orig_it:
+            price = compute_anomalous_resale_price(orig_it, price)
         prices[str(entry["name"])] = price
     return prices
 
@@ -653,9 +1343,22 @@ async def generate_faction_quartermaster_shop(faction: dict, session: dict) -> d
             "intro_narrative": f"The {faction_name} quartermaster nods at you.",
             "stock": q_stock,
         }
+    from mechanics.combat.equipment import enrich_equipment_item
+    from mechanics.combat.items.anomalous_gear import apply_anomalous_incursions_gear_rules
+    from mechanics.social.factions import infer_anomalous_faction_archetype
+    fac_arch = infer_anomalous_faction_archetype(faction) if scenario_data.is_anomalous_incursions_scenario(scen_key) else ""
+    priv_bonus_qm = fac_arch in ("private_agency_1", "private_agency_2")
+
     stock = []
     for entry in result.get("stock", []) or []:
         if not isinstance(entry, dict) or not entry.get("name"):
+            continue
+        it_name = str(entry["name"])[:60]
+        it_type = str(entry.get("item_type", "Item"))[:30]
+        if scenario_data.is_anomalous_incursions_scenario(scen_key) and (
+            it_type.lower() == "spellbook"
+            or any(it_name.lower().startswith(p) for p in ("spellbook:", "grimoire:", "tome:", "scroll:"))
+        ):
             continue
         try:
             price = max(1, int(entry.get("price", 5)))
@@ -665,13 +1368,29 @@ async def generate_faction_quartermaster_shop(faction: dict, session: dict) -> d
             quantity = max(1, min(9, int(entry.get("quantity", 1))))
         except (TypeError, ValueError):
             quantity = 1
-        stock.append({
-            "name": str(entry["name"])[:60],
-            "item_type": str(entry.get("item_type", "Item"))[:30],
+        qm_item = {
+            "name": it_name,
+            "item_type": it_type,
             "description": str(entry.get("description", ""))[:200],
             "price": price,
-            "quantity": quantity,
-        })
+            "quantity": 1 if fac_arch == "monastic_order" else quantity,
+        }
+        for keep_k in ("effect", "metadata", "slot", "slot_cost", "tier"):
+            if entry.get(keep_k) is not None:
+                qm_item[keep_k] = entry[keep_k]
+        if not qm_item.get("effect") and it_type.lower() in {"weapon", "armor", "shield", "head", "top", "bottom", "gloves", "shoes", "accessory"}:
+            enrich_equipment_item(qm_item, scenario=scen_key)
+            if scenario_data.is_anomalous_incursions_scenario(scen_key):
+                apply_anomalous_incursions_gear_rules(
+                    qm_item,
+                    scenario=scen_key,
+                    slot=qm_item.get("slot", "Weapon"),
+                    tier=qm_item.get("tier", 2),
+                    private_agency_bonus=priv_bonus_qm,
+                )
+        stock.append(qm_item)
+    if fac_arch == "monastic_order" and len(stock) > 3:
+        stock = stock[:3]
     return {
         "intro_narrative": str(result.get("intro_narrative", f"The {faction_name} quartermaster nods at you."))[:300],
         "stock": stock,

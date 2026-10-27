@@ -13,6 +13,8 @@ class TestFamilySyncAndDynamicRomance(unittest.TestCase):
     def setUp(self):
         db.init_db()
         self.session_ids = []
+        with db.get_conn() as conn:
+            conn.execute("DELETE FROM characters WHERE user_id=1")
 
     def tearDown(self):
         with db.get_conn() as conn:

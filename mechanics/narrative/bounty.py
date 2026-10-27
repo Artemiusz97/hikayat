@@ -11,6 +11,25 @@ from llm_client import call_llm_json
 
 log = logging.getLogger("hikayat.bounty")
 
+
+def _resolve_session_location(session_id: int, session: dict = None, scen_key: str = "fantasy") -> str:
+    loc = (session.get("current_location") if isinstance(session, dict) else "") or ""
+    if not loc and session_id:
+        try:
+            from mechanics.world.locations.formatting import get_discovered_primary_locations
+            d_locs = get_discovered_primary_locations(session_id, scen_key)
+            if d_locs:
+                first_z = list(d_locs.keys())[0]
+                loc = f"{first_z} ➔ {d_locs[first_z][0]}" if d_locs[first_z] else first_z
+            if not loc:
+                from mechanics.world.locations.seeding import get_default_tiered_location
+                dz, dp, _ = get_default_tiered_location(scen_key, session_id=session_id)
+                loc = f"{dz} ➔ {dp}"
+        except Exception:
+            pass
+    return loc or ("Ashford Academy" if "school" in scen_key.lower() else "the Frontier")
+
+
 # --------------------------------------------------------------------- Taxonomy of Quest Archetypes
 ARCHETYPES_BY_SCENARIO = {
     "general": [
@@ -41,11 +60,208 @@ ARCHETYPES_BY_SCENARIO = {
         "Seduction", "Allure", "Domination", "Subjugation", "Underground Brothel",
         "Courtesan Guild", "Aphrodisiac Run", "Lust Alchemy", "Paramour Courtship",
         "Harem Bond", "Bondage Escape", "Captive Rescue", "Masquerade Revelry", "Hedonist Intrigue"
-    ]
+    ],
+    "anomalous_incursions": [
+        "Eliminate Hostile Anomalous Entity",
+        "Secure Non-Hostile Anomalous Entity",
+        "Contain Anomalous Phenomenon",
+        "Investigate Anomalous Phenomenon",
+        "Find Missing Person (Spirited Away)",
+        "Retrieve Altered Item / Cursed Relic",
+        "Disrupt Cult Ritual / Clandestine Auction",
+        "Spatial Distortion Mapping",
+        "Cognitohazard & Urban Legend Suppression",
+        "Quarantine Perimeter Defense",
+        "Rogue Operative / Rival Hunter Interception",
+        "High-Sensitivity Esper / Witness Escort",
+    ],
+}
+
+# 12 Canonical Scenario Bounty Archetypes (mapping both snake_case keys and display labels)
+ANOMALOUS_BOUNTY_ARCHETYPES: list[dict] = [
+    {
+        "key": "rogue_entity_termination",
+        "label": "Eliminate Hostile Anomalous Entity",
+        "icon": "👹",
+        "blueprint_id": "NEUTRALIZATION",
+        "title_prefix": "Termination Order",
+        "default_objective": "Track down and eliminate the hostile anomalous entity threatening civilian infrastructure.",
+        "req_item": "",
+    },
+    {
+        "key": "non_hostile_entity_pacification",
+        "label": "Secure Non-Hostile Anomalous Entity",
+        "icon": "🛡️",
+        "blueprint_id": "ESCORT_RESCUE",
+        "title_prefix": "Live Containment",
+        "default_objective": "Locate, pacify, and safely seal the non-hostile anomalous entity into a containment unit without lethal force.",
+        "req_item": "",
+    },
+    {
+        "key": "spatial_rift_sealing",
+        "label": "Contain Anomalous Phenomenon",
+        "icon": "🔮",
+        "blueprint_id": "SITE_DEFENSE_RITUAL",
+        "title_prefix": "Rift Stabilization",
+        "default_objective": "Deploy resonance anchors and channel stabilization seals to collapse the active spatial phenomenon.",
+        "req_item": "",
+    },
+    {
+        "key": "temporal_loop_anchor",
+        "label": "Investigate Anomalous Phenomenon",
+        "icon": "🔍",
+        "blueprint_id": "INVESTIGATION",
+        "title_prefix": "Field Recon",
+        "default_objective": "Investigate the localized temporal/sensory anomaly, collect resonance readings, and identify its origin.",
+        "req_item": "",
+    },
+    {
+        "key": "missing_agent_rescue",
+        "label": "Find Missing Person (Spirited Away)",
+        "icon": "🕵️",
+        "blueprint_id": "ESCORT_RESCUE",
+        "title_prefix": "Extraction Alert",
+        "default_objective": "Breach the pocket threshold to locate and extract the missing person spirited away by an anomaly.",
+        "req_item": "",
+    },
+    {
+        "key": "cursed_relic_retrieval",
+        "label": "Retrieve Altered Item / Cursed Relic",
+        "icon": "💎",
+        "blueprint_id": "ACQUISITION",
+        "title_prefix": "Relic Recovery",
+        "default_objective": "Secure the volatile Altered Item / Cursed Relic in a lead-lined case and deliver it to the vault.",
+        "req_item": "Sealed Altered Relic",
+    },
+    {
+        "key": "cult_ritual_disruption",
+        "label": "Disrupt Cult Ritual / Clandestine Auction",
+        "icon": "💥",
+        "blueprint_id": "HEIST_INFILTRATION",
+        "title_prefix": "Covert Raid",
+        "default_objective": "Infiltrate the clandestine gathering, sabotage the occult ritual catalyst or black-market auction, and exfiltrate.",
+        "req_item": "",
+    },
+    {
+        "key": "sensory_anomaly_purge",
+        "label": "Spatial Distortion Mapping",
+        "icon": "🧭",
+        "blueprint_id": "EXPLORATION_HAZARD",
+        "title_prefix": "Cartography Sweep",
+        "default_objective": "Navigate the non-Euclidean corridor hazards, deploy telemetry beacons, and map the shifting zone geometry.",
+        "req_item": "",
+    },
+    {
+        "key": "urban_legend_debunking",
+        "label": "Cognitohazard & Urban Legend Suppression",
+        "icon": "📻",
+        "blueprint_id": "SOCIAL_MANIPULATION",
+        "title_prefix": "Memetic Suppression",
+        "default_objective": "Contain the spreading cognitohazard rumor, administer Class-A amnestics or counter-memes to witnesses, and scrub feeds.",
+        "req_item": "",
+    },
+    {
+        "key": "cognitohazard_quarantine",
+        "label": "Quarantine Perimeter Defense",
+        "icon": "🏰",
+        "blueprint_id": "SITE_DEFENSE_RITUAL",
+        "title_prefix": "Cordon Defense",
+        "default_objective": "Fortify the municipal quarantine barricade and repel waves of manifesting entities until containment holds.",
+        "req_item": "",
+    },
+    {
+        "key": "syndicate_black_market_interception",
+        "label": "Rogue Operative / Rival Hunter Interception",
+        "icon": "⚔️",
+        "blueprint_id": "CONTEST_RIVALRY",
+        "title_prefix": "Hunter Interception",
+        "default_objective": "Intercept the rogue operative or rival bounty hunter before they abscond with the anomalous target.",
+        "req_item": "",
+    },
+    {
+        "key": "anomalous_autopsy_escort",
+        "label": "High-Sensitivity Esper / Witness Escort",
+        "icon": "🛡️",
+        "blueprint_id": "ESCORT_RESCUE",
+        "title_prefix": "VIP Esper Escort",
+        "default_objective": "Protect and escort the high-sensitivity Esper / forensic witness safely through hazardous sectors.",
+        "req_item": "",
+    },
+]
+
+# Faction Board Flavor Bias for Anomalous Incursions
+ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS: dict[str, list[str]] = {
+    "public_agency": [
+        "Quarantine Perimeter Defense",
+        "Contain Anomalous Phenomenon",
+        "Retrieve Altered Item / Cursed Relic",
+        "Investigate Anomalous Phenomenon",
+        "Eliminate Hostile Anomalous Entity",
+        "Cognitohazard & Urban Legend Suppression",
+    ],
+    "private_agency_1": [
+        "Eliminate Hostile Anomalous Entity",
+        "Secure Non-Hostile Anomalous Entity",
+        "Rogue Operative / Rival Hunter Interception",
+        "Disrupt Cult Ritual / Clandestine Auction",
+        "High-Sensitivity Esper / Witness Escort",
+        "Retrieve Altered Item / Cursed Relic",
+    ],
+    "private_agency_2": [
+        "Rogue Operative / Rival Hunter Interception",
+        "Eliminate Hostile Anomalous Entity",
+        "Disrupt Cult Ritual / Clandestine Auction",
+        "Secure Non-Hostile Anomalous Entity",
+        "High-Sensitivity Esper / Witness Escort",
+        "Spatial Distortion Mapping",
+    ],
+    "monastic_order": [
+        "Contain Anomalous Phenomenon",
+        "Retrieve Altered Item / Cursed Relic",
+        "Find Missing Person (Spirited Away)",
+        "Eliminate Hostile Anomalous Entity",
+        "Disrupt Cult Ritual / Clandestine Auction",
+        "Secure Non-Hostile Anomalous Entity",
+    ],
+    "freelance_app": [
+        "Find Missing Person (Spirited Away)",
+        "Investigate Anomalous Phenomenon",
+        "Cognitohazard & Urban Legend Suppression",
+        "Spatial Distortion Mapping",
+        "Secure Non-Hostile Anomalous Entity",
+        "High-Sensitivity Esper / Witness Escort",
+    ],
 }
 
 # --------------------------------------------------------------------- Discord Quest Log Icon Mappings
 QUEST_TYPE_ICONS = {
+    # Anomalous Incursions Archetypes
+    "eliminate hostile anomalous entity": "👹",
+    "rogue_entity_termination": "👹",
+    "secure non-hostile anomalous entity": "🛡️",
+    "non_hostile_entity_pacification": "🛡️",
+    "contain anomalous phenomenon": "🔮",
+    "spatial_rift_sealing": "🔮",
+    "investigate anomalous phenomenon": "🔍",
+    "temporal_loop_anchor": "🔍",
+    "find missing person (spirited away)": "🕵️",
+    "spirited away": "🕵️",
+    "missing_agent_rescue": "🕵️",
+    "retrieve altered item / cursed relic": "💎",
+    "retrieve altered item": "💎",
+    "cursed_relic_retrieval": "💎",
+    "disrupt cult ritual / clandestine auction": "💥",
+    "cult_ritual_disruption": "💥",
+    "spatial distortion mapping": "🧭",
+    "sensory_anomaly_purge": "🧭",
+    "cognitohazard & urban legend suppression": "📻",
+    "urban_legend_debunking": "📻",
+    "quarantine perimeter defense": "🏰",
+    "cognitohazard_quarantine": "🏰",
+    "rogue operative / rival hunter interception": "⚔️",
+    "syndicate_black_market_interception": "⚔️",
+    "high-sensitivity esper / witness escort": "🛡️",
+    "anomalous_autopsy_escort": "🛡️",
     # General Archetypes
     "monster hunting": "👹",
     "extermination": "👹",
@@ -153,11 +369,13 @@ def get_quest_type_icon(quest_type: str) -> str:
 
 def get_archetypes_for_scenario(scenario: str = None) -> list[str]:
     """Returns ONLY the relevant archetypes for the active session scenario, prioritized."""
-    from scenario_data import has_tag
+    from scenario_data import has_tag, is_anomalous_incursions_scenario
     from mechanics.world.locations.seeds import is_school_scenario
     archetypes = []
 
     # 1. Primary Scenario Archetypes (highest priority)
+    if is_anomalous_incursions_scenario(scenario):
+        archetypes.extend(ARCHETYPES_BY_SCENARIO.get("anomalous_incursions", []))
     if is_school_scenario(scenario):
         archetypes.extend(ARCHETYPES_BY_SCENARIO.get("modern", []))
     if has_tag(scenario, "fantasy") or has_tag(scenario, "isekai") or has_tag(scenario, "isekai_fantasy") or has_tag(scenario, "grimdark") or has_tag(scenario, "dark_fantasy"):
@@ -255,7 +473,7 @@ def resolve_or_seed_bounty_client(
     session_id: int,
     session: dict = None,
     raw_bounty: dict = None,
-    default_loc: str = "the central area",
+    default_loc: str = "",
     index: int = 0
 ) -> tuple[str, str]:
     """Deterministically identifies or seeds a named client NPC and starting location for a bounty."""
@@ -285,6 +503,8 @@ def resolve_or_seed_bounty_client(
                 client_npc = str(wp["target_npc"]).strip()
                 break
 
+    if not default_loc:
+        default_loc = _resolve_session_location(session_id, session, scen_key)
     client_loc = str(raw_bounty.get("client_location", "") or default_loc or "").strip()
 
     if client_npc:
@@ -294,9 +514,23 @@ def resolve_or_seed_bounty_client(
     if is_school_scenario(scen_key) and session:
         try:
             from mechanics.social.school_roster import ensure_school_directory_exists
+            from mechanics.world.schedules import is_campus_node_or_location
             roster = ensure_school_directory_exists(session)
             if roster:
-                chosen = roster[(session_id + index) % len(roster)]
+                probe_loc = f"{client_loc} {raw_bounty.get('title', '')} {raw_bounty.get('description', '')}".lower()
+                is_town_errand = (
+                    any(k in probe_loc for k in (
+                        "commercial", "convenience", "konbini", "cafe", "café", "arcade", "karaoke",
+                        "commuter station", "transit", "koban", "kōban", "park", "seaside", "beach",
+                        "pier", "lighthouse", "mountain", "delivery", "bus", "part-time", "shift"
+                    ))
+                    and not is_campus_node_or_location(location_str=client_loc, session_id=session_id, scen_key=scen_key)
+                )
+                if is_town_errand:
+                    pool = [r for r in roster if r.get("grade") in ("Citizen", "Youth Peer")] or roster
+                else:
+                    pool = [r for r in roster if r.get("grade") not in ("Citizen", "Youth Peer")] or roster
+                chosen = pool[(session_id + index) % len(pool)]
                 return chosen.get("name", "Fellow Student"), chosen.get("primary_facility", default_loc)
         except Exception:
             pass
@@ -326,6 +560,8 @@ def resolve_or_seed_bounty_client(
 def get_bounty_board_title_name(scen_key: str = None) -> tuple[str, str]:
     """Returns (title_name, emoji) for the Bounty Board Embed based on scenario."""
     from mechanics.world.locations import is_school_scenario
+    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        return ("Anomalous Containment & Freelance Dispatch", "📡")
     scen = str(scen_key or "").lower()
     if is_school_scenario(scen):
         return ("Campus Requests & Commissions", "📋")
@@ -340,7 +576,156 @@ def get_bounty_board_title_name(scen_key: str = None) -> tuple[str, str]:
     return ("Guild Bounty Board", "📋")
 
 
+_ANOMALOUS_CONSOLIDATED_COMPLEX_IDS = {
+    "loc_general_hospital",
+    "loc_theme_park",
+    "loc_eastern_temple",
+    "loc_botanical_zoo",
+}
+_ANOMALOUS_SAFE_HQ_FACILITY_IDS = {
+    "loc_agency_hq",
+    "loc_private_hq_1",
+    "loc_private_hq_2",
+    "loc_player_house",
+}
+
+
+def _collect_anomalous_bounty_candidate_locations(session_id: int, scen_key: str) -> list[str]:
+    """
+    Collects candidate field locations for Anomalous Incursions bounties, expanding
+    consolidated multi-wing complexes (`loc_general_hospital`, `loc_theme_park`,
+    `loc_eastern_temple`, `loc_botanical_zoo`) to `Zone ➔ Complex ➔ Wing` while
+    excluding safe Agency HQs and the player's residence.
+    """
+    candidates: list[str] = []
+    if session_id:
+        try:
+            nodes = db.get_session_world_nodes(session_id) or []
+            if nodes:
+                node_map = {n["node_id"]: n for n in nodes}
+                rooms_by_parent: dict[str, list[dict]] = {}
+                for n in nodes:
+                    if n.get("node_type") == "ROOM" and n.get("parent_id"):
+                        rooms_by_parent.setdefault(str(n["parent_id"]), []).append(n)
+                for n in nodes:
+                    if n.get("node_type") != "FACILITY":
+                        continue
+                    nid = str(n.get("node_id") or "")
+                    if nid in _ANOMALOUS_SAFE_HQ_FACILITY_IDS or nid.startswith("loc_hq_"):
+                        continue
+                    parent = node_map.get(n.get("parent_id"))
+                    z_name = parent["name"] if parent else "Metropolitan Grid"
+                    if nid in _ANOMALOUS_CONSOLIDATED_COMPLEX_IDS:
+                        for w in rooms_by_parent.get(nid, []):
+                            if w.get("name"):
+                                candidates.append(f"{z_name} ➔ {n['name']} ➔ {w['name']}")
+                    elif n.get("name"):
+                        candidates.append(f"{z_name} ➔ {n['name']}")
+        except Exception:
+            pass
+    if not candidates:
+        try:
+            from mechanics.world.locations import get_discovered_primary_locations
+            zones_dict = get_discovered_primary_locations(session_id, scen_key) or {}
+            for z, prims in zones_dict.items():
+                for p in prims:
+                    p_low = p.lower()
+                    if "lobby" not in p_low and "bedroom" not in p_low and "hq" not in p_low:
+                        candidates.append(f"{z} ➔ {p}")
+        except Exception:
+            pass
+    return candidates
+
+
+def _build_anomalous_fallback_bounties(
+    session_id: int,
+    board_key: str,
+    default_loc: str,
+    candidate_locations: list[str] | None = None,
+    faction_name: str = "",
+    seed_offset: int = 0,
+) -> list[dict]:
+    """Builds 3 deterministic scenario-specific bounties for Anomalous Incursions with faction flavor bias."""
+    import namegen
+
+    cand_locs = [c.replace(" -> ", " ➔ ") for c in (candidate_locations or []) if c]
+    if not cand_locs:
+        cand_locs = [default_loc or "Metropolitan Grid ➔ Civic Plaza"]
+
+    preferred_labels = ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS.get(
+        board_key, ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS["freelance_app"]
+    )
+    arch_by_label = {a["label"]: a for a in ANOMALOUS_BOUNTY_ARCHETYPES}
+
+    from mechanics.world.locations import format_clean_location_prose
+    results: list[dict] = []
+    for i in range(3):
+        lbl = preferred_labels[(int(session_id or 1) + seed_offset + i) % len(preferred_labels)]
+        arch_meta = arch_by_label.get(lbl, ANOMALOUS_BOUNTY_ARCHETYPES[i % len(ANOMALOUS_BOUNTY_ARCHETYPES)])
+        tgt_loc = cand_locs[(int(session_id or 1) + seed_offset + i * 2) % len(cand_locs)]
+        sec_loc = cand_locs[(int(session_id or 1) + seed_offset + i * 2 + 1) % len(cand_locs)]
+        tgt_prose = format_clean_location_prose(tgt_loc, include_zone=True, preposition="in")
+        tgt_short = format_clean_location_prose(tgt_loc, include_zone=False)
+        sec_short = format_clean_location_prose(sec_loc, include_zone=False)
+        entity_name = namegen.generate_anomalous_entity_name(hash_val=int(session_id or 1) * 17 + seed_offset + i * 13)
+
+        sponsor_prefix = f"[{faction_name}] " if faction_name and board_key != "freelance_app" else ""
+        nh_temp = ""
+        is_nh = "non-hostile" in lbl.lower()
+        if is_nh:
+            nh_temp = "timid" if ((int(session_id or 1) + seed_offset + i) % 2 == 0) else "volatile"
+            temp_cue = (
+                "Timid/elusive demeanor—startling it risks escape."
+                if nh_temp == "timid"
+                else "Volatile/territorial aura—provoking it risks combat."
+            )
+            title = f"{arch_meta['title_prefix']}: {entity_name}"[:58]
+            obj = f"{sponsor_prefix}Contain '{entity_name}' alive at {tgt_prose}. {temp_cue}"[:200]
+            stage_1_lbl = f"Arrive at {tgt_short} and observe '{entity_name}'s temperament"
+            stage_2_lbl = f"Encounter and contain non-hostile entity '{entity_name}' alive at {sec_short}"
+        elif "Entity" in lbl:
+            title = f"{arch_meta['title_prefix']}: {entity_name}"[:58]
+            obj = f"{sponsor_prefix}{arch_meta['default_objective']} Target manifestation '{entity_name}' sighted at {tgt_prose}."[:200]
+            stage_1_lbl = f"Arrive at {tgt_short} and establish perimeter scan"
+            stage_2_lbl = f"Execute containment protocol for '{title}' at {sec_short}"
+        else:
+            fac_short = tgt_short
+            title = f"{arch_meta['title_prefix']} at {fac_short}"[:58]
+            obj = f"{sponsor_prefix}{arch_meta['default_objective']} Active location: {tgt_prose}."[:200]
+            stage_1_lbl = f"Arrive at {tgt_short} and establish perimeter scan"
+            stage_2_lbl = f"Execute containment protocol for '{title}' at {sec_short}"
+
+        entry_dict = {
+            "quest_type": lbl,
+            "title": title,
+            "objective": obj,
+            "required_item": arch_meta.get("req_item", ""),
+            "reward_xp": 130 + (i * 20),
+            "reward_gold": 65 + (i * 20),
+            "reward_item": "Trauma Medkit" if i == 0 else ("Cognitive Stabilizer Ampoule" if i == 1 else ""),
+            "faction_rep_reward": 10,
+            "waypoints": [
+                {"stage_index": 1, "stage_label": stage_1_lbl, "target_location": tgt_loc, "completion_trigger": "arrival"},
+                {"stage_index": 2, "stage_label": stage_2_lbl, "target_location": sec_loc, "completion_trigger": "skill_check"},
+            ],
+        }
+        if is_nh:
+            entry_dict["non_hostile_temperament"] = nh_temp
+            entry_dict["entity_name"] = entity_name
+        results.append(entry_dict)
+    return results
+
+
 BOUNTY_BOARD_SYSTEM_PROMPT = build_bounty_system_prompt()
+
+
+def _filter_general_bounties(rows: list[dict]) -> list[dict]:
+    """Excludes Faction HQ internal bounties from Freelance/General notice boards."""
+    return [
+        q for q in (rows or [])
+        if not str(q.get("quest_id") or "").startswith("FBNT-")
+        and "faction:" not in str(q.get("quest_notes") or "")
+    ]
 
 
 async def generate_bounty_board(session: dict | int, force_refresh: bool = False) -> list[dict]:
@@ -351,8 +736,9 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
         session = db.get_session(session_id) or {"id": session_id}
     else:
         session_id = session["id"]
+
     if not force_refresh:
-        existing = db.get_session_quests(session_id, status="Available")
+        existing = _filter_general_bounties(db.get_session_quests(session_id, status="Available"))
         if len(existing) >= 3:
             return existing
     else:
@@ -409,9 +795,12 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
     candidate_locations = []
     from mechanics.world.locations import get_discovered_primary_locations, get_session_school_name
     zones_dict = get_discovered_primary_locations(session_id, scen_key)
-    for z, prims in zones_dict.items():
-        for p in prims:
-            candidate_locations.append(f"{z} -> {p}")
+    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        candidate_locations = _collect_anomalous_bounty_candidate_locations(session_id, scen_key)
+    if not candidate_locations:
+        for z, prims in zones_dict.items():
+            for p in prims:
+                candidate_locations.append(f"{z} -> {p}")
 
     if is_school_scenario(scen_key):
         school_zone = get_session_school_name(session_id, scen_key) if session_id else "Westlake Academy"
@@ -497,10 +886,21 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
     elif candidate_locations:
         loc_hints = "\nAvailable Regional Locations for Waypoints:\n" + "\n".join(f"- {l}" for l in candidate_locations[:8]) + "\n"
 
+    is_anom = scenario_data.is_anomalous_incursions_scenario(scen_key)
+    anom_hints = ""
+    if is_anom:
+        pref_archs = ", ".join(ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS["freelance_app"])
+        anom_hints = (
+            f"\nFREELANCE ANOMALY DISPATCH APP RULES:\n"
+            f"- Prioritize civilian & freelance containment commissions from these archetypes: {pref_archs}.\n"
+            f"- NEVER use numeric threat grades (e.g. never say 'Grade-4').\n"
+        )
+
     user_prompt = (
         f"{scen_block}\n"
         f"Location: {loc}\n"
         f"{school_hints}\n"
+        f"{anom_hints}\n"
         f"{loc_hints}\n"
         f"Generate 3 dynamic bounties for the local notice board.\n"
         f"Respond with JSON matching exactly this schema:\n{BOUNTY_BOARD_SCHEMA}"
@@ -515,7 +915,14 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
         bounties_raw = []
 
     if not bounties_raw:
-        if is_school_scenario(scen_key):
+        if is_anom:
+            bounties_raw = _build_anomalous_fallback_bounties(
+                session_id=session_id,
+                board_key="freelance_app",
+                default_loc=loc,
+                candidate_locations=candidate_locations,
+            )
+        elif is_school_scenario(scen_key):
             bounties_raw = [
                 {
                     "quest_type": "Academic Rescue",
@@ -588,13 +995,14 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
                 }
             ]
 
+    from mechanics.world.locations import clean_narrative_location_arrows
     for idx, b in enumerate(bounties_raw):
         if not isinstance(b, dict) or not b.get("title"):
             continue
         b_id = f"BNT-{uuid.uuid4().hex[:8].upper()}"
         q_type = str(b.get("quest_type", "Side Bounty"))
-        obj_text = str(b.get("objective", "Complete the bounty task."))[:200]
-        title_text = str(b.get("title"))[:60]
+        obj_text = clean_narrative_location_arrows(str(b.get("objective", "Complete the bounty task.")))[:200]
+        title_text = clean_narrative_location_arrows(str(b.get("title")))[:60]
 
         from mechanics.narrative.blueprints import get_blueprint_for_archetype, infer_required_item_and_count_from_text, roll_quest_deadline
         blueprint_id = get_blueprint_for_archetype(q_type, obj_text)
@@ -624,6 +1032,13 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
             seed_str=b_id,
         )
 
+        q_notes_gen = "board_source:freelance_app" if is_anom else ""
+        if is_anom and ("non-hostile" in str(q_type or "").lower() or b.get("non_hostile_temperament")):
+            from mechanics.world.anomalous_events import get_non_hostile_entity_temperament, extract_non_hostile_entity_name
+            nh_t = str(b.get("non_hostile_temperament") or get_non_hostile_entity_temperament(seed_key=b_id))
+            nh_e = str(b.get("entity_name") or extract_non_hostile_entity_name({"title": title_text, "objective": obj_text}))
+            q_notes_gen = f"{q_notes_gen}|non_hostile_temperament:{nh_t}|entity_name:{nh_e}"
+
         db.upsert_quest(
             session_id=session_id,
             quest_id=b_id,
@@ -637,6 +1052,7 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
             reward_gold=int(b.get("reward_gold", 35)),
             reward_stat_points=0,
             reward_item=str(b.get("reward_item", "") or "")[:60],
+            quest_notes=q_notes_gen,
             blueprint_id=blueprint_id,
             client_npc=client_npc,
             client_location=client_loc,
@@ -664,15 +1080,21 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
             required_item=req_item,
         )
         if validated_wps:
-            from mechanics.world.locations import parse_tiered_location
+            from mechanics.world.locations import parse_tiered_location, clean_narrative_location_arrows
             for wp in validated_wps:
+                if wp.get("stage_label"):
+                    wp["stage_label"] = clean_narrative_location_arrows(wp["stage_label"])
                 raw_tgt = wp.get("target_location", "")
                 if raw_tgt:
-                    z_norm, p_norm, _ = parse_tiered_location(raw_tgt, scen_key, session_id=session_id)
-                    wp["target_location"] = f"{z_norm} ➔ {p_norm}"
+                    raw_parts = [x.strip() for x in raw_tgt.replace("->", "➔").split("➔") if x.strip()]
+                    z_norm, p_norm, s_norm = parse_tiered_location(raw_tgt, scen_key, session_id=session_id)
+                    if s_norm and len(raw_parts) >= 3:
+                        wp["target_location"] = f"{z_norm} ➔ {p_norm} ➔ {s_norm}"
+                    else:
+                        wp["target_location"] = f"{z_norm} ➔ {p_norm}"
             db.save_quest_waypoints(session_id=session_id, quest_id=b_id, waypoints=validated_wps, sub_obj_id=None)
 
-    return db.get_session_quests(session_id, status="Available")
+    return _filter_general_bounties(db.get_session_quests(session_id, status="Available"))
 
 
 # ---------------------------------------------------------------- Faction Bounty Board
@@ -745,20 +1167,51 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
     loc = faction.get("hq_location_id") or session.get("current_location", "the faction HQ")
     scen_key = session.get("scenario")
 
+    is_anom = scenario_data.is_anomalous_incursions_scenario(scen_key)
+    f_arch = ""
+    anom_fac_hints = ""
+    candidate_locations = []
+    if is_anom:
+        from mechanics.social.factions import infer_anomalous_faction_archetype, ANOMALOUS_DISTRUSTED_ARCHETYPES
+        f_arch = infer_anomalous_faction_archetype(faction)
+        if f_arch in ANOMALOUS_DISTRUSTED_ARCHETYPES:
+            # Cult and Clandestine Syndicate are distrusted/unlicensed and do not host operable public bounty boards
+            return []
+        candidate_locations = _collect_anomalous_bounty_candidate_locations(session_id, scen_key)
+        pref_archs = ", ".join(ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS.get(f_arch, ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS["public_agency"]))
+        anom_fac_hints = (
+            f"ANOMALOUS FACTION BOARD ARCHETYPE BIAS ({f_arch}):\n"
+            f"- Prioritize these archetypes for {faction_name}: {pref_archs}.\n"
+            f"- NEVER use numeric threat grades (e.g. never say 'Grade-4').\n\n"
+        )
+
     user_prompt = (
         f"{scen_block}\n"
         f"Faction: {faction_name} (Category: {faction.get('category', 'guild')})\n"
         f"Faction HQ: {loc}\n"
         f"Faction Reputation: {faction.get('reputation_score', 0):+d}\n\n"
+        f"{anom_fac_hints}"
         f"Generate 3 exclusive faction bounties for the {faction_name} notice board.\n"
         f"Respond with JSON matching exactly this schema:\n{FACTION_BOUNTY_SCHEMA}"
     )
 
     _is_llm_mocked = hasattr(call_llm_json, "_mock_name")
+    from mechanics.world.locations import format_clean_location_prose, clean_narrative_location_arrows
+    loc_short = format_clean_location_prose(loc, include_zone=False)
+    loc_prose = format_clean_location_prose(loc, include_zone=True, preposition="in")
     if _is_llm_mocked:
         result = await call_llm_json(FACTION_BOUNTY_SYSTEM_PROMPT, user_prompt, temperature=0.8,
                                       is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
         bounties_raw = result.get("bounties", []) or []
+    elif is_anom:
+        bounties_raw = _build_anomalous_fallback_bounties(
+            session_id=session_id,
+            board_key=f_arch or "public_agency",
+            default_loc=loc,
+            candidate_locations=candidate_locations,
+            faction_name=faction_name,
+            seed_offset=sum(ord(c) for c in str(faction_id or faction_name)),
+        )
     else:
         bounties_raw = [
             {
@@ -787,13 +1240,13 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
                 "reward_item": "Supply Ration",
                 "faction_rep_reward": 10,
                 "waypoints": [
-                    {"stage_index": 1, "stage_label": f"Deliver supplies to {loc}", "target_location": loc, "completion_trigger": "arrival"}
+                    {"stage_index": 1, "stage_label": f"Deliver supplies to {loc_short}", "target_location": loc, "completion_trigger": "arrival"}
                 ]
             },
             {
                 "quest_type": "Faction Subterfuge",
                 "title": f"Intelligence Gathering for {faction_name}",
-                "objective": f"Investigate rival movements near {loc}.",
+                "objective": f"Investigate rival movements near {loc_prose}.",
                 "client_npc": f"{faction_name} Spymaster",
                 "client_location": loc,
                 "reward_xp": 150,
@@ -801,7 +1254,7 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
                 "reward_item": "Ciphered Scroll",
                 "faction_rep_reward": 15,
                 "waypoints": [
-                    {"stage_index": 1, "stage_label": f"Scout area near {loc}", "target_location": loc, "completion_trigger": "arrival"}
+                    {"stage_index": 1, "stage_label": f"Scout area near {loc_short}", "target_location": loc, "completion_trigger": "arrival"}
                 ]
             }
         ]
@@ -811,8 +1264,8 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
             continue
         b_id = f"FBNT-{uuid.uuid4().hex[:8].upper()}"
         q_type = str(b.get("quest_type", "Faction Bounty"))
-        obj_text = str(b.get("objective", "Complete the faction task."))[:200]
-        title_text = str(b.get("title"))[:60]
+        obj_text = clean_narrative_location_arrows(str(b.get("objective", "Complete the faction task.")))[:200]
+        title_text = clean_narrative_location_arrows(str(b.get("title")))[:60]
         faction_rep_reward = max(5, min(20, int(b.get("faction_rep_reward", 10))))
 
         from mechanics.narrative.blueprints import get_blueprint_for_archetype, infer_required_item_and_count_from_text
@@ -844,6 +1297,12 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
             seed_str=b_id,
         )
 
+        q_notes = f"faction:{faction_id}|board_source:{f_arch}|rep_reward:{faction_rep_reward}" if (is_anom and f_arch) else f"faction:{faction_id}|rep_reward:{faction_rep_reward}"
+        if is_anom and ("non-hostile" in str(q_type or "").lower() or b.get("non_hostile_temperament")):
+            from mechanics.world.anomalous_events import get_non_hostile_entity_temperament, extract_non_hostile_entity_name
+            nh_t = str(b.get("non_hostile_temperament") or get_non_hostile_entity_temperament(seed_key=b_id))
+            nh_e = str(b.get("entity_name") or extract_non_hostile_entity_name({"title": title_text, "objective": obj_text}))
+            q_notes = f"{q_notes}|non_hostile_temperament:{nh_t}|entity_name:{nh_e}"
         db.upsert_quest(
             session_id=session_id,
             quest_id=b_id,
@@ -857,7 +1316,7 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
             reward_gold=max(5, min(120, int(b.get("reward_gold", 30)))),
             reward_stat_points=0,
             reward_item=str(b.get("reward_item", "") or "")[:60],
-            quest_notes=f"faction:{faction_id}|rep_reward:{faction_rep_reward}",
+            quest_notes=q_notes,
             blueprint_id=blueprint_id,
             client_npc=client_npc,
             client_location=client_loc,
@@ -879,12 +1338,18 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
             required_item=req_item,
         )
         if validated_wps:
-            from mechanics.world.locations import parse_tiered_location
+            from mechanics.world.locations import parse_tiered_location, clean_narrative_location_arrows
             for wp in validated_wps:
+                if wp.get("stage_label"):
+                    wp["stage_label"] = clean_narrative_location_arrows(wp["stage_label"])
                 raw_tgt = wp.get("target_location", "")
                 if raw_tgt:
-                    z_norm, p_norm, _ = parse_tiered_location(raw_tgt, scen_key, session_id=session_id)
-                    wp["target_location"] = f"{z_norm} ➔ {p_norm}"
+                    raw_parts = [x.strip() for x in raw_tgt.replace("->", "➔").split("➔") if x.strip()]
+                    z_norm, p_norm, s_norm = parse_tiered_location(raw_tgt, scen_key, session_id=session_id)
+                    if s_norm and len(raw_parts) >= 3:
+                        wp["target_location"] = f"{z_norm} ➔ {p_norm} ➔ {s_norm}"
+                    else:
+                        wp["target_location"] = f"{z_norm} ➔ {p_norm}"
             db.save_quest_waypoints(session_id=session_id, quest_id=b_id,
                                     waypoints=validated_wps, sub_obj_id=None)
 
@@ -928,7 +1393,7 @@ def build_consequence_followup_bounty(session_id: int, session: dict = None) -> 
     scen_key = session.get("scenario") or "fantasy"
     curr_day = int(session.get("current_day") or 1)
     curr_min = int(session.get("current_minute") or 480)
-    cur_loc = session.get("current_location") or "the central area"
+    cur_loc = _resolve_session_location(session_id, session, scen_key)
 
     all_quests = db.get_session_quests(session_id) or []
     candidate_q = None
@@ -1032,15 +1497,16 @@ def build_consequence_followup_bounty(session_id: int, session: dict = None) -> 
 
     # Waypoints: 2 stages (Stage 1 arrival/investigate, Stage 2 confront/resolve)
     from mechanics.world.waypoints import ensure_multi_stage_waypoints
-    from mechanics.world.locations import get_discovered_primary_locations
+    from mechanics.world.locations import get_discovered_primary_locations, format_clean_location_prose
     zones_dict = get_discovered_primary_locations(session_id, scen_key) or {}
     discovered_locs = [f"{z} ➔ {p}" for z, prims in zones_dict.items() for p in prims] if isinstance(zones_dict, dict) else list(zones_dict)
     alt_locs = [dl for dl in discovered_locs if dl.strip().lower() != cur_loc.strip().lower()]
     sec_loc = alt_locs[0] if alt_locs else cur_loc
     ter_loc = alt_locs[1] if len(alt_locs) >= 2 else sec_loc
+    cur_loc_short = format_clean_location_prose(cur_loc, include_zone=False)
 
     raw_wps = [
-        {"stage_index": 1, "stage_label": f"Investigate rumors of {new_target} at {cur_loc}", "target_location": cur_loc, "completion_trigger": "arrival"},
+        {"stage_index": 1, "stage_label": f"Investigate rumors of {new_target} at {cur_loc_short}", "target_location": cur_loc, "completion_trigger": "arrival"},
         {"stage_index": 2, "stage_label": f"Confront {new_target} and settle the matter", "target_location": sec_loc, "target_npc": new_target, "completion_trigger": "skill_check"},
     ]
     wps = ensure_multi_stage_waypoints(
@@ -1078,7 +1544,7 @@ def seed_contact_commission_if_eligible(session_id: int, session: dict = None) -
     scen_key = session.get("scenario") or "fantasy"
     curr_day = int(session.get("current_day") or 1)
     curr_min = int(session.get("current_minute") or 480)
-    cur_loc = session.get("current_location") or "the central area"
+    cur_loc = _resolve_session_location(session_id, session, scen_key)
 
     existing_quests = db.get_session_quests(session_id) or []
     # Cap active/available personal commissions to 1 at a time
@@ -1163,15 +1629,16 @@ def seed_contact_commission_if_eligible(session_id: int, session: dict = None) -
     )
 
     from mechanics.world.waypoints import ensure_multi_stage_waypoints
-    from mechanics.world.locations import get_discovered_primary_locations
+    from mechanics.world.locations import get_discovered_primary_locations, format_clean_location_prose
     zones_dict = get_discovered_primary_locations(session_id, scen_key) or {}
     discovered_locs = [f"{z} ➔ {p}" for z, prims in zones_dict.items() for p in prims] if isinstance(zones_dict, dict) else list(zones_dict)
     alt_locs = [dl for dl in discovered_locs if dl.strip().lower() != c_loc.strip().lower()]
     sec_loc = alt_locs[0] if alt_locs else c_loc
     ter_loc = alt_locs[1] if len(alt_locs) >= 2 else sec_loc
+    c_loc_short = format_clean_location_prose(c_loc, include_zone=False)
 
     raw_wps = [
-        {"stage_index": 1, "stage_label": f"Meet with {c_name} at {c_loc} to discuss the matter", "target_location": c_loc, "target_npc": c_name, "completion_trigger": "arrival"},
+        {"stage_index": 1, "stage_label": f"Meet with {c_name} at {c_loc_short} to discuss the matter", "target_location": c_loc, "target_npc": c_name, "completion_trigger": "arrival"},
         {"stage_index": 2, "stage_label": f"Resolve the confidential matter for {c_name}", "target_location": sec_loc, "completion_trigger": "skill_check"},
     ]
     wps = ensure_multi_stage_waypoints(
@@ -1223,9 +1690,9 @@ def replenish_daily_bounties_deterministic(
     scen_key = session.get("scenario") or "fantasy"
     curr_day = int(session.get("current_day") or 1)
     curr_min = int(session.get("current_minute") or 480)
-    cur_loc = session.get("current_location") or "the central area"
+    cur_loc = _resolve_session_location(session_id, session, scen_key)
 
-    avail = db.get_session_quests(session_id, status="Available") or []
+    avail = _filter_general_bounties(db.get_session_quests(session_id, status="Available") or [])
     if len(avail) >= 3 and not force:
         return avail
 
@@ -1249,47 +1716,78 @@ def replenish_daily_bounties_deterministic(
     sec_loc = alt_locs[0] if alt_locs else cur_loc
     ter_loc = alt_locs[1] if len(alt_locs) >= 2 else sec_loc
 
-    fallback_templates = [
-        {
-            "blueprint_id": "ACQUISITION",
-            "quest_type": "Resource Scavenge",
-            "title": "Stockpile Scavenge",
-            "objective": f"Gather vital supplies and materials from {sec_loc} for the local guild stockpile.",
-            "reward_xp": 120,
-            "reward_gold": 35,
-            "req_item": "Supply Crate",
-            "stages": [
-                {"stage_index": 1, "stage_label": f"Scout the perimeter of {cur_loc} for supply leads", "target_location": cur_loc, "completion_trigger": "arrival"},
-                {"stage_index": 2, "stage_label": f"Collect the Supply Crate at {sec_loc}", "target_location": sec_loc, "completion_trigger": "skill_check"},
-            ]
-        },
-        {
-            "blueprint_id": "INVESTIGATION",
-            "quest_type": "Perimeter Patrol",
-            "title": "Perimeter Security Sweep",
-            "objective": f"Conduct a reconnaissance sweep around {sec_loc} to assess recent disturbances.",
-            "reward_xp": 130,
-            "reward_gold": 40,
-            "req_item": "",
-            "stages": [
-                {"stage_index": 1, "stage_label": f"Patrol the boundaries of {cur_loc}", "target_location": cur_loc, "completion_trigger": "arrival"},
-                {"stage_index": 2, "stage_label": f"Examine physical clues and inspect the perimeter at {sec_loc}", "target_location": sec_loc, "completion_trigger": "skill_check"},
-            ]
-        },
-        {
-            "blueprint_id": "NEUTRALIZATION",
-            "quest_type": "Bounty Hunting",
-            "title": "Rogue Marauder Bounty",
-            "objective": f"A hostile marauder is reported roaming near {ter_loc}. Track and subdue them.",
-            "reward_xp": 150,
-            "reward_gold": 45,
-            "req_item": "",
-            "stages": [
-                {"stage_index": 1, "stage_label": f"Track the marauder's trail from {cur_loc}", "target_location": cur_loc, "completion_trigger": "arrival"},
-                {"stage_index": 2, "stage_label": f"Confront the marauder at {ter_loc} and neutralize the threat", "target_location": ter_loc, "completion_trigger": "skill_check"},
-            ]
-        },
-    ]
+    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        from mechanics.narrative.blueprints import get_blueprint_for_archetype
+        anom_loc_pool = _collect_anomalous_bounty_candidate_locations(session_id, scen_key)
+        anom_alt = [dl for dl in anom_loc_pool if dl.strip().lower() != cur_loc.strip().lower()] or alt_locs or [cur_loc]
+        anom_cands = _build_anomalous_fallback_bounties(
+            session_id=session_id,
+            board_key="freelance_app",
+            default_loc=cur_loc,
+            candidate_locations=anom_alt,
+            seed_offset=curr_day * 7,
+        )
+        fallback_templates = [
+            {
+                "blueprint_id": get_blueprint_for_archetype(ac["quest_type"]),
+                "quest_type": ac["quest_type"],
+                "title": ac["title"],
+                "objective": ac["objective"],
+                "reward_xp": ac["reward_xp"],
+                "reward_gold": ac["reward_gold"],
+                "req_item": ac.get("required_item", ""),
+                "stages": ac["waypoints"],
+            }
+            for ac in anom_cands
+        ]
+    else:
+        from mechanics.world.locations import format_clean_location_prose
+        cur_short = format_clean_location_prose(cur_loc, include_zone=False)
+        sec_prose = format_clean_location_prose(sec_loc, include_zone=True, preposition="in")
+        sec_short = format_clean_location_prose(sec_loc, include_zone=False)
+        ter_prose = format_clean_location_prose(ter_loc, include_zone=True, preposition="in")
+        ter_short = format_clean_location_prose(ter_loc, include_zone=False)
+        fallback_templates = [
+            {
+                "blueprint_id": "ACQUISITION",
+                "quest_type": "Resource Scavenge",
+                "title": "Stockpile Scavenge",
+                "objective": f"Gather vital supplies and materials from {sec_prose} for the local guild stockpile.",
+                "reward_xp": 120,
+                "reward_gold": 35,
+                "req_item": "Supply Crate",
+                "stages": [
+                    {"stage_index": 1, "stage_label": f"Scout the perimeter of {cur_short} for supply leads", "target_location": cur_loc, "completion_trigger": "arrival"},
+                    {"stage_index": 2, "stage_label": f"Collect the Supply Crate at {sec_short}", "target_location": sec_loc, "completion_trigger": "skill_check"},
+                ]
+            },
+            {
+                "blueprint_id": "INVESTIGATION",
+                "quest_type": "Perimeter Patrol",
+                "title": "Perimeter Security Sweep",
+                "objective": f"Conduct a reconnaissance sweep around {sec_prose} to assess recent disturbances.",
+                "reward_xp": 130,
+                "reward_gold": 40,
+                "req_item": "",
+                "stages": [
+                    {"stage_index": 1, "stage_label": f"Patrol the boundaries of {cur_short}", "target_location": cur_loc, "completion_trigger": "arrival"},
+                    {"stage_index": 2, "stage_label": f"Examine physical clues and inspect the perimeter at {sec_short}", "target_location": sec_loc, "completion_trigger": "skill_check"},
+                ]
+            },
+            {
+                "blueprint_id": "NEUTRALIZATION",
+                "quest_type": "Bounty Hunting",
+                "title": "Rogue Marauder Bounty",
+                "objective": f"A hostile marauder is reported roaming near {ter_prose}. Track and subdue them.",
+                "reward_xp": 150,
+                "reward_gold": 45,
+                "req_item": "",
+                "stages": [
+                    {"stage_index": 1, "stage_label": f"Track the marauder's trail from {cur_short}", "target_location": cur_loc, "completion_trigger": "arrival"},
+                    {"stage_index": 2, "stage_label": f"Confront the marauder at {ter_short} and neutralize the threat", "target_location": ter_loc, "completion_trigger": "skill_check"},
+                ]
+            },
+        ]
 
     from mechanics.world.waypoints import ensure_multi_stage_waypoints
 
@@ -1327,6 +1825,7 @@ def replenish_daily_bounties_deterministic(
             status="Available",
             reward_xp=tmpl["reward_xp"],
             reward_gold=tmpl["reward_gold"],
+            quest_notes="board_source:freelance_app" if scenario_data.is_anomalous_incursions_scenario(scen_key) else "",
             blueprint_id=tmpl["blueprint_id"],
             client_npc=client_name,
             client_location=client_loc,
@@ -1355,6 +1854,380 @@ def replenish_daily_bounties_deterministic(
         if new_q:
             avail.append(new_q)
 
-    return db.get_session_quests(session_id, status="Available")
+    return _filter_general_bounties(db.get_session_quests(session_id, status="Available"))
+
+
+# -----------------------------------------------------------------------------
+# Anomalous Incursions: Mandatory Daily Bounty, Eligibility Matrix & Loot Rules
+# -----------------------------------------------------------------------------
+
+def parse_anomalous_quest_board_source(quest: dict, session_id: int | None = None) -> str:
+    """
+    Infers the originating board/source of a quest in Anomalous Incursions:
+    - `'story_quest'` for Main Story Quests (`is_story_quest == 1`)
+    - `'public_agency'`, `'private_agency_1'`, `'private_agency_2'`, `'monastic_order'`,
+      `'cult_faction'`, `'clandestine_faction'`, or `'freelance_app'`.
+    """
+    if not quest:
+        return "freelance_app"
+    if quest.get("is_story_quest") or quest.get("quest_type") in ("Story Quest", "Main Quest"):
+        return "story_quest"
+
+    notes = str(quest.get("quest_notes") or "")
+    faction_id = ""
+    for part in notes.replace("\n", "|").split("|"):
+        p = part.strip()
+        if p.startswith("board_source:"):
+            return p.split(":", 1)[1].strip().lower()
+        if p.startswith("faction:"):
+            faction_id = p.split(":", 1)[1].strip()
+
+    if faction_id and session_id:
+        try:
+            from mechanics.social.factions import infer_anomalous_faction_archetype
+            fac = db.get_faction(session_id, faction_id)
+            if fac:
+                return infer_anomalous_faction_archetype(fac)
+        except Exception:
+            pass
+
+    q_id = str(quest.get("quest_id") or "").upper()
+    if q_id.startswith("MAND-"):
+        if session_id:
+            try:
+                from mechanics.social.factions import get_anomalous_faction_state
+                st = get_anomalous_faction_state(session_id)
+                return str(st.get("faction_archetype_key") or "public_agency")
+            except Exception:
+                pass
+        return "public_agency"
+    return "freelance_app"
+
+
+def dispatch_anomalous_mandatory_daily_bounty(
+    session_id: int,
+    current_day: int,
+    faction_archetype_key: str,
+    faction_name: str = "",
+    scen_key: str = "anomalous_incursions",
+) -> dict | None:
+    """
+    Automatically generates and inserts the player's Mandatory Daily Bounty (`status='Active'`)
+    for `current_day` when affiliated with `public_agency`, `private_agency_1`, `private_agency_2`,
+    or `monastic_order`. Freelancers (`freelancer`) receive no mandatory daily bounty.
+    """
+    if not scenario_data.is_anomalous_incursions_scenario(scen_key):
+        return None
+    arch = str(faction_archetype_key or "").strip().lower()
+    if not arch or arch == "freelancer":
+        return None
+
+    day_num = max(1, int(current_day or 1))
+    prefix = f"MAND-D{day_num}-"
+
+    all_quests = db.get_session_quests(session_id) or []
+    for q in all_quests:
+        qid = str(q.get("quest_id") or "")
+        if qid.startswith(prefix) and q.get("status") in ("Active", "Completed"):
+            return {
+                "quest_id": qid,
+                "title": q.get("title", ""),
+                "quest_type": q.get("quest_type", ""),
+                "objective": q.get("objective", ""),
+                "location": q.get("client_location", "") or "Metropolitan Grid",
+                "deadline_day": day_num,
+            }
+        # Mark any uncompleted mandatory bounties from earlier days as Failed
+        notes = str(q.get("quest_notes") or "")
+        if ("mandatory_daily:1" in notes or qid.startswith("MAND-D")) and not qid.startswith(prefix) and q.get("status") == "Active":
+            try:
+                db.update_quest_status(session_id, qid, "Failed")
+            except Exception:
+                pass
+
+    # Candidate city locations (outside safe Agency HQs / Player House, with consolidated complex wings expanded)
+    candidate_locations = _collect_anomalous_bounty_candidate_locations(session_id, scen_key)
+    if not candidate_locations:
+        candidate_locations = ["Metropolitan Grid ➔ Central Transit Station", "Downtown Commercial District ➔ Neon Arcade Plaza"]
+
+    import namegen
+    from mechanics.narrative.blueprints import get_blueprint_for_archetype
+    from mechanics.world.waypoints import ensure_multi_stage_waypoints
+    from mechanics.social.factions import get_anomalous_faction_state, save_anomalous_faction_state
+
+    preferred = ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS.get(arch, ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS["public_agency"])
+    arch_by_label = {a["label"]: a for a in ANOMALOUS_BOUNTY_ARCHETYPES}
+    seed_idx = int(session_id or 1) * 31 + day_num * 17
+    chosen_label = preferred[seed_idx % len(preferred)]
+    meta = arch_by_label.get(chosen_label, ANOMALOUS_BOUNTY_ARCHETYPES[0])
+
+    from mechanics.world.locations import format_clean_location_prose
+    target_loc = candidate_locations[seed_idx % len(candidate_locations)]
+    sec_loc = candidate_locations[(seed_idx + 3) % len(candidate_locations)]
+    target_prose = format_clean_location_prose(target_loc, include_zone=True, preposition="in")
+    target_short = format_clean_location_prose(target_loc, include_zone=False)
+    entity_name = namegen.generate_anomalous_entity_name(hash_val=seed_idx)
+
+    fac_label = faction_name or "Command Dispatch"
+    q_id = f"{prefix}{uuid.uuid4().hex[:6].upper()}"
+    is_nh_mand = "non-hostile" in chosen_label.lower()
+    nh_mand_temp = ""
+    if is_nh_mand:
+        from mechanics.world.anomalous_events import get_non_hostile_entity_temperament
+        nh_mand_temp = get_non_hostile_entity_temperament(seed_key=q_id)
+        mand_cue = (
+            "Timid/elusive—startling risks escape."
+            if nh_mand_temp == "timid"
+            else "Volatile/territorial—provoking risks combat."
+        )
+        objective = (
+            f"[MANDATORY DAILY DISPATCH — {fac_label}] Contain '{entity_name}' alive at {target_prose} before 24:00. {mand_cue}"
+        )[:200]
+    else:
+        objective = (
+            f"[MANDATORY DAILY DISPATCH — {fac_label}] {meta['default_objective']} "
+            f"Respond to '{entity_name}' at {target_prose} before 24:00 today."
+        )[:200]
+    title = f"[Mandatory] {meta['title_prefix']}: {entity_name}"[:58]
+    blueprint_id = get_blueprint_for_archetype(chosen_label, objective)
+    req_item = meta.get("req_item", "")
+
+    fac_state = get_anomalous_faction_state(session_id)
+    fac_id = str(fac_state.get("joined_faction_id") or arch)
+    q_notes = f"mandatory_daily:1|faction:{fac_id}|board_source:{arch}|rep_reward:15"
+    if is_nh_mand:
+        q_notes = f"{q_notes}|non_hostile_temperament:{nh_mand_temp}|entity_name:{entity_name}"
+
+    # Base gold (confiscated automatically at claim time for Public Agency / Monastic Order)
+    base_gold = 95 if arch in ("private_agency_1", "private_agency_2") else 75
+
+    db.upsert_quest(
+        session_id=session_id,
+        quest_id=q_id,
+        quest_type=chosen_label,
+        title=title,
+        objective=objective,
+        progress=f"0/1 {req_item} Collected" if (blueprint_id == "ACQUISITION" and req_item) else "0/1 Target Sighted",
+        current_clues="",
+        status="Active",
+        reward_xp=160,
+        reward_gold=base_gold,
+        reward_stat_points=0,
+        reward_item="Trauma Medkit" if arch in ("private_agency_1", "private_agency_2", "monastic_order") else "",
+        quest_notes=q_notes,
+        blueprint_id=blueprint_id,
+        client_npc=f"{fac_label} Dispatch Officer",
+        client_location=target_loc,
+        required_item=req_item,
+        required_item_count=1 if req_item else 0,
+        deadline_day=day_num,
+        deadline_minute=1439,
+    )
+
+    stage_2_mand_lbl = (
+        f"Encounter and contain non-hostile entity '{entity_name}' alive"
+        if is_nh_mand
+        else f"Resolve mandatory containment directive for '{entity_name}'"
+    )
+    raw_wps = [
+        {"stage_index": 1, "stage_label": f"Deploy to {target_short} and verify anomaly readings", "target_location": target_loc, "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": stage_2_mand_lbl, "target_location": sec_loc, "completion_trigger": "skill_check"},
+    ]
+    wps = ensure_multi_stage_waypoints(
+        raw_wps,
+        default_loc=target_loc,
+        archetype=chosen_label,
+        secondary_loc=sec_loc,
+        session_id=session_id,
+        scen_key=scen_key,
+        client_npc=f"{fac_label} Dispatch Officer",
+        client_location=target_loc,
+        required_item=req_item,
+    )
+    if wps:
+        db.save_quest_waypoints(session_id=session_id, quest_id=q_id, waypoints=wps, sub_obj_id=None)
+
+    if fac_state:
+        fac_state["mandatory_bounty_id"] = q_id
+        fac_state["mandatory_bounty_completed_today"] = False
+        fac_state["mandatory_bounty_penalized_today"] = False
+        save_anomalous_faction_state(session_id, fac_state)
+
+    return {
+        "quest_id": q_id,
+        "title": title,
+        "quest_type": chosen_label,
+        "objective": objective,
+        "location": target_loc,
+        "deadline_day": day_num,
+    }
+
+
+def evaluate_anomalous_bounty_eligibility(
+    session_id: int,
+    user_id: int | None,
+    quest: dict,
+) -> dict:
+    """
+    Evaluates whether the player's current Anomalous Incursions Faction Affiliation permits
+    accepting `quest`, enforcing the strict Faction Bounty Eligibility Matrix:
+    - `public_agency`: Public Agency + Smartphone Freelance App ONLY. Blocked from Private Agencies & Monastic Order.
+    - `private_agency_1`: Own Private #1 + Public Agency (Contract Work) + Freelance App. Blocked from Rival Private #2 & Monastic Order.
+    - `private_agency_2`: Own Private #2 + Public Agency (Contract Work) + Freelance App. Blocked from Rival Private #1 & Monastic Order.
+    - `monastic_order`: Own Monastic Order + Public Agency (Contract Work) + Freelance App. Blocked from Private Agencies #1 & #2.
+    - `freelancer`: Public Agency (Contract Work) + Freelance App. Blocked from internal Private Agency & Monastic Order boards.
+    - All Operatives: Blocked from `cult_faction` and `clandestine_faction` boards.
+    """
+    from mechanics.social.factions import get_anomalous_faction_state
+
+    fac_state = get_anomalous_faction_state(session_id, user_id=user_id)
+    player_arch = str(fac_state.get("faction_archetype_key") or "public_agency")
+    board_src = parse_anomalous_quest_board_source(quest, session_id=session_id)
+
+    if board_src in ("cult_faction", "clandestine_faction"):
+        return {
+            "allowed": False,
+            "player_faction": player_arch,
+            "board_source": board_src,
+            "is_contract_work": False,
+            "reason": "Unlicensed occult cult and clandestine syndicate contracts are strictly off-limits.",
+        }
+
+    allowed_map: dict[str, set[str]] = {
+        "public_agency": {"public_agency", "freelance_app", "story_quest"},
+        "private_agency_1": {"private_agency_1", "public_agency", "freelance_app", "story_quest"},
+        "private_agency_2": {"private_agency_2", "public_agency", "freelance_app", "story_quest"},
+        "monastic_order": {"monastic_order", "public_agency", "freelance_app", "story_quest"},
+        "freelancer": {"public_agency", "freelance_app", "story_quest"},
+    }
+    allowed_set = allowed_map.get(player_arch, {"public_agency", "freelance_app", "story_quest"})
+    is_allowed = board_src in allowed_set
+    is_contract = is_allowed and board_src == "public_agency" and player_arch != "public_agency"
+
+    if is_allowed:
+        return {
+            "allowed": True,
+            "player_faction": player_arch,
+            "board_source": board_src,
+            "is_contract_work": is_contract,
+            "reason": "Contract work authorized." if is_contract else "Authorized.",
+        }
+
+    if player_arch == "public_agency":
+        reason = "As a state-salaried Public Agency operative, jurisdiction law prohibits accepting bounties from Private Agencies or the Monastic Shrine Order (Freelance App commissions remain permitted)."
+    elif player_arch in ("private_agency_1", "private_agency_2"):
+        if board_src in ("private_agency_1", "private_agency_2"):
+            reason = "Corporate non-compete clauses prohibit accepting bounties from a rival Private Agency!"
+        else:
+            reason = "Private Agency operatives are not permitted to accept internal Monastic Shrine Order rites."
+    elif player_arch == "monastic_order":
+        reason = "Monastic Shrine Order vows prohibit accepting commercial contracts from Private Agencies (Public Agency contract work & Freelance App commissions are permitted)."
+    else:
+        reason = "Independent Freelancers lack security clearance for internal Private Agency or Monastic Shrine boards (Public Agency contract work & Freelance App commissions are open)."
+
+    return {
+        "allowed": False,
+        "player_faction": player_arch,
+        "board_source": board_src,
+        "is_contract_work": False,
+        "reason": reason,
+    }
+
+
+def should_confiscate_anomalous_combat_loot(
+    session_id: int,
+    session: dict | None = None,
+    user_id: int | None = None,
+    defeated_enemies: list | None = None,
+) -> bool:
+    """
+    Determines whether combat gold & fallen-anomaly loot must be confiscated under the
+    Public Agency Taxpayer Mandate in Anomalous Incursions:
+    - Returns `True` ONLY when:
+      1. Scenario is `Anomalous Incursions` (or variant), AND
+      2. Player belongs to `public_agency`, AND
+      3. Combat is NOT a Daily Anomalous Incursion or Random Encounter, AND
+      4. Player is engaged on an Active Public Agency Bounty (`board_source == 'public_agency'` or `mandatory_daily:1`)
+         or Main Story Quest (`is_story_quest == 1`), rather than a Freelance App commission.
+    - Private Agencies, Monastic Shrine Order, and Freelancers ALWAYS return `False` (keep 100% combat spoils).
+    """
+    if session is None and session_id:
+        session = db.get_session(session_id) or {}
+    elif session is None:
+        session = {}
+
+    scen_key = str(session.get("scenario") or "fantasy")
+    if not scenario_data.is_anomalous_incursions_scenario(scen_key):
+        return False
+
+    from mechanics.social.factions import get_anomalous_faction_state
+    fac_state = get_anomalous_faction_state(session_id, user_id=user_id)
+    if str(fac_state.get("faction_archetype_key") or "") != "public_agency":
+        return False
+
+    # 1. Check if combat came from a Daily Incursion or Random Encounter (player keeps loot!)
+    for e in (defeated_enemies or []):
+        if isinstance(e, dict) and (e.get("incursion_id") or e.get("is_random_encounter")):
+            return False
+    try:
+        from mechanics.world.anomalous_events import get_active_incursion_at_location
+        if get_active_incursion_at_location(session_id, session.get("current_location", ""), session.get("current_node_id", "")):
+            return False
+    except Exception:
+        pass
+
+    # Explicit override flag on session if set
+    explicit_src = str(session.get("_active_combat_quest_source") or "").strip().lower()
+    if explicit_src == "freelance_app":
+        return False
+    if explicit_src in ("public_agency", "story_quest"):
+        return True
+
+    # 2. Inspect active quests and waypoints relative to current location
+    active_quests = db.get_session_quests(session_id, status="Active") or []
+    raw_cur_loc = str(session.get("current_location") or "")
+    cur_loc = raw_cur_loc.lower()
+    cur_leaf = cur_loc.split("➔")[-1].strip() if "➔" in cur_loc else cur_loc
+    cur_primary = ""
+    try:
+        from mechanics.world.locations import parse_tiered_location
+        _, p_loc, _ = parse_tiered_location(raw_cur_loc, scen_key, session_id=session_id)
+        cur_primary = str(p_loc or "").strip().lower()
+    except Exception:
+        parts_loc = [p.strip() for p in cur_loc.split("➔") if p.strip()]
+        if len(parts_loc) >= 2:
+            cur_primary = parts_loc[1]
+
+    has_matching_freelance = False
+    has_matching_public_or_story = False
+    has_any_public_or_story = False
+    has_any_freelance = False
+
+    for q in active_quests:
+        src = parse_anomalous_quest_board_source(q, session_id=session_id)
+        qid = q.get("quest_id", "")
+        wps = db.get_quest_waypoints(session_id, qid) if qid else []
+        wp_match = any(
+            (cur_primary and cur_primary in str(wp.get("target_location") or "").lower())
+            or (cur_leaf and cur_leaf in str(wp.get("target_location") or "").lower())
+            for wp in (wps or [])
+        )
+        if src == "freelance_app":
+            has_any_freelance = True
+            if wp_match:
+                has_matching_freelance = True
+        elif src in ("public_agency", "story_quest"):
+            has_any_public_or_story = True
+            if wp_match:
+                has_matching_public_or_story = True
+
+    if has_matching_freelance and not has_matching_public_or_story:
+        return False
+    if has_matching_public_or_story:
+        return True
+    if has_any_freelance and not has_any_public_or_story:
+        return False
+    return has_any_public_or_story
+
 
 

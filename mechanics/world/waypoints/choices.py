@@ -42,6 +42,16 @@ def get_active_companion_for_waypoint(session_id: int | dict, wp: dict) -> dict 
     if not sid:
         return None
     try:
+        # Phase 5 A18: Companion Assistance Privacy Gate
+        sess = session_id if isinstance(session_id, dict) else db.get_session(sid)
+        if isinstance(sess, dict):
+            cur_nid = sess.get("current_node_id") or ""
+            curr_node = db.get_world_node(sid, cur_nid) if cur_nid else None
+            if curr_node and curr_node.get("privacy_level") == "private":
+                intimate_active = bool(sess.get("_intimate_active") or sess.get("intimate_contact"))
+                if not intimate_active:
+                    return None
+
         party = list(db.get_session_party_npcs(sid) or [])
         temp_comps = list(db.get_temporary_companions(sid) or [])
         all_raw = party + temp_comps
@@ -118,17 +128,23 @@ def generate_quest_action_choices(
 
     quest_choices = []
 
-    # 1. Check if Story Quest is in Climax Ready state
-    story_quest, climax_loc = get_story_quest_climax_location(session_id)
+    # 1. Check if Story Quest is in Climax Ready state (or premature showdown)
+    story_quest, climax_loc = get_story_quest_climax_location(session_id, allow_premature=True)
     if story_quest and climax_loc and check_location_matches_waypoint(current_location, climax_loc):
         sq_title = story_quest.get("title", "Story Quest")
+        sub_objs = story_quest.get("sub_objectives", []) or []
+        is_premature = bool(sub_objs and not all(isinstance(so, dict) and so.get("completed") for so in sub_objs))
         stat = "CHA" if "high_school" in scen_key or "modern" in scen_key else ("INT" if "sci" in scen_key else "STR")
         req = 6
         if char and isinstance(char.get("stats"), dict):
             c_stat = int(char["stats"].get(stat, 5))
             req = max(4, min(10, c_stat))
+        if is_premature:
+            req += 4  # Phase 5 A11: +4 DC penalty for premature confrontation
 
-        if "high_school" in scen_key or "modern" in scen_key:
+        if is_premature:
+            climax_label = f"⚡ [Story Climax - Premature Showdown] Confront the threat for '{sq_title}' without full evidence ({stat})"
+        elif "high_school" in scen_key or "modern" in scen_key:
             climax_label = f"⚡ [Story Climax] Present your resolution plan for '{sq_title}' and coordinate the student body ({stat})"
         elif "cyberpunk" in scen_key or "scifi" in scen_key:
             climax_label = f"⚡ [Story Climax] Execute the final operation and secure '{sq_title}' ({stat})"
@@ -153,6 +169,7 @@ def generate_quest_action_choices(
             "stage_index": 99,
             "is_quest_action": True,
             "is_climax_action": True,
+            "is_premature_climax": is_premature,
             "contract_type": "climax"
         })
 
@@ -161,15 +178,21 @@ def generate_quest_action_choices(
         return []
 
     for wp in active_wps:
-        from .matching import resolve_effective_waypoint_location, is_waypoint_npc_present_in_scene, resolve_waypoint_target_npc
+        from .matching import (
+            resolve_effective_waypoint_location,
+            is_waypoint_npc_present_in_scene,
+            resolve_waypoint_target_npc,
+            can_waypoint_match_via_npc_presence,
+        )
         target_loc = wp.get("target_location", "")
         target_npc = resolve_waypoint_target_npc(session_id, wp) or wp.get("target_npc", "")
         eff_loc = resolve_effective_waypoint_location(session_id, wp) if session_id else target_loc
         static_loc = wp.get("static_target_location") or target_loc
+        can_npc_match = can_waypoint_match_via_npc_presence(target_npc, wp.get("stage_key", ""), current_location, wp)
         loc_matched = (
             (eff_loc and check_location_matches_waypoint(current_location, eff_loc))
             or (static_loc and check_location_matches_waypoint(current_location, static_loc))
-            or (bool(target_npc) and is_waypoint_npc_present_in_scene(session_id, target_npc))
+            or (bool(target_npc) and can_npc_match and is_waypoint_npc_present_in_scene(session_id, target_npc))
         )
         if not loc_matched:
             continue
@@ -307,6 +330,33 @@ def generate_quest_action_choices(
             clean_stage = f"[⚠️ Out of Window: +{out_of_window_dc_penalty} DC / High Alert] {clean_stage}"
 
         req_item = wp.get("required_item") or wp.get("quest_required_item") or ""
+
+        # Special Case: Anomalous Incursions Out-of-Combat Non-Hostile Entity Containment (all 4 narrative approaches)
+        try:
+            import scenario_data
+            if scenario_data.is_anomalous_incursions_scenario(scen_key):
+                from mechanics.world.anomalous_events import (
+                    is_non_hostile_entity_containment_waypoint,
+                    extract_non_hostile_entity_name,
+                    build_non_hostile_narrative_choices,
+                )
+                if is_non_hostile_entity_containment_waypoint(wp, all_wps=all_wps):
+                    ent_nm = extract_non_hostile_entity_name(wp)
+                    nh_choices = build_non_hostile_narrative_choices(
+                        ent_nm,
+                        mode="quest",
+                        char=char,
+                        quest_id=qid,
+                        sub_obj_id=sub_obj_id,
+                        stage_index=stage_idx,
+                        is_story_quest=is_story,
+                        contract_type=trigger,
+                        dc_mod=out_of_window_dc_penalty,
+                    )
+                    quest_choices.extend(nh_choices)
+                    break
+        except Exception:
+            pass
 
         # Special Case: Guaranteed Stage 3 Turn-In after sparing the target
         if res_approach == "spared_deception" and stage_idx >= 3:
@@ -475,6 +525,17 @@ def generate_quest_action_choices(
         if len(quest_choices) >= 3:
             break
 
+    for qc in quest_choices:
+        if isinstance(qc, dict) and qc.get("is_quest_action"):
+            qc["_python_verified_quest"] = True
+            qc["_server_stamped"] = True
+            if int(qc.get("gold_cost") or 0) > 0 and not qc.get("gold_spent"):
+                qc["gold_spent"] = int(qc["gold_cost"])
+            if qc.get("approach") == "breakthrough_leverage":
+                qc["breakthrough_leveraged"] = True
+            if int(qc.get("wait_minutes") or 0) > 0 and not qc.get("skip_minutes"):
+                qc["skip_minutes"] = int(qc["wait_minutes"])
+
     return quest_choices
 
 
@@ -491,6 +552,30 @@ def _extract_word_stems(words: set[str] | list[str]) -> set[str]:
                 stems.add(w[:-len(suf)])
                 break
     return stems
+
+
+def _strip_unverified_quest_flags(raw_choices: list) -> list:
+    """Strips unverified quest tags, badges, and prefixes from choices when no quest matches the current location."""
+    cleaned = []
+    for c in raw_choices:
+        if not isinstance(c, dict):
+            cleaned.append(c)
+            continue
+        c_copy = dict(c)
+        c_copy["is_quest_action"] = False
+        c_copy["is_story_quest"] = False
+        c_copy["is_climax_action"] = False
+        c_copy["_python_verified_quest"] = False
+        c_copy["quest_id"] = ""
+        c_copy["sub_obj_id"] = None
+        c_copy["stage_index"] = None
+        c_copy["contract_type"] = ""
+        lbl = str(c_copy.get("label", ""))
+        lbl_clean = re.sub(r"^[⭐🎯⚡🔹\s\[\]]+(?:bounty|story quest|story climax|quest)?\]?\s*", "", lbl, flags=re.IGNORECASE).strip()
+        if lbl_clean:
+            c_copy["label"] = lbl_clean
+        cleaned.append(c_copy)
+    return cleaned
 
 
 def tag_and_enrich_quest_choices(
@@ -519,6 +604,8 @@ def tag_and_enrich_quest_choices(
         "aftercare", "aftershocks", "tremors", "arousal", "pleasure", "lick",
         "fuck", "fucking", "fucked", "pussy", "cock", "clit", "straddle",
     )
+
+    session_row = db.get_session(session_id) if session_id else None
 
     if session_id:
         try:
@@ -551,7 +638,10 @@ def tag_and_enrich_quest_choices(
                     if not any("break" in str(c.get("label", "")).lower() or "struggle" in str(c.get("label", "")).lower() for c in choices if isinstance(c, dict)):
                         choices.insert(0, break_free_choice)
 
-                    has_companions = bool(current_npcs or (session_row and session_row.get("party_npcs_json")))
+                    has_companions = bool(
+                        current_npcs
+                        or (session_row and (session_row.get("party_npcs") or session_row.get("party_npcs_json") or session_row.get("temporary_companions")))
+                    )
                     if has_companions:
                         companion_cut_choice = {
                             "label": "🗣️ [Ask for Help] Signal your companion to cut and untie your bonds",
@@ -618,7 +708,6 @@ def tag_and_enrich_quest_choices(
 
     # Detect if characters are in active 1-on-1 or group dialogue
     from mechanics.world.mobility import get_session_dialogue_partners
-    session_row = db.get_session(session_id)
     if dialogue_partner is not ...:
         if isinstance(dialogue_partner, list):
             active_dps = [str(p).strip() for p in dialogue_partner if str(p).strip()]
@@ -631,33 +720,40 @@ def tag_and_enrich_quest_choices(
     in_active_dialogue = bool(active_dps)
     dp_name = active_dps[0].lower() if in_active_dialogue else ""
 
-    # Check if there are active phone appointments at this location
+    # Check if there are active rendezvous commitments at this location
     appts_at_loc = []
     try:
-        appts = db.get_phone_appointments(session_id, status="pending") + db.get_phone_appointments(session_id, status="arrived")
+        from mechanics.system.commitments_engine import get_active_commitments
+        appts = get_active_commitments(session_id, commitment_type="rendezvous", limit=20)
         for appt in appts:
-            appt_loc = appt.get("rendezvous_location", "")
+            appt_loc = appt.get("target_location") or appt.get("rendezvous_location") or ""
             if appt_loc and check_location_matches_waypoint(current_location, appt_loc):
                 appts_at_loc.append(appt)
     except Exception:
         pass
 
     if not active_wps and not climax_ready_at_loc and not appts_at_loc:
-        return choices
+        return _strip_unverified_quest_flags(choices)
 
     # Find active waypoints matching current location or NPC presence
-    from .matching import resolve_effective_waypoint_location, is_waypoint_npc_present_in_scene, resolve_waypoint_target_npc
+    from .matching import (
+        resolve_effective_waypoint_location,
+        is_waypoint_npc_present_in_scene,
+        resolve_waypoint_target_npc,
+        can_waypoint_match_via_npc_presence,
+    )
     matching_wps = []
     for wp in active_wps:
         eff_loc = resolve_effective_waypoint_location(session_id, wp) if session_id else wp.get("target_location", "")
         t_npc = resolve_waypoint_target_npc(session_id, wp) or wp.get("target_npc", "")
+        can_npc_match = can_waypoint_match_via_npc_presence(t_npc, wp.get("stage_key", ""), current_location, wp)
         if (eff_loc and check_location_matches_waypoint(current_location, eff_loc)) or (
-            bool(t_npc) and is_waypoint_npc_present_in_scene(session_id, t_npc)
+            bool(t_npc) and can_npc_match and is_waypoint_npc_present_in_scene(session_id, t_npc)
         ):
             matching_wps.append(wp)
 
     if not matching_wps and not climax_ready_at_loc and not appts_at_loc:
-        return choices
+        return _strip_unverified_quest_flags(choices)
 
     result_choices = []
     seen_labels = set()
@@ -730,6 +826,7 @@ def tag_and_enrich_quest_choices(
                 best_climax_choice["is_quest_action"] = True
                 best_climax_choice["is_climax_action"] = True
                 best_climax_choice["is_story_quest"] = True
+                best_climax_choice["_python_verified_quest"] = True
                 best_climax_choice["quest_id"] = sq_id
                 best_climax_choice["sub_obj_id"] = None
                 best_climax_choice["stage_index"] = 99
@@ -780,7 +877,7 @@ def tag_and_enrich_quest_choices(
         # Collect already tagged approaches for this quest
         tagged_approaches = set()
         for c in result_choices:
-            if c.get("is_quest_action") and c.get("quest_id") == qid:
+            if c.get("is_quest_action") and c.get("quest_id") == qid and c.get("_python_verified_quest"):
                 c["is_story_quest"] = is_story
                 raw_label = c.get("label", "")
                 if not raw_label.startswith(f"{icon} [{prefix}]") and not raw_label.startswith(f"[{prefix}]"):
@@ -934,11 +1031,15 @@ def tag_and_enrich_quest_choices(
             # Tag this distinct approach choice
             cand_choice["is_quest_action"] = True
             cand_choice["is_story_quest"] = is_story
+            cand_choice["_python_verified_quest"] = True
+            cand_choice["_server_stamped"] = True
             cand_choice["quest_id"] = qid
             cand_choice["sub_obj_id"] = sub_obj_id
             cand_choice["stage_index"] = stage_idx
             cand_choice["contract_type"] = trigger
             cand_choice["approach"] = cand_app
+            if cand_app == "breakthrough_leverage":
+                cand_choice["breakthrough_leveraged"] = True
 
             raw_label = cand_choice.get("label", "")
             if not any(raw_label.startswith(p) for p in (f"{icon} [{prefix}]", f"[{prefix}]", f"⚡ [{prefix}]", f"🤝 [{prefix}]")):
@@ -952,6 +1053,8 @@ def tag_and_enrich_quest_choices(
                 cand_choice["requirement"] = 0
                 if cand_app == "buyout_bribe" and not cand_choice.get("gold_cost"):
                     cand_choice["gold_cost"] = calculate_quest_buyout_cost(wp)
+                if cand_app == "buyout_bribe" and int(cand_choice.get("gold_cost") or 0) > 0:
+                    cand_choice["gold_spent"] = int(cand_choice["gold_cost"])
             elif cand_app == "companion_assist":
                 cand_choice["requirement"] = max(2, int(cand_choice.get("requirement") or 6) - 3)
                 cand_choice["dc_mod"] = -3
@@ -969,12 +1072,48 @@ def tag_and_enrich_quest_choices(
 
             tagged_approaches.add(cand_app)
 
+        # Anomalous Incursions Non-Hostile Containment: ensure all 4 narrative approaches are offered in open exploration
+        if not in_active_dialogue and allow_fallback:
+            try:
+                import scenario_data
+                if scenario_data.is_anomalous_incursions_scenario(scen_key):
+                    from mechanics.world.anomalous_events import (
+                        is_non_hostile_entity_containment_waypoint,
+                        extract_non_hostile_entity_name,
+                        build_non_hostile_narrative_choices,
+                    )
+                    wp_all = db.get_quest_waypoints(session_id, qid, sub_obj_id) or []
+                    if is_non_hostile_entity_containment_waypoint(wp, all_wps=wp_all):
+                        ent_nm = extract_non_hostile_entity_name(wp)
+                        nh_choices = build_non_hostile_narrative_choices(
+                            ent_nm,
+                            mode="quest",
+                            char=char,
+                            quest_id=qid,
+                            sub_obj_id=sub_obj_id,
+                            stage_index=stage_idx,
+                            is_story_quest=is_story,
+                            contract_type=trigger,
+                        )
+                        inserted_idx = 0
+                        for nh_c in nh_choices:
+                            nh_c["_python_verified_quest"] = True
+                            nh_app = nh_c.get("approach", "")
+                            if nh_app and nh_app not in tagged_approaches:
+                                result_choices.insert(inserted_idx, nh_c)
+                                inserted_idx += 1
+                                tagged_approaches.add(nh_app)
+                        continue
+            except Exception:
+                pass
+
         # Fallback handling
         if len(tagged_approaches) == 0 and is_dp_match and is_npc_present:
             if not in_active_dialogue and allow_fallback:
                 fallback_choices = generate_quest_action_choices(session_id, current_location, scen_key=scen_key, char=char)
                 if fallback_choices:
                     for fb in fallback_choices[:2]:
+                        fb["_python_verified_quest"] = True
                         result_choices.insert(0, fb)
                         tagged_approaches.add(fb.get("approach", "direct"))
             elif in_active_dialogue and target_npc:
@@ -987,6 +1126,7 @@ def tag_and_enrich_quest_choices(
                     "mp_cost": 0,
                     "is_quest_action": True,
                     "is_story_quest": is_story,
+                    "_python_verified_quest": True,
                     "quest_id": qid,
                     "sub_obj_id": sub_obj_id,
                     "stage_index": stage_idx,
@@ -1000,95 +1140,137 @@ def tag_and_enrich_quest_choices(
         elif stage_idx >= 2 and len(tagged_approaches) < 2 and not in_active_dialogue and allow_fallback and len(result_choices) < 5:
             fallback_choices = generate_quest_action_choices(session_id, current_location, scen_key=scen_key, char=char)
             for fb in fallback_choices:
+                fb["_python_verified_quest"] = True
                 fb_app = fb.get("approach", "direct")
                 if fb_app not in tagged_approaches and len(result_choices) < 5:
                     result_choices.append(fb)
                     tagged_approaches.add(fb_app)
                     break
 
-    # Phone meetup appointment choices: guarantee interaction option at rendezvous ONLY when in open exploration (not in dialogue)
+    # Rendezvous meetup choices: guarantee interaction/wait option ONLY when in open exploration (not in dialogue)
     try:
-        from mechanics.world.mobility import get_session_dialogue_partners
         dp_list = [p.lower() for p in active_dps]
 
-        from mechanics.system.commitments_engine import get_active_commitments
+        from mechanics.system.commitments_engine import get_active_commitments, _compute_abs_window, _canon_key
         active_commitments = get_active_commitments(session_id, commitment_type="rendezvous", limit=20)
-
-        if active_commitments:
-            pending_appts = [c for c in active_commitments if c.get("status") == "pending"]
-            arrived_appts = [c for c in active_commitments if c.get("status") == "arrived"]
-        else:
-            pending_appts = db.get_phone_appointments(session_id, status="pending")
-            arrived_appts = [
-                a for a in db.get_phone_appointments(session_id, status="arrived")
-                if any(str((x.get("name") or x.get("npc_name")) if isinstance(x, dict) else x).strip().lower() == a.get("npc_name", "").strip().lower() for x in (scene_npcs or []))
-                or any(dp == a.get("npc_name", "").strip().lower() for dp in dp_list)
-            ] if session_row else []
+        pending_appts = [c for c in active_commitments if c.get("status") in ("pending", "approaching")]
+        arrived_appts = [c for c in active_commitments if c.get("status") in ("arrived", "in_progress")]
 
         # Build contact name lookup for resolving friendly display names
         known_contacts_map = {}
         if hasattr(db, "get_contacts") and session_id:
             try:
                 for c in (db.get_contacts(session_id) or []):
-                    c_id = str(c.get("npc_id") or "").strip().lower()
                     c_nm = str(c.get("name") or "").strip()
-                    if c_id and c_nm:
-                        known_contacts_map[c_id] = c_nm
+                    if not c_nm:
+                        continue
+                    for ck in (c.get("npc_id"), c_nm, _canon_key(c_nm)):
+                        if ck:
+                            known_contacts_map[str(ck).strip().lower()] = c_nm
             except Exception:
                 pass
 
         curr_day, curr_min, _ = db.get_session_time(session_id) if hasattr(db, "get_session_time") else (1, 480, "")
+        abs_now = (max(1, int(curr_day)) - 1) * 1440 + max(0, int(curr_min))
+        scene_npc_names = {
+            str((x.get("name") or x.get("npc_name")) if isinstance(x, dict) else x).strip().lower()
+            for x in (current_npcs or [])
+            if x
+        }
+
         for appt in (pending_appts + arrived_appts):
-            appt_loc = appt.get("rendezvous_location", "") or appt.get("target_location", "")
-            npc_name = appt.get("npc_name", "") or appt.get("target_entity", "")
+            appt_loc = appt.get("target_location") or appt.get("rendezvous_location") or ""
+            npc_name = appt.get("npc_name") or ""
             if (not npc_name or "_" in npc_name) and appt.get("participants"):
                 for p in appt["participants"]:
-                    if p.get("role") != "organizer":
-                        p_key = (p.get("person_key") or p.get("npc_id") or "").strip().lower()
-                        p_name = p.get("name") or known_contacts_map.get(p_key)
-                        if p_name:
-                            npc_name = p_name
-                            break
+                    p_key = str(p.get("person_key") or p.get("npc_id") or "").strip().lower()
+                    if p.get("role") == "organizer" and p_key == "player":
+                        continue
+                    if p_key == "player":
+                        continue
+                    p_name = known_contacts_map.get(p_key) or p.get("name")
+                    if p_name:
+                        npc_name = p_name
+                        break
             if not npc_name and appt.get("target_entity"):
-                t_ent = appt["target_entity"].strip().lower()
-                npc_name = known_contacts_map.get(t_ent) or t_ent.replace("_", " ").title()
-            elif "_" in npc_name and known_contacts_map.get(npc_name.strip().lower()):
-                npc_name = known_contacts_map[npc_name.strip().lower()]
+                t_ent = str(appt["target_entity"]).strip().lower()
+                npc_name = known_contacts_map.get(t_ent) or known_contacts_map.get(_canon_key(t_ent)) or t_ent.replace("_", " ").title()
             elif "_" in npc_name:
-                npc_name = npc_name.replace("_", " ").title()
+                npc_name = known_contacts_map.get(npc_name.strip().lower()) or npc_name.replace("_", " ").title()
 
-            if appt_loc and npc_name and check_location_matches_waypoint(current_location, appt_loc):
-                npc_low = npc_name.lower().strip()
-                # If already in active dialogue with this NPC, NEVER inject an initiation/greeting choice!
-                if any(dp in npc_low or npc_low in dp for dp in dp_list):
+            if not (appt_loc and npc_name and check_location_matches_waypoint(current_location, appt_loc)):
+                continue
+
+            s_day = max(1, int(appt.get("scheduled_day") or 1))
+            start_min = int(appt.get("start_minute") or 0)
+            abs_start, abs_end = _compute_abs_window(appt)
+            appt_status = appt.get("status")
+
+            is_same_day_early = (s_day == int(curr_day) and start_min > 0 and int(curr_min) < start_min and appt_status in ("pending", "approaching"))
+            is_within_window = ((abs_start - 15) <= abs_now <= abs_end) or appt_status in ("arrived", "in_progress")
+
+            if not is_same_day_early and not is_within_window:
+                continue
+
+            npc_low = npc_name.lower().strip()
+            if appt_status in ("arrived", "in_progress") and scene_npc_names and npc_low not in scene_npc_names and not any(dp == npc_low for dp in dp_list):
+                if not ((abs_start - 15) <= abs_now <= abs_end):
                     continue
-                npc_first = npc_low.split()[0] if npc_low else ""
-                has_npc_choice = any(
-                    npc_low in str(c.get("label", "")).lower() or
-                    (len(npc_first) >= 3 and f" {npc_first}" in f" {str(c.get('label', '')).lower()}")
-                    for c in result_choices
-                )
-                if not has_npc_choice and not dp_list:
-                    # Invariant 12: Contextual Early Arrival Wait Action
-                    start_min = int(appt.get("start_minute", 0) or appt.get("created_minute", 0) or 0)
-                    if start_min > 0 and curr_min < start_min:
-                        disp_h = ((start_min // 60) % 24)
-                        ampm = "AM" if disp_h < 12 else "PM"
-                        clock_h = disp_h % 12 or 12
-                        time_str = f"{clock_h}:{start_min % 60:02d} {ampm}"
-                        result_choices.insert(0, {
-                            "label": f"⏳ [Wait] Wait for {npc_name} until {time_str}",
-                            "stat": "NONE",
-                            "requirement": 0,
-                            "is_quest_action": False
-                        })
-                    else:
-                        result_choices.insert(0, {
-                            "label": f"💌 [Meetup] Greet and talk with {npc_name}",
-                            "stat": "NONE",
-                            "requirement": 0,
-                            "is_quest_action": False
-                        })
+
+            # If already in active dialogue with this NPC, NEVER inject an initiation/greeting choice!
+            if any(dp in npc_low or npc_low in dp for dp in dp_list):
+                continue
+            npc_first = npc_low.split()[0] if npc_low else ""
+            has_npc_choice = any(
+                npc_low in str(c.get("label", "")).lower() or
+                (len(npc_first) >= 3 and f" {npc_first}" in f" {str(c.get('label', '')).lower()}")
+                for c in result_choices
+            )
+            if not has_npc_choice and not dp_list:
+                # Invariant 12: Contextual Early Arrival Wait Action
+                if is_same_day_early and npc_low not in scene_npc_names:
+                    disp_h = ((start_min // 60) % 24)
+                    ampm = "AM" if disp_h < 12 else "PM"
+                    clock_h = disp_h % 12 or 12
+                    time_str = f"{clock_h}:{start_min % 60:02d} {ampm}"
+                    result_choices.insert(0, {
+                        "label": f"⏳ [Wait] Wait for {npc_name} until {time_str}",
+                        "stat": "NONE",
+                        "requirement": 0,
+                        "is_quest_action": False
+                    })
+                else:
+                    result_choices.insert(0, {
+                        "label": f"💌 [Meetup] Greet and talk with {npc_name}",
+                        "stat": "NONE",
+                        "requirement": 0,
+                        "is_quest_action": False
+                    })
+    except Exception:
+        pass
+
+    # Strict Final Location Lock Guard:
+    # Any choice not verified against an active local waypoint at this location
+    # MUST have is_quest_action set to False and all hallucinated quest badges removed.
+    for c in result_choices:
+        if isinstance(c, dict):
+            if not c.get("_python_verified_quest"):
+                c["is_quest_action"] = False
+                c["is_story_quest"] = False
+                c["is_climax_action"] = False
+                c["quest_id"] = ""
+                c["sub_obj_id"] = None
+                c["stage_index"] = None
+                c["contract_type"] = ""
+                raw_lbl = str(c.get("label", ""))
+                if any(k in raw_lbl.lower() for k in ("[bounty]", "[story quest]", "[story climax]", "[quest]", "🎯", "⭐", "⚡")):
+                    clean_lbl = re.sub(r"^[⭐🎯⚡🔹\s\[\]]+(?:bounty|story quest|story climax|quest)?\]?\s*", "", raw_lbl, flags=re.IGNORECASE).strip()
+                    if clean_lbl:
+                        c["label"] = clean_lbl
+
+    try:
+        from game_engine.choices_cleaner import deduplicate_redundant_choices
+        result_choices = deduplicate_redundant_choices(result_choices)
     except Exception:
         pass
 

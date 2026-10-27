@@ -102,8 +102,70 @@ class SocialInvariantAuditor:
             )
             turn_violations.extend(a_violations)
 
+        # 6. Audit Commitments Lifecycle
+        c_violations = self._audit_commitments_lifecycle(turn, session_id)
+        turn_violations.extend(c_violations)
+
+        # 7. Audit Phase 2 Metaphor Guard
+        m_violations = self._audit_metaphor_guard(turn, session_id, action, outcome_label)
+        turn_violations.extend(m_violations)
+
         self.violations.extend(turn_violations)
         return turn_violations
+
+    def _audit_commitments_lifecycle(self, turn: int, session_id: int) -> List[SocialViolation]:
+        violations: List[SocialViolation] = []
+        try:
+            with db.get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT id, title, target_npc, commitment_type, status, start_minute, end_minute FROM commitments_ledger WHERE session_id=?",
+                    (session_id,)
+                ).fetchall()
+                VALID_STATUSES = {"pending", "active", "arrived", "fulfilled", "flaked", "abandoned", "cancelled", "voided"}
+                for r in rows:
+                    cid, title, target_npc, c_type, status, start_m, end_m = r
+                    if status not in VALID_STATUSES:
+                        violations.append(SocialViolation(
+                            turn=turn,
+                            category="COMMITMENT_INVALID_STATUS",
+                            message=f"Commitment #{cid} ('{title}') has invalid status: '{status}'",
+                            target_npc=target_npc or "",
+                            severity="CRITICAL",
+                        ))
+                    if start_m is not None and end_m is not None and start_m > end_m:
+                        violations.append(SocialViolation(
+                            turn=turn,
+                            category="COMMITMENT_TIME_INVERSION",
+                            message=f"Commitment #{cid} has start_minute ({start_m}) > end_minute ({end_m})",
+                            target_npc=target_npc or "",
+                            severity="CRITICAL",
+                        ))
+        except Exception:
+            pass
+        return violations
+
+    def _audit_metaphor_guard(
+        self,
+        turn: int,
+        session_id: int,
+        action: Optional[Any],
+        outcome_label: str
+    ) -> List[SocialViolation]:
+        violations: List[SocialViolation] = []
+        act_text = str(getattr(action, "action_text", "") or getattr(action, "label", "") or "").lower()
+        full_text = f"{act_text} {outcome_label.lower()}"
+        METAPHOR_TRIGGERS = ["verbal combat", "kiss of death", "penetrate defense", "slashing remarks", "shot down"]
+        if any(trig in full_text for trig in METAPHOR_TRIGGERS):
+            sess = db.get_session(session_id) or {}
+            if sess.get("in_combat") or sess.get("combat_turn", 0) > 0:
+                violations.append(SocialViolation(
+                    turn=turn,
+                    category="METAPHOR_GUARD_BREACH",
+                    message="Metaphorical combat phrase triggered accidental combat state transition!",
+                    target_npc=getattr(action, "target_npc", "") or "",
+                    severity="CRITICAL",
+                ))
+        return violations
 
     def _audit_contact(
         self,
@@ -406,7 +468,10 @@ class SocialInvariantAuditor:
         for name, sib in dir_siblings.items():
             name_parts = [p.lower() for p in name.split()]
             sib_parts = [p.lower() for p in sib.split()]
-            shared_surnames = set(name_parts) & set(sib_parts)
+            import namegen
+            n_base = namegen.normalize_base_surname(namegen.extract_first_and_last_name(name)[1]).lower()
+            s_base = namegen.normalize_base_surname(namegen.extract_first_and_last_name(sib)[1]).lower()
+            shared_surnames = (set(name_parts) & set(sib_parts)) or (bool(n_base and s_base and n_base == s_base))
 
             # 1. Biological siblings must share family surname (supporting Western and Eastern name order)
             if name_parts and sib_parts and not shared_surnames:
@@ -423,7 +488,8 @@ class SocialInvariantAuditor:
             if sib in dir_siblings:
                 reciprocal = dir_siblings[sib]
                 reciprocal_parts = [p.lower() for p in reciprocal.split()]
-                reciprocal_shared = (set(reciprocal_parts) & set(sib_parts)) | (set(reciprocal_parts) & set(name_parts))
+                r_base = namegen.normalize_base_surname(namegen.extract_first_and_last_name(reciprocal)[1]).lower()
+                reciprocal_shared = (set(reciprocal_parts) & set(sib_parts)) | (set(reciprocal_parts) & set(name_parts)) or (bool(r_base and (r_base == s_base or r_base == n_base)))
                 if reciprocal_parts and not reciprocal_shared:
                     violations.append(SocialViolation(
                         turn=turn,

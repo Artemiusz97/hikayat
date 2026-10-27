@@ -78,18 +78,18 @@ def resolve_generic_beastfolk_species(seed: str = "") -> str:
     """Deterministically (via seed) resolves generic 'beastfolk', 'anthro', 'furry', or 'half-beast'
     into one of the canonical beastfolk species according to weighted scenario rates."""
     species_pool = (
-        ["cat"] * 15 +
-        ["fox"] * 15 +
-        ["wolf"] * 7 +
-        ["tiger"] * 7 +
-        ["lion"] * 7 +
-        ["cheetah"] * 7 +
-        ["fennec"] * 7 +
-        ["rabbit"] * 7 +
-        ["mouse"] * 7 +
-        ["bear"] * 7 +
-        ["bird"] * 7 +
-        ["reptile"] * 7
+        ["cat"] * 14 +
+        ["fox"] * 14 +
+        ["wolf"] * 12 +
+        ["bird"] * 12 +
+        ["tiger"] * 10 +
+        ["lion"] * 8 +
+        ["cheetah"] * 8 +
+        ["fennec"] * 8 +
+        ["bear"] * 6 +
+        ["reptile"] * 4 +
+        ["rabbit"] * 2 +
+        ["mouse"] * 2
     )
     if seed:
         import hashlib

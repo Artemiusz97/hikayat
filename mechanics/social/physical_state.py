@@ -6,6 +6,7 @@ Maintains precise physical grounding (character postures, held items,
 garment layers, intimate contact, and room props) as an invisible cognitive anchor
 for LLM narration without adding UI clutter to Discord.
 """
+import copy
 import re
 import json
 import logging
@@ -140,6 +141,12 @@ def detect_intimate_disengagement(actions: list) -> bool:
     if not actions:
         return False
     for a in actions:
+        if isinstance(a, dict):
+            r_int = a.get("resolved_intent") if isinstance(a.get("resolved_intent"), dict) else {}
+            s_int = str(r_int.get("sub_intent") or a.get("sub_intent") or "").lower().strip()
+            m_int = str(r_int.get("intent") or a.get("intent") or "").lower().strip()
+            if a.get("ends_dialogue") or r_int.get("ends_dialogue") or s_int in ("aftercare", "redress") or m_int in ("dialogue_exit", "movement"):
+                return True
         lbl = ((a.get("label") or "") if isinstance(a, dict) else str(a)).lower()
         if not lbl:
             continue
@@ -172,9 +179,32 @@ def is_erotic_intimate_contact(intimate_contact: str) -> bool:
 
 
 
+def _extract_gifted_wardrobe(char_or_npc: dict, session_id: int = 0) -> Dict[str, str]:
+    """Extracts any player-gifted wearable garments (`Top`, `Bottom`, `Outerwear`, `Accessory`, `Lingerie`) from an NPC's `basic_info`."""
+    if not isinstance(char_or_npc, dict):
+        return {}
+    basic = char_or_npc.get("basic_info")
+    if isinstance(basic, str):
+        try:
+            basic = json.loads(basic)
+        except Exception:
+            basic = {}
+    if not isinstance(basic, dict):
+        basic = {}
+    gw = basic.get("gifted_wardrobe")
+    if not gw and session_id and char_or_npc.get("name"):
+        try:
+            contact = db.get_contact(session_id, char_or_npc["name"])
+            if contact and isinstance(contact.get("basic_info"), dict):
+                gw = contact["basic_info"].get("gifted_wardrobe")
+        except Exception:
+            gw = None
+    return dict(gw) if isinstance(gw, dict) else {}
+
+
 def _infer_initial_undergarments_state(char_or_npc: dict, scen_key: str = "fantasy",
                                        session_id: int = 0) -> tuple[str, str]:
-    """Infers initial under_top and under_bottom state from character appearance/undergarments."""
+    """Infers initial under_top and under_bottom state from character appearance/undergarments and gifted lingerie."""
     app = char_or_npc.get("appearance") or {}
     if not app and session_id and char_or_npc.get("name"):
         try:
@@ -199,11 +229,14 @@ def _infer_initial_undergarments_state(char_or_npc: dict, scen_key: str = "fanta
     if isinstance(under, str):
         under = {"underwear": under}
 
+    gifted = _extract_gifted_wardrobe(char_or_npc, session_id=session_id)
+    gifted_lingerie = str(gifted.get("Lingerie") or "").strip()
+
     gender = str(char_or_npc.get("gender") or app.get("gender") or "female").lower()
     is_male = any(kw in gender for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in gender for kw in ("female", "woman"))
 
-    bra_val = str(under.get("bra") or app.get("bra") or "").strip()
-    und_val = str(under.get("underwear") or app.get("underwear") or "").strip()
+    bra_val = gifted_lingerie or str(under.get("bra") or app.get("bra") or "").strip()
+    und_val = gifted_lingerie or str(under.get("underwear") or app.get("underwear") or "").strip()
 
     if is_male:
         u_top = "None (N/A)"
@@ -232,26 +265,31 @@ def _infer_initial_undergarments_state(char_or_npc: dict, scen_key: str = "fanta
 
 
 def init_default_physical_state(session_id: int, party: list, scen_key: str = "fantasy",
-                                opening_scene: dict = None) -> dict:
+                                opening_scene: dict = None, initial_actor_override: dict = None) -> dict:
     if hasattr(opening_scene, "model_dump"):
         opening_scene = opening_scene.model_dump()
 
     actors: Dict[str, Any] = {}
 
     # Initialize party members
-    for entry in party:
+    for idx, entry in enumerate(party):
         char = entry[0] if isinstance(entry, (tuple, list)) else entry
         if not isinstance(char, dict):
             continue
         c_name = char.get("name", "Hero")
         equipped_weapon = "Empty hands"
-        equipped_outerwear = "none"
-        equipped_top = "Clothed"
-        equipped_bottom = "Clothed"
-        equipped_footwear = "Worn"
+        inv = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else []
+        char_with_inv = dict(char)
+        if inv and "inventory" not in char_with_inv:
+            char_with_inv["inventory"] = inv
+        wardrobe = resolve_canonical_wardrobe(char_with_inv, scen_key=scen_key, session_id=session_id)
+
+        equipped_outerwear = wardrobe[SLOT_OUTERWEAR]["item_name"] or "none"
+        equipped_top = wardrobe[SLOT_TOP]["item_name"] or "Clothed"
+        equipped_bottom = wardrobe[SLOT_BOTTOM]["item_name"] or "Clothed"
+        equipped_footwear = wardrobe[SLOT_FOOTWEAR]["item_name"] if inv and any(isinstance(i, dict) and i.get("slot") in ("Shoes", "Footwear") for i in inv) else "Worn"
         main_w = None
         off_w = None
-        inv = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else []
         if isinstance(inv, list):
             for item in inv:
                 if not isinstance(item, dict):
@@ -281,17 +319,20 @@ def init_default_physical_state(session_id: int, party: list, scen_key: str = "f
             equipped_weapon = off_w
 
         u_top, u_bot = _infer_initial_undergarments_state(char, scen_key, session_id=session_id)
-        actors[c_name] = {
+        canon_snap = {
+            SLOT_OUTERWEAR: equipped_outerwear,
+            SLOT_TOP: equipped_top,
+            SLOT_BOTTOM: equipped_bottom,
+            SLOT_UNDER_TOP: u_top,
+            SLOT_UNDER_BOTTOM: u_bot,
+            SLOT_FOOTWEAR: equipped_footwear,
+        }
+        actor_dict: Dict[str, Any] = {
+            "actor_type": "player" if idx == 0 else "npc",
             "posture": "Standing alert",
             "holding": equipped_weapon,
-            "clothing": {
-                "outerwear": equipped_outerwear,
-                "top": equipped_top,
-                "bottom": equipped_bottom,
-                "under_top": u_top,
-                "under_bottom": u_bot,
-                "footwear": equipped_footwear,
-            },
+            "clothing": dict(canon_snap),
+            "canonical_outfit": dict(canon_snap),
             "stance": "Ready",
             "composure": COMPOSURE_COMPOSED,
             "is_wet": False,
@@ -299,6 +340,13 @@ def init_default_physical_state(session_id: int, party: list, scen_key: str = "f
             "climax_count": 0,
             "in_refractory": False,
         }
+        if initial_actor_override and isinstance(initial_actor_override, dict):
+            for ok, ov in initial_actor_override.items():
+                if ok == "clothing" and isinstance(ov, dict):
+                    actor_dict["clothing"].update(ov)
+                elif ov is not None:
+                    actor_dict[ok] = ov
+        actors[c_name] = actor_dict
 
     # Initialize NPCs present in opening scene
     if opening_scene and isinstance(opening_scene, dict):
@@ -307,18 +355,25 @@ def init_default_physical_state(session_id: int, party: list, scen_key: str = "f
             for n in npcs[:4]:
                 if isinstance(n, dict) and n.get("name"):
                     n_name = n["name"]
+                    npc_wardrobe = resolve_canonical_wardrobe(n, scen_key=scen_key, session_id=session_id)
                     u_top, u_bot = _infer_initial_undergarments_state(n, scen_key, session_id=session_id)
+                    n_top = npc_wardrobe[SLOT_TOP]["item_name"] or "Clothed"
+                    n_bot = npc_wardrobe[SLOT_BOTTOM]["item_name"] or "Clothed"
+                    n_out = npc_wardrobe[SLOT_OUTERWEAR]["item_name"] or "none"
+                    n_canon = {
+                        SLOT_OUTERWEAR: n_out,
+                        SLOT_TOP: n_top,
+                        SLOT_BOTTOM: n_bot,
+                        SLOT_UNDER_TOP: u_top,
+                        SLOT_UNDER_BOTTOM: u_bot,
+                        SLOT_FOOTWEAR: "Worn",
+                    }
                     actors[n_name] = {
+                        "actor_type": "npc",
                         "posture": "Standing nearby",
                         "holding": "Empty hands",
-                        "clothing": {
-                            "outerwear": "none",
-                            "top": "Clothed",
-                            "bottom": "Clothed",
-                            "under_top": u_top,
-                            "under_bottom": u_bot,
-                            "footwear": "Worn",
-                        },
+                        "clothing": dict(n_canon),
+                        "canonical_outfit": dict(n_canon),
                         "stance": "Neutral",
                         "composure": COMPOSURE_COMPOSED,
                         "is_wet": False,
@@ -359,11 +414,27 @@ def init_default_physical_state(session_id: int, party: list, scen_key: str = "f
     return state
 
 
+def _fmt_outer_or_foot_label(val: Any) -> str:
+    s = str(val or "").strip()
+    if not s:
+        return s
+    low = s.lower()
+    if low.startswith(("worn", "disheveled", "displaced", "removed", "none", "stripped", "unbuttoned", "open")):
+        return s
+    if normalize_garment_state(s) == STATE_WORN and low not in ("clothed", "on"):
+        return f"worn ({s})"
+    return s
+
+
 def build_physical_prompt_block(session: dict, party: list, is_combat: bool = False,
                                  is_nsfw: bool = False, actions: list = None) -> str:
     """Builds a compact ~30-75 token continuity anchor to inject into the LLM system/user prompt."""
     session_id = session.get("id", 0)
-    state = (db.get_session_physical_state(session_id) if session_id else None) or session.get("physical_state") or {}
+    raw_sess_phys = session.get("physical_state")
+    if isinstance(raw_sess_phys, dict) and raw_sess_phys.get("actors"):
+        state = copy.deepcopy(raw_sess_phys)
+    else:
+        state = (db.get_session_physical_state(session_id) if session_id else None) or (copy.deepcopy(raw_sess_phys) if isinstance(raw_sess_phys, dict) else {})
 
     if not state or not isinstance(state, dict) or not state.get("actors"):
         scen_key = session.get("scenario", "fantasy")
@@ -383,6 +454,23 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
                 party_names.add(c_name.lower())
                 human_player_names.add(c_name.lower())
                 matched_key = _match_actor_key(c_name, actors)
+                if matched_key not in actors:
+                    u_top_init, u_bot_init = _infer_initial_undergarments_state(char, session.get("scenario", "fantasy"), session_id=session_id)
+                    actors[c_name] = {
+                        "posture": "Standing alert",
+                        "holding": "Weapon",
+                        "clothing": {
+                            "outerwear": "none",
+                            "top": "Clothed",
+                            "bottom": "Clothed",
+                            "under_top": u_top_init,
+                            "under_bottom": u_bot_init,
+                            "footwear": "Worn",
+                        },
+                        "stance": "Ready",
+                        "composure": COMPOSURE_COMPOSED,
+                    }
+                    matched_key = c_name
                 if matched_key in actors:
                     inv = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else []
                     main_w = None
@@ -535,11 +623,11 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
 
             cloth_summary_parts = []
             if outer and str(outer).lower() not in ("none", ""):
-                cloth_summary_parts.append(f"Outerwear: {outer}")
+                cloth_summary_parts.append(f"Outerwear: {_fmt_outer_or_foot_label(outer)}")
             cloth_summary_parts.append(f"Top: {top}")
             cloth_summary_parts.append(f"Bottom: {bot}")
             if foot and str(foot).lower() not in ("worn", "none", ""):
-                cloth_summary_parts.append(f"Footwear: {foot}")
+                cloth_summary_parts.append(f"Footwear: {_fmt_outer_or_foot_label(foot)}")
             cloth_summary = ", ".join(cloth_summary_parts)
 
             if "none" in str(u_top).lower() or "none" in str(u_bot).lower():
@@ -901,11 +989,11 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
             if is_nsfw or has_special_under or has_special_outer or (top and top != "Clothed") or (bot and bot != "Clothed") or has_special_foot:
                 cloth_summary_parts = []
                 if has_special_outer:
-                    cloth_summary_parts.append(f"Outerwear: {outer}")
+                    cloth_summary_parts.append(f"Outerwear: {_fmt_outer_or_foot_label(outer)}")
                 cloth_summary_parts.append(f"Top: {top}")
                 cloth_summary_parts.append(f"Bottom: {bot}")
                 if has_special_foot:
-                    cloth_summary_parts.append(f"Footwear: {foot}")
+                    cloth_summary_parts.append(f"Footwear: {_fmt_outer_or_foot_label(foot)}")
                 cloth_summary = ", ".join(cloth_summary_parts)
 
                 if u_top or u_bot:
@@ -952,14 +1040,13 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
 
 
 def _match_actor_key(name: str, actors: dict) -> str:
-    """Finds matching actor key in actors dict handling case, first names, markdown decorations, slugification, and titles."""
+    """Finds matching actor key in actors dict handling case, cultural given/surnames, markdown decorations, slugification, and titles."""
     n_raw = str(name).strip().strip("*_`\"' ")
     if not n_raw:
         return name
     n_clean = n_raw.lower()
     n_norm = re.sub(r'[\s_\-]+', ' ', n_clean).strip()
     n_alphanum = re.sub(r'[^a-z0-9]', '', n_clean)
-    n_first = n_norm.split()[0] if n_norm else ""
 
     # 1. Exact case-insensitive match
     for k in actors:
@@ -975,23 +1062,34 @@ def _match_actor_key(name: str, actors: dict) -> str:
         if n_alphanum and re.sub(r'[^a-z0-9]', '', k_clean) == n_alphanum:
             return k
 
-    # 3. First-name match (if >= 3 chars)
-    if len(n_first) >= 3:
+    # 3. Cultural person-token match (disambiguated across actor keys; never matches bare 'ms.', 'dr.', 'chef', or shared surnames)
+    import namegen
+    actor_keys_list = [str(k).strip().strip("*_`\"' ") for k in actors]
+    n_toks = namegen.get_unique_person_tokens(n_norm, peer_names=actor_keys_list, min_len=2)
+    if n_toks:
+        token_matches = []
+        for k in actors:
+            k_stripped = str(k).strip().strip("*_`\"' ")
+            k_toks = namegen.get_unique_person_tokens(k_stripped, peer_names=actor_keys_list, min_len=2)
+            if n_toks & k_toks:
+                token_matches.append(k)
+        if len(token_matches) == 1:
+            return token_matches[0]
+
+    # 4. Word-boundary substring match (excluding bare honorifics/particles)
+    if n_norm.rstrip(".") not in namegen.NAME_PARTICLES_AND_HONORIFICS:
+        sub_matches = []
         for k in actors:
             k_clean = str(k).strip().strip("*_`\"' ").lower()
             k_norm = re.sub(r'[\s_\-]+', ' ', k_clean).strip()
-            k_first = (k_norm.split() or [""])[0]
-            if k_first == n_first:
-                return k
-
-    # 4. Substring match (e.g. "Elena" in "Elena Vance" or "Marcus" in "Captain Marcus")
-    for k in actors:
-        k_clean = str(k).strip().strip("*_`\"' ").lower()
-        k_norm = re.sub(r'[\s_\-]+', ' ', k_clean).strip()
-        if (len(n_norm) >= 3 and n_norm in k_norm) or (len(k_norm) >= 3 and k_norm in n_norm):
-            return k
-        if (len(n_clean) >= 3 and n_clean in k_clean) or (len(k_clean) >= 3 and k_clean in n_clean):
-            return k
+            if k_norm.rstrip(".") in namegen.NAME_PARTICLES_AND_HONORIFICS:
+                continue
+            if (len(n_norm) >= 3 and re.search(rf'\b{re.escape(n_norm)}\b', k_norm)) or (
+                len(k_norm) >= 3 and re.search(rf'\b{re.escape(k_norm)}\b', n_norm)
+            ):
+                sub_matches.append(k)
+        if len(sub_matches) == 1:
+            return sub_matches[0]
 
     return name
 
@@ -1013,22 +1111,42 @@ def _canonical_clothing_slot(slot_name: str) -> str:
     return s
 
 
+_GARMENT_NONE_RE = re.compile(r"\b(?:none|bra-?less|commando|freeball)\b|\bn/a\b", re.I)
+_GARMENT_REMOVED_RE = re.compile(
+    r"\b(?:removed|stripped|dropped|bare|nude|taken?\s+off)\b"
+    r"|\boff\b(?!\s*(?:-|\s)\s*(?:shoulder|white|duty|hand|color|colour))",
+    re.I,
+)
+_GARMENT_DISPLACED_RE = re.compile(
+    r"\b(?:displaced|pulled\s+aside|pulled\s+down|lifted|lowered|pushed\s+aside|hooked\s+up|hiked\s+up)\b"
+    r"|(?<!button-)(?<!button\s)\bdown\b(?!\s*(?:jacket|coat|vest|parka|shirt|collar))"
+    r"|\baside\b",
+    re.I,
+)
+_GARMENT_DISHEVELED_RE = re.compile(
+    r"\b(?:disheveled|unbuttoned|loosened|untucked|askew|unzipped|torn|unhook(?:ed)?|unclasp(?:ed)?|undone)\b"
+    r"|\bopen\b(?!\s*(?:-|\s)\s*(?:cardigan|front|back|toe|weave|collar|neck|blazer|coat|jacket))",
+    re.I,
+)
+_GARMENT_WORN_RE = re.compile(r"\b(?:worn|clothed|fastened|intact)\b|\bon\b", re.I)
+
+
 def normalize_garment_state(state_str: str) -> str:
-    """Normalizes arbitrary free-text state string into one of the 5 discrete FSM states."""
+    """Normalizes arbitrary free-text state string into one of the 5 discrete FSM states using word-boundary guards."""
     if not state_str:
         return STATE_WORN
     s = str(state_str).lower().strip()
     if s in VALID_GARMENT_STATES:
         return s
-    if any(k in s for k in ("none", "n/a", "bra-less", "braless", "commando", "freeball")):
+    if _GARMENT_NONE_RE.search(s):
         return STATE_NONE
-    if any(k in s for k in ("off", "removed", "stripped", "dropped", "bare", "nude", "take off", "taken off")):
+    if _GARMENT_REMOVED_RE.search(s):
         return STATE_REMOVED
-    if any(k in s for k in ("displaced", "pulled aside", "pulled down", "lifted", "lowered", "aside", "hooked up", "down")):
+    if _GARMENT_DISPLACED_RE.search(s):
         return STATE_DISPLACED
-    if any(k in s for k in ("disheveled", "unbuttoned", "loosened", "open", "untucked", "askew", "unzipped", "torn", "unhook", "unhooked", "unclasp", "unclasped")):
+    if _GARMENT_DISHEVELED_RE.search(s):
         return STATE_DISHEVELED
-    if any(k in s for k in ("worn", "on", "clothed", "fastened")):
+    if _GARMENT_WORN_RE.search(s):
         return STATE_WORN
     return STATE_WORN
 
@@ -1106,10 +1224,12 @@ def compute_clothing_summary_badge(clothing_dict: Optional[Dict[str, Any]], gend
     u_bot = str(clothing_dict.get("under_bottom", "worn") or "worn").strip().lower()
 
     def _is_off(val: str) -> bool:
-        return any(k in val for k in ("off", "none", "removed", "stripped", "bare", "nude", "dropped to floor", "dropped"))
+        st = normalize_garment_state(val)
+        return st in (STATE_REMOVED, STATE_NONE)
 
     def _is_disheveled(val: str) -> bool:
-        return any(k in val for k in ("disheveled", "unbuttoned", "pulled down", "pulled aside", "lowered", "loosened", "askew", "open", "torn", "exposed"))
+        st = normalize_garment_state(val)
+        return st in (STATE_DISHEVELED, STATE_DISPLACED) or "exposed" in val
 
     top_off = _is_off(top)
     bot_off = _is_off(bot)
@@ -1133,11 +1253,12 @@ def compute_clothing_summary_badge(clothing_dict: Optional[Dict[str, Any]], gend
     if bot_off and not top_off:
         return "Bottomless 🍑"
 
-    # 5. Disheveled: Any layer is disheveled/pulled down/unbuttoned, or missing undergarment
-    # Note: For male characters, having no bra (under_top) is standard, so only u_bot_off indicates commando
+    # 5. Disheveled: Any layer is disheveled/displaced/pulled down/unbuttoned, or an undergarment was actively removed mid-scene
+    # Note: Natural 'none' (bra-less / commando) under intact worn outer clothing remains 'Fully Clothed 👕'!
     has_disheveled_layer = _is_disheveled(top) or _is_disheveled(bot) or _is_disheveled(u_top) or _is_disheveled(u_bot)
-    has_missing_undergarment = u_bot_off or (u_top_off and not is_male)
-    if has_disheveled_layer or has_missing_undergarment:
+    u_top_removed = normalize_garment_state(u_top) == STATE_REMOVED and not is_male
+    u_bot_removed = normalize_garment_state(u_bot) == STATE_REMOVED
+    if has_disheveled_layer or u_top_removed or u_bot_removed:
         return "Disheveled 👔"
 
     # 6. Default: Fully Clothed
@@ -1213,15 +1334,6 @@ def get_actor_physical_state(session_id: int, actor_name: str, conn: Optional[sq
         ).fetchone()
 
         if not row:
-            count_row = c.execute("SELECT COUNT(*) FROM actor_physical_states WHERE session_id=?", (session_id,)).fetchone()
-            if count_row and count_row[0] == 0:
-                ensure_lazy_migration(session_id, conn=c)
-                row = c.execute(
-                    "SELECT * FROM actor_physical_states WHERE session_id=? AND (canonical_key=? OR actor_name=? COLLATE NOCASE)",
-                    (session_id, c_key, str(actor_name).strip())
-                ).fetchone()
-
-        if not row:
             return None
 
         res = dict(row)
@@ -1262,13 +1374,6 @@ def get_all_actor_physical_states(session_id: int, conn: Optional[sqlite3.Connec
             "SELECT * FROM actor_physical_states WHERE session_id=? ORDER BY id ASC",
             (session_id,)
         ).fetchall()
-
-        if not rows:
-            ensure_lazy_migration(session_id, conn=c)
-            rows = c.execute(
-                "SELECT * FROM actor_physical_states WHERE session_id=? ORDER BY id ASC",
-                (session_id,)
-            ).fetchall()
 
         result = []
         for r in rows:
@@ -1320,69 +1425,109 @@ def upsert_actor_physical_state(
     garments: Optional[Dict[str, Any]] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> None:
-    """Upserts normalized actor physical state and garment layers."""
+    """Upserts normalized actor physical state and garment layers while preserving omitted fields."""
     if not session_id or not actor_name:
         return
+    state_data = state_data if isinstance(state_data, dict) else {}
     c_key = canonical_actor_key(actor_name)
     now = time.time()
-    actor_type = state_data.get("actor_type") or ("player" if c_key == "player" else "npc")
-    posture = state_data.get("posture", "standing")
-    posture_qualifier = state_data.get("posture_qualifier", "")
-    relative_target = state_data.get("relative_target") or state_data.get("relative_position", "")
-    relative_relation = state_data.get("relative_relation", "")
-    holding = state_data.get("holding", "Empty hands")
-    stance = state_data.get("stance", "Neutral")
-    tether_type = state_data.get("tether_type") or ("restrained" if "restrain" in str(state_data.get("tether", "")).lower() else "none")
-    tether_partner = state_data.get("tether_partner") or state_data.get("tether", "")
-    composure = state_data.get("composure", COMPOSURE_COMPOSED)
-    is_wet = 1 if state_data.get("is_wet") else 0
-    is_bloodied = 1 if state_data.get("is_bloodied") else 0
-    climax_count = int(state_data.get("climax_count") or 0)
-    in_refractory = 1 if state_data.get("in_refractory") else 0
-    outfit_raw = state_data.get("canonical_outfit_json") or state_data.get("canonical_outfit") or {}
-    canonical_outfit_json = json.dumps(outfit_raw) if isinstance(outfit_raw, dict) else str(outfit_raw)
 
     with _get_connection(conn) as c:
-        c.execute("""
-            INSERT INTO actor_physical_states (
-                session_id, actor_name, canonical_key, actor_type, posture, posture_qualifier,
-                relative_target, relative_relation, holding, stance, tether_type, tether_partner,
-                composure, is_wet, is_bloodied, climax_count, in_refractory, canonical_outfit_json,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(session_id, canonical_key) DO UPDATE SET
-                actor_name=excluded.actor_name,
-                actor_type=COALESCE(excluded.actor_type, actor_physical_states.actor_type),
-                posture=COALESCE(excluded.posture, actor_physical_states.posture),
-                posture_qualifier=COALESCE(excluded.posture_qualifier, actor_physical_states.posture_qualifier),
-                relative_target=COALESCE(excluded.relative_target, actor_physical_states.relative_target),
-                relative_relation=COALESCE(excluded.relative_relation, actor_physical_states.relative_relation),
-                holding=COALESCE(excluded.holding, actor_physical_states.holding),
-                stance=COALESCE(excluded.stance, actor_physical_states.stance),
-                tether_type=COALESCE(excluded.tether_type, actor_physical_states.tether_type),
-                tether_partner=COALESCE(excluded.tether_partner, actor_physical_states.tether_partner),
-                composure=COALESCE(excluded.composure, actor_physical_states.composure),
-                is_wet=COALESCE(excluded.is_wet, actor_physical_states.is_wet),
-                is_bloodied=COALESCE(excluded.is_bloodied, actor_physical_states.is_bloodied),
-                climax_count=COALESCE(excluded.climax_count, actor_physical_states.climax_count),
-                in_refractory=COALESCE(excluded.in_refractory, actor_physical_states.in_refractory),
-                canonical_outfit_json=CASE WHEN excluded.canonical_outfit_json != '{}' THEN excluded.canonical_outfit_json ELSE actor_physical_states.canonical_outfit_json END,
-                updated_at=excluded.updated_at
-        """, (
-            session_id, actor_name, c_key, actor_type, posture, posture_qualifier,
-            relative_target, relative_relation, holding, stance, tether_type, tether_partner,
-            composure, is_wet, is_bloodied, climax_count, in_refractory, canonical_outfit_json,
-            now, now
-        ))
+        existing_row = c.execute(
+            "SELECT * FROM actor_physical_states WHERE session_id=? AND canonical_key=?",
+            (session_id, c_key),
+        ).fetchone()
+        ex = dict(existing_row) if existing_row else {}
 
-        # Handle Garments
+        actor_type = state_data.get("actor_type") or ex.get("actor_type")
+        if not actor_type:
+            if c_key == "player":
+                actor_type = "player"
+            else:
+                p_row = c.execute(
+                    """SELECT 1 FROM characters ch
+                       JOIN sessions s ON (s.character_id = ch.id OR ch.active_session_id = s.id OR s.host_user_id = ch.user_id)
+                       WHERE s.id = ? AND LOWER(ch.name) = LOWER(?) LIMIT 1""",
+                    (session_id, str(actor_name).strip()),
+                ).fetchone()
+                actor_type = "player" if p_row else "npc"
+
+        posture = state_data["posture"] if "posture" in state_data and state_data["posture"] is not None else ex.get("posture", "standing")
+        posture_qualifier = (
+            state_data["posture_qualifier"]
+            if "posture_qualifier" in state_data and state_data["posture_qualifier"] is not None
+            else ex.get("posture_qualifier", "")
+        )
+        if "relative_target" in state_data or "relative_position" in state_data:
+            relative_target = state_data.get("relative_target") or state_data.get("relative_position") or ""
+        else:
+            relative_target = ex.get("relative_target", "")
+        relative_relation = (
+            state_data["relative_relation"]
+            if "relative_relation" in state_data and state_data["relative_relation"] is not None
+            else ex.get("relative_relation", "")
+        )
+        holding = state_data["holding"] if "holding" in state_data and state_data["holding"] is not None else ex.get("holding", "Empty hands")
+        stance = state_data["stance"] if "stance" in state_data and state_data["stance"] is not None else ex.get("stance", "Neutral")
+
+        if "tether_type" in state_data or "tether" in state_data:
+            raw_tether = str(state_data.get("tether") or state_data.get("tether_partner") or "")
+            tether_type = state_data.get("tether_type") or (
+                "restrained" if any(k in raw_tether.lower() for k in ("restrain", "bound", "tied", "shackled", "handcuffed", "pinned down")) else "none"
+            )
+        else:
+            tether_type = ex.get("tether_type", "none")
+
+        if "tether" in state_data and state_data.get("tether"):
+            tether_partner = str(state_data["tether"])
+        elif "tether_partner" in state_data:
+            tether_partner = str(state_data.get("tether_partner") or "")
+        elif "tether" in state_data:
+            tether_partner = ""
+        else:
+            tether_partner = ex.get("tether_partner", "")
+
+        if "composure" in state_data and state_data["composure"] is not None:
+            composure = state_data["composure"]
+        elif isinstance(state_data.get("status_effects"), list):
+            inferred_comp = None
+            for se in state_data["status_effects"]:
+                se_low = str(se or "").strip().lower()
+                for vc in VALID_COMPOSURE_STATES:
+                    if vc != COMPOSURE_COMPOSED and vc in se_low:
+                        inferred_comp = vc
+                        break
+                if inferred_comp:
+                    break
+            composure = inferred_comp or ex.get("composure", COMPOSURE_COMPOSED)
+        else:
+            composure = ex.get("composure", COMPOSURE_COMPOSED)
+        is_wet = (1 if state_data.get("is_wet") else 0) if "is_wet" in state_data else int(ex.get("is_wet") or 0)
+        is_bloodied = (1 if state_data.get("is_bloodied") else 0) if "is_bloodied" in state_data else int(ex.get("is_bloodied") or 0)
+        climax_count = int(state_data.get("climax_count") or 0) if "climax_count" in state_data else int(ex.get("climax_count") or 0)
+        in_refractory = (1 if state_data.get("in_refractory") else 0) if "in_refractory" in state_data else int(ex.get("in_refractory") or 0)
+
+        outfit_raw = state_data.get("canonical_outfit_json") or state_data.get("canonical_outfit")
+        if outfit_raw:
+            canonical_outfit_json = json.dumps(outfit_raw) if isinstance(outfit_raw, dict) else str(outfit_raw)
+        else:
+            canonical_outfit_json = ex.get("canonical_outfit_json") or "{}"
+
+        existing_garments_rows = c.execute(
+            "SELECT slot, state, item_name, layer_depth FROM actor_garments WHERE session_id=? AND actor_key=?",
+            (session_id, c_key),
+        ).fetchall()
+        existing_garments_map = {str(r["slot"]): dict(r) for r in existing_garments_rows}
+
+        resolved_garment_rows: list[tuple[str, str, str, int]] = []
         if garments is not None and isinstance(garments, dict):
             for raw_slot, g_info in garments.items():
                 slot = _canonical_clothing_slot(raw_slot)
+                prev_g = existing_garments_map.get(slot) or {}
                 if isinstance(g_info, dict):
                     st = normalize_garment_state(str(g_info.get("state", STATE_WORN)))
-                    item_name = str(g_info.get("item_name", ""))
-                    layer_depth = int(g_info.get("layer_depth", SLOT_LAYER_DEPTHS.get(slot, 2)))
+                    item_name = str(g_info["item_name"]) if "item_name" in g_info and g_info["item_name"] is not None else str(prev_g.get("item_name") or "")
+                    layer_depth = int(g_info.get("layer_depth", prev_g.get("layer_depth", SLOT_LAYER_DEPTHS.get(slot, 2))))
                 else:
                     raw_str = str(g_info or "")
                     st = normalize_garment_state(raw_str)
@@ -1392,50 +1537,112 @@ def upsert_actor_physical_state(
                         clean_low = raw_str.lower().strip()
                         for token in ("removed", "stripped", "off", "disheveled", "unbuttoned", "displaced", "pulled aside", "pulled down", "unhooked"):
                             if clean_low.endswith(token) and len(clean_low) > len(token):
-                                item_name = raw_str[:len(raw_str)-len(token)].strip()
+                                cand_nm = raw_str[:len(raw_str) - len(token)].strip(" -:/()")
+                                if cand_nm.lower() not in VALID_GARMENT_STATES:
+                                    item_name = cand_nm
                                 break
                             elif clean_low.startswith(token) and len(clean_low) > len(token):
-                                item_name = raw_str[len(token):].strip()
+                                cand_nm = raw_str[len(token):].strip(" -:/()")
+                                if cand_nm.lower() not in VALID_GARMENT_STATES:
+                                    item_name = cand_nm
                                 break
-                    if not item_name and st == STATE_WORN and raw_str.lower() not in (STATE_WORN, "clothed"):
-                        item_name = raw_str
-                    layer_depth = SLOT_LAYER_DEPTHS.get(slot, 2)
+                    if not item_name and st == STATE_WORN and raw_str.lower().strip() not in (STATE_WORN, "clothed", "on"):
+                        item_name = raw_str.strip()
+                    if not item_name and st != STATE_NONE and prev_g.get("item_name"):
+                        item_name = str(prev_g["item_name"])
+                    layer_depth = int(prev_g.get("layer_depth", SLOT_LAYER_DEPTHS.get(slot, 2)))
+                resolved_garment_rows.append((slot, st, item_name, layer_depth))
 
-                c.execute("""
-                    INSERT INTO actor_garments (
-                        session_id, actor_key, slot, state, item_name, layer_depth, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(session_id, actor_key, slot) DO UPDATE SET
-                        state=excluded.state,
-                        item_name=excluded.item_name,
-                        layer_depth=excluded.layer_depth,
-                        updated_at=excluded.updated_at
-                """, (session_id, c_key, slot, st, item_name, layer_depth, now))
+        # Auto-snapshot initial canonical outfit if none exists yet and worn named garments are provided
+        if canonical_outfit_json in ("", "{}") and resolved_garment_rows:
+            snap_outfit = {}
+            for slot, st, item_name, _ in resolved_garment_rows:
+                if st == STATE_NONE:
+                    snap_outfit[slot] = STATE_NONE
+                elif item_name and item_name.lower() not in ("clothed", "worn"):
+                    snap_outfit[slot] = item_name
+            if snap_outfit:
+                canonical_outfit_json = json.dumps(snap_outfit)
+
+        c.execute("""
+            INSERT INTO actor_physical_states (
+                session_id, actor_name, canonical_key, actor_type, posture, posture_qualifier,
+                relative_target, relative_relation, holding, stance, tether_type, tether_partner,
+                composure, is_wet, is_bloodied, climax_count, in_refractory, canonical_outfit_json,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(session_id, canonical_key) DO UPDATE SET
+                actor_name=excluded.actor_name,
+                actor_type=excluded.actor_type,
+                posture=excluded.posture,
+                posture_qualifier=excluded.posture_qualifier,
+                relative_target=excluded.relative_target,
+                relative_relation=excluded.relative_relation,
+                holding=excluded.holding,
+                stance=excluded.stance,
+                tether_type=excluded.tether_type,
+                tether_partner=excluded.tether_partner,
+                composure=excluded.composure,
+                is_wet=excluded.is_wet,
+                is_bloodied=excluded.is_bloodied,
+                climax_count=excluded.climax_count,
+                in_refractory=excluded.in_refractory,
+                canonical_outfit_json=excluded.canonical_outfit_json,
+                updated_at=excluded.updated_at
+        """, (
+            session_id, actor_name, c_key, actor_type, posture, posture_qualifier,
+            relative_target, relative_relation, holding, stance, tether_type, tether_partner,
+            composure, is_wet, is_bloodied, climax_count, in_refractory, canonical_outfit_json,
+            now, now
+        ))
+
+        for slot, st, item_name, layer_depth in resolved_garment_rows:
+            c.execute("""
+                INSERT INTO actor_garments (
+                    session_id, actor_key, slot, state, item_name, layer_depth, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, actor_key, slot) DO UPDATE SET
+                    state=excluded.state,
+                    item_name=excluded.item_name,
+                    layer_depth=excluded.layer_depth,
+                    updated_at=excluded.updated_at
+            """, (session_id, c_key, slot, st, item_name, layer_depth, now))
 
 
 def sync_state_dict_to_db(session_id: int, state_dict: Dict[str, Any], conn: Optional[sqlite3.Connection] = None) -> None:
     """Synchronizes full physical_state dictionary to normalized database tables."""
     if not session_id or not isinstance(state_dict, dict):
         return
-    actors = state_dict.get("actors") or {}
+    actors = state_dict.get("actors")
+    if actors is None or not isinstance(actors, dict):
+        return
     with _get_connection(conn) as c:
         current_keys = []
         for actor_name, a_data in actors.items():
             if isinstance(a_data, dict):
-                garments = a_data.get("clothing") or {}
-                upsert_actor_physical_state(session_id, actor_name, a_data, garments=garments, conn=c)
+                norm_a = dict(a_data)
+                if "tether" not in norm_a and "tether_partner" not in norm_a:
+                    norm_a["tether_type"] = "none"
+                    norm_a["tether_partner"] = ""
+                if "relative_position" not in norm_a and "relative_target" not in norm_a:
+                    norm_a["relative_target"] = ""
+                garments = norm_a.get("clothing") if "clothing" in norm_a else None
+                upsert_actor_physical_state(session_id, actor_name, norm_a, garments=garments, conn=c)
                 current_keys.append(canonical_actor_key(actor_name))
         if current_keys:
             placeholders = ",".join("?" for _ in current_keys)
             c.execute(f"DELETE FROM actor_physical_states WHERE session_id=? AND canonical_key NOT IN ({placeholders})", [session_id] + current_keys)
             c.execute(f"DELETE FROM actor_garments WHERE session_id=? AND actor_key NOT IN ({placeholders})", [session_id] + current_keys)
+        else:
+            c.execute("DELETE FROM actor_physical_states WHERE session_id=?", (session_id,))
+            c.execute("DELETE FROM actor_garments WHERE session_id=?", (session_id,))
 
 
 def materialize_session_physical_state(session_id: int, conn: Optional[sqlite3.Connection] = None) -> Dict[str, Any]:
     """
-    Invariant 7: Write-Through Materialization.
-    Reads normalized tables and existing JSON blob to produce an up-to-date materialization,
-    writing it back to sessions.physical_state_json.
+    Invariant 7: Normalized Read Projection.
+    Reads actor state & garments exclusively from actor_physical_states + actor_garments,
+    and merges scene-level room metadata (props, intimate_contact, combat_focus, dropped_items, climax_state).
     """
     if not session_id:
         return {}
@@ -1444,15 +1651,21 @@ def materialize_session_physical_state(session_id: int, conn: Optional[sqlite3.C
         existing_data = {}
         if existing_json_row and existing_json_row["physical_state_json"]:
             try:
-                existing_data = json.loads(existing_json_row["physical_state_json"])
+                parsed = json.loads(existing_json_row["physical_state_json"])
+                if isinstance(parsed, dict):
+                    existing_data = parsed
             except Exception:
                 existing_data = {}
 
         actors_list = get_all_actor_physical_states(session_id, conn=c)
+        if not actors_list and not existing_data:
+            return {}
+
         actors_dict = {}
         for a in actors_list:
             a_name = a["actor_name"]
-            actors_dict[a_name] = {
+            actor_entry = {
+                "actor_type": a.get("actor_type") or "npc",
                 "posture": a["posture"],
                 "holding": a["holding"],
                 "stance": a["stance"],
@@ -1462,9 +1675,16 @@ def materialize_session_physical_state(session_id: int, conn: Optional[sqlite3.C
                 "climax_count": a["climax_count"],
                 "in_refractory": bool(a["in_refractory"]),
                 "clothing": a.get("clothing") or {},
-                "relative_position": a.get("relative_target") or "",
-                "tether": a.get("tether_partner") or "",
+                "tether_type": a.get("tether_type") or "none",
+                "tether_partner": a.get("tether_partner") or "",
             }
+            if a.get("relative_target"):
+                actor_entry["relative_position"] = a["relative_target"]
+            if a.get("tether_partner"):
+                actor_entry["tether"] = a["tether_partner"]
+            if a.get("canonical_outfit"):
+                actor_entry["canonical_outfit"] = a["canonical_outfit"]
+            actors_dict[a_name] = actor_entry
 
         res = {
             "actors": actors_dict,
@@ -1476,10 +1696,13 @@ def materialize_session_physical_state(session_id: int, conn: Optional[sqlite3.C
         }
         if "excitement" in existing_data:
             res["excitement"] = existing_data["excitement"]
+        if "room_layout" in existing_data:
+            res["room_layout"] = existing_data["room_layout"]
+        if "dropped_item_meta" in existing_data and isinstance(existing_data["dropped_item_meta"], dict):
+            res["dropped_item_meta"] = existing_data["dropped_item_meta"]
+        if "pockets_emptied" in existing_data and isinstance(existing_data["pockets_emptied"], list):
+            res["pockets_emptied"] = existing_data["pockets_emptied"]
 
-        # Cache back to sessions table
-        c.execute("UPDATE sessions SET physical_state_json=?, updated_at=? WHERE id=?",
-                  (json.dumps(res), time.time(), session_id))
         return res
 
 
@@ -1518,31 +1741,71 @@ GENITAL_INTIMACY_KEYWORDS = (
     "groin", "penis", "vagina", "clit", "pussy", "cock", "fondle groin"
 )
 
+TRUE_PRIVATE_SUITE_KEYWORDS = (
+    "bedroom", "private room", "bedchamber", "dorm", "quarters", "personal room",
+    "private bath", "safehouse", "love hotel", "mirrored velvet suite",
+    "rooftop jacuzzi suite", "private karaoke", "karaoke booth",
+    "velvet basement salon", "curtained fitting", "fitting room",
+)
+
+DISCREET_SECLUDED_KEYWORDS = (
+    "empty classroom", "under-stairwell", "behind gym storage", "equipment storage cage",
+    "gardening tool shed", "behind vending machine", "service alley",
+    "backstage prop loft", "soundproof recording booth", "clock tower belfry",
+    "derelict stage wings", "pedestrian underpass", "overgrown azalea thicket",
+    "secluded sea-cave", "under-pier pilings", "back-dune driftwood",
+    "secluded pine cabin", "enclosed wooden boathouse", "wooded trail gazebo",
+    "deep blossom alcove", "mossy cedar clearing", "shaded willow bank",
+)
+
 PRIVATE_VENUE_KEYWORDS = (
     "bedroom", "private room", "bedchamber", "chamber", "dorm", "quarters",
-    "private bath", "bathhouse", "bathroom", "shower", "tent", "secluded",
-    "quiet spot", "isolated", "hideaway", "sanctuary", "secret", "personal room"
+    "private bath", "bathhouse", "bathroom", "shower", "locker & shower",
+    "tent", "secluded", "quiet spot", "isolated", "hideaway", "sanctuary",
+    "secret", "personal room",
+) + TRUE_PRIVATE_SUITE_KEYWORDS + DISCREET_SECLUDED_KEYWORDS
+
+
+CHEST_INTIMACY_KEYWORDS = (
+    "suck breast", "fondle breast", "grope breast", "kiss breast", "lick nipple",
+    "suck nipple", "tease nipple", "cup breast", "bare chest", "expose breast",
 )
 
 
 def enforce_anatomical_barriers_on_act(clothing_dict: Dict[str, Any], act_name_or_label: str) -> Dict[str, Any]:
     """
-    Invariant 9: Anatomical Barrier Guard for Genital Intimacy.
-    When genital intimacy is initiated or narrated, blocking worn bottom / undergarment
+    Invariant 9: Anatomical Barrier Guard for Genital & Chest Intimacy.
+    When genital or chest intimacy succeeds, blocking worn outer / undergarment
     layers auto-shift to 'displaced' (pulled aside / lowered) if not already removed.
     """
     cloth = dict(clothing_dict or {})
     act_low = str(act_name_or_label or "").lower()
-    if not any(kw in act_low for kw in GENITAL_INTIMACY_KEYWORDS):
-        return cloth
 
-    bot_st = normalize_garment_state(str(cloth.get(SLOT_BOTTOM, "")))
-    if bot_st == STATE_WORN:
-        cloth = apply_garment_transition(cloth, SLOT_BOTTOM, STATE_DISPLACED)
+    if any(kw in act_low for kw in GENITAL_INTIMACY_KEYWORDS):
+        bot_st = normalize_garment_state(str(cloth.get(SLOT_BOTTOM, "")))
+        if bot_st == STATE_WORN:
+            cloth = apply_garment_transition(cloth, SLOT_BOTTOM, STATE_DISPLACED)
 
-    ubot_st = normalize_garment_state(str(cloth.get(SLOT_UNDER_BOTTOM, "")))
-    if ubot_st == STATE_WORN:
-        cloth = apply_garment_transition(cloth, SLOT_UNDER_BOTTOM, STATE_DISPLACED)
+        ubot_st = normalize_garment_state(str(cloth.get(SLOT_UNDER_BOTTOM, "")))
+        if ubot_st == STATE_WORN:
+            cloth = apply_garment_transition(cloth, SLOT_UNDER_BOTTOM, STATE_DISPLACED)
+
+    is_chest_act = any(kw in act_low for kw in CHEST_INTIMACY_KEYWORDS) or (
+        any(n in act_low for n in ("breast", "nipple", "bosom"))
+        and any(v in act_low for v in ("kiss", "suck", "lick", "fondle", "grope", "cup", "tease", "caress", "touch", "expose", "bare"))
+    )
+    if is_chest_act:
+        outer_st = normalize_garment_state(str(cloth.get(SLOT_OUTERWEAR, "")))
+        if outer_st == STATE_WORN:
+            cloth = apply_garment_transition(cloth, SLOT_OUTERWEAR, STATE_DISPLACED)
+
+        top_st = normalize_garment_state(str(cloth.get(SLOT_TOP, "")))
+        if top_st == STATE_WORN:
+            cloth = apply_garment_transition(cloth, SLOT_TOP, STATE_DISPLACED)
+
+        utop_st = normalize_garment_state(str(cloth.get(SLOT_UNDER_TOP, "")))
+        if utop_st == STATE_WORN:
+            cloth = apply_garment_transition(cloth, SLOT_UNDER_TOP, STATE_DISPLACED)
 
     return cloth
 
@@ -1678,12 +1941,27 @@ def resolve_canonical_wardrobe(
             elif slot in ("footwear", "boots", "shoes"):
                 eq_foot = name
 
+    # Apply any player-gifted wearable garments (`Top`, `Bottom`, `Outerwear`, `Accessory`)
+    gifted = _extract_gifted_wardrobe(char_or_npc, session_id=session_id)
+    if gifted:
+        if not eq_outer and gifted.get("Outerwear"):
+            eq_outer = str(gifted["Outerwear"])
+        if not eq_top and gifted.get("Top"):
+            eq_top = str(gifted["Top"])
+        if not eq_bot and gifted.get("Bottom"):
+            eq_bot = str(gifted["Bottom"])
+        if not eq_foot and gifted.get("Footwear"):
+            eq_foot = str(gifted["Footwear"])
+
     # Fallback to attire description parsing if inventory empty
     if attire_desc:
         if not eq_top:
             eq_top = attire_desc
         if not eq_bot:
             eq_bot = attire_desc
+
+    if gifted.get("Accessory") and eq_top and str(gifted["Accessory"]) not in eq_top:
+        eq_top = f"{eq_top} (wearing {gifted['Accessory']})"
 
     top_name = eq_top or "Clothed"
     bot_name = eq_bot or "Clothed"
@@ -1773,15 +2051,18 @@ def _is_name_allowed(name: str, allowed_names: set) -> bool:
     n_clean = name.strip().lower()
     if n_clean in allowed_names:
         return True
-    n_first = n_clean.split()[0] if n_clean else ""
-    for a in allowed_names:
-        if not a:
-            continue
-        a_first = (a.split() or [""])[0]
-        if len(n_first) >= 3 and a_first == n_first:
+    import namegen
+    allowed_list = [str(a).strip().lower() for a in allowed_names if a]
+    n_toks = namegen.get_unique_person_tokens(n_clean, min_len=2)
+    for a in allowed_list:
+        a_toks = namegen.get_unique_person_tokens(a, peer_names=allowed_list, min_len=2)
+        if n_toks & a_toks:
             return True
-        if (len(a) >= 3 and a in n_clean) or (len(n_clean) >= 3 and n_clean in a):
-            return True
+        if a.rstrip(".") not in namegen.NAME_PARTICLES_AND_HONORIFICS and n_clean.rstrip(".") not in namegen.NAME_PARTICLES_AND_HONORIFICS:
+            if (len(a) >= 3 and re.search(rf'\b{re.escape(a)}\b', n_clean)) or (
+                len(n_clean) >= 3 and re.search(rf'\b{re.escape(n_clean)}\b', a)
+            ):
+                return True
     return False
 
 
@@ -1811,6 +2092,10 @@ def merge_physical_state_updates(current_state: dict, updates: dict, party: list
             res["climax_state"] = current_state["climax_state"]
         if "excitement" in current_state:
             res["excitement"] = current_state["excitement"]
+        if "dropped_item_meta" in current_state:
+            res["dropped_item_meta"] = current_state["dropped_item_meta"]
+        if "pockets_emptied" in current_state:
+            res["pockets_emptied"] = current_state["pockets_emptied"]
         return res
 
     # 1. Update Actors
@@ -1869,6 +2154,7 @@ def merge_physical_state_updates(current_state: dict, updates: dict, party: list
                     existing["relative_position"] = r_val[:100]
                 else:
                     existing.pop("relative_position", None)
+                    existing.pop("relative_target", None)
                     
             if "tether" in u_data:
                 t_val = str(u_data["tether"]).strip() if u_data["tether"] else ""
@@ -1876,6 +2162,8 @@ def merge_physical_state_updates(current_state: dict, updates: dict, party: list
                     existing["tether"] = t_val[:100]
                 else:
                     existing.pop("tether", None)
+                    existing["tether_type"] = "none"
+                    existing["tether_partner"] = ""
 
             # Clothing delta updates with Auto-Cascading FSM (Invariant 1)
             cloth_val = u_data.get("clothing")
@@ -2032,6 +2320,9 @@ def merge_physical_state_updates(current_state: dict, updates: dict, party: list
                             a_act["posture"] = "Resting / Embracing after climax"
                         break
 
+    if len(dropped_items) > 10:
+        dropped_items = dropped_items[-10:]
+
     res = {
         "actors": actors,
         "props": props,
@@ -2044,6 +2335,18 @@ def merge_physical_state_updates(current_state: dict, updates: dict, party: list
         res["excitement"] = current_state["excitement"]
     if isinstance(updates, dict) and "excitement" in updates:
         res["excitement"] = updates["excitement"]
+    if "dropped_item_meta" in current_state and isinstance(current_state["dropped_item_meta"], dict):
+        res["dropped_item_meta"] = dict(current_state["dropped_item_meta"])
+    if isinstance(updates, dict) and isinstance(updates.get("dropped_item_meta"), dict):
+        res.setdefault("dropped_item_meta", {}).update(updates["dropped_item_meta"])
+    if "pockets_emptied" in current_state and isinstance(current_state["pockets_emptied"], list):
+        res["pockets_emptied"] = list(current_state["pockets_emptied"])
+    if isinstance(updates, dict) and isinstance(updates.get("pockets_emptied"), list):
+        merged_pockets = list(res.get("pockets_emptied") or [])
+        for p in updates["pockets_emptied"]:
+            if p not in merged_pockets:
+                merged_pockets.append(p)
+        res["pockets_emptied"] = merged_pockets
 
     if session_id:
         try:
@@ -2065,6 +2368,7 @@ def restore_equipped_outfit(current_state: dict, party: list, scen_key: str = "f
     if party and isinstance(party, list):
         for entry in party:
             char = entry[0] if isinstance(entry, (tuple, list)) else entry
+            inv = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else (char.get("inventory") if isinstance(char, dict) else [])
             if not isinstance(char, dict) or not char.get("name"):
                 continue
             c_name = char["name"]
@@ -2081,11 +2385,23 @@ def restore_equipped_outfit(current_state: dict, party: list, scen_key: str = "f
             if stance == "dead" or "deceased" in str(a_data.get("posture", "")).lower():
                 continue
                 
-            inv = entry[1] if isinstance(entry, (tuple, list)) and len(entry) > 1 else []
-            equipped_outerwear = "none"
-            equipped_top = "Clothed"
-            equipped_bottom = "Clothed"
-            equipped_footwear = "Worn"
+            canon_outfit = dict(a_data.get("canonical_outfit") or {})
+            if not canon_outfit and session_id:
+                try:
+                    row_act = get_actor_physical_state(session_id, matched_key)
+                    if row_act and row_act.get("canonical_outfit"):
+                        canon_outfit = dict(row_act["canonical_outfit"])
+                except Exception:
+                    pass
+            char_with_inv = dict(char)
+            if inv and "inventory" not in char_with_inv:
+                char_with_inv["inventory"] = inv
+            wardrobe = resolve_canonical_wardrobe(char_with_inv, scen_key=scen_key, session_id=session_id)
+
+            equipped_outerwear = canon_outfit.get("outerwear") or wardrobe[SLOT_OUTERWEAR]["item_name"] or "none"
+            equipped_top = canon_outfit.get("top") or wardrobe[SLOT_TOP]["item_name"] or "Clothed"
+            equipped_bottom = canon_outfit.get("bottom") or wardrobe[SLOT_BOTTOM]["item_name"] or "Clothed"
+            equipped_footwear = canon_outfit.get("footwear") or "Worn"
             if isinstance(inv, list):
                 for item in inv:
                     if not isinstance(item, dict):
@@ -2102,16 +2418,15 @@ def restore_equipped_outfit(current_state: dict, party: list, scen_key: str = "f
                         equipped_bottom = n
                     elif s in ("Shoes", "Footwear") and n:
                         equipped_footwear = n
-                        
+
             u_top, u_bot = _infer_initial_undergarments_state(char, scen_key, session_id)
-            
-            # Only redress if they are currently missing top/bottom layers that they should have equipped
+
+            # Restore canonical/equipped layers
             cloth = a_data.get("clothing") or {}
             if isinstance(cloth, dict):
                 cloth["outerwear"] = equipped_outerwear
                 cloth["top"] = equipped_top
                 cloth["bottom"] = equipped_bottom
-                # We also ensure undergarments match the baseline, in case they were stripped
                 cloth["under_top"] = u_top
                 cloth["under_bottom"] = u_bot
                 cloth["footwear"] = equipped_footwear
@@ -2119,7 +2434,7 @@ def restore_equipped_outfit(current_state: dict, party: list, scen_key: str = "f
             actors[matched_key]["composure"] = COMPOSURE_COMPOSED
 
     # Also redress any conscious non-party NPC actors whose clothing was removed/undone during intimacy
-    _undressed_tokens = ("removed", "none", "stripped", "pulled", "unbuttoned", "open", "disheveled", "undone", "naked", "bare")
+    _undressed_tokens = ("removed", "none", "stripped", "pulled", "unbuttoned", "open", "disheveled", "displaced", "undone", "naked", "bare")
     for a_key, a_data in actors.items():
         if a_key in handled_keys or not isinstance(a_data, dict):
             continue
@@ -2128,32 +2443,49 @@ def restore_equipped_outfit(current_state: dict, party: list, scen_key: str = "f
         if stance in ("dead", "incapacitated") or any(w in posture_low for w in ("deceased", "downed", "unconscious")):
             continue
         cloth = a_data.get("clothing")
-        canon_outfit = {}
+        canon_outfit = dict(a_data.get("canonical_outfit") or {})
+        npc_contact = None
         if session_id:
             try:
-                row_act = get_actor_physical_state(session_id, a_key)
-                if row_act and row_act.get("canonical_outfit"):
-                    canon_outfit = row_act["canonical_outfit"]
+                if not canon_outfit:
+                    row_act = get_actor_physical_state(session_id, a_key)
+                    if row_act and row_act.get("canonical_outfit"):
+                        canon_outfit = dict(row_act["canonical_outfit"])
+                npc_contact = db.get_contact(session_id, a_key)
             except Exception:
                 pass
-        top_restore = canon_outfit.get("top") or "Clothed"
-        bot_restore = canon_outfit.get("bottom") or "Clothed"
-        out_restore = canon_outfit.get("outerwear") or "none"
-        foot_restore = canon_outfit.get("footwear") or "Worn"
+        u_top_def, u_bot_def = _infer_initial_undergarments_state(
+            npc_contact if isinstance(npc_contact, dict) else {"name": a_key, "gender": a_data.get("gender", "female")},
+            scen_key=scen_key,
+            session_id=session_id,
+        )
+        if not canon_outfit and isinstance(npc_contact, dict):
+            w_npc = resolve_canonical_wardrobe(npc_contact, scen_key=scen_key, session_id=session_id)
+            canon_outfit = {
+                "outerwear": w_npc[SLOT_OUTERWEAR]["item_name"] or "none",
+                "top": w_npc[SLOT_TOP]["item_name"] or "Clothed",
+                "bottom": w_npc[SLOT_BOTTOM]["item_name"] or "Clothed",
+                "under_top": u_top_def,
+                "under_bottom": u_bot_def,
+                "footwear": "Worn",
+            }
 
         if isinstance(cloth, dict):
-            if any(t in str(cloth.get("top", "")).lower() for t in _undressed_tokens):
-                cloth["top"] = top_restore
-            if any(t in str(cloth.get("bottom", "")).lower() for t in _undressed_tokens):
-                cloth["bottom"] = bot_restore
-            if any(t in str(cloth.get("outerwear", "")).lower() for t in _undressed_tokens):
-                cloth["outerwear"] = out_restore
-            if any(t in str(cloth.get("footwear", "")).lower() for t in _undressed_tokens):
-                cloth["footwear"] = foot_restore
-            if any(t in str(cloth.get("under_top", "")).lower() for t in ("removed", "stripped", "pulled", "unclasped", "undone")):
-                cloth["under_top"] = "Worn"
-            if any(t in str(cloth.get("under_bottom", "")).lower() for t in ("removed", "stripped", "pulled", "undone")):
-                cloth["under_bottom"] = "Worn"
+            if canon_outfit:
+                cloth = redress_actor_to_canonical(cloth, canon_outfit)
+            else:
+                if any(t in str(cloth.get("top", "")).lower() for t in _undressed_tokens):
+                    cloth["top"] = "Clothed"
+                if any(t in str(cloth.get("bottom", "")).lower() for t in _undressed_tokens):
+                    cloth["bottom"] = "Clothed"
+                if any(t in str(cloth.get("outerwear", "")).lower() for t in _undressed_tokens):
+                    cloth["outerwear"] = "none"
+                if any(t in str(cloth.get("footwear", "")).lower() for t in _undressed_tokens):
+                    cloth["footwear"] = "Worn"
+                if any(t in str(cloth.get("under_top", "")).lower() for t in ("removed", "stripped", "pulled", "displaced", "unclasped", "undone")):
+                    cloth["under_top"] = u_top_def
+                if any(t in str(cloth.get("under_bottom", "")).lower() for t in ("removed", "stripped", "pulled", "displaced", "undone")):
+                    cloth["under_bottom"] = u_bot_def
             actors[a_key]["clothing"] = cloth
             actors[a_key]["composure"] = COMPOSURE_COMPOSED
             
@@ -2239,11 +2571,14 @@ def handle_location_transition(current_state: dict, party: list = None,
 
             # Clear room-specific relative position anchor upon room transition
             actor_copy.pop("relative_position", None)
+            actor_copy.pop("relative_target", None)
 
             # If tether is anchored to an old room fixture or non-transitioned entity, clear it (preserve carried burdens)
-            tether = str(actor_copy.get("tether") or "").strip()
+            tether = str(actor_copy.get("tether") or actor_copy.get("tether_partner") or "").strip()
             if tether and not any(w in tether.lower() for w in ("carry", "holding", "carrying")):
                 actor_copy.pop("tether", None)
+                actor_copy["tether_type"] = "none"
+                actor_copy["tether_partner"] = ""
 
             actors[name] = actor_copy
 
@@ -2255,6 +2590,8 @@ def handle_location_transition(current_state: dict, party: list = None,
         "dropped_items": [],
         "climax_state": {"partner_climaxed": False, "player_climaxed": False, "partner_climaxes": {}},
     }
+    if "pockets_emptied" in current_state and isinstance(current_state["pockets_emptied"], list):
+        new_state["pockets_emptied"] = list(current_state["pockets_emptied"])
     if "excitement" in current_state and isinstance(current_state["excitement"], dict):
         exc_copy = dict(current_state["excitement"])
         exc_copy["active"] = False
@@ -2270,3 +2607,398 @@ def handle_location_transition(current_state: dict, party: list = None,
     # Auto-redress upon transitioning locations
     new_state = restore_equipped_outfit(new_state, party, session_id=session_id)
     return new_state
+
+
+def is_shower_or_locker_location(location_str: str = "", node_id: str = "") -> bool:
+    """Returns True if the node or location is an athletic Locker & Shower Room."""
+    probe = f"{node_id} {location_str}".lower()
+    return any(k in probe for k in (
+        "loc_male_shower_room", "loc_female_shower_room",
+        "men's locker & shower", "women's locker & shower",
+        "locker & shower room", "tiled shower stalls", "wooden locker benches",
+    ))
+
+
+def is_private_intimate_venue(
+    location_str: str = "",
+    node_id: str = "",
+    session_id: int = 0,
+    player_gender: str = "",
+    is_undressing_or_showering_only: bool = False,
+) -> bool:
+    """
+    Returns True when the room guarantees 0% passerby/witness exposure risk:
+    - Personal bedrooms, private baths, Love Hotel suites (`sub_love_hotel_mirrored`, `sub_love_hotel_jacuzzi`),
+      Private Karaoke Booths, Velvet Basement Salon (`loc_nsfw_faction_hq`), Curtained Fitting Rooms,
+      or any world_node flagged `"is_private_intimate": true`.
+    - Also returns True when undressing/washing inside the player's own-gender Shower Room.
+    """
+    probe = f"{node_id} {location_str}".lower()
+    if any(k in probe for k in (
+        "sub_love_hotel_mirrored", "sub_love_hotel_jacuzzi", "loc_nsfw_faction_hq",
+        "velvet basement salon", "mirrored velvet suite", "rooftop jacuzzi suite",
+        "private karaoke", "curtained fitting",
+    )):
+        return True
+    if any(k in probe for k in TRUE_PRIVATE_SUITE_KEYWORDS) and "lobby" not in probe:
+        return True
+    if session_id and node_id:
+        try:
+            wn = db.get_world_node(session_id, node_id)
+            if wn and wn.get("state_json"):
+                st = json.loads(wn["state_json"]) if isinstance(wn["state_json"], str) else wn["state_json"]
+                if isinstance(st, dict) and st.get("is_private_intimate"):
+                    return True
+        except Exception:
+            pass
+    if is_undressing_or_showering_only and is_shower_or_locker_location(location_str, node_id):
+        g_low = str(player_gender or "").strip().lower()
+        is_female_room = any(k in probe for k in ("loc_female_shower_room", "women's locker", "sub_female_"))
+        is_male_room = (not is_female_room) and any(k in probe for k in ("loc_male_shower_room", "men's locker", "sub_male_"))
+        if (is_male_room and g_low == "male") or (is_female_room and g_low == "female"):
+            return True
+    return False
+
+
+def is_discreet_venue(location_str: str = "", node_id: str = "", session_id: int = 0) -> bool:
+    """Returns True if the room is one of the 21 secluded `is_discreet` spots (8% thrill risk)."""
+    probe = f"{node_id} {location_str}".lower()
+    if any(k in probe for k in DISCREET_SECLUDED_KEYWORDS):
+        return True
+    if session_id:
+        try:
+            nid = node_id or db.resolve_node_id_from_location(session_id, location_str) or ""
+            if nid:
+                wn = db.get_world_node(session_id, nid)
+                if wn and wn.get("state_json"):
+                    st = json.loads(wn["state_json"]) if isinstance(wn["state_json"], str) else wn["state_json"]
+                    if isinstance(st, dict) and st.get("is_discreet"):
+                        return True
+        except Exception:
+            pass
+    return False
+
+
+def stage_shower_room_actors(
+    state: Dict[str, Any],
+    session_id: int = 0,
+    location_str: str = "",
+    node_id: str = "",
+    npc_records: Optional[List[Dict[str, Any]]] = None,
+    seed: int = 0,
+) -> Dict[str, Any]:
+    """
+    Stages scheduled/ambient athletes inside `Men's` / `Women's Locker & Shower Room`
+    with `is_wet=1`, damp hair, and towel-wrapped or mid-change physical states.
+    """
+    if not isinstance(state, dict) or not is_shower_or_locker_location(location_str, node_id):
+        return state
+    actors = dict(state.get("actors") or {})
+    records = list(npc_records or [])
+    changed = False
+    for idx, rec in enumerate(records):
+        if not isinstance(rec, dict) or not rec.get("name"):
+            continue
+        n_name = str(rec["name"]).strip()
+        n_gender = str(rec.get("gender") or "female").strip().lower()
+        is_male = (n_gender == "male")
+        variant = (sum(ord(c) for c in f"{session_id}:{n_name}:{seed}") + idx) % 3
+        if variant == 0:
+            cloth = {
+                SLOT_OUTERWEAR: "none",
+                SLOT_TOP: "displaced (Wrapped bath towel)" if not is_male else "removed",
+                SLOT_BOTTOM: "displaced (Wrapped bath towel)",
+                SLOT_UNDER_TOP: "None (N/A)" if is_male else "removed",
+                SLOT_UNDER_BOTTOM: "removed",
+                SLOT_FOOTWEAR: "Shower slippers",
+            }
+            posture = "Standing by wooden locker bench drying damp hair with a towel"
+        elif variant == 1:
+            cloth = {
+                SLOT_OUTERWEAR: "none",
+                SLOT_TOP: "removed" if is_male else "disheveled (Unbuttoned athletic jersey)",
+                SLOT_BOTTOM: "Athletic shorts",
+                SLOT_UNDER_TOP: "None (N/A)" if is_male else "Worn (Sports bra)",
+                SLOT_UNDER_BOTTOM: "Worn",
+                SLOT_FOOTWEAR: "Sneakers",
+            }
+            posture = "Mid-change beside an open athletic locker"
+        else:
+            cloth = {
+                SLOT_OUTERWEAR: "none",
+                SLOT_TOP: "Damp practice tee",
+                SLOT_BOTTOM: "Track warm-up pants",
+                SLOT_UNDER_TOP: "None (N/A)" if is_male else "Worn",
+                SLOT_UNDER_BOTTOM: "Worn",
+                SLOT_FOOTWEAR: "Sneakers",
+            }
+            posture = "Towel slung around neck after rinsing off in the shower stalls"
+
+        existing = dict(actors.get(n_name) or {})
+        existing.update({
+            "actor_type": "npc",
+            "posture": posture,
+            "holding": existing.get("holding") or "Gym towel",
+            "clothing": cloth,
+            "stance": "Relaxed",
+            "composure": COMPOSURE_COMPOSED,
+            "is_wet": 1,
+            "is_bloodied": 0,
+        })
+        if "canonical_outfit" not in existing:
+            w = resolve_canonical_wardrobe(rec, session_id=session_id)
+            existing["canonical_outfit"] = {
+                SLOT_OUTERWEAR: w[SLOT_OUTERWEAR]["item_name"] or "none",
+                SLOT_TOP: w[SLOT_TOP]["item_name"] or "Clothed",
+                SLOT_BOTTOM: w[SLOT_BOTTOM]["item_name"] or "Clothed",
+                SLOT_UNDER_TOP: "None (N/A)" if is_male else "Worn",
+                SLOT_UNDER_BOTTOM: "Worn",
+                SLOT_FOOTWEAR: "Worn",
+            }
+        actors[n_name] = existing
+        changed = True
+
+    if changed:
+        state["actors"] = actors
+        if session_id:
+            try:
+                db.update_session_physical_state(session_id, state)
+                sync_state_dict_to_db(session_id, state)
+            except Exception:
+                pass
+    return state
+
+
+def apply_player_shower_refresh(
+    session_id: int,
+    party: Optional[list] = None,
+    action_text: str = "",
+    location_str: str = "",
+    node_id: str = "",
+    player_gender: str = "",
+) -> Dict[str, Any]:
+    """
+    Functional wash-up / shower composure reset:
+    When the player showers or washes up in their own-gender Shower Room (or a private bath /
+    bedroom / Love Hotel Jacuzzi Suite), resets player `composure` from `disheveled` /
+    `exhausted` / `flustered` / `shaken` back to `COMPOSURE_COMPOSED`, clears `is_bloodied`,
+    and restores fresh equipped attire.
+    """
+    act_low = str(action_text or "").lower()
+    wash_cues = ("shower", "wash up", "rinse off", "freshen up", "wash off", "take a bath", "clean up")
+    if not any(cue in act_low for cue in wash_cues):
+        return {"refreshed": False}
+
+    probe = f"{node_id} {location_str}".lower()
+    in_own_shower = False
+    if is_shower_or_locker_location(location_str, node_id):
+        g_low = str(player_gender or "").strip().lower()
+        is_female_room = any(k in probe for k in ("loc_female_shower_room", "women's locker", "sub_female_"))
+        is_male_room = (not is_female_room) and any(k in probe for k in ("loc_male_shower_room", "men's locker", "sub_male_"))
+        if not g_low or (is_male_room and g_low == "male") or (is_female_room and g_low == "female"):
+            in_own_shower = True
+
+    in_private_bath = any(k in probe for k in ("bedroom", "private bath", "jacuzzi", "bathhouse", "onsen", "restroom"))
+    if not (in_own_shower or in_private_bath):
+        return {"refreshed": False}
+
+    state = db.get_session_physical_state(session_id) if session_id else {}
+    if not isinstance(state, dict) or not state.get("actors"):
+        return {"refreshed": False}
+
+    state = restore_equipped_outfit(state, party or [], session_id=session_id)
+    actors = state.get("actors") or {}
+    p_key = find_player_actor_key(actors, party=party, session_id=session_id)
+    if not p_key or p_key not in actors:
+        return {"refreshed": False}
+
+    old_comp = str(actors[p_key].get("composure") or COMPOSURE_COMPOSED)
+    actors[p_key]["composure"] = COMPOSURE_COMPOSED
+    actors[p_key]["is_bloodied"] = 0
+    actors[p_key]["is_wet"] = 0
+    actors[p_key]["in_refractory"] = 0
+    actors[p_key]["posture"] = "Freshly showered and composed"
+    state["actors"] = actors
+    if session_id:
+        try:
+            db.update_session_physical_state(session_id, state)
+            sync_state_dict_to_db(session_id, state)
+        except Exception:
+            pass
+    return {
+        "refreshed": True,
+        "actor": p_key,
+        "old_composure": old_comp,
+        "new_composure": COMPOSURE_COMPOSED,
+    }
+
+
+def classify_wearable_gift_slot(
+    item_dict: Optional[Dict[str, Any]] = None,
+    item_name: str = "",
+) -> Optional[str]:
+    """
+    Classifies a gifted item into a canonical NPC `gifted_wardrobe` category
+    (`Lingerie`, `Outerwear`, `Top`, `Bottom`, `Footwear`, `Accessory`),
+    or returns `None` for non-wearable gifts (food, drinks, plushies, candles, etc.).
+    """
+    it = item_dict if isinstance(item_dict, dict) else {}
+    meta = it.get("metadata") if isinstance(it.get("metadata"), dict) else {}
+    if not meta and it.get("effect"):
+        try:
+            from mechanics.combat.items.envelope import parse_item
+            parsed = parse_item(str(it.get("effect") or ""))
+            if isinstance(parsed, dict):
+                meta = parsed
+        except Exception:
+            meta = {}
+
+    name_low = str(item_name or it.get("name") or meta.get("name") or "").strip().lower()
+    itype_low = str(it.get("item_type") or meta.get("item_type") or "").strip().lower()
+    slot_low = str(it.get("slot") or meta.get("slot") or "").strip().lower()
+
+    if itype_low in ("food", "drink", "potion", "consumable", "spellbook", "weapon", "shield"):
+        return None
+
+    if (
+        itype_low == "lingerie"
+        or slot_low == "lingerie"
+        or any(k in name_low for k in ("lingerie", "corset", "bra", "panties", "garter", "babydoll", "negligee", "teddy"))
+    ):
+        return "Lingerie"
+
+    if (
+        itype_low == "outerwear"
+        or slot_low == "outerwear"
+        or any(k in name_low for k in ("coat", "blazer", "jacket", "cardigan", "parka", "overcoat", "cape"))
+    ):
+        return "Outerwear"
+
+    if (
+        itype_low == "top"
+        or slot_low == "top"
+        or any(k in name_low for k in ("blouse", "shirt", "sweater", "hoodie", "tunic", "vest", "dress", "sundress", "gown", "camisole"))
+    ):
+        return "Top"
+
+    if (
+        itype_low == "bottom"
+        or slot_low == "bottom"
+        or any(k in name_low for k in ("skirt", "slacks", "trousers", "jeans", "shorts", "leggings"))
+    ):
+        return "Bottom"
+
+    if (
+        itype_low in ("shoes", "footwear")
+        or slot_low in ("shoes", "footwear")
+        or any(k in name_low for k in ("sneakers", "loafers", "heels", "boots", "sandals"))
+    ):
+        return "Footwear"
+
+    if (
+        itype_low == "accessory"
+        or slot_low.startswith("accessory")
+        or any(
+            k in name_low
+            for k in (
+                "necklace", "locket", "pendant", "ring", "bracelet", "watch", "wristwatch",
+                "hairpin", "ribbon", "tie", "scarf", "earrings", "choker", "glasses", "sunglasses", "cuffs",
+            )
+        )
+    ):
+        return "Accessory"
+
+    if itype_low == "clothing":
+        return "Top"
+
+    return None
+
+
+def apply_wearable_gift_to_npc(
+    session_id: int,
+    character_id: int,
+    npc_name: str,
+    item_dict: Optional[Dict[str, Any]] = None,
+    item_name: str = "",
+) -> Optional[str]:
+    """
+    Persists a gifted wearable garment/accessory/lingerie into the recipient NPC's
+    `basic_info.gifted_wardrobe` and updates their live `physical_state` wardrobe
+    so they equip/wear the gift immediately.
+    """
+    if not session_id or not npc_name:
+        return None
+    clean_item = str(item_name or (item_dict or {}).get("name") or "").strip()
+    if not clean_item:
+        return None
+    slot_cat = classify_wearable_gift_slot(item_dict, clean_item)
+    if not slot_cat:
+        return None
+
+    contact = db.get_contact(session_id, npc_name, character_id)
+    if not contact and character_id:
+        contact = db.get_contact(session_id, npc_name, 0)
+    if not contact:
+        slug = npc_name.lower().strip().replace(" ", "_")
+        contact = db.get_contact(session_id, slug, character_id) or db.get_contact(session_id, slug, 0)
+
+    binfo = dict((contact or {}).get("basic_info") or {})
+    gw = dict(binfo.get("gifted_wardrobe") or {})
+    gw[slot_cat] = clean_item
+    binfo["gifted_wardrobe"] = gw
+
+    npc_id_val = str((contact or {}).get("npc_id") or npc_name.lower().strip().replace(" ", "_"))
+    npc_disp = str((contact or {}).get("name") or npc_name).strip()
+    db.upsert_contact(
+        session_id=session_id,
+        character_id=character_id,
+        npc_id=npc_id_val,
+        name=npc_disp,
+        basic_info=binfo,
+    )
+
+    try:
+        state = db.get_session_physical_state(session_id)
+        if isinstance(state, dict) and isinstance(state.get("actors"), dict):
+            actors = state["actors"]
+            matched_key = _match_actor_key(npc_disp, actors)
+            if matched_key in actors and isinstance(actors[matched_key], dict):
+                actor = actors[matched_key]
+                cloth = dict(actor.get("clothing") or {})
+                canon = dict(actor.get("canonical_outfit") or {})
+                if slot_cat == "Outerwear":
+                    cloth[SLOT_OUTERWEAR] = clean_item
+                    canon[SLOT_OUTERWEAR] = clean_item
+                elif slot_cat == "Top":
+                    cloth[SLOT_TOP] = clean_item
+                    canon[SLOT_TOP] = clean_item
+                elif slot_cat == "Bottom":
+                    cloth[SLOT_BOTTOM] = clean_item
+                    canon[SLOT_BOTTOM] = clean_item
+                elif slot_cat == "Footwear":
+                    cloth[SLOT_FOOTWEAR] = clean_item
+                    canon[SLOT_FOOTWEAR] = clean_item
+                elif slot_cat == "Lingerie":
+                    is_male_actor = "none (n/a)" in str(cloth.get(SLOT_UNDER_TOP, "")).lower()
+                    if not is_male_actor:
+                        cloth[SLOT_UNDER_TOP] = f"Worn ({clean_item})"
+                        canon[SLOT_UNDER_TOP] = f"Worn ({clean_item})"
+                    cloth[SLOT_UNDER_BOTTOM] = f"Worn ({clean_item})"
+                    canon[SLOT_UNDER_BOTTOM] = f"Worn ({clean_item})"
+                elif slot_cat == "Accessory":
+                    cur_top = str(cloth.get(SLOT_TOP) or "Clothed")
+                    if clean_item.lower() not in cur_top.lower():
+                        cloth[SLOT_TOP] = f"{cur_top} (wearing {clean_item})"
+                    cur_canon_top = str(canon.get(SLOT_TOP) or cur_top)
+                    if clean_item.lower() not in cur_canon_top.lower():
+                        canon[SLOT_TOP] = f"{cur_canon_top} (wearing {clean_item})"
+                actor["clothing"] = cloth
+                actor["canonical_outfit"] = canon
+                actors[matched_key] = actor
+                state["actors"] = actors
+                db.update_session_physical_state(session_id, state)
+                sync_state_dict_to_db(session_id, state)
+    except Exception:
+        pass
+
+    return slot_cat

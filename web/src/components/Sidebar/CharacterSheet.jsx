@@ -301,33 +301,26 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
     <div className="bg-black/35 rounded-xl border border-fantasy-border p-3 sm:p-3.5 space-y-2.5 sm:space-y-3 select-none">
       
       {/* Hero Header */}
-      <div className="flex items-start justify-between border-b border-fantasy-border/70 pb-3 gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-[52px] h-[52px] bg-gradient-to-br from-fantasy-dark via-neutral-900 to-black border-2 border-fantasy-accent/60 rounded-xl flex items-center justify-center shadow-md shadow-black/80 shrink-0">
-            <User size={26} className="text-fantasy-accent" />
+      <div className="space-y-2 border-b border-fantasy-border/50 pb-3">
+        <div className="flex items-center gap-2.5">
+          <div className="grid place-items-center w-10 h-10 rounded-full bg-fantasy-accent/15 text-fantasy-accent font-bold shrink-0">
+            {(character.name || '?').charAt(0).toUpperCase()}
           </div>
-          <div className="min-w-0">
-            <h2 className="font-rpg font-bold text-xl sm:text-2xl text-gray-100 leading-tight tracking-wide truncate">{character.name}</h2>
-            <div className="flex items-center gap-2 mt-1 flex-wrap">
-              <span className="text-sm text-fantasy-accent font-bold uppercase tracking-wider">
-                Lv.{character.level || 1} {character.char_class || character.class_name || 'Adventurer'}
-              </span>
-              {character.scenario && (
-                <span className="text-[11px] px-2 py-0.5 bg-fantasy-border/80 text-gray-200 rounded-md font-semibold">
-                  {character.scenario_display_name || character.scenario}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap text-xs text-gray-300">
-              {character.race && (
-                <span className="px-2 py-0.5 rounded-md bg-black/60 border border-fantasy-border/80 font-medium text-xs">{character.race}</span>
-              )}
-              {character.gender && (
-                <span className="px-2 py-0.5 rounded-md bg-black/60 border border-fantasy-border/80 font-medium text-xs">{character.gender}</span>
-              )}
-              <span className="px-2 py-0.5 rounded-md bg-black/60 border border-fantasy-border/80 font-mono text-xs">
-                📅 {character.days_adventured ?? 1}d
-              </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="hk-display font-bold text-lg text-gray-50 leading-tight truncate">{character.name}</h2>
+            <p className="text-xs text-gray-400 truncate" title={`Lv.${character.level || 1} ${character.char_class || character.class_name || 'Adventurer'}`}>
+              <span className="text-fantasy-accent font-semibold">Lv.{character.level || 1}</span> {character.char_class || character.class_name || 'Adventurer'}
+            </p>
+          </div>
+          <div className="flex items-center gap-1 h-8 px-2.5 rounded-full bg-amber-500/10 text-amber-300 font-mono text-sm font-bold shrink-0" title="Gold">
+            <Coins size={14} className="text-amber-400" />
+            <span>{character.gold !== undefined ? character.gold : 0}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 flex-wrap text-xs text-gray-300">
+          {character.race && <span className="hk-chip">{character.race}</span>}
+          {character.gender && <span className="hk-chip">{character.gender}</span>}
+          <span className="hk-chip" title="Days adventured">📅 {character.days_adventured ?? 1}d</span>
               {isNsfw && !isMale && (
                 <button
                   type="button"
@@ -362,15 +355,6 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
                   })()}
                 </button>
               )}
-            </div>
-          </div>
-        </div>
-
-        {/* Currency Display */}
-        <div className="flex items-center gap-1.5 bg-black/60 border border-amber-800/60 px-3 py-1.5 rounded-lg text-amber-300 font-mono text-sm sm:text-base font-bold shadow-sm shrink-0">
-          <Coins size={16} className="text-amber-400" />
-          <span>{character.gold !== undefined ? character.gold : 0}</span>
-          <span className="text-xs text-amber-500 font-extrabold">G</span>
         </div>
       </div>
 
@@ -466,12 +450,9 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
       {/* Core S.P.E.C.I.A.L. Attributes Grid */}
       <div className="space-y-1.5">
         <div className="text-xs uppercase font-bold text-gray-200 tracking-wider flex justify-between items-center">
-          <span className="flex items-center gap-1">
+          <span className="flex items-center gap-1 min-w-0">
             <span>✨</span>
-            <span>{t('stats.special_attributes', 'S.P.E.C.I.A.L. Attributes')}</span>
-          </span>
-          <span className="text-[11px] text-gray-400 font-mono bg-black/60 px-1.5 py-0.2 rounded border border-fantasy-border/60">
-            {t('stats.slots_label', 'Slots')}: {character.used_inventory_slots ?? 0} / {character.inventory_capacity ?? 10}
+            <span className="truncate">{t('stats.special_attributes', 'S.P.E.C.I.A.L. Attributes')}</span>
           </span>
         </div>
         <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
@@ -525,10 +506,10 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
         <div className="text-xs uppercase font-bold text-gray-300 tracking-wider">
           <span>{t('stats.combat_tactical_stats', 'Combat & Tactical Stats')}</span>
         </div>
-        <div className="grid grid-cols-4 sm:grid-cols-7 gap-1 text-center">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(3.4rem,1fr))] gap-1 text-center">
           {combatGrid.map((cg) => (
             <div key={cg.label} className="bg-black/45 border border-fantasy-border/60 hover:border-fantasy-border/90 rounded-lg p-1.5 shadow-sm transition-colors">
-              <div className="text-[9.5px] font-bold text-gray-400 uppercase tracking-wider">{cg.label}</div>
+              <div className="text-[9.5px] font-bold text-gray-400 uppercase truncate">{cg.label}</div>
               <div className="text-xs font-mono font-bold text-gray-100 mt-0.5">{cg.val}</div>
             </div>
           ))}

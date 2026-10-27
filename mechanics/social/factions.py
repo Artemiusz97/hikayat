@@ -313,6 +313,7 @@ def infer_default_hq_location(faction_name: str, scen_key: str = "") -> str:
         if any(k in name_l for k in ("council", "stuco")): return "Student Council Office"
         if any(k in name_l for k in ("drama", "theater", "acting")): return "School Auditorium Stage"
         if any(k in name_l for k in ("occult", "mystery", "paranormal")): return "Old Storage Room 3-B"
+        if any(k in name_l for k in ("salon", "velvet", "hedonist", "boudoir", "lust", "desire")): return "Velvet Basement Salon"
         if any(k in name_l for k in ("gang", "delinquent", "rebel", "brawler", "skulls", "wolves")): return "Behind Gym Storage Sheds"
         return f"{faction_name.strip()} Clubroom"
 
@@ -737,9 +738,115 @@ def get_player_faction_social_modifier(player_faction_id: str, npc_faction_id: s
     return 0
 
 
+# ---------------------------------------------------------------- Anomalous Incursions 5-Tier Promotion Meter
+ANOMALOUS_PROMOTION_TIERS: List[Dict[str, Any]] = [
+    {"tier": 1, "title": "Probationary Agent",   "min_rep": 0,  "max_rep": 19,  "daily_salary": 50,  "next_tier_rep": 20},
+    {"tier": 2, "title": "Junior Operative",     "min_rep": 20, "max_rep": 44,  "daily_salary": 90,  "next_tier_rep": 45},
+    {"tier": 3, "title": "Senior Operative",     "min_rep": 45, "max_rep": 69,  "daily_salary": 140, "next_tier_rep": 70},
+    {"tier": 4, "title": "Special Investigator", "min_rep": 70, "max_rep": 89,  "daily_salary": 200, "next_tier_rep": 90},
+    {"tier": 5, "title": "Elite Agent",          "min_rep": 90, "max_rep": 100, "daily_salary": 300, "next_tier_rep": 100},
+]
+
+ANOMALOUS_JOINABLE_ARCHETYPES = {"public_agency", "private_agency_1", "private_agency_2", "monastic_order"}
+ANOMALOUS_DISTRUSTED_ARCHETYPES = {"cult_faction", "clandestine_faction"}
+
+
+def get_anomalous_promotion_tier_info(rep_score: int) -> Dict[str, Any]:
+    """Returns the 1-5 Promotion Tier dictionary for a 0-100 Anomalous Incursions reputation score."""
+    clamped = max(0, min(100, int(rep_score or 0)))
+    for t in ANOMALOUS_PROMOTION_TIERS:
+        if t["min_rep"] <= clamped <= t["max_rep"]:
+            return dict(t)
+    return dict(ANOMALOUS_PROMOTION_TIERS[0])
+
+
+def infer_anomalous_faction_archetype(faction: Dict[str, Any]) -> str:
+    """Infers which of the 6 fixed Anomalous Incursions archetypes a faction belongs to."""
+    if not isinstance(faction, dict):
+        return ""
+    cat = str(faction.get("category") or faction.get("archetype_key") or "").strip().lower()
+    if cat in ("public_agency", "private_agency_1", "private_agency_2", "monastic_order", "cult_faction", "clandestine_faction"):
+        return cat
+    hq = str(faction.get("hq_location_id") or "").lower()
+    notes = str(faction.get("notes") or "").lower()
+    name_l = str(faction.get("name") or "").lower()
+    if "loc_hq_executive_dispatch" in hq or "state-sanctioned" in notes or "taxpayer" in notes:
+        return "public_agency"
+    if "loc_et_main_sanctuary" in hq or "monastic" in notes or "exorcist" in name_l or "shrine" in name_l:
+        return "monastic_order"
+    if "regional tower hq" in hq or "loc_private_hq_1" in hq:
+        return "private_agency_1"
+    if "operations spire hq" in hq or "loc_private_hq_2" in hq or "rival private" in notes:
+        return "private_agency_2"
+    if "hidden sanctum" in hq or "loc_cult_sanctum_hq" in hq or "congregation" in notes or "worship" in notes:
+        return "cult_faction"
+    if "shadow exchange" in hq or "loc_clandestine_syndicate_hq" in hq or "black-budget" in notes:
+        return "clandestine_faction"
+    if cat == "private_agency":
+        return "private_agency_1"
+    return cat
+
+
+def get_anomalous_faction_perks_list(archetype_key: str, promotion_tier: int = 1, salary_suspended: bool = False) -> List[str]:
+    """Returns the faction-specific perks & restrictions list for Anomalous Incursions."""
+    t_info = next((t for t in ANOMALOUS_PROMOTION_TIERS if t["tier"] == max(1, min(5, int(promotion_tier or 1)))), ANOMALOUS_PROMOTION_TIERS[0])
+    arch = str(archetype_key or "").strip().lower()
+    if arch == "public_agency":
+        sal_str = f"Daily Salary: {t_info['daily_salary']}G/day (Tier {t_info['tier']} {t_info['title']})"
+        if salary_suspended:
+            sal_str += " [SUSPENDED - Complete Mandatory Bounty to restore]"
+        return [
+            sal_str,
+            "Bureau Requisition Discount: Permanent 50% OFF at all Public Agency HQ stores",
+            "Taxpayer Mandate: 0G & 0 Loot from Official Bureau Bounties & Main Story Quests (confiscated by Bureau)",
+            "Freelance Exception: Keep 100% Gold & Loot from Smartphone Freelance App, Daily Incursions & Random Encounters",
+            "Daily Mandatory Dispatch: Must complete within the day or suffer -15 Rep & potential demotion",
+            "Jurisdiction Lock: Cannot accept Private Agency or Monastic Order bounties",
+        ]
+    elif arch in ("private_agency", "private_agency_1", "private_agency_2"):
+        return [
+            "Commission Contractor: 0G Daily Salary — earn full bounty payouts and keep 100% of anomaly loot",
+            "Syndicate Armory Access: High-tier gear (+20% Anomalous Tag chance & +1 Tier Bias) at 1.35x corporate markup",
+            "Public Agency Shops: Permitted to purchase at 1.0x standard price (no discount)",
+            "Cross-Contracting: May accept own Private Agency, Public Agency (paid contract), & Smartphone Freelance bounties",
+            "Daily Mandatory Dispatch: Must complete within the day or suffer -15 Rep with your agency",
+            "Non-Compete Clause: Barred from Rival Private Agency & Monastic Order bounties",
+        ]
+    elif arch == "monastic_order":
+        ration_str = "Sacred Shrine Ration: 100% FREE (0G) items at Shrine Shop (limited to 3 sacred items/day; 0G resale)"
+        if salary_suspended:
+            ration_str += " [SUSPENDED - Complete Mandatory Bounty to restore]"
+        return [
+            "Ascetic Vow: 0G Daily Salary & 0G Order Bounty Fee — but keep 100% of combat gold & loot drops from anomalies",
+            ration_str,
+            "Public Agency Shops: Permitted to purchase at 1.0x standard price (no discount)",
+            "Cross-Contracting: May accept Monastic Order, Public Agency (paid contract), & Smartphone Freelance bounties",
+            "Daily Mandatory Rite: Must complete within the day or suffer -15 Rep with the Order",
+        ]
+    elif arch in ("cult_faction", "clandestine_faction"):
+        return [
+            "Distrusted Organization: Non-joinable clandestine/occult entity viewed with deep suspicion.",
+        ]
+    else:
+        return [
+            "Independent Freelancer: No daily salary & no mandatory daily bounty quota",
+            "Contract Freedom: May accept Public Agency contract bounties & Smartphone Freelance App bounties (keep all loot)",
+            "Merchant Access: Standard 1.0x pricing at Public Agency & City shops (Private & Shrine member perks locked)",
+            "Open Recruitment: Visit any joinable Faction HQ at any time to enlist as a Tier 1 Probationary Agent",
+        ]
+
+
 # ---------------------------------------------------------------- Perks Evaluation
 def get_active_perks(faction: Dict[str, Any], player_rank: int, reputation_score: int) -> List[str]:
     """Return list of active perk strings based on the player's rank and reputation score."""
+    arch = infer_anomalous_faction_archetype(faction)
+    if arch in ("public_agency", "private_agency_1", "private_agency_2", "monastic_order", "cult_faction", "clandestine_faction"):
+        if arch in ("cult_faction", "clandestine_faction"):
+            return get_anomalous_faction_perks_list(arch, 1)
+        if player_rank <= 0:
+            return get_anomalous_faction_perks_list(arch, 1)
+        return get_anomalous_faction_perks_list(arch, player_rank)
+
     if player_rank == 0:
         return []
     perks = []
@@ -992,7 +1099,7 @@ def _role_leadership_rank_weight(role_str: str) -> int:
     return 0
 
 
-def _match_school_roster_to_faction(faction_name: str, school_roster: list[dict], template: str) -> list[dict]:
+def _match_school_roster_to_faction(faction_name: str, school_roster: list[dict], template: str, category: str = "") -> list[dict]:
     tiers = get_hierarchy(template)
     fac_lower = faction_name.lower()
 
@@ -1001,65 +1108,89 @@ def _match_school_roster_to_faction(faction_name: str, school_roster: list[dict]
     pool = [
         c for c in school_roster
         if (str(c.get("grade", "")).strip().lower() == "faculty") == is_faculty_faction
+        and str(c.get("grade", "")).strip().lower() not in ("citizen", "youth peer")
     ]
     if not pool:
-        pool = [c for c in school_roster if str(c.get("grade", "")).strip().lower() != "faculty"]
+        pool = [
+            c for c in school_roster
+            if str(c.get("grade", "")).strip().lower() not in ("faculty", "citizen", "youth peer")
+        ]
+
+    is_nsfw_club_faction = (
+        str(category or "").strip().lower() == "nsfw_club"
+        or any(
+            str(c.get("club", "")).strip().lower() == fac_lower
+            and (str(c.get("clique", "")).strip().lower() == "hedonists" or c.get("faction_category") == "nsfw_club")
+            for c in pool
+        )
+    )
 
     primary_matched = []
     secondary_matched = []
 
-    if "council" in fac_lower or "student" in fac_lower:
+    if is_nsfw_club_faction:
         for c in pool:
-            r_low = str(c.get("role", "")).lower()
-            club = str(c.get("club", ""))
-            if club == "Student Council" or re.search(r"\bcouncil\b|\bclass representative\b|\bhallway monitor\b", r_low):
+            club_low = str(c.get("club", "")).strip().lower()
+            clique_low = str(c.get("clique", "")).strip().lower()
+            if club_low == fac_lower or clique_low == "hedonists" or c.get("faction_category") == "nsfw_club":
                 primary_matched.append(c)
-    elif "drama" in fac_lower or "theater" in fac_lower or "theatre" in fac_lower or re.search(r"\barts?\b", fac_lower):
-        for c in pool:
-            r_low = str(c.get("role", "")).lower()
-            club = str(c.get("club", ""))
-            # Strictly exclude Martial Arts / Athletic Directorate from Drama & Arts clubs
-            if club == "Athletic Directorate" or "martial art" in r_low:
-                continue
-            if club in ("Arts & Drama Society", "Drama Club") or re.search(r"\b(drama|theater|theatre|stage|acting)\b", r_low):
-                primary_matched.append(c)
-            elif club in ("Fine Arts Guild", "Arts & Music Wing") or re.search(r"\b(sketch artist|clarinetist|musician|choir)\b", r_low):
-                secondary_matched.append(c)
-    elif "occult" in fac_lower or "mystery" in fac_lower or "paranormal" in fac_lower:
-        for c in pool:
-            r_low = str(c.get("role", "")).lower()
-            club = str(c.get("club", ""))
-            if club == "Occult & Mystery Club" or re.search(r"\b(occult|mystery|tarot|paranormal)\b", r_low):
-                primary_matched.append(c)
-            elif club in ("Literature & Book Circle", "Library Archives", "Astronomy & Physics Circle") or re.search(r"\b(bookworm|library|astronomer)\b", r_low):
-                secondary_matched.append(c)
-    elif template == "delinquents" or any(w in fac_lower for w in ("delinquent", "rebel", "wildcat", "brawler", "gang", "blazer")):
-        for c in pool:
-            r_low = str(c.get("role", "")).lower()
-            clique = str(c.get("clique", ""))
-            fac_str = str(c.get("primary_facility", "")).lower()
-            if clique in ("Rebels", "Slackers") or re.search(r"\b(delinquent|rebel|slacker)\b", r_low):
-                primary_matched.append(c)
-            elif "brawler" in fac_str or "rooftop" in fac_str:
-                secondary_matched.append(c)
-    elif "athletic" in fac_lower or "varsity" in fac_lower or "sports" in fac_lower:
-        for c in pool:
-            r_low = str(c.get("role", "")).lower()
-            club = str(c.get("club", ""))
-            if club == "Athletic Directorate" or re.search(r"\b(varsity|captain|sprinter|swim|basketball|runner|track|martial arts)\b", r_low):
-                primary_matched.append(c)
-    elif "journalism" in fac_lower or "newspaper" in fac_lower or "media" in fac_lower:
-        for c in pool:
-            r_low = str(c.get("role", "")).lower()
-            club = str(c.get("club", ""))
-            if club == "Journalism & Media" or re.search(r"\b(editor|columnist|reporter|broadcast)\b", r_low):
-                primary_matched.append(c)
-    elif "science" in fac_lower or "robotics" in fac_lower:
-        for c in pool:
-            r_low = str(c.get("role", "")).lower()
-            club = str(c.get("club", ""))
-            if club == "Science & Robotics Club" or re.search(r"\b(robotics|science|chemistry|lab assistant)\b", r_low):
-                primary_matched.append(c)
+    else:
+        pool = [
+            c for c in pool
+            if str(c.get("clique", "")).strip().lower() != "hedonists" and c.get("faction_category") != "nsfw_club"
+        ]
+        if "council" in fac_lower or "student" in fac_lower:
+            for c in pool:
+                r_low = str(c.get("role", "")).lower()
+                club = str(c.get("club", ""))
+                if club == "Student Council" or re.search(r"\bcouncil\b|\bclass representative\b|\bhallway monitor\b", r_low):
+                    primary_matched.append(c)
+        elif "drama" in fac_lower or "theater" in fac_lower or "theatre" in fac_lower or re.search(r"\barts?\b", fac_lower):
+            for c in pool:
+                r_low = str(c.get("role", "")).lower()
+                club = str(c.get("club", ""))
+                # Strictly exclude Martial Arts / Athletic Directorate from Drama & Arts clubs
+                if club == "Athletic Directorate" or "martial art" in r_low:
+                    continue
+                if club in ("Arts & Drama Society", "Drama Club") or re.search(r"\b(drama|theater|theatre|stage|acting)\b", r_low):
+                    primary_matched.append(c)
+                elif club in ("Fine Arts Guild", "Arts & Music Wing") or re.search(r"\b(sketch artist|clarinetist|musician|choir)\b", r_low):
+                    secondary_matched.append(c)
+        elif "occult" in fac_lower or "mystery" in fac_lower or "paranormal" in fac_lower:
+            for c in pool:
+                r_low = str(c.get("role", "")).lower()
+                club = str(c.get("club", ""))
+                if club == "Occult & Mystery Club" or re.search(r"\b(occult|mystery|tarot|paranormal)\b", r_low):
+                    primary_matched.append(c)
+                elif club in ("Literature & Book Circle", "Library Archives", "Astronomy & Physics Circle") or re.search(r"\b(bookworm|library|astronomer)\b", r_low):
+                    secondary_matched.append(c)
+        elif template == "delinquents" or any(w in fac_lower for w in ("delinquent", "rebel", "wildcat", "brawler", "gang", "blazer")):
+            for c in pool:
+                r_low = str(c.get("role", "")).lower()
+                clique = str(c.get("clique", ""))
+                fac_str = str(c.get("primary_facility", "")).lower()
+                if clique in ("Rebels", "Slackers") or re.search(r"\b(delinquent|rebel|slacker)\b", r_low):
+                    primary_matched.append(c)
+                elif "brawler" in fac_str or "rooftop" in fac_str:
+                    secondary_matched.append(c)
+        elif "athletic" in fac_lower or "varsity" in fac_lower or "sports" in fac_lower:
+            for c in pool:
+                r_low = str(c.get("role", "")).lower()
+                club = str(c.get("club", ""))
+                if club == "Athletic Directorate" or re.search(r"\b(varsity|captain|sprinter|swim|basketball|runner|track|martial arts)\b", r_low):
+                    primary_matched.append(c)
+        elif "journalism" in fac_lower or "newspaper" in fac_lower or "media" in fac_lower:
+            for c in pool:
+                r_low = str(c.get("role", "")).lower()
+                club = str(c.get("club", ""))
+                if club == "Journalism & Media" or re.search(r"\b(editor|columnist|reporter|broadcast)\b", r_low):
+                    primary_matched.append(c)
+        elif "science" in fac_lower or "robotics" in fac_lower:
+            for c in pool:
+                r_low = str(c.get("role", "")).lower()
+                club = str(c.get("club", ""))
+                if club == "Science & Robotics Club" or re.search(r"\b(robotics|science|chemistry|lab assistant)\b", r_low):
+                    primary_matched.append(c)
 
     if not primary_matched and not secondary_matched:
         return []
@@ -1145,7 +1276,7 @@ def sync_faction_rosters_with_contacts(session_id: int) -> list[dict]:
 
     def _normalize_title(t: str) -> str:
         t_clean = str(t or "").lower().replace("-", " ")
-        for prefix in ("student council", "council", "club", "disciplinary"):
+        for prefix in ("student council", "council", "club", "disciplinary", "salon"):
             t_clean = t_clean.replace(prefix, "")
         t_clean = t_clean.replace("&", " ").strip()
         return " ".join(t_clean.split())
@@ -1199,7 +1330,7 @@ def sync_faction_rosters_with_contacts(session_id: int) -> list[dict]:
                             has_invalid_member = True
                             displaced_off_roster.add(m_name_low)
                 if has_invalid_member:
-                    rebuilt = _match_school_roster_to_faction(fac_name_orig, school_roster, f.get("hierarchy_template", "club"))
+                    rebuilt = _match_school_roster_to_faction(fac_name_orig, school_roster, f.get("hierarchy_template", "club"), category=f.get("category", ""))
                     if rebuilt and len(rebuilt) == len(roster):
                         roster = rebuilt
                         roster_modified = True
@@ -1341,6 +1472,7 @@ def sync_faction_rosters_with_contacts(session_id: int) -> list[dict]:
                     should_update_lb = True
                     desc_to_write = ""  # Preserves existing rich description via COALESCE(NULLIF(?, ''), description)
 
+            matched_c = contact_by_rank.get(r_entry.get("rank", 0))
             if roster_modified or should_update_lb:
                 try:
                     from mechanics.social.persona import infer_contact_gender
@@ -1359,7 +1491,6 @@ def sync_faction_rosters_with_contacts(session_id: int) -> list[dict]:
 
             # Bidirectional sync to school_directory if a contact officer isn't in school_directory yet
             if is_school and m_low not in dir_by_name:
-                matched_c = contact_by_rank.get(r_entry.get("rank", 0))
                 b_info = (matched_c.get("basic_info") or {}) if matched_c else {}
                 c_grade = str(b_info.get("grade") or ("Senior" if r_entry.get("rank", 1) >= 3 else "Junior")).strip()
                 c_role_str = str(b_info.get("role") or r_title).strip()
@@ -1442,23 +1573,32 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
 
     scen_key = scenario_key or "fantasy"
     is_nsfw = scenario_data.is_nsfw_scenario(scen_key)
-    starters = namegen.get_scenario_starter_factions(scen_key, is_nsfw=is_nsfw)
+    is_anom = scenario_data.is_anomalous_incursions_scenario(scen_key)
+    starters = namegen.get_scenario_starter_factions(scen_key, is_nsfw=is_nsfw, hash_val=int(session_id or 1))
 
     school_roster = []
     if is_school_scenario(scen_key):
         from mechanics.social.school_roster import ensure_school_directory_exists
         school_roster = ensure_school_directory_exists({"id": session_id, "scenario": scen_key})
 
+    # Pre-calculate faction IDs for diplomacy matrix in Anomalous Incursions
+    arch_to_fid = {}
+    for fac in starters:
+        arch = fac.get("archetype_key", "")
+        if arch:
+            arch_to_fid[arch] = fac["name"].strip().lower().replace(" ", "_")
+
     for fac in starters:
         name = fac["name"]
         template = fac.get("hierarchy_template", "guild")
-        category = fac.get("category", "guild")
+        arch_key = fac.get("archetype_key", "")
+        category = arch_key if (is_anom and arch_key) else fac.get("category", "guild")
         hq = fac.get("hq_location_id", "")
         notes = fac.get("notes", "")
 
         roster = []
         if school_roster:
-            roster = _match_school_roster_to_faction(name, school_roster, template)
+            roster = _match_school_roster_to_faction(name, school_roster, template, category=category)
 
         if not roster:
             roster = generate_procedural_leadership_roster(template, scen_key)
@@ -1467,15 +1607,35 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
                 if not r.get("race") and r.get("name"):
                     r["race"] = normalize_race("", scen_key=scen_key, seed=f"{session_id}:officer:{r['name'].lower()}")
 
+        initial_delta = 0
+        allied_ids = []
+        rival_ids = []
+        if is_anom and arch_key:
+            friendly_archs = ["public_agency", "private_agency_1", "private_agency_2", "monastic_order"]
+            distrusted_archs = ["cult_faction", "clandestine_faction"]
+            if arch_key in friendly_archs:
+                initial_delta = 25
+                allied_ids = [arch_to_fid[a] for a in friendly_archs if a != arch_key and a in arch_to_fid]
+                rival_ids = [arch_to_fid[a] for a in distrusted_archs if a in arch_to_fid]
+                if arch_key == "private_agency_1" and "private_agency_2" in arch_to_fid:
+                    rival_ids.insert(0, arch_to_fid["private_agency_2"])
+                elif arch_key == "private_agency_2" and "private_agency_1" in arch_to_fid:
+                    rival_ids.insert(0, arch_to_fid["private_agency_1"])
+            else:
+                initial_delta = -25
+                rival_ids = [arch_to_fid[a] for a in friendly_archs if a in arch_to_fid]
+
         db.upsert_faction(
             session_id=session_id,
             name=name,
-            delta_score=0,
+            delta_score=initial_delta,
             category=category,
             hq_location_id=hq,
             notes=notes,
             hierarchy_template=template,
-            leadership_roster=roster
+            leadership_roster=roster,
+            rival_faction_ids=rival_ids,
+            allied_faction_ids=allied_ids,
         )
 
         # Seed named roster members into the lorebook so the LLM knows their
@@ -1517,8 +1677,353 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
             except Exception:
                 pass
 
+    if is_anom:
+        try:
+            from mechanics.social.agent_roster import ensure_anomalous_agent_roster
+            ensure_anomalous_agent_roster(session_id, scen_key)
+        except Exception:
+            pass
+
     return sync_faction_rosters_with_contacts(session_id)
 
 
+def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> Dict[str, Any]:
+    """
+    Retrieves or initializes the player's Anomalous Incursions Faction & 5-Tier Promotion Meter state.
+    """
+    import db
+    import scenario_data
+
+    session = db.get_session(session_id) or {}
+    scen_key = str(session.get("scenario") or "fantasy")
+    if not scenario_data.is_anomalous_incursions_scenario(scen_key):
+        return {}
+
+    factions = ensure_starter_factions(session_id, scen_key)
+    lookup_uid = user_id or session.get("host_user_id")
+    char = db.get_character(lookup_uid) if lookup_uid else None
+
+    state = dict(session.get("anomalous_faction_state") or {})
+    if not state.get("faction_archetype_key"):
+        # Check if character already has a joined_faction_id or starting_faction
+        joined_fid = str((char or {}).get("joined_faction_id") or session.get("starting_faction_id") or "").strip().lower()
+        matched_fac = next((f for f in factions if (f.get("faction_id") or "").lower() == joined_fid or infer_anomalous_faction_archetype(f) == joined_fid), None)
+        if matched_fac:
+            arch = infer_anomalous_faction_archetype(matched_fac)
+            fid = matched_fac["faction_id"]
+            fname = matched_fac["name"]
+        else:
+            # Default to public_agency unless explicitly set to freelancer
+            if joined_fid == "freelancer":
+                arch = "freelancer"
+                fid = ""
+                fname = "Independent Freelancer"
+            else:
+                pub_fac = next((f for f in factions if infer_anomalous_faction_archetype(f) == "public_agency"), factions[0] if factions else {})
+                arch = "public_agency"
+                fid = pub_fac.get("faction_id", "")
+                fname = pub_fac.get("name", "Public Containment Bureau")
+
+        rep = max(0, min(100, int(state.get("promotion_rep", 0) or 0)))
+        t_info = get_anomalous_promotion_tier_info(rep)
+        state = {
+            "faction_archetype_key": arch,
+            "joined_faction_id": fid,
+            "joined_faction_name": fname,
+            "promotion_rep": rep,
+            "promotion_tier": t_info["tier"] if arch != "freelancer" else 0,
+            "promotion_title": t_info["title"] if arch != "freelancer" else "Independent Freelancer",
+            "salary_ration_suspended": bool(state.get("salary_ration_suspended", False)),
+            "shrine_free_claims_today": int(state.get("shrine_free_claims_today", 0) or 0),
+            "shrine_free_max_daily": 3,
+            "mandatory_bounty_completed_today": bool(state.get("mandatory_bounty_completed_today", False)),
+            "mandatory_bounty_id": str(state.get("mandatory_bounty_id") or ""),
+            "last_rollover_day": int(state.get("last_rollover_day", 1) or 1),
+        }
+        save_anomalous_faction_state(session_id, state, user_id=lookup_uid)
+    else:
+        # Ensure promotion_tier and title match promotion_rep
+        arch = state.get("faction_archetype_key", "public_agency")
+        rep = max(0, min(100, int(state.get("promotion_rep", 0) or 0)))
+        t_info = get_anomalous_promotion_tier_info(rep)
+        state["promotion_rep"] = rep
+        state["promotion_tier"] = t_info["tier"] if arch != "freelancer" else 0
+        state["promotion_title"] = t_info["title"] if arch != "freelancer" else "Independent Freelancer"
+        state.setdefault("shrine_free_max_daily", 3)
+        state.setdefault("shrine_free_claims_today", 0)
+        state.setdefault("salary_ration_suspended", False)
+        state.setdefault("mandatory_bounty_completed_today", False)
+    return state
+
+
+def save_anomalous_faction_state(session_id: int, state: Dict[str, Any], user_id: int | None = None) -> Dict[str, Any]:
+    """Persists `anomalous_faction_state` to session extra_json and syncs character membership fields."""
+    import db
+
+    session = db.get_session(session_id) or {}
+    lookup_uid = user_id or session.get("host_user_id")
+    char = db.get_character(lookup_uid) if lookup_uid else None
+
+    arch = str(state.get("faction_archetype_key") or "public_agency").strip().lower()
+    rep = max(0, min(100, int(state.get("promotion_rep", 0) or 0)))
+    t_info = get_anomalous_promotion_tier_info(rep)
+    state["promotion_rep"] = rep
+    if arch == "freelancer":
+        state["promotion_tier"] = 0
+        state["promotion_title"] = "Independent Freelancer"
+        state["joined_faction_id"] = ""
+        state["joined_faction_name"] = "Independent Freelancer"
+    else:
+        state["promotion_tier"] = t_info["tier"]
+        state["promotion_title"] = t_info["title"]
+
+    db.update_session(session_id, extra={"anomalous_faction_state": state})
+    if char and char.get("id"):
+        db.set_character_faction_membership(
+            char["id"],
+            state.get("joined_faction_id", ""),
+            int(state.get("promotion_tier", 0) or 0),
+            state.get("promotion_title", ""),
+        )
+    return state
+
+
+def update_agent_promotion_reputation(
+    session_id: int,
+    delta_rep: int,
+    reason: str = "",
+    is_mandatory_completion: bool = False,
+    is_missed_mandatory: bool = False,
+    user_id: int | None = None,
+) -> Dict[str, Any]:
+    """
+    Adjusts the player's 0-100 Agent Promotion Meter in Anomalous Incursions.
+    Automatically promotes or demotes across Tiers 1-5, enforces the 0 Rep floor without expulsion,
+    and manages the salary/ration suspension flag when missing a mandatory bounty at 0 Rep.
+    """
+    state = get_anomalous_faction_state(session_id, user_id=user_id)
+    if not state or state.get("faction_archetype_key") == "freelancer":
+        return {"changed": False, "state": state, "message": ""}
+
+    old_rep = int(state.get("promotion_rep", 0) or 0)
+    old_tier = int(state.get("promotion_tier", 1) or 1)
+    old_title = state.get("promotion_title", "Probationary Agent")
+
+    if is_missed_mandatory and old_rep == 0:
+        state["salary_ration_suspended"] = True
+
+    new_rep = max(0, min(100, old_rep + int(delta_rep or 0)))
+    t_info = get_anomalous_promotion_tier_info(new_rep)
+    new_tier = t_info["tier"]
+    new_title = t_info["title"]
+
+    if is_mandatory_completion or (delta_rep > 0 and is_mandatory_completion):
+        state["salary_ration_suspended"] = False
+        state["mandatory_bounty_completed_today"] = True
+
+    state["promotion_rep"] = new_rep
+    state["promotion_tier"] = new_tier
+    state["promotion_title"] = new_title
+    save_anomalous_faction_state(session_id, state, user_id=user_id)
+
+    promoted = new_tier > old_tier
+    demoted = new_tier < old_tier
+    msg_parts = [f"Agent Reputation {'+' if delta_rep >= 0 else ''}{delta_rep} ({old_rep} -> {new_rep}/100)"]
+    if reason:
+        msg_parts.append(f"[{reason}]")
+    if promoted:
+        msg_parts.append(f"🎖️ PROMOTED to Tier {new_tier}: {new_title}!")
+    elif demoted:
+        msg_parts.append(f"⚠️ DEMOTED to Tier {new_tier}: {new_title}!")
+    elif is_missed_mandatory and old_rep == 0:
+        msg_parts.append("⚠️ Probationary Floor (0 Rep) violation: Daily Salary / Shrine Ration privileges suspended until a Mandatory Bounty is completed!")
+
+    return {
+        "changed": True,
+        "old_rep": old_rep,
+        "new_rep": new_rep,
+        "old_tier": old_tier,
+        "new_tier": new_tier,
+        "old_title": old_title,
+        "new_title": new_title,
+        "promoted": promoted,
+        "demoted": demoted,
+        "salary_ration_suspended": state.get("salary_ration_suspended", False),
+        "state": state,
+        "message": " ".join(msg_parts),
+    }
+
+
+def join_or_transfer_anomalous_faction(
+    session_id: int,
+    target_faction_or_archetype: str,
+    user_id: int | None = None,
+) -> Dict[str, Any]:
+    """
+    Enlists a Freelancer or transfers an existing Agent into one of the 4 joinable factions
+    (or resigns to Independent Freelancer), resetting Promotion Tier to Tier 1 (0 Rep).
+    """
+    import db
+
+    sess = db.get_session(session_id) or {}
+    scen_key = str(sess.get("scenario") or "anomalous_incursions")
+    factions = ensure_starter_factions(session_id, scen_key)
+    target_clean = str(target_faction_or_archetype or "").strip().lower()
+
+    def _abandon_old_mandatory_bounties() -> None:
+        try:
+            active_qs = db.get_session_quests(session_id, status="Active") or []
+            for aq in active_qs:
+                qid = str(aq.get("quest_id") or "")
+                qnotes = str(aq.get("quest_notes") or "")
+                if qid.upper().startswith("MAND-") or "mandatory_daily:1" in qnotes:
+                    db.update_quest_status(session_id, qid, "Abandoned")
+        except Exception:
+            pass
+
+    if target_clean in ("freelancer", "leave", "independent", "none", ""):
+        _abandon_old_mandatory_bounties()
+        state = get_anomalous_faction_state(session_id, user_id=user_id)
+        state.update({
+            "faction_archetype_key": "freelancer",
+            "joined_faction_id": "",
+            "joined_faction_name": "Independent Freelancer",
+            "promotion_rep": 0,
+            "promotion_tier": 0,
+            "promotion_title": "Independent Freelancer",
+            "salary_ration_suspended": False,
+            "mandatory_bounty_completed_today": False,
+            "mandatory_bounty_id": "",
+        })
+        save_anomalous_faction_state(session_id, state, user_id=user_id)
+        return {
+            "success": True,
+            "state": state,
+            "message": "You are now operating as an Independent Freelancer.",
+        }
+
+    matched_fac = None
+    for f in factions:
+        arch = infer_anomalous_faction_archetype(f)
+        if target_clean in (
+            (f.get("faction_id") or "").lower(),
+            (f.get("name") or "").lower(),
+            arch,
+        ):
+            matched_fac = f
+            break
+    if not matched_fac and target_clean == "private_agency":
+        matched_fac = next((f for f in factions if infer_anomalous_faction_archetype(f) == "private_agency_1"), None)
+
+    if not matched_fac:
+        return {"success": False, "error": f"Faction '{target_faction_or_archetype}' not found."}
+
+    arch = infer_anomalous_faction_archetype(matched_fac)
+    if arch in ANOMALOUS_DISTRUSTED_ARCHETYPES:
+        return {
+            "success": False,
+            "error": f"{matched_fac.get('name')} is an unlicensed occult/clandestine organization and cannot be joined by operatives.",
+        }
+
+    _abandon_old_mandatory_bounties()
+    t1 = ANOMALOUS_PROMOTION_TIERS[0]
+    state = get_anomalous_faction_state(session_id, user_id=user_id)
+    state.update({
+        "faction_archetype_key": arch,
+        "joined_faction_id": matched_fac["faction_id"],
+        "joined_faction_name": matched_fac["name"],
+        "promotion_rep": 0,
+        "promotion_tier": 1,
+        "promotion_title": t1["title"],
+        "salary_ration_suspended": False,
+        "mandatory_bounty_completed_today": False,
+        "mandatory_bounty_id": "",
+    })
+    save_anomalous_faction_state(session_id, state, user_id=user_id)
+    # Issue today's mandatory daily bounty if session is already live and none active
+    try:
+        cur_day = int(sess.get("current_day", 1) or 1)
+        if sess.get("id"):
+            from mechanics.narrative.bounty import dispatch_anomalous_mandatory_daily_bounty
+            mand_q = dispatch_anomalous_mandatory_daily_bounty(
+                session_id=session_id,
+                current_day=cur_day,
+                faction_archetype_key=arch,
+                faction_name=matched_fac["name"],
+                scen_key=scen_key,
+            )
+            if mand_q and mand_q.get("quest_id"):
+                state = get_anomalous_faction_state(session_id, user_id=user_id)
+                state["mandatory_bounty_id"] = mand_q["quest_id"]
+                save_anomalous_faction_state(session_id, state, user_id=user_id)
+    except Exception:
+        pass
+    try:
+        from mechanics.social.agent_roster import hydrate_faction_colleagues_to_contacts
+        hydrate_faction_colleagues_to_contacts(session_id, arch, scen_key=scen_key)
+    except Exception:
+        pass
+    return {
+        "success": True,
+        "faction": matched_fac,
+        "state": state,
+        "message": f"Enlisted with {matched_fac['name']} as a Tier 1 {t1['title']} (0/100 Rep)!",
+    }
+
+
+def get_agent_dossier_summary(session_id: int, user_id: int | None = None) -> Dict[str, Any]:
+    """
+    Returns the complete Agent Dossier & 5-Tier Promotion Meter summary for Dual UI display
+    in both the Factions/Codex Modal and the Smartphone Bounty/Dispatch App.
+    """
+    import db
+    import namegen
+    import scenario_data
+
+    session = db.get_session(session_id) or {}
+    scen_key = str(session.get("scenario") or "fantasy")
+    if not scenario_data.is_anomalous_incursions_scenario(scen_key):
+        return {"is_anomalous_incursions": False}
+
+    state = get_anomalous_faction_state(session_id, user_id=user_id)
+    arch = state.get("faction_archetype_key", "public_agency")
+    rep = int(state.get("promotion_rep", 0) or 0)
+    tier_info = get_anomalous_promotion_tier_info(rep)
+    suspended = bool(state.get("salary_ration_suspended", False))
+
+    daily_salary = tier_info["daily_salary"] if (arch == "public_agency" and not suspended) else 0
+    cataclysm = session.get("world_ending_anomaly") or namegen.generate_world_ending_anomaly_profile(hash_val=int(session_id or 1))
+    contained_log = session.get("contained_anomalies_log") or []
+    daily_incursions = session.get("daily_incursions") or []
+
+    return {
+        "is_anomalous_incursions": True,
+        "faction_archetype_key": arch,
+        "joined_faction_id": state.get("joined_faction_id", ""),
+        "joined_faction_name": state.get("joined_faction_name", "Independent Freelancer"),
+        "promotion_rep": rep,
+        "promotion_tier": int(state.get("promotion_tier", 0) or 0),
+        "promotion_title": state.get("promotion_title", "Independent Freelancer"),
+        "tier_min_rep": tier_info["min_rep"],
+        "tier_max_rep": tier_info["max_rep"],
+        "next_tier_rep": tier_info["next_tier_rep"],
+        "promotion_tiers": ANOMALOUS_PROMOTION_TIERS,
+        "daily_salary": daily_salary,
+        "base_tier_salary": tier_info["daily_salary"] if arch == "public_agency" else 0,
+        "salary_ration_suspended": suspended,
+        "shrine_free_claims_today": int(state.get("shrine_free_claims_today", 0) or 0),
+        "shrine_free_max_daily": int(state.get("shrine_free_max_daily", 3) or 3),
+        "mandatory_bounty_completed_today": bool(state.get("mandatory_bounty_completed_today", False)),
+        "mandatory_bounty_id": state.get("mandatory_bounty_id", ""),
+        "active_perks": get_anomalous_faction_perks_list(arch, state.get("promotion_tier", 1), suspended),
+        "contained_anomalies_log": contained_log,
+        "contained_anomalies_count": len(contained_log),
+        "active_daily_incursions": [inc for inc in daily_incursions if not inc.get("resolved")],
+        "world_ending_anomaly": cataclysm,
+        "endless_mode_unlocked": bool(session.get("endless_mode_unlocked", False)),
+    }
+
+
 ensure_session_factions_seeded = ensure_starter_factions
+
 

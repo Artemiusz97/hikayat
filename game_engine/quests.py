@@ -12,28 +12,146 @@ def create_contextual_story_quest_data(
     Guarantees a rich Story Quest with exactly 3 distinct sub-quests and 3-stage
     progressive waypoints even if the LLM is completely unreachable or times out."""
     scen_key = session.get("scenario", "fantasy")
-    loc = session.get("current_location") or "the central area"
-    from mechanics.world.locations import get_discovered_primary_locations, is_school_scenario, sanitize_location_target, process_llm_location_update
+    loc = (session.get("current_location") if isinstance(session, dict) else "") or ""
+    if not loc and starting_hook_context:
+        loc = starting_hook_context.get("suggested_location") or ""
+    if not loc and isinstance(session, dict) and session.get("current_node_id"):
+        try:
+            import db
+            node = db.get_world_node(session_id, session["current_node_id"])
+            if node:
+                ancestors = db.get_node_ancestors(session_id, session["current_node_id"])
+                chain = [a["name"] for a in reversed(ancestors)] + [node["name"]]
+                loc = " ➔ ".join(chain)
+        except Exception:
+            pass
+
+    from mechanics.world.locations import (
+        get_discovered_primary_locations,
+        is_school_scenario,
+        sanitize_location_target,
+        process_llm_location_update,
+        resolve_session_location_tokens,
+        format_clean_location_prose,
+        clean_narrative_location_arrows,
+    )
     from mechanics.world.waypoints import ensure_multi_stage_waypoints
+
+    if loc and "{" in loc:
+        loc = resolve_session_location_tokens(session_id, loc, scen_key)
 
     zones_dict = get_discovered_primary_locations(session_id, scen_key)
     avail_locs_list = []
     for z, prims in zones_dict.items():
+        z_res = resolve_session_location_tokens(session_id, z, scen_key)
         for p in prims[:2]:
-            avail_locs_list.append(f"{z} -> {p}")
+            p_res = resolve_session_location_tokens(session_id, p, scen_key)
+            avail_locs_list.append(f"{z_res} -> {p_res}")
+
+    if not loc:
+        if avail_locs_list:
+            loc = avail_locs_list[0]
+        else:
+            try:
+                from mechanics.world.locations.seeding import get_default_tiered_location
+                dz, dp, _ = get_default_tiered_location(scen_key, session_id=session_id)
+                loc = f"{dz} -> {dp}"
+            except Exception:
+                loc = "Ashford Academy" if is_school_scenario(scen_key) else "the Realm"
 
     loc1 = avail_locs_list[0] if len(avail_locs_list) > 0 else loc
-    loc2 = avail_locs_list[1] if len(avail_locs_list) > 1 else loc
-    loc3 = avail_locs_list[2] if len(avail_locs_list) > 2 else loc
+    loc2 = avail_locs_list[1] if len(avail_locs_list) > 1 else loc1
+    loc3 = avail_locs_list[2] if len(avail_locs_list) > 2 else (avail_locs_list[0] if avail_locs_list else loc)
 
-    if is_school_scenario(scen_key):
+    loc_prose = format_clean_location_prose(loc, include_zone=True, preposition="in")
+    loc_short = format_clean_location_prose(loc, include_zone=False)
+    loc1_prose = format_clean_location_prose(loc1, include_zone=True, preposition="in")
+    loc2_prose = format_clean_location_prose(loc2, include_zone=True, preposition="in")
+    loc3_prose = format_clean_location_prose(loc3, include_zone=True, preposition="in")
+    loc1_short = format_clean_location_prose(loc1, include_zone=False)
+    loc2_short = format_clean_location_prose(loc2, include_zone=False)
+    loc3_short = format_clean_location_prose(loc3, include_zone=False)
+
+    import scenario_data
+    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        from mechanics.narrative.blueprints import generate_anomalous_campaign_blueprint
+        bp = generate_anomalous_campaign_blueprint(session_id, session)
+        ch_clamped = max(1, min(11, int(chapter_num or 1)))
+        ch_spec = bp["chapters"].get(ch_clamped, bp["chapters"][1])
+        anomaly = bp["world_ending_anomaly"]
+        ent_name = anomaly.get("name", "The Non-Euclidean Convergence")
+        ent_title = anomaly.get("title", "Sovereign of the Folded Horizon")
+        omen = anomaly.get("foreshadow_sign", "geometric distortions and bleeding static")
+        harbinger = anomaly.get("harbinger_name", "The Convergence Harbinger")
+
+        title = ch_spec["title_template"]
+        archetype = ch_spec["archetype"]
+        sub_archs = ch_spec["sub_archetypes"]
+
+        if ch_clamped == 1:
+            objective = (
+                f"Respond to an emerging containment breach at {loc1_prose} and stabilize the affected threshold. "
+                f"Investigate anomalous telemetry readings across {loc2_short} and {loc3_prose}, culminating in an ominous resonance spike ({omen}) "
+                f"that foreshadows the distant awakening of {ent_name}."
+            )
+        elif 2 <= ch_clamped <= 6:
+            objective = (
+                f"{ch_spec['pacing_directive']} Follow the trail of altered relics, spatial distortions, and clandestine interference "
+                f"across {loc1_short}, {loc2_short}, and {loc3_prose} before the Cult and Syndicate complete their preparations for {ent_name}."
+            )
+        elif 7 <= ch_clamped <= 9:
+            objective = (
+                f"{ch_spec['pacing_directive']} Reinforce municipal quarantine cordons at {loc1_short}, intercept hostile manifestations at {loc2_short}, "
+                f"and confront {harbinger}'s vanguard forces near {loc3_prose}."
+            )
+        elif ch_clamped == 10:
+            objective = (
+                f"Reality fractures across the metropolitan sky as {ent_name} ({ent_title}) manifests at the convergence epicenter! "
+                f"Map the non-Euclidean breach at {loc1_short}, sever the final ritual anchors at {loc2_short}, and defeat {ent_name} at {loc3_prose} to save the world!"
+            )
+        else:
+            objective = (
+                f"With {ent_name} defeated and the cataclysm averted, seal the last lingering reality echoes at {loc1_short}, "
+                f"suppress residual cognitohazard fallout at {loc2_short}, and attend your post-crisis commendation & debriefing at {loc3_prose}."
+            )
+
+        sub_objs = [
+            {
+                "id": 1,
+                "archetype": sub_archs[0],
+                "text": f"[{sub_archs[0]}] Execute primary field protocol and secure resonance telemetry at {loc1_prose}.",
+                "completed": False,
+            },
+            {
+                "id": 2,
+                "archetype": sub_archs[1],
+                "text": f"[{sub_archs[1]}] Stabilize secondary breach vectors and neutralize interference at {loc2_prose}.",
+                "completed": False,
+            },
+            {
+                "id": 3,
+                "archetype": sub_archs[2],
+                "text": (
+                    f"[Boss Confrontation] Breach the convergence core and defeat {ent_name} at {loc3_prose}!"
+                    if ch_clamped == 10
+                    else (
+                        f"[Foreshadowing Spike] Contain the breach leader at {loc3_prose} and record the ominous signature ({omen})."
+                        if ch_clamped == 1
+                        else f"[{sub_archs[2]}] Complete final chapter containment objective at {loc3_prose}."
+                    )
+                ),
+                "completed": False,
+            },
+        ]
+    elif is_school_scenario(scen_key):
         from mechanics.social.school_roster import ensure_school_directory_exists
         roster = ensure_school_directory_exists(session)
-        clean_loc = loc.split("➔")[-1].strip() or "the Academy"
-        title = f"Chapter #{chapter_num}: Whispers at {clean_loc}"
+        from mechanics.world.locations.seeds import get_session_school_name
+        school_name = get_session_school_name(session_id, scen_key) or "the Academy"
+        title = f"Chapter #{chapter_num}: Whispers at {school_name}"
         archetype = "Campus Investigation"
         objective = (
-            f"Unsettling rumors and hidden rivalries are spreading through {loc}. "
+            f"Unsettling rumors and hidden rivalries are spreading through {school_name}. "
             f"Investigate the initial disturbance, gather vital testimonies from students across campus facilities, "
             f"and uncover who is pulling the strings before the situation spirals out of control."
         )
@@ -41,19 +159,19 @@ def create_contextual_story_quest_data(
             {
                 "id": 1,
                 "archetype": "Investigation",
-                "text": f"Search for physical evidence and inspect the disturbance site at {loc1}.",
+                "text": f"Search for physical evidence and inspect the disturbance site at {loc1_prose}.",
                 "completed": False
             },
             {
                 "id": 2,
                 "archetype": "Infiltration",
-                "text": f"Infiltrate the restricted records or quiet corners of {loc2} to gather confidential intel.",
+                "text": f"Infiltrate the restricted records or quiet corners of {loc2_prose} to gather confidential intel.",
                 "completed": False
             },
             {
                 "id": 3,
                 "archetype": "Diplomacy",
-                "text": f"Interview key student leads and negotiate with club representatives at {loc3}.",
+                "text": f"Interview key student leads and negotiate with club representatives at {loc3_prose}.",
                 "completed": False
             }
         ]
@@ -62,7 +180,7 @@ def create_contextual_story_quest_data(
         title = f"Chapter #1: The {arch_title} Resolution"
         archetype = "Inciting Incident"
         objective = (
-            f"The repercussions of the {arch_title.lower()} incident have begun to unfold across {loc}. "
+            f"The repercussions of the {arch_title.lower()} incident have begun to unfold across {loc_prose}. "
             f"Investigate the physical trail left in the wake of the disturbance, secure the surrounding regional thresholds, "
             f"and confront the rising threat before it spreads further."
         )
@@ -76,13 +194,13 @@ def create_contextual_story_quest_data(
             {
                 "id": 2,
                 "archetype": "Infiltration",
-                "text": f"Scout the perimeter and bypass security barriers around {loc2}.",
+                "text": f"Scout the perimeter and bypass security barriers around {loc2_prose}.",
                 "completed": False
             },
             {
                 "id": 3,
                 "archetype": "Diplomacy",
-                "text": f"Confront the regional instigator or coordinate countermeasures with allies at {loc3}.",
+                "text": f"Confront the regional instigator or coordinate countermeasures with allies at {loc3_prose}.",
                 "completed": False
             }
         ]
@@ -90,7 +208,7 @@ def create_contextual_story_quest_data(
         title = f"Chapter #{chapter_num}: Encrypted Subnets"
         archetype = "Corporate Espionage"
         objective = (
-            f"Hostile corporate factions have initiated surveillance across the district of {loc}. "
+            f"Hostile corporate factions have initiated surveillance across {loc_prose}. "
             f"Infiltrate protected networks, recover encrypted data chips, and establish counter-measures "
             f"before your squad is tracked down by automated enforcement units."
         )
@@ -98,27 +216,27 @@ def create_contextual_story_quest_data(
             {
                 "id": 1,
                 "archetype": "Investigation",
-                "text": f"Hack into the local comms hub at {loc1} and decrypt illicit network chatter.",
+                "text": f"Hack into the local comms hub at {loc1_prose} and decrypt illicit network chatter.",
                 "completed": False
             },
             {
                 "id": 2,
                 "archetype": "Infiltration",
-                "text": f"Bypass automated firewalls and stealthily breach the mainframe sector at {loc2}.",
+                "text": f"Bypass automated firewalls and stealthily breach the mainframe sector at {loc2_prose}.",
                 "completed": False
             },
             {
                 "id": 3,
                 "archetype": "Diplomacy",
-                "text": f"Deliver extracted intelligence to black-market contacts or extract assets at {loc3}.",
+                "text": f"Deliver extracted intelligence to black-market contacts or extract assets at {loc3_prose}.",
                 "completed": False
             }
         ]
     else:
-        title = f"Chapter #{chapter_num}: Shadows Over {loc.split('➔')[-1].strip() or 'the Frontier'}"
+        title = f"Chapter #{chapter_num}: Shadows Over {loc_short or 'the Frontier'}"
         archetype = "Frontier Delve"
         objective = (
-            f"Dark forces and unexplained anomalies threaten the stability of {loc}. "
+            f"Dark forces and unexplained anomalies threaten the stability of {loc_prose}. "
             f"Explore uncharted reaches, collect critical relics of power, and coordinate with regional guardians "
             f"to neutralize the gathering peril."
         )
@@ -126,19 +244,19 @@ def create_contextual_story_quest_data(
             {
                 "id": 1,
                 "archetype": "Investigation",
-                "text": f"Examine the anomaly and recover physical evidence from the threshold of {loc1}.",
+                "text": f"Examine the anomaly and recover physical evidence from the threshold of {loc1_prose}.",
                 "completed": False
             },
             {
                 "id": 2,
                 "archetype": "Infiltration",
-                "text": f"Delve into hazardous ruins and bypass mystical barriers at {loc2}.",
+                "text": f"Delve into hazardous ruins and bypass mystical barriers at {loc2_prose}.",
                 "completed": False
             },
             {
                 "id": 3,
                 "archetype": "Diplomacy",
-                "text": f"Negotiate with faction scouts or confront the regional champion at {loc3}.",
+                "text": f"Negotiate with faction scouts or confront the regional champion at {loc3_prose}.",
                 "completed": False
             }
         ]
@@ -152,9 +270,9 @@ def create_contextual_story_quest_data(
         req_item, req_cnt = infer_required_item_and_count_from_text(so.get("text", "")) if so_bp == "ACQUISITION" else ("", 1)
         so["required_item"] = req_item
         so["required_item_count"] = req_cnt
-        sec = loc2 if idx == 1 else (loc3 if idx == 2 else loc1)
+        so_loc = loc1 if idx == 1 else (loc2 if idx == 2 else loc3)
         sub_waypoints[idx] = ensure_multi_stage_waypoints(
-            [], default_loc=loc, archetype=arch, secondary_loc=sec,
+            [], default_loc=so_loc, archetype=arch, secondary_loc=so_loc,
             session_id=session_id, scen_key=scen_key, required_item=req_item
         )
 
@@ -166,6 +284,18 @@ def create_contextual_story_quest_data(
             if t_loc:
                 clean_t = sanitize_location_target(t_loc, session_id=session_id, scen_key=scen_key)
                 process_llm_location_update(session_id, clean_t, scen_key)
+
+    title = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, title, scen_key))
+    objective = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, objective, scen_key))
+    for so in sub_objs:
+        if "text" in so:
+            so["text"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, so["text"], scen_key))
+    for so_id, wps in sub_waypoints.items():
+        for wp in wps:
+            if wp.get("target_location") and "{" in wp["target_location"]:
+                wp["target_location"] = resolve_session_location_tokens(session_id, wp["target_location"], scen_key)
+            if wp.get("stage_label"):
+                wp["stage_label"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, wp["stage_label"], scen_key))
 
     return {
         "title": title,
@@ -191,6 +321,44 @@ def ensure_story_quest_exists(session: dict) -> dict | None:
             len(sub_objs) == 0
         )
         if not is_generic and len(sub_objs) >= 1:
+            # Self-healing for unrendered location tokens or raw arrow strings in prose
+            scen_key = session.get("scenario", "fantasy")
+            raw_check = f"{sq.get('title', '')} {sq.get('objective', '')} {str(sub_objs)}"
+            if ("{" in raw_check and "session_" in raw_check) or "➔" in raw_check or "->" in raw_check:
+                from mechanics.world.locations import resolve_session_location_tokens, clean_narrative_location_arrows
+                sq_title = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, sq.get("title") or "", scen_key))
+                sq_obj = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, sq.get("objective") or "", scen_key))
+                sq_sub = []
+                for so in sub_objs:
+                    so_c = dict(so)
+                    if "text" in so_c:
+                        so_c["text"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, so_c["text"], scen_key))
+                    sq_sub.append(so_c)
+                db.upsert_quest(
+                    session_id=session_id,
+                    quest_id=sq["quest_id"],
+                    quest_type=sq.get("quest_type") or "Story Quest",
+                    title=sq_title,
+                    objective=sq_obj,
+                    progress=sq.get("progress") or "Active",
+                    current_clues=sq.get("current_clues") or "",
+                    status=sq.get("status") or "Active",
+                    reward_xp=sq.get("reward_xp") or 250,
+                    reward_gold=sq.get("reward_gold") or 60,
+                    is_story_quest=1,
+                    clues_required=sq.get("clues_required") or len(sq_sub),
+                    sub_objectives=sq_sub
+                )
+                with db.get_conn() as conn:
+                    wp_rows = conn.execute("SELECT id, target_location, stage_label FROM quest_waypoints WHERE session_id=? AND quest_id=?", (session_id, sq["quest_id"])).fetchall()
+                    for wp_r in wp_rows:
+                        tl = wp_r["target_location"] or ""
+                        sl = wp_r["stage_label"] or ""
+                        tl_f = resolve_session_location_tokens(session_id, tl, scen_key)
+                        sl_f = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, sl, scen_key))
+                        if tl_f != tl or sl_f != sl:
+                            conn.execute("UPDATE quest_waypoints SET target_location=?, stage_label=? WHERE id=?", (tl_f, sl_f, wp_r["id"]))
+                sq = db.get_active_story_quest(session_id)
             return sq
         # Self-healing path: existing quest is missing objectives
         sq_id = sq["quest_id"]
@@ -246,18 +414,41 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
             avail_locs_list.append(f"{z} -> {p}")
     avail_locs_text = ", ".join(avail_locs_list[:12]) if avail_locs_list else loc
 
-    pacing_note = f"CAMPAIGN PACING: This is Chapter #{chapter_num} of {MAX_CAMPAIGN_CHAPTERS}.\n"
-    if chapter_num >= MAX_CAMPAIGN_CHAPTERS:
+    import scenario_data
+    from mechanics.narrative.blueprints import get_max_campaign_chapters, generate_anomalous_campaign_blueprint
+    max_chapters = get_max_campaign_chapters(scen_key)
+    is_anom_story = scenario_data.is_anomalous_incursions_scenario(scen_key)
+
+    pacing_note = f"CAMPAIGN PACING: This is Chapter #{chapter_num} of {max_chapters}.\n"
+    anom_story_context = ""
+    if is_anom_story:
+        bp = generate_anomalous_campaign_blueprint(session_id, session)
+        ch_clamped = max(1, min(11, int(chapter_num or 1)))
+        ch_spec = bp["chapters"].get(ch_clamped, bp["chapters"][1])
+        anomaly = bp["world_ending_anomaly"]
+        pacing_note += (
+            f"ANOMALOUS INCURSIONS 11-CHAPTER ARC DIRECTIVE:\n"
+            f"- World-Ending Antagonist: {anomaly.get('name')} ({anomaly.get('title')})\n"
+            f"- Foreshadow Omen: {anomaly.get('foreshadow_sign')}\n"
+            f"- {ch_spec['pacing_directive']}\n"
+            f"- Required Sub-Quest Archetypes for this Chapter: {', '.join(ch_spec['sub_archetypes'])}\n"
+            f"- NEVER use numeric threat grades (e.g. never say 'Grade-4').\n"
+        )
+        anom_story_context = (
+            f"WORLD-ENDING ANOMALY DOSSIER: {anomaly.get('name')} — {ch_spec['pacing_directive']}\n"
+            f"Use these 3 sub-quest archetypes in order: {', '.join(ch_spec['sub_archetypes'])}.\n\n"
+        )
+    elif chapter_num >= max_chapters:
         pacing_note += (
             "🏆 [GRAND FINALE CHAPTER]: This is the climactic 10th and final chapter of the campaign!\n"
             "The overarching objective and sub-quests MUST stage the ultimate culmination of the campaign, resolving the core mysteries and Campaign End Goals.\n"
         )
-    elif chapter_num == (MAX_CAMPAIGN_CHAPTERS // 2):
+    elif chapter_num == (max_chapters // 2):
         pacing_note += (
             "⚡ [MID-CAMPAIGN CLIMAX (Chapter 5/10)]: This is the halfway turning point of the campaign!\n"
             "Introduce major narrative escalations, shocking revelations, or rising stakes that propel the story into its darker or more intense second half.\n"
         )
-    elif chapter_num == (MAX_CAMPAIGN_CHAPTERS - 1):
+    elif chapter_num == (max_chapters - 1):
         pacing_note += (
             "⚔️ [PENULTIMATE CHAPTER (Chapter 9/10)]: The calm before the storm!\n"
             "The sub-quests should assemble the final keys, allies, preparations, and revelations needed for the upcoming grand finale in Chapter 10.\n"
@@ -328,6 +519,7 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
         f"Current Starting Location: {loc}\n"
         f"{context_line}"
         f"{school_context}"
+        f"{anom_story_context}"
         f"Long-Term Campaign End Goals:\n{goals_summary}\n\n"
         f"Available Regional Locations for Sub-Quests:\n{avail_locs_text}\n\n"
         f"Generate Story Quest #{chapter_num} with: a rich multi-sentence main objective and EXACTLY 3 specific, independent sub-quests "
@@ -384,9 +576,10 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
     from mechanics.world.waypoints import ensure_multi_stage_waypoints
     if isinstance(raw_sub, list):
         for idx, item in enumerate(raw_sub, 1):
+            so_target = avail_locs_list[idx - 1] if idx - 1 < len(avail_locs_list) else loc
             if isinstance(item, str) and item.strip():
                 sub_objs.append({"id": idx, "archetype": "Investigation", "text": item.strip(), "completed": False})
-                sub_waypoints[idx] = ensure_multi_stage_waypoints([], default_loc=loc, archetype="Investigation", session_id=session_id)
+                sub_waypoints[idx] = ensure_multi_stage_waypoints([], default_loc=so_target, archetype="Investigation", session_id=session_id)
             elif isinstance(item, dict):
                 so_id = item.get("id", idx)
                 arch = item.get("archetype", "Objective")
@@ -399,7 +592,7 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
                         "completed": False
                     })
                     wp_list = item.get("waypoints") or []
-                    sub_waypoints[so_id] = ensure_multi_stage_waypoints(wp_list, default_loc=loc, archetype=arch, session_id=session_id)
+                    sub_waypoints[so_id] = ensure_multi_stage_waypoints(wp_list, default_loc=so_target, archetype=arch, session_id=session_id)
 
     # STRICT PYTHON GUARDRAIL: Guarantee EXACTLY 3 Sub-Objectives
     if len(sub_objs) < 3:
@@ -461,18 +654,23 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
     sub_waypoints = game_engine._distribute_fallback_locations(session_id, scen_key, sub_waypoints, sub_objs)
 
     # Auto-discover target locations in SQLite
-    from mechanics.world.locations import sanitize_location_target
+    from mechanics.world.locations import sanitize_location_target, clean_narrative_location_arrows
+    for so in sub_objs:
+        if so.get("text"):
+            so["text"] = clean_narrative_location_arrows(so["text"])
     for so_id, wps in sub_waypoints.items():
         for wp in wps:
+            if wp.get("stage_label"):
+                wp["stage_label"] = clean_narrative_location_arrows(wp["stage_label"])
             t_loc = wp.get("target_location", "").strip()
             if t_loc:
                 clean_t = sanitize_location_target(t_loc, session_id=session_id, scen_key=scen_key)
                 process_llm_location_update(session_id, clean_t, scen_key)
 
     return {
-        "title": (result.get("title") or f"Chapter #{chapter_num} Objective").strip(),
+        "title": clean_narrative_location_arrows((result.get("title") or f"Chapter #{chapter_num} Objective").strip()),
         "archetype": (result.get("archetype") or "Story Quest").strip(),
-        "objective": (result.get("objective") or "Complete chapter objectives.").strip(),
+        "objective": clean_narrative_location_arrows((result.get("objective") or "Complete chapter objectives.").strip()),
         "sub_objectives": sub_objs,
         "sub_waypoints": sub_waypoints,
     }
@@ -508,7 +706,35 @@ def _is_similar_clue(new_clue: str, existing_clues: list[str]) -> bool:
                 return True
     return False
 
-def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list[int] = None, outcome: dict = None, actions: list[dict] = None) -> dict | None:
+def sync_deterministic_campaign_goals(session_id: int) -> None:
+    """Computes campaign_goals progress_pct deterministically from chapter + Story Quest completion (D11)."""
+    if not session_id:
+        return
+    goals = db.get_session_campaign_goals(session_id)
+    if not goals:
+        return
+    cur_ch = db.get_session_chapter(session_id) or 1
+    active_sq = db.get_active_story_quest(session_id)
+    sub_ratio = 0.0
+    if active_sq and isinstance(active_sq.get("sub_objectives"), list) and active_sq["sub_objectives"]:
+        subs = [s for s in active_sq["sub_objectives"] if isinstance(s, dict)]
+        if subs:
+            done_cnt = sum(1 for s in subs if s.get("completed"))
+            sub_ratio = done_cnt / len(subs)
+    det_pct = min(100, max(0, int(round(((max(1, cur_ch) - 1 + sub_ratio) / MAX_CAMPAIGN_CHAPTERS) * 100))))
+    dirty_goals = False
+    for g in goals:
+        if det_pct > int(g.get("progress_pct", 0) or 0):
+            g["progress_pct"] = det_pct
+            dirty_goals = True
+        if int(g.get("progress_pct", 0) or 0) >= 100 and g.get("status") != "Completed":
+            g["status"] = "Completed"
+            dirty_goals = True
+    if dirty_goals:
+        db.update_session_campaign_goals(session_id, goals)
+
+
+def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list[int] = None, outcome: dict = None, actions: list[dict] = None, from_llm: bool = False) -> dict | None:
     """Process a single quest update dict OR an outcome/scene dict containing quest_updates / _quest_update.
     Returns a reward notice dict if a quest was completed, otherwise None.
     """
@@ -520,7 +746,7 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
         notices = []
         for qu in quest_update["quest_updates"]:
             if isinstance(qu, dict):
-                n = game_engine.apply_quest_update(session_id, qu, party_user_ids=party_user_ids, outcome=outcome or quest_update, actions=actions)
+                n = game_engine.apply_quest_update(session_id, qu, party_user_ids=party_user_ids, outcome=outcome or quest_update, actions=actions, from_llm=from_llm)
                 if n and n.get("claimed"):
                     notices.append(n)
         return notices[0] if notices else None
@@ -559,6 +785,15 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
                 matched_quest = q
                 break
 
+    # Phase 5 Guard: Zero LLM Objective Authority (D1, D11)
+    if from_llm and not quest_update.get("_server_authoritative"):
+        if not matched_quest:
+            return None
+        status = matched_quest.get("status") or "Active"
+        reward_xp = matched_quest.get("reward_xp", reward_xp)
+        reward_gold = matched_quest.get("reward_gold", reward_gold)
+        reward_item = matched_quest.get("reward_item", reward_item)
+
     if matched_quest:
         quest_id = matched_quest["quest_id"]
         if not title:
@@ -591,35 +826,9 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
             if not objective or objective in ("Complete objective.", ""):
                 objective = active_sq["objective"]
 
-    # Update Goal Progress % with deterministic chapter floor and ceiling clamp
+    # Update Goal Progress % deterministically from chapter & Story Quest completion (D11)
     cur_ch = db.get_session_chapter(session_id) or 1
-    chapter_floor = min(100, int(((cur_ch - 1) / MAX_CAMPAIGN_CHAPTERS) * 100))
-    chapter_ceiling = min(100, int((cur_ch / MAX_CAMPAIGN_CHAPTERS) * 100))
-    goal_updates = quest_update.get("goal_progress_updates")
-    goals = db.get_session_campaign_goals(session_id)
-    if goals:
-        dirty_goals = False
-        for g in goals:
-            gid = g.get("id")
-            # Always ensure goal is at least at chapter floor
-            if g.get("progress_pct", 0) < chapter_floor:
-                g["progress_pct"] = chapter_floor
-                dirty_goals = True
-            if goal_updates and isinstance(goal_updates, dict) and gid in goal_updates:
-                try:
-                    val = int(goal_updates[gid])
-                    # Clamp between chapter floor and ceiling (unless final chapter)
-                    max_allowed = 100 if cur_ch >= MAX_CAMPAIGN_CHAPTERS else chapter_ceiling
-                    clamped_val = max(chapter_floor, min(max_allowed, val))
-                    if clamped_val != g.get("progress_pct", 0):
-                        g["progress_pct"] = clamped_val
-                        dirty_goals = True
-                    if g["progress_pct"] >= 100:
-                        g["status"] = "Completed"
-                except Exception:
-                    pass
-        if dirty_goals:
-            db.update_session_campaign_goals(session_id, goals)
+    sync_deterministic_campaign_goals(session_id)
 
     # Abort if still no real title — don't create garbage placeholder rows
     if not title or title in ("Active Objective", "Complete objective.", ""):
@@ -890,24 +1099,58 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
     if status == "Completed" and party_user_ids:
         notice = db.claim_quest_reward(session_id, quest_id, party_user_ids)
         if notice and notice.get("claimed") and (notice.get("is_story_quest") or is_sq):
+            session_obj = db.get_session(session_id) or {"id": session_id}
+            scen_key_curr = str(session_obj.get("scenario") or "fantasy")
+            import scenario_data as _sd_q
+            from mechanics.narrative.blueprints import get_max_campaign_chapters
+            max_ch_for_scen = get_max_campaign_chapters(scen_key_curr)
+
             cur_ch = db.get_session_chapter(session_id)
-            next_ch = cur_ch + 1
-            db.set_session_chapter(session_id, next_ch)
 
             # Deterministic Campaign Goal Advance on Chapter Completion
             goals = db.get_session_campaign_goals(session_id)
             if goals:
-                new_floor = min(100, int((cur_ch / MAX_CAMPAIGN_CHAPTERS) * 100))
+                new_floor = min(100, int((cur_ch / max_ch_for_scen) * 100))
                 for g in goals:
                     g["progress_pct"] = max(g.get("progress_pct", 0), new_floor)
-                    if cur_ch >= MAX_CAMPAIGN_CHAPTERS or g["progress_pct"] >= 100:
+                    if cur_ch >= max_ch_for_scen or g["progress_pct"] >= 100:
                         g["progress_pct"] = 100
                         g["status"] = "Completed"
                 db.update_session_campaign_goals(session_id, goals)
 
+            # Anomalous Incursions Chapter 11 Completion -> Post-Game Epilogue & Endless Mode Choice!
+            if _sd_q.is_anomalous_incursions_scenario(scen_key_curr) and cur_ch >= 11:
+                epilogue_choices = [
+                    {
+                        "label": "🏁 Conclude Campaign (Archive Chronicle)",
+                        "stat": "FREE",
+                        "requirement": 0,
+                        "mp_cost": 0,
+                        "intent": "epilogue_conclude_campaign",
+                    },
+                    {
+                        "label": "♾️ Continue in Endless Containment Mode",
+                        "stat": "FREE",
+                        "requirement": 0,
+                        "mp_cost": 0,
+                        "intent": "epilogue_endless_mode",
+                    },
+                ]
+                db.update_session(session_id, extra={"epilogue_ready": True, "epilogue_choices": epilogue_choices})
+                notice["epilogue_ready"] = True
+                notice["epilogue_choices"] = epilogue_choices
+                if isinstance(outcome, dict):
+                    outcome["epilogue_ready"] = True
+                    outcome["epilogue_choices"] = epilogue_choices
+                if newly_discovered_clue:
+                    notice["newly_discovered_clue"] = newly_discovered_clue
+                return notice
+
+            next_ch = cur_ch + 1
+            db.set_session_chapter(session_id, next_ch)
+
             # Write a contextual quest immediately so the DB is NEVER blank or generic,
             # then schedule the LLM call to replace it with a fully unique quest.
-            session_obj = db.get_session(session_id)
             import uuid, asyncio
             next_sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
             fallback_data = create_contextual_story_quest_data(session_id, session_obj, chapter_num=next_ch)
@@ -1596,6 +1839,59 @@ def apply_quest_approach_effects(
             "directive": f"[MANDATORY BREAKTHROUGH LEVERAGE]: The player confronted {target_npc} with undeniable deductions synthesized from the caseboard, shattering their resistance!",
         }
 
+    # 6. Anomalous Incursions: Out-of-Combat Non-Hostile Entity Containment
+    try:
+        import scenario_data
+        sess_chk = session if isinstance(session, dict) else (db.get_session(session_id) or {})
+        scen_chk = str(sess_chk.get("scenario") or "fantasy")
+        if scenario_data.is_anomalous_incursions_scenario(scen_chk):
+            from mechanics.world.anomalous_events import (
+                is_non_hostile_entity_containment_waypoint,
+                extract_non_hostile_entity_name,
+                record_contained_anomaly_to_vault_log,
+            )
+            so_id_val = waypoint.get("sub_obj_id") if isinstance(waypoint, dict) and waypoint.get("sub_obj_id") is not None else (sub_obj.get("id") if isinstance(sub_obj, dict) else None)
+            all_wps_chk = db.get_quest_waypoints(session_id, qid, so_id_val) or []
+            if app in ("nh_persuade", "nh_calm", "nh_outwit", "nh_environment") or is_non_hostile_entity_containment_waypoint(waypoint, all_wps=all_wps_chk, sub_obj=sub_obj, quest=quest):
+                from db.quests import append_quest_note_flag_in_db
+                ent_nm = extract_non_hostile_entity_name(quest, sub_obj)
+                method_map = {
+                    "nh_persuade": "Persuaded & Contained Willingly",
+                    "nh_calm": "Calmed & Sealed Non-Lethally",
+                    "nh_outwit": "Outwitted into Containment Snare",
+                    "nh_environment": "Cornered via Environmental Containment",
+                }
+                method_str = method_map.get(app, "Narrative Field Containment")
+                loc_str = str(sess_chk.get("current_location") or quest.get("client_location") or "Metropolitan Grid")
+                vault_entry = record_contained_anomaly_to_vault_log(
+                    session_id=session_id,
+                    entity_name=ent_nm,
+                    category_tag="spatial_warp",
+                    subtype="non_hostile_entity",
+                    location=loc_str,
+                    containment_note=f"Contained alive during '{quest.get('title', 'Containment Operation')}'.",
+                    resolution_method=method_str,
+                    user_id=lead_uid,
+                    quest_id=qid,
+                    sub_obj_id=so_id_val,
+                )
+                secured_key = f"entity_secured_so_{so_id_val}" if so_id_val is not None else "entity_secured"
+                append_quest_note_flag_in_db(session_id, qid, secured_key, "1")
+                append_quest_note_flag_in_db(session_id, qid, "vault_logged", "1")
+                db.set_quest_resolution_approach(session_id, qid, app if app.startswith("nh_") else "non_hostile_contained")
+                return {
+                    "handled": True,
+                    "entity_contained": True,
+                    "vault_entry": vault_entry,
+                    "directive": (
+                        f"[MANDATORY NON-HOSTILE CONTAINMENT SUCCESS]: The player successfully contained '{ent_nm}' alive "
+                        f"via {method_str} without combat! Narrate sealing it safely into a portable containment unit "
+                        f"(logged for {vault_entry['vault_facility']})."
+                    ),
+                }
+    except Exception:
+        pass
+
     return {}
 
 
@@ -1614,7 +1910,15 @@ def apply_quest_failure_consequences(
     import time
     qid = quest.get("quest_id", "")
     client_npc = quest.get("client_npc") or ""
-    progress_note = "Failed (Betrayed Client)" if reason == "betrayed_client" else "Failed (Target Alerted / Escaped)"
+    lead_uid = party_user_ids[0] if party_user_ids else 1
+    if reason == "betrayed_client":
+        progress_note = "Failed (Betrayed Client)"
+    elif reason == "entity_escaped":
+        progress_note = "Failed (Non-Hostile Target Escaped)"
+    elif reason == "killed_non_hostile_target":
+        progress_note = "Failed (Non-Hostile Target Killed)"
+    else:
+        progress_note = "Failed (Target Alerted / Escaped)"
     db.fail_quest_and_waypoints(session_id, qid, resolution_approach=reason, progress_note=progress_note)
 
     # Client Affinity fallout
@@ -1643,10 +1947,41 @@ def apply_quest_failure_consequences(
         except Exception:
             pass
 
-    # Delayed Travel Ambush for combat/criminal blueprints
+    sess_eff = session if isinstance(session, dict) else (db.get_session(session_id) or {})
+    scen = str(sess_eff.get("scenario") or "fantasy")
+
+    # Anomalous Incursions Mandatory Daily Bounty failure penalty (-15 Promotion Rep, guarded against midnight double-penalty)
+    promotion_penalty_notice = ""
+    try:
+        import scenario_data
+        if scenario_data.is_anomalous_incursions_scenario(scen) and (
+            "mandatory_daily:1" in q_notes or str(qid).upper().startswith("MAND-")
+        ):
+            from mechanics.social.factions import (
+                get_anomalous_faction_state,
+                save_anomalous_faction_state,
+                update_agent_promotion_reputation,
+            )
+            fac_st = get_anomalous_faction_state(session_id, user_id=lead_uid)
+            if str(fac_st.get("faction_archetype_key") or "public_agency") != "freelancer" and not fac_st.get("mandatory_bounty_penalized_today", False):
+                promo_res = update_agent_promotion_reputation(
+                    session_id=session_id,
+                    delta_rep=-15,
+                    reason=f"Failed Mandatory Daily Dispatch '{quest.get('title', 'Mandatory Bounty')}'",
+                    is_missed_mandatory=True,
+                    user_id=lead_uid,
+                )
+                fac_st = promo_res.get("state") or get_anomalous_faction_state(session_id, user_id=lead_uid)
+                fac_st["mandatory_bounty_penalized_today"] = True
+                save_anomalous_faction_state(session_id, fac_st, user_id=lead_uid)
+                promotion_penalty_notice = str(promo_res.get("message") or "")
+    except Exception:
+        pass
+
+    # Delayed Travel Ambush for combat/criminal blueprints (skip for non-hostile anomaly escape/kill)
     bp = quest.get("blueprint_id") or ""
-    if bp in ("NEUTRALIZATION", "HEIST_INFILTRATION", "CONTEST_RIVALRY", "EXPLORATION_HAZARD", ""):
-        cur_loc = (session.get("current_location") if session else "") or ""
+    if reason not in ("entity_escaped", "killed_non_hostile_target") and bp in ("NEUTRALIZATION", "HEIST_INFILTRATION", "CONTEST_RIVALRY", "EXPLORATION_HAZARD", ""):
+        cur_loc = (sess_eff.get("current_location") if sess_eff else "") or ""
         enemy_name = f"{client_npc}'s Enforcer" if (reason == "betrayed_client" and client_npc) else (quest.get("target_npc") or "Vengeful Mercenary")
         retaliation_data = {
             "quest_id": qid,
@@ -1664,7 +1999,6 @@ def apply_quest_failure_consequences(
             pass
 
     # PeerPulse Scandal for Social or School scenarios
-    scen = (session.get("scenario") if session else "") or "fantasy"
     try:
         from mechanics.world.locations.seeds import is_school_scenario
         is_school = is_school_scenario(scen)
@@ -1684,11 +2018,15 @@ def apply_quest_failure_consequences(
         except Exception:
             pass
 
-    return {
+    promo_dir = f" {promotion_penalty_notice}" if promotion_penalty_notice else ""
+    res_payload = {
         "failed": True,
         "reason": reason,
-        "directive": f"[MANDATORY QUEST FAILURE & FALLOUT]: Quest '{quest.get('title')}' has FAILED ({reason}). Narrate the consequences and strained relations vividly."
+        "directive": f"[MANDATORY QUEST FAILURE & FALLOUT]: Quest '{quest.get('title')}' has FAILED ({reason}).{promo_dir} Narrate the consequences and strained relations vividly.",
     }
+    if promotion_penalty_notice:
+        res_payload["promotion_penalty_notice"] = promotion_penalty_notice
+    return res_payload
 
 
 def handle_failed_quest_skill_check(
@@ -1705,7 +2043,8 @@ def handle_failed_quest_skill_check(
     - Stage 1 Immunity: Scouting checks never add strikes.
     - Stage >= 2: Adds +1 Strike (or +2 on Stage 3 critical failure).
     - At 1/2 Strikes: Emits complication directive.
-    - At 2/2 Strikes: Deterministic Hard Failure for bounties, or Pyrrhic Breakthrough ('dire_cost') for Story Quests.
+    - At 2/2 Strikes: Deterministic Hard Failure for bounties, or Pyrrhic Breakthrough ('dire_cost') for Story Quests
+      (or Temperament-Driven Escape vs Agitated Hostile Combat for Non-Hostile Anomalous Entities).
     """
     import db
     import time
@@ -1738,6 +2077,125 @@ def handle_failed_quest_skill_check(
             "directive": f"[COMPANION STRIKE SHIELD ACTIVATED]: {comp_name} intervened to parry/deflect the complication! Strike count was NOT incremented (0 strikes accrued).",
         }
 
+    # Anomalous Incursions Non-Hostile Entity Containment Branching (Timid Escape vs Volatile Hostile Combat)
+    sess_eff = session if isinstance(session, dict) else (db.get_session(session_id) or {})
+    scen_chk = str(sess_eff.get("scenario") or "fantasy")
+    try:
+        import scenario_data
+        is_anom_scen = scenario_data.is_anomalous_incursions_scenario(scen_chk)
+    except Exception:
+        is_anom_scen = False
+
+    if is_anom_scen:
+        from mechanics.world.anomalous_events import (
+            is_non_hostile_entity_containment_waypoint,
+            extract_non_hostile_entity_name,
+            get_non_hostile_entity_temperament,
+            spawn_agitated_non_hostile_entity,
+        )
+        if is_non_hostile_entity_containment_waypoint(waypoint, all_wps=all_wps, sub_obj=sub_obj, quest=q_fresh):
+            ent_nm = extract_non_hostile_entity_name(q_fresh, sub_obj)
+            temp = get_non_hostile_entity_temperament(seed_key=qid, quest_notes=q_notes)
+            strike_res = db.increment_quest_strikes(session_id, qid, delta=1)
+
+            if not strike_res["failed"]:
+                if temp == "timid":
+                    warn_dir = (
+                        f"[NON-HOSTILE CONTAINMENT COMPLICATION - {strike_res['strikes']}/{strike_res['max_strikes']} STRIKES]: "
+                        f"The containment attempt on '{ent_nm}' faltered! Startled and skittish, it edges toward an unstable spatial seam—"
+                        f"one more failed skill check and '{ent_nm}' will escape!"
+                    )
+                else:
+                    warn_dir = (
+                        f"[NON-HOSTILE CONTAINMENT COMPLICATION - {strike_res['strikes']}/{strike_res['max_strikes']} STRIKES]: "
+                        f"The containment attempt on '{ent_nm}' faltered! Its territorial static arcs dangerously—"
+                        f"one more failed skill check and '{ent_nm}' will turn hostile in combat!"
+                    )
+                return {
+                    "status": "strike_warning",
+                    "temperament": temp,
+                    "strikes": strike_res["strikes"],
+                    "max_strikes": strike_res["max_strikes"],
+                    "failed": False,
+                    "directive": warn_dir,
+                }
+
+            # Max strikes reached (2/2) -> Branch by temperament!
+            if temp == "timid":
+                if not q_fresh.get("is_story_quest"):
+                    fail_res = apply_quest_failure_consequences(
+                        session_id, q_fresh, party_user_ids, reason="entity_escaped", session=sess_eff
+                    )
+                    fail_res["escaped"] = True
+                    fail_res["temperament"] = "timid"
+                    fail_res["strikes"] = strike_res["strikes"]
+                    fail_res["max_strikes"] = strike_res["max_strikes"]
+                    promo_part = f" {fail_res['promotion_penalty_notice']}" if fail_res.get("promotion_penalty_notice") else ""
+                    fail_res["directive"] = (
+                        f"[NON-HOSTILE ENTITY ESCAPED — BOUNTY FAILED]: Startled by repeated failed containment attempts, "
+                        f"'{ent_nm}' slipped through a spatial seam and vanished! Quest '{q_fresh.get('title')}' has FAILED.{promo_part}"
+                    )
+                    return fail_res
+                else:
+                    now = time.time()
+                    with db.get_conn() as conn:
+                        if sub_obj_id is not None:
+                            conn.execute(
+                                "UPDATE quest_waypoints SET status='completed', updated_at=? WHERE session_id=? AND quest_id=? AND sub_obj_id=?",
+                                (now, session_id, qid, sub_obj_id),
+                            )
+                        else:
+                            conn.execute(
+                                "UPDATE quest_waypoints SET status='completed', updated_at=? WHERE session_id=? AND quest_id=?",
+                                (now, session_id, qid),
+                            )
+                    if sub_obj:
+                        sub_obj["completed"] = True
+                        sub_obj["resolution_approach"] = "dire_cost"
+                    db.set_quest_resolution_approach(session_id, qid, "dire_cost")
+                    db.reset_quest_strikes(session_id, qid)
+                    lead_uid = party_user_ids[0] if party_user_ids else 1
+                    db.apply_hp_mp_delta(lead_uid, hp_delta=-5)
+                    return {
+                        "status": "dire_cost",
+                        "escaped": True,
+                        "temperament": "timid",
+                        "failed": False,
+                        "directive": (
+                            f"[MANDATORY DIRE COST — SPECIMEN ESCAPED]: '{ent_nm}' bolted through a spatial tear in a burst of "
+                            f"anomalous static (-5 HP backlash), escaping live capture! The player salvages only residual telemetry "
+                            f"to press '{q_fresh.get('title')}' forward (NOT logged to Containment Vault)."
+                        ),
+                    }
+            else:
+                # Volatile temperament -> Spawns into combat WITHOUT failing the quest yet!
+                db.reset_quest_strikes(session_id, qid)
+                cur_loc_str = str(sess_eff.get("current_location") or waypoint.get("target_location") or "")
+                enemy_obj = spawn_agitated_non_hostile_entity(
+                    session_id=session_id,
+                    entity_name=ent_nm,
+                    location=cur_loc_str,
+                    quest_id=qid,
+                    sub_obj_id=sub_obj_id,
+                    is_story_quest=bool(q_fresh.get("is_story_quest")),
+                    session=session,
+                )
+                return {
+                    "status": "agitated_combat",
+                    "agitated": True,
+                    "combat_started": True,
+                    "temperament": "volatile",
+                    "failed": False,
+                    "strikes": strike_res["strikes"],
+                    "max_strikes": strike_res["max_strikes"],
+                    "enemy": enemy_obj,
+                    "directive": (
+                        f"[NON-HOSTILE ENTITY AGITATED INTO COMBAT]: Repeated failed containment attempts provoked '{ent_nm}' "
+                        f"into lashing out! Combat has begun, but '{q_fresh.get('title')}' is NOT failed yet—the player can still "
+                        f"attempt [🗣️ Persuade / Calm] in combat or weaken it to <= 35% HP for [🛡️ Subdue & Contain], "
+                        f"whereas killing it (0 HP) will destroy the specimen and fail the bounty!"
+                    ),
+                }
 
     delta = 2 if (check_result_tier == "critical_failure" and stage_idx >= 3) else 1
     strike_res = db.increment_quest_strikes(session_id, qid, delta=delta)
@@ -1966,15 +2424,40 @@ def resolve_pre_turn_quests_and_clues(
     session: dict,
     party: list = None,
     actions: list = None,
+    persist_db: bool = True,
 ) -> dict:
     """
     Deterministic pre-turn quest, clue, and chapter climax resolution engine.
-    Runs BEFORE the Narrator LLM on every turn:
-    1. Evaluates active quests against current location and player action checks (Dual-Trigger).
-    2. Advances waypoints and marks completed sub-quests and full quests deterministically.
-    3. Manages the Two-Phase Chapter Climax system (setup -> resolution) and chapter increments.
-    4. Emits [MANDATORY QUEST OBJECTIVE COMPLETE] and [MANDATORY CHAPTER CLIMAX RESOLUTION] directives.
+    When persist_db=False (live turn pipeline), executes inside a rolled-back SQLite SAVEPOINT
+    so LLM failures never mutate DB state, and commits atomically inside apply_outcome (D3).
     """
+    import db
+    session_id = (session.get("id") or 0) if isinstance(session, dict) else 0
+    if not persist_db and session_id:
+        pre_ch = session.get("chapter", 1) if isinstance(session, dict) else 1
+        eff_loc = session.get("current_location") or ""
+        with db.UnitOfWork() as uow_conn:
+            uow_conn.execute("SAVEPOINT sp_pre_turn_quests")
+            try:
+                res = _resolve_pre_turn_quests_impl(session, party=party, actions=actions)
+            finally:
+                uow_conn.execute("ROLLBACK TO SAVEPOINT sp_pre_turn_quests")
+                uow_conn.execute("RELEASE SAVEPOINT sp_pre_turn_quests")
+        res["_needs_db_commit"] = True
+        res["_pre_chapter"] = pre_ch
+        res["_effective_location"] = eff_loc
+        res["_party_snapshot"] = party
+        if isinstance(session, dict):
+            session["_pre_turn_quest_res"] = res
+        return res
+    return _resolve_pre_turn_quests_impl(session, party=party, actions=actions)
+
+
+def _resolve_pre_turn_quests_impl(
+    session: dict,
+    party: list = None,
+    actions: list = None,
+) -> dict:
     import db
     from mechanics.world.waypoints import (
         try_advance_on_arrival,
@@ -1992,12 +2475,25 @@ def resolve_pre_turn_quests_and_clues(
     is_success = False
     fa = {}
     if actions:
-        fa = actions[0] if isinstance(actions[0], dict) else {}
-        if isinstance(actions[0], dict):
+        # D15 Multiplayer Co-op: prefer any action explicitly targeting a quest, climax, or clue deduction
+        selected_raw = actions[0]
+        for cand_a in actions:
+            if isinstance(cand_a, dict) and (
+                cand_a.get("is_quest_action")
+                or cand_a.get("quest_id")
+                or cand_a.get("is_climax_action")
+                or str(cand_a.get("sub_intent") or "").lower() == "deduce_clues"
+                or "story climax" in str(cand_a.get("label") or cand_a.get("action") or "").lower()
+                or "⚡" in str(cand_a.get("label") or "")
+            ):
+                selected_raw = cand_a
+                break
+        fa = selected_raw if isinstance(selected_raw, dict) else {}
+        if isinstance(selected_raw, dict):
             action_str = str(fa.get("label") or fa.get("action") or "")
             is_success = is_check_success(fa.get("check"), default_if_none=True)
         else:
-            action_str = str(actions[0] or "")
+            action_str = str(selected_raw or "")
             is_success = True
     act_low = action_str.lower()
 
@@ -2325,6 +2821,32 @@ def resolve_pre_turn_quests_and_clues(
                     directives.append(
                         f"[MANDATORY QUEST OBJECTIVE COMPLETE]: Sub-objective '{so.get('text', so_id)}' for quest '{q.get('title')}' is completed! Narrate the breakthrough/discovery vividly."
                     )
+                    # Phase 5 Q2: Pre-Registered Objective Clue Discovery
+                    c_lead = so.get("clue") or so.get("clue_lead")
+                    if not c_lead:
+                        t_text = str(so.get("text") or "")
+                        if any(k in t_text.lower() for k in ("investigate", "discover", "uncover", "search", "interview", "interrogate", "examine", "clue", "evidence", "find")):
+                            c_lead = f"Discovered lead: {t_text}"
+                    if c_lead and session_id:
+                        try:
+                            from mechanics.narrative.clues import categorize_clue
+                            cur_ch = session.get("chapter", 1) if session else 1
+                            cid = db.add_session_clue(
+                                session_id=session_id,
+                                title=f"Lead: {str(so.get('text', 'Evidence'))[:40]}",
+                                lead_text=str(c_lead),
+                                category=categorize_clue(str(c_lead)),
+                                source_location=cur_loc,
+                                linked_npc=str(so_wp.get("target_npc") if so_wp else "") or str(q.get("target_npc") or ""),
+                                quest_id=qid,
+                                chapter=cur_ch,
+                            )
+                            if cid:
+                                directives.append(
+                                    f"[MANDATORY CLUE DISCOVERY]: Evidence recorded to Caseboard: '{c_lead}'"
+                                )
+                        except Exception as e:
+                            logger.warning("Failed to record pre-registered clue: %s", e)
                     break
             if sub_dirty and session_id:
                 try:
@@ -2350,31 +2872,43 @@ def resolve_pre_turn_quests_and_clues(
                     if q not in completed_quests:
                         completed_quests.append(q)
 
-        # Check if climax action was executed for a story quest
+        # Check if climax action was executed for a story quest (standard or premature per A11)
         if q.get("is_story_quest"):
-            sq, climax_loc = get_story_quest_climax_location(session_id)
+            sq, climax_loc = get_story_quest_climax_location(session_id, allow_premature=True)
             if sq and sq.get("quest_id") == qid:
                 if ("story climax" in act_low or "⚡" in action_str):
+                    sub_objs_done = all(isinstance(s, dict) and s.get("completed") for s in (q.get("sub_objectives") or []))
                     if is_success:
+                        # Auto-mark all sub-objectives as cleared on successful climax
+                        for s in (q.get("sub_objectives") or []):
+                            if isinstance(s, dict):
+                                s["completed"] = True
                         if q not in completed_quests:
                             completed_quests.append(q)
                     else:
-                        strike_res = db.increment_quest_strikes(session_id, qid, delta=2 if check_tier == "critical_failure" else 1)
-                        if strike_res["failed"] or check_tier == "critical_failure":
-                            db.set_quest_resolution_approach(session_id, qid, "pyrrhic_climax")
-                            q["resolution_approach"] = "pyrrhic_climax"
-                            q["reward_xp"] = max(25, int(int(q.get("reward_xp") or 100) * 0.5))
-                            q["reward_gold"] = max(10, int(int(q.get("reward_gold") or 30) * 0.5))
-                            db.apply_hp_mp_delta(party_uids[0], hp_delta=-10)
+                        if not sub_objs_done:
+                            # Phase 5 A11: Premature confrontation failure -> immediate escape/escalation +2 strikes
+                            strike_res = db.increment_quest_strikes(session_id, qid, delta=2)
                             directives.append(
-                                f"[MANDATORY PYRRHIC CLIMAX RESOLUTION]: The Chapter Climax '{q.get('title')}' concluded with bittersweet compromise and dark consequences! Complete the climax and narrate the heavy toll."
+                                f"[PREMATURE CLIMAX FAILED - {strike_res['strikes']}/{strike_res['max_strikes']} STRIKES]: Confronting the threat without full evidence backfired! The suspect evaded capture and opposition is on alert."
                             )
-                            if q not in completed_quests:
-                                completed_quests.append(q)
                         else:
-                            directives.append(
-                                f"[QUEST COMPLICATION - {strike_res['strikes']}/{strike_res['max_strikes']} STRIKES]: The Story Climax check met unexpected resistance! The stakes escalate for the final push."
-                            )
+                            strike_res = db.increment_quest_strikes(session_id, qid, delta=2 if check_tier == "critical_failure" else 1)
+                            if strike_res["failed"] or check_tier == "critical_failure":
+                                db.set_quest_resolution_approach(session_id, qid, "pyrrhic_climax")
+                                q["resolution_approach"] = "pyrrhic_climax"
+                                q["reward_xp"] = max(25, int(int(q.get("reward_xp") or 100) * 0.5))
+                                q["reward_gold"] = max(10, int(int(q.get("reward_gold") or 30) * 0.5))
+                                db.apply_hp_mp_delta(party_uids[0], hp_delta=-10)
+                                directives.append(
+                                    f"[MANDATORY PYRRHIC CLIMAX RESOLUTION]: The Chapter Climax '{q.get('title')}' concluded with bittersweet compromise and dark consequences! Complete the climax and narrate the heavy toll."
+                                )
+                                if q not in completed_quests:
+                                    completed_quests.append(q)
+                            else:
+                                directives.append(
+                                    f"[QUEST COMPLICATION - {strike_res['strikes']}/{strike_res['max_strikes']} STRIKES]: The Story Climax check met unexpected resistance! The stakes escalate for the final push."
+                                )
 
     # Award rewards deterministically for newly completed quests
     import time
@@ -2417,24 +2951,132 @@ def resolve_pre_turn_quests_and_clues(
             f"[MANDATORY QUEST OBJECTIVE COMPLETE]: Quest '{cq.get('title')}' is completed! Narrate the breakthrough/success vividly."
         )
 
-    # Two-Phase Chapter Climax System
-    chapter_climax = False
-    active_sq = db.get_active_story_quest(session_id) if session_id else None
-    if not active_sq and session_id:
-        cur_ch = session.get("chapter", 1)
-        if session.get("chapter_climax_phase") == "setup":
-            session["chapter"] = cur_ch + 1
-            session["chapter_climax_phase"] = "resolved"
+    # Interactive Caseboard Deductive Synthesis via explicit turn action (D18: no silent 0-XP auto-consumption)
+    deduction_xp_bonus = 0
+    is_deduce_action = (
+        str(fa.get("sub_intent") or "").lower() == "deduce_clues"
+        or str(fa.get("intent") or "").lower() == "deduce_clues"
+        or "[synthesize leads]" in act_low
+    )
+    if session_id and is_deduce_action:
+        if is_success:
             try:
-                db.set_session_chapter(session_id, session["chapter"])
+                from mechanics.narrative.clues import evaluate_clue_deduction
+                scen_k = session.get("scenario", "fantasy") if session else "fantasy"
+                matched_deduction = None
+                explicit_pair = fa.get("clue_pair_ids")
+                if isinstance(explicit_pair, list) and len(explicit_pair) == 2:
+                    ca = db.get_session_clue_by_id(int(explicit_pair[0]))
+                    cb = db.get_session_clue_by_id(int(explicit_pair[1]))
+                    if ca and cb and not ca.get("is_consumed") and not cb.get("is_consumed"):
+                        ok_d, b_title, b_text = evaluate_clue_deduction(ca, cb, scen_key=scen_k)
+                        if ok_d:
+                            matched_deduction = (ca, cb, b_title, b_text)
+                if not matched_deduction:
+                    open_clues = [
+                        c for c in (db.get_session_clues(session_id, is_verified=0) or [])
+                        if not c.get("is_consumed") and c.get("category") != "deduction"
+                    ]
+                    for i in range(len(open_clues)):
+                        for j in range(i + 1, len(open_clues)):
+                            ca, cb = open_clues[i], open_clues[j]
+                            ok_d, b_title, b_text = evaluate_clue_deduction(ca, cb, scen_key=scen_k)
+                            if ok_d:
+                                matched_deduction = (ca, cb, b_title, b_text)
+                                break
+                        if matched_deduction:
+                            break
+                if matched_deduction:
+                    ca, cb, b_title, b_text = matched_deduction
+                    db.synthesize_deduction_clue(
+                        session_id,
+                        [ca["id"], cb["id"]],
+                        b_title,
+                        b_text,
+                        chapter=session.get("chapter", 1) if session else 1,
+                    )
+                    for uid in party_uids:
+                        try:
+                            db.add_xp(uid, 50)
+                        except Exception:
+                            pass
+                    deduction_xp_bonus = 50
+                    directives.append(
+                        f"[STAGE DIRECTION — BREAKTHROUGH SYNTHESIZED]: Synthesized '{b_title}' from caseboard evidence (+50 XP)! {b_text}"
+                    )
+            except Exception as e:
+                logger.warning("Failed during interactive caseboard deductive synthesis: %s", e)
+        else:
+            directives.append(
+                "[STAGE DIRECTION — DEDUCTION INCONCLUSIVE]: You cross-referenced the evidence leads, but couldn't quite connect the full picture yet (leads remain unconsumed)."
+            )
+
+    # Two-Phase Chapter Climax System (Phase 5 Q4)
+    chapter_climax = False
+    cur_ch = session.get("chapter", 1) if session else 1
+    has_completed_sq = bool(completed_quests and any(q.get("is_story_quest") for q in completed_quests))
+
+    if has_completed_sq and session_id:
+        import scenario_data as _sd_ep
+        scen_key_ep = str(session.get("scenario") or "fantasy") if isinstance(session, dict) else "fantasy"
+        cur_db_ch = db.get_session_chapter(session_id) or cur_ch
+        effective_ch = max(cur_ch, cur_db_ch)
+        if _sd_ep.is_anomalous_incursions_scenario(scen_key_ep) and effective_ch >= 11 and not (isinstance(session, dict) and session.get("endless_mode_unlocked")):
+            epilogue_choices = [
+                {
+                    "label": "🏁 Conclude Campaign (Archive Chronicle)",
+                    "stat": "FREE",
+                    "requirement": 0,
+                    "mp_cost": 0,
+                    "intent": "epilogue_conclude_campaign",
+                },
+                {
+                    "label": "♾️ Continue in Endless Containment Mode",
+                    "stat": "FREE",
+                    "requirement": 0,
+                    "mp_cost": 0,
+                    "intent": "epilogue_endless_mode",
+                },
+            ]
+            db.update_session(session_id, extra={"epilogue_ready": True, "epilogue_choices": epilogue_choices})
+            if isinstance(session, dict):
+                session["epilogue_ready"] = True
+                session["epilogue_choices"] = epilogue_choices
+                session["chapter_climax_phase"] = "resolved"
+            directives.append(
+                "[MANDATORY CAMPAIGN EPILOGUE RESOLUTION]: Chapter 11 resolution & commendation completed! Present the Post-Game Epilogue choice to archive the chronicle or continue in Endless Containment Mode."
+            )
+            chapter_climax = True
+        else:
+            next_ch = cur_ch + 1
+            if isinstance(session, dict):
+                session["chapter"] = next_ch
+                session["chapter_climax_phase"] = "resolved"
+            try:
+                db.set_session_chapter(session_id, next_ch)
             except Exception:
                 pass
             directives.append(
-                f"[MANDATORY CHAPTER CLIMAX RESOLUTION]: Chapter {cur_ch} climax successfully concluded! Transition into Chapter {session['chapter']}."
+                f"[MANDATORY CHAPTER CLIMAX RESOLUTION]: Chapter {cur_ch} climax successfully concluded! Transition into Chapter {next_ch}."
             )
             chapter_climax = True
-        elif completed_quests and any(q.get("is_story_quest") for q in completed_quests):
-            session["chapter_climax_phase"] = "setup"
+            try:
+                ensure_story_quest_exists(session)
+            except Exception:
+                pass
+    elif session_id:
+        active_sq = db.get_active_story_quest(session_id)
+        if active_sq:
+            sq_subs = active_sq.get("sub_objectives", []) or []
+            if sq_subs and all(isinstance(s, dict) and s.get("completed") for s in sq_subs):
+                if isinstance(session, dict):
+                    session["chapter_climax_phase"] = "setup" 
+
+    if session_id:
+        try:
+            sync_deterministic_campaign_goals(session_id)
+        except Exception:
+            pass
 
     res = {
         "completed_quests": [q.get("quest_id") for q in completed_quests],
@@ -2444,8 +3086,111 @@ def resolve_pre_turn_quests_and_clues(
         "advanced_keys": advanced_keys,
         "directives": directives,
         "chapter_climax": chapter_climax,
+        "deduction_xp_bonus": deduction_xp_bonus,
     }
     session["_pre_turn_quest_res"] = res
     return res
 
+def forfeit_side_bounty(session_id: int, quest_id: str, party_user_ids: list[int] = None) -> dict:
+    """
+    Abandons/forfeits an active side bounty per Phase 5 contract A16:
+    - Applies -5 client affinity penalty.
+    - Clears associated waypoints.
+    - Marks quest status = 'Abandoned'.
+    - Queues zero retaliation ambushes.
+    """
+    import db
+    import time
+    q = db.get_quest_by_id(session_id, quest_id)
+    if not q or q.get("is_story_quest"):
+        return {"success": False, "reason": "Cannot forfeit story quest"}
+
+    with db.get_conn() as conn:
+        now = time.time()
+        conn.execute("UPDATE quests SET status='Abandoned', updated_at=? WHERE session_id=? AND quest_id=?", (now, session_id, quest_id))
+        conn.execute("UPDATE quest_waypoints SET status='abandoned', updated_at=? WHERE session_id=? AND quest_id=?", (now, session_id, quest_id))
+
+    client_npc = q.get("client_npc") or ""
+    if client_npc:
+        try:
+            db.update_relationship_score(session_id, client_npc, delta_score=-5)
+        except Exception:
+            pass
+
+    return {
+        "success": True,
+        "quest_id": quest_id,
+        "title": q.get("title", "Bounty"),
+        "client_affinity_delta": -5,
+        "directive": f"[SIDE BOUNTY FORFEITED]: The contract '{q.get('title')}' was abandoned (-5 Affinity with {client_npc or 'the client'})."
+    }
+
+
+def can_accept_side_bounty(session_id: int, quest: dict | None = None) -> bool:
+    """Checks if session is below the max active side bounties concurrency cap of 3 (exempting mandatory daily dispatches)."""
+    import db
+    if isinstance(quest, dict):
+        q_notes = str(quest.get("quest_notes") or "")
+        if str(quest.get("quest_id") or "").upper().startswith("MAND-") or "mandatory_daily:1" in q_notes:
+            return True
+    active_bounties = [
+        q for q in (db.get_session_quests(session_id, status="Active") or [])
+        if not q.get("is_story_quest")
+        and not str(q.get("quest_id") or "").upper().startswith("MAND-")
+        and "mandatory_daily:1" not in str(q.get("quest_notes") or "")
+    ]
+    return len(active_bounties) < 3
+
+
+def check_and_extract_defeated_suspect_evidence(session_id: int, defeated_npc_name: str, cur_loc: str = "") -> dict | None:
+    """
+    Fail-Forward Pocket Evidence Drop per Phase 5 contract A14:
+    If an investigation suspect is defeated in combat before formal interrogation,
+    extracts their vital evidence from personal effects into session_clues with genre-grounded wording.
+    """
+    import db
+    if not session_id or not defeated_npc_name:
+        return None
+    d_low = defeated_npc_name.strip().lower()
+    sess = db.get_session(session_id) or {}
+    scen_low = str(sess.get("scenario") or "fantasy").lower()
+    if any(k in scen_low for k in ("cyber", "sci", "space", "post_apoc")):
+        artifact_desc = "an encrypted datapad and access passkey"
+        cat_val = "digital"
+    elif any(k in scen_low for k in ("school", "modern", "slice", "anomalous", "academy", "campus")):
+        artifact_desc = "a hidden notebook and locker key"
+        cat_val = "document"
+    else:
+        artifact_desc = "a wax-sealed ledger and signet key"
+        cat_val = "document"
+
+    active_quests = db.get_session_quests(session_id, status="Active") or []
+    for q in active_quests:
+        target_npc = str(q.get("target_npc") or "").strip().lower()
+        sub_objs = q.get("sub_objectives") or []
+        is_suspect = (target_npc and target_npc in d_low) or any(
+            isinstance(so, dict) and d_low in str(so.get("text", "")).lower() for so in sub_objs
+        ) or (d_low in str(q.get("objective", "")).lower())
+        if is_suspect:
+            cur_ch = db.get_session_chapter(session_id) or 1
+            title = f"Pocket Evidence: {defeated_npc_name}"
+            lead_text = f"Recovered from the personal effects of {defeated_npc_name}: {artifact_desc} confirming their involvement in '{q.get('title')}'."
+            cid = db.add_session_clue(
+                session_id=session_id,
+                title=title,
+                lead_text=lead_text,
+                category=cat_val,
+                source_location=cur_loc,
+                linked_npc=defeated_npc_name,
+                quest_id=q.get("quest_id", ""),
+                chapter=cur_ch,
+            )
+            return {
+                "clue_id": cid,
+                "title": title,
+                "lead_text": lead_text,
+                "quest_id": q.get("quest_id", ""),
+                "directive": f"[FAIL-FORWARD EVIDENCE RECOVERED]: Vital evidence extracted from {defeated_npc_name}'s personal effects!",
+            }
+    return None
 

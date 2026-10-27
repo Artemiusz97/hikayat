@@ -139,6 +139,7 @@ class TestSubObjectiveGuardrails(unittest.TestCase):
                     "quest_id": self.quest_id,
                     "title": "The Moonwell Awakens",
                     "completed_sub_quest_ids": [1],
+                    "_server_authoritative": True,
                 }
             ],
             "character_outcomes": [{"name": "Alice", "hp_change": 0, "mp_change": 0}]

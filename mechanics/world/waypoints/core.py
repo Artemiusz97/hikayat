@@ -13,7 +13,8 @@ from .matching import (
     get_story_quest_climax_location,
     resolve_effective_waypoint_location,
     is_waypoint_npc_present_in_scene,
-    resolve_waypoint_target_npc
+    resolve_waypoint_target_npc,
+    can_waypoint_match_via_npc_presence,
 )
 
 
@@ -90,8 +91,9 @@ def build_waypoint_prompt_block(session_id: int, current_location: str, destinat
         resource_target = int(wp.get("resource_target", 0))
         resource_collected = int(wp.get("resource_collected", 0))
 
+        can_npc_match = can_waypoint_match_via_npc_presence(target_npc, wp.get("stage_key", ""), current_location, wp)
         at_target = check_location_matches_waypoint(current_location, target_loc) or (
-            bool(target_npc) and is_waypoint_npc_present_in_scene(session_id, target_npc)
+            bool(target_npc) and can_npc_match and is_waypoint_npc_present_in_scene(session_id, target_npc)
         )
 
         header = f"  [{quest_title}" + (f" Sub-Obj #{sub_obj_id}]" if sub_obj_id is not None else "]")
@@ -121,9 +123,34 @@ def build_waypoint_prompt_block(session_id: int, current_location: str, destinat
                 else:
                     lines.append("    => ⭐ ACTIVE LOCAL QUEST OBJECTIVE AT CURRENT LOCATION:")
                     lines.append(f"       You MUST include at least one dedicated choice in `next_choices` (marked with ⭐ or 🎯) allowing the player to directly interact with or progress this stage ('{label}').")
+                    try:
+                        import scenario_data
+                        sess_chk = db.get_session(session_id) if session_id else None
+                        scen_chk = str((sess_chk or {}).get("scenario") or "fantasy")
+                        if scenario_data.is_anomalous_incursions_scenario(scen_chk):
+                            from mechanics.world.anomalous_events import (
+                                is_non_hostile_entity_containment_waypoint,
+                                extract_non_hostile_entity_name,
+                                get_non_hostile_entity_temperament,
+                                get_temperament_scene_hint,
+                            )
+                            if is_non_hostile_entity_containment_waypoint(wp):
+                                q_id_wp = str(wp.get("quest_id") or "")
+                                q_notes_wp = str(wp.get("quest_notes") or "")
+                                ent_nm = extract_non_hostile_entity_name(wp)
+                                temp_val = get_non_hostile_entity_temperament(seed_key=q_id_wp, quest_notes=q_notes_wp)
+                                temp_hint = get_temperament_scene_hint(ent_nm, temp_val)
+                                lines.append(
+                                    f"       [NON-HOSTILE ENTITY CONTAINMENT DIRECTIVE]: {ent_nm} is NON-HOSTILE when encountered. "
+                                    f"Do NOT start combat automatically (`enemies_in_combat` MUST stay empty unless already fighting). "
+                                    f"Telegraph its temperament in the scene: {temp_hint}"
+                                )
+                    except Exception:
+                        pass
         else:
-            lines.append(f"    => Player must travel to: {target_loc} before this stage can progress.")
-            lines.append("    => Do NOT complete this objective. Offer travel or inquiry choices.")
+            lines.append(f"    => [STRICT LOCATION LOCK]: The objective target is at: '{target_loc}'. The player is currently at: '{current_location or '(unknown)'}'.")
+            lines.append(f"    => STRICT RULE: DO NOT generate active quest/bounty interaction/investigation choices for this remote objective at this location.")
+            lines.append(f"    => Offer ONLY travel or navigation choices toward '{target_loc}'.")
             lines.append("    => [POST-OBJECTIVE / TRAVEL TRANSITION]: If the local objective at the current room was completed, do NOT generate redundant micro-checks on the solved obstacle. Prioritize travel choices toward target locations, speaking with present NPCs, or resting.")
         lines.append("")
 
@@ -137,8 +164,9 @@ def get_active_local_quest_hooks(session_id: int, current_location: str) -> list
     for wp in active_wps:
         target_loc = resolve_effective_waypoint_location(session_id, wp)
         t_npc = resolve_waypoint_target_npc(session_id, wp) or wp.get("target_npc", "")
+        can_npc_match = can_waypoint_match_via_npc_presence(t_npc, wp.get("stage_key", ""), current_location, wp)
         if (target_loc and check_location_matches_waypoint(current_location, target_loc)) or (
-            t_npc and is_waypoint_npc_present_in_scene(session_id, t_npc)
+            t_npc and can_npc_match and is_waypoint_npc_present_in_scene(session_id, t_npc)
         ):
             matched.append(wp)
     return matched
@@ -185,6 +213,10 @@ def ensure_quest_waypoints_exist(session_id: int):
                     idx = (int(so_id) - 1) % len(existing_locs)
                     target_loc = f"{existing_locs[idx].get('zone_name')} ➔ {existing_locs[idx].get('primary_name')}"
                 
+                if target_loc and "{" in target_loc:
+                    from mechanics.world.locations.hierarchy import resolve_session_location_tokens
+                    target_loc = resolve_session_location_tokens(session_id, target_loc, scen_key)
+
                 wps = ensure_multi_stage_waypoints([], default_loc=target_loc, archetype=arch)
                 if wps:
                     db.save_quest_waypoints(session_id, qid, wps, sub_obj_id=so_id)
@@ -216,23 +248,46 @@ def get_location_waypoint_markers(session_id: int) -> dict[str, list[str]]:
         keys = []
         if len(parts) >= 2:
             z_tgt, p_tgt = parts[0], parts[1]
+            s_tgt = parts[2] if len(parts) >= 3 else ""
             keys.extend([f"{z_tgt} {arrow} {p_tgt}", f"{z_tgt} -> {p_tgt}", p_tgt])
+            if s_tgt:
+                keys.append(s_tgt)
             if existing_locs:
                 z_words = set(re.findall(r"\b\w{3,}\b", z_tgt.lower()))
                 for r in existing_locs:
                     r_p = r.get("primary_name", "")
                     r_z = r.get("zone_name", "")
-                    if r_p and r_z and (r_p.lower() == p_tgt.lower() or p_tgt.lower() in r_p.lower() or r_p.lower() in p_tgt.lower()):
+                    r_s = r.get("sub_name", "")
+                    if not (r_p and r_z):
+                        continue
+                    matches_p = (
+                        r_p.lower() == p_tgt.lower()
+                        or p_tgt.lower() in r_p.lower()
+                        or r_p.lower() in p_tgt.lower()
+                    )
+                    matches_s = bool(r_s) and (
+                        r_s.lower() == p_tgt.lower()
+                        or p_tgt.lower() in r_s.lower()
+                        or (bool(s_tgt) and (r_s.lower() == s_tgt.lower() or s_tgt.lower() in r_s.lower()))
+                    )
+                    if matches_p or matches_s:
                         r_z_words = set(re.findall(r"\b\w{3,}\b", r_z.lower()))
                         if z_tgt.lower() in generic_template_zones or not z_tgt or (z_words & r_z_words) or z_words.issubset(r_z_words):
-                            keys.extend([f"{r_z} {arrow} {r_p}", f"{r_z} -> {r_p}"])
+                            keys.extend([f"{r_z} {arrow} {r_p}", f"{r_z} -> {r_p}", r_p])
+                            if matches_s and r_s:
+                                keys.extend([f"{r_z} {arrow} {r_s}", r_s])
         elif len(parts) == 1:
             p_tgt = parts[0]
             keys.append(p_tgt)
             if existing_locs:
                 for r in existing_locs:
-                    if r.get("primary_name", "").lower() == p_tgt.lower() and r.get("zone_name"):
-                        keys.extend([f"{r['zone_name']} {arrow} {r['primary_name']}", f"{r['zone_name']} -> {r['primary_name']}"])
+                    r_p = r.get("primary_name", "")
+                    r_z = r.get("zone_name", "")
+                    r_s = r.get("sub_name", "")
+                    if r_z and (r_p.lower() == p_tgt.lower() or (r_s and r_s.lower() == p_tgt.lower())):
+                        keys.extend([f"{r_z} {arrow} {r_p}", f"{r_z} -> {r_p}", r_p])
+                        if r_s and r_s.lower() == p_tgt.lower():
+                            keys.append(r_s)
         for k in keys:
             if k not in markers:
                 markers[k] = []
@@ -253,96 +308,12 @@ def get_location_waypoint_markers(session_id: int) -> dict[str, list[str]]:
     if story_quest and climax_loc:
         climax_title = story_quest.get("title", "Story Quest")
         tag = f"⚡ [Story Climax] {climax_title} — Final Showdown"
-
-        parts = [climax_loc]
-        for d in delimiters:
-            if d in climax_loc:
-                parts = [p.strip() for p in climax_loc.split(d) if p.strip()]
-                break
-
-        keys_to_register = []
-        if len(parts) >= 2:
-            z_tgt = parts[0]
-            p_tgt = parts[1]
-            keys_to_register.extend([
-                f"{z_tgt} {arrow} {p_tgt}",
-                f"{z_tgt} -> {p_tgt}",
-                p_tgt,
-            ])
-            if existing_locs:
-                z_words = set(re.findall(r"\b\w{3,}\b", z_tgt.lower()))
-                for r in existing_locs:
-                    r_p = r.get("primary_name", "")
-                    r_z = r.get("zone_name", "")
-                    if r_p and r_z and (r_p.lower() == p_tgt.lower() or p_tgt.lower() in r_p.lower() or r_p.lower() in p_tgt.lower()):
-                        r_z_words = set(re.findall(r"\b\w{3,}\b", r_z.lower()))
-                        if z_tgt.lower() in generic_template_zones or not z_tgt or (z_words & r_z_words) or z_words.issubset(r_z_words):
-                            keys_to_register.extend([
-                                f"{r_z} {arrow} {r_p}",
-                                f"{r_z} -> {r_p}",
-                            ])
-        elif len(parts) == 1:
-            p_tgt = parts[0]
-            keys_to_register.append(p_tgt)
-            if existing_locs:
-                for r in existing_locs:
-                    if r.get("primary_name", "").lower() == p_tgt.lower() and r.get("zone_name"):
-                        keys_to_register.extend([
-                            f"{r['zone_name']} {arrow} {r['primary_name']}",
-                            f"{r['zone_name']} -> {r['primary_name']}",
-                        ])
-
-        for k in keys_to_register:
-            if k not in markers:
-                markers[k] = []
-            if tag not in markers[k]:
-                markers[k].append(tag)
+        _register_location_marker(climax_loc, tag)
 
     for wp in active_wps:
         target_loc = resolve_effective_waypoint_location(session_id, wp).strip()
         if not target_loc:
             continue
-        parts = [target_loc]
-        for d in delimiters:
-            if d in target_loc:
-                parts = [p.strip() for p in target_loc.split(d) if p.strip()]
-                break
-
-        keys_to_register = []
-        if len(parts) >= 2:
-            z_tgt = parts[0]
-            p_tgt = parts[1]
-            keys_to_register.extend([
-                f"{z_tgt} {arrow} {p_tgt}",
-                f"{z_tgt} -> {p_tgt}",
-                p_tgt,
-            ])
-            # If z_tgt is a generic template zone (e.g. "Ancient Woods"), resolve to the session's actual seeded zone
-            if existing_locs:
-                z_words = set(re.findall(r"\b\w{3,}\b", z_tgt.lower()))
-                for r in existing_locs:
-                    r_p = r.get("primary_name", "")
-                    r_z = r.get("zone_name", "")
-                    if r_p and r_z and (r_p.lower() == p_tgt.lower() or p_tgt.lower() in r_p.lower() or r_p.lower() in p_tgt.lower()):
-                        r_z_words = set(re.findall(r"\b\w{3,}\b", r_z.lower()))
-                        if z_tgt.lower() in generic_template_zones or not z_tgt or (z_words & r_z_words) or z_words.issubset(r_z_words):
-                            keys_to_register.extend([
-                                f"{r_z} {arrow} {r_p}",
-                                f"{r_z} -> {r_p}",
-                            ])
-        elif len(parts) == 1:
-            p_tgt = parts[0]
-            keys_to_register.append(p_tgt)
-            if existing_locs:
-                for r in existing_locs:
-                    if r.get("primary_name", "").lower() == p_tgt.lower() and r.get("zone_name"):
-                        keys_to_register.extend([
-                            f"{r['zone_name']} {arrow} {r['primary_name']}",
-                            f"{r['zone_name']} -> {r['primary_name']}",
-                        ])
-        else:
-            continue
-
         quest_title = wp.get("quest_title", "Quest")
         is_story = bool(wp.get("is_story_quest"))
         sub_obj_id = wp.get("sub_obj_id")
@@ -368,10 +339,6 @@ def get_location_waypoint_markers(session_id: int) -> dict[str, list[str]]:
             stage_part = f" — {sub_label}" if sub_label else ""
             tag = f"{icon} [Bounty] {quest_title}{stage_part}{npc_suffix}"
 
-        for k in keys_to_register:
-            if k not in markers:
-                markers[k] = []
-            if tag not in markers[k]:
-                markers[k].append(tag)
+        _register_location_marker(target_loc, tag)
 
     return markers

@@ -1,7 +1,9 @@
+from __future__ import annotations
 import db
 import asyncio
 import json
 import logging
+import math
 import time
 from contextlib import contextmanager
 import re
@@ -95,19 +97,68 @@ def get_skill_progress(char: dict) -> dict:
 def set_skill_progress(user_id: int, progress: dict):
     db.update_character_fields(user_id, skill_progress=json.dumps(progress))
 
-def can_add_item(user_id: int, slot_cost: int = 1) -> bool:
+STACKABLE_CONSUMABLE_TYPES = {"potion", "food", "drink", "consumable"}
+
+
+def compute_inventory_used_slots(items: list[dict]) -> int:
+    """Computes inventory slot usage with 5x virtual stacking for identical unequipped consumables (D9)."""
+    total = 0
+    stack_counts: dict[tuple[str, str, str, int], int] = {}
+    for item in (items or []):
+        if not isinstance(item, dict):
+            continue
+        raw_cost = int(item["slot_cost"]) if item.get("slot_cost") is not None else 1
+        if raw_cost <= 0:
+            continue
+        is_equipped = bool(item.get("equipped"))
+        it_type_low = str(item.get("item_type") or "").strip().lower()
+        if not is_equipped and it_type_low in STACKABLE_CONSUMABLE_TYPES:
+            key = (
+                str(item.get("name") or "").strip().lower(),
+                it_type_low,
+                str(item.get("effect") or "").strip(),
+                raw_cost,
+            )
+            stack_counts[key] = stack_counts.get(key, 0) + 1
+        else:
+            total += raw_cost
+    for (_name, _itype, _eff, unit_cost), cnt in stack_counts.items():
+        total += math.ceil(cnt / 5) * unit_cost
+    return total
+
+
+def can_add_item(
+    user_id: int,
+    slot_cost: int = 1,
+    name: str = "",
+    item_type: str = "",
+    effect: str = "",
+) -> bool:
     char = db.get_character(user_id)
     if not char:
         return True
     cap = cd.inventory_capacity(char.get("str_", 1))
-    return (used_slots(user_id) + slot_cost) <= cap
+    existing = get_inventory(user_id)
+    raw_cost = int(slot_cost) if slot_cost is not None else 1
+    if raw_cost <= 0:
+        return True
+    if name or item_type:
+        candidate = {
+            "name": name,
+            "item_type": item_type,
+            "effect": effect,
+            "slot_cost": raw_cost,
+            "equipped": 0,
+        }
+        return compute_inventory_used_slots(existing + [candidate]) <= cap
+    return (compute_inventory_used_slots(existing) + raw_cost) <= cap
+
 
 def add_item(user_id: int, name: str, item_type: str, effect: str = "", slot_cost: int = 1, force: bool = False) -> int | None:
     char = db.get_character(user_id)
     char_id = char["id"] if char else None
     if not force and char:
-        cap = cd.inventory_capacity(char.get("str_", 1))
-        if (used_slots(user_id) + slot_cost) > cap:
+        if not can_add_item(user_id, slot_cost=slot_cost, name=name, item_type=item_type, effect=effect):
             return None
     with get_conn() as conn:
         cur = conn.execute(
@@ -125,17 +176,19 @@ def remove_item_by_name(user_id: int, name: str) -> bool:
     if not target_clean:
         return False
 
+    was_equipped = False
+    removed = False
     with get_conn() as conn:
         # 1. Exact case-insensitive match
         row = conn.execute(
-            "SELECT id FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND LOWER(name)=? LIMIT 1",
+            "SELECT id, equipped, slot FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND LOWER(name)=? LIMIT 1",
             (char_id, user_id, target_clean)
         ).fetchone()
 
         # 2. Substring match
         if not row:
             rows = conn.execute(
-                "SELECT id, name FROM inventory WHERE character_id=? OR (character_id IS NULL AND user_id=?)",
+                "SELECT id, name, equipped, slot FROM inventory WHERE character_id=? OR (character_id IS NULL AND user_id=?)",
                 (char_id, user_id)
             ).fetchall()
             for r in rows:
@@ -159,20 +212,53 @@ def remove_item_by_name(user_id: int, name: str) -> bool:
                     row = best_match
 
         if row:
+            was_equipped = bool(row["equipped"])
             cur = conn.execute("DELETE FROM inventory WHERE id=?", (row["id"],))
-            return cur.rowcount > 0
-    return False
+            removed = cur.rowcount > 0
+
+    if removed and was_equipped:
+        try:
+            _sync_equipment_to_physical_state(user_id)
+        except Exception:
+            pass
+        try:
+            from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
+            sync_equipped_anomalous_spells(user_id)
+        except Exception:
+            pass
+    return removed
 
 def remove_item(user_id: int, item_id: int) -> bool:
     char = db.get_character(user_id)
     if not char:
         return False
+    was_equipped = False
+    removed = False
     with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, equipped FROM inventory WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
+            (item_id, char["id"], user_id),
+        ).fetchone()
+        if not row:
+            return False
+        was_equipped = bool(row["equipped"])
         cur = conn.execute(
             "DELETE FROM inventory WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
             (item_id, char["id"], user_id),
         )
-        return cur.rowcount > 0
+        removed = cur.rowcount > 0
+
+    if removed and was_equipped:
+        try:
+            _sync_equipment_to_physical_state(user_id)
+        except Exception:
+            pass
+        try:
+            from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
+            sync_equipped_anomalous_spells(user_id)
+        except Exception:
+            pass
+    return removed
 
 def get_inventory(user_id: int):
     char = db.get_character(user_id)
@@ -258,6 +344,27 @@ def equip_item(user_id: int, item_id: int, slot: str) -> dict | None:
         if is_shoes and slot not in ("Shoes",):
             raise ValueError("Shoes can only be equipped in the 'Shoes' slot.")
 
+        # 0.5 Restraint Dual-Wield / Two-Handed Gate (Invariant 12)
+        if slot in ("Weapon", "Shield"):
+            try:
+                active_sid_check = db.get_active_session_id_for_user(user_id)
+                if active_sid_check:
+                    import mechanics.social.physical_state as ps
+                    p_state = ps.get_actor_physical_state(active_sid_check, char.get("name", "Hero"), conn=conn) or ps.get_actor_physical_state(active_sid_check, "player", conn=conn)
+                    if p_state:
+                        has_other_hand = bool(conn.execute(
+                            "SELECT 1 FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND slot=? AND equipped=1",
+                            (char_id, user_id, "Shield" if slot == "Weapon" else "Weapon"),
+                        ).fetchone())
+                        if is_two_handed(item_dict) or (is_weapon and has_other_hand):
+                            allowed_eq, eq_reason = ps.can_actor_travel_or_dual_wield(p_state)
+                            if not allowed_eq:
+                                raise ValueError(eq_reason)
+            except ValueError:
+                raise
+            except Exception:
+                pass
+
         # 1. 2-Handed Weapon & Shield / Off-Hand mutual exclusion
         if slot == "Weapon" and is_two_handed(item_dict):
             # Unequip shield/off-hand if equipping a 2H weapon
@@ -285,7 +392,12 @@ def equip_item(user_id: int, item_id: int, slot: str) -> dict | None:
             conn.execute("UPDATE inventory SET equipped=0, slot=NULL WHERE id=?", (previous["id"],))
 
         conn.execute("UPDATE inventory SET equipped=1, slot=?, character_id=? WHERE id=?", (slot, char_id, item_id))
-    _sync_equipment_to_physical_state(user_id)
+    _sync_equipment_to_physical_state(user_id, changed_slot=slot)
+    try:
+        from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
+        sync_equipped_anomalous_spells(user_id)
+    except Exception as e:
+        log.warning(f"Error syncing anomalous spells on equip for user {user_id}: {e}")
     return previous
 
 def unequip_slot(user_id: int, slot: str) -> dict | None:
@@ -301,11 +413,16 @@ def unequip_slot(user_id: int, slot: str) -> dict | None:
         if not row:
             return None
         conn.execute("UPDATE inventory SET equipped=0, slot=NULL WHERE id=?", (row["id"],))
-    _sync_equipment_to_physical_state(user_id)
+    _sync_equipment_to_physical_state(user_id, changed_slot=slot)
+    try:
+        from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
+        sync_equipped_anomalous_spells(user_id)
+    except Exception as e:
+        log.warning(f"Error syncing anomalous spells on unequip for user {user_id}: {e}")
     return dict(row)
 
-def _sync_equipment_to_physical_state(user_id: int) -> None:
-    """Invariant 5: Synchronizes equipped weapon holding and garment layers to active session physical state."""
+def _sync_equipment_to_physical_state(user_id: int, changed_slot: str | None = None) -> None:
+    """Invariant 5: Synchronizes equipped weapon holding and garment layers to active session physical state without clobbering unrelated garment states or posture/restraints."""
     try:
         active_sid = db.get_active_session_id_for_user(user_id)
         if not active_sid:
@@ -314,62 +431,65 @@ def _sync_equipment_to_physical_state(user_id: int) -> None:
         if not char:
             return
         equipment = get_equipment(user_id)
+        import mechanics.social.physical_state as ps
+
+        player_name = char.get("name", "Hero")
+        existing_actor = None
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT actor_name FROM actor_physical_states WHERE session_id=? AND (actor_type='player' OR canonical_key='player' OR LOWER(actor_name)=LOWER(?)) LIMIT 1",
+                (active_sid, player_name),
+            ).fetchone()
+            if row and row["actor_name"]:
+                player_name = row["actor_name"]
+            existing_actor = ps.get_actor_physical_state(active_sid, player_name, conn=conn)
 
         main_w = equipment.get("Weapon")
         off_w = equipment.get("Shield")
+        state_patch: dict = {"actor_type": "player"}
+
+        # Auto-clear temporary held props when equipping/unequipping Weapon or Shield (or when weapons are equipped)
         if main_w and off_w:
-            holding = f"{main_w['name']} & {off_w['name']}"
+            state_patch["holding"] = f"{main_w['name']} & {off_w['name']}"
         elif main_w:
-            holding = main_w["name"]
+            state_patch["holding"] = main_w["name"]
         elif off_w:
-            holding = off_w["name"]
-        else:
-            holding = "Empty hands"
+            state_patch["holding"] = off_w["name"]
+        elif changed_slot in ("Weapon", "Shield", None) or not existing_actor:
+            state_patch["holding"] = "Empty hands"
 
         arm = equipment.get("Armor")
         top = equipment.get("Top")
         bot = equipment.get("Bottom")
         shoes = equipment.get("Shoes")
 
-        garments = {}
+        garments: dict = {}
         if arm:
             garments["outerwear"] = {"state": "worn", "item_name": arm.get("name", "")}
-        else:
+        elif changed_slot in ("Armor", None) or not existing_actor:
             garments["outerwear"] = {"state": "none", "item_name": ""}
 
         if top:
             garments["top"] = {"state": "worn", "item_name": top.get("name", "")}
-        else:
+        elif changed_slot in ("Top", None) or not existing_actor:
             garments["top"] = {"state": "worn", "item_name": "Clothed"}
 
         if bot:
             garments["bottom"] = {"state": "worn", "item_name": bot.get("name", "")}
-        else:
+        elif changed_slot in ("Bottom", None) or not existing_actor:
             garments["bottom"] = {"state": "worn", "item_name": "Clothed"}
 
         if shoes:
             garments["footwear"] = {"state": "worn", "item_name": shoes.get("name", "")}
-        else:
+        elif changed_slot in ("Shoes", None) or not existing_actor:
             garments["footwear"] = {"state": "worn", "item_name": "Worn"}
-
-        import mechanics.social.physical_state as ps
-
-        player_name = char.get("name", "Hero")
-        with get_conn() as conn:
-            row = conn.execute(
-                "SELECT actor_name FROM actor_physical_states WHERE session_id=? AND (actor_type='player' OR canonical_key='player')",
-                (active_sid,)
-            ).fetchone()
-            if row and row["actor_name"]:
-                player_name = row["actor_name"]
 
         ps.upsert_actor_physical_state(
             active_sid,
             player_name,
-            {"holding": holding, "actor_type": "player"},
-            garments=garments,
+            state_patch,
+            garments=garments if garments else None,
         )
-        ps.materialize_session_physical_state(active_sid)
     except Exception as e:
         log.warning(f"Error syncing equipment to physical state for user {user_id}: {e}")
 
@@ -386,6 +506,45 @@ def get_equipment(user_id: int) -> dict:
     return {slot: by_slot.get(slot) for slot in cd.EQUIPMENT_SLOTS}
 
 def used_slots(user_id: int) -> int:
-    return sum(i.get("slot_cost", 1) for i in get_inventory(user_id))
+    return compute_inventory_used_slots(get_inventory(user_id))
+
+
+def drop_item_to_session_floor(user_id: int, item_dict: dict, session_id: int | None = None) -> bool:
+    """Places a dropped inventory item onto the active room floor with preserved metadata (D20, max 10 items)."""
+    if not isinstance(item_dict, dict):
+        return False
+    name = str(item_dict.get("name") or "").strip()
+    if not name:
+        return False
+    sid = session_id or db.get_active_session_id_for_user(user_id)
+    if not sid:
+        return False
+    try:
+        phys_st = db.get_session_physical_state(sid) or {}
+        if not isinstance(phys_st, dict):
+            phys_st = {}
+        dropped = list(phys_st.get("dropped_items") or [])
+        dropped.append(name)
+        if len(dropped) > 10:
+            dropped = dropped[-10:]
+        phys_st["dropped_items"] = dropped
+
+        meta_map = dict(phys_st.get("dropped_item_meta") or {})
+        meta_map[name.lower()] = {
+            "name": name,
+            "item_type": str(item_dict.get("item_type") or "Item"),
+            "effect": str(item_dict.get("effect") or ""),
+            "slot_cost": int(item_dict["slot_cost"]) if item_dict.get("slot_cost") is not None else 1,
+        }
+        active_lower = {str(d).strip().lower() for d in dropped if str(d).strip()}
+        for k in list(meta_map.keys()):
+            if k not in active_lower:
+                meta_map.pop(k, None)
+        phys_st["dropped_item_meta"] = meta_map
+        db.update_session_physical_state(sid, phys_st, sync_tables=False)
+        return True
+    except Exception as e:
+        log.warning(f"Failed to record floor drop for user {user_id}: {e}")
+        return False
 
 

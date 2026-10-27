@@ -1,4 +1,5 @@
 from __future__ import annotations
+import copy
 import random
 from typing import Dict, Any, Optional
 
@@ -394,7 +395,7 @@ def generate_random_equipment(
         "handedness": base_data.get("handedness", "Versatile"),
         "base_dt": base_dt,
         "type_dt": type_dt,
-        "tags": base_data["tags"],
+        "tags": copy.deepcopy(base_data["tags"]),
         "stat_modifiers": stat_mods
     }
     

@@ -2190,12 +2190,12 @@ def deduce_weapon_archetype(name: str, pool_dict: Dict[str, Any] | None = None) 
     # Priority keyword mapping: longer / more specific matches first
     checks = [
         (["greatsword", "claymore", "zweihander"], "greatsword"),
-        (["shortsword", "gladius"], "shortsword"),
+        (["machete", "shortsword", "gladius"], "shortsword"),
         (["baseball bat", "wooden bat", "spiked bat", "billiard cue", "skateboard", "guitar case"], "bat"),
         (["kendo sword", "bokken", "shinai"], "katana"),
-        (["submachinegun", "smg", "machine pistol"], "submachinegun"),
+        (["submachinegun", "smg", "machine pistol", "pdw"], "submachinegun"),
         (["pipe rifle", "sniper rifle", "hunting rifle", "carbine", "rifle"], "rifle"),
-        (["shotgun", "scattergun"], "shotgun"),
+        (["shotgun", "scattergun", "scatterer"], "shotgun"),
         (["revolver", "six-shooter", "derringer"], "revolver"),
         (["fountain pen"], "fountain_pen"),
         (["mechanical pencil"], "mechanical_pencil"),
@@ -2208,16 +2208,16 @@ def deduce_weapon_archetype(name: str, pool_dict: Dict[str, Any] | None = None) 
         (["textbook", "sketchbook"], "sketchbook"),
         (["pepper spray"], "improvised"),
         (["candelabra"], "improvised"),
-        (["lead-pipe", "lead pipe", "pipe baton", "u-lock", "stun flashlight", "briefcase"], "baton"),
-        (["sledgehammer", "heavy spanner", "spanner", "wrench", "skillet"], "warhammer"),
+        (["lead-pipe", "lead pipe", "pipe baton", "u-lock", "stun flashlight", "briefcase", "blackjack"], "baton"),
+        (["sledgehammer", "heavy spanner", "spanner", "wrench", "skillet", "maul"], "warhammer"),
         (["kunai set", "kunai", "throwing knife", "shuriken"], "throwing"),
-        (["plasma torch", "utility cutter", "stun projector"], "pistol"),
+        (["needlegun", "flechette pistol", "plasma torch", "utility cutter", "stun projector"], "pistol"),
         (["bayoneted musket", "musket"], "musket"),
         (["harpoon", "steam harpoon"], "spear"),
         (["railgun"], "railgun"),
         (["flamethrower"], "flamethrower"),
         (["machinegun", "minigun"], "machinegun"),
-        (["polearm", "halberd", "glaive", "lance", "pike"], "polearm"),
+        (["naginata", "polearm", "halberd", "glaive", "lance", "pike"], "spear"),
         (["warhammer", "hammer"], "warhammer"),
         (["crossbow"], "crossbow"),
         (["katana", "nodachi", "wakizashi", "tanto"], "katana"),
@@ -2226,7 +2226,7 @@ def deduce_weapon_archetype(name: str, pool_dict: Dict[str, Any] | None = None) 
         (["baton", "nightstick", "truncheon"], "baton"),
         (["whip"], "whip"),
         (["fist", "knuckle", "claws", "cestus", "boxing wraps", "sparring mitts"], "fist_weapon"),
-        (["dagger", "stiletto", "knife", "dirk"], "dagger"),
+        (["dagger", "stiletto", "knife", "dirk", "vajra", "combat blade"], "dagger"),
         (["spear", "javelin"], "spear"),
         (["mace", "morningstar", "club", "flail"], "mace"),
         (["staff", "rod", "stave", "monopod"], "staff"),
@@ -2264,16 +2264,25 @@ def generate_random_equipment(
     archetype: Optional[str] = None,
     name: Optional[str] = None,
     element: Optional[str] = None,
+    private_agency_bonus: bool = False,
+    force_anomalous: Optional[bool] = None,
+    force_granted_spell: Optional[bool] = None,
 ) -> Dict[str, Any]:
     item_tier = tier if tier in (1, 2, 3) else roll_tier()
     scen_key = normalize_weapon_scenario(scenario)
+    from mechanics.combat.items.anomalous_gear import (
+        is_anomalous_scenario,
+        choose_anomalous_weapon_archetype,
+        apply_anomalous_incursions_gear_rules,
+    )
+    is_anom_scen = is_anomalous_scenario(scenario)
     
     # Check if scenario is non-combat / slice-of-life
     try:
         from scenario_data import is_non_combat_scenario
-        use_non_combat = is_non_combat_scenario(scenario) or scen_key == "high_school"
+        use_non_combat = (is_non_combat_scenario(scenario) or scen_key == "high_school") and not is_anom_scen
     except Exception:
-        use_non_combat = scen_key == "high_school"
+        use_non_combat = scen_key == "high_school" and not is_anom_scen
         
     pool_dict = NON_COMBAT_WEAPON_ARCHETYPES if use_non_combat else WEAPON_ARCHETYPES
     
@@ -2281,6 +2290,8 @@ def generate_random_equipment(
         arch = archetype
     elif name:
         arch = deduce_weapon_archetype(name, pool_dict)
+    elif is_anom_scen:
+        arch = choose_anomalous_weapon_archetype()
     else:
         arch = random.choice(list(pool_dict.keys()))
         
@@ -2394,7 +2405,7 @@ def generate_random_equipment(
     if use_non_combat:
         metadata = make_narrative_metadata(metadata)
     
-    return {
+    res_item = {
         "name": item_name,
         "item_type": "Weapon",
         "slot": "Weapon",
@@ -2402,6 +2413,44 @@ def generate_random_equipment(
         "metadata": metadata,
         "slot_cost": 1
     }
+    if is_anom_scen and not name:
+        res_item = apply_anomalous_incursions_gear_rules(
+            res_item,
+            scenario=scenario,
+            slot="Weapon",
+            tier=item_tier,
+            private_agency_bonus=private_agency_bonus,
+            force_anomalous=force_anomalous,
+            force_granted_spell=force_granted_spell,
+        )
+    elif is_anom_scen and name:
+        # Preserve explicit name while still rolling anomalous/non-anomalous rules unless explicitly forced
+        explicit_name = item_name.strip()
+        eff_force = force_anomalous
+        if eff_force is None and "anomalous" in explicit_name.lower():
+            eff_force = True
+        res_item = apply_anomalous_incursions_gear_rules(
+            res_item,
+            scenario=scenario,
+            slot="Weapon",
+            tier=item_tier,
+            private_agency_bonus=private_agency_bonus,
+            force_anomalous=eff_force,
+            force_granted_spell=force_granted_spell,
+        )
+        clean_exp = explicit_name.replace("[Anomalous]", "").strip()
+        if res_item.get("metadata", {}).get("is_anomalous"):
+            from mechanics.combat.items.anomalous_gear import ANOMALOUS_ELEMENT_AFFIXES
+            elem = str(res_item["metadata"].get("element") or "dark")
+            affix_info = ANOMALOUS_ELEMENT_AFFIXES.get(elem, ANOMALOUS_ELEMENT_AFFIXES["dark"])
+            prefix = random.choice(affix_info["prefixes"])
+            final_w_name = f"[Anomalous] {prefix} {clean_exp}" if not explicit_name.startswith("[Anomalous]") else explicit_name
+        else:
+            final_w_name = clean_exp
+        res_item["name"] = final_w_name
+        res_item["metadata"]["name"] = final_w_name
+        res_item["effect"] = serialize_item(res_item["metadata"])
+    return res_item
 
 def generate_starting_weapons(scenario: str = "fantasy", count: int = 6) -> List[Dict[str, Any]]:
     """Generates procedural starting weapons using the new weapon generation system."""
@@ -2467,4 +2516,7 @@ def format_equipment_card(metadata: Dict[str, Any]) -> str:
         lines.append("⚠️ *Two-Handed: Cannot be used with a shield.*")
     elif hand == "Versatile":
         lines.append("🔄 *Versatile: +15% Damage Multiplier & +4% Crit when two-handed (no shield).*")
+    granted_sp = metadata.get("granted_spell")
+    if isinstance(granted_sp, dict) and granted_sp.get("name"):
+        lines.append(f"✨ **Grants Ability (While Equipped):** {granted_sp['name']} ({granted_sp.get('mp_cost', 10)} MP)")
     return "\n".join(lines)

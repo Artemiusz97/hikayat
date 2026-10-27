@@ -4,6 +4,16 @@ import { useGameSession } from './hooks/useGameSession';
 import AuthView from './views/AuthView';
 import DashboardView from './views/DashboardView';
 import GameView from './views/GameView';
+import { useScenarioTheme } from './theme/ThemeProvider';
+
+const Splash = ({ label }) => (
+  <div className="flex h-full items-center justify-center">
+    <div className="flex flex-col items-center gap-4 hk-enter">
+      <div className="h-10 w-10 rounded-full border-2 border-fantasy-accent/25 border-t-fantasy-accent animate-spin" />
+      <span className="hk-display text-sm text-gray-400">{label}</span>
+    </div>
+  </div>
+);
 
 function App() {
   const {
@@ -17,14 +27,17 @@ function App() {
     waitingForParty, partyStatus, lastSyncTimestamp,
     partyChatMessages, onlineUserIds, sendPartyChat,
     startSession, joinSession, submitAction,
-    exitToDashboard, resumeSession, endSession, retryGeneration,
+    exitToDashboard, resumeSession, resumeSessionSlot, endSession, endSessionById, retryGeneration,
     rerollImage, rerollingImage,
     actionError, clearActionError,
     refreshSession
   } = useGameSession(user, character);
 
+  // Auto theme follows whichever scenario is in focus (active or paused session).
+  useScenarioTheme(session);
+
   if (authLoading) {
-    return <div className="flex h-screen items-center justify-center text-fantasy-accent">Loading...</div>;
+    return <Splash label="Loading..." />;
   }
 
   if (!user) {
@@ -33,7 +46,7 @@ function App() {
 
   // Cold-start initial loading: Only show full-screen loader when there is no session and user is not on dashboard
   if (sessionLoading && !session && !pausedOnDashboard) {
-    return <div className="flex h-screen items-center justify-center text-fantasy-accent">Summoning Reality...</div>;
+    return <Splash label="Summoning Reality..." />;
   }
 
   if (!session || pausedOnDashboard) {
@@ -50,7 +63,9 @@ function App() {
         joinSession={joinSession}
         activeSession={session}
         onResumeSession={resumeSession}
+        onResumeSlot={resumeSessionSlot}
         onEndSession={endSession}
+        onEndSlot={endSessionById}
         refreshCharacter={refreshCharacter}
         refreshSession={refreshSession}
         onSessionLoaded={(s) => {
@@ -62,7 +77,7 @@ function App() {
   }
 
   if (sessionLoading) {
-    return <div className="flex h-screen items-center justify-center text-fantasy-accent">Summoning Reality...</div>;
+    return <Splash label="Summoning Reality..." />;
   }
 
   return (

@@ -1,7 +1,7 @@
-# Hikayat (v2.4.0) — Living AI Tabletop RPG & Web Application
+# Hikayat (v2.6.0) — Living AI Tabletop RPG & Web Application
 
 [![Tests](https://github.com/Artemiusz97/hikayat/actions/workflows/tests.yml/badge.svg)](https://github.com/Artemiusz97/hikayat/actions/workflows/tests.yml)
-[![Version](https://img.shields.io/badge/version-2.4.0-blue.svg)](releases/CHANGELOG-v2.4.0.md)
+[![Version](https://img.shields.io/badge/version-2.6.0-blue.svg)](releases/CHANGELOG-v2.6.0.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/react-18.2-61dafb.svg)](web/)
 
@@ -9,85 +9,99 @@ Hikayat is a comprehensive, multi-genre LLM-driven Tabletop RPG engine powered b
 
 ---
 
-## 🛠️ Technical Architecture & Innovations
+## 🛠️ 10 Unique Technical Implementations
 *(What sets Hikayat apart from traditional LLM-powered text RPGs)*
 
-### 1. Deterministic State Separation & Anti-Hallucination Pipeline
-* **True Game State vs. Hallucinated Prose**: Most LLM-based text RPGs rely on the language model to guess HP, invent inventory changes, and simulate dice rolls in prose, inevitably leading to narrative drift and broken rules.
-* **Code-Driven Truth Directives**: In Hikayat, every dice check, combat damage calculation, inventory capacity check, and status effect is deterministically computed in Python first. The LLM acts purely as a narrator, bounded by immutable truth directives that prevent hallucinations.
+### 1. Deterministic State Separation & Anti-Hallucination Pipeline (Phase 1–5 Directives)
+* **True Game State vs. Hallucinated Prose**: Traditional LLM-based text RPGs rely on the language model to guess HP, invent unearned inventory items, and simulate dice rolls in prose, inevitably leading to narrative drift and rule violations.
+* **Code-Driven Truth Directives**: In Hikayat, every dice check, combat damage calculation, inventory capacity check, status effect, and quest milestone is deterministically resolved in Python before generation. The LLM acts purely as a narrator bounded by immutable truth directives that prevent hallucinations.
 
-### 2. Dual-Model Architecture & Computational Offloading
+### 2. Deterministic Cast & Dialogue Authority (`CastPlanner`)
+* **Phantom Character Elimination**: Scene attendance, active dialogue partners, bystanders, and departures are deterministically tracked in Python (`game_engine/npcs/cast_planner.py`).
+* **Quotation Scrape Immunity**: Conversation state is never polluted or resurrected by LLM quotation scraping. Narrator cast suggestions (arrive, depart, engage) are strictly validated against spatial contracts, and dialogue exits immediately close conversational loops across all present NPCs.
+
+### 3. Multi-Edge Graph Pathfinding & 3-Tier Spatial Topology (`mechanics/world/locations/pathfinding.py`)
+* **Dijkstra Shortest-Path Traversal**: Models world geography via an SQLite graph of nodes and bidirectional edges with Dijkstra and BFS shortest-path routing.
+* **3-Tier Hierarchy & Access Gating**: Enforces granular micro-spatial positioning (*Zone ➔ Facility ➔ Room*) alongside access key/lockpicking gates, curfew stealth verifications, fog-of-war hidden node exclusion, combat flee displacement, and transit fare gating.
+
+### 4. Autonomous Stealth & Infiltration Simulation Engine (`mechanics/stealth/`)
+* **Mathematical Infiltration Dynamics**: Replaces hand-wavy narrative sneaking with a 4-stage alert state machine (`UNAWARE`, `SUSPICIOUS`, `SEARCHING`, `DETECTED`) and dynamic detection accumulation with natural decay over unobserved turns.
+* **Acoustic & Environmental Modeling**: Calculates armor acoustic noise penalties, companion noise drag, action noise, and ambient lighting modifiers to resolve opposed perception checks deterministically.
+
+### 5. Dual-Model Architecture & Computational Offloading
 * **Decoupled Narration & Utility Work**: Separates high-latency, creative prose generation from mechanical background operations.
 * **Dedicated Utility Model (`LLM_UTILITY_MODEL`)**: Offloads background calculations (quest tracking, clue merging, shop restocking, item validation) to fast, lightweight models while reserving parameter-heavy models exclusively for rich prose.
 
-### 3. Dynamic Model Routing & Fallback Cascade
-* **Automated Provider Failover**: Multi-provider resilience automatically shifts across candidate models on timeouts or rate-limits without interrupting the player's turn.
-* **Context-Aware NSFW Routing**: Adult/unrated scenarios are dynamically channeled to dedicated uncensored models (`NSFW_LLM_MODEL`) with isolated fallback chains, keeping mainstream models clean.
+### 6. Dynamic Provider Routing, Fallback Cascade & Headroom Margins
+* **Automated Multi-Provider Failover**: High-availability resilience automatically shifts across candidate models on timeouts or rate-limits without interrupting the player's turn.
+* **Context-Aware NSFW Routing**: Mature scenarios are dynamically channeled to dedicated uncensored models (`NSFW_LLM_MODEL`) with isolated fallback chains.
 * **Reasoning Headroom Safeguards**: Enforces strict 3,500 token output headroom margins, completely preventing the JSON truncation errors common to modern reasoning models.
 
-### 4. Deterministic Affinity Engine & Runtime Auditor
-* **Algorithmic Relationship Standing (`affinity_engine.py`)**: Computes interpersonal affinity, emotional thresholds, and disposition tiers mathematically, ensuring persistent social consequences across sessions.
-* **Turn Auditor & Matching Architecture (`auditor.py`, `matching.py`)**: Automatically verifies choice plausibility, entity references, and state transitions before outcomes are rendered, while isolating ambient collective crowds from persistent NPC profiles.
-
-### 5. Vector Memory Compaction & Context Token Budgeting
+### 7. Semantic Vector Memory Compaction & Context Token Budgeting
 * **Semantic Vector Retrieval**: Lorebook entries, historical character encounters, and location knowledge are indexed and retrieved via semantic embeddings (`mechanics/system/memory/`).
 * **Active Token Budgeting & Compaction**: Dynamically compacts older conversation turns into persistent contextual summaries, preserving long-term campaign continuity within strict token budgets.
 
-### 6. Headless Turn Service & Omnichannel Architecture
-* **Presentation-Decoupled Game Loop**: The turn engine (`services/turn_service.py`) operates as a completely headless core.
+### 8. Headless Omnichannel Turn Engine (`services/turn_service.py`)
+* **Presentation-Decoupled Game Loop**: The turn engine operates as a completely headless core.
 * **100% Platform Parity**: Both the Discord bot (slash commands, button decks, modal sheets) and the React Web SPA (REST endpoints, WebSockets) consume the exact same underlying service, ensuring synchronized state across platforms.
 
-### 7. 5-Language Internationalization & Anti-Drift Pronoun Engine
-* **5-Language Localization Engine (localization/, web/src/locales/)**: Real-time translation and canonicalization of item affixes, inventory lemmas, movement prefixes, combat choices, and dialogue intents across English (n), Polish (pl), Malay (ms), German (de), and Simplified Chinese (zh).
-* **Multi-Tier Pronoun Resolver & Anti-Hallucination Guard**: Post-generation pronoun sanitizers and immutable gender directives ensuring zero pronoun drift during long multi-party scenes.
+### 9. 5-Language Internationalization & Anti-Drift Pronoun Engine
+* **5-Language Localization Engine (`localization/`, `web/src/locales/`)**: Real-time translation and canonicalization of item affixes, inventory lemmas, movement prefixes, combat choices, and dialogue intents across English (`en`), Polish (`pl`), Malay (`ms`), German (`de`), and Simplified Chinese (`zh`).
+* **Multi-Tier Pronoun Resolver**: Post-generation pronoun sanitizers and immutable gender directives ensure zero pronoun drift during long multi-party scenes.
 
-### 8. SDXL Scene Rendering & Living Scene Stage Manager
-* **Automated Visual Grounding (services/image_service.py)**: Synthesizes prompt tokens from narrative prose and renders high-fidelity SDXL scene artwork with local disk persistence, content-hash deduplication, and in-game Smartphone gallery synchronization.
-* **Pre-Turn Stage Manager (stage_manager.py)**: Deterministically tracks spatial presence (*Present in Scene*, *Nearby in Facility*, *Off-Site*), arbitrating plausible arrivals and departures while isolating transient background crowds from persistent NPC cards.
-
-### 9. Spatial Graph Architecture, Dijkstra Navigation & Commitments Ledger
-* **Bidirectional Spatial Graph (spatial_graph.py)**: Models world environments with travel costs and access gates, using Dijkstra shortest-path pathfinding for realistic travel duration calculations.
-* **Sub-Facility Waypoint Preservation**: Retains granular micro-spatial positions (*Zone ➔ Facility ➔ Sub-Facility*) across all movements.
-* **Commitments & Obligations Ledger (commitments_engine.py)**: Tracks scheduled rendezvous, player promises, and deadlines with dynamic social repercussions for broken commitments.
+### 10. SDXL Scene Rendering & Automated Visual Grounding (`services/image_service.py`)
+* **Prose-to-Art Pipeline**: Dynamically synthesizes environment, lighting, framing, and atmosphere tokens directly from narrative prose to generate high-fidelity SDXL scene artwork.
+* **Local Persistence & In-Game Sync**: Persists generated images to local storage with content-hash deduplication, negative prompt aesthetic conditioning, and automatic synchronization with the in-game Smartphone photo vault.
 
 ---
 
-## 🌟 Core Gameplay Systems
+## 🌟 10 Core Gameplay Features
 
-### 1. Dual Platforms: Discord Bot & Modern React Web UI
-* **Discord Bot**: Interactive slash commands, button menus, modals, and dynamic embed dialogues.
+### 1. Dual Platforms: Discord Bot & Modern React Web SPA
+* **Discord Bot**: Interactive slash commands, button decks, modal sheets, and dynamic embed dialogues.
 * **Modern React Web UI (`web/src/`)**: Single-page application featuring interactive Tactical Battle Decks, live Story Feed, in-game Smartphone modal, Turn Outcome panel (`TurnOutcomePanel.jsx`), Party Widget, and redesigned Codex panels.
 * **FastAPI Modular Backend (`api/`, `services/`)**: High-performance REST endpoints and WebSockets for multiplayer synchronization and state streaming.
 
-### 2. Living World, Time Engine & In-Game Smartphone
-* **Minute-by-Minute Time Progression**: Persistent in-game clock advancing across 8 distinct time-of-day phases (Dawn, Afternoon, Dusk, Night, etc.).
-* **Rest & Fatigue Mechanics**: Dynamic "Sleep / Rest" actions in hub locations with cumulative fatigue penalties for staying awake.
-* **In-Game Smartphone (`/phone`)**: Contextually grounded direct messaging (`dm_grounding.py`), player-initiated texting (`player_dm.py`), media vault captions, and date scheduling.
-* **Procedural Biomes & Location Hubs**: Tiered location tree architecture with dynamic discovery, area links, and contextual merchant hubs.
+### 2. Tactical Action Dock & Quick Belt Hotbar (`web/src/components/`)
+* **Persistent Command Dock (`TacticalActionDock.jsx`)**: Sidebar command deck providing instant one-click access to stealth stances, combat targeting, quick-use consumables, smartphone apps, gifting, and time advancement.
+* **Quick Belt Popover (`QuickBeltPopover.jsx`)**: Instant-access popover displaying belt potions, remedies, snacks, and consumables for immediate one-click usage without opening full inventory screens.
 
-### 3. Deep Social Dynamics, NPC Depth & Factions
-* **Rich NPC Depth & Memory**: NPCs feature persistent backgrounds, unique mannerisms, emotional moods, evolving dispositions, and contextual memory of player history.
-* **Genealogy & Canonical Families**: Preserves consistent family lineages (parents, siblings, spouses) and personal histories across encounters.
-* **Unified Action Intent Engine**: Intelligently distinguishes diplomatic banter, peaceful exploration, romantic advances, gift giving, and commerce.
-* **Nuanced Relationship & Intimacy Dynamics**: Multi-stage relationship milestones with mutual preference tracking, dynamic excitement meters, emotional disclosure gating, and gradual intimacy evolution across physical and emotional dimensions.
-* **Living Factions System (`/factions`)**: Dynamic faction standings, territorial influence, rivalries, and faction headquarters with reputation perks.
+### 3. Living World, Time Engine & Circadian Routine Schedules
+* **Minute-by-Minute Time Progression**: Persistent in-game clock advancing across 8 distinct time-of-day phases (Dawn, Morning, Afternoon, Dusk, Night, Late Night, etc.).
+* **Circadian NPC Schedules**: NPCs follow dynamic schedules across schools and facilities based on grade, club, and role.
+* **Rest & Time Manipulation**: Sleep mechanics, fatigue penalties, and deliberate time skipping via the interactive Time Skip modal (`TimeSkipModal.jsx`).
 
-### 4. Tactical Combat Engine & Battle Decks
+### 4. Tactical Turn-Based Combat Decks & Counter-Play
 * **Code-Driven Tactical Battle Decks**: 7-slot combat choices (*Attack, Defend, Magic, Item, Flee, Tactician Moves*) with active enemy target switching and success probability indicators.
 * **Telegraphed Enemy Moves & Counter-Play**: Enemies telegraph incoming intents (charging, casting, defending, swarming), enabling strategic defensive guards, interruptions, and counter-attacks.
 * **Companion Combat AI**: Friendly companions participate actively in battles with autonomous tactical support, vital tracking, and dedicated combat event logging.
-* **Scalable Threat Hierarchy**: Dynamic encounter scaling from skirmishers to champions and multi-phase bosses with distinctive combat affixes.
-* **Narrative Immersion Protocol**: Strict GM rules prevent raw HP numbers from leaking into prose, describing physical trauma and flow dynamically.
+* **Narrative Immersion Protocol**: Strict GM rules prevent raw HP numbers from leaking into prose, describing physical trauma and combat flow dynamically.
 
-### 5. Modular Equipment & Elemental Magic Systems
+### 5. In-Game Smartphone Ecosystem (`/phone`)
+* **Contextually Grounded Messaging**: In-universe digital hub featuring direct messaging with NPCs (`dm_grounding.py`), player-initiated texting (`player_dm.py`), date scheduling, and contacts directory.
+* **Media Vault & Apps**: Digital codex apps, camera captures, and media photo vault with persistent narrative captions.
+
+### 6. Deep Social Dynamics, Persona & Nuanced Relationships
+* **Rich NPC Depth & Memory**: NPCs feature persistent backgrounds, unique mannerisms, emotional moods, evolving dispositions, and contextual memory of player history.
+* **Genealogy & Canonical Families**: Preserves consistent family lineages (parents, siblings, spouses) and personal histories across encounters.
+* **Contextual Gifting & Milestones**: Gift giving with immediate affinity evaluation (`GiveGiftModal.jsx`), multi-track relationship progression (platonic, romantic, rivalry), and emotional disclosure gating.
+
+### 7. Tactical Infiltration & Opposed Stealth Gameplay
+* **Dynamic Covert Operations**: Sneak through restricted facilities, pick locks, bypass curfew patrols, and exploit shadows and silence penalties.
+* **Distractions & Evasion**: Create deliberate noise distractions to redirect guards, drop detection meters, or escape search perimeters.
+
+### 8. Modular Equipment & Elemental Magic Systems
 * **Expansive Weapon Arsenal**: Over 2,000 lines of specialized weaponry across historical, fantasy, sci-fi, and modern archetypes, acting as tactical damage multipliers with dual-wielding support.
-* **Layered Equipment & Armor**: Distinct slots for civilian attire, combat armor, headwear, shields, and accessories, with balanced damage mitigation formulas.
+* **Layered Equipment & Armor**: Distinct slots for civilian attire, combat armor, headwear, shields, and accessories, with Fallout: New Vegas-style Damage Threshold (DT) mitigation.
 * **Elemental Magic Taxonomy**: Dedicated magic package with elemental tags, spell taxonomy, class-specific spell kits, and dynamic MP cost scaling.
-* **Procedural Consumables & Scenario Gear**: Dynamic loot tables, restorative items, and consumables tailored to specific world scenarios (`genres.json`).
 
-### 6. Procedural 10-Chapter Campaign System
-* **Long-Term Procedural Goals**: Story campaigns progress through 10 chapters driven by dynamically generated end goals and emergent narrative arcs.
-* **Dynamic Bounty Board & Quests**: Interactive `/quest` and `/bounty` views with sub-objectives, item loot rewards, and XP bonuses.
+### 9. Living Factions System & Territorial Standings (`/factions`)
+* **Dynamic World Influence**: Living faction headquarters, rank progression, territorial control, and faction rivalries.
+* **Faction Contract Boards**: Procedural faction bounty boards with exclusive reputation perks, rank advancement, and faction-specific lore.
+
+### 10. Procedural 10-Chapter Campaign System
+* **Long-Term Procedural Goals**: Story campaigns progress through 10 progressive chapters driven by dynamically generated end goals and emergent narrative arcs.
+* **Dynamic Bounty Board & Quests**: Interactive `/quest` and `/bounty` views with sub-objectives, clue investigations, suspect evidence extraction, item loot rewards, and emergent climax waypoints.
 
 ---
 

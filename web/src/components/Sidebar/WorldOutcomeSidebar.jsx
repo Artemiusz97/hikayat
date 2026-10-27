@@ -221,7 +221,7 @@ const WorldOutcomeSidebar = ({
   const dialoguePartners = new Set(
     (() => {
       let list = [];
-      if (Array.isArray(session?.dialogue_partners) && session.dialogue_partners.length > 0) {
+      if (Array.isArray(session?.dialogue_partners)) {
         list = session.dialogue_partners;
       } else if (session?.dialogue_partner) {
         const dp = session.dialogue_partner;
@@ -329,6 +329,7 @@ const WorldOutcomeSidebar = ({
                   const name = typeof npc === 'string' ? npc : (npc?.name || 'Unknown');
                   const isPartner = dialoguePartners.has(name.toLowerCase().trim());
                   const clothing = typeof npc === 'object' ? npc?.clothing_status : null;
+                  const anomTag = typeof npc === 'object' ? (npc?.anomalous_npc_tag || npc?.basic_info?.anomalous_npc_tag) : null;
                   const statusEffects = (typeof npc === 'object' && Array.isArray(npc?.status_effects) ? npc.status_effects : []).filter(eff => {
                     const str = (typeof eff === 'string' ? eff : (eff?.name || '')).trim();
                     const low = str.toLowerCase();
@@ -409,6 +410,16 @@ const WorldOutcomeSidebar = ({
                         >
                           <span className={`w-2 h-2 rounded-full shrink-0 ${isPartner ? 'bg-purple-400 animate-pulse' : 'bg-emerald-400'}`} />
                           <span className="truncate max-w-[150px] text-xs">{name}</span>
+                          {anomTag === 'special_agent' && (
+                            <span className="text-[8.5px] font-mono uppercase px-1 py-0.2 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-700/50 font-bold shrink-0">
+                              ⚡ {t('codex.special_agent', 'Special Agent')}
+                            </span>
+                          )}
+                          {anomTag === 'civilian' && (
+                            <span className="text-[8.5px] font-mono uppercase px-1 py-0.2 rounded bg-slate-900/80 text-slate-300 border border-slate-700/60 font-semibold shrink-0">
+                              {t('codex.civilian', 'Civilian')}
+                            </span>
+                          )}
                           {isPartner && (
                             <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded bg-purple-900/90 text-purple-200 font-bold shrink-0">
                               {t('scene.talking', 'Talking')}

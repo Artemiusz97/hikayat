@@ -317,8 +317,8 @@ class TestIntimacyLedger(unittest.TestCase):
         bob_events = get_intimate_events(self.session_id, str(c_bob["id"]))
         self.assertEqual(len(bob_events), 1)
         bob_ev = bob_events[0]
-        self.assertEqual(bob_ev["character_id"], str(c_bob["id"]))
-        self.assertEqual(bob_ev["partner_id"], str(c_alice["id"]))
+        self.assertEqual(bob_ev["character_id"], c_bob["npc_id"])
+        self.assertEqual(bob_ev["partner_id"], c_alice["npc_id"])
         # partner_name must be the human-readable "Alice Hart", NOT the numeric ID or slug!
         self.assertEqual(bob_ev["partner_name"], "Alice Hart")
 

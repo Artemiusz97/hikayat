@@ -5,6 +5,7 @@ import {
   MapPin, Coins, Sparkles, ChevronDown, ChevronRight, ShieldAlert,
   FileSearch, RefreshCw, PlusCircle, Trash2, Zap
 } from 'lucide-react';
+import { formatCleanLocation, cleanProseLocations } from '../../utils/locationFormat';
 
 const CATEGORY_META = {
   physical: { icon: '🔍', label: 'Physical', color: 'text-amber-300 bg-amber-950/50 border-amber-700/50' },
@@ -350,7 +351,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                         )}
                       </div>
                       <h4 className="font-rpg font-bold text-sm text-gray-100 mt-1 leading-snug group-hover:text-fantasy-accent transition-colors">
-                        {activeStoryQuest.title || 'The Unfolding Journey'}
+                        {cleanProseLocations(activeStoryQuest.title || 'The Unfolding Journey')}
                       </h4>
                     </div>
 
@@ -365,7 +366,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                       onClick={() => setIsStoryExpanded(true)}
                       className="flex items-center justify-between text-[11px] text-gray-400 italic pt-1 border-t border-fantasy-border/20 cursor-pointer"
                     >
-                      <span className="truncate">{activeStoryQuest.objective || 'Tap to view objectives, locations, and rewards.'}</span>
+                      <span className="truncate">{cleanProseLocations(activeStoryQuest.objective || 'Tap to view objectives, locations, and rewards.')}</span>
                       <span className="text-[10px] text-fantasy-accent not-italic font-semibold shrink-0 ml-2">Expand ▾</span>
                     </div>
                   )}
@@ -375,7 +376,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                     <div className="space-y-2.5 pt-1 border-t border-fantasy-border/30">
                       {activeStoryQuest.objective && (
                         <p className="text-xs text-gray-300 leading-relaxed bg-black/40 p-2.5 rounded border border-fantasy-border/50">
-                          {activeStoryQuest.objective}
+                          {cleanProseLocations(activeStoryQuest.objective)}
                         </p>
                       )}
 
@@ -383,7 +384,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                         <div className="flex items-center justify-between gap-2 text-[11px] text-rose-200 bg-rose-950/50 px-2.5 py-2 rounded border border-rose-600/60">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <MapPin size={13} className="shrink-0 text-rose-400" />
-                            <span className="truncate">⚡ Final Showdown Location: <strong>{activeStoryQuest.climax_location || activeStoryQuest.target_location}</strong></span>
+                            <span className="truncate">⚡ Final Showdown Location: <strong>{formatCleanLocation(activeStoryQuest.climax_location || activeStoryQuest.target_location)}</strong></span>
                           </div>
                           {onOpenWorldMap && (
                             <button
@@ -401,7 +402,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                         <div className="flex items-center justify-between gap-2 text-[11px] text-amber-300 bg-amber-950/30 px-2.5 py-1.5 rounded border border-amber-700/40">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <MapPin size={12} className="shrink-0" />
-                            <span className="truncate">📍 Waypoint Lead: <strong>{activeStoryQuest.target_location}</strong></span>
+                            <span className="truncate">📍 Waypoint Lead: <strong>{formatCleanLocation(activeStoryQuest.target_location)}</strong></span>
                           </div>
                           {onOpenWorldMap && (
                             <button
@@ -491,7 +492,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                       <p className={`text-[11px] leading-snug ${
                                         isDone ? 'text-gray-500 line-through' : 'text-gray-200 font-medium'
                                       }`}>
-                                        {soText}
+                                        {cleanProseLocations(soText)}
                                       </p>
                                     </div>
                                   </div>
@@ -502,14 +503,14 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                       {stageLabel && (
                                         <div className="text-[11px] text-amber-100 font-semibold leading-snug flex items-start gap-1.5">
                                           <span className="text-amber-400 shrink-0">🎯 Current Step:</span>
-                                          <span>{stageLabel}</span>
+                                          <span>{cleanProseLocations(stageLabel)}</span>
                                         </div>
                                       )}
                                       {targetLoc && (
                                         <div className="flex items-center justify-between gap-2 pt-0.5">
                                           <div className="flex items-center gap-1 text-[11px] text-amber-300 min-w-0">
                                             <MapPin size={12} className="text-amber-400 shrink-0" />
-                                            <span className="truncate">📍 <strong>{targetLoc}</strong></span>
+                                            <span className="truncate" title={formatCleanLocation(targetLoc)}>📍 <strong>{formatCleanLocation(targetLoc)}</strong></span>
                                           </div>
                                           {onOpenWorldMap && (
                                             <button
@@ -553,10 +554,10 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                               {wpDone ? '☑️' : wpActive ? '📍' : '🔒'}
                                             </span>
                                             <div className="min-w-0 flex-1">
-                                              <span>Stage {wp.stage_index || wIdx + 1}: {wp.stage_label}</span>
+                                              <span>Stage {wp.stage_index || wIdx + 1}: {cleanProseLocations(wp.stage_label)}</span>
                                               {wp.target_location && (
                                                 <span className={`block text-[9px] font-mono ${wpActive ? 'text-amber-300' : 'text-gray-500'}`}>
-                                                  ↳ 📍 {wp.target_location}{wp.target_npc ? ` • 👤 ${wp.target_npc}` : ''}
+                                                  ↳ 📍 {formatCleanLocation(wp.target_location)}{wp.target_npc ? ` • 👤 ${wp.target_npc}` : ''}
                                                 </span>
                                               )}
                                             </div>
@@ -622,7 +623,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                           >
                             <div className="min-w-0 flex-1">
                               <h5 className="font-semibold text-xs text-gray-200 flex items-center gap-1.5 flex-wrap group-hover:text-fantasy-accent transition-colors">
-                                <span>{q.title}</span>
+                                <span>{cleanProseLocations(q.title)}</span>
                                 {q.climax_ready && (
                                   <span className="text-[9px] px-1.5 py-0.2 bg-rose-950/80 text-rose-300 rounded font-bold uppercase border border-rose-600/60">
                                     🔥 Climax Ready!
@@ -631,7 +632,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                               </h5>
                               {!isExpanded && (
                                 <p className="text-[10px] text-gray-400 truncate mt-0.5">
-                                  {q.stage_label || (q.target_location ? `📍 ${q.target_location}` : (q.objective || q.description || 'Tap to view details'))}
+                                  {cleanProseLocations(q.stage_label) || (q.target_location ? `📍 ${formatCleanLocation(q.target_location)}` : cleanProseLocations(q.objective || q.description || 'Tap to view details'))}
                                 </p>
                               )}
                             </div>
@@ -648,21 +649,21 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                           {isExpanded && (
                             <div className="space-y-2 pt-1 border-t border-fantasy-border/30">
                               {(q.objective || q.description) && (
-                                <p className="text-[11px] text-gray-400 leading-snug">{q.objective || q.description}</p>
+                                <p className="text-[11px] text-gray-400 leading-snug">{cleanProseLocations(q.objective || q.description)}</p>
                               )}
 
                               {(q.target_location || q.stage_label || q.target_npc) && (
                                 <div className="bg-amber-950/35 border border-amber-600/50 rounded-md p-2 space-y-1">
                                   {q.stage_label && (
                                     <div className="text-[11px] text-amber-100 font-semibold leading-snug">
-                                      🎯 Current Task: {q.stage_label}
+                                      🎯 Current Task: {cleanProseLocations(q.stage_label)}
                                     </div>
                                   )}
                                   {q.target_location && (
                                     <div className="flex items-center justify-between gap-2">
                                       <div className="flex items-center gap-1 text-[11px] text-amber-300 min-w-0">
                                         <MapPin size={12} className="text-amber-400 shrink-0" />
-                                        <span className="truncate">📍 <strong>{q.target_location}</strong></span>
+                                        <span className="truncate" title={formatCleanLocation(q.target_location)}>📍 <strong>{formatCleanLocation(q.target_location)}</strong></span>
                                       </div>
                                       {onOpenWorldMap && (
                                         <button
@@ -706,11 +707,11 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                         )}
                                         <div className="min-w-0 flex-1">
                                           <span className={done ? 'text-gray-500 line-through' : isActive ? 'text-amber-200 font-semibold' : 'text-gray-400'}>
-                                            {typeof st === 'string' ? st : (st.text || st.stage_label || st.label || st.title)}
+                                            {cleanProseLocations(typeof st === 'string' ? st : (st.text || st.stage_label || st.label || st.title))}
                                           </span>
                                           {stLoc && !done && (
                                             <span className={`block text-[9px] font-mono ${isActive ? 'text-amber-300' : 'text-gray-500'}`}>
-                                              ↳ 📍 {stLoc}{stNpc ? ` • 👤 ${stNpc}` : ''}
+                                              ↳ 📍 {formatCleanLocation(stLoc)}{stNpc ? ` • 👤 ${stNpc}` : ''}
                                             </span>
                                           )}
                                         </div>
@@ -768,7 +769,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                         >
                           <div className="flex items-center gap-1.5 min-w-0">
                             <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />
-                            <span className="text-gray-300 font-medium truncate">{cq.title}</span>
+                            <span className="text-gray-300 font-medium truncate">{cleanProseLocations(cq.title)}</span>
                           </div>
                           <span className="text-[10px] text-emerald-400/80 font-mono shrink-0">Claimed</span>
                         </div>
@@ -823,11 +824,11 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                         >
                           <div className="min-w-0 flex-1">
                             <h5 className="font-bold text-xs text-gray-100 group-hover:text-amber-300 transition-colors">
-                              {b.title}
+                              {cleanProseLocations(b.title)}
                             </h5>
                             {!isExpanded && (
                               <p className="text-[10px] text-gray-400 truncate mt-0.5">
-                                {b.target_location ? `📍 ${b.target_location}` : (b.objective || b.description)}
+                                {b.target_location ? `📍 ${formatCleanLocation(b.target_location)}` : cleanProseLocations(b.objective || b.description)}
                               </p>
                             )}
                           </div>
@@ -843,13 +844,13 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
 
                         {isExpanded && (
                           <div className="space-y-2 pt-1 border-t border-fantasy-border/30">
-                            <p className="text-[11px] text-gray-300 leading-snug">{b.objective || b.description}</p>
+                            <p className="text-[11px] text-gray-300 leading-snug">{cleanProseLocations(b.objective || b.description)}</p>
 
                             {b.target_location && (
                               <div className="flex items-center justify-between gap-2 bg-amber-950/30 border border-amber-700/40 rounded px-2 py-1 text-[10px] text-amber-300">
                                 <div className="flex items-center gap-1 min-w-0">
                                   <MapPin size={11} className="text-amber-400 shrink-0" />
-                                  <span className="truncate">📍 <strong>{b.target_location}</strong>{b.target_npc ? ` • 👤 ${b.target_npc}` : ''}</span>
+                                  <span className="truncate" title={formatCleanLocation(b.target_location)}>📍 <strong>{formatCleanLocation(b.target_location)}</strong>{b.target_npc ? ` • 👤 ${b.target_npc}` : ''}</span>
                                 </div>
                               </div>
                             )}
@@ -1030,8 +1031,8 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                           )}
                         </div>
 
-                        <h5 className="font-bold text-xs text-gray-100">{title}</h5>
-                        <p className="text-[11px] text-gray-300 leading-snug">{body}</p>
+                        <h5 className="font-bold text-xs text-gray-100">{cleanProseLocations(title)}</h5>
+                        <p className="text-[11px] text-gray-300 leading-snug">{cleanProseLocations(body)}</p>
 
                         {isObj && (c.linked_npc || c.source_location) && (
                           <div className="flex flex-wrap gap-2 pt-1 text-[10px] text-gray-400 border-t border-fantasy-border/30">
@@ -1039,7 +1040,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                               <span className="text-amber-300">👤 Suspect: <strong>{c.linked_npc}</strong></span>
                             )}
                             {c.source_location && (
-                              <span className="text-gray-400">📍 {c.source_location}</span>
+                              <span className="text-gray-400">📍 {formatCleanLocation(c.source_location)}</span>
                             )}
                           </div>
                         )}
@@ -1094,7 +1095,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                             <Circle size={13} className="text-fantasy-accent shrink-0 mt-0.5" />
                           )}
                           <span className={isDone ? 'text-gray-500 line-through' : 'text-gray-200'}>
-                            {text}
+                            {cleanProseLocations(text)}
                           </span>
                         </div>
                       );

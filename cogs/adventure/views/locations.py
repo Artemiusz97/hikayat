@@ -58,7 +58,9 @@ class ZoneSelectDropdown(discord.ui.Select):
             z_name = z["zone_name"]
             desc_parts = [f"{z.get('places_count', 0)} places"]
             if z.get("is_current"):
-                desc_parts.append("Current")
+                desc_parts.append("Here")
+            elif z.get("travel_tag"):
+                desc_parts.append(z["travel_tag"])
             if z.get("theme"):
                 desc_parts.append(z["theme"])
             elif z.get("active_tags"):
@@ -112,9 +114,16 @@ class ZoneSelectView(discord.ui.View):
         self.add_item(ZoneSelectDropdown(cog, session_id, scen_key, zones_summary, current_loc=current_loc, char_name=char_name, sync=sync))
 
 class PrimarySelectDropdown(discord.ui.Select):
-    def __init__(self, cog: "AdventureCog", session_id: int, options_list: list, sync: bool = False):
+    def __init__(
+        self,
+        cog: "AdventureCog",
+        session_id: int,
+        options_list: list,
+        sync: bool = False,
+        parent_view: "PrimarySelectView" = None,
+    ):
         super().__init__(
-            placeholder="📍 Select destination...",
+            placeholder="📍 Select facility / destination...",
             min_values=1,
             max_values=1,
             options=options_list
@@ -122,14 +131,37 @@ class PrimarySelectDropdown(discord.ui.Select):
         self.cog = cog
         self.session_id = session_id
         self.sync = sync
+        self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
         selected_location = self.values[0]
+        if self.parent_view:
+            p_item = self.parent_view.primary_by_value.get(selected_location)
+            if p_item:
+                room_details = p_item.get("sub_location_details") or []
+                raw_subs = [s for s in (p_item.get("sub_locations") or []) if s and s != "Main Area"]
+                if len(room_details) >= 2 or len(raw_subs) >= 2:
+                    sub_view = SubLocationSelectView(
+                        cog=self.cog,
+                        session_id=self.session_id,
+                        scen_key=self.parent_view.scen_key,
+                        zone_name=self.parent_view.zone_name,
+                        primary_item=p_item,
+                        zones_summary=self.parent_view.zones_summary,
+                        current_loc=self.parent_view.current_loc,
+                        char_name=self.parent_view.char_name,
+                        sync=self.sync,
+                    )
+                    embed = build_facility_rooms_embed(self.parent_view.zone_name, p_item)
+                    await interaction.response.edit_message(embed=embed, view=sub_view)
+                    return
+
         action_text = f"I travel to {selected_location}."
         if self.sync:
             await self.cog.handle_sync_pick(interaction, self.session_id, custom_text=action_text)
         else:
             await self.cog.handle_action(interaction, self.session_id, custom_text=action_text)
+
 
 class PrimarySelectView(discord.ui.View):
     def __init__(self, cog: "AdventureCog", session_id: int, scen_key: str, zone_name: str, zones_summary: list, current_loc: str = "", char_name: str = "", sync: bool = False):
@@ -142,6 +174,7 @@ class PrimarySelectView(discord.ui.View):
         self.current_loc = current_loc
         self.char_name = char_name
         self.sync = sync
+        self.primary_by_value: dict[str, dict] = {}
 
         target_zone = next((z for z in zones_summary if z["zone_name"].lower() == zone_name.lower()), None)
         primary_items = target_zone.get("primary_locations", []) if target_zone else []
@@ -152,27 +185,30 @@ class PrimarySelectView(discord.ui.View):
         options = []
         for p in primary_items[:25]:
             p_name = p["name"]
-            val_str = p["value"]
+            val_str = p["value"][:100]
+            self.primary_by_value[val_str] = p
             emoji = p.get("archetype_emoji") or p.get("emoji") or "📍"
             is_same_zone = bool(curr_z and curr_z.lower() == zone_name.lower())
-            travel_tag = "Instant Local" if is_same_zone else "Inter-Zone Travel"
+            travel_tag = p.get("travel_tag") or ("~4m walk" if is_same_zone else "~15m transit")
             arch_label = p.get("archetype") or "Area"
+            room_cnt = len(p.get("sub_location_details") or p.get("sub_locations") or [])
+            rooms_hint = f" • {room_cnt} rooms" if room_cnt >= 2 else ""
             badges = p.get("badges", "")
             if badges:
-                desc = f"[{travel_tag}] {arch_label} {badges}"
+                desc = f"[{travel_tag}] {arch_label}{rooms_hint} {badges}"
             else:
-                desc = f"[{travel_tag}] {arch_label}"
+                desc = f"[{travel_tag}] {arch_label}{rooms_hint}"
             options.append(discord.SelectOption(
                 label=p_name[:100],
                 description=desc[:100],
-                value=val_str[:100],
+                value=val_str,
                 emoji=emoji
             ))
 
         if not options:
             options.append(discord.SelectOption(label=f"{zone_name} Main Area", value=f"{zone_name} ➔ Main Area", emoji="📍"))
 
-        self.add_item(PrimarySelectDropdown(cog, session_id, options, sync=sync))
+        self.add_item(PrimarySelectDropdown(cog, session_id, options, sync=sync, parent_view=self))
 
         # Back button to return to World Map view
         back_btn = discord.ui.Button(label="World Map", emoji="🗺️", style=discord.ButtonStyle.secondary)
@@ -180,6 +216,140 @@ class PrimarySelectView(discord.ui.View):
         self.add_item(back_btn)
 
     async def _on_back(self, interaction: discord.Interaction):
+        embed = build_world_map_embed(self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name)
+        view = ZoneSelectView(self.cog, self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name, sync=self.sync)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class SubLocationSelectDropdown(discord.ui.Select):
+    def __init__(self, cog: "AdventureCog", session_id: int, options_list: list, target_map: dict[str, str], sync: bool = False):
+        super().__init__(
+            placeholder="🚪 Select a specific room or wing...",
+            min_values=1,
+            max_values=1,
+            options=options_list,
+        )
+        self.cog = cog
+        self.session_id = session_id
+        self.target_map = target_map
+        self.sync = sync
+
+    async def callback(self, interaction: discord.Interaction):
+        key = self.values[0]
+        full_dest = self.target_map.get(key, key)
+        action_text = f"I travel to {full_dest}."
+        if self.sync:
+            await self.cog.handle_sync_pick(interaction, self.session_id, custom_text=action_text)
+        else:
+            await self.cog.handle_action(interaction, self.session_id, custom_text=action_text)
+
+
+class SubLocationSelectView(discord.ui.View):
+    def __init__(
+        self,
+        cog: "AdventureCog",
+        session_id: int,
+        scen_key: str,
+        zone_name: str,
+        primary_item: dict,
+        zones_summary: list,
+        current_loc: str = "",
+        char_name: str = "",
+        sync: bool = False,
+    ):
+        super().__init__(timeout=180)
+        self.cog = cog
+        self.session_id = session_id
+        self.scen_key = scen_key
+        self.zone_name = zone_name
+        self.primary_item = primary_item
+        self.zones_summary = zones_summary
+        self.current_loc = current_loc
+        self.char_name = char_name
+        self.sync = sync
+
+        p_name = primary_item.get("name", "Facility")
+        room_details = primary_item.get("sub_location_details") or []
+        raw_subs = primary_item.get("sub_locations") or []
+
+        options = []
+        target_map: dict[str, str] = {}
+        if room_details:
+            for idx, rd in enumerate(room_details[:25]):
+                r_name = rd.get("name", "")
+                if not r_name:
+                    continue
+                val_key = str(idx)
+                target_map[val_key] = f"{zone_name} ➔ {p_name} ➔ {r_name}"
+                r_eta = rd.get("travel_tag") or "~1m walk"
+                r_badge = rd.get("access_badge") or "Open"
+                r_locked = (not rd.get("is_unlocked")) and (
+                    "Closed" in r_badge or "Locked" in r_badge or r_badge in ("Restricted", "Private")
+                )
+                emoji = "📍" if rd.get("is_current_room") else ("🔒" if r_locked else "🚪")
+                props = rd.get("props") or []
+                desc_bits = [f"[{r_eta}]"]
+                if r_locked:
+                    desc_bits.append(r_badge)
+                if props:
+                    desc_bits.append(", ".join(props[:3]))
+                options.append(discord.SelectOption(
+                    label=r_name[:100],
+                    value=val_key,
+                    description=" • ".join(desc_bits)[:100],
+                    emoji=emoji,
+                ))
+        else:
+            for idx, s_name in enumerate(raw_subs[:25]):
+                if not s_name:
+                    continue
+                val_key = str(idx)
+                target_map[val_key] = f"{zone_name} ➔ {p_name} ➔ {s_name}"
+                options.append(discord.SelectOption(
+                    label=str(s_name)[:100],
+                    value=val_key,
+                    description=f"Room inside {p_name}"[:100],
+                    emoji="🚪",
+                ))
+
+        if options:
+            self.add_item(SubLocationSelectDropdown(cog, session_id, options, target_map, sync=sync))
+
+        enter_btn = discord.ui.Button(label="Enter Main Entrance", emoji="🚶", style=discord.ButtonStyle.success)
+        enter_btn.callback = self._on_enter_main
+        self.add_item(enter_btn)
+
+        back_zone_btn = discord.ui.Button(label=f"Back to {zone_name[:50]}", emoji="⬅️", style=discord.ButtonStyle.secondary)
+        back_zone_btn.callback = self._on_back_zone
+        self.add_item(back_zone_btn)
+
+        map_btn = discord.ui.Button(label="World Map", emoji="🗺️", style=discord.ButtonStyle.secondary)
+        map_btn.callback = self._on_world_map
+        self.add_item(map_btn)
+
+    async def _on_enter_main(self, interaction: discord.Interaction):
+        dest = self.primary_item.get("value") or f"{self.zone_name} ➔ {self.primary_item.get('name', 'Facility')}"
+        action_text = f"I travel to {dest}."
+        if self.sync:
+            await self.cog.handle_sync_pick(interaction, self.session_id, custom_text=action_text)
+        else:
+            await self.cog.handle_action(interaction, self.session_id, custom_text=action_text)
+
+    async def _on_back_zone(self, interaction: discord.Interaction):
+        view = PrimarySelectView(
+            cog=self.cog,
+            session_id=self.session_id,
+            scen_key=self.scen_key,
+            zone_name=self.zone_name,
+            zones_summary=self.zones_summary,
+            current_loc=self.current_loc,
+            char_name=self.char_name,
+            sync=self.sync,
+        )
+        embed = build_zone_places_embed(self.session_id, self.zone_name, self.scen_key, current_loc=self.current_loc, char_name=self.char_name)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def _on_world_map(self, interaction: discord.Interaction):
         embed = build_world_map_embed(self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name)
         view = ZoneSelectView(self.cog, self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name, sync=self.sync)
         await interaction.response.edit_message(embed=embed, view=view)

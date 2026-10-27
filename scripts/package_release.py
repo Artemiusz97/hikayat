@@ -40,7 +40,8 @@ EXCLUDE_EXTS = {
 
 EXCLUDE_EXACT_FILES = {
     '.env', '.DS_Store', 'Thumbs.db',
-    'pytest.ini', 'run_tests.bat', 'requirements-dev.txt'
+    'pytest.ini', 'run_tests.bat', 'requirements-dev.txt',
+    'AGENTS.md', 'GEMINI.md'
 }
 
 

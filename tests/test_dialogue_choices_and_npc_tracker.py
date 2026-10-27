@@ -17,12 +17,20 @@ class TestDialogueChoicesAndNPCTracker(unittest.TestCase):
         with db.get_conn() as conn:
             conn.execute("DELETE FROM session_locations WHERE session_id = ?", (self.test_session_id,))
             conn.execute("DELETE FROM sessions WHERE id = ?", (self.test_session_id,))
+            conn.execute("DELETE FROM world_nodes WHERE session_id = ?", (self.test_session_id,))
+            conn.execute("DELETE FROM world_edges WHERE session_id = ?", (self.test_session_id,))
+            conn.execute("DELETE FROM school_directory WHERE session_id = ?", (self.test_session_id,))
+            conn.execute("DELETE FROM contacts WHERE session_id = ?", (self.test_session_id,))
             conn.commit()
 
     def tearDown(self):
         with db.get_conn() as conn:
             conn.execute("DELETE FROM session_locations WHERE session_id = ?", (self.test_session_id,))
             conn.execute("DELETE FROM sessions WHERE id = ?", (self.test_session_id,))
+            conn.execute("DELETE FROM world_nodes WHERE session_id = ?", (self.test_session_id,))
+            conn.execute("DELETE FROM world_edges WHERE session_id = ?", (self.test_session_id,))
+            conn.execute("DELETE FROM school_directory WHERE session_id = ?", (self.test_session_id,))
+            conn.execute("DELETE FROM contacts WHERE session_id = ?", (self.test_session_id,))
             conn.commit()
 
     def test_clean_choices_in_dialogue_mode_filters_wandering_and_guarantees_exit(self):

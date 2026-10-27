@@ -511,7 +511,8 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
         raw_choices, narrative, scene_title, partner_arg, npcs = game_engine.extract_scene_fields(scene)
         location = scene.get("location", "")
         enemies = scene.get("nearby_enemies", [])
-        choices = self._clean_choices(raw_choices, scenario=scen_key, location=location, char=first_char, dialogue_partner=partner_arg, current_npcs=npcs, session_id=session.get("id"))
+        _open_partners = [partner_arg] if isinstance(partner_arg, str) and partner_arg.strip() else (list(partner_arg) if isinstance(partner_arg, list) else [])
+        choices = await adb(game_engine.build_hybrid_turn_choices, raw_choices, session=session, party=party, result={**scene, "location": location, "npcs_present": npcs, "dialogue_partners": _open_partners})
         await adb(db.save_session_scene, session["id"], scene_title,
                                narrative, choices, history=[],
                                location=location, nearby_enemies=enemies, current_npcs=npcs,
@@ -520,6 +521,8 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
         merchant = _apply_merchant_encounter_result(session["id"], scene.get("merchant_encounter"))
         scen_key = session.get("scenario", "fantasy")
         first_char_id = party[0][0]["id"] if party and party[0][0] else 0
+        present_npc_names = {game_engine._get_npc_name(n).lower() for n in (npcs or []) if game_engine._get_npc_name(n)}
+        enemy_names = {game_engine._get_npc_name(e).lower() for e in enemies if e}
         for entity in scene.get("new_entities", []) or []:
             ent_type = entity.get("type", "person")
             ent_name = entity.get("name", "")
@@ -543,13 +546,13 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
                 race=norm_race,
                 appearance=norm_app,
             )
-            if ent_type.lower() == "person" and ent_name:
+            if ent_type.lower() == "person" and ent_name and ent_name.strip().lower() in present_npc_names and ent_name.strip().lower() not in enemy_names:
                 await adb(db.upsert_contact,
                     session_id=session["id"],
                     character_id=first_char_id,
                     npc_id=ent_name,
                     name=ent_name,
-                    basic_info={"description": entity.get("description", ""), "role": entity.get("role", "")},
+                    basic_info={"description": entity.get("description", ""), "role": entity.get("role", ""), "met_in_person": True},
                     delta_score=0,
                     new_traits=entity.get("traits", []),
                     new_preferences=entity.get("preferences", []),
@@ -567,7 +570,7 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
                     character_id=first_char_id,
                     npc_id=n_name,
                     name=n_name,
-                    basic_info={"role": npc.get("role", "") if isinstance(npc, dict) else ""},
+                    basic_info={"role": npc.get("role", "") if isinstance(npc, dict) else "", "met_in_person": True},
                     delta_score=0,
                     race=npc.get("race", "") if isinstance(npc, dict) else "",
                     gender=npc.get("gender", "") if isinstance(npc, dict) else "",

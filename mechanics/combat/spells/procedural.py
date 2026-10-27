@@ -407,6 +407,17 @@ SUMMON_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "name": "Clockwork Colossus", "archetype": "Brute", "count": 1, "duration": 5,
         "hp_per_level": 14, "base_hp": 85, "attack_type": "blunt", "damage_type": "physical",
         "description": "Massive walking brass titan with twin hydraulic crushing fists."
+    },
+    # Anomalous Incursions / Urban Paranormal
+    "shikigami_hound": {
+        "name": "Paper-Talisman Shikigami Hound", "archetype": "Stalker", "count": 2, "duration": 3,
+        "hp_per_level": 6, "base_hp": 24, "attack_type": "slash", "damage_type": "radiant",
+        "description": "Origami-bound guardian wolf manifested from consecrated exorcism talismans."
+    },
+    "guardian_shikigami": {
+        "name": "Astral Containment Sentinel", "archetype": "Guardian", "count": 1, "duration": 5,
+        "hp_per_level": 13, "base_hp": 72, "attack_type": "blunt", "damage_type": "force",
+        "description": "Towering psychokinetic ward-construct anchored to local reality."
     }
 }
 
@@ -565,12 +576,62 @@ SCENARIO_SPELL_AFFIXES: Dict[str, Dict[str, Any]] = {
             "summon_swarm": ["Carrion Swarm", "Ghoul Pack", "Rad-Roach Cluster"],
             "summon_titan": ["Bone Colossus", "Flesh Titan", "Mutant Behemoth"]
         }
+    },
+    "anomalous_incursions": {
+        "prefixes": {
+            1: ["Singularity-Class", "Zero-Point", "Sovereign Psychic", "High-Rite", "Non-Euclidean", "Ouroboros", "Apex Resonance", "Heavenly Seal"],
+            2: ["Psychokinetic", "Resonant", "Ofuda-Bound", "Phase-Shifted", "Telekinetic", "Exorcist's", "Synaptic", "Void-Vector"],
+            3: ["Tactical", "Field-Wave", "Focused", "Ward-Etched", "Static", "Kinetic", "Vector", "Pulse"]
+        },
+        "suffixes": {
+            1: ["of Spatial Collapse", "of the Astral Seal", "of Total Purge", "of Singularity Rupture", "of the Grand Shrine", "of Event Horizon"],
+            2: ["Protocol", "Seal", "Resonance", "of Containment", "of Exorcism", "Vector"]
+        },
+        "elem_adjectives": {
+            "fire": ["Thermokinetic", "Pyro-Resonant", "Cremation-Rite", "Incendiary-Vector", "Plasma-Flare"],
+            "cold": ["Cryo-Stasis", "Endothermic", "Zero-Kelvin", "Entropy-Chill", "Hoarfrost-Seal"],
+            "lightning": ["Electro-Static", "Grid-Surge", "Thunder-Talisman", "High-Voltage", "Fulminating"],
+            "earth": ["Graviton-Anchor", "Tectonic-Lock", "Obsidian-Seal", "Lithic-Barrier", "Dense-Mass"],
+            "water": ["Abyssal-Pressure", "Purification-Tide", "Hydro-Stasis", "Dark-Current", "Cleansing-Stream"],
+            "wind": ["Vacuum-Shear", "Sonic-Gale", "Kamaitachi-Rite", "Barometric", "Vortex-Slip"],
+            "acid": ["Molecular-Dissolve", "Caustic-Residue", "Bio-Solvent", "Corrosive-Phase"],
+            "force": ["Telekinetic", "Spatial-Shear", "Vector-Crush", "Gravity-Fold", "Reality-Anchor"],
+            "thunder": ["Acoustic-Rupture", "Infrasonic", "Resonance-Shock", "Shatter-Wave"],
+            "poison": ["Miasmic-Spore", "Blight-Contagion", "Neuro-Toxin", "Black-Ichor"],
+            "radiant": ["Sacred-Ofuda", "Purifying-Light", "Shrine-Flare", "Consecrated", "Astral-Ward"],
+            "necrotic": ["Entropy-Drain", "Abyssal-Decay", "Curse-Siphon", "Hollow-Echo", "Soul-Sever"],
+            "psychic": ["Cognitohazard", "Telepathic-Spike", "Mind-Fracture", "Memetic-Pulse", "Synaptic-Lock"],
+            "magical": ["Anomalous", "Non-Euclidean", "Zero-Point", "Etheric-Resonance", "Phase-Fold"],
+            "slashing": ["Spatial-Cleaver", "Monomolecular-Shear", "Dimension-Cut"],
+            "piercing": ["Phase-Needle", "Vector-Spike", "Sealing-Pin"],
+            "bludgeoning": ["Telekinetic-Hammer", "Graviton-Slam", "Kinetic-Press"]
+        },
+        "shape_nouns": {
+            "bolt": ["Vector Dart", "Resonance Spike", "Ofuda Tag", "Psi-Bolt", "Phase Shot"],
+            "lance": ["Phase Beam", "Spatial Lance", "Exorcism Ray", "Linear Cut"],
+            "cone": ["Shockwave Fan", "Purging Wave", "Resonance Sweep", "Telekinetic Cone"],
+            "sphere": ["Singularity Burst", "Containment Nova", "Gravity Well", "Resonance Sphere"],
+            "line": ["Spatial Sever", "Vector Line", "Fault Trace", "Phase Slash"],
+            "cylinder": ["Pillar of Sealing", "Gravity Column", "Astral Drop", "Containment Pylon"],
+            "chain": ["Frequency Arc", "Resonance Cascade", "Talisman Chain", "Synaptic Relay"],
+            "aura": ["Reality Anchor Ward", "Psychic Aegis", "Sacred Kekkai", "Containment Field"],
+            "summon_swarm": ["Shikigami Flock", "Containment Drones", "Tether-Hounds"],
+            "summon_titan": ["Guardian Shikigami Avatar", "Astral Containment Sentinel", "Sovereign Ward-Construct"]
+        }
     }
 }
 
 def normalize_scenario_key(scenario: str) -> str:
     """Normalizes scenario string to canonical genre key for spell flavor resolution."""
+    try:
+        from scenario_data import is_anomalous_incursions_scenario
+        if is_anomalous_incursions_scenario(scenario):
+            return "anomalous_incursions"
+    except Exception:
+        pass
     scen = str(scenario or "fantasy").lower().strip()
+    if any(w in scen for w in ("anomalous_incursions", "urban_anomalies")):
+        return "anomalous_incursions"
     if any(w in scen for w in ("steampunk", "clockwork", "victorian")):
         return "steampunk"
     elif any(w in scen for w in ("scifi", "sci_fi", "space", "cyber", "hacker", "tech")):
@@ -670,6 +731,12 @@ def generate_procedural_spell(
             element = "necrotic"
         elif elem_lower in ("magical", "arcane"):
             element = "force"
+        elif elem_lower in ("shock", "electric", "electricity", "thunder_bolt"):
+            element = "lightning"
+        elif elem_lower in ("ice", "frost", "cryo"):
+            element = "cold"
+        elif elem_lower in ("holy", "sacred", "light"):
+            element = "radiant"
         elif elem_lower in ("stone", "terra"):
             element = "earth"
         elif elem_lower in ("gale", "air", "aero"):
@@ -786,7 +853,9 @@ def generate_procedural_spell(
             spell_def["status_ailment"] = status_ailment
 
     elif school_info["role"] == "summon":
-        if scen_key == "steampunk":
+        if scen_key == "anomalous_incursions":
+            summon_candidates = ["shikigami_hound", "micro_drone", "guardian_shikigami"]
+        elif scen_key == "steampunk":
             summon_candidates = ["clockwork_drone", "steam_automaton", "clockwork_colossus"]
         elif scen_key == "cyberpunk":
             summon_candidates = ["micro_drone", "combat_automaton", "siege_mech"]
@@ -803,6 +872,7 @@ def generate_procedural_spell(
 
     # Generate rich description
     genre_descriptor = {
+        "anomalous_incursions": f"{school_info['name']} anomalous resonance ability.",
         "steampunk": f"{school_info['name']} mechanism (Aether/Clockwork).",
         "cyberpunk": f"{school_info['name']} protocol (Digital/Cyberdeck).",
         "dark_fantasy": f"{school_info['name']} hex (Grimdark/Wasteland).",
@@ -834,9 +904,12 @@ def generate_procedural_spellbook_item(
     school: Optional[str] = None
 ) -> Dict[str, Any]:
     """Generates an inventory item spellbook / grimoire teaching a procedurally generated spell."""
-    spell = generate_procedural_spell(scenario=scenario, tier=tier, school=school)
-    
     scen_key = normalize_scenario_key(scenario)
+    if scen_key in ("anomalous_incursions", "urban_anomalies"):
+        from mechanics.combat.items.consumables.generators import generate_procedural_potion
+        return generate_procedural_potion(tier=tier, genre="anomalous_incursions")
+
+    spell = generate_procedural_spell(scenario=scenario, tier=tier, school=school)
     if scen_key == "steampunk":
         tier_prefix = "Master Plan" if tier == 1 else ("Blueprint" if tier == 2 else "Schematic")
     elif scen_key == "cyberpunk":

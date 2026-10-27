@@ -1,16 +1,30 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="ember" data-scheme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#1b1712" />
     <title>Hikayat - AI RPG Console</title>
+    <script>
+      // Paint a manually-chosen theme before React boots to avoid a flash.
+      (function () {
+        try {
+          var m = localStorage.getItem('hikayat_theme_mode');
+          var light = { daylight: 1, aero: 1 };
+          if (m && m !== 'auto') {
+            document.documentElement.setAttribute('data-theme', m);
+            document.documentElement.setAttribute('data-scheme', light[m] ? 'light' : 'dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-kM55UFkg.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Djscas_N.css">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <script type="module" crossorigin src="/assets/index-C0b0ERE2.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BDrgawWv.css">
   </head>
-  <body class="bg-fantasy-dark text-gray-200 antialiased overflow-hidden">
-    <div id="root"></div>
+  <body class="text-gray-200 antialiased overflow-hidden">
+    <div id="root"></div>
   </body>
 </html>

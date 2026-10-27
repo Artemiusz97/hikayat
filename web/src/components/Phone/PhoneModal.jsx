@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   X, Camera, Video, MessageSquare, Rss, Wifi,
   MapPin, Calendar, Sparkles, ChevronLeft, Send, User, Image as ImageIcon, Heart, ShoppingBag,
   Search, RefreshCw, UserPlus, Users, ShieldAlert, GripHorizontal
 } from 'lucide-react';
+import { formatCleanLocation, cleanProseLocations } from '../../utils/locationFormat';
 
 const formatTimestamp = (ts) => {
   if (!ts) return 'Just now';
@@ -11,8 +13,32 @@ const formatTimestamp = (ts) => {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRefreshInventory, onRefreshCodex, onRefreshCharacter }) => {
+const getAvatarInitial = (name) => {
+  if (!name || typeof name !== 'string') return '?';
+  const stripped = name
+    .replace(/\s*\((?:née|nee)\s+[^)]*\)/i, '')
+    .replace(/^(?:mr|ms|mrs|miss|mx|dr|prof|professor|coach|nurse|chef|dean|principal|headmaster|headmistress|madam|madame|sensei|officer|capt|captain)\.?\s+/i, '')
+    .trim();
+  return (stripped || name.trim())[0]?.toUpperCase() || '?';
+};
+
+const PhoneModal = ({
+  isOpen,
+  onClose,
+  phoneHook,
+  codexHook,
+  session,
+  user,
+  initialChatNpc = null,
+  onClearInitialChatNpc = null,
+  onRefreshInventory,
+  onRefreshCodex,
+  onRefreshCharacter,
+}) => {
+  const { t } = useTranslation();
   const [activeApp, setActiveApp] = useState('home'); // 'home' | 'photos' | 'dms' | 'feed' | 'shop' | 'bounties'
+  const [messagesSubTab, setMessagesSubTab] = useState('contacts'); // 'contacts' | 'dispatch'
+  const msgTabRefs = useRef({});
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [photoCategory, setPhotoCategory] = useState('all'); // 'all' | 'photo' | 'intimate' | 'video'
   const [photoContactFilter, setPhotoContactFilter] = useState('__all__');
@@ -40,20 +66,12 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
   const [selectedFactionFilter, setSelectedFactionFilter] = useState('all');
   const [generatingBounties, setGeneratingBounties] = useState(false);
   const [bountyActionBanner, setBountyActionBanner] = useState(null);
+  const [cancellingCommitmentId, setCancellingCommitmentId] = useState(null);
 
   // Draggable window state
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const dragRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0 });
-
-  // Reset to centered position and home screen when opened
-  useEffect(() => {
-    if (isOpen) {
-      setPosition({ x: 0, y: 0 });
-      setActiveApp('home');
-      setSelectedPhoto(null);
-    }
-  }, [isOpen]);
 
   const handleStartDrag = (clientX, clientY) => {
     setIsDragging(true);
@@ -132,11 +150,55 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
   }, [isDragging]);
 
   const {
-    branding, appointments, gossipFeed, mediaGallery, contacts, suggestedPeers = [], socialState,
+    branding, appointments, commitments: phoneCommitments = [], gossipFeed, mediaGallery, contacts, dispatchChannels = [], suggestedPeers = [], socialState,
     activeChatNpc, chatMessages, dailyLimits, loadingChat, sendingChat,
     loadChatMessages, sendMessage, closeChat,
-    refreshFeed, scourFeed, discoverPeer, sendFriendRequest, refreshPhoneData
+    refreshFeed, scourFeed, discoverPeer, sendFriendRequest, refreshPhoneData, cancelCommitment
   } = phoneHook;
+
+  // Reset to centered position and open requested DM thread (or home screen) when opened
+  useEffect(() => {
+    if (isOpen) {
+      setPosition({ x: 0, y: 0 });
+      setSelectedPhoto(null);
+      if (initialChatNpc) {
+        setActiveApp('dms');
+        setMessagesSubTab('contacts');
+        setDmOutcomeBanner(null);
+        if (loadChatMessages) {
+          loadChatMessages(initialChatNpc);
+        }
+        if (onClearInitialChatNpc) {
+          onClearInitialChatNpc();
+        }
+      } else {
+        setActiveApp('home');
+      }
+    }
+  }, [isOpen, initialChatNpc]);
+
+  const plannerItems = (phoneCommitments && phoneCommitments.length > 0) ? phoneCommitments : (appointments || []);
+
+  const handleOpenChatWithContact = (npcIdOrName) => {
+    if (!npcIdOrName) return;
+    setActiveApp('dms');
+    if (loadChatMessages) {
+      loadChatMessages(npcIdOrName);
+    }
+  };
+
+  const handleCancelPlannerItem = async (commitmentId) => {
+    if (!commitmentId || !cancelCommitment || cancellingCommitmentId) return;
+    setCancellingCommitmentId(commitmentId);
+    try {
+      await cancelCommitment(commitmentId, 'player_cancelled');
+      if (onRefreshCodex) onRefreshCodex();
+    } catch {
+      // ignore
+    } finally {
+      setCancellingCommitmentId(null);
+    }
+  };
 
   const handleDeleteMedia = async (photo) => {
     if (!photo?.id || !user?.user_id || deletingPhoto) return;
@@ -357,43 +419,66 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
     return true;
   });
 
-  // Build unified DM contact list from contacts + appointments
+  // Build strictly unlocked personal DM contacts directory (never mix non-contact appointments or automated dispatches)
   const dmDirectory = [];
   const seenIds = new Set();
   (contacts || []).forEach(c => {
-    const id = c.npc_id || c.name;
+    if (c.is_dispatch_channel) return;
+    const id = String(c.npc_id ?? c.name ?? '');
     if (id && !seenIds.has(id.toLowerCase())) {
       seenIds.add(id.toLowerCase());
+      const scoreVal = c.relationship_score ?? 0;
       dmDirectory.push({
         npc_id: c.npc_id || c.name,
         name: c.name || c.npc_id,
         role: c.basic_info?.role || c.basic_info?.occupation || 'Contact',
-        score: c.relationship_score ?? 0
+        score: scoreVal,
+        is_blocked_contact: Boolean(c.is_blocked_contact || scoreVal <= -50),
+        anomalous_npc_tag: c.anomalous_npc_tag || c.basic_info?.anomalous_npc_tag || null,
+        deceased: Boolean(c.deceased || c.basic_info?.deceased),
       });
     }
   });
-  (appointments || []).forEach(appt => {
-    const id = appt.npc_id || appt.npc_name;
-    if (id && !seenIds.has(id.toLowerCase())) {
-      seenIds.add(id.toLowerCase());
-      dmDirectory.push({
-        npc_id: appt.npc_id || appt.npc_name,
-        name: appt.npc_name || appt.npc_id,
-        role: `Rendezvous: ${appt.rendezvous_location}`,
-        score: null
+
+  // Build read-only automated Alerts / Dispatch directory
+  const dispatchDirectory = [];
+  const seenDispatchIds = new Set();
+  [...(dispatchChannels || []), ...(contacts || []).filter(c => c.is_dispatch_channel)].forEach(ch => {
+    const id = String(ch.npc_id ?? ch.name ?? '');
+    if (id && !seenDispatchIds.has(id.toLowerCase())) {
+      seenDispatchIds.add(id.toLowerCase());
+      dispatchDirectory.push({
+        npc_id: ch.npc_id || ch.name,
+        name: ch.name || ch.npc_id,
+        role: ch.role || ch.basic_info?.role || ch.basic_info?.occupation || 'Automated Broadcast Channel',
+        is_dispatch_channel: true,
       });
     }
   });
+
+  const showDispatchTab = dispatchDirectory.length > 0 || String(session?.scenario || '').toLowerCase().includes('anomalous');
+  const activeChatKeyLow = String(activeChatNpc ?? '').toLowerCase();
+  const activeDispatchEntry = dispatchDirectory.find(
+    d => String(d.npc_id).toLowerCase() === activeChatKeyLow || String(d.name).toLowerCase() === activeChatKeyLow
+  );
+  const activeContactEntry = dmDirectory.find(
+    c => String(c.npc_id).toLowerCase() === activeChatKeyLow || String(c.name).toLowerCase() === activeChatKeyLow
+  );
+  const isDispatchThread = Boolean(activeDispatchEntry);
+  const isBlockedContact = !isDispatchThread && Boolean(
+    activeContactEntry?.is_blocked_contact || ((activeContactEntry?.score ?? 0) <= -50)
+  );
+  const activeDisplayTitle = activeDispatchEntry?.name || activeContactEntry?.name || activeChatNpc;
 
   const allAvailableBounties = codexHook?.availableBounties || [];
   const factionsList = codexHook?.factions || [];
 
   const availableBounties = allAvailableBounties.filter(b => {
     if (selectedFactionFilter === 'all') return true;
-    const bFaction = (b.faction_id || b.faction_name || b.faction || '').toLowerCase();
+    const bFaction = String(b.faction_id || b.faction_name || b.faction || '').toLowerCase();
     const targetF = factionsList.find(f => f.faction_id === selectedFactionFilter || f.name === selectedFactionFilter);
-    const targetId = (targetF?.faction_id || selectedFactionFilter).toLowerCase();
-    const targetName = (targetF?.name || '').toLowerCase();
+    const targetId = String(targetF?.faction_id || selectedFactionFilter || '').toLowerCase();
+    const targetName = String(targetF?.name || '').toLowerCase();
     return (
       bFaction === targetId ||
       (targetName && bFaction.includes(targetName)) ||
@@ -465,7 +550,7 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
       subtitle: 'Schedule & Rendezvous',
       icon: Calendar,
       gradient: 'from-blue-500 via-indigo-500 to-sky-600',
-      badge: (appointments || []).length > 0 ? appointments.length : null,
+      badge: plannerItems.length > 0 ? plannerItems.length : null,
       badgeColor: 'bg-blue-500',
     },
     {
@@ -529,7 +614,7 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
       className="fixed inset-0 z-50 flex flex-col md:items-center md:justify-center md:p-4 bg-neutral-950 md:bg-black/80 md:backdrop-blur-md text-gray-100 select-none overflow-hidden"
     >
       {/* Phone Shell: Full-screen on mobile, centered phone shell on desktop */}
-      <div className="w-full h-full md:max-w-[420px] md:h-[840px] md:max-h-[92vh] md:rounded-[44px] md:border-[6px] md:border-neutral-800 md:shadow-[0_0_50px_rgba(0,0,0,0.85)] md:ring-1 md:ring-neutral-700/50 flex flex-col bg-neutral-950 overflow-hidden relative pb-[max(0.6rem,env(safe-area-inset-bottom))] md:pb-0">
+      <div className="w-full h-full md:max-w-[420px] md:h-[840px] md:max-h-[calc(var(--app-height,100dvh)-1.5rem)] md:rounded-[44px] md:border-[6px] md:border-neutral-800 md:shadow-[0_0_50px_rgba(0,0,0,0.85)] md:ring-1 md:ring-neutral-700/50 flex flex-col bg-neutral-950 overflow-hidden relative pb-[max(0.6rem,env(safe-area-inset-bottom))] md:pb-0">
         
         {/* Dynamic Island / Speaker Notch & Status Bar (Restored for desktop browser version, hidden on mobile) */}
         <div className="hidden md:flex relative px-6 pt-3 pb-2 justify-between items-center text-xs font-semibold text-gray-200 bg-neutral-950/90 z-20 shrink-0">
@@ -685,51 +770,68 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-mono">
-                    {appointments.length} Active
+                    {plannerItems.length} Active
                   </span>
                 </div>
               </div>
 
-              {/* Appointments List */}
+              {/* Unified Commitments & Rendezvous List */}
               <div className="flex-1 overflow-y-auto p-3.5 space-y-3">
-                {appointments.length === 0 ? (
+                {plannerItems.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-52 text-center text-neutral-500 space-y-2">
                     <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center text-neutral-600">
                       <Calendar size={22} />
                     </div>
-                    <div className="text-xs font-medium text-neutral-400">No Upcoming Meetups</div>
+                    <div className="text-xs font-medium text-neutral-400">No Active Meetups or Promises</div>
                     <p className="text-[10px] max-w-[220px] text-neutral-500 leading-relaxed">
-                      Message a contact or agree on plans in conversation to schedule physical rendezvous.
+                      Message a contact or agree on plans and promises in conversation to track them here.
                     </p>
                     <button
                       type="button"
                       onClick={() => setActiveApp('dms')}
-                      className="mt-2 px-3 py-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[11px] font-medium transition-colors cursor-pointer"
+                      className="mt-2 px-3 py-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-[11px] font-medium transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
                     >
                       Open Messages
                     </button>
                   </div>
                 ) : (
-                  appointments.map((appt, i) => {
+                  plannerItems.map((appt, i) => {
+                    const cId = appt.commitment_id || appt.id;
+                    const cType = (appt.commitment_type || (appt.rendezvous_location || appt.target_location ? 'rendezvous' : 'promise')).toLowerCase();
+                    const isRendezvous = cType === 'rendezvous';
                     const isArrived = appt.status === 'arrived';
                     const isConfidential = Boolean(appt.is_confidential);
-                    const shortLoc = (appt.rendezvous_location || appt.target_location || '').split('➔').pop().trim();
-                    const npcName = appt.npc_name || appt.target_entity || 'Contact';
+                    const shortLoc = formatCleanLocation(appt.rendezvous_location || appt.target_location || '', { includeZone: false });
+                    const npcName = appt.target_display_name || appt.npc_name || appt.target_entity || 'Contact';
+                    const subtypeLabel = (appt.subtype || cType).replace(/_/g, ' ');
+                    const canCancel = Boolean(cId && ['active', 'pending', 'arrived'].includes((appt.status || 'pending').toLowerCase()));
 
-                    const hasOverlapConflict = appointments.some(other => {
-                      if (!other || (other.id && other.id === appt.id) || (other.npc_id && other.npc_id === appt.npc_id)) return false;
+                    const hasOverlapConflict = isRendezvous && plannerItems.some(other => {
+                      if (!other || (other.commitment_id || other.id) === cId) return false;
+                      const oType = (other.commitment_type || (other.rendezvous_location || other.target_location ? 'rendezvous' : 'promise')).toLowerCase();
+                      if (oType !== 'rendezvous') return false;
                       const sameDay = (other.scheduled_day || 1) === (appt.scheduled_day || 1);
                       if (!sameDay) return false;
-                      const oStart = other.start_minute ?? (other.created_minute ? other.created_minute % 1440 : 0);
-                      const oEnd = other.end_minute ?? (other.expiry_minute ? other.expiry_minute % 1440 : 1439);
-                      const aStart = appt.start_minute ?? (appt.created_minute ? appt.created_minute % 1440 : 0);
-                      const aEnd = appt.end_minute ?? (appt.expiry_minute ? appt.expiry_minute % 1440 : 1439);
+                      const oStart = other.start_minute ?? 0;
+                      const oEnd = other.end_minute ?? 1439;
+                      const aStart = appt.start_minute ?? 0;
+                      const aEnd = appt.end_minute ?? 1439;
                       return Math.max(oStart, aStart) < Math.min(oEnd, aEnd);
                     });
 
+                    const fmtMin = (m) => {
+                      const clean = Math.max(0, Number(m || 0)) % 1440;
+                      return `${String(Math.floor(clean / 60)).padStart(2, '0')}:${String(clean % 60).padStart(2, '0')}`;
+                    };
+                    const timeWindowLabel = appt.time_window_label || (
+                      isRendezvous
+                        ? `Day ${appt.scheduled_day || 1} • ${fmtMin(appt.start_minute ?? appt.created_minute)}–${fmtMin(appt.end_minute ?? appt.expiry_minute)}`
+                        : (appt.scheduled_day ? `Day ${appt.scheduled_day}` : 'Open Obligation')
+                    );
+
                     return (
                       <div
-                        key={appt.id || i}
+                        key={cId || i}
                         className={`p-3.5 rounded-2xl border transition-all ${
                           isArrived
                             ? 'bg-emerald-950/20 border-emerald-500/40 shadow-sm shadow-emerald-950/50'
@@ -737,15 +839,18 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
                               isArrived ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-neutral-800 text-neutral-300'
                             }`}>
                               {npcName.slice(0, 2).toUpperCase()}
                             </div>
-                            <div>
+                            <div className="min-w-0">
                               <div className="text-xs font-bold text-neutral-100 flex items-center gap-1.5 flex-wrap">
-                                {npcName}
+                                <span>{appt.title || npcName}</span>
+                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-blue-950/60 text-blue-300 border border-blue-800/40 uppercase font-mono">
+                                  {subtypeLabel}
+                                </span>
                                 {isConfidential && (
                                   <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-950/60 text-purple-300 border border-purple-800/40">
                                     Private 1-on-1
@@ -758,40 +863,58 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                                 )}
                               </div>
                               <div className="text-[10px] text-neutral-400 flex items-center gap-1 mt-0.5">
-                                <MapPin size={10} className="text-neutral-500" />
-                                <span className="truncate max-w-[180px]">{shortLoc || 'Scheduled Venue'}</span>
+                                {shortLoc ? (
+                                  <>
+                                    <MapPin size={10} className="text-neutral-500 shrink-0" />
+                                    <span className="truncate max-w-[180px]">{shortLoc}</span>
+                                  </>
+                                ) : (
+                                  <span className="truncate max-w-[180px]">👤 {npcName}</span>
+                                )}
                               </div>
                             </div>
                           </div>
 
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-medium ${
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-medium shrink-0 ${
                             isArrived
                               ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                               : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                           }`}>
-                            {isArrived ? 'Arrived & Waiting' : 'Scheduled'}
+                            {isArrived ? 'Arrived & Waiting' : (isRendezvous ? 'Scheduled' : 'Active')}
                           </span>
                         </div>
 
-                        {appt.topic && (
+                        {(appt.description || appt.topic) && (
                           <p className="mt-2.5 text-[11px] text-neutral-300 bg-neutral-950/60 p-2 rounded-xl border border-neutral-800/60 italic">
-                            "{appt.topic}"
+                            "{appt.description || appt.topic}"
                           </p>
                         )}
 
-                        <div className="mt-3 pt-2.5 border-t border-neutral-800/60 flex items-center justify-between text-[10px]">
-                          <span className="text-neutral-500 font-mono">
-                            {appt.created_minute ? `Window: ${Math.floor(appt.created_minute % 1440 / 60)}:${String(appt.created_minute % 60).padStart(2, '0')}` : 'Flexible Window'}
+                        <div className="mt-3 pt-2.5 border-t border-neutral-800/60 flex items-center justify-between gap-2 text-[10px]">
+                          <span className="text-neutral-400 font-mono truncate">
+                            {timeWindowLabel}
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              openChat(appt.npc_id || npcName);
-                            }}
-                            className="px-2.5 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-[10px] font-medium transition-colors cursor-pointer"
-                          >
-                            Message Contact
-                          </button>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {canCancel && (
+                              <button
+                                type="button"
+                                disabled={cancellingCommitmentId === cId}
+                                onClick={() => handleCancelPlannerItem(cId)}
+                                className="px-2 py-1 rounded-lg bg-rose-950/50 hover:bg-rose-900/60 text-rose-300 border border-rose-800/50 text-[10px] font-medium transition-colors cursor-pointer disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-400"
+                              >
+                                {cancellingCommitmentId === cId ? '...' : 'Cancel'}
+                                <span className="sr-only"> {appt.title || npcName}</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenChatWithContact(appt.npc_id || npcName)}
+                              className="px-2.5 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-[10px] font-medium transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
+                            >
+                              Message Contact
+                              <span className="sr-only"> {npcName}</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -915,22 +1038,33 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
               {activeChatNpc ? (
                 <div className="flex-1 flex flex-col h-full min-h-0 space-y-2">
                   {/* Single Clean Chat Header */}
-                  <div className="flex items-center justify-between pb-2 border-b border-neutral-800/80 shrink-0">
+                  <div className="flex items-center justify-between pb-2 border-b border-neutral-800/80 shrink-0 gap-2">
                     <button
                       type="button"
                       onClick={() => { setDmOutcomeBanner(null); closeChat(); }}
-                      className="p-1 rounded-full text-cyan-400 hover:text-cyan-300 hover:bg-neutral-800/80 transition-colors flex items-center gap-0.5 text-xs font-semibold cursor-pointer"
+                      className="p-1 rounded-full text-cyan-400 hover:text-cyan-300 hover:bg-neutral-800/80 transition-colors flex items-center gap-0.5 text-xs font-semibold cursor-pointer shrink-0"
                     >
                       <ChevronLeft size={16} />
-                      <span>DMs</span>
+                      <span>{branding.dm_app_name || 'Messages'}</span>
                     </button>
                     <div className="flex items-center gap-2 min-w-0">
-                      <div className="w-6 h-6 rounded-full bg-cyan-950 border border-cyan-800/60 flex items-center justify-center text-cyan-300 font-bold text-[10px] shrink-0">
-                        <User size={12} />
+                      <div className={`w-6 h-6 rounded-full border flex items-center justify-center font-bold text-[10px] shrink-0 ${
+                        isDispatchThread
+                          ? 'bg-indigo-950 border-indigo-700/60 text-indigo-300'
+                          : isBlockedContact
+                            ? 'bg-red-950 border-red-700/60 text-red-300'
+                            : 'bg-cyan-950 border-cyan-800/60 text-cyan-300'
+                      }`}>
+                        {isDispatchThread ? '📡' : <User size={12} />}
                       </div>
-                      <span className="font-bold text-xs text-gray-100 truncate">{activeChatNpc}</span>
+                      <span className="font-bold text-xs text-gray-100 truncate">{activeDisplayTitle}</span>
+                      {isBlockedContact && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-950/80 text-red-300 border border-red-700/60 font-bold uppercase shrink-0">
+                          🚫 {t('contacts.blocked_badge', 'Blocked')}
+                        </span>
+                      )}
                     </div>
-                    <div className="w-8" />
+                    <div className="w-6 shrink-0" />
                   </div>
 
                   {/* DM Reply Outcome Banner */}
@@ -953,10 +1087,10 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                             </span>
                           )}
                         </div>
-                        <button onClick={() => setDmOutcomeBanner(null)} className="text-gray-500 hover:text-gray-300">✕</button>
+                        <button type="button" onClick={() => setDmOutcomeBanner(null)} className="text-gray-500 hover:text-gray-300">✕</button>
                       </div>
                       {dmOutcomeBanner.rendezvous_location && (
-                        <div className="text-amber-300">📍 Meetup Scheduled: <strong>{dmOutcomeBanner.rendezvous_location}</strong></div>
+                        <div className="text-amber-300">📍 Meetup Scheduled: <strong>{formatCleanLocation(dmOutcomeBanner.rendezvous_location)}</strong></div>
                       )}
                       {dmOutcomeBanner.media_dropped && (
                         <div className="text-pink-300">📸 Media Received: <strong>{dmOutcomeBanner.media_dropped.name || 'Saved to Photo Vault!'}</strong></div>
@@ -970,7 +1104,9 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                       <p className="text-[11px] text-gray-500 italic text-center py-8">Loading history...</p>
                     ) : chatMessages.length === 0 ? (
                       <p className="text-[11px] text-gray-500 italic text-center py-8">
-                        Pick a message topic below to text {activeChatNpc}!
+                        {isDispatchThread
+                          ? 'No official dispatch alerts received yet.'
+                          : `Pick a message topic below to text ${activeDisplayTitle}!`}
                       </p>
                     ) : (
                       chatMessages.map((msg, idx) => {
@@ -983,7 +1119,9 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                             <div className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-xs ${
                               isPlayer
                                 ? 'bg-cyan-600 text-white rounded-tr-none'
-                                : 'bg-neutral-800 text-gray-200 rounded-tl-none border border-neutral-700/50'
+                                : isDispatchThread
+                                  ? 'bg-indigo-950/60 text-indigo-100 rounded-tl-none border border-indigo-700/50'
+                                  : 'bg-neutral-800 text-gray-200 rounded-tl-none border border-neutral-700/50'
                             }`}>
                               <p className="leading-snug whitespace-pre-line">{msg.message}</p>
                             </div>
@@ -1003,151 +1141,167 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                     )}
                   </div>
 
-                  {/* 1-Click Intent Action Grid: 4 Columns x 2 Rows, NO SCROLLBAR, NEVER CUT OFF */}
-                  {(() => {
-                    const isMeetupAccepted = dailyLimits?.meetup?.status === 'accepted';
-                    const flirtLocked = !!(dailyLimits?.flirt?.locked || (dailyLimits?.flirt?.used >= 3));
-                    const meetupLocked = !!(dailyLimits?.meetup?.locked || (isMeetupAccepted ? ((dailyLimits?.meetup?.relocations_left ?? 2) <= 0) : ((dailyLimits?.meetup?.used ?? 0) >= 1)));
-                    const rumorLocked = !!(dailyLimits?.rumor?.locked || ((dailyLimits?.rumor?.used ?? 0) >= 1));
-                    const photoLocked = !!(dailyLimits?.photo?.locked || ((dailyLimits?.photo?.used ?? 0) >= 3));
-                    const spicyLocked = !!(dailyLimits?.spicy?.locked || ((dailyLimits?.spicy?.used ?? 0) >= 3));
+                  {/* Footer Controls: Read-Only Broadcast vs Blocked Contact vs Personal DM Composer */}
+                  {isDispatchThread ? (
+                    <div className="p-2.5 rounded-xl bg-indigo-950/35 border border-indigo-800/50 text-center text-[11px] text-indigo-200 font-medium shrink-0">
+                      📡 {t('phone.read_only_broadcast', 'Automated Official Broadcast Channel — Read-Only')}
+                    </div>
+                  ) : isBlockedContact ? (
+                    <div className="p-2.5 rounded-xl bg-red-950/40 border border-red-800/60 text-center text-[11px] text-red-200 leading-snug shrink-0">
+                      🚫 {t('phone.blocked_notice', 'This contact has blocked your number due to hostility. Reconcile with them in person first.')}
+                    </div>
+                  ) : (
+                    <>
+                      {/* 1-Click Intent Action Grid: 4 Columns x 2 Rows */}
+                      {(() => {
+                        const chatMax = dailyLimits?.chat?.max ?? ((activeContactEntry?.score ?? 0) >= 100 ? 5 : 3);
+                        const chatUsed = dailyLimits?.chat?.used ?? 0;
+                        const chatLeft = Math.max(0, chatMax - chatUsed);
+                        const isMeetupAccepted = dailyLimits?.meetup?.status === 'accepted';
+                        const flirtLocked = !!(dailyLimits?.flirt?.locked || (dailyLimits?.flirt?.used >= 3));
+                        const meetupLocked = !!(dailyLimits?.meetup?.locked || (isMeetupAccepted ? ((dailyLimits?.meetup?.relocations_left ?? 2) <= 0) : ((dailyLimits?.meetup?.used ?? 0) >= 1)));
+                        const rumorLocked = !!(dailyLimits?.rumor?.locked || ((dailyLimits?.rumor?.used ?? 0) >= 1));
+                        const photoLocked = !!(dailyLimits?.photo?.locked || ((dailyLimits?.photo?.used ?? 0) >= 3));
+                        const spicyLocked = !!(dailyLimits?.spicy?.locked || ((dailyLimits?.spicy?.used ?? 0) >= 3));
 
-                    const intentOptions = [
-                      {
-                        id: 'chat',
-                        label: 'Chat',
-                        icon: '💬',
-                        badge: '∞',
-                        locked: false,
-                        disabled: sendingChat,
-                        color: 'hover:border-cyan-500/50 hover:bg-cyan-950/40 text-cyan-200',
-                        title: 'Send a friendly chat message'
-                      },
-                      {
-                        id: 'flirt',
-                        label: 'Flirt',
-                        icon: '💕',
-                        badge: dailyLimits ? (flirtLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.flirt?.used ?? 0))}/3`) : '3/3',
-                        locked: flirtLocked,
-                        disabled: sendingChat || flirtLocked,
-                        color: 'hover:border-pink-500/50 hover:bg-pink-950/40 text-pink-200',
-                        title: 'Flirt with contact (3 attempts/day)'
-                      },
-                      {
-                        id: 'meetup',
-                        label: isMeetupAccepted ? 'Move' : 'Meetup',
-                        icon: '📍',
-                        badge: dailyLimits ? (isMeetupAccepted ? (meetupLocked ? '🔒' : `${dailyLimits?.meetup?.relocations_left ?? 2} left`) : (meetupLocked ? '🔒' : '1/1')) : '1/1',
-                        locked: meetupLocked,
-                        disabled: sendingChat || meetupLocked,
-                        color: 'hover:border-amber-500/50 hover:bg-amber-950/40 text-amber-200',
-                        title: isMeetupAccepted ? 'Relocate meetup spot (up to 2 times)' : 'Propose to meet up (1 attempt/day)'
-                      },
-                      {
-                        id: 'rumor',
-                        label: 'Rumor',
-                        icon: '🕵️',
-                        badge: dailyLimits ? (rumorLocked ? '🔒' : '1/1') : '1/1',
-                        locked: rumorLocked,
-                        disabled: sendingChat || rumorLocked,
-                        color: 'hover:border-emerald-500/50 hover:bg-emerald-950/40 text-emerald-200',
-                        title: 'Ask for rumors and gossip (1 attempt/day)'
-                      },
-                      {
-                        id: 'photo_ask',
-                        label: 'Ask Pic',
-                        icon: '📸',
-                        badge: dailyLimits ? (photoLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.photo?.used ?? 0))}/3`) : '3/3',
-                        locked: photoLocked,
-                        disabled: sendingChat || photoLocked,
-                        color: 'hover:border-purple-500/50 hover:bg-purple-950/40 text-purple-200',
-                        title: 'Ask contact for a casual photo (shared 3/day)'
-                      },
-                      {
-                        id: 'photo_send',
-                        label: 'Send Pic',
-                        icon: '📤',
-                        badge: dailyLimits ? (photoLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.photo?.used ?? 0))}/3`) : '3/3',
-                        locked: photoLocked,
-                        disabled: sendingChat || photoLocked,
-                        color: 'hover:border-teal-500/50 hover:bg-teal-950/40 text-teal-200',
-                        title: 'Send contact a casual photo (shared 3/day)'
-                      },
-                      {
-                        id: 'spicy_ask',
-                        label: 'Ask Spicy',
-                        icon: '🔥',
-                        badge: dailyLimits ? (spicyLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.spicy?.used ?? 0))}/3`) : '3/3',
-                        locked: spicyLocked,
-                        disabled: sendingChat || spicyLocked,
-                        color: 'hover:border-rose-500/50 hover:bg-rose-950/40 text-rose-200',
-                        title: 'Ask contact for a spicy photo (shared 3/day)'
-                      },
-                      {
-                        id: 'spicy_send',
-                        label: 'Send Spicy',
-                        icon: '💋',
-                        badge: dailyLimits ? (spicyLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.spicy?.used ?? 0))}/3`) : '3/3',
-                        locked: spicyLocked,
-                        disabled: sendingChat || spicyLocked,
-                        color: 'hover:border-red-500/50 hover:bg-red-950/40 text-red-200',
-                        title: 'Send contact a spicy photo of yourself (shared 3/day)'
-                      },
-                    ];
+                        const intentOptions = [
+                          {
+                            id: 'chat',
+                            label: 'Chat',
+                            icon: '💬',
+                            badge: `${chatLeft}/${chatMax}`,
+                            locked: chatLeft === 0,
+                            disabled: sendingChat,
+                            color: 'hover:border-cyan-500/50 hover:bg-cyan-950/40 text-cyan-200',
+                            title: `Send a friendly chat message (${chatMax} affinity-granting chats/day)`
+                          },
+                          {
+                            id: 'flirt',
+                            label: 'Flirt',
+                            icon: '💕',
+                            badge: dailyLimits ? (flirtLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.flirt?.used ?? 0))}/3`) : '3/3',
+                            locked: flirtLocked,
+                            disabled: sendingChat || flirtLocked,
+                            color: 'hover:border-pink-500/50 hover:bg-pink-950/40 text-pink-200',
+                            title: 'Flirt with contact (3 attempts/day)'
+                          },
+                          {
+                            id: 'meetup',
+                            label: isMeetupAccepted ? 'Move' : 'Meetup',
+                            icon: '📍',
+                            badge: dailyLimits ? (isMeetupAccepted ? (meetupLocked ? '🔒' : `${dailyLimits?.meetup?.relocations_left ?? 2} left`) : (meetupLocked ? '🔒' : '1/1')) : '1/1',
+                            locked: meetupLocked,
+                            disabled: sendingChat || meetupLocked,
+                            color: 'hover:border-amber-500/50 hover:bg-amber-950/40 text-amber-200',
+                            title: isMeetupAccepted ? 'Relocate meetup spot (up to 2 times)' : 'Propose to meet up (1 attempt/day)'
+                          },
+                          {
+                            id: 'rumor',
+                            label: 'Rumor',
+                            icon: '🕵️',
+                            badge: dailyLimits ? (rumorLocked ? '🔒' : '1/1') : '1/1',
+                            locked: rumorLocked,
+                            disabled: sendingChat || rumorLocked,
+                            color: 'hover:border-emerald-500/50 hover:bg-emerald-950/40 text-emerald-200',
+                            title: 'Ask for rumors and gossip (1 attempt/day)'
+                          },
+                          {
+                            id: 'photo_ask',
+                            label: 'Ask Pic',
+                            icon: '📸',
+                            badge: dailyLimits ? (photoLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.photo?.used ?? 0))}/3`) : '3/3',
+                            locked: photoLocked,
+                            disabled: sendingChat || photoLocked,
+                            color: 'hover:border-purple-500/50 hover:bg-purple-950/40 text-purple-200',
+                            title: 'Ask contact for a casual photo (shared 3/day)'
+                          },
+                          {
+                            id: 'photo_send',
+                            label: 'Send Pic',
+                            icon: '📤',
+                            badge: dailyLimits ? (photoLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.photo?.used ?? 0))}/3`) : '3/3',
+                            locked: photoLocked,
+                            disabled: sendingChat || photoLocked,
+                            color: 'hover:border-teal-500/50 hover:bg-teal-950/40 text-teal-200',
+                            title: 'Send contact a casual photo (shared 3/day)'
+                          },
+                          {
+                            id: 'spicy_ask',
+                            label: 'Ask Spicy',
+                            icon: '🔥',
+                            badge: dailyLimits ? (spicyLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.spicy?.used ?? 0))}/3`) : '3/3',
+                            locked: spicyLocked,
+                            disabled: sendingChat || spicyLocked,
+                            color: 'hover:border-rose-500/50 hover:bg-rose-950/40 text-rose-200',
+                            title: 'Ask contact for a spicy photo (shared 3/day)'
+                          },
+                          {
+                            id: 'spicy_send',
+                            label: 'Send Spicy',
+                            icon: '💋',
+                            badge: dailyLimits ? (spicyLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.spicy?.used ?? 0))}/3`) : '3/3',
+                            locked: spicyLocked,
+                            disabled: sendingChat || spicyLocked,
+                            color: 'hover:border-red-500/50 hover:bg-red-950/40 text-red-200',
+                            title: 'Send contact a spicy photo of yourself (shared 3/day)'
+                          },
+                        ];
 
-                    return (
-                      <div className="grid grid-cols-4 gap-1.5 pt-2 border-t border-neutral-800/80 shrink-0">
-                        {intentOptions.map(opt => (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            disabled={opt.disabled}
-                            onClick={() => handleInstantIntentSend(opt.id)}
-                            className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-xl transition-all cursor-pointer select-none active:scale-95 border shadow-xs ${
-                              opt.disabled
-                                ? 'opacity-40 cursor-not-allowed bg-neutral-900/40 border-neutral-800/40 text-neutral-500'
-                                : selectedIntent === opt.id
-                                  ? 'bg-cyan-600/30 text-cyan-100 border-cyan-400 ring-1 ring-cyan-500/40 shadow-sm'
-                                  : `bg-neutral-900/95 border-neutral-800/90 ${opt.color}`
-                            }`}
-                            title={opt.title}
-                          >
-                            <div className="flex items-center gap-1 leading-tight">
-                              <span className="text-xs shrink-0">{opt.icon}</span>
-                              <span className="text-[10px] font-bold truncate">{opt.label}</span>
-                            </div>
-                            {opt.badge && (
-                              <span className={`text-[8px] font-mono leading-none mt-0.5 px-1 rounded ${
-                                opt.locked ? 'text-red-400/90 bg-red-950/40' : 'text-neutral-400'
-                              }`}>
-                                {opt.badge}
-                              </span>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    );
-                  })()}
+                        return (
+                          <div className="grid grid-cols-4 gap-1.5 pt-2 border-t border-neutral-800/80 shrink-0">
+                            {intentOptions.map(opt => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                disabled={opt.disabled}
+                                onClick={() => handleInstantIntentSend(opt.id)}
+                                className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-xl transition-all cursor-pointer select-none active:scale-95 border shadow-xs ${
+                                  opt.disabled
+                                    ? 'opacity-40 cursor-not-allowed bg-neutral-900/40 border-neutral-800/40 text-neutral-500'
+                                    : selectedIntent === opt.id
+                                      ? 'bg-cyan-600/30 text-cyan-100 border-cyan-400 ring-1 ring-cyan-500/40 shadow-sm'
+                                      : `bg-neutral-900/95 border-neutral-800/90 ${opt.color}`
+                                }`}
+                                title={opt.title}
+                              >
+                                <div className="flex items-center gap-1 leading-tight">
+                                  <span className="text-xs shrink-0">{opt.icon}</span>
+                                  <span className="text-[10px] font-bold truncate">{opt.label}</span>
+                                </div>
+                                {opt.badge && (
+                                  <span className={`text-[8px] font-mono leading-none mt-0.5 px-1 rounded ${
+                                    opt.locked ? 'text-amber-300/90 bg-amber-950/40' : 'text-neutral-400'
+                                  }`}>
+                                    {opt.badge}
+                                  </span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()}
 
-                  {/* Custom Message Composer */}
-                  <form onSubmit={handleSendDm} className="flex items-center gap-2 pt-1.5 shrink-0">
-                    <input
-                      type="text"
-                      value={dmInput}
-                      onChange={(e) => setDmInput(e.target.value)}
-                      disabled={sendingChat}
-                      placeholder={`Custom message to ${activeChatNpc}...`}
-                      className="flex-1 bg-neutral-900 border border-neutral-800 focus:border-cyan-500 rounded-xl px-3.5 py-2.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none disabled:opacity-50 transition-colors"
-                    />
-                    <button
-                      type="submit"
-                      disabled={!dmInput.trim() || sendingChat}
-                      className="p-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-40 transition-colors cursor-pointer shrink-0 shadow-sm"
-                      title="Send Custom Message"
-                    >
-                      <Send size={16} />
-                    </button>
-                  </form>
+                      {/* Custom Message Composer */}
+                      <form onSubmit={handleSendDm} className="flex items-center gap-2 pt-1.5 shrink-0">
+                        <input
+                          type="text"
+                          value={dmInput}
+                          onChange={(e) => setDmInput(e.target.value)}
+                          disabled={sendingChat}
+                          placeholder={`Custom message to ${activeDisplayTitle}...`}
+                          className="flex-1 bg-neutral-900 border border-neutral-800 focus:border-cyan-500 rounded-xl px-3.5 py-2.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none disabled:opacity-50 transition-colors"
+                        />
+                        <button
+                          type="submit"
+                          disabled={!dmInput.trim() || sendingChat}
+                          className="p-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-40 transition-colors cursor-pointer shrink-0 shadow-sm"
+                          title="Send Custom Message"
+                        >
+                          <Send size={16} />
+                        </button>
+                      </form>
+                    </>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-3 flex-1 flex flex-col min-h-0">
@@ -1164,8 +1318,58 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                     )}
                   </div>
 
-                  {/* Pending Appointments Banner */}
-                  {appointments.length > 0 && (
+                  {/* Contacts vs Alerts / Dispatch Sub-View Switcher */}
+                  {showDispatchTab && (
+                    <div
+                      role="tablist"
+                      aria-label="Message channels"
+                      onKeyDown={(e) => {
+                        if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                          e.preventDefault();
+                          const next = messagesSubTab === 'contacts' ? 'dispatch' : 'contacts';
+                          setMessagesSubTab(next);
+                          msgTabRefs.current[next]?.focus();
+                        }
+                      }}
+                      className="flex bg-neutral-900 p-1 rounded-xl border border-neutral-800 gap-1 shrink-0"
+                    >
+                      <button
+                        ref={(el) => { msgTabRefs.current.contacts = el; }}
+                        type="button"
+                        role="tab"
+                        aria-selected={messagesSubTab === 'contacts'}
+                        tabIndex={messagesSubTab === 'contacts' ? 0 : -1}
+                        onClick={() => setMessagesSubTab('contacts')}
+                        className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                          messagesSubTab === 'contacts'
+                            ? 'bg-cyan-600/30 text-cyan-200 border border-cyan-500/50'
+                            : 'text-gray-400 hover:text-gray-200'
+                        }`}
+                      >
+                        <Users size={12} />
+                        <span>{t('contacts.title', 'Contacts')} ({dmDirectory.length})</span>
+                      </button>
+                      <button
+                        ref={(el) => { msgTabRefs.current.dispatch = el; }}
+                        type="button"
+                        role="tab"
+                        aria-selected={messagesSubTab === 'dispatch'}
+                        tabIndex={messagesSubTab === 'dispatch' ? 0 : -1}
+                        onClick={() => setMessagesSubTab('dispatch')}
+                        className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                          messagesSubTab === 'dispatch'
+                            ? 'bg-indigo-600/30 text-indigo-200 border border-indigo-500/50'
+                            : 'text-gray-400 hover:text-gray-200'
+                        }`}
+                      >
+                        <ShieldAlert size={12} />
+                        <span>{t('phone.alerts_dispatch', 'Alerts / Dispatch')} ({dispatchDirectory.length})</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Pending Appointments Banner (only in personal Contacts sub-tab) */}
+                  {messagesSubTab === 'contacts' && appointments.length > 0 && (
                     <div className="space-y-1.5 shrink-0">
                       <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider flex items-center gap-1">
                         <Calendar size={11} />
@@ -1188,52 +1392,119 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                           </div>
                           <div className="flex items-center gap-1 text-[11px] text-gray-300">
                             <MapPin size={11} className="text-amber-400 shrink-0" />
-                            <span>Rendezvous: <strong>{appt.rendezvous_location}</strong></span>
+                            <span>Rendezvous: <strong>{formatCleanLocation(appt.rendezvous_location)}</strong></span>
                           </div>
                         </div>
                       ))}
                     </div>
                   )}
 
-                  {/* Contacts List */}
+                  {/* Directory List */}
                   <div className="space-y-2 flex-1 overflow-y-auto custom-scrollbar pr-0.5 min-h-0">
-                    <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider block">
-                      Contacts ({dmDirectory.length})
-                    </span>
-                    {dmDirectory.length === 0 ? (
-                      <div className="text-center py-10 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl">
-                        <MessageSquare size={24} className="mx-auto opacity-30 text-cyan-400 mb-1" />
-                        <p className="text-xs">No contacts discovered yet.</p>
-                        <p className="text-[10px] text-gray-500 mt-1">
-                          Meet characters in the story to unlock their contact numbers!
-                        </p>
-                      </div>
+                    {showDispatchTab && messagesSubTab === 'dispatch' ? (
+                      <>
+                        <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider block">
+                          {t('phone.alerts_dispatch', 'Alerts / Dispatch')} ({dispatchDirectory.length})
+                        </span>
+                        {dispatchDirectory.length === 0 ? (
+                          <div className="text-center py-10 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl">
+                            <ShieldAlert size={24} className="mx-auto opacity-30 text-indigo-400 mb-1" />
+                            <p className="text-xs">No official dispatch broadcasts yet.</p>
+                          </div>
+                        ) : (
+                          dispatchDirectory.map((ch) => (
+                            <button
+                              key={ch.npc_id}
+                              type="button"
+                              onClick={() => loadChatMessages(ch.npc_id)}
+                              className="w-full text-left bg-indigo-950/25 border border-indigo-800/50 hover:border-indigo-500/60 rounded-xl p-2.5 flex items-center justify-between cursor-pointer transition-colors"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-8 h-8 rounded-full bg-indigo-950/80 border border-indigo-700/60 flex items-center justify-center text-indigo-300 font-bold text-xs shrink-0">
+                                  📡
+                                </div>
+                                <div className="min-w-0">
+                                  <span className="font-semibold text-xs text-indigo-100 block truncate">{ch.name}</span>
+                                  <span className="text-[10px] text-indigo-300/75 block truncate">{ch.role}</span>
+                                </div>
+                              </div>
+                              <ChevronLeft size={14} className="text-indigo-400/70 rotate-180 shrink-0" />
+                            </button>
+                          ))
+                        )}
+                      </>
                     ) : (
-                      dmDirectory.map((c) => (
-                        <div
-                          key={c.npc_id}
-                          onClick={() => loadChatMessages(c.npc_id)}
-                          className="bg-neutral-900/60 border border-neutral-800 hover:border-cyan-500/50 rounded-xl p-2.5 flex items-center justify-between cursor-pointer transition-colors"
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="w-8 h-8 rounded-full bg-cyan-950/60 border border-cyan-800/60 flex items-center justify-center text-cyan-300 font-bold text-xs shrink-0">
-                              <User size={14} />
-                            </div>
-                            <div className="min-w-0">
-                              <span className="font-semibold text-xs text-gray-200 block truncate">{c.name}</span>
-                              <span className="text-[10px] text-gray-400 block truncate">{c.role}</span>
-                            </div>
+                      <>
+                        <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider block">
+                          {t('contacts.title', 'Contacts')} ({dmDirectory.length})
+                        </span>
+                        {dmDirectory.length === 0 ? (
+                          <div className="text-center py-10 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl">
+                            <MessageSquare size={24} className="mx-auto opacity-30 text-cyan-400 mb-1" />
+                            <p className="text-xs">{t('contacts.no_contacts', 'No personal contacts unlocked yet.')}</p>
+                            <p className="text-[10px] text-gray-500 mt-1">
+                              {t('contacts.unlock_hint', 'Ask for someone\'s number in conversation, add them on PeerPulse, or reach Friend standing (100+).')}
+                            </p>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            {c.score !== null && (
-                              <span className="text-[10px] font-mono text-pink-400 flex items-center gap-0.5">
-                                <Heart size={10} /> {c.score}
-                              </span>
-                            )}
-                            <ChevronLeft size={14} className="text-gray-500 rotate-180" />
-                          </div>
-                        </div>
-                      ))
+                        ) : (
+                          dmDirectory.map((c) => (
+                            <button
+                              key={c.npc_id}
+                              type="button"
+                              onClick={() => loadChatMessages(c.npc_id)}
+                              className={`w-full text-left bg-neutral-900/60 border rounded-xl p-2.5 flex items-center justify-between cursor-pointer transition-colors ${
+                                c.is_blocked_contact
+                                  ? 'border-red-900/60 hover:border-red-700/70'
+                                  : 'border-neutral-800 hover:border-cyan-500/50'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className={`w-8 h-8 rounded-full border flex items-center justify-center font-bold text-xs shrink-0 ${
+                                  c.is_blocked_contact
+                                    ? 'bg-red-950/60 border-red-800/60 text-red-300'
+                                    : 'bg-cyan-950/60 border-cyan-800/60 text-cyan-300'
+                                }`}>
+                                  <User size={14} />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className={`font-semibold text-xs truncate ${c.deceased ? 'line-through text-gray-500' : 'text-gray-200'}`}>{c.name}</span>
+                                    {c.is_blocked_contact && (
+                                      <span className="text-[8.5px] px-1 py-0.2 rounded bg-red-950/80 text-red-300 border border-red-700/60 font-bold uppercase shrink-0">
+                                        🚫 {t('contacts.blocked_badge', 'Blocked')}
+                                      </span>
+                                    )}
+                                    {c.anomalous_npc_tag === 'special_agent' && (
+                                      <span className="text-[8.5px] px-1 py-0.2 rounded bg-cyan-950/70 text-cyan-300 border border-cyan-700/50 font-bold uppercase shrink-0">
+                                        ⚡ {t('codex.special_agent', 'Special Agent')}
+                                      </span>
+                                    )}
+                                    {c.anomalous_npc_tag === 'civilian' && (
+                                      <span className="text-[8.5px] px-1 py-0.2 rounded bg-slate-900/80 text-slate-300 border border-slate-700/60 font-semibold uppercase shrink-0">
+                                        {t('codex.civilian', 'Civilian')}
+                                      </span>
+                                    )}
+                                    {c.deceased && (
+                                      <span className="text-[8.5px] px-1 py-0.2 rounded bg-rose-950/80 text-rose-300 border border-rose-700/60 font-bold uppercase shrink-0">
+                                        💀 {t('codex.deceased', 'Deceased')}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-[10px] text-gray-400 block truncate">{c.role}</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {c.score !== null && (
+                                  <span className={`text-[10px] font-mono flex items-center gap-0.5 ${c.is_blocked_contact ? 'text-red-400' : 'text-pink-400'}`}>
+                                    <Heart size={10} /> {c.score}
+                                  </span>
+                                )}
+                                <ChevronLeft size={14} className="text-gray-500 rotate-180" />
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -1357,7 +1628,7 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                                     ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                                     : 'bg-purple-900/30 text-purple-300 border border-purple-700/40'
                                 }`}>
-                                  {isLead ? '⚡' : (post.author_name ? post.author_name[0] : '?')}
+                                  {isLead ? '⚡' : getAvatarInitial(post.author_name)}
                                 </div>
                                 <div>
                                   <div className="flex items-center gap-1.5">
@@ -1478,7 +1749,19 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                       <div className="bg-neutral-900/90 border border-neutral-800 rounded-2xl p-3.5 space-y-2.5">
                         <div className="flex items-start justify-between gap-2">
                           <div>
-                            <h5 className="font-bold text-xs text-gray-100">{peerProfile.name}</h5>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h5 className="font-bold text-xs text-gray-100">{peerProfile.name}</h5>
+                              {peerProfile.anomalous_npc_tag === 'special_agent' && (
+                                <span className="text-[8.5px] px-1 py-0.2 rounded bg-cyan-950/70 text-cyan-300 border border-cyan-700/50 font-bold uppercase">
+                                  ⚡ {t('codex.special_agent', 'Special Agent')}
+                                </span>
+                              )}
+                              {peerProfile.anomalous_npc_tag === 'civilian' && (
+                                <span className="text-[8.5px] px-1 py-0.2 rounded bg-slate-900/80 text-slate-300 border border-slate-700/60 font-semibold uppercase">
+                                  {t('codex.civilian', 'Civilian')}
+                                </span>
+                              )}
+                            </div>
                             <span className="text-[10px] font-mono text-cyan-400 block">{peerProfile.handle}</span>
                           </div>
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-800 text-gray-300 border border-neutral-700 font-semibold">
@@ -1505,7 +1788,7 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                           )}
                           {peerProfile.facility && (
                             <span className="px-2 py-0.5 rounded-lg bg-neutral-950 text-gray-400 border border-neutral-800">
-                              📍 {peerProfile.facility}
+                              📍 {formatCleanLocation(peerProfile.facility, { includeZone: false })}
                             </span>
                           )}
                         </div>
@@ -1608,10 +1891,22 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="flex items-center gap-2.5 min-w-0">
                                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-900/50 to-blue-900/50 border border-cyan-700/40 flex items-center justify-center font-bold text-xs text-cyan-200 shrink-0">
-                                      {peer.name ? peer.name[0] : '?'}
+                                      {getAvatarInitial(peer.name)}
                                     </div>
                                     <div className="min-w-0">
-                                      <h6 className="font-bold text-xs text-gray-100 truncate">{peer.name}</h6>
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <h6 className="font-bold text-xs text-gray-100 truncate">{peer.name}</h6>
+                                        {peer.anomalous_npc_tag === 'special_agent' && (
+                                          <span className="text-[8.5px] px-1 py-0.2 rounded bg-cyan-950/70 text-cyan-300 border border-cyan-700/50 font-bold uppercase shrink-0">
+                                            ⚡ {t('codex.special_agent', 'Special Agent')}
+                                          </span>
+                                        )}
+                                        {peer.anomalous_npc_tag === 'civilian' && (
+                                          <span className="text-[8.5px] px-1 py-0.2 rounded bg-slate-900/80 text-slate-300 border border-slate-700/60 font-semibold uppercase shrink-0">
+                                            {t('codex.civilian', 'Civilian')}
+                                          </span>
+                                        )}
+                                      </div>
                                       <span className="text-[10px] font-mono text-cyan-400/90 block truncate">{peer.handle}</span>
                                     </div>
                                   </div>
@@ -1940,7 +2235,7 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                     >
                       <div className="flex justify-between items-start gap-2">
                         <div className="min-w-0">
-                          <span className="font-bold text-xs text-gray-100 block">{bounty.title}</span>
+                          <span className="font-bold text-xs text-gray-100 block">{cleanProseLocations(bounty.title)}</span>
                           <span className="text-[10px] font-mono text-rose-400 block mt-0.5">
                             {bounty.quest_type || 'Campus Request'}
                             {bounty.target_name ? ` • Target: ${bounty.target_name}` : ''}
@@ -1953,7 +2248,7 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                         )}
                       </div>
 
-                      <p className="text-[11px] text-gray-300 leading-snug">{bounty.objective || bounty.description}</p>
+                      <p className="text-[11px] text-gray-300 leading-snug">{cleanProseLocations(bounty.objective || bounty.description)}</p>
 
                       {/* Rewards row */}
                       <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono pt-0.5">
@@ -2009,7 +2304,7 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                     >
                       <div className="flex justify-between items-start gap-2">
                         <div>
-                          <span className="font-bold text-xs text-amber-200 block">{quest.title}</span>
+                          <span className="font-bold text-xs text-amber-200 block">{cleanProseLocations(quest.title)}</span>
                           <span className="text-[10px] font-mono text-gray-400 block mt-0.5">
                             {quest.quest_type}
                             {quest.target_name ? ` • Target: ${quest.target_name}` : ''}
@@ -2020,7 +2315,7 @@ const PhoneModal = ({ isOpen, onClose, phoneHook, codexHook, session, user, onRe
                         </span>
                       </div>
 
-                      <p className="text-[11px] text-gray-300 leading-snug">{quest.objective}</p>
+                      <p className="text-[11px] text-gray-300 leading-snug">{cleanProseLocations(quest.objective)}</p>
 
                       {quest.progress && (
                         <div className="bg-neutral-950/80 p-1.5 rounded-lg border border-neutral-800 text-[10px] font-mono text-cyan-300 flex items-center justify-between">

@@ -188,9 +188,22 @@ def get_node_effective_access_info(
             if sched_access.get("curfew_label") and not curfew_label:
                 curfew_label = sched_access["curfew_label"]
 
+    # Anomalous Incursions Tiered HQ Access Gate evaluation
+    anom_hq = evaluate_anomalous_hq_access(session_id, node, fac_node, scen_key=scen_key)
+    if anom_hq.get("force_open"):
+        tier = "open"
+        is_unlocked = True
+    elif anom_hq.get("force_restricted"):
+        tier = "restricted"
+        if not sched_reason_label and anom_hq.get("reason_label"):
+            sched_reason_label = anom_hq["reason_label"]
+            sched_reason_code = "faction_hq_restricted"
+
     # Status Badge
     if is_unlocked and (tier in ("restricted", "private") or schedule_locked):
         status_badge = "Unlocked"
+    elif sched_access.get("badge_override") and sched_reason_code == "theme_park_anomalous_shift":
+        status_badge = sched_access["badge_override"]
     elif schedule_locked and sched_access.get("badge_override") and sched_reason_code in ("commercial_closed", "weekend_closed", "restricted"):
         status_badge = sched_access["badge_override"]
     elif curfew_active:
@@ -244,8 +257,14 @@ def record_node_unlock(
         updates["unlocked_until_day"] = current_day
 
     db.update_world_node_state(session_id, node_id, updates)
-    if node.get("parent_id") and node.get("node_type") == "ROOM":
-        db.update_world_node_state(session_id, node["parent_id"], updates)
+    parent_id = str(node.get("parent_id") or "")
+    multi_wing_parents = (
+        "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
+        "loc_general_hospital", "loc_theme_park", "loc_eastern_temple", "loc_botanical_zoo",
+        "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
+    )
+    if parent_id and node.get("node_type") == "ROOM" and not parent_id.startswith("bld_school_") and parent_id not in multi_wing_parents:
+        db.update_world_node_state(session_id, parent_id, updates)
     return True
 
 
@@ -296,13 +315,156 @@ def has_npc_authority_for_node(npc: dict, node: dict, parent_node: dict | None =
         return True
     if any(k in club for k in ("occult", "paranormal", "tarot")) and "old_storage" in full_target:
         return True
+    if any(k in club for k in ("velvet", "secret society", "after-hours", "salon", "midnight", "crimson", "hedon")) and ("nsfw_faction_hq" in full_target or "velvet basement" in full_target):
+        return True
+    if str(npc.get("faction_category") or (npc.get("basic_info") or {}).get("faction_category") or "").lower() == "nsfw_club" and ("nsfw_faction_hq" in full_target or "velvet basement" in full_target):
+        return True
 
     # Private residence ownership (resident's home)
     if "house" in full_target or "residence" in full_target or "bedroom" in full_target:
         if name and (name in full_target or any(part in full_target for part in name.split() if len(part) >= 3)):
             return True
 
+    # Anomalous Incursions Faction HQ authority
+    f_arch = str(npc.get("faction_archetype_key") or (npc.get("basic_info") or {}).get("faction_archetype_key") or "").lower()
+    if f_arch:
+        if f_arch == "public_agency" and ("loc_hq_" in full_target or "zone_agency_hq" in full_target or "loc_agency_hq" in full_target):
+            return True
+        if f_arch == "private_agency_1" and ("loc_private_hq_1" in full_target or "sub_priv1_" in full_target):
+            return True
+        if f_arch == "private_agency_2" and ("loc_private_hq_2" in full_target or "sub_priv2_" in full_target):
+            return True
+        if f_arch == "monastic_order" and ("loc_et_" in full_target or "zone_eastern_temple" in full_target):
+            return True
+        if f_arch == "cult_faction" and ("loc_cult_" in full_target or "sub_cult_" in full_target):
+            return True
+        if f_arch == "clandestine_faction" and ("loc_clandestine_" in full_target or "sub_synd_" in full_target):
+            return True
+
     return False
+
+
+def evaluate_anomalous_hq_access(
+    session_id: int,
+    node: dict,
+    fac_node: dict | None = None,
+    scen_key: str = "",
+) -> dict[str, Any]:
+    """
+    Evaluates Tiered HQ Access Gates for Anomalous Incursions:
+    - Public Lobbies, Contract Boards & Public Agency Shops are open to all friendly operatives & Freelancers.
+    - Inner Sanctums, Containment Vaults, Operative Lounges & Private Armories require membership in that faction
+      (or an active Story/Bounty quest waypoint or companion escort).
+    - Cult & Clandestine HQs are restricted unless unlocked by a Story/Bounty waypoint or breach check.
+    """
+    try:
+        from scenario_data import is_anomalous_incursions_scenario
+        if not is_anomalous_incursions_scenario(scen_key):
+            return {}
+    except Exception:
+        return {}
+
+    n_id = str(node.get("node_id") or "").lower()
+    n_name = str(node.get("name") or "").lower()
+    p_id = str((fac_node or {}).get("node_id") or "").lower()
+    p_name = str((fac_node or {}).get("name") or "").lower()
+    combined = f"{n_id} {p_id} {n_name} {p_name}"
+
+    required_arch = ""
+    is_open_lobby_or_shop = False
+
+    # 1. Public Agency HQ (`loc_agency_hq` / `zone_agency_hq` / `loc_hq_*`)
+    if "loc_hq_" in combined or n_id in ("zone_agency_hq", "loc_agency_hq") or p_id in ("zone_agency_hq", "loc_agency_hq"):
+        if n_id == "loc_agency_hq":
+            is_open_lobby_or_shop = True
+        elif any(k in combined for k in (
+            "loc_hq_main_lobby", "loc_hq_tactical_armory", "loc_hq_field_outfitter",
+            "loc_hq_medical_bay", "loc_hq_cleansing_bay", "loc_hq_canteen_cafe",
+            "loc_hq_executive_dispatch", "entrance", "lobby", "reception", "bounty"
+        )) and "loc_hq_containment_sector" not in combined and "loc_hq_research_division" not in combined:
+            is_open_lobby_or_shop = True
+        elif any(k in combined for k in (
+            "loc_hq_containment_sector", "loc_hq_research_division", "loc_hq_parapsych_lab",
+            "loc_hq_training_range", "loc_hq_training_arena", "loc_hq_agent_dormitories",
+        )):
+            required_arch = "public_agency"
+
+    # 2. Private Agency #1 HQ (`loc_private_hq_1` / `sub_priv1_*`)
+    elif "loc_private_hq_1" in combined or "sub_priv1_" in combined:
+        if n_id == "loc_private_hq_1" or any(k in combined for k in ("sub_priv1_entrance", "sub_priv1_dispatch", "entrance", "lobby", "contract board", "contract & tactical dispatch")):
+            is_open_lobby_or_shop = True
+        else:
+            required_arch = "private_agency_1"
+
+    # 3. Private Agency #2 HQ (`loc_private_hq_2` / `sub_priv2_*`)
+    elif "loc_private_hq_2" in combined or "sub_priv2_" in combined:
+        if n_id == "loc_private_hq_2" or any(k in combined for k in ("sub_priv2_entrance", "sub_priv2_dispatch", "entrance", "lobby", "contract board", "contract & tactical dispatch")):
+            is_open_lobby_or_shop = True
+        else:
+            required_arch = "private_agency_2"
+
+    # 4. Monastic Shrine Order HQ (`loc_eastern_temple` / `loc_et_*`)
+    elif "loc_et_" in combined or n_id in ("loc_eastern_temple", "zone_eastern_temple"):
+        if any(k in combined for k in ("loc_et_five_story_pagoda", "loc_et_reliquary_pagoda", "loc_et_exorcist_dojo")) and "entrance" not in n_name:
+            required_arch = "monastic_order"
+        else:
+            is_open_lobby_or_shop = True
+
+    # 5. Cult & Clandestine HQs (`loc_cult_sanctum_hq`, `loc_clandestine_syndicate_hq`)
+    elif "loc_cult_sanctum_hq" in combined or "sub_cult_" in combined:
+        required_arch = "cult_faction"
+    elif "loc_clandestine_syndicate_hq" in combined or "sub_synd_" in combined:
+        required_arch = "clandestine_faction"
+
+    if is_open_lobby_or_shop and not required_arch:
+        return {"force_open": True}
+    if not required_arch:
+        return {}
+
+    from mechanics.social.factions import get_anomalous_faction_state
+    f_state = get_anomalous_faction_state(session_id)
+    player_arch = str(f_state.get("faction_archetype_key") or "").lower()
+    if player_arch == required_arch:
+        return {"force_open": True, "unlocked_by_faction": required_arch}
+
+    # Check if an active Story Quest or Accepted Bounty targets this location
+    try:
+        quests = db.get_session_quests(session_id) or []
+        for q in quests:
+            if str(q.get("status") or "").lower() in ("active", "accepted", "in_progress"):
+                cand_locs = [
+                    str(q.get("target_location") or "").lower(),
+                    str(q.get("waypoint") or "").lower(),
+                    str(q.get("location") or "").lower(),
+                ]
+                for wp_item in (q.get("waypoints") or []):
+                    if isinstance(wp_item, dict):
+                        cand_locs.append(str(wp_item.get("location") or wp_item.get("name") or "").lower())
+                    elif wp_item:
+                        cand_locs.append(str(wp_item).lower())
+                for wp in cand_locs:
+                    if wp and (wp in combined or (n_name and len(n_name) >= 5 and n_name in wp) or (p_name and len(p_name) >= 5 and p_name in wp)):
+                        return {
+                            "force_open": True,
+                            "unlocked_by_quest": bool(q.get("is_story_quest")),
+                            "unlocked_by_bounty": not bool(q.get("is_story_quest")),
+                        }
+    except Exception:
+        pass
+
+    label_map = {
+        "public_agency": "Restricted Bureau Inner Sector (Public Agency Clearance Required)",
+        "private_agency_1": "Restricted Syndicate Vault & Armory (Agency #1 Operative Clearance Required)",
+        "private_agency_2": "Restricted Rival Syndicate Vault & Armory (Agency #2 Operative Clearance Required)",
+        "monastic_order": "Restricted Monastic Inner Sanctum (Order Initiate Clearance Required)",
+        "cult_faction": "Ward-Sealed Occult Sanctum (Hostile Cult Restricted Area)",
+        "clandestine_faction": "Biometric Clandestine Vault (Unauthorized Entry Prohibited)",
+    }
+    return {
+        "force_restricted": True,
+        "required_faction_archetype": required_arch,
+        "reason_label": label_map.get(required_arch, "Restricted Faction Sector"),
+    }
 
 
 def evaluate_node_access_gate(
@@ -368,9 +530,11 @@ def evaluate_node_access_gate(
                     active_companions.append({"name": dp})
 
     current_action_label = " ".join(str(a.get("label", "") if isinstance(a, dict) else a) for a in (actions or [])).lower()
-    is_breach_action = any(w in current_action_label for w in (
+    has_check = bool(actions and isinstance(actions[0], dict) and (actions[0].get("check") or str(actions[0].get("stat", "NONE")).upper() != "NONE"))
+    is_breach_action = has_check or any(w in current_action_label for w in (
         "sneak", "pick", "climb", "scale", "fence", "lockpick", "force", "break in", "bypass",
-        "talk your way", "convince", "excuse", "nurse", "ring the intercom", "buzz", "apologize"
+        "talk your way", "convince", "excuse", "nurse", "ring the intercom", "buzz", "apologize",
+        "audition", "charm", "cellar", "grate"
     ))
 
     action_check_tier = "success"
@@ -429,7 +593,8 @@ def evaluate_node_access_gate(
         if player_on_campus and not target_on_campus and not is_npc_private_home:
             has_truancy_pass = (
                 (gate_state.get("truancy_unlocked_day") or 0) >= curr_day
-                or any(k in inv_str for k in ("hall pass", "nurse pass", "early dismissal", "staff pass", "gate pass", "master key", "council badge"))
+                or (isinstance(session, dict) and int(session.get("infirmary_pass_day") or 0) >= curr_day)
+                or any(k in inv_str for k in ("hall pass", "nurse pass", "sick pass", "early dismissal", "staff pass", "gate pass", "master key", "council badge"))
                 or any(
                     isinstance(comp, dict)
                     and any(r in str(comp.get("role") or (comp.get("basic_info") or {}).get("role") or "").lower() for r in ("teacher", "faculty", "staff", "nurse", "counselor", "principal"))
@@ -522,6 +687,134 @@ def evaluate_node_access_gate(
     if low_id in ("loc_player_house", "sub_player_bedroom") or "player's house" in display_name.lower():
         return {"gated": False}
 
+    # 1b. Love Hotel Automated Suite Rental (`$40` Mirrored Suite / `$80` Rooftop Jacuzzi Suite + Partner Waiver)
+    node_state_raw = db.get_world_node_state(session_id, target_node_id)
+    if low_id in ("sub_love_hotel_mirrored", "sub_love_hotel_jacuzzi") or node_state_raw.get("suite_fee"):
+        suite_fee = int(node_state_raw.get("suite_fee") or (80 if "jacuzzi" in low_id else 40))
+        suite_bonus = 3 if "jacuzzi" in low_id else 1
+        if (
+            (node_state_raw.get("suite_paid_day") or 0) >= curr_day
+            or (node_state_raw.get("unlocked_until_day") or 0) >= curr_day
+            or node_state_raw.get("unlocked_permanent")
+        ):
+            if isinstance(session, dict):
+                session["active_love_hotel_suite_bonus"] = suite_bonus
+            return {"gated": False, "love_hotel_suite_bonus": suite_bonus}
+
+        # Check Partner-Invited Waiver ($0)
+        partner_waived = bool(
+            isinstance(session, dict)
+            and (
+                session.get("partner_treating_love_hotel")
+                or int(session.get("love_hotel_waived_day") or 0) >= curr_day
+            )
+        )
+        if not partner_waived:
+            appts_lh = (db.get_phone_appointments(session_id, status="pending") or []) + (db.get_phone_appointments(session_id, status="arrived") or [])
+            for appt in appts_lh:
+                appt_t = str(appt.get("target_node_id") or "").lower()
+                appt_l = str(appt.get("rendezvous_location") or "").lower()
+                if any(k in f"{appt_t} {appt_l}" for k in ("love_hotel", "love hotel", "mirrored luxury", "rooftop jacuzzi")):
+                    partner_waived = True
+                    break
+
+        if partner_waived:
+            db.update_world_node_state(
+                session_id,
+                target_node_id,
+                {"suite_paid_day": curr_day, "unlocked_until_day": curr_day, "last_unlock_reason": "partner_treated_suite"},
+            )
+            if isinstance(session, dict):
+                session["active_love_hotel_suite_bonus"] = suite_bonus
+            return {
+                "gated": False,
+                "unlocked_by": "partner_treated_suite",
+                "suite_fee_paid": 0,
+                "love_hotel_suite_bonus": suite_bonus,
+                "prompt_directive": (
+                    f"[STAGE DIRECTION — SUITE TREATED BY PARTNER]: Your partner already handled the automated kiosk fee "
+                    f"for {display_name} ($0 charged to you; suite unlocked for the day/night)."
+                ),
+            }
+
+        # Check player gold & deduct automated suite fee
+        char_obj = None
+        for member in (party or []):
+            cand = member[0] if isinstance(member, (tuple, list)) else member
+            if isinstance(cand, dict) and (cand.get("user_id") or cand.get("gold") is not None):
+                char_obj = cand
+                break
+        user_id = int((char_obj or {}).get("user_id") or (session.get("host_id") if isinstance(session, dict) else 0) or 0)
+        db_char = db.get_character(user_id) if user_id else None
+        avail_gold = int(
+            (char_obj.get("gold") if (char_obj and char_obj.get("gold") is not None) else (db_char or {}).get("gold")) or 0
+        )
+
+        if avail_gold >= suite_fee:
+            if user_id and db_char:
+                db.apply_hp_mp_delta(user_id, gold_delta=-suite_fee)
+            if isinstance(char_obj, dict):
+                char_obj["gold"] = max(0, avail_gold - suite_fee)
+            db.update_world_node_state(
+                session_id,
+                target_node_id,
+                {"suite_paid_day": curr_day, "unlocked_until_day": curr_day, "last_unlock_reason": "suite_fee_paid"},
+            )
+            if isinstance(session, dict):
+                session["active_love_hotel_suite_bonus"] = suite_bonus
+            return {
+                "gated": False,
+                "unlocked_by": "love_hotel_suite_payment",
+                "suite_fee_paid": suite_fee,
+                "love_hotel_suite_bonus": suite_bonus,
+                "prompt_directive": (
+                    f"[STAGE DIRECTION — AUTOMATED SUITE UNLOCKED]: The discreet touchscreen kiosk dispenses a magnetic keycard "
+                    f"for {display_name} (${suite_fee} paid; unlocked for the rest of the day/night)."
+                ),
+            }
+        else:
+            lobby_choices = []
+            if low_id == "sub_love_hotel_jacuzzi" and avail_gold >= 40:
+                lobby_choices.append(Phase2Choice("Rent the Mirrored Luxury Suite ($40) instead", stat="NONE", requirement=0))
+            lobby_choices.append(Phase2Choice("Step back into the Automated Touchscreen Check-In Lobby", stat="NONE", requirement=0))
+            return {
+                "gated": True,
+                "node_id": "sub_love_hotel_lobby",
+                "facility_node_id": "loc_love_hotel",
+                "node_name": display_name,
+                "reason_code": "insufficient_funds",
+                "reason_label": f"Automated Suite Kiosk Requires ${suite_fee} (You have ${avail_gold})",
+                "focal_point": "At the Automated Touchscreen Check-In Kiosk",
+                "prompt_directive": (
+                    f"[SYSTEM: LOVE HOTEL AUTOMATED SUITE KIOSK — INSUFFICIENT FUNDS]\n"
+                    f"The glowing touchscreen panel in the clerkless lobby displays a ${suite_fee} rate for {display_name}, "
+                    f"but the player currently only carries ${avail_gold}. Halt at the Automated Touchscreen Check-In Lobby."
+                ),
+                "barrier_choices": lobby_choices,
+            }
+
+    # 1c. NSFW Secret Society HQ (`loc_nsfw_faction_hq` / `Velvet Basement Salon`) Speakeasy Gate
+    if low_id == "loc_nsfw_faction_hq" or "velvet basement" in display_name.lower():
+        if isinstance(session, dict) and (
+            session.get("nsfw_faction_member")
+            or int(session.get("nsfw_faction_invited_day") or 0) >= curr_day
+        ):
+            record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="nsfw_faction_invite")
+            return {"gated": False, "unlocked_by": "nsfw_faction_invite"}
+        try:
+            for fac in (db.get_factions(session_id) or []):
+                f_cat = str(fac.get("category") or "").lower()
+                f_hq = str(fac.get("hq_location_id") or "").lower()
+                if f_cat == "nsfw_club" or "velvet basement" in f_hq or "loc_nsfw_faction_hq" in f_hq:
+                    f_rep = int(fac.get("reputation_score") or fac.get("reputation") or 0)
+                    p_rank = int(fac.get("player_rank") or 0)
+                    f_rank = str(fac.get("player_title") or fac.get("member_rank") or "").strip().lower()
+                    if bool(fac.get("is_member")) or p_rank > 0 or f_rank not in ("", "none", "outsider", "non-member") or f_rep >= 25:
+                        record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="nsfw_faction_standing")
+                        return {"gated": False, "unlocked_by": "nsfw_faction_standing"}
+        except Exception:
+            pass
+
     # 2. Check access info & existing unlocks
     access_info = get_node_effective_access_info(
         session_id, target_node_id, current_day=curr_day, current_minute=curr_min, scen_key=scen_key
@@ -546,8 +839,26 @@ def evaluate_node_access_gate(
             res["prompt_directive"] = late_arrival_directive
         return res
 
-    # 3. Check Inventory for Key / Pass / Badge
-    if any(k in inv_str for k in ("key", "master key", "staff pass", "council badge")):
+    # Special Rule: Theme Park 22:00–08:00 Anomalous Shift allows nocturnal field investigation past warped turnstiles
+    if access_info.get("schedule_reason_code") == "theme_park_anomalous_shift":
+        return {
+            "gated": False,
+            "is_trespassing": True,
+            "anomalous_shift_active": True,
+            "prompt_directive": (
+                "[STAGE DIRECTION — THEME PARK ANOMALOUS SHIFT (22:00–08:00)]: "
+                "The Theme Park & Amusement Resort is closed to civilian crowds after 10:00 PM, "
+                "but active spatial distortion leaves the shuttered turnstiles warped open. "
+                "Depict an eerie nocturnal carnival atmosphere: reversed calliope music, flickering neon midway lights, "
+                "zero mundane tourists, and active anomalous phenomena."
+            ),
+        }
+
+    # 3. Check Inventory for Key / Pass / Badge (strict word-boundary match so "Keychain"/"Whiskey" never unlock vaults)
+    if re.search(
+        r"\b(master key|skeleton key|staff pass|council badge|keycard|passcard|access card|clearance badge|door key|gate key|vault key|sanctum key|room key|office key|key)\b",
+        inv_str,
+    ):
         record_node_unlock(session_id, target_node_id, unlock_type="permanent", current_day=curr_day, reason="key")
         return {"gated": False, "unlocked_by": "key"}
 
@@ -617,6 +928,12 @@ def evaluate_node_access_gate(
             patrol_confrontation = is_crit_fail_tier or curfew_active or is_trespassing
             patrol_npc = None
             if patrol_confrontation:
+                if isinstance(session, dict):
+                    try:
+                        from mechanics.stealth import break_stealth
+                        break_stealth(session, reason="caught_at_restricted_gate", break_all=True)
+                    except Exception:
+                        pass
                 # Try pulling an existing authority figure from contacts / school roster (User Decision #1)
                 roster = db.get_school_roster(session_id) or []
                 contacts = db.get_contacts(session_id) or []
@@ -688,18 +1005,27 @@ def evaluate_node_access_gate(
     elif tier == "private":
         reason_code = "private_intercom"
         reason_label = "Private Residence Gate"
+    elif low_id == "loc_nsfw_faction_hq" or "velvet basement" in display_name.lower():
+        reason_code = "speakeasy_restricted"
+        reason_label = "Secret Society Speakeasy Door (Membership, Invite, or Audition Required)"
     else:
         reason_code = "restricted"
         reason_label = sched_reason_label or "Restricted Access"
 
     barrier_choices = []
-    if not is_lock_jammed:
-        barrier_choices.append(Phase2Choice(f"[AGI] Sneak in or pick the lock to enter {display_name}", stat="AGI", requirement=12))
-    if tier == "private":
-        barrier_choices.append(Phase2Choice(f"[CHA] Ring the intercom and ask to be let into {display_name}", stat="CHA", requirement=10))
+    if low_id == "loc_nsfw_faction_hq" or "velvet basement" in display_name.lower():
+        if not is_lock_jammed:
+            barrier_choices.append(Phase2Choice(f"[AGI] Slip quietly through the cellar service grate into {display_name}", stat="AGI", requirement=12))
+        barrier_choices.append(Phase2Choice(f"[CHA] Audition or charm the doorkeeper to gain entry to {display_name}", stat="CHA", requirement=12))
+        barrier_choices.append(Phase2Choice(f"Step away from {display_name}", stat="NONE", requirement=0))
     else:
-        barrier_choices.append(Phase2Choice(f"[CHA] Talk your way past authority or seek permission for {display_name}", stat="CHA", requirement=11))
-    barrier_choices.append(Phase2Choice(f"Turn back from {display_name}", stat="NONE", requirement=0))
+        if not is_lock_jammed:
+            barrier_choices.append(Phase2Choice(f"[AGI] Sneak in or pick the lock to enter {display_name}", stat="AGI", requirement=12))
+        if tier == "private":
+            barrier_choices.append(Phase2Choice(f"[CHA] Ring the intercom and ask to be let into {display_name}", stat="CHA", requirement=10))
+        else:
+            barrier_choices.append(Phase2Choice(f"[CHA] Talk your way past authority or seek permission for {display_name}", stat="CHA", requirement=11))
+        barrier_choices.append(Phase2Choice(f"Turn back from {display_name}", stat="NONE", requirement=0))
 
     trespass_note = (
         "\n- TRESPASSING WARNING: It is between 20:00 and 07:00. All students and teachers have gone home, "
@@ -833,12 +1159,16 @@ def get_privacy_nudge_choice(
 ) -> str | None:
     """
     Edge Case 7: When in a public sub-location with an active dialogue partner during
-    confidential, secret, or romantic tension, returns a choice to step into an adjacent secluded room.
+    confidential, secret, or romantic tension, returns a choice to step into an adjacent secluded room or prop.
     """
     if not session_id or not current_node_id or not partner_name:
         return None
 
     curr_node = db.get_world_node(session_id, current_node_id)
+    if not curr_node:
+        resolved_id = db.resolve_node_id_from_location(session_id, current_node_id)
+        if resolved_id:
+            curr_node = db.get_world_node(session_id, resolved_id)
     if not curr_node or curr_node.get("privacy_level") != "public":
         return None
 
@@ -861,12 +1191,26 @@ def get_privacy_nudge_choice(
     if not (is_romantic or is_secret_context):
         return None
 
-    # Find adjacent secluded sibling room under the same facility
+    # 1. Check for a secluded prop within the current room first
+    try:
+        from .seeds import get_node_props
+        scen_key = (session.get("scenario") if isinstance(session, dict) else "") or "high_school_drama"
+        curr_focal = str((session.get("focal_point") if isinstance(session, dict) else "") or "").lower()
+        room_props = get_node_props(session_id, curr_node["node_id"], scenario_key=scen_key)
+        secluded_prop_keywords = ("aisle", "alcove", "corner", "behind", "booth", "closet", "balcony", "stairwell", "under")
+        for pr in room_props:
+            pr_low = pr.lower()
+            if pr_low != curr_focal and any(k in pr_low for k in secluded_prop_keywords):
+                return Phase2Choice(f"Step into {pr} with {partner_name} for privacy", stat="NONE", requirement=0)
+    except Exception:
+        pass
+
+    # 2. Find adjacent secluded sibling room under the same facility
     all_nodes = db.get_session_world_nodes(session_id)
     siblings = [
         n for n in all_nodes
         if n.get("parent_id") == parent_id
-        and n.get("node_id") != current_node_id
+        and n.get("node_id") != curr_node["node_id"]
         and n.get("node_type") == "ROOM"
         and n.get("privacy_level") in ("semi_private", "private")
     ]

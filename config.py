@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.6.0"
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 

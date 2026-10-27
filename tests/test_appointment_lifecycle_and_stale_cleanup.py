@@ -86,13 +86,9 @@ class TestAppointmentLifecycleAndStaleCleanup(unittest.TestCase):
 
         game_engine.process_scene_npcs(result, session, new_loc=classroom, old_loc=rooftop)
 
-        # Maya's appointment should now be completed
-        with db.get_conn() as conn:
-            row = conn.execute(
-                "SELECT status FROM phone_appointments WHERE session_id = ? AND npc_id = ?",
-                (self.session_id, "maya_anderson")
-            ).fetchone()
-            self.assertEqual(row["status"], "completed")
+        # Maya's appointment should now be fulfilled in commitments_ledger (exposed as completed)
+        completed_appts = db.get_phone_appointments(self.session_id, status="completed")
+        self.assertTrue(any(a["npc_id"] == "maya_anderson" for a in completed_appts))
 
     def test_departing_npc_completes_appointment(self):
         """When an NPC departs in the narrative, their appointment is marked completed."""
@@ -104,18 +100,15 @@ class TestAppointmentLifecycleAndStaleCleanup(unittest.TestCase):
         session = db.get_session(self.session_id)
         result = {
             "npcs_present": [],
+            "cast_events": [{"type": "depart", "npc": "Sofia Anderson"}],
             "outcome_narrative": "Artemiusz watches Sofia depart, the soft click of the front door signaling her exit.",
             "next_narrative": "You relax in the quiet room."
         }
 
         game_engine.process_scene_npcs(result, session, new_loc=house, old_loc=house)
 
-        with db.get_conn() as conn:
-            row = conn.execute(
-                "SELECT status FROM phone_appointments WHERE session_id = ? AND npc_id = ?",
-                (self.session_id, "sofia_anderson")
-            ).fetchone()
-            self.assertEqual(row["status"], "completed")
+        completed_appts = db.get_phone_appointments(self.session_id, status="completed")
+        self.assertTrue(any(a["npc_id"] == "sofia_anderson" for a in completed_appts))
 
     def test_conversational_action_does_not_summon_absent_npc(self):
         """Clicking 'Speak with Sofia Anderson' when Sofia is not in the room must NOT spawn Sofia into the scene."""

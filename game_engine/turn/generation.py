@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Any, Optional, Dict, List, Tuple
 from .constants import *
 import db
 import re
@@ -180,6 +182,8 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
     hook_text = hook_context.get("hook_text", "")
 
     suggested_loc = hook_context.get("suggested_location", "")
+    if scenario_data.is_anomalous_incursions_scenario(scen_key) and session.get("anomalous_starting_location"):
+        suggested_loc = str(session["anomalous_starting_location"])
 
     arch_directive = hook_context.get("directive", "")
 
@@ -256,18 +260,113 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         except Exception:
             pass
 
-    # Deterministic Pre-Seeding: Lock spatial graph and starting world_node_id in 0ms BEFORE calling the LLM
+    # D21: Seed spatial world_nodes and lock starting current_node_id & canonical location BEFORE spawning roles or calling Turn 0 LLM
+    locked_opening_node_id = ""
     if session.get("id") and is_location_engine_enabled(scen_key):
         try:
             from mechanics.world.locations.graph_seeder import ensure_session_spatial_graph_seeded
+            from mechanics.world.locations.pathfinding import format_node_hierarchy
             ensure_session_spatial_graph_seeded(session["id"], scen_key, char_name=first_char_name)
-            if suggested_loc:
-                pre_node_id = db.resolve_node_id_from_location(session["id"], suggested_loc)
-                if pre_node_id:
-                    session["current_node_id"] = pre_node_id
-                    db.update_session(session["id"], current_node_id=pre_node_id)
+            pre_node_id = session.get("current_node_id") or ""
+            if not pre_node_id and suggested_loc:
+                pre_node_id = db.resolve_node_id_from_location(session["id"], suggested_loc) or ""
+            if not pre_node_id:
+                all_wn = db.get_session_world_nodes(session["id"]) or []
+                for wn in all_wn:
+                    if str(wn.get("tier") or "").upper() in ("ROOM", "FACILITY"):
+                        pre_node_id = str(wn["node_id"])
+                        break
+                if not pre_node_id and all_wn:
+                    pre_node_id = str(all_wn[0]["node_id"])
+            if pre_node_id:
+                locked_opening_node_id = pre_node_id
+                canon_loc = format_node_hierarchy(session["id"], pre_node_id) or suggested_loc
+                if canon_loc:
+                    suggested_loc = canon_loc
+                    session["current_location"] = canon_loc
+                session["current_node_id"] = pre_node_id
+                db.update_session(session["id"], current_node_id=pre_node_id, current_location=session.get("current_location") or suggested_loc)
         except Exception as e:
             log.warning("Pre-LLM spatial graph seed warning in generate_opening_scene: %s", e)
+
+    # Modernized starting hook integrations: focal point, scheduled roles, physical state, starting prop, visual cues
+    hook_focal_point = hook_context.get("focal_point", "")
+    if hook_focal_point:
+        session["focal_point"] = hook_focal_point
+        try:
+            db.update_session(session["id"], focal_point=hook_focal_point)
+        except Exception as e:
+            log.warning("Failed updating focal_point in generate_opening_scene: %s", e)
+
+    scheduled_roles = hook_context.get("scheduled_roles", [])
+    if scheduled_roles:
+        try:
+            from game_engine.npcs.stage_manager import _spawn_canonical_role_npc_pre_turn
+            from mechanics.social.persona.actor_card import derive_initial_micro_blocking
+            curr_npcs = list(session.get("current_npcs") or [])
+            curr_npc_names = {game_engine._get_npc_name(n).lower() for n in curr_npcs if n}
+            for role_title in scheduled_roles:
+                if role_title:
+                    spawned = _spawn_canonical_role_npc_pre_turn(session, role_title, suggested_loc or "")
+                    if spawned and spawned.get("name"):
+                        sp_name = spawned["name"]
+                        if sp_name.lower() not in curr_npc_names:
+                            micro = derive_initial_micro_blocking(
+                                spawned,
+                                current_location=suggested_loc or "",
+                                time_slot=session.get("time_slot", "morning"),
+                                stage_role="room_bystander"
+                            )
+                            spawned["spot_and_posture"] = micro.get("spot_and_posture", "")
+                            spawned["active_prop"] = micro.get("active_prop", "")
+                            curr_npcs.append(spawned)
+                            curr_npc_names.add(sp_name.lower())
+            session["current_npcs"] = curr_npcs
+            db.update_session(session["id"], current_npcs_json=json.dumps(curr_npcs))
+        except Exception as e:
+            log.warning("Failed spawning scheduled_roles in generate_opening_scene: %s", e)
+
+    initial_phys = hook_context.get("initial_physical_state") or {}
+    if initial_phys and session.get("id"):
+        try:
+            from mechanics.social.physical_state import upsert_actor_physical_state
+            for p_entry in party:
+                p_char = p_entry[0] if isinstance(p_entry, (tuple, list)) else p_entry
+                if isinstance(p_char, dict) and p_char.get("name"):
+                    upsert_actor_physical_state(session["id"], p_char["name"], initial_phys)
+        except Exception as e:
+            log.warning("Failed applying initial_physical_state in generate_opening_scene: %s", e)
+
+    starting_prop = hook_context.get("starting_prop")
+    if starting_prop and party:
+        lead_uid = None
+        first_elem = party[0]
+        if isinstance(first_elem, (tuple, list)) and len(first_elem) >= 1 and isinstance(first_elem[0], dict):
+            lead_uid = first_elem[0].get("user_id")
+        elif isinstance(first_elem, (tuple, list)) and len(first_elem) >= 2 and isinstance(first_elem[1], int):
+            lead_uid = first_elem[1]
+        elif isinstance(first_elem, dict):
+            lead_uid = first_elem.get("user_id")
+        if lead_uid and isinstance(starting_prop, dict) and starting_prop.get("name"):
+            try:
+                already_granted = str(session.get("opening_starting_prop_name") or "").strip().lower() == str(starting_prop["name"]).strip().lower()
+                if not already_granted:
+                    db.add_item(
+                        user_id=lead_uid,
+                        name=starting_prop["name"],
+                        item_type=starting_prop.get("item_type", "tool"),
+                        effect=starting_prop.get("effect", ""),
+                        force=True
+                    )
+                    session["opening_starting_prop_name"] = starting_prop["name"]
+                    if session.get("id"):
+                        db.update_session(session["id"], extra={"opening_starting_prop_name": starting_prop["name"]})
+            except Exception as e:
+                log.warning("Failed adding starting_prop to inventory in generate_opening_scene: %s", e)
+
+    visual_cues = hook_context.get("visual_cues", "")
+    if visual_cues:
+        session["opening_visual_cues"] = visual_cues
 
     time_prompt_block = format_llm_time_context(curr_day, curr_min, scen_key)
 
@@ -341,12 +440,19 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
 
 
 
+    from mechanics.system.time_engine import get_time_of_day_phase, format_clock
+    phase_name, emoji, lighting_desc = get_time_of_day_phase(curr_min)
+    clock_str = format_clock(curr_min)
     temporal_mandate = (
         f"STRICT TEMPORAL CONSISTENCY MANDATE:\n"
-        f"- Active starting clock time: {curr_min // 60:02d}:{curr_min % 60:02d} (Day {curr_day}).\n"
-        f"- All narrative descriptions (lighting, sun position, ambient sounds, student and town activities) MUST STRICTLY conform to this active morning hour.\n"
-        f"- STRICTLY FORBIDDEN: Do NOT narrate sunset, dusk, evening, twilight, or night when the clock indicates morning! Describe morning sunlight, students arriving, homeroom preparations, or morning routines.\n\n"
+        f"- Active starting clock time: {clock_str} ({phase_name} {emoji}, Day {curr_day}).\n"
+        f"- Ambient lighting & atmosphere: {lighting_desc}.\n"
+        f"- All narrative descriptions (lighting, shadows, sky condition, ambient sounds, and activities) MUST STRICTLY conform to this active time ({clock_str} - {phase_name}).\n"
+        f"- Do NOT contradict the current clock time ({clock_str}) or lighting conditions!\n\n"
     )
+
+    focal_line = f"MICRO FOCAL POINT & STANCE: {hook_focal_point}\n" if hook_focal_point else ""
+    visual_line = f"SCENE ATMOSPHERE & VISUAL CUES: {visual_cues}\n" if visual_cues else ""
 
     if party and not session.get("lead_character_gender"):
         lead_c = party[0][0] if isinstance(party[0], (tuple, list)) else party[0]
@@ -361,6 +467,8 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         f"{temporal_mandate}"
         f"OPENING INCITING INCIDENT [{arch_title}]: {hook_text}\n"
         f"ARCHETYPE DIRECTIVE: {arch_directive}\n\n"
+        f"{focal_line}"
+        f"{visual_line}"
         f"{loc_anchor_line}"
         f"KNOWN WORLD:\n{game_engine._known_world_text(session['id'], suggested_loc or '')}\n\n"
         f"{time_prompt_block}\n"
@@ -387,19 +495,12 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         result = {}
 
     if isinstance(result, dict) and is_location_engine_enabled(scen_key):
-
         s_nar = (result.get("narrative") or result.get("outcome_narrative") or "").strip()
-
         loc_to_reconcile = result.get("location") or suggested_loc
-
         result["location"] = game_engine.reconcile_movement_location(
-
             session["id"], "", loc_to_reconcile,
-
             action_text="Begin adventure", narrative=s_nar,
-
             scen_key=scen_key, char_name=first_char_name
-
         )
 
     res_deep = namegen.resolve_tokens_deep(result, scenario=scen_key)
@@ -407,18 +508,26 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
     if isinstance(res_deep, dict) and session.get("id") and is_location_engine_enabled(scen_key):
         try:
             from mechanics.world.locations.graph_seeder import ensure_session_spatial_graph_seeded
+            from mechanics.world.locations.pathfinding import format_node_hierarchy
             ensure_session_spatial_graph_seeded(session["id"], scen_key, char_name=first_char_name)
             init_loc = res_deep.get("location") or suggested_loc or ""
-            if init_loc:
-                init_node_id = db.resolve_node_id_from_location(session["id"], init_loc)
-                if init_node_id:
-                    res_deep["current_node_id"] = init_node_id
-                    session["current_node_id"] = init_node_id
-                    db.update_session(session["id"], current_node_id=init_node_id)
+            init_node_id = db.resolve_node_id_from_location(session["id"], init_loc) if init_loc else None
+            if not init_node_id and locked_opening_node_id:
+                init_node_id = locked_opening_node_id
+            if init_node_id:
+                canon_hier = format_node_hierarchy(session["id"], init_node_id)
+                if canon_hier:
+                    res_deep["location"] = canon_hier
+                    session["current_location"] = canon_hier
+                res_deep["current_node_id"] = init_node_id
+                session["current_node_id"] = init_node_id
+                db.update_session(
+                    session["id"],
+                    current_node_id=init_node_id,
+                    current_location=res_deep.get("location") or suggested_loc or "",
+                )
         except Exception as e:
             log.warning("Failed to seed/resolve initial current_node_id in generate_opening_scene: %s", e)
-
-
 
     if isinstance(res_deep, dict):
 
@@ -442,7 +551,7 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
             res_deep["narrative"], session=session, result=res_deep, party=party
         )
 
-        # Reconcile NPCs present in the opening scene from prose, rosters, and audit
+        # Reconcile NPCs present in the opening scene from rosters and audit
         eff_loc = res_deep.get("location") or suggested_loc or ""
         try:
             res_deep["npcs_present"] = game_engine.process_scene_npcs(
@@ -451,19 +560,35 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         except Exception as e:
             log.warning("process_scene_npcs failed for opening scene: %s", e)
 
-        # Detect any speaking NPCs to set initial dialogue partner
+        # Set initial dialogue partner strictly from structured entity_audit / cast_events
         try:
-            full_nar = str(res_deep.get("narrative") or "")
-            speaking_npcs = game_engine.extract_speaking_npcs_from_narrative(
-                full_nar, res_deep.get("npcs_present", []), party=party
-            )
-            if speaking_npcs:
-                res_deep["dialogue_partner"] = speaking_npcs[0]
-                res_deep["dialogue_partners"] = speaking_npcs
+            audit_speaking = (res_deep.get("entity_audit") or {}).get("speaking_characters") or []
+            if audit_speaking:
+                res_deep["dialogue_partner"] = audit_speaking[0]
+                res_deep["dialogue_partners"] = list(audit_speaking)
         except Exception as e:
-            log.warning("extract_speaking_npcs_from_narrative failed for opening scene: %s", e)
+            log.warning("dialogue partner extraction failed for opening scene: %s", e)
 
-        init_default_physical_state(session["id"], party, scen_key, opening_scene=res_deep)
+        # D21: Persist initial deterministic cast_state on Turn 0
+        try:
+            from game_engine.npcs.cast_planner import get_cast_state, save_cast_state
+            init_cast_st = get_cast_state(session)
+            save_cast_state(session, init_cast_st, persist_db=bool(session.get("id")))
+        except Exception as e:
+            log.warning("initial cast_state persistence failed for opening scene: %s", e)
+
+        init_default_physical_state(
+            session["id"],
+            party,
+            scen_key,
+            opening_scene=res_deep,
+            initial_actor_override=initial_phys if initial_phys else None,
+        )
+
+        if hook_focal_point and not res_deep.get("focal_point"):
+            res_deep["focal_point"] = hook_focal_point
+        if visual_cues and not res_deep.get("visual_cues"):
+            res_deep["visual_cues"] = visual_cues
 
 
 
@@ -520,6 +645,11 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
                 "scene_title": (res_deep.get("scene_title") or "").strip()
 
             }
+
+            if res_deep.get("location"):
+                session["current_location"] = res_deep["location"]
+            elif suggested_loc:
+                session["current_location"] = suggested_loc
 
             _is_sq_mocked = (
                 hasattr(game_engine.generate_story_quest, "_mock_name")
@@ -1027,7 +1157,7 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
     user_prompt = (
         f"KNOWN WORLD:\n{game_engine._known_world_text(session['id'], session.get('current_location', ''), current_npcs=session.get('current_npcs', []))}\n\n"
         f"CHARACTER SHEET:\n{game_engine._character_sheet_text(char, inventory)}\n\n"
-        f"RECENT HISTORY:\n{game_engine._history_text(session['history'], session_id=session.get('id'))}\n\n"
+        f"RECENT HISTORY:\n{game_engine._history_text(session.get('history', []), session_id=session.get('id'))}\n\n"
         f"Custom action: \"{action_text}\"\n\n"
         f"Decide governing Attribute, requirement (2-12), intent, sub_intent, and target_npc. If spell, set mp_cost.\n"
     )

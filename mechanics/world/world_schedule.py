@@ -62,6 +62,14 @@ SCENARIO_WORLD_SCHEDULES: Dict[str, Dict[str, Any]] = {
         "commercial_open_min": 480,  # 08:00 AM
         "commercial_close_min": 1320,# 10:00 PM
     },
+    "urban_fantasy": {
+        "genre_family": "urban_fantasy",
+        "wake_minute": 450,          # 07:30 AM
+        "sleep_minute": 1380,        # 11:00 PM (23:00)
+        "sleep_end_minute": 360,     # 06:00 AM
+        "commercial_open_min": 480,  # 08:00 AM
+        "commercial_close_min": 1320,# 10:00 PM (22:00)
+    },
     "cyberpunk": {
         "genre_family": "cyberpunk",
         "wake_minute": 450,
@@ -150,6 +158,8 @@ def is_high_school_setting(scen_key: str) -> bool:
 def resolve_genre_schedule_key(scen_key: str = "fantasy") -> str:
     """Resolves any scenario key or custom tag combination to a canonical schedule profile key."""
     s = str(scen_key or "").lower().strip()
+    if any(k in s for k in ("anomalous_incursions", "urban_anomalies", "urban_fantasy")):
+        return "urban_fantasy"
     if is_high_school_setting(s):
         return "high_school"
     if "slice_of_life" in s:
@@ -191,6 +201,20 @@ def get_scenario_sleep_minute(scen_key: str = "fantasy") -> int:
     return int(profile.get("sleep_minute", 1320))
 
 
+def is_nsfw_faction_hq_node(
+    node: Optional[Dict[str, Any]] = None,
+    parent_node: Optional[Dict[str, Any]] = None,
+    location_str: str = ""
+) -> bool:
+    """Returns True if the specific node is the restricted NSFW Faction HQ (`Velvet Basement Salon`)."""
+    own_parts = [str(location_str or "")]
+    if isinstance(node, dict):
+        own_parts.append(str(node.get("node_id") or ""))
+        own_parts.append(str(node.get("name") or ""))
+    own_combined = " ".join(own_parts).lower()
+    return any(m in own_combined for m in ("loc_nsfw_faction_hq", "velvet basement salon", "velvet basement"))
+
+
 def is_abandoned_school_node(
     node: Optional[Dict[str, Any]] = None,
     parent_node: Optional[Dict[str, Any]] = None,
@@ -198,10 +222,12 @@ def is_abandoned_school_node(
 ) -> bool:
     """
     Returns True if the node or location belongs to the Abandoned Old Campus Building zone
-    (`zone_abandoned_school` and its child facilities/rooms).
+    (`zone_abandoned_school` and its child facilities/rooms), excluding the gated NSFW Faction HQ.
     Per world schedule rules, nobody bothers to lock the doors or check this area,
     so it remains unrestricted and accessible 24/7.
     """
+    if is_nsfw_faction_hq_node(node, parent_node, location_str=location_str):
+        return False
     parts = [str(location_str or "")]
     for n in (node, parent_node):
         if isinstance(n, dict):
@@ -211,13 +237,19 @@ def is_abandoned_school_node(
     combined = " ".join(parts).lower()
     abandoned_markers = (
         "zone_abandoned_school",
+        "bld_abandoned_school",
         "abandoned old campus",
         "old showa campus",
         "derelict old campus",
         "decaying clock tower",
+        "forgotten clock tower",
+        "clock tower",
+        "heritage wing",
+        "showa campus",
         "loc_clock_tower",
         "loc_old_storage_3b",
         "old storage room 3-b",
+        "storage room 3-b",
         "loc_derelict_gym",
         "derelict old gymnasium",
         "loc_old_infirmary",
@@ -226,6 +258,8 @@ def is_abandoned_school_node(
         "overgrown hallway",
         "dark_equipment_room",
         "sub_dark_equipment_room",
+        "loc_abandoned_boiler_cellar",
+        "boiler cellar",
     )
     return any(m in combined for m in abandoned_markers)
 
@@ -255,30 +289,48 @@ def is_campus_node_or_location(
 
     # Explicitly exclude residential & commercial off-campus markers
     if any(off in combined for off in (
-        "zone_commercial", "zone_residential", "zone_seaside_bay", "zone_mountain_park",
+        "zone_commercial", "zone_downtown", "zone_residential", "zone_seaside_bay",
+        "zone_mountain_park", "zone_recreational_park",
         "loc_player_house", "sub_player_bedroom", "loc_cafe", "loc_arcade",
         "loc_convenience_store", "loc_bookstore", "loc_fashion_boutique",
-        "loc_karaoke_box", "loc_ramen_shop", "loc_local_park"
+        "loc_karaoke_box", "loc_ramen_shop", "loc_local_park", "loc_city_square",
+        "loc_restaurant", "loc_clothing_store", "loc_brand_clothing_store",
+        "loc_accessories_store", "loc_gift_store", "loc_night_market",
+        "loc_nightclub", "loc_adult_store", "loc_love_hotel",
+        "loc_park_lake", "loc_hilltop_lookout", "loc_sakura_grove",
+        "loc_park_shrine", "loc_picnic_pavilions"
     )):
         return False
 
     campus_markers = (
         "zone_school_main", "zone_school_commons", "zone_school_athletics",
         "zone_school_arts", "zone_abandoned_school",
+        "bld_school_academic", "bld_school_athletics", "bld_school_commons",
+        "bld_school_arts", "bld_abandoned_school",
+        "academy", "school", "athletics", "commons", "annex", "academic wing",
+        "science wing", "chemistry lab", "chemistry & science lab",
         "homeroom", "classroom", "staff room", "school library", "science lab",
+        "school infirmary", "infirmary", "boys' restroom", "girls' restroom",
+        "shower room", "locker & shower",
         "school rooftop", "school main gates", "entrance foyer", "shoe lockers",
         "central courtyard", "campus dining hall", "vending machine pavilion",
         "botanical glasshouse", "main gymnasium", "athletic track", "swimming pool",
         "martial arts dojo", "behind gym", "student council", "auditorium",
         "music room", "fine arts studio", "broadcasting room", "clubroom",
-        "abandoned old campus", "old storage room 3-b", "clock tower",
-        "loc_homeroom", "loc_empty_class", "loc_staff_room", "loc_library",
+        "abandoned old campus", "old storage room 3-b", "clock tower", "velvet basement",
+        "loc_homeroom", "loc_freshman_class", "loc_sophomore_class", "loc_junior_class", "loc_senior_class",
+        "loc_empty_class", "loc_under_stairwell", "loc_school_infirmary",
+        "loc_male_restroom", "loc_female_restroom", "loc_male_shower_room", "loc_female_shower_room",
+        "loc_staff_room", "loc_library",
         "loc_science_lab", "loc_rooftop", "loc_school_gate", "loc_entrance_foyer",
-        "loc_courtyard", "loc_cafeteria", "loc_vending_pavilion", "loc_greenhouse",
+        "loc_courtyard", "loc_cafeteria", "loc_vending_pavilion", "loc_vending_alcove", "loc_greenhouse",
+        "loc_gardening_shed", "loc_janitor_alcove",
         "loc_gymnasium", "loc_sports_field", "loc_pool", "loc_martial_arts_dojo",
-        "loc_behind_gym_sheds", "loc_student_council", "loc_auditorium_stage",
-        "loc_old_east_music_room", "loc_fine_arts_studio", "loc_broadcasting_room",
-        "loc_clubroom_corridor",
+        "loc_behind_gym_sheds", "loc_sports_equipment_shed",
+        "loc_student_council", "loc_auditorium_stage", "loc_auditorium",
+        "loc_old_east_music_room", "loc_old_music_room", "loc_fine_arts_studio", "loc_art_studio",
+        "loc_broadcasting_room", "loc_broadcast_room", "loc_clubroom_corridor", "loc_clubroom_wing",
+        "loc_backstage_prop_loft", "loc_soundproof_practice_booth", "loc_nsfw_faction_hq",
     )
     if any(m in combined for m in campus_markers):
         return True
@@ -378,8 +430,8 @@ def get_world_schedule_state(
                     "It is the After-School Extracurricular Period (15:00–20:00). Students may freely "
                     "roam the school areas or leave campus. Club members gather in clubrooms (e.g., "
                     "Auditorium/Theater, Music Room, Fine Arts Studio, Student Council) and athletes train "
-                    "at sports facilities, while unused rooms (Empty Classroom, School Rooftop, Chemical "
-                    "Storage Closet, and Staff Room after 17:00) are locked."
+                    "at sports facilities, while restricted rooms (School Rooftop, Chemical Storage Closet, "
+                    "and Staff Room & School Infirmary after 17:00) are locked."
                 )
             else:
                 # 20:00 - 07:00
@@ -447,21 +499,51 @@ def get_world_schedule_state(
             "narrative_directive": f"{narrative_directive} {comm_status_note}",
         }
 
-    # Non-school genres (Slice of Life, Cyberpunk, Sci-Fi, Steampunk, Fantasy, Isekai, Post-Apoc)
+    # Non-school genres (Urban Fantasy, Slice of Life, Cyberpunk, Sci-Fi, Steampunk, Fantasy, Isekai, Post-Apoc)
     if 420 <= safe_min < 1200:
         period_key = "weekend_daytime" if weekend else "daytime_operations"
         period_label = "Weekend Daytime Activity" if weekend else "Standard Daytime Operations"
-        narrative_directive = (
-            f"Daytime operations are active ({'Weekend' if weekend else 'Weekday'}). "
-            f"{'Commercial venues and guild halls are open.' if commercial_venues_open else 'Early morning preparation before commercial venues open at 08:00.'}"
-        )
+        if genre_family == "urban_fantasy":
+            narrative_directive = (
+                f"Metropolitan daytime operations are active ({'Weekend' if weekend else 'Weekday'}). "
+                f"{'Commercial districts, transit hubs, cafés, and agency headquarters are open (Theme Park operates normal family hours).' if commercial_venues_open else 'Early morning transit rush before commercial storefronts open at 08:00; 24/7 Agency HQ and convenience stores are active.'}"
+            )
+        else:
+            narrative_directive = (
+                f"Daytime operations are active ({'Weekend' if weekend else 'Weekday'}). "
+                f"{'Commercial venues and guild halls are open.' if commercial_venues_open else 'Early morning preparation before commercial venues open at 08:00.'}"
+            )
     else:
         period_key = "night_operations"
         period_label = "Nighttime / After-Hours (20:00–07:00)"
-        narrative_directive = (
-            "Nighttime hours are in effect. "
-            + ("24/7 neon nightlife and street markets remain active." if genre_family == "cyberpunk" else "Standard daytime shops are shuttered for the night (08:00–22:00 daily), while taverns, inns, and outdoor districts remain accessible.")
-        )
+        if genre_family == "urban_fantasy":
+            if 1200 <= safe_min < 1320:
+                closing_warn = (
+                    " Theme Park loudspeakers broadcast final 22:00 closing announcements as staff usher late visitors toward the gates before the Anomalous Shift begins!"
+                    if safe_min >= 1290
+                    else " Theme Park evening lights are still open to the public until 22:00."
+                )
+                narrative_directive = (
+                    "Metropolitan late-evening hours (20:00–22:00) are in effect. Standard commercial storefronts remain open until 22:00, "
+                    "while nightlife alleys, 24/7 Agency HQ divisions, and transit corridors are bustling."
+                    + closing_warn
+                )
+            else:
+                anomalous_shift_note = (
+                    " The Theme Park Zone has entered its 22:00–08:00 Anomalous Shift!"
+                    if (safe_min >= 1320 or safe_min < 480)
+                    else ""
+                )
+                narrative_directive = (
+                    "Metropolitan nighttime hours are in effect. Standard daytime retail storefronts shutter from 22:00–08:00, "
+                    "while 24/7 Agency HQ operations, metro transit, nightlife districts, and emergency hospitals remain open."
+                    + anomalous_shift_note
+                )
+        else:
+            narrative_directive = (
+                "Nighttime hours are in effect. "
+                + ("24/7 neon nightlife and street markets remain active." if genre_family == "cyberpunk" else "Standard daytime shops are shuttered for the night (08:00–22:00 daily), while taverns, inns, and outdoor districts remain accessible.")
+            )
 
     return {
         "genre_family": genre_family,
@@ -512,6 +594,45 @@ def evaluate_world_schedule_node_access(
     p_name = str((parent_node or {}).get("name") or "").lower()
     combined = f"{n_id} {n_name} {p_id} {p_name}"
 
+    genre_family = resolve_genre_schedule_key(scen_key)
+
+    # 0. Special Rule: Theme Park & Amusement Resort (`zone_theme_park`) closes at 22:00 (10:00 PM)
+    # and manifests its anomalous state from 22:00 (1320) until it reopens at 08:00 AM (480).
+    if genre_family == "urban_fantasy" and any(k in combined for k in ("zone_theme_park", "theme park", "amusement resort", "loc_tp_")):
+        if safe_min >= 1320 or safe_min < 480:
+            return {
+                "schedule_locked": False,
+                "is_trespassing": True,
+                "force_open": False,
+                "badge_override": "Anomalous Shift (22:00–08:00)",
+                "curfew_label": "22:00–08:00",
+                "reason_code": "theme_park_anomalous_shift",
+                "reason_label": "Theme Park Closed to Public — Anomalous Nighttime Manifestation Active (22:00–08:00)",
+            }
+        return {
+            "schedule_locked": False,
+            "is_trespassing": False,
+            "force_open": True,
+            "badge_override": "Open (08:00–22:00)",
+            "curfew_label": "",
+            "reason_code": "",
+            "reason_label": "",
+        }
+
+    # 0b. NSFW Secret Society HQ (`loc_nsfw_faction_hq` / `Velvet Basement Salon`):
+    # Located inside Abandoned School Building so it has no 20:00 campus curfew,
+    # while preserving its `restricted` speakeasy access tier (not force_open).
+    if is_nsfw_faction_hq_node(node, parent_node):
+        return {
+            "schedule_locked": False,
+            "is_trespassing": False,
+            "force_open": False,
+            "badge_override": "",
+            "curfew_label": "",
+            "reason_code": "",
+            "reason_label": "",
+        }
+
     # 1. Special Rule: Abandoned School Building (`zone_abandoned_school`) is ALWAYS accessible 24/7
     if is_abandoned_school_node(node, parent_node):
         return {
@@ -528,14 +649,92 @@ def evaluate_world_schedule_node_access(
     if n_type == "ZONE" and n_cat != "academic":
         return {"schedule_locked": False, "is_trespassing": False, "force_open": False}
 
-    # 3. Commercial Venues: Cafes, stores, restaurants, arcades, karaoke open 08:00–22:00 every day
+    # 3. Commercial Venues: Cafes, stores, restaurants, arcades, karaoke, and specialty nightlife
     if n_cat == "commercial":
-        # 24-Hour Convenience Store and outdoor streets/plazas stay open 24/7
-        is_24h_or_outdoor = any(k in combined for k in (
-            "convenience_store", "convenience store", "24-hour", "24h",
-            "street", "plaza", "avenue", "promenade", "alley", "district"
-        )) and not any(v in combined for v in ("cafe", "café", "arcade", "bookstore", "boutique", "karaoke", "ramen", "restaurant"))
-        if is_24h_or_outdoor:
+        # Explicit 24-hour facilities (Convenience Store, City Square, Love Hotel, Kōban Police Box, etc.) stay open 24/7
+        is_explicit_24h = any(
+            k in combined for k in (
+                "convenience_store", "convenience store", "24-hour", "24h",
+                "transit_plaza", "loc_city_square", "city square",
+                "loc_love_hotel", "love hotel", "mirage boutique love hotel", "touchscreen check-in",
+                "bus_shelter", "bus terminal", "koban", "kōban",
+                "police box", "shopping_crosswalk", "pedestrian crosswalk",
+                "sub_square_fountain", "sub_square_underpass",
+            )
+        )
+        if is_explicit_24h:
+            return {"schedule_locked": False, "is_trespassing": False, "force_open": True, "badge_override": "Open (24/7)"}
+
+        # Custom High School Downtown venue operating windows:
+        # 3a. Lantern Night Market & Bazaar (`loc_night_market`): strictly 18:00 (1080) to 22:00 (1320)
+        if any(k in combined for k in ("loc_night_market", "lantern night market", "night market & bazaar")):
+            if 1080 <= safe_min < 1320:
+                return {"schedule_locked": False, "is_trespassing": False, "force_open": True, "badge_override": "Open (18:00–22:00)"}
+            return {
+                "schedule_locked": True,
+                "is_trespassing": False,
+                "force_open": False,
+                "badge_override": "Closed (Open 18:00–22:00)",
+                "curfew_label": "22:00–18:00",
+                "reason_code": "commercial_closed",
+                "reason_label": "Lantern Night Market Closed (Open 18:00–22:00 Daily)",
+            }
+
+        # 3b. Neon Pulse Nightclub (`loc_nightclub`): 18:00 (1080) to 02:00 (120)
+        if any(k in combined for k in ("loc_nightclub", "neon pulse nightclub")):
+            if safe_min >= 1080 or safe_min < 120:
+                return {"schedule_locked": False, "is_trespassing": False, "force_open": True, "badge_override": "Open (18:00–02:00)"}
+            return {
+                "schedule_locked": True,
+                "is_trespassing": False,
+                "force_open": False,
+                "badge_override": "Closed (Open 18:00–02:00)",
+                "curfew_label": "02:00–18:00",
+                "reason_code": "commercial_closed",
+                "reason_label": "Nightclub Closed (Open 18:00–02:00 Nightly)",
+            }
+
+        # 3c. Velvet Curtain Adult Boutique (`loc_adult_store`): 12:00 (720) to 00:00 (1440)
+        if any(k in combined for k in ("loc_adult_store", "velvet curtain adult boutique")):
+            if 720 <= safe_min < 1440:
+                return {"schedule_locked": False, "is_trespassing": False, "force_open": True, "badge_override": "Open (12:00–00:00)"}
+            return {
+                "schedule_locked": True,
+                "is_trespassing": False,
+                "force_open": False,
+                "badge_override": "Closed (Open 12:00–00:00)",
+                "curfew_label": "00:00–12:00",
+                "reason_code": "commercial_closed",
+                "reason_label": "Adult Boutique Closed (Open 12:00–00:00 Daily)",
+            }
+
+        # 3d. Luxury Designer Boutique (`loc_brand_clothing_store`): 10:00 (600) to 22:00 (1320)
+        if any(k in combined for k in ("loc_brand_clothing_store", "luxury designer boutique")):
+            if 600 <= safe_min < 1320:
+                return {"schedule_locked": False, "is_trespassing": False, "force_open": False, "badge_override": "Open (10:00–22:00)"}
+            return {
+                "schedule_locked": True,
+                "is_trespassing": False,
+                "force_open": False,
+                "badge_override": "Closed (Open 10:00–22:00)",
+                "curfew_label": "22:00–10:00",
+                "reason_code": "commercial_closed",
+                "reason_label": "Luxury Designer Boutique Closed (Open 10:00–22:00 Daily)",
+            }
+
+        # Urban Fantasy / Cyberpunk dedicated late-night & nocturnal venues stay open after 22:00
+        if genre_family in ("urban_fantasy", "cyberpunk") and any(
+            k in combined for k in (
+                "late-night", "izakaya", "jazz", "cocktail", "red-lantern",
+                "black market", "masquerade auction", "sky-high penthouse", "fight pit"
+            )
+        ):
+            return {"schedule_locked": False, "is_trespassing": False, "force_open": True, "badge_override": "Open (Late-Night)"}
+
+        is_outdoor_street = any(k in combined for k in (
+            "street", "plaza", "avenue", "promenade", "alley", "district", "city square", "underpass"
+        )) and not any(v in combined for v in ("cafe", "café", "arcade", "bookstore", "boutique", "emporium", "shop", "store", "karaoke", "ramen", "restaurant", "diner", "bazaar", "nightclub"))
+        if is_outdoor_street:
             return {"schedule_locked": False, "is_trespassing": False, "force_open": True, "badge_override": "Open (24/7)"}
 
         # Standard commercial operating hours: 08:00 (480) to 22:00 (1320) every day
@@ -570,24 +769,43 @@ def evaluate_world_schedule_node_access(
 
         # 4b. Weekend Daytime (07:00–20:00 on Saturday & Sunday)
         if weekend:
-            # Open on weekends: Sports Facilities, Club HQs / Cultural Arts, Courtyard, Main Gates
+            # Campus Dining Hall / Cafeteria is explicitly closed on weekends
+            if n_id == "loc_cafeteria" or "dining hall" in n_name or "cafeteria" in n_name:
+                return {
+                    "schedule_locked": True,
+                    "is_trespassing": False,
+                    "force_open": False,
+                    "badge_override": "Locked (Weekend)",
+                    "curfew_label": "Weekend Closure",
+                    "reason_code": "weekend_closed",
+                    "reason_label": "School Closed for Weekend (Only Sports Facilities & Club HQs Open)",
+                }
+
+            # Open on weekends: Sports Facilities, Club HQs / Cultural Arts, Courtyard, Main Gates, and Discreet Sheds/Booths
             weekend_open_markers = (
                 "zone_school_athletics", "zone_school_arts",
+                "bld_school_athletics", "bld_school_arts", "bld_school_commons",
                 "loc_gymnasium", "main gymnasium", "basketball", "bleachers", "locker",
+                "loc_male_shower_room", "loc_female_shower_room", "shower room",
                 "loc_sports_field", "athletic track", "stadium field", "running track", "dugout",
                 "loc_pool", "swimming pool", "diving", "poolside",
                 "loc_martial_arts_dojo", "martial arts dojo", "tatami", "shinai",
                 "loc_behind_gym_sheds", "behind gym",
+                "loc_sports_equipment_shed", "equipment shed",
                 "loc_student_council", "student council",
-                "loc_auditorium_stage", "auditorium", "backstage",
-                "loc_old_east_music_room", "music room", "piano",
-                "loc_fine_arts_studio", "fine arts", "easel", "pottery",
-                "loc_broadcasting_room", "broadcasting", "media",
-                "loc_clubroom_corridor", "clubroom",
+                "loc_auditorium_stage", "loc_auditorium", "auditorium", "backstage",
+                "loc_old_east_music_room", "loc_old_music_room", "music room", "piano",
+                "loc_fine_arts_studio", "loc_art_studio", "fine arts", "easel", "pottery",
+                "loc_broadcasting_room", "loc_broadcast_room", "broadcasting", "media",
+                "loc_clubroom_corridor", "loc_clubroom_wing", "clubroom",
+                "loc_backstage_prop_loft", "prop loft",
+                "loc_soundproof_practice_booth", "practice booth",
                 "loc_school_gate", "school main gates", "front gate", "bike racks", "notice board",
                 "loc_courtyard", "central courtyard", "fountain", "cherry tree",
-                "loc_vending_pavilion", "vending machine",
+                "loc_vending_pavilion", "loc_vending_alcove", "vending machine",
                 "loc_greenhouse", "botanical glasshouse", "greenhouse",
+                "loc_gardening_shed", "gardening shed",
+                "loc_janitor_alcove", "utility alcove",
             )
             # Restricted sub-rooms inside club wing still keep their own lock (e.g. Council Archives & Safe)
             if any(r in combined for r in ("council_archives", "archive files & safe", "soundproof_closet")):
@@ -596,7 +814,7 @@ def evaluate_world_schedule_node_access(
             if any(m in combined for m in weekend_open_markers):
                 return {"schedule_locked": False, "is_trespassing": False, "force_open": False}
 
-            # All other school facilities (Main Academic Wing: Homeroom, Empty Classroom, Library,
+            # All other school facilities (Main Academic Wing: Classrooms, Infirmary, Library,
             # Science Lab, Staff Room, Rooftop, Entrance Foyer, Hallways, and Cafeteria) are locked on weekends
             return {
                 "schedule_locked": True,
@@ -610,23 +828,28 @@ def evaluate_world_schedule_node_access(
 
         # 4c. Weekday Extracurricular Period (15:00–20:00 on Monday–Friday)
         if 900 <= safe_min < 1200:
-            # Unused/hazardous rooms locked during extracurriculars:
-            # Empty Classroom, School Rooftop, Chemical Storage Closet, and Staff Room after 17:00 (1020)
-            is_empty_class = any(k in combined for k in ("loc_empty_class", "empty classroom", "unused desks", "supply closet"))
+            # Campus discreet rooms (`loc_empty_class`, `loc_under_stairwell`, etc.) remain open until 20:00.
+            # Hazardous/staff rooms locked during extracurriculars:
+            # School Rooftop, Chemical Storage Closet, and Staff Room & School Infirmary after 17:00 (1020)
             is_rooftop = any(k in combined for k in ("loc_rooftop", "school rooftop"))
             is_chem_closet = any(k in combined for k in ("chemical_closet", "chemical storage"))
             is_staff_room = any(k in combined for k in ("loc_staff_room", "staff room", "teachers' staff"))
-            is_staff_late = is_staff_room and safe_min >= 1020
+            is_infirmary = any(k in combined for k in ("loc_school_infirmary", "school infirmary"))
+            is_staff_or_nurse_late = (is_staff_room or is_infirmary) and safe_min >= 1020
 
-            if is_empty_class or is_rooftop or is_chem_closet or is_staff_late:
+            if is_rooftop or is_chem_closet or is_staff_or_nurse_late:
                 return {
                     "schedule_locked": True,
                     "is_trespassing": False,
                     "force_open": False,
-                    "badge_override": "Locked (After-School)",
-                    "curfew_label": "15:00–07:00",
+                    "badge_override": "Locked (After 17:00)" if is_staff_or_nurse_late else "Locked (After-School)",
+                    "curfew_label": "17:00–07:00" if is_staff_or_nurse_late else "15:00–07:00",
                     "reason_code": "restricted",
-                    "reason_label": "Locked During Extracurricular Hours (15:00–20:00)",
+                    "reason_label": (
+                        "Locked After Faculty & Nurse Departure (17:00–07:00)"
+                        if is_staff_or_nurse_late
+                        else "Locked During Extracurricular Hours (15:00–20:00)"
+                    ),
                 }
 
         # 4d. Weekday Open School Hours (07:00–15:00 on Monday–Friday):

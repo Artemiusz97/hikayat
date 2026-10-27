@@ -14,7 +14,7 @@ def get_default_tiered_location(scenario_key: str = "fantasy", session_id: int =
 
     scen_data = get_scenario_seed_data(scenario_key)
 
-    zones = scen_data.get("zones") or []
+    zones = inject_anomalous_faction_hq_facilities(scen_data.get("zones") or [], session_id=session_id, scenario_key=scenario_key)
 
     if zones:
 
@@ -28,41 +28,59 @@ def get_default_tiered_location(scenario_key: str = "fantasy", session_id: int =
 
         if primaries:
 
+            p_id = primaries[0].get("id", "")
             p_name = primaries[0].get("name", "Main Area")
 
-            if p_name == "Homeroom Classroom" or primaries[0].get("id") == "loc_homeroom" or is_school_scenario(scenario_key):
+            if p_name == "Homeroom Classroom" or p_id == "loc_homeroom":
 
                 p_name = get_session_classroom_name(session_id, scenario_key)
 
-            elif p_name == "Player's House" or primaries[0].get("id") == "loc_player_house":
+            elif p_name == "Player's House" or p_id == "loc_player_house":
 
                 p_name = get_session_player_house_name(session_id, char_name, scenario_key)
 
-            elif p_name == "Neighborhood Park" or primaries[0].get("id") == "loc_local_park":
+            elif p_name == "Neighborhood Park" or p_id == "loc_local_park":
 
                 p_name = get_session_park_name(session_id, scenario_key)
+            elif p_id == "loc_agency_hq" or "{session_agency_hq}" in p_name:
+                p_name = get_session_agency_hq_name(session_id, scenario_key)
 
-
+            if is_urban_anomalous_scenario(scenario_key):
+                z_name = get_session_urban_zone_name(session_id, zones[0].get("id", ""), z_name, scenario_key)
+                p_name = get_session_urban_facility_name(session_id, zones[0].get("id", ""), p_id, p_name, scenario_key, char_name)
 
             subs = primaries[0].get("sub_locations") or []
 
             if subs:
 
+                s_id = subs[0].get("id", "")
                 s_name = subs[0].get("name", "Main Area")
 
-                p_id = primaries[0].get("id", "")
-
-                if (s_name == "Player's Desk" or subs[0].get("id") == "sub_player_desk") and (p_id == "loc_homeroom" or "homeroom" in p_name.lower()):
+                if s_name == "Homeroom Classroom" or s_id == "loc_homeroom":
+                    s_name = get_session_classroom_name(session_id, scenario_key)
+                elif (s_name == "Player's Desk" or s_id == "sub_player_desk") and (p_id == "loc_homeroom" or "homeroom" in p_name.lower()):
 
                     s_name = get_session_player_desk_name(session_id, char_name)
+                elif is_urban_anomalous_scenario(scenario_key) and s_id.startswith("loc_hq_"):
+                    s_name = get_session_urban_facility_name(session_id, "zone_agency_hq", s_id, s_name, scenario_key, char_name)
 
             else:
 
                 s_name = "Main Area"
 
-            return (z_name, p_name, s_name)
+            from .hierarchy import resolve_session_location_tokens
+            return (
+                resolve_session_location_tokens(session_id, z_name, scenario_key, char_name),
+                resolve_session_location_tokens(session_id, p_name, scenario_key, char_name),
+                resolve_session_location_tokens(session_id, s_name, scenario_key, char_name)
+            )
 
-        return (z_name, "Main Area", "Main Area")
+        from .hierarchy import resolve_session_location_tokens
+        return (
+            resolve_session_location_tokens(session_id, z_name, scenario_key, char_name),
+            "Main Area",
+            "Main Area"
+        )
 
     return ("World Region", "Main Area", "Main Area")
 
@@ -156,9 +174,13 @@ def get_archetype_starting_location(
 
                 z_name = get_session_residential_neighborhood_name(session_id, scenario_key)
 
-            elif (z_name == "Commercial District" or z_id == "zone_commercial") and is_school_scenario(scenario_key):
+            elif (z_name in ("Commercial District", "Downtown") or z_id in ("zone_commercial", "zone_downtown")) and is_school_scenario(scenario_key):
 
                 z_name = get_session_commercial_district_name(session_id, scenario_key)
+
+            elif (z_name in ("Recreational Mountain Park", "Recreational Park") or z_id in ("zone_mountain_park", "zone_recreational_park")) and is_school_scenario(scenario_key):
+
+                z_name = get_session_recreation_park_name(session_id, scenario_key)
 
             z_hub = bool(z.get("is_hub", False))
 
@@ -172,6 +194,17 @@ def get_archetype_starting_location(
 
                     p_name = get_session_classroom_name(session_id, scenario_key) if session_id else "Homeroom Classroom"
 
+                elif p_id == "bld_school_athletics" or p_name == "School Grounds & Athletics":
+                    p_name = get_session_athletics_complex_name(session_id, scenario_key)
+                elif p_id == "bld_school_commons" or p_name == "Student Commons & Central Plaza":
+                    p_name = get_session_student_commons_name(session_id, scenario_key)
+                elif p_id == "bld_school_arts" or p_name == "Cultural Arts & Student Union":
+                    p_name = get_session_cultural_arts_name(session_id, scenario_key)
+                elif p_id == "bld_abandoned_school" or p_name == "Abandoned Old Campus Building":
+                    p_name = get_session_abandoned_campus_name(session_id, scenario_key)
+                elif p_id == "loc_agency_hq" or "{session_agency_hq}" in p_name:
+                    p_name = get_session_agency_hq_name(session_id, scenario_key)
+
                 elif p_name == "Player's House" or p_id == "loc_player_house":
 
                     p_name = get_session_player_house_name(session_id, char_name, scenario_key)
@@ -180,17 +213,18 @@ def get_archetype_starting_location(
 
                     p_name = get_session_park_name(session_id, scenario_key)
 
-
-
                 subs = p.get("sub_locations", [])
 
                 if subs:
 
                     for s in subs:
 
+                        s_id = s.get("id", "")
                         s_name = s.get("name", "Main Area")
 
-                        if (s_name == "Player's Desk" or s.get("id") == "sub_player_desk") and (p_id == "loc_homeroom" or "homeroom" in p_name.lower()):
+                        if s_name == "Homeroom Classroom" or s_id == "loc_homeroom":
+                            s_name = get_session_classroom_name(session_id, scenario_key) if session_id else "Homeroom Classroom"
+                        elif (s_name == "Player's Desk" or s_id == "sub_player_desk") and (p_id == "loc_homeroom" or "homeroom" in p_name.lower()):
 
                             s_name = get_session_player_desk_name(session_id, char_name)
 
@@ -267,7 +301,13 @@ def get_archetype_starting_location(
 
             import random
 
-            return random.choice(matching_hint)
+            cz, cp, cs = random.choice(matching_hint)
+            from .hierarchy import resolve_session_location_tokens
+            return (
+                resolve_session_location_tokens(session_id, cz, scenario_key, char_name),
+                resolve_session_location_tokens(session_id, cp, scenario_key, char_name),
+                resolve_session_location_tokens(session_id, cs, scenario_key, char_name)
+            )
 
 
 
@@ -335,218 +375,63 @@ def get_archetype_starting_location(
 
 
 
-    return random.choice(candidates)
+    cz, cp, cs = random.choice(candidates)
+    from .hierarchy import resolve_session_location_tokens
+    return (
+        resolve_session_location_tokens(session_id, cz, scenario_key, char_name),
+        resolve_session_location_tokens(session_id, cp, scenario_key, char_name),
+        resolve_session_location_tokens(session_id, cs, scenario_key, char_name)
+    )
 
 def _reconcile_faction_hq_locations(session_id: int, scenario_key: str = "high_school_drama", school_name: str = ""):
-
     """Ensures every faction recorded in the database has a grounded physical HQ location in session_locations."""
-
     if not session_id:
-
         return
-
     try:
-
         factions = db.get_factions(session_id)
-
         if not factions:
-
             return
 
-
-
         existing_locs = db.get_session_locations(session_id) or []
-
-        existing_primaries = {(r.get("primary_name") or "").strip().lower() for r in existing_locs}
-
+        existing_primaries = (
+            {(r.get("primary_name") or "").strip().lower() for r in existing_locs}
+            | {(r.get("sub_name") or "").strip().lower() for r in existing_locs}
+        )
         existing_ids = {(r.get("location_id") or "").strip().lower() for r in existing_locs}
-
-
-
-        arts_zone = get_session_cultural_arts_name(session_id, scenario_key)
-
-        abandoned_zone = get_session_abandoned_campus_name(session_id, scenario_key)
-
-        athletics_zone = get_session_athletics_complex_name(session_id, scenario_key)
-
-        commons_zone = get_session_student_commons_name(session_id, scenario_key)
-
-        academic_zone = school_name or get_session_school_name(session_id, scenario_key) or "Westlake Academy"
-
-
-
-        # Preset sub-locations mapping for known starter HQs in high school drama
-
-        preset_hqs = {
-
-            "school auditorium stage": {
-
-                "zone": arts_zone,
-
-                "name": "School Auditorium Stage",
-
-                "subs": ["Auditorium Stage", "Backstage Dressing Area", "Prop & Costume Storeroom"]
-
-            },
-
-            "old storage room 3-b": {
-
-                "zone": abandoned_zone,
-
-                "name": "Old Storage Room 3-B",
-
-                "subs": ["Club Meeting Table", "Tarot & Divination Corner", "Archive Bookshelves"]
-
-            },
-
-            "old east wing music room": {
-
-                "zone": arts_zone,
-
-                "name": "Old East Wing Music Room",
-
-                "subs": ["Upright Piano Alcove", "Velvet Lounge Couch", "Soundproof Storage Closet"]
-
-            },
-
-            "behind gym storage sheds": {
-
-                "zone": athletics_zone,
-
-                "name": "Behind Gym Storage Sheds",
-
-                "subs": ["Brawler Hangout Benches", "Behind Equipment Shed", "Graffiti Brick Wall"]
-
-            },
-
-            "student council office": {
-
-                "zone": arts_zone,
-
-                "name": "Student Council Office",
-
-                "subs": ["President's Desk", "Meeting Table", "Archive Files & Safe"]
-
-            },
-
-            "main gymnasium": {
-
-                "zone": athletics_zone,
-
-                "name": "Main Gymnasium",
-
-                "subs": ["Basketball Court", "Upper Concourse Bleachers", "Locker & Shower Room"]
-
-            }
-
-        }
-
-
+        world_nodes_present = bool(db.get_session_world_nodes(session_id))
 
         for fac in factions:
-
             hq_raw = (fac.get("hq_location_id") or "").strip()
-
             if not hq_raw:
-
                 continue
-
-
-
-            # If hq_raw contains tiered delimiters, parse into clean atomic primary name
 
             if any(d in hq_raw for d in ("➔", "->", ">", "|")):
-
                 fz, fp, fs = parse_tiered_location(hq_raw, scenario_key, session_id=session_id)
-
                 hq_raw = fp
-
                 with db.get_conn() as conn:
-
                     conn.execute("UPDATE factions SET hq_location_id = ? WHERE id = ?", (fp, fac["id"]))
-
                     conn.commit()
 
-
-
             hq_lower = hq_raw.lower()
-
             if hq_lower in existing_primaries or hq_lower in existing_ids:
-
                 continue
 
+            if world_nodes_present:
+                resolved_nid = db.resolve_node_id_from_location(session_id, hq_raw)
+                if resolved_nid:
+                    continue
 
+            if any(hq_lower in ep or ep in hq_lower for ep in existing_primaries if len(ep) >= 6):
+                continue
 
-            if hq_lower in preset_hqs:
-
-                cfg = preset_hqs[hq_lower]
-
-                target_z = cfg["zone"]
-
-                p_name = cfg["name"]
-
-                sub_list = cfg["subs"]
-
-            else:
-
-                if is_school_scenario(scenario_key):
-
-                    if any(k in hq_lower for k in ("gym", "field", "shed", "track", "outdoor", "court", "sheds", "brawler", "delinquent", "sports", "martial", "tatami")):
-
-                        target_z = athletics_zone
-
-                    elif any(k in hq_lower for k in ("commons", "cafeteria", "canteen", "vending", "greenhouse", "courtyard", "garden")):
-
-                        target_z = commons_zone
-
-                    elif any(k in hq_lower for k in ("council", "stuco", "drama", "auditorium", "music", "piano", "art", "media", "broadcast", "club", "esport", "gaming")):
-
-                        target_z = arts_zone
-
-                    elif any(k in hq_lower for k in ("occult", "mystery", "abandoned", "clock tower", "derelict", "storage room 3")):
-
-                        target_z = abandoned_zone
-
-                    else:
-
-                        target_z = academic_zone
-
-                else:
-
-                    target_z = "World Region"
-
-                p_name = hq_raw
-
-                sub_list = [f"{p_name} Entrance", f"{p_name} Main Area", f"{p_name} Inner Room"]
-
-
-
-            for sub in sub_list:
-
-                loc_id = f"loc_{_slugify(target_z)}_{_slugify(p_name)}_{_slugify(sub)}"
-
-                db.save_session_location(
-
-                    session_id=session_id,
-
-                    location_id=loc_id,
-
-                    zone_name=target_z,
-
-                    primary_name=p_name,
-
-                    sub_name=sub,
-
-                    atmosphere="",
-
-                    is_dynamic=0
-
-                )
-
-            existing_primaries.add(p_name.lower())
-
+            provisioned = provision_faction_hq_tier2_location(
+                session_id,
+                fac.get("name", "Faction"),
+                scenario_key,
+                hq_raw,
+            )
+            existing_primaries.add(provisioned.lower())
     except Exception:
-
         pass
 
 def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_school_drama", char_name: str = ""):
@@ -560,6 +445,25 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
 
     existing = db.get_session_locations(session_id)
+
+    from .hierarchy import resolve_session_location_tokens
+
+    # Retroactive self-healing: fix any existing unrendered session tokens in SQLite
+    if existing and any('{' in (r.get('zone_name') or '') or '{' in (r.get('primary_name') or '') for r in existing):
+        with db.get_conn() as conn:
+            for r in existing:
+                z_cur = r.get('zone_name') or ''
+                p_cur = r.get('primary_name') or ''
+                s_cur = r.get('sub_name') or ''
+                z_fixed = resolve_session_location_tokens(session_id, z_cur, scenario_key, char_name)
+                p_fixed = resolve_session_location_tokens(session_id, p_cur, scenario_key, char_name)
+                s_fixed = resolve_session_location_tokens(session_id, s_cur, scenario_key, char_name)
+                if z_fixed != z_cur or p_fixed != p_cur or s_fixed != s_cur:
+                    conn.execute(
+                        'UPDATE session_locations SET zone_name=?, primary_name=?, sub_name=? WHERE location_id=?',
+                        (z_fixed, p_fixed, s_fixed, r['location_id'])
+                    )
+        existing = db.get_session_locations(session_id)
 
     school_name = get_session_school_name(session_id, scenario_key) if is_school_scenario(scenario_key) else None
 
@@ -575,7 +479,7 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
     scen_data = get_scenario_seed_data(scenario_key)
 
-    zones = scen_data.get("zones") or []
+    zones = inject_anomalous_faction_hq_facilities(scen_data.get("zones") or [], session_id=session_id, scenario_key=scenario_key)
 
 
 
@@ -645,7 +549,8 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
     abandoned_name = get_session_abandoned_campus_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
 
-
+    agency_hq_name = get_session_agency_hq_name(session_id, scenario_key)
+    agency_name = get_session_agency_name(session_id, scenario_key)
 
     existing_loc_ids = {r.get("location_id") for r in existing if r.get("location_id")}
 
@@ -739,11 +644,11 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
             zone_name = dungeon_name
 
-        elif z_id == "zone_city_center" or zone_name == "City Center & Megacorp Plaza":
+        elif zone_name == "City Center & Megacorp Plaza":
 
             zone_name = f"{cyber_city} - City Center"
 
-        elif z_id == "zone_downtown" or zone_name == "Downtown Commercial Core":
+        elif zone_name == "Downtown Commercial Core":
 
             zone_name = f"{cyber_city} - Downtown"
 
@@ -783,11 +688,11 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
             zone_name = seaside_name
 
-        elif z_id == "zone_mountain_park" or zone_name == "Recreational Mountain Park":
+        elif z_id in ("zone_mountain_park", "zone_recreational_park") or zone_name in ("Recreational Mountain Park", "Recreational Park"):
 
             zone_name = rec_park_name
 
-        elif z_id == "zone_commercial" or zone_name == "Commercial District":
+        elif z_id == "zone_commercial" or zone_name == "Commercial District" or ((z_id == "zone_downtown" or zone_name == "Downtown") and is_school_scenario(scenario_key)):
 
             zone_name = commercial_name
 
@@ -795,17 +700,27 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
             zone_name = residential_name
 
+        elif z_id == "zone_agency_hq" or "{session_agency_hq}" in zone_name:
 
+            zone_name = agency_hq_name
+
+        elif "{session_agency}" in zone_name:
+
+            zone_name = agency_name
+
+        if is_urban_anomalous_scenario(scenario_key):
+            zone_name = get_session_urban_zone_name(session_id, z_id, zone_name, scenario_key)
+        zone_name = resolve_session_location_tokens(session_id, zone_name, scenario_key, char_name)
 
         if "theme" in zone or "features" in zone:
 
             env_dict = {
 
-                "theme": zone.get("theme", ""),
+                "theme": resolve_session_location_tokens(session_id, zone.get("theme", ""), scenario_key, char_name),
 
-                "features": zone.get("features", ""),
+                "features": resolve_session_location_tokens(session_id, zone.get("features", ""), scenario_key, char_name),
 
-                "sensory": zone.get("sensory", zone.get("atmosphere", ""))
+                "sensory": resolve_session_location_tokens(session_id, zone.get("sensory", zone.get("atmosphere", "")), scenario_key, char_name)
 
             }
 
@@ -813,7 +728,7 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
         else:
 
-            atmosphere = zone.get("atmosphere", "")
+            atmosphere = resolve_session_location_tokens(session_id, zone.get("atmosphere", ""), scenario_key, char_name)
 
 
 
@@ -831,11 +746,22 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
                 primary_name = classroom_name
 
+            elif p_id == "bld_school_athletics" or primary_name == "School Grounds & Athletics":
+                primary_name = athletics_name or "School Grounds & Athletics"
+            elif p_id == "bld_school_commons" or primary_name == "Student Commons & Central Plaza":
+                primary_name = commons_name or "Student Commons & Central Plaza"
+            elif p_id == "bld_school_arts" or primary_name == "Cultural Arts & Student Union":
+                primary_name = arts_name or "Cultural Arts & Student Union"
+            elif p_id == "bld_abandoned_school" or primary_name == "Abandoned Old Campus Building":
+                primary_name = abandoned_name or "Abandoned Old Campus Building"
+            elif p_id == "loc_agency_hq" or "{session_agency_hq}" in primary_name:
+                primary_name = agency_hq_name
+
             elif primary_name == "Player's House" or p_id == "loc_player_house":
 
                 primary_name = player_house
 
-            elif primary_name == "Neighborhood Park" or p_id == "loc_local_park":
+            elif park_name and (primary_name == "Neighborhood Park" or p_id == "loc_local_park"):
 
                 primary_name = park_name
 
@@ -857,7 +783,9 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
                 continue
 
-
+            if is_urban_anomalous_scenario(scenario_key):
+                primary_name = get_session_urban_facility_name(session_id, z_id, p_id, primary_name, scenario_key, char_name)
+            primary_name = resolve_session_location_tokens(session_id, primary_name, scenario_key, char_name)
 
             for sub in primary.get("sub_locations") or []:
 
@@ -865,9 +793,15 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
                 sub_name = sub.get("name", "Main Area")
 
-                if (sub_name == "Player's Desk" or s_id == "sub_player_desk") and (p_id == "loc_homeroom" or "homeroom" in primary_name.lower()):
+                if classroom_name and (sub_name == "Homeroom Classroom" or s_id == "loc_homeroom"):
+                    sub_name = classroom_name
+                elif (sub_name == "Player's Desk" or s_id == "sub_player_desk") and (p_id == "loc_homeroom" or "homeroom" in primary_name.lower()):
 
                     sub_name = player_desk
+                elif is_urban_anomalous_scenario(scenario_key) and s_id.startswith(("loc_hq_", "sub_priv1_", "sub_priv2_")):
+                    sub_name = get_session_urban_facility_name(session_id, "zone_agency_hq", s_id, sub_name, scenario_key, char_name)
+
+                sub_name = resolve_session_location_tokens(session_id, sub_name, scenario_key, char_name)
 
                 loc_id = s_id or f"loc_{_slugify(zone_name)}_{_slugify(primary_name)}_{_slugify(sub_name)}"
 

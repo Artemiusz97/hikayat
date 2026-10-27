@@ -19,25 +19,37 @@ class ConnectionManager:
 
     async def connect(self, session_id: int, user_id: int, websocket: WebSocket):
         await websocket.accept()
-        if session_id not in self.active_connections:
-            self.active_connections[session_id] = []
-        self.active_connections[session_id].append({"ws": websocket, "user_id": user_id})
-        logger.info(f"User {user_id} connected to WebSocket session {session_id}")
-        await self.broadcast_presence(session_id)
+        try:
+            clean_sid = int(session_id)
+        except (ValueError, TypeError):
+            clean_sid = session_id
+        if clean_sid not in self.active_connections:
+            self.active_connections[clean_sid] = []
+        self.active_connections[clean_sid].append({"ws": websocket, "user_id": user_id})
+        logger.info(f"User {user_id} connected to WebSocket session {clean_sid}")
+        await self.broadcast_presence(clean_sid)
 
     def disconnect(self, session_id: int, websocket: WebSocket):
-        if session_id in self.active_connections:
-            self.active_connections[session_id] = [
-                c for c in self.active_connections[session_id] if c["ws"] != websocket
+        try:
+            clean_sid = int(session_id)
+        except (ValueError, TypeError):
+            clean_sid = session_id
+        if clean_sid in self.active_connections:
+            self.active_connections[clean_sid] = [
+                c for c in self.active_connections[clean_sid] if c["ws"] != websocket
             ]
-            if not self.active_connections[session_id]:
-                del self.active_connections[session_id]
+            if not self.active_connections[clean_sid]:
+                del self.active_connections[clean_sid]
 
     async def broadcast_presence(self, session_id: int):
-        if session_id not in self.active_connections:
+        try:
+            clean_sid = int(session_id)
+        except (ValueError, TypeError):
+            clean_sid = session_id
+        if clean_sid not in self.active_connections:
             return
-        members = await adb(db.get_session_members, session_id)
-        connected_uids = [c["user_id"] for c in self.active_connections[session_id]]
+        members = await adb(db.get_session_members, clean_sid)
+        connected_uids = [c["user_id"] for c in self.active_connections[clean_sid]]
 
         member_profiles = []
         for uid in members:
@@ -51,15 +63,24 @@ class ConnectionManager:
 
         payload = {
             "type": "PRESENCE_UPDATE",
-            "session_id": session_id,
+            "session_id": clean_sid,
             "members": member_profiles
         }
-        await self.broadcast(session_id, payload)
+        await self.broadcast(clean_sid, payload)
 
     async def broadcast(self, session_id: int, message: dict):
-        if session_id not in self.active_connections:
+        try:
+            clean_sid = int(session_id)
+        except (ValueError, TypeError):
+            clean_sid = session_id
+        conns = self.active_connections.get(clean_sid, [])
+        if not conns and isinstance(clean_sid, int):
+            conns = self.active_connections.get(str(clean_sid), [])
+        elif not conns and isinstance(clean_sid, str) and clean_sid.isdigit():
+            conns = self.active_connections.get(int(clean_sid), [])
+        if not conns:
             return
-        for conn in list(self.active_connections[session_id]):
+        for conn in list(conns):
             try:
                 await conn["ws"].send_json(message)
             except Exception as e:
@@ -69,28 +90,36 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+def _to_json_safe(val):
+    if isinstance(val, dict):
+        return {str(k): _to_json_safe(v) for k, v in val.items()}
+    if isinstance(val, (list, tuple)):
+        return [_to_json_safe(v) for v in val]
+    if hasattr(val, "__dict__") and not isinstance(val, type):
+        return _to_json_safe(vars(val))
+    return val
+
+
 def _serializable_action(action: dict) -> dict:
-    """Returns a copy of the action dict safe for json.dumps (no raw dataclass objects)."""
-    safe = {}
-    for k, v in action.items():
-        if hasattr(v, "__dict__") and not isinstance(v, dict):
-            safe[k] = v.__dict__
-        else:
-            safe[k] = v
-    return safe
+    """Returns a deep copy of the action dict safe for json.dumps (no raw dataclass objects at any depth)."""
+    if not isinstance(action, dict):
+        return {}
+    return _to_json_safe(action)
 
 
-def enrich_choices_with_odds(choices: list, user_id: int) -> list:
+def enrich_choices_with_odds(choices: list, user_id: int, session: dict = None) -> list:
     """Enriches scene choices with calculated success_pct, chance, and Discord-matching action icons."""
     from cogs.adventure.embeds import (
         _get_choice_quest_icon,
         _get_choice_skill_emoji,
         _get_choice_emoji,
     )
+    from mechanics.stealth import compute_choice_stealth_odds
 
     char = db.get_character(user_id) if user_id else None
     user_settings = db.get_settings(char["user_id"]) if char else {}
     check_mode = (user_settings or {}).get("debug_check_mode", "off")
+    inv = (db.get_inventory(user_id) or []) if (char and choices and isinstance(session, dict)) else None
 
     enriched = []
     for c in (choices or []):
@@ -109,8 +138,23 @@ def enrich_choices_with_odds(choices: list, user_id: int) -> list:
             if stat in ("NONE", "FREE", "ITEM") or req_int <= 0:
                 pct = 100
             else:
-                rate = skill_check.success_chance(stat_val, req_int, check_mode=check_mode)
-                pct = int(round(rate))
+                stealth_pct = (
+                    compute_choice_stealth_odds(
+                        session,
+                        char,
+                        choice_copy,
+                        equipped_items=inv,
+                        user_id=user_id,
+                    )
+                    if isinstance(session, dict) and check_mode in ("off", "", None)
+                    else None
+                )
+                if stealth_pct is not None:
+                    pct = int(stealth_pct)
+                    stat_val = char.get("agi_", stat_val)
+                else:
+                    rate = skill_check.success_chance(stat_val, req_int, check_mode=check_mode)
+                    pct = int(round(rate))
             choice_copy["success_pct"] = pct
             choice_copy["chance"] = pct
             choice_copy["stat_val"] = stat_val
@@ -178,7 +222,7 @@ class CharacterCreateRequest(BaseModel):
     race_description: Optional[str] = ""
     scenario: Optional[str] = "fantasy"
     tags: Optional[list[str] | str] = None
-    starting_weapon: Optional[str] = "Rusty Sword"
+    starting_weapon: Optional[str] = None
     starting_weapon_description: Optional[str] = ""
     starter_loadout: Optional[dict] = None
     str_val: int = Field(1, ge=1, le=10, alias="str")
@@ -192,6 +236,7 @@ class CharacterCreateRequest(BaseModel):
     breast_size: Optional[str] = None
     penis_size: Optional[str] = None
     asset_texture: Optional[str] = None
+    starting_faction: Optional[str] = None
 
 
 class CharacterAppearanceUpdateRequest(BaseModel):
@@ -213,6 +258,7 @@ class PreviewGearRequest(BaseModel):
     race: Optional[str] = "Human"
     starting_weapon: Optional[str] = ""
     force_dynamic: Optional[bool] = True
+    starting_faction: Optional[str] = None
 
 
 class RegenerateGearRequest(BaseModel):
@@ -281,8 +327,16 @@ class StartAdventureRequest(BaseModel):
     breast_size: Optional[str] = None
     penis_size: Optional[str] = None
     asset_texture: Optional[str] = None
+    starting_faction: Optional[str] = None
     appearance: Optional[Dict[str, Any]] = None
+    slot: Optional[int] = 1
+    character_id: Optional[int] = None
 
+
+class ResumeSessionRequest(BaseModel):
+    user_id: int
+    session_id: int
+    character_id: Optional[int] = None
 
 
 class ActionRequest(BaseModel):
@@ -293,6 +347,18 @@ class ActionRequest(BaseModel):
     action: Optional[Dict[str, Any]] = None
     direct_choice: Optional[Dict[str, Any]] = None
     combat_target: Optional[str] = None
+    intent: Optional[str] = None
+    target_npc: Optional[str] = None
+    skip_minutes: Optional[int] = None
+    sleep_mode: Optional[str] = None
+    is_stealth: Optional[bool] = False
+    stance: Optional[str] = None
+
+
+class ToggleStealthRequest(BaseModel):
+    session_id: int
+    user_id: int
+    active: Optional[bool] = None
 
 
 class EndAdventureRequest(BaseModel):

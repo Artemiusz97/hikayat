@@ -324,11 +324,53 @@ def _build_player_actions_text(actions: list, session: dict | None = None) -> st
         check_obj = a.get("check")
         chance_note = f" (success chance was {check_obj.chance}%)" if check_obj and hasattr(check_obj, "chance") else ""
         c_name = a["char"]["name"] if isinstance(a.get("char"), dict) and a["char"].get("name") else "You"
+        scen_for_act = str(session.get("scenario", "fantasy") if isinstance(session, dict) else "fantasy")
+        is_recruit_act = (
+            str(a.get("intent") or "").lower() == "party_recruit"
+            or any(
+                kw in action_lower
+                for kw in (
+                    "join your party", "join our party", "join the party", "permanent companion",
+                    "join your field team", "join your field party", "onto your field squad", "onto your field team",
+                    "travel with your retinue", "join your retinue", "travel with your group", "join your group",
+                    "run with your team", "join your team", "join your crew", "join your expedition crew",
+                    "partner up and join", "team up and join", "team up and travel",
+                )
+            )
+        )
+        if is_recruit_act:
+            try:
+                from mechanics.social.relationships import (
+                    get_scenario_recruitment_phrasing,
+                    normalize_recruitment_choice_label,
+                )
+                t_npc_act = str(a.get("target_npc") or "").strip()
+                action_lbl = normalize_recruitment_choice_label(action_lbl, scenario=scen_for_act, target_npc=t_npc_act)
+                rec_info = get_scenario_recruitment_phrasing(scen_for_act, npc_name=t_npc_act or "the NPC", player_name=c_name)
+                tier_directive += (
+                    f"\n  * NATURAL TEAM-UP / RECRUITMENT NARRATION DIRECTIVE: {rec_info['narration_guidance']}"
+                )
+            except Exception:
+                pass
         action_lines.append(
             f"- {c_name} chose to: \"{action_lbl}\"{mp_note} -> "
             f"Outcome (already determined, do not contradict): {tier_directive}{chance_note}"
         )
-    actions_text = "\n".join(action_lines)
+    stealth_directives = []
+    if isinstance(session, dict) and session.get("stealth_state"):
+        from mechanics.stealth.core import format_stealth_truth_directive
+        s_dir = format_stealth_truth_directive(session)
+        if s_dir:
+            stealth_directives.append(s_dir.strip())
+    elif any(isinstance(a, dict) and (a.get("is_stealth") or a.get("stance") == "stealth") for a in (actions or [])):
+        from mechanics.stealth.core import format_stealth_truth_directive
+        s_dir = format_stealth_truth_directive(session or {})
+        if s_dir:
+            stealth_directives.append(s_dir.strip())
+
+    if stealth_directives:
+        action_lines.append("\n" + "\n\n".join(stealth_directives))
+
     return "\n".join(action_lines)
 
 async def _build_history_context(session: dict, ctx, budget=None) -> str:

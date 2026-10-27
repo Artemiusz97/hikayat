@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
+from pydantic import BaseModel
 import json
 
 import db
@@ -35,6 +36,10 @@ from mechanics.social.factions import (
     promote_player_in_roster,
     remove_player_from_roster,
     get_promotion_trial_directive,
+    get_agent_dossier_summary,
+    join_or_transfer_anomalous_faction,
+    infer_anomalous_faction_archetype,
+    ANOMALOUS_DISTRUSTED_ARCHETYPES,
 )
 from mechanics.narrative.clues import evaluate_clue_deduction
 from mechanics.world.locations import location_has_bounty_board, get_notice_board_label
@@ -71,6 +76,109 @@ from .deps import (
 )
 
 router = APIRouter()
+
+
+class CancelCommitmentRequest(BaseModel):
+    user_id: int | None = None
+    reason: str = "player_cancelled"
+
+
+def _fmt_hhmm(minute_val: int | None) -> str:
+    if minute_val is None:
+        return "00:00"
+    m = int(minute_val) % 1440
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
+def _enrich_commitments_for_ui(session_id: int, raw_commitments: list[dict] | None, contacts: list[dict] | None = None) -> list[dict]:
+    """Enriches commitment rows with friendly display names, subtype badges, and formatted time windows."""
+    if not raw_commitments:
+        return []
+    contact_by_key: dict[str, dict] = {}
+    for c in (contacts or []):
+        if not isinstance(c, dict):
+            continue
+        c_nm = str(c.get("name") or "").strip()
+        c_id = str(c.get("npc_id") or "").strip()
+        if c_id:
+            contact_by_key[c_id.lower()] = c
+            contact_by_key[c_id.lower().replace("-", "_")] = c
+        if c_nm:
+            contact_by_key[c_nm.lower()] = c
+            contact_by_key[c_nm.lower().replace(" ", "_").replace("-", "_")] = c
+
+    out: list[dict] = []
+    for item in raw_commitments:
+        if not isinstance(item, dict):
+            continue
+        d = dict(item)
+        d.setdefault("commitment_id", d.get("id"))
+        meta = d.get("metadata")
+        if not isinstance(meta, dict):
+            try:
+                meta = json.loads(d.get("metadata_json") or "{}")
+            except Exception:
+                meta = {}
+        d["metadata"] = meta
+
+        parts = d.get("participants")
+        if not isinstance(parts, list):
+            try:
+                parts = json.loads(d.get("participants_json") or "[]")
+            except Exception:
+                parts = []
+        d["participants"] = parts
+
+        src = str(d.get("source_entity") or "").strip()
+        tgt = str(d.get("target_entity") or "").strip()
+        counterparty_key = tgt if src.lower() in ("player", "") else src
+        matched_c = contact_by_key.get(counterparty_key.lower()) or contact_by_key.get(counterparty_key.lower().replace("-", "_"))
+
+        display_name = ""
+        npc_id_val = ""
+        if matched_c:
+            display_name = str(matched_c.get("name") or "").strip()
+            npc_id_val = str(matched_c.get("npc_id") or matched_c.get("name") or "").strip()
+        if not display_name:
+            for p in parts:
+                if isinstance(p, dict):
+                    pk = str(p.get("person_key") or p.get("npc_id") or "").strip()
+                    if pk.lower() not in ("player", ""):
+                        display_name = str(p.get("name") or pk).strip()
+                        npc_id_val = npc_id_val or str(p.get("npc_id") or pk).strip()
+                        break
+        if not display_name:
+            raw_lbl = str(d.get("npc_name") or counterparty_key or "Counterparty").strip()
+            display_name = raw_lbl.replace("_", " ").title() if "_" in raw_lbl and raw_lbl == raw_lbl.lower() else raw_lbl
+        if not npc_id_val:
+            npc_id_val = str(d.get("npc_id") or counterparty_key or display_name).strip()
+
+        d["target_display_name"] = display_name
+        d.setdefault("npc_name", display_name)
+        d.setdefault("npc_id", npc_id_val)
+
+        c_type = str(d.get("commitment_type") or "promise").lower()
+        subtype = str(meta.get("subtype") or meta.get("purpose") or c_type).strip().lower()
+        d["subtype"] = subtype
+
+        s_day = d.get("scheduled_day")
+        e_day = d.get("end_day") if d.get("end_day") is not None else s_day
+        s_min = d.get("start_minute")
+        e_min = d.get("end_minute")
+        if c_type == "rendezvous" and s_day is not None:
+            if e_day is not None and int(e_day) > int(s_day):
+                d["time_window_label"] = f"Day {s_day} {_fmt_hhmm(s_min)} – Day {e_day} {_fmt_hhmm(e_min)}"
+            else:
+                d["time_window_label"] = f"Day {s_day} • {_fmt_hhmm(s_min)}–{_fmt_hhmm(e_min)}"
+        elif meta.get("has_deadline") and s_day is not None:
+            d["time_window_label"] = f"Due Day {s_day} • {_fmt_hhmm(e_min)}"
+        elif d.get("deadline_turn") is not None:
+            d["time_window_label"] = f"Due by Turn #{d['deadline_turn']}"
+        else:
+            d["time_window_label"] = f"Day {s_day}" if s_day is not None else "Open Obligation"
+
+        out.append(d)
+    return out
 
 
 @router.post("/api/party/companion")
@@ -135,6 +243,11 @@ async def manage_party_companion(req: CompanionPartyRequest):
                 (dict(n) for n in curr_npcs if isinstance(n, dict) and (n.get("name") or "").strip().lower() == npc_name.lower()),
                 None
             )
+        if not matched_contact and scenario_data.is_anomalous_incursions_scenario(scen_key):
+            from mechanics.social.agent_roster import find_special_agent_by_name
+            sp_agent = await adb(find_special_agent_by_name, req.session_id, npc_name, scen_key)
+            if sp_agent:
+                matched_contact = dict(sp_agent)
     if not matched_contact:
         raise HTTPException(status_code=404, detail=f"NPC '{npc_name}' not found in contacts, current scene, or world codex.")
 
@@ -152,6 +265,36 @@ async def manage_party_companion(req: CompanionPartyRequest):
     char_level = max(1, int(char_row.get("level", 1) or 1)) if char_row else 1
     rec_cost = get_recruitment_cost(score, level=char_level)
     char_gold = int(char_row.get("gold", 0) or 0) if char_row else 0
+    extra_companion_fields = {}
+
+    comp_hp = 45
+    comp_max_hp = 45
+    comp_mp = 25
+    comp_max_mp = 25
+
+    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        from mechanics.social.agent_roster import evaluate_anomalous_companion_recruitment
+        eval_res = await adb(evaluate_anomalous_companion_recruitment, session, req.user_id, matched_contact, score, char_level)
+        if not eval_res.get("allowed"):
+            raise HTTPException(status_code=400, detail=eval_res.get("reason") or f"Cannot recruit {npc_name}.")
+        rec_cost = int(eval_res.get("cost", 0) or 0)
+        comp_hp = int(eval_res.get("hp", 130) or 130)
+        comp_max_hp = int(eval_res.get("max_hp", comp_hp) or comp_hp)
+        comp_mp = int(eval_res.get("mp", 60) or 60)
+        comp_max_mp = int(eval_res.get("max_mp", comp_mp) or comp_mp)
+        extra_companion_fields = {
+            "anomalous_npc_tag": "special_agent",
+            "is_special_agent": True,
+            "agent_tier": eval_res.get("agent_tier", 1),
+            "rank_title": eval_res.get("rank_title", ""),
+            "agent_class": eval_res.get("agent_class", ""),
+            "faction_id": eval_res.get("faction_id", ""),
+            "faction_name": eval_res.get("faction_name", ""),
+            "innate_abilities": eval_res.get("innate_abilities", []),
+            "level": eval_res.get("level", char_level),
+            "stats": eval_res.get("stats", {}),
+            "weapon_profile": eval_res.get("weapon_profile", {}),
+        }
 
     if rec_cost > 0:
         if char_gold < rec_cost:
@@ -164,18 +307,19 @@ async def manage_party_companion(req: CompanionPartyRequest):
     npc_payload = {
         "name": (matched_contact or {}).get("name") or npc_name,
         "npc_id": (matched_contact or {}).get("npc_id") or npc_name.lower().replace(" ", "_"),
-        "role": basic_info.get("role") or basic_info.get("occupation") or matched_contact.get("role") or "Companion",
-        "hp": 45,
-        "max_hp": 45,
-        "mp": 25,
-        "max_mp": 25,
+        "role": extra_companion_fields.get("agent_class") or basic_info.get("role") or basic_info.get("occupation") or matched_contact.get("role") or "Companion",
+        "hp": comp_hp,
+        "max_hp": comp_max_hp,
+        "mp": comp_mp,
+        "max_mp": comp_max_mp,
         "relationship_score": score,
+        **extra_companion_fields,
     }
     added = await adb(db.add_session_party_npc, req.session_id, npc_payload)
     if not added:
         raise HTTPException(status_code=400, detail=f"Could not add {npc_name} to party (party full or already recruited).")
 
-    # Per contact rule 1b: Recruited party members automatically enter Contacts list
+    # Recruited companions enter Party & Known Characters; only >= 100 or explicitly unlocked contacts appear in personal Contacts
     existing_in_contacts = any((c.get("name") or "").strip().lower() == npc_name.lower() for c in contacts)
     delta_to_apply = 0 if existing_in_contacts else score
     c_app = matched_contact.get("appearance") or matched_contact.get("appearance_json")
@@ -185,13 +329,33 @@ async def manage_party_companion(req: CompanionPartyRequest):
             c_app = json.loads(c_app)
         except Exception:
             c_app = {}
+    upsert_binfo = dict(basic_info) if isinstance(basic_info, dict) and basic_info else {"role": npc_payload["role"]}
+    upsert_binfo["met_in_person"] = True
+    if score < 100 and not (
+        upsert_binfo.get("exchanged_contact")
+        or upsert_binfo.get("added_via_peerpulse")
+        or upsert_binfo.get("unlocked_via_friendship")
+    ):
+        upsert_binfo.pop("contact_added", None)
+        upsert_binfo.pop("is_contact", None)
+    if extra_companion_fields.get("anomalous_npc_tag") == "special_agent":
+        upsert_binfo.update({
+            "anomalous_npc_tag": "special_agent",
+            "is_special_agent": True,
+            "agent_tier": extra_companion_fields.get("agent_tier", 1),
+            "rank_title": extra_companion_fields.get("rank_title", ""),
+            "agent_class": extra_companion_fields.get("agent_class", ""),
+            "faction_id": extra_companion_fields.get("faction_id", ""),
+            "faction": extra_companion_fields.get("faction_name", ""),
+            "innate_abilities": extra_companion_fields.get("innate_abilities", []),
+        })
     await adb(
         db.upsert_contact,
         session_id=req.session_id,
         character_id=char_id,
         npc_id=npc_payload["npc_id"],
         name=npc_payload["name"],
-        basic_info=basic_info if basic_info else {"role": npc_payload["role"]},
+        basic_info=upsert_binfo,
         delta_score=delta_to_apply,
         track="platonic",
         race=matched_contact.get("race", "") or "",
@@ -232,6 +396,11 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
     debug_reveal_all = bool((settings or {}).get("debug_reveal_all_info", 0))
     phys_st = session.get("physical_state") if isinstance(session.get("physical_state"), dict) else None
 
+    import scenario_data as _sd_lore
+    if _sd_lore.is_anomalous_incursions_scenario(scen_key):
+        from mechanics.social.agent_roster import prune_unmet_preseeded_special_agents
+        await adb(prune_unmet_preseeded_special_agents, session_id)
+
     grouped = await adb(db.get_lorebook, session_id)
     commitments = await adb(db.get_active_commitments, session_id)
     contacts = await adb(db.get_contacts, session_id) or []
@@ -254,40 +423,12 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
         str(p).strip().lower() for p in (party_npcs or []) if isinstance(p, str) and p.strip()
     }
 
-    # Only include NPCs encountered in person (current scene, turn history)
-    met_in_story_names = set(party_names)
-    for n in curr_npcs:
-        if isinstance(n, dict) and n.get("name"):
-            met_in_story_names.add(str(n["name"]).lower().strip())
-        elif isinstance(n, str) and n.strip():
-            met_in_story_names.add(str(n).lower().strip())
-    if dialogue_partner:
-        met_in_story_names.add(str(dialogue_partner).lower().strip())
-    for dp_item in (session.get("dialogue_partners") or []):
-        if dp_item:
-            met_in_story_names.add(str(dp_item).lower().strip())
-
-    # Include all NPCs encountered across session turn history (witnesses, dialogue partners, present NPCs)
-    for h in (session.get("history") or []):
-        if not isinstance(h, dict):
-            continue
-        for w in (h.get("witnessed_by") or []):
-            if isinstance(w, str) and w.strip():
-                met_in_story_names.add(w.strip().lower())
-        hist_dp = h.get("dialogue_partner")
-        if hist_dp and isinstance(hist_dp, str) and hist_dp.strip():
-            met_in_story_names.add(hist_dp.strip().lower())
-        for ru in (h.get("relationship_updates") or []):
-            if isinstance(ru, dict) and ru.get("npc_name"):
-                met_in_story_names.add(str(ru["npc_name"]).strip().lower())
-        for n in (h.get("current_npcs") or h.get("present_npcs") or []):
-            if isinstance(n, dict) and n.get("name"):
-                met_in_story_names.add(str(n["name"]).strip().lower())
-            elif isinstance(n, str) and n.strip():
-                met_in_story_names.add(str(n).strip().lower())
-
-    if player_char_name:
-        met_in_story_names.discard(player_char_name)
+    from mechanics.social.relationships import (
+        collect_met_npc_names,
+        is_npc_discovered_by_player,
+        is_unlocked_contact,
+    )
+    met_in_story_names = collect_met_npc_names(session, party_npcs=party_npcs, player_char_name=player_char_name)
 
     discovered_people_names = set()
     all_entities = []
@@ -308,24 +449,13 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
                     if c:
                         score = int(c.get("relationship_score", 0) or 0)
 
-                    # A character is strictly discovered if met in person (including past turns via last_in_person_ts or story lore), has active affinity, or is an unlocked contact
-                    from mechanics.social.relationships import is_unlocked_contact
-                    has_last_in_person = bool(c and (c.get("last_in_person_ts") or (c.get("basic_info") or {}).get("last_in_person_ts")))
-                    is_custom_story_lore = bool(
-                        not it_dict.get("faction")
-                        and (
-                            it_dict.get("mannerisms")
-                            or it_dict.get("motivation")
-                            or (isinstance(it_dict.get("appearance"), dict) and it_dict["appearance"].get("distinctive_features"))
-                        )
-                    )
-                    is_discovered = bool(
-                        debug_reveal_all
-                        or p_name in met_in_story_names
-                        or score != 0
-                        or (c is not None and is_unlocked_contact(c, party_names))
-                        or has_last_in_person
-                        or is_custom_story_lore
+                    # A character is strictly discovered if met in person (scene, turn history, party), has active affinity, or is an explicit contact
+                    is_discovered = is_npc_discovered_by_player(
+                        p_name,
+                        c,
+                        met_in_story_names,
+                        party_names=party_names,
+                        score_override=score,
                     )
 
                     # Filter out unencountered background faction / directory placeholders
@@ -421,7 +551,8 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
 
                     enriched_person = _enrich_contact_record(it_dict, session_id, scen_key, debug_reveal_all, phys_st=phys_st)
                     it_dict.update(enriched_person)
-                    it_dict["is_contact"] = bool(c is not None)
+                    it_dict["is_contact"] = bool(c is not None and is_unlocked_contact(c, party_names, met_in_story_names=met_in_story_names))
+                    it_dict["is_discovered"] = True
 
                     discovered_people_names.add(p_name)
                     all_entities.append(it_dict)
@@ -437,13 +568,12 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
                 continue
 
             score = int(c.get("relationship_score", 0) or 0)
-            from mechanics.social.relationships import is_unlocked_contact
-            is_discovered_c = bool(
-                debug_reveal_all
-                or c_name_lower in met_in_story_names
-                or score != 0
-                or is_unlocked_contact(c, party_names)
-                or bool(c.get("last_in_person_ts") or (c.get("basic_info") or {}).get("last_in_person_ts"))
+            is_discovered_c = is_npc_discovered_by_player(
+                c_name_lower,
+                c,
+                met_in_story_names,
+                party_names=party_names,
+                score_override=score,
             )
             if not is_discovered_c:
                 continue
@@ -480,7 +610,8 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
             p_dict["entity_type"] = "person"
             p_dict["basic_info"] = b_info
             p_dict["relationship_score"] = score
-            p_dict["is_contact"] = True
+            p_dict["is_contact"] = bool(is_unlocked_contact(c, party_names, met_in_story_names=met_in_story_names))
+            p_dict["is_discovered"] = True
 
             enriched_p = _enrich_contact_record(p_dict, session_id, scen_key, debug_reveal_all, phys_st=phys_st)
             p_dict.update(enriched_p)
@@ -502,6 +633,7 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
             display_name = (r_entry.get("name") if r_entry else None) or (matched_curr_npc.get("name") if matched_curr_npc else met_name_lower.title())
             p_dict = {
                 "name": display_name,
+                "formal_title": (r_entry.get("formal_title") if r_entry else "") or "",
                 "role": (r_entry.get("role") if r_entry else None) or (matched_curr_npc.get("role") if matched_curr_npc else "Acquaintance"),
                 "grade": (r_entry.get("grade") if r_entry else "") or "",
                 "club": (r_entry.get("club") if r_entry else "") or "",
@@ -525,7 +657,7 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
     return {
         "categories": grouped,
         "entities": all_entities,
-        "commitments": [dict(c) for c in (commitments or [])],
+        "commitments": _enrich_commitments_for_ui(session_id, commitments, contacts),
     }
 
 
@@ -544,6 +676,10 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None)):
     lookup_uid = valid_uid or session.get("host_user_id") or 0
     settings = await adb(db.get_settings, lookup_uid) if lookup_uid else {}
     debug_reveal_all = bool((settings or {}).get("debug_reveal_all_info", 0))
+    from scenario_data import is_nsfw_scenario, is_anomalous_incursions_scenario
+    if is_anomalous_incursions_scenario(scen_key):
+        from mechanics.social.agent_roster import prune_unmet_preseeded_special_agents
+        await adb(prune_unmet_preseeded_special_agents, session_id)
     char_row = await adb(db.get_character, lookup_uid) if lookup_uid else None
     char_id = char_row.get("id", 0) if char_row else 0
     contacts = await adb(db.get_contacts, session_id, char_id)
@@ -552,11 +688,11 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None)):
     enriched_contacts = await adb(
         lambda: [_enrich_contact_record(c, session_id, scen_key, debug_reveal_all, phys_st=phys_st) for c in contacts]
     )
-    from scenario_data import is_nsfw_scenario
-    from mechanics.social.relationships import is_unlocked_contact
+    from mechanics.social.relationships import collect_met_npc_names, is_unlocked_contact
     party_npcs = await adb(db.get_session_party_npcs, session_id)
     party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
-    unlocked_contacts = [c for c in enriched_contacts if is_unlocked_contact(c, party_names)]
+    met_names = collect_met_npc_names(session, party_npcs=party_npcs)
+    unlocked_contacts = [c for c in enriched_contacts if is_unlocked_contact(c, party_names, met_in_story_names=met_names)]
     return {
         "contacts": unlocked_contacts,
         "is_nsfw": is_nsfw_scenario(scen_key),
@@ -565,21 +701,30 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None)):
 
 
 def _enrich_factions_list(session_id: int, user_id: int | None = None) -> dict:
+    import scenario_data
+
     session = db.get_session(session_id) or {}
     scen_key = session.get("scenario", "fantasy")
+    is_anom = scenario_data.is_anomalous_incursions_scenario(scen_key)
     lookup_uid = user_id or session.get("host_user_id")
+    char = db.get_character(lookup_uid) if lookup_uid else None
+
+    try:
+        ensure_starter_factions(session_id, scen_key)
+        if is_anom:
+            from mechanics.social.agent_roster import ensure_anomalous_agent_roster
+            ensure_anomalous_agent_roster(session_id, scen_key)
+        sync_faction_rosters_with_contacts(session_id)
+    except Exception:
+        pass
+
+    agent_dossier = get_agent_dossier_summary(session_id, lookup_uid) if is_anom else {"is_anomalous_incursions": False}
     char = db.get_character(lookup_uid) if lookup_uid else None
     membership = {
         "joined_faction_id": (char or {}).get("joined_faction_id") or "",
         "faction_rank": int((char or {}).get("faction_rank") or 0),
         "faction_title": (char or {}).get("faction_title") or "",
     }
-
-    try:
-        ensure_starter_factions(session_id, scen_key)
-        sync_faction_rosters_with_contacts(session_id)
-    except Exception:
-        pass
 
     raw_factions = db.get_factions(session_id)
     enriched = []
@@ -606,9 +751,14 @@ def _enrich_factions_list(session_id: int, user_id: int | None = None) -> dict:
         perks = get_active_perks(f_dict, eff_rank, rep)
         f_dict["active_perks"] = perks or []
         f_dict["rival_faction_ids"] = f_dict.get("rival_faction_ids") or []
+        if is_anom:
+            arch = infer_anomalous_faction_archetype(f_dict)
+            f_dict["archetype_key"] = arch
+            f_dict["joinable"] = arch not in ANOMALOUS_DISTRUSTED_ARCHETYPES
+            f_dict["diplomatic_stance"] = "distrusted" if arch in ANOMALOUS_DISTRUSTED_ARCHETYPES else "friendly"
         enriched.append(f_dict)
 
-    return {"factions": enriched, "membership": membership}
+    return {"factions": enriched, "membership": membership, "agent_dossier": agent_dossier}
 
 
 @router.get("/api/factions/{session_id}")
@@ -641,7 +791,21 @@ async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
     joined_fid = (char.get("joined_faction_id") or "").strip().lower()
     target_fid = (faction.get("faction_id") or "").strip().lower()
 
-    if action == "join":
+    import scenario_data
+    is_anom = scenario_data.is_anomalous_incursions_scenario(scen_key)
+
+    if action in ("join", "transfer"):
+        if is_anom:
+            res = await adb(join_or_transfer_anomalous_faction, session_id, faction["faction_id"], req.user_id)
+            if not res.get("success"):
+                raise HTTPException(status_code=400, detail=res.get("error", "Cannot join this faction."))
+            payload = await adb(_enrich_factions_list, session_id, req.user_id)
+            return {
+                "success": True,
+                "action": action,
+                "message": res.get("message", f"Joined {faction.get('name')}!"),
+                **payload,
+            }
         if joined_fid and joined_fid != target_fid:
             raise HTTPException(
                 status_code=400,
@@ -658,6 +822,15 @@ async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
         }
 
     if action == "leave":
+        if is_anom:
+            res = await adb(join_or_transfer_anomalous_faction, session_id, "freelancer", req.user_id)
+            payload = await adb(_enrich_factions_list, session_id, req.user_id)
+            return {
+                "success": True,
+                "action": "leave",
+                "message": res.get("message", f"You have parted ways with {faction.get('name')} and are now an Independent Freelancer."),
+                **payload,
+            }
         roster = faction.get("leadership_roster") or []
         if roster:
             cleaned_roster = remove_player_from_roster(roster, char["name"], template, scen_key)
@@ -672,12 +845,35 @@ async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
         }
 
     if action == "rest":
-        if tier["tier_level"] < 2:
+        if is_anom:
+            from mechanics.social.factions import get_anomalous_faction_state, infer_anomalous_faction_archetype
+            a_st = await adb(get_anomalous_faction_state, session_id, req.user_id)
+            fac_arch = infer_anomalous_faction_archetype(faction)
+            if str(a_st.get("faction_archetype_key") or "") != fac_arch:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Safehouse recovery quarters at {faction.get('name', 'this faction')} are restricted to enlisted operatives."
+                )
+        elif tier["tier_level"] < 2:
             raise HTTPException(
                 status_code=400,
                 detail="You need Liked standing or higher (+1 Rep) to use the faction safehouse rest."
             )
         await adb(db.apply_hp_mp_delta, req.user_id, char["max_hp"], char["max_mp"], 0)
+        party_npcs_rest = await adb(db.get_session_party_npcs, session_id)
+        if party_npcs_rest:
+            rested_companions = []
+            for p_comp in party_npcs_rest:
+                if isinstance(p_comp, dict):
+                    p_comp = dict(p_comp)
+                    p_comp["hp"] = int(p_comp.get("max_hp", p_comp.get("hp", 100)) or 100)
+                    p_comp["mp"] = int(p_comp.get("max_mp", p_comp.get("mp", 0)) or 0)
+                    p_comp["status_effects"] = [
+                        s for s in (p_comp.get("status_effects") or [])
+                        if not any(k in str(s).lower() for k in ("incapacitated", "knocked out", "exhausted", "triage"))
+                    ]
+                    rested_companions.append(p_comp)
+            await adb(db.set_session_party_npcs, session_id, rested_companions)
         payload = await adb(_enrich_factions_list, session_id, req.user_id)
         return {
             "success": True,
@@ -689,9 +885,33 @@ async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
         }
 
     if action == "quartermaster":
+        fac_arch = ""
+        if is_anom:
+            from mechanics.social.factions import (
+                ANOMALOUS_DISTRUSTED_ARCHETYPES,
+                get_anomalous_faction_state,
+                infer_anomalous_faction_archetype,
+            )
+            fac_arch = infer_anomalous_faction_archetype(faction)
+            if fac_arch in ANOMALOUS_DISTRUSTED_ARCHETYPES:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"{faction.get('name', 'This group')} operates clandestinely without an official requisition quartermaster."
+                )
+            a_st = await adb(get_anomalous_faction_state, session_id, req.user_id)
+            player_arch = str(a_st.get("faction_archetype_key") or "freelancer")
+            if fac_arch in ("private_agency_1", "private_agency_2") and player_arch != fac_arch:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"{faction.get('name', 'Private Syndicate')} Quartermaster access is restricted exclusively to contracted operatives of this agency."
+                )
         current_day, current_minute, _ = await adb(db.get_session_time, session_id)
         merchant = session.setdefault("merchant", {})
-        faction_key = f"faction_{faction['faction_id']}"
+        faction_key = (
+            f"faction_{faction['faction_id']}:monastic_daily"
+            if (is_anom and fac_arch == "monastic_order")
+            else f"faction_{faction['faction_id']}"
+        )
         from mechanics.combat.merchant import (
             generate_faction_quartermaster_shop,
             get_or_create_merchant_catalogue,
@@ -704,13 +924,14 @@ async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
             shop = await generate_faction_quartermaster_shop(faction, session)
             cat_entry = update_merchant_catalogue(merchant, faction_key, shop, current_day, current_minute)
 
-        discount = cat_entry.get("discount_pct", 0)
+        discount = 0 if is_anom else cat_entry.get("discount_pct", 0)
         merchant.update({
             "active": True,
             "active_store_key": faction_key,
             "stock": cat_entry["stock"],
             "discount_pct": discount,
             "is_faction_quartermaster": True,
+            "quartermaster_faction_arch": fac_arch if is_anom else "",
             "restock_day": cat_entry.get("restock_day", current_day),
             "restock_minute": cat_entry.get("restock_minute", current_minute),
         })
@@ -725,6 +946,25 @@ async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
         }
 
     if action == "bounty":
+        if is_anom:
+            from mechanics.social.factions import (
+                ANOMALOUS_DISTRUSTED_ARCHETYPES,
+                get_anomalous_faction_state,
+                infer_anomalous_faction_archetype,
+            )
+            fac_arch = infer_anomalous_faction_archetype(faction)
+            if fac_arch in ANOMALOUS_DISTRUSTED_ARCHETYPES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{faction.get('name', 'This organization')} does not publish licensed containment contracts."
+                )
+            a_st = await adb(get_anomalous_faction_state, session_id, req.user_id)
+            player_arch = str(a_st.get("faction_archetype_key") or "freelancer")
+            if fac_arch != "public_agency" and player_arch != fac_arch:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Internal dispatch contracts for {faction.get('name', 'this faction')} are restricted to its enlisted operatives."
+                )
         bounties = await game_engine.generate_faction_bounty_board(session, faction)
         payload = await adb(_enrich_factions_list, session_id, req.user_id)
         return {
@@ -735,7 +975,12 @@ async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
             **payload,
         }
 
-    if action == "promote":
+    if action in ("promote", "challenge_leader"):
+        if is_anom:
+            raise HTTPException(
+                status_code=400,
+                detail="In Anomalous Incursions, operatives cannot usurp the fixed leadership hierarchy. Advance from Tier 1 (Probationary Agent) to Tier 5 (Elite Agent) on the 5-Tier Promotion Meter (0-100 Rep) by completing Faction Bounties (+10 Rep) and Daily Mandatory Dispatches (+15 Rep)!"
+            )
         if joined_fid != target_fid:
             raise HTTPException(
                 status_code=400,
@@ -808,18 +1053,74 @@ def _build_quests_payload(session_id: int) -> dict:
     scen_key = session.get("scenario", "fantasy")
     current_loc = session.get("current_location") or ""
     quests = [dict(q) for q in db.get_session_quests(session_id) if q]
+    from mechanics.world.locations.hierarchy import (
+        resolve_session_location_tokens,
+        clean_narrative_location_arrows,
+        dedupe_location_stutter,
+    )
+
+    def _clean_quest_dict(q: dict) -> None:
+        if q.get("title"):
+            q["title"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, q["title"], scen_key))
+        if q.get("objective"):
+            q["objective"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, q["objective"], scen_key))
+        if q.get("stage_label"):
+            q["stage_label"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, q["stage_label"], scen_key))
+        if q.get("target_location"):
+            q["target_location"] = dedupe_location_stutter(resolve_session_location_tokens(session_id, q["target_location"], scen_key))
+        if q.get("waypoints") and isinstance(q["waypoints"], list):
+            for wp in q["waypoints"]:
+                if isinstance(wp, dict):
+                    if wp.get("stage_label"):
+                        wp["stage_label"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, wp["stage_label"], scen_key))
+                    if wp.get("target_location"):
+                        wp["target_location"] = dedupe_location_stutter(resolve_session_location_tokens(session_id, wp["target_location"], scen_key))
+        if q.get("sub_objectives"):
+            for so in q["sub_objectives"]:
+                if isinstance(so, dict):
+                    if so.get("text"):
+                        so["text"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, so["text"], scen_key))
+                    if so.get("stage_label"):
+                        so["stage_label"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, so["stage_label"], scen_key))
+                    if so.get("target_location"):
+                        so["target_location"] = dedupe_location_stutter(resolve_session_location_tokens(session_id, so["target_location"], scen_key))
+                    if so.get("waypoints") and isinstance(so["waypoints"], list):
+                        for wp in so["waypoints"]:
+                            if isinstance(wp, dict):
+                                if wp.get("stage_label"):
+                                    wp["stage_label"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, wp["stage_label"], scen_key))
+                                if wp.get("target_location"):
+                                    wp["target_location"] = dedupe_location_stutter(resolve_session_location_tokens(session_id, wp["target_location"], scen_key))
+
+    for q in quests:
+        _clean_quest_dict(q)
     active_sq = db.get_active_story_quest(session_id)
+    if active_sq:
+        active_sq = dict(active_sq)
+        _clean_quest_dict(active_sq)
     if active_sq and active_sq.get("climax_ready"):
         try:
             _, climax_loc = get_story_quest_climax_location(session_id)
             if climax_loc:
-                clean_climax = climax_loc.replace(" -> ", " ➔ ")
+                clean_climax = dedupe_location_stutter(climax_loc.replace(" -> ", " ➔ "))
                 active_sq["climax_location"] = clean_climax
                 active_sq["target_location"] = clean_climax
         except Exception:
             pass
     clues = [dict(c) for c in db.get_session_clues(session_id) if c]
     available_bounties = [q for q in quests if q.get("status") == "Available"]
+    import scenario_data as _sd_qp
+    if _sd_qp.is_anomalous_incursions_scenario(scen_key):
+        try:
+            from mechanics.narrative.bounty import evaluate_anomalous_bounty_eligibility, parse_anomalous_quest_board_source
+            host_uid = session.get("host_user_id") if session else None
+            for bq in available_bounties:
+                elig = evaluate_anomalous_bounty_eligibility(session_id, host_uid, bq)
+                bq["board_source"] = parse_anomalous_quest_board_source(bq, session_id=session_id)
+                bq["anomalous_eligible"] = bool(elig.get("allowed", True))
+                bq["anomalous_lock_reason"] = str(elig.get("reason") or "")
+        except Exception:
+            pass
     nb_label, nb_emoji = get_notice_board_label(scen_key)
     current_chapter = db.get_session_chapter(session_id) or 1
     campaign_end_goals = session.get("campaign_end_goals") or db.get_session_campaign_goals(session_id) or []
@@ -876,17 +1177,44 @@ async def bounty_contract_action(session_id: int, req: BountyActionRequest):
     if not quest:
         raise HTTPException(status_code=404, detail="Bounty contract not found")
 
+    session = await adb(db.get_session, session_id) or {}
+    scen_key = str(session.get("scenario") or "fantasy")
     action = (req.action or "accept").strip().lower()
+
+    import scenario_data
+    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        notes = str(quest.get("quest_notes") or "")
+        if action == "accept":
+            from mechanics.narrative.bounty import evaluate_anomalous_bounty_eligibility
+            elig = await adb(evaluate_anomalous_bounty_eligibility, session_id, req.user_id, quest)
+            if not elig.get("allowed", True):
+                raise HTTPException(status_code=400, detail=elig.get("reason") or "Faction rules prohibit accepting this bounty.")
+        elif action == "abandon":
+            if "mandatory_daily:1" in notes or str(quest.get("quest_id") or "").upper().startswith("MAND-"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Mandatory Daily Dispatches cannot be abandoned! Complete it before 24:00 to avoid a -15 Reputation penalty."
+                )
+
     if action == "accept":
+        can_take = await adb(game_engine.can_accept_side_bounty, session_id, quest)
+        if not can_take:
+            raise HTTPException(
+                status_code=400,
+                detail="Maximum 3 active side bounties reached! Complete or abandon one first.",
+            )
         new_status = "Active"
         msg = f"Accepted contract: {quest.get('title', 'Bounty')}!"
+        await adb(db.update_quest_status, session_id, req.quest_id, new_status)
     elif action == "abandon":
+        forfeit_res = await adb(game_engine.forfeit_side_bounty, session_id, req.quest_id, [req.user_id])
+        if not forfeit_res.get("success"):
+            raise HTTPException(status_code=400, detail=forfeit_res.get("reason") or "Cannot abandon this contract.")
         new_status = "Abandoned"
         msg = f"Abandoned contract: {quest.get('title', 'Bounty')}."
     else:
         raise HTTPException(status_code=400, detail=f"Invalid bounty action: {req.action}")
 
-    await adb(db.update_quest_status, session_id, req.quest_id, new_status)
     payload = await adb(_build_quests_payload, session_id)
     return {
         "success": True,
@@ -911,12 +1239,26 @@ async def deduce_caseboard_clues(session_id: int, req: ClueDeductionRequest):
     clue_b = await adb(db.get_session_clue_by_id, req.clue_b_id)
     if not clue_a or not clue_b:
         raise HTTPException(status_code=404, detail="One or both selected evidence records could not be found.")
+    if clue_a.get("is_consumed") or clue_b.get("is_consumed"):
+        raise HTTPException(status_code=400, detail="One or both selected leads have already been consumed.")
+
+    # D18 Anti-spam cooldown: max 1 attempt per pair per turn
+    pair_key = f"{min(int(req.clue_a_id), int(req.clue_b_id))}:{max(int(req.clue_a_id), int(req.clue_b_id))}"
+    cur_turn = len(session.get("history") or [])
+    attempts_map = dict(session.get("deduction_attempts_turn") or {})
+    if attempts_map.get(pair_key) == cur_turn:
+        raise HTTPException(
+            status_code=400,
+            detail="You already attempted to connect this pair of leads this turn. Advance the story or try another lead!",
+        )
 
     scen_key = session.get("scenario", "fantasy")
     is_valid, title, detail_text = evaluate_clue_deduction(clue_a, clue_b, scen_key=scen_key)
 
     xp_awarded = 0
     if is_valid:
+        attempts_map[pair_key] = cur_turn
+        await adb(db.update_session, session_id, extra={"deduction_attempts_turn": attempts_map})
         char_row = await adb(db.get_character, req.user_id) if req.user_id else {}
         import random
         cats = {clue_a.get("category", "physical"), clue_b.get("category", "physical")}
@@ -980,6 +1322,10 @@ async def get_phone_state(session_id: int, user_id: int = Query(...)):
     arrived_appts = await adb(db.get_phone_appointments, session_id, status="arrived")
     appointments = (pending_appts or []) + (arrived_appts or [])
     gossip = await adb(db.get_gossip_feed, session_id, limit=15)
+    import scenario_data as _sd_phone
+    if _sd_phone.is_anomalous_incursions_scenario(scen_key):
+        from mechanics.social.agent_roster import prune_unmet_preseeded_special_agents
+        await adb(prune_unmet_preseeded_special_agents, session_id)
     char_row = await adb(db.get_character, user_id)
     char_id = char_row.get("id", 0) if char_row else 0
     contacts = await adb(db.get_contacts, session_id, char_id)
@@ -1003,9 +1349,60 @@ async def get_phone_state(session_id: int, user_id: int = Query(...)):
 
     party_npcs = await adb(db.get_session_party_npcs, session_id)
     party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
-    from mechanics.social.relationships import is_unlocked_contact
-    unlocked_contacts = [dict(c) for c in contacts if is_unlocked_contact(c, party_names)]
+    from mechanics.social.relationships import collect_met_npc_names, is_contact_blocked, is_unlocked_contact
+    met_names = collect_met_npc_names(session, party_npcs=party_npcs)
+    unlocked_contacts = []
+    for c in contacts:
+        if is_unlocked_contact(c, party_names, met_in_story_names=met_names):
+            uc_copy = dict(c)
+            uc_copy["is_blocked_contact"] = is_contact_blocked(uc_copy)
+            unlocked_contacts.append(uc_copy)
+
+    synthetic_channels = []
+    if _sd_phone.is_anomalous_incursions_scenario(scen_key):
+        try:
+            from mechanics.social.factions import get_anomalous_faction_state
+            a_st = await adb(get_anomalous_faction_state, session_id, user_id)
+            dispatch_defs = [
+                ("metropolitan_anomaly_watch", "Metropolitan Anomaly Watch", "Citywide Anomaly Broadcast"),
+            ]
+            if a_st.get("faction_archetype_key", "freelancer") != "freelancer" and a_st.get("joined_faction_name"):
+                f_disp = f"{a_st['joined_faction_name']} Dispatch"
+                dispatch_defs.insert(0, (f_disp.strip().lower().replace(" ", "_"), f_disp, "Mandatory Daily Dispatch"))
+            for ch_id, ch_name, ch_role in dispatch_defs:
+                msgs = await adb(db.get_phone_messages, session_id, ch_id, 1)
+                if msgs:
+                    synthetic_channels.append({
+                        "npc_id": ch_id,
+                        "name": ch_name,
+                        "role": ch_role,
+                        "is_dispatch_channel": True,
+                        "read_only": True,
+                    })
+            from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag
+            for uc in unlocked_contacts:
+                if isinstance(uc, dict) and not uc.get("is_dispatch_channel"):
+                    t_uc = classify_anomalous_npc_tag(uc, session_id=session_id, scen_key=scen_key)
+                    uc["anomalous_npc_tag"] = t_uc
+                    uc["anomalous_tag_label"] = "Special Agent" if t_uc == "special_agent" else "Civilian"
+                    if (uc.get("basic_info") or {}).get("deceased"):
+                        uc["deceased"] = True
+        except Exception:
+            pass
     suggested_peers = await adb(get_suggested_peers, session_id, user_id)
+    if _sd_phone.is_anomalous_incursions_scenario(scen_key) and isinstance(suggested_peers, list):
+        try:
+            from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag
+            for sp_p in suggested_peers:
+                if isinstance(sp_p, dict):
+                    t_sp = classify_anomalous_npc_tag(sp_p, session_id=session_id, scen_key=scen_key)
+                    sp_p["anomalous_npc_tag"] = t_sp
+                    sp_p["anomalous_tag_label"] = "Special Agent" if t_sp == "special_agent" else "Civilian"
+        except Exception:
+            pass
+    active_commitments = await adb(db.get_active_commitments, session_id)
+    enriched_commitments = _enrich_commitments_for_ui(session_id, active_commitments, contacts)
+    enriched_appointments = _enrich_commitments_for_ui(session_id, appointments, contacts)
 
     return {
         "is_supported": is_supported,
@@ -1021,10 +1418,12 @@ async def get_phone_state(session_id: int, user_id: int = Query(...)):
             "shop_app_name": branding.get("shop_app_name", "E-Shop") if branding else "E-Shop",
             "emoji": branding.get("emoji", "📱") if branding else "📱",
         } if branding else None,
-        "appointments": [dict(a) for a in appointments],
+        "appointments": enriched_appointments,
+        "commitments": enriched_commitments,
         "gossip_feed": [dict(g) for g in gossip],
         "media_gallery": digital_media,
         "contacts": unlocked_contacts,
+        "dispatch_channels": synthetic_channels,
         "suggested_peers": suggested_peers,
         "social_state": social_state,
     }
@@ -1083,6 +1482,18 @@ async def discover_peerpulse_profile(session_id: int, req: PeerPulseDiscoverRequ
     if not profile:
         raise HTTPException(status_code=404, detail=f"No PeerPulse profile found matching '{query}'.")
 
+    import scenario_data as _sd_disc
+    scen_disc = session.get("scenario", "")
+    if isinstance(profile, dict) and _sd_disc.is_anomalous_incursions_scenario(scen_disc):
+        try:
+            from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag
+            t_p = classify_anomalous_npc_tag(profile, session_id=session_id, scen_key=scen_disc)
+            profile = dict(profile)
+            profile["anomalous_npc_tag"] = t_p
+            profile["anomalous_tag_label"] = "Special Agent" if t_p == "special_agent" else "Civilian"
+        except Exception:
+            pass
+
     return {
         "success": True,
         "profile": profile,
@@ -1100,11 +1511,21 @@ async def send_peerpulse_friend_request(session_id: int, req: PeerPulseFriendReq
     char_row = await adb(db.get_character, req.user_id)
     char_id = char_row.get("id", 0) if char_row else 0
     contacts = await adb(db.get_contacts, session_id, char_id)
+    party_npcs = await adb(db.get_session_party_npcs, session_id)
+    party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
+    from mechanics.social.relationships import collect_met_npc_names, is_contact_blocked, is_unlocked_contact
+    met_names = collect_met_npc_names(session, party_npcs=party_npcs)
+    unlocked_contacts = []
+    for c in contacts:
+        if is_unlocked_contact(c, party_names, met_in_story_names=met_names):
+            uc_copy = dict(c)
+            uc_copy["is_blocked_contact"] = is_contact_blocked(uc_copy)
+            unlocked_contacts.append(uc_copy)
     return {
         "success": True,
         **res,
         "profile": req.profile,
-        "contacts": [dict(c) for c in contacts],
+        "contacts": unlocked_contacts,
     }
 
 
@@ -1115,6 +1536,18 @@ async def get_peerpulse_suggestions(session_id: int, user_id: int = Query(...)):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     suggestions = await adb(get_suggested_peers, session_id, user_id)
+    import scenario_data as _sd_sugg
+    scen_sugg = session.get("scenario", "")
+    if _sd_sugg.is_anomalous_incursions_scenario(scen_sugg):
+        try:
+            from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag
+            for sp_p in (suggestions or []):
+                if isinstance(sp_p, dict):
+                    t_sp = classify_anomalous_npc_tag(sp_p, session_id=session_id, scen_key=scen_sugg)
+                    sp_p["anomalous_npc_tag"] = t_sp
+                    sp_p["anomalous_tag_label"] = "Special Agent" if t_sp == "special_agent" else "Civilian"
+        except Exception:
+            pass
     return {
         "success": True,
         "suggested_peers": suggestions,
@@ -1140,6 +1573,13 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
     text = (req.message or "").strip()
     if (not text or text == "__auto__") and not req.intent:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    norm_target_id = str(npc_id or "").strip().lower().replace(" ", "_")
+    if norm_target_id == "metropolitan_anomaly_watch" or norm_target_id.endswith("_dispatch"):
+        raise HTTPException(
+            status_code=400,
+            detail="Automated dispatch channels are read-only broadcast feeds and do not accept replies."
+        )
 
     session_row = await adb(db.get_session, session_id)
     if not session_row:
@@ -1168,6 +1608,30 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
             "basic_info": {}
         }
 
+    from mechanics.social.relationships import is_contact_blocked
+    if isinstance(contact, dict) and (
+        contact.get("is_dispatch_channel")
+        or (isinstance(contact.get("basic_info"), dict) and contact["basic_info"].get("is_dispatch_channel"))
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Automated dispatch channels are read-only broadcast feeds and do not accept replies."
+        )
+    if is_contact_blocked(contact):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{contact.get('name', 'This contact')} has blocked your number due to hostility. Reconcile with them in person first."
+        )
+
+    if isinstance(contact, dict) and (
+        contact.get("deceased")
+        or (isinstance(contact.get("basic_info"), dict) and contact["basic_info"].get("deceased"))
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{contact.get('name', 'This contact')}'s line is disconnected — they perished during an anomalous incursion."
+        )
+
     if not text or text == "__auto__":
         text = await generate_player_chat_message(session, dict(contact), player_char, req.intent)
         if not text:
@@ -1190,4 +1654,43 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
         "messages": [dict(m) for m in messages],
         "daily_limits": reply_data.get("daily_limits"),
     }
+
+
+@router.post("/api/commitments/{session_id}/{commitment_id}/cancel")
+async def cancel_session_commitment(
+    session_id: int,
+    commitment_id: int,
+    req: CancelCommitmentRequest | None = Body(default=None),
+):
+    """Cancels an active rendezvous or commitment in commitments_ledger without flake penalty."""
+    from mechanics.system import commitments_engine
+
+    session = await adb(db.get_session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    reason = (req.reason if req and req.reason else "player_cancelled").strip()
+    cancelled = await adb(
+        commitments_engine.cancel_commitment,
+        session_id,
+        commitment_id,
+        reason=reason,
+        cancelled_by="player",
+    )
+    if not cancelled:
+        raise HTTPException(status_code=404, detail="Commitment not found or already resolved")
+
+    contacts = await adb(db.get_contacts, session_id) or []
+    active_commitments = await adb(db.get_active_commitments, session_id)
+    pending_appts = await adb(db.get_phone_appointments, session_id, status="pending")
+    arrived_appts = await adb(db.get_phone_appointments, session_id, status="arrived")
+    appointments = (pending_appts or []) + (arrived_appts or [])
+
+    return {
+        "success": True,
+        "cancelled_id": commitment_id,
+        "commitments": _enrich_commitments_for_ui(session_id, active_commitments, contacts),
+        "appointments": _enrich_commitments_for_ui(session_id, appointments, contacts),
+    }
+
 

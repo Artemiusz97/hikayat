@@ -119,6 +119,13 @@ TAG_TO_TEMPLATE_KEY = {
     "cyberpunk": "cyberpunk",
     "steampunk": "steampunk",
     "fantasy": "fantasy",
+    "urban_fantasy": "urban_fantasy",
+    "modern": "urban_fantasy",
+    "urban_anomalies": "anomalous_incursions",
+    "anomalous_incursions": "anomalous_incursions",
+    "nsfw_gore_anomalous_incursions": "anomalous_incursions",
+    "furry_anomalous_incursions": "anomalous_incursions",
+    "nsfw_furry_gore_anomalous_incursions": "anomalous_incursions",
 }
 
 
@@ -155,10 +162,22 @@ def get_all_class_templates() -> dict[str, dict]:
     for scen_key, class_dict in templates.items():
         if isinstance(class_dict, dict):
             all_classes.update(class_dict)
+    try:
+        from mechanics.combat.items.anomalous_gear import get_all_anomalous_faction_classes
+        all_classes.update(get_all_anomalous_faction_classes())
+    except Exception:
+        pass
     return all_classes
 
 
-def get_class_templates(scenario: str | None = None) -> dict[str, dict]:
+def get_class_templates(scenario: str | None = None, starting_faction: str | None = None) -> dict[str, dict]:
+    try:
+        from scenario_data import is_anomalous_incursions_scenario
+        if is_anomalous_incursions_scenario(scenario):
+            from mechanics.combat.items.anomalous_gear import get_anomalous_faction_classes
+            return get_anomalous_faction_classes(starting_faction or "public_agency")
+    except Exception:
+        pass
     templates = load_class_templates()
     if not scenario or scenario == "all":
         return get_all_class_templates()
@@ -177,6 +196,15 @@ def get_all_starting_weapons() -> list[str]:
                 if w not in seen:
                     seen.add(w)
                     all_weapons.append(w)
+    try:
+        from mechanics.combat.items.anomalous_gear import ANOMALOUS_FACTION_WEAPONS
+        for w_list in ANOMALOUS_FACTION_WEAPONS.values():
+            for w in w_list:
+                if w not in seen:
+                    seen.add(w)
+                    all_weapons.append(w)
+    except Exception:
+        pass
     return all_weapons or ["Runic Sword", "Arcane Staff", "Elven Bow", "Silver Dagger"]
 
 
@@ -194,14 +222,17 @@ def is_tailed_race(race: str) -> bool:
     return any(k in r for k in tailed_keywords)
 
 
-def get_starting_weapons(scenario: str | None = None) -> list[str]:
+def get_starting_weapons(scenario: str | None = None, starting_faction: str | None = None) -> list[str]:
     weapons = load_starting_weapons()
     if not scenario or scenario == "all":
         return get_all_starting_weapons()
     try:
-        from scenario_data import is_non_combat_scenario
+        from scenario_data import is_non_combat_scenario, is_anomalous_incursions_scenario
         if is_non_combat_scenario(scenario):
             return []
+        if is_anomalous_incursions_scenario(scenario):
+            from mechanics.combat.items.anomalous_gear import get_anomalous_faction_weapons
+            return get_anomalous_faction_weapons(starting_faction or "public_agency")
     except Exception:
         pass
     if scenario in weapons:
@@ -236,6 +267,16 @@ def get_starting_weapons(scenario: str | None = None) -> list[str]:
 def get_starter_gear_by_class(scenario: str = "fantasy", char_class: str = "", gender: str = "Male", race: str = "Human") -> dict:
     scen_classes = get_class_templates(scenario)
     class_info = scen_classes.get(char_class)
+    if not class_info:
+        try:
+            from mechanics.combat.items.anomalous_gear import get_all_anomalous_faction_classes
+            class_info = get_all_anomalous_faction_classes().get(char_class)
+        except Exception:
+            pass
+    if not class_info:
+        raw_templates = load_class_templates()
+        key = _resolve_template_scenario_key(scenario, raw_templates)
+        class_info = (raw_templates.get(scenario) or {}).get(char_class) or (raw_templates.get(key) or {}).get(char_class)
     if not class_info:
         # Fallback to fantasy if class not found in given scenario
         scen_classes = get_class_templates("fantasy")
@@ -308,12 +349,35 @@ def get_starter_gear_by_class(scenario: str = "fantasy", char_class: str = "", g
     return gear_map
 
 
-def get_starting_items(scenario: str = "fantasy", char_class: str = "") -> list:
+def get_starting_items(scenario: str = "fantasy", char_class: str = "", starting_faction: str = "") -> list:
     scen_classes = get_class_templates(scenario)
     class_info = scen_classes.get(char_class)
     if not class_info:
+        try:
+            from mechanics.combat.items.anomalous_gear import get_all_anomalous_faction_classes
+            class_info = get_all_anomalous_faction_classes().get(char_class)
+        except Exception:
+            pass
+    if not class_info:
+        raw_templates = load_class_templates()
+        key = _resolve_template_scenario_key(scenario, raw_templates)
+        class_info = (raw_templates.get(scenario) or {}).get(char_class) or (raw_templates.get(key) or {}).get(char_class)
+    if not class_info:
         scen_classes = get_class_templates("fantasy")
         class_info = scen_classes.get(char_class, {})
+
+    try:
+        from scenario_data import is_anomalous_incursions_scenario
+        if is_anomalous_incursions_scenario(scenario):
+            from mechanics.combat.items.anomalous_gear import get_anomalous_faction_starting_items
+            anom_items = list(get_anomalous_faction_starting_items(scenario, starting_faction or "public_agency"))
+            raw_items = class_info.get("starting_items", [])
+            for entry in raw_items:
+                if isinstance(entry, list) and len(entry) >= 4 and str(entry[1]).lower() in ("tool", "quest"):
+                    anom_items.append((entry[0], entry[1], entry[2], int(entry[3])))
+            return anom_items
+    except Exception:
+        pass
 
     raw_items = class_info.get("starting_items", [])
     items = []
@@ -622,11 +686,20 @@ def generate_starter_equipment_loadout(
     gender: str = "Male",
     race: str = "Human",
     weapon_name: str = "",
-    tier: int = 3
+    tier: int = 3,
+    starting_faction: str = "",
 ) -> dict:
     """Convenience alias delegating to mechanics.combat.items.generate_starter_equipment_loadout."""
     from mechanics.combat.items import generate_starter_equipment_loadout as _gen_loadout
-    return _gen_loadout(scenario=scenario, char_class=char_class, gender=gender, race=race, weapon_name=weapon_name, tier=tier)
+    return _gen_loadout(
+        scenario=scenario,
+        char_class=char_class,
+        gender=gender,
+        race=race,
+        weapon_name=weapon_name,
+        tier=tier,
+        starting_faction=starting_faction,
+    )
 
 
 def format_equipment_card(metadata: dict) -> str:

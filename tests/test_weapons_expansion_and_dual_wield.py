@@ -116,7 +116,7 @@ def test_class_templates_all_have_starter_gear_weapons():
                     f"Class {scen}:{cname} still has weapon in starting_items: {s_item}"
                 )
 
-    assert total_classes == 48
+    assert total_classes == 126
 
 
 def test_spellcaster_starter_weapons():

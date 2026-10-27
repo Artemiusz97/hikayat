@@ -27,9 +27,12 @@ const MiniBar = ({ label, current, max, color, icon: Icon }) => {
 };
 
 const PartyMemberCard = ({ member, isNpc = false, isSelf = false, isOnline = true, onDismiss, dismissing, onTriggerAction }) => {
+  const { t } = useTranslation();
   const name = member.name || (isNpc ? 'Companion' : 'Player');
   const role = member.char_class || member.role || (isNpc ? 'Allied Companion' : 'Adventurer');
   const level = member.level || 1;
+  const isSpecialAgent = Boolean(isNpc && (member.anomalous_npc_tag === 'special_agent' || member.is_special_agent));
+  const agentTier = member.agent_tier || null;
   const hp = member.hp !== undefined ? member.hp : (member.max_hp || 20);
   const maxHp = member.max_hp || 20;
   const mp = member.mp !== undefined ? member.mp : (member.max_mp || 10);
@@ -92,9 +95,15 @@ const PartyMemberCard = ({ member, isNpc = false, isSelf = false, isOnline = tru
                 </span>
               )}
               {isNpc && (
-                <span className="text-[9px] px-1 py-0.2 bg-purple-950/60 text-purple-300 rounded font-bold uppercase border border-purple-800/40">
-                  NPC
-                </span>
+                isSpecialAgent ? (
+                  <span className="text-[9px] px-1.5 py-0.2 bg-cyan-950/70 text-cyan-300 rounded font-bold uppercase border border-cyan-700/50">
+                    ⚡ {t('codex.special_agent', 'Special Agent')}
+                  </span>
+                ) : (
+                  <span className="text-[9px] px-1 py-0.2 bg-purple-950/60 text-purple-300 rounded font-bold uppercase border border-purple-800/40">
+                    NPC
+                  </span>
+                )
               )}
               {member.clothing_status && (
                 <span className="text-[8.5px] font-mono px-1 py-0.2 rounded bg-black/60 text-gray-300 border border-neutral-700/60 leading-tight">
@@ -103,7 +112,7 @@ const PartyMemberCard = ({ member, isNpc = false, isSelf = false, isOnline = tru
               )}
             </div>
             <span className="text-[10px] text-gray-400 font-medium block">
-              Lv.{level} {role}
+              {agentTier ? `Tier ${agentTier} • ` : ''}Lv.{level} {role}
             </span>
           </div>
         </div>

@@ -25,6 +25,7 @@ from mechanics.combat.items.clothing import (
     can_equip_item_in_scenario,
     generate_random_clothing as _gen_clothing,
     generate_random_clothing,
+    get_equipped_clothing_affinity_bonus,
     format_clothing_card as _fmt_clothing,
     format_clothing_card,
     is_clothing_slot,
@@ -95,28 +96,71 @@ from mechanics.combat.items.envelope import (
     serialize_item, parse_item, ITEM_PREFIX, is_item_json
 )
 
-def generate_random_equipment(scenario="fantasy", slot="Weapon", tier=None, archetype=None, name=None):
+def generate_random_equipment(
+    scenario="fantasy",
+    slot="Weapon",
+    tier=None,
+    archetype=None,
+    name=None,
+    private_agency_bonus: bool = False,
+    force_anomalous=None,
+    force_granted_spell=None,
+):
+    from mechanics.combat.items.anomalous_gear import is_anomalous_scenario, apply_anomalous_incursions_gear_rules
+    is_anom = is_anomalous_scenario(scenario)
+
     if is_clothing_slot(slot):
-        return _gen_clothing(scenario, slot, tier)
+        item = _gen_clothing(scenario, slot, tier)
     elif slot == "Weapon":
-        return _gen_weapon(scenario, slot, tier, archetype=archetype, name=name)
+        return _gen_weapon(
+            scenario,
+            slot,
+            tier,
+            archetype=archetype,
+            name=name,
+            private_agency_bonus=private_agency_bonus,
+            force_anomalous=force_anomalous,
+            force_granted_spell=force_granted_spell,
+        )
     elif slot in ("Head", "Headwear", "Helmet"):
-        return _gen_headwear(scenario, "Head", tier, archetype=archetype)
+        item = _gen_headwear(scenario, "Head", tier, archetype=archetype)
     elif slot in ("Gloves", "Glove", "Hands", "Gauntlets"):
-        return _gen_gloves(scenario, "Gloves", tier, archetype=archetype)
+        item = _gen_gloves(scenario, "Gloves", tier, archetype=archetype)
     elif slot in ("Shoes", "Boots", "Feet", "Footwear"):
-        return _gen_shoes(scenario, "Shoes", tier, archetype=archetype)
+        item = _gen_shoes(scenario, "Shoes", tier, archetype=archetype)
     elif slot == "Armor" or slot in ("Top", "Bottom", "Body", "Chest"):
-        if not can_equip_armor_in_scenario(scenario):
+        if not can_equip_armor_in_scenario(scenario) and not is_anom:
             clothing_slot = slot if slot in ("Top", "Bottom") else "Top"
-            return _gen_clothing(scenario, clothing_slot, tier)
-        return _gen_armor(scenario, slot if slot in ("Armor", "Top", "Bottom") else "Armor", tier, archetype=archetype)
+            item = _gen_clothing(scenario, clothing_slot, tier)
+        else:
+            item = _gen_armor(scenario, slot if slot in ("Armor", "Top", "Bottom") else "Armor", tier, archetype=archetype)
     elif slot in ("Shield", "Offhand", "Off-hand"):
-        return _gen_shield(scenario, "Shield", tier, archetype=archetype)
+        item = _gen_shield(scenario, "Shield", tier, archetype=archetype)
     elif slot.startswith("Accessory") or slot in ("Accessory", "Ring", "Amulet", "Necklace", "Trinket"):
-        return _gen_acc(scenario, slot if slot.startswith("Accessory") else "Accessory 1", tier)
+        item = _gen_acc(scenario, slot if slot.startswith("Accessory") else "Accessory 1", tier)
     else:
-        return _gen_weapon(scenario, "Weapon", tier, archetype=archetype, name=name)
+        return _gen_weapon(
+            scenario,
+            "Weapon",
+            tier,
+            archetype=archetype,
+            name=name,
+            private_agency_bonus=private_agency_bonus,
+            force_anomalous=force_anomalous,
+            force_granted_spell=force_granted_spell,
+        )
+
+    if is_anom and isinstance(item, dict):
+        item = apply_anomalous_incursions_gear_rules(
+            item,
+            scenario=scenario,
+            slot=item.get("slot") or slot,
+            tier=item.get("metadata", {}).get("tier", tier or 3),
+            private_agency_bonus=private_agency_bonus,
+            force_anomalous=force_anomalous,
+            force_granted_spell=force_granted_spell,
+        )
+    return item
 
 
 def _infer_class_archetype_profile(char_class: str, class_description: str = "", scenario: str = "fantasy") -> dict:
@@ -420,6 +464,7 @@ def generate_starter_equipment_loadout(
     weapon_name: str = "",
     tier: int = 3,
     archetype_profile: dict | None = None,
+    starting_faction: str = "",
 ) -> dict:
     """Generates a complete starting equipment loadout based on the new equipment generation system.
 
@@ -568,6 +613,18 @@ def generate_starter_equipment_loadout(
             if isinstance(item, dict) and "metadata" in item and isinstance(item["metadata"], dict):
                 item["metadata"] = make_narrative_metadata(item["metadata"])
                 item["effect"] = serialize_item(item["metadata"])
+
+    from .anomalous_gear import is_anomalous_scenario, apply_anomalous_faction_starter_theme
+    if is_anomalous_scenario(scenario):
+        loadout = apply_anomalous_faction_starter_theme(
+            loadout,
+            scenario=scenario,
+            starting_faction=starting_faction or "public_agency",
+            gender=gender,
+            race=race,
+            char_class=char_class,
+            starting_weapon=weapon_name,
+        )
 
     return loadout
 

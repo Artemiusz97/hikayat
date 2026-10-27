@@ -229,7 +229,62 @@ class TestNPCGenderAndPronounConsistency(unittest.TestCase):
         self.assertNotIn("him phone", cleaned)
 
 
+    def test_multi_character_scene_does_not_mutate_male_lead_pronouns(self):
+        """Verify that in multi-character scenes with female NPCs, male protagonist pronouns are not blindly converted to feminine."""
+        raw_text = (
+            "Static hums quietly through the receiver, pressing against his ears as he stands alone in his search. "
+            "A few yards away, Astrid Larsen shifts her weight, her gaze lingering on him with a mix of curiosity and guardedness, "
+            "while Luciana Bjornsson remains leaning against the lockers."
+        )
+        session = {
+            "id": 1,
+            "lead_character_name": "Hero",
+            "lead_character_gender": "male",
+            "current_npcs": [
+                {"name": "Astrid Larsen", "gender": "female"},
+                {"name": "Luciana Bjornsson", "gender": "female"},
+            ],
+        }
+        party = [[{"name": "Hero", "gender": "male"}]]
+
+        cleaned = sanitize_npc_pronoun_consistency(raw_text, session=session, party=party)
+        # Male lead pronouns must NOT be corrupted to "her ears as she stands alone in his search" or "lingering on her"
+        self.assertIn("pressing against his ears as he stands alone in his search", cleaned)
+        self.assertIn("her gaze lingering on him", cleaned)
+        self.assertNotIn("pressing against her ears as she stands alone in his search", cleaned)
+        self.assertNotIn("lingering on her with a mix", cleaned)
+
+    def test_tag_narrative_pronouns_left_to_right_discourse_attribution(self):
+        """Verify pronoun_resolver tags pronouns in left-to-right order rather than attributing prior pronouns to later characters."""
+        from game_engine.pronoun_resolver import tag_narrative_pronouns
+
+        session = {
+            "lead_character_name": "Hero",
+            "lead_character_gender": "male",
+            "current_npcs": [
+                {"name": "Astrid Larsen", "gender": "female", "role": "student"},
+                {"name": "Luciana Bjornsson", "gender": "female", "role": "student"},
+            ],
+        }
+        party = [[{"name": "Hero", "gender": "male", "char_class": "Hero"}]]
+        sentence = (
+            "A few yards away, Astrid Larsen shifts her weight, her gaze lingering on him with curiosity, "
+            "while Luciana Bjornsson folds her arms quietly."
+        )
+        tagged = tag_narrative_pronouns(sentence, session=session, party=party)
+
+        # Astrid's pronouns must refer to Astrid Larsen
+        self.assertIn('<ref char="Astrid Larsen" role="student">her</ref> weight', tagged)
+        self.assertIn('<ref char="Astrid Larsen" role="student">her</ref> gaze', tagged)
+        # Him refers to Hero
+        self.assertIn('<ref char="Hero"', tagged)
+        self.assertIn('>him</ref>', tagged)
+        # Luciana's pronoun must refer to Luciana Bjornsson
+        self.assertIn('<ref char="Luciana Bjornsson" role="student">her</ref> arms', tagged)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 

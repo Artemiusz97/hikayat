@@ -96,8 +96,11 @@ class TestSchoolSocialSystemsIntegration(unittest.IsolatedAsyncioTestCase):
         relations = genealogy.ensure_contact_relations(contact, session_id=self.test_session_id, scenario="high_school_drama")
         family = relations.get("family", [])
         family_first_names = [m.get("first_name") for m in family]
-        sib_first = sib_char["sibling_name"].split()[0]
-        self.assertIn(sib_first, family_first_names, f"Expected sibling {sib_first} in family tree {family}")
+        sib_first, _ = genealogy.extract_surname_and_firstname(sib_char["sibling_name"])
+        self.assertTrue(
+            sib_first in family_first_names or any(sib_first in m.get("name", "") for m in family),
+            f"Expected sibling {sib_first} ({sib_char['sibling_name']}) in family tree {family}"
+        )
 
     @patch("mechanics.system.phone.call_llm_json")
     async def test_phone_dm_reply_injects_sibling_and_grade_dynamics(self, mock_llm):

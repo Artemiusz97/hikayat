@@ -89,40 +89,46 @@ class TestSpatialGraphArchitecture(unittest.TestCase):
 
     def test_spatial_graph_seeding(self):
         """Verifies that ensure_session_spatial_graph_seeded populates nodes and edges from seeds."""
+        from mechanics.world.locations import get_node_props
         ensure_session_spatial_graph_seeded(self.test_session_id, scenario_key="high_school_drama")
         nodes = db.get_session_world_nodes(self.test_session_id)
         self.assertGreater(len(nodes), 20)
 
-        # Check Botanical Glasshouse and its Interior Greenery Path
+        # Check Student Commons Building (Tier 2 FACILITY) and Botanical Glasshouse (Tier 3 ROOM)
+        commons_bld = db.get_world_node(self.test_session_id, "bld_school_commons")
+        self.assertIsNotNone(commons_bld)
+        self.assertEqual(commons_bld["node_type"], "FACILITY")
+        self.assertEqual(commons_bld["category"], "academic")
+
         greenhouse = db.get_world_node(self.test_session_id, "loc_greenhouse")
         self.assertIsNotNone(greenhouse)
         self.assertEqual(greenhouse["name"], "Botanical Glasshouse")
-        self.assertEqual(greenhouse["node_type"], "FACILITY")
+        self.assertEqual(greenhouse["node_type"], "ROOM")
+        self.assertEqual(greenhouse["parent_id"], "bld_school_commons")
         self.assertEqual(greenhouse["category"], "academic")
 
-        greenery_path = db.get_world_node(self.test_session_id, "sub_greenhouse_path")
-        self.assertIsNotNone(greenery_path)
-        self.assertEqual(greenery_path["name"], "Interior Greenery Path")
-        self.assertEqual(greenery_path["parent_id"], "loc_greenhouse")
+        # Former micro sub-locations are preserved as room props
+        gh_props = get_node_props("loc_greenhouse", "Botanical Glasshouse")
+        self.assertIn("Interior Greenery Path", gh_props)
 
-        # Check outgoing edges from Botanical Glasshouse connect through its Entrance cut-vertex
-        edges = db.get_outgoing_edges(self.test_session_id, "loc_greenhouse")
+        # Check outgoing edges from Student Commons Building connect through its Entrance cut-vertex
+        edges = db.get_outgoing_edges(self.test_session_id, "bld_school_commons")
         edge_targets = [e["to_node_id"] for e in edges]
-        self.assertIn("sub_botanical_glasshouse_entrance", edge_targets)
-        ent_edges = db.get_outgoing_edges(self.test_session_id, "sub_botanical_glasshouse_entrance")
+        self.assertIn("loc_courtyard", edge_targets)
+        ent_edges = db.get_outgoing_edges(self.test_session_id, "loc_courtyard")
         ent_targets = [e["to_node_id"] for e in ent_edges]
-        self.assertIn("sub_greenhouse_path", ent_targets)
+        self.assertIn("loc_greenhouse", ent_targets)
 
     def test_session_migration_to_spatial_graph(self):
         """Verifies that a session with tiered location string maps cleanly to its corresponding node."""
         res = migrate_session_to_spatial_graph(self.test_session_id)
         self.assertEqual(res["status"], "migrated")
-        self.assertEqual(res["current_node_id"], "sub_greenhouse_path")
+        self.assertEqual(res["current_node_id"], "loc_greenhouse")
 
         sess = db.get_session(self.test_session_id)
-        self.assertEqual(sess["current_node_id"], "sub_greenhouse_path")
+        self.assertEqual(sess["current_node_id"], "loc_greenhouse")
         self.assertIn("current_world_node", sess)
-        self.assertEqual(sess["current_world_node"]["name"], "Interior Greenery Path")
+        self.assertEqual(sess["current_world_node"]["name"], "Botanical Glasshouse")
         self.assertEqual(sess["current_world_node"]["category"], "academic")
 
     def test_category_and_privacy_inference(self):
@@ -153,9 +159,9 @@ class TestSpatialGraphArchitecture(unittest.TestCase):
         # 3-tier string
         loc_str = "Campus Promenade & Student Commons ➔ Botanical Glasshouse ➔ Interior Greenery Path"
         resolved = db.resolve_node_id_from_location(self.test_session_id, loc_str)
-        self.assertEqual(resolved, "sub_greenhouse_path")
+        self.assertEqual(resolved, "loc_greenhouse")
 
-        # Facility name
+        # Facility / Room name
         resolved = db.resolve_node_id_from_location(self.test_session_id, "Botanical Glasshouse")
         self.assertIn(resolved, ("loc_greenhouse", "sub_greenhouse_path"))
 
@@ -192,7 +198,7 @@ class TestSpatialGraphArchitecture(unittest.TestCase):
         )
 
         sess = db.get_session(self.test_session_id)
-        self.assertEqual(sess["current_node_id"], "sub_greenhouse_path")
+        self.assertEqual(sess["current_node_id"], "loc_greenhouse")
 
         # 1. Arrival trigger must NOT advance because greenhouse is NOT student council!
         adv = try_advance_on_arrival(self.test_session_id, qid, 1, sess["current_location"])
@@ -221,24 +227,24 @@ class TestSpatialGraphArchitecture(unittest.TestCase):
         """Verifies ROOM nodes inherit pathways from parent FACILITY and transit hub detection works."""
         ensure_session_spatial_graph_seeded(self.test_session_id, scenario_key="high_school_drama")
         
-        # Check outgoing edges from interior room sub_greenhouse_path
-        outgoing = db.get_outgoing_edges(self.test_session_id, "sub_greenhouse_path", include_parent_pathways=True)
+        # Check outgoing edges from interior room loc_greenhouse
+        outgoing = db.get_outgoing_edges(self.test_session_id, "loc_greenhouse", include_parent_pathways=True)
         self.assertGreater(len(outgoing), 0)
         to_ids = {e["to_node_id"] for e in outgoing}
-        # Parent facility loc_greenhouse must be reachable or its adjacent facilities must be inherited
-        self.assertTrue("loc_greenhouse" in to_ids or any(e.get("edge_type") == "pathway" for e in outgoing))
+        # Parent facility bld_school_commons or sibling rooms must be reachable and adjacent facilities inherited
+        self.assertTrue("bld_school_commons" in to_ids or "loc_courtyard" in to_ids or any(e.get("edge_type") == "pathway" for e in outgoing))
 
         # Check transit hub resolution
-        is_thub = db.is_node_or_parent_transit_hub(self.test_session_id, "sub_greenhouse_path")
+        is_thub = db.is_node_or_parent_transit_hub(self.test_session_id, "loc_greenhouse")
         self.assertTrue(is_thub or not is_thub)  # function executes cleanly without error
         
         # Check prefer_facility in resolve_node_id_from_location
         fac_id = db.resolve_node_id_from_location(
             self.test_session_id,
-            "Campus Promenade & Student Commons ➔ Botanical Glasshouse",
+            "Campus Promenade & Student Commons",
             prefer_facility=True
         )
-        self.assertEqual(fac_id, "loc_greenhouse", "prefer_facility=True must return FACILITY node rather than child ROOM")
+        self.assertEqual(fac_id, "bld_school_commons", "prefer_facility=True must return FACILITY node rather than child ROOM")
 
     def test_dynamic_location_graph_sync(self):
         """Verifies save_session_location with is_dynamic=1 automatically creates world_nodes and world_edges."""

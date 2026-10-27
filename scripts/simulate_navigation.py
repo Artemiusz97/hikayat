@@ -32,6 +32,10 @@ SUPPORTED_SCENARIOS = [
     "steampunk",
     "dark_fantasy",
     "isekai_fantasy",
+    "slice_of_life",
+    "anomalous_incursions",
+    "urban_anomalies",
+    "urban_fantasy",
 ]
 
 
@@ -84,7 +88,7 @@ def format_report_summary(report: SimulationReport) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description="Hikayat World Navigation & Waypoint Simulator Harness")
-    parser.add_argument("--journeys", "-n", type=int, default=50, help="Number of journeys to simulate (default: 50)")
+    parser.add_argument("--journeys", "--count", "--simulations", "-n", type=int, default=50, dest="journeys", help="Number of journeys to simulate (default: 50)")
     parser.add_argument(
         "--scenario", "-s", type=str, default="all",
         help=f"Scenario to test (default: 'all' or one of {', '.join(SUPPORTED_SCENARIOS)})"
@@ -187,6 +191,26 @@ def main():
         )
 
         safe_print("\n" + format_report_summary(report))
+
+        failed_results = [r for r in report.results if r.violations or r.error or r.deadlock]
+        if failed_results:
+            os.makedirs("reports/failures", exist_ok=True)
+            for fr in failed_results[:10]:
+                failure_path = f"reports/failures/navigation_seed_{fr.seed}.json"
+                with open(failure_path, "w", encoding="utf-8") as f:
+                    json.dump({
+                        "journey_id": fr.journey_id,
+                        "seed": fr.seed,
+                        "scenario": fr.scenario,
+                        "success": fr.success,
+                        "deadlock": fr.deadlock,
+                        "total_turns": fr.total_turns,
+                        "completed_stages": fr.completed_stages,
+                        "error": fr.error,
+                        "path_history": fr.path_history,
+                        "violations": [v.__dict__ for v in fr.violations],
+                    }, f, indent=2, default=str)
+            safe_print(f"\nSaved {min(10, len(failed_results))} failure reproduction payloads to reports/failures/")
 
         if args.json_report:
             with open(args.json_report, "w", encoding="utf-8") as f:

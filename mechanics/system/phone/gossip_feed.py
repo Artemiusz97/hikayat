@@ -49,12 +49,14 @@ async def generate_gossip_feed_posts(session: dict, force_refresh: bool = False)
             juniors = [c for c in roster if c.get("grade") == "Junior"]
             under = [c for c in roster if c.get("grade") in ("Sophomore", "Freshman")]
             faculty = [c for c in roster if c.get("grade") == "Faculty"]
+            town_youth = [c for c in roster if c.get("grade") in ("Youth Peer", "Citizen")]
 
             sample = []
             if seniors: sample.append(seniors[(session_id + 1) % len(seniors)])
             if juniors: sample.append(juniors[(session_id + 2) % len(juniors)])
             if under: sample.append(under[(session_id + 3) % len(under)])
             if faculty: sample.append(faculty[(session_id + 4) % len(faculty)])
+            if town_youth: sample.append(town_youth[(session_id + 5) % len(town_youth)])
 
             chars_info = [
                 f"- {c['name']} [{c.get('grade')}] ({c.get('role')} | Club: {c.get('club')}) — Located: {c.get('primary_facility')}"
@@ -318,11 +320,34 @@ def queue_witness_gossip_post(
     Instantly queues a 0ms procedural social feed rumor post when a witness spots
     a romantic, intimate, or illicit interaction in a semi-public/public node.
     """
+    import namegen
     loc_short = str(location_display or "campus").split("➔")[-1].strip() or "the hallway"
-    handle_slug = "".join(c for c in str(witness_name or "anon").lower().split()[0] if c.isalnum()) or "campus_watch"
+    witness_given = namegen.get_given_name(str(witness_name or "")) or str(witness_name or "anon")
+    handle_slug = "".join(c for c in witness_given.lower() if c.isalnum()) or "campus_watch"
     author_handle = f"@{handle_slug}_spotted"
 
-    if event_kind in ("intimate", "romantic"):
+    if event_kind == "secret_affair":
+        templates = [
+            f"Wait—isn't {player_name} already taken?! Just spotted them getting super intimate with {partner_name} at {loc_short}! 👀💔",
+            f"Major drama alert: saw {player_name} sneaking around with {partner_name} near {loc_short} behind their partner's back! 🤫🔥",
+            f"Someone check on {player_name}'s partner... they were definitely not 'just talking' with {partner_name} at {loc_short}! 🚨",
+        ]
+        tag = "#SecretAffair"
+    elif event_kind == "affair_exposed":
+        templates = [
+            f"BOMBSHELL BREAKUP: {player_name} was caught sneaking around with {partner_name} at {loc_short}—their relationship is officially OVER! 💔🚨",
+            f"Everyone is talking about it: {player_name}'s secret tryst with {partner_name} at {loc_short} just blew up in the open! Instant breakup! 😱🔥",
+            f"Campus scandal of the semester—{player_name} got exposed cheating with {partner_name} near {loc_short} and got dumped on the spot! 👀💥",
+        ]
+        tag = "#BreakupBombshell"
+    elif event_kind == "restroom_intrusion":
+        templates = [
+            f"PSA: {player_name} literally just got caught barging into {loc_short} and kicked right out into the hall!! 😳🚨",
+            f"Cannot believe {player_name} actually walked into {loc_short} and got busted on the spot... Student Council already heard! 🙈📢",
+            f"Major awkwardness alert—someone just screamed at {player_name} for wandering into {loc_short}! Watch where you're going!! 👀🚨",
+        ]
+        tag = "#CampusScandal"
+    elif event_kind in ("intimate", "romantic"):
         templates = [
             f"Wait, did anyone else just see {player_name} and {partner_name} getting super close at {loc_short}?! 👀🔥",
             f"Pretty sure I just walked past {player_name} and {partner_name} having a private moment near {loc_short}... my lips are sealed 🤫✨",

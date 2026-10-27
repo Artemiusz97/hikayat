@@ -257,7 +257,7 @@ def get_session_quests(session_id: int, status: str = None) -> list[dict]:
     with get_conn() as conn:
         if status:
             rows = conn.execute(
-                "SELECT * FROM quests WHERE session_id=? AND status=? ORDER BY updated_at DESC",
+                "SELECT * FROM quests WHERE session_id=? AND LOWER(status)=LOWER(?) ORDER BY updated_at DESC",
                 (session_id, status)
             ).fetchall()
         else:
@@ -357,6 +357,76 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
     rxp = quest.get("reward_xp", 100)
     rgold = quest.get("reward_gold", 25)
     ritem = quest.get("reward_item") or ""
+    notes = str(quest.get("quest_notes") or "")
+    is_story_q = bool(quest.get("is_story_quest") or quest.get("quest_type") in ("Story Quest", "Main Quest"))
+
+    # Anomalous Incursions: Faction Reward Confiscation, 5-Tier Promotion Meter & Vault Log
+    anom_promotion_result = None
+    anom_reward_note = ""
+    scen_key = "fantasy"
+    try:
+        import scenario_data
+        sess_row = db.get_session(session_id) or {}
+        scen_key = str(sess_row.get("scenario") or "fantasy")
+        if scenario_data.is_anomalous_incursions_scenario(scen_key):
+            from mechanics.social.factions import get_anomalous_faction_state, update_agent_promotion_reputation
+            from mechanics.narrative.bounty import parse_anomalous_quest_board_source
+            lead_uid = party_user_ids[0] if party_user_ids else sess_row.get("host_user_id")
+            fac_st = get_anomalous_faction_state(session_id, user_id=lead_uid)
+            player_arch = str(fac_st.get("faction_archetype_key") or "public_agency")
+            board_src = parse_anomalous_quest_board_source(quest, session_id=session_id)
+            is_mandatory = ("mandatory_daily:1" in notes) or str(quest_id or "").upper().startswith("MAND-")
+
+            # 1. Reward & Loot Confiscation Rules
+            if player_arch == "public_agency" and (board_src == "public_agency" or is_story_q or is_mandatory):
+                rgold = 0
+                ritem = ""
+                anom_reward_note = "Taxpayer Mandate: 0G / 0 Loot (salaried Public Agency duty)."
+            elif player_arch == "monastic_order" and (board_src == "monastic_order" or is_mandatory):
+                rgold = 0
+                anom_reward_note = "Sacred Shrine Duty: 0G bounty fee (recovered relics/spoils retained)."
+
+            # 2. 5-Tier Agent Promotion Meter Progression
+            if player_arch != "freelancer":
+                earns_promo_rep = (
+                    is_mandatory
+                    or (board_src == player_arch)
+                    or is_story_q
+                )
+                if earns_promo_rep:
+                    rep_delta = 15 if (is_mandatory or is_story_q) else 10
+                    anom_promotion_result = update_agent_promotion_reputation(
+                        session_id=session_id,
+                        delta_rep=rep_delta,
+                        reason=f"Completed '{quest.get('title', 'Mission')}'",
+                        is_mandatory_completion=is_mandatory,
+                        user_id=lead_uid,
+                    )
+
+            # 3. Record Non-Hostile Entity / Altered Relic Containment to Vault Log (unless failed-forward via dire_cost)
+            q_type_low = str(quest.get("quest_type") or "").lower()
+            res_app_low = str(quest.get("resolution_approach") or "").lower()
+            if res_app_low != "dire_cost" and any(k in q_type_low for k in ("non-hostile", "non_hostile", "altered item", "cursed relic", "relic_retrieval")):
+                from mechanics.world.anomalous_events import record_contained_anomaly_to_vault_log, extract_non_hostile_entity_name
+                is_nh_type = "non-hostile" in q_type_low or "non_hostile" in q_type_low
+                ent_disp = (
+                    extract_non_hostile_entity_name(quest)
+                    if is_nh_type
+                    else str(quest.get("required_item") or quest.get("title") or "Anomalous Specimen")
+                )
+                record_contained_anomaly_to_vault_log(
+                    session_id=session_id,
+                    entity_name=ent_disp,
+                    category_tag="cursed_relic" if ("relic" in q_type_low or "item" in q_type_low) else "spatial_warp",
+                    subtype="non_hostile_entity" if is_nh_type else "environmental_phenomenon",
+                    location=str(quest.get("client_location") or sess_row.get("current_location") or "Metropolitan Grid"),
+                    containment_note=f"Secured and logged upon completion of '{quest.get('title', 'Containment Operation')}'.",
+                    resolution_method="Bounty Containment Protocol",
+                    user_id=lead_uid,
+                    quest_id=str(quest_id or ""),
+                )
+    except Exception:
+        pass
 
     levels_gained_by_user = {}
     for uid in party_user_ids:
@@ -367,7 +437,18 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
         db.apply_hp_mp_delta(uid, 0, 0, rgold)
 
         if ritem:
-            db.add_item(uid, ritem, "Quest", "Quest Reward", 1)
+            import scenario_data as _sd_q
+            if _sd_q.is_anomalous_incursions_scenario(scen_key):
+                try:
+                    from mechanics.combat.items.consumables.generators import generate_procedural_potion
+                    r_lower = str(ritem).lower()
+                    eff_tags = ["mana_restore"] if any(w in r_lower for w in ("stabilizer", "incense", "ampoule", "focus", "spirit")) else ["healing"]
+                    pot = generate_procedural_potion(tier=2, effect_tags=eff_tags, genre="anomalous_incursions")
+                    db.add_item(uid, ritem, pot.get("item_type", "Potion"), pot.get("effect", "Restores HP"), 1)
+                except Exception:
+                    db.add_item(uid, ritem, "Potion", "Restores 35 HP", 1)
+            else:
+                db.add_item(uid, ritem, "Quest", "Quest Reward", 1)
 
     # Client Affinity Boost: +8 for personal commissions, +5 for standard quests
     client_affinity_gain = 0
@@ -440,6 +521,8 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
         "client_affinity_gained": client_affinity_gain,
         "faction_rep_gained": faction_rep_gained,
         "rival_rep_deltas": rival_rep_deltas,
+        "anomalous_promotion": anom_promotion_result,
+        "anomalous_reward_note": anom_reward_note,
     }
 
 def add_session_clue(
@@ -467,7 +550,7 @@ def add_session_clue(
 
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, title, lead_text FROM session_clues WHERE session_id=?",
+            "SELECT * FROM session_clues WHERE session_id=? ORDER BY created_at ASC, id ASC",
             (session_id,)
         ).fetchall()
         t_clean_low = clean_title.lower()
@@ -477,7 +560,7 @@ def add_session_clue(
             r_lead_low = str(r["lead_text"]).lower()
             if r_title_low == t_clean_low or r_lead_low == l_clean_low:
                 return r["id"]
-            if clean_lead in r_lead_low or r_lead_low in clean_lead:
+            if l_clean_low in r_lead_low or r_lead_low in l_clean_low:
                 return r["id"]
 
         cur = conn.execute(
@@ -486,7 +569,63 @@ def add_session_clue(
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (session_id, quest_id or "", chapter or 1, clean_title, clean_lead, clean_cat, source_location or "", linked_npc or "", int(is_verified), parents_json, now, now)
         )
-        return cur.lastrowid
+        new_id = cur.lastrowid
+
+        # D12 Smart Tiered 20-Clue Caseboard Cap:
+        # Cap active unconsumed leads at 20 by auto-archiving (is_consumed=1) oldest completed-chapter
+        # or circumstantial/side-bounty clues first; NEVER evict active Story Quest clues or Breakthroughs.
+        try:
+            all_rows = conn.execute(
+                "SELECT * FROM session_clues WHERE session_id=? ORDER BY created_at ASC, id ASC",
+                (session_id,),
+            ).fetchall()
+            consumed_by_parent: set[int] = set()
+            for r in all_rows:
+                try:
+                    for pid in (json.loads(r["deduction_parents_json"] or "[]") or []):
+                        consumed_by_parent.add(int(pid))
+                except Exception:
+                    pass
+
+            active_unconsumed = []
+            for r in all_rows:
+                rd = dict(r)
+                if rd.get("category") == "deduction":
+                    continue
+                if bool(rd.get("is_consumed")) or rd["id"] in consumed_by_parent:
+                    continue
+                active_unconsumed.append(rd)
+
+            if len(active_unconsumed) > 20:
+                sq_rows = conn.execute(
+                    "SELECT quest_id FROM quests WHERE session_id=? AND status='Active' AND is_story_quest=1",
+                    (session_id,),
+                ).fetchall()
+                active_sq_ids = {str(sr["quest_id"]) for sr in sq_rows if sr["quest_id"]}
+                cur_ch_val = int(chapter or 1)
+                evictable = [
+                    rd for rd in active_unconsumed
+                    if rd["id"] != new_id
+                    and rd.get("category") != "deduction"
+                    and str(rd.get("quest_id") or "") not in active_sq_ids
+                ]
+                evictable.sort(
+                    key=lambda rd: (
+                        0 if int(rd.get("chapter") or 1) < cur_ch_val else (1 if not rd.get("quest_id") else 2),
+                        float(rd.get("created_at") or 0.0),
+                        int(rd["id"]),
+                    )
+                )
+                overflow = len(active_unconsumed) - 20
+                for target_rd in evictable[:overflow]:
+                    conn.execute(
+                        "UPDATE session_clues SET is_consumed=1, updated_at=? WHERE id=?",
+                        (now, target_rd["id"]),
+                    )
+        except sqlite3.OperationalError:
+            pass
+
+        return new_id
 
 def get_session_clues(
     session_id: int,
@@ -528,7 +667,7 @@ def get_session_clues(
                 d["deduction_parents"] = json.loads(d.get("deduction_parents_json") or "[]")
             except Exception:
                 d["deduction_parents"] = []
-            d["is_consumed"] = d["id"] in consumed_ids
+            d["is_consumed"] = bool(d.get("is_consumed")) or (d["id"] in consumed_ids)
             results.append(d)
         return results
 
@@ -555,7 +694,7 @@ def get_session_clue_by_id(clue_id: int) -> dict | None:
                     break
             except Exception:
                 pass
-        d["is_consumed"] = consumed
+        d["is_consumed"] = bool(d.get("is_consumed")) or consumed
         return d
 
 def verify_session_clue(clue_id: int) -> bool:
@@ -678,6 +817,11 @@ def synthesize_deduction_clue(
     )
     for parent_id in clue_ids:
         verify_session_clue(parent_id)
+        try:
+            with get_conn() as conn:
+                conn.execute("UPDATE session_clues SET is_consumed=1, updated_at=? WHERE id=?", (time.time(), parent_id))
+        except sqlite3.OperationalError:
+            pass
 
     apply_caseboard_breakthrough_to_quests(session_id, clue_ids, title, lead_text)
     return cid

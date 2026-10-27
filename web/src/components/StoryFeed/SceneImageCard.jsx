@@ -25,9 +25,22 @@ export const SceneImageCard = ({
     };
   }, [lightboxOpen]);
 
-  // If there's no image and we are in On-Demand mode on the latest scene, show the "Illustrate Scene" banner
+  // If there's no image and we are in On-Demand or Auto mode on the latest scene
   if (!imageUrl) {
-    if (isLatest && imageGenMode === 2 && onReroll) {
+    if (isLatest && (imageGenMode === 1 || String(imageGenMode).toLowerCase() === 'auto')) {
+      return (
+        <div className="mb-4 md:mb-5 p-3.5 rounded-xl border border-dashed border-fantasy-accent/40 bg-black/40 flex items-center justify-between gap-3 animate-pulse">
+          <div className="flex items-center gap-2.5 text-xs text-fantasy-accent font-serif">
+            <Sparkles size={14} className="animate-spin text-fantasy-accent shrink-0" />
+            <span>Illustrating scene in background...</span>
+          </div>
+          <span className="text-[10px] font-mono text-gray-400 bg-white/5 px-2 py-0.5 rounded border border-white/10 uppercase tracking-wider">
+            Rendering
+          </span>
+        </div>
+      );
+    }
+    if (isLatest && (imageGenMode === 2 || String(imageGenMode).toLowerCase() === 'on_demand') && onReroll) {
       return (
         <div className="mb-4 md:mb-5 p-3 rounded-xl border border-dashed border-amber-500/40 bg-amber-950/10 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-amber-200/90 font-serif">
@@ -102,7 +115,7 @@ export const SceneImageCard = ({
           className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/90 backdrop-blur-md animate-fadeIn"
           onClick={() => setLightboxOpen(false)}
         >
-          <div className="relative max-w-5xl max-h-[92vh] flex flex-col items-center">
+          <div className="relative max-w-5xl max-h-[calc(var(--app-height,100dvh)-1.5rem)] flex flex-col items-center">
             {/* Close Button */}
             <button
               type="button"
@@ -117,7 +130,7 @@ export const SceneImageCard = ({
             <img
               src={imageUrl}
               alt={title || 'Scene Illustration'}
-              className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl border border-fantasy-border/40 select-none"
+              className="max-w-full max-h-[calc(var(--app-height,100dvh)-3rem)] object-contain rounded-lg shadow-2xl border border-fantasy-border/40 select-none"
               onClick={(e) => e.stopPropagation()}
             />
 

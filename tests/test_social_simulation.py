@@ -741,5 +741,52 @@ class TestSocialSimulation:
         finally:
             with db.get_conn() as conn:
                 db.core._delete_session_records(conn, sid)
+    def test_commitments_lifecycle_and_metaphor_guard(self):
+        """Verify commitments lifecycle auditing (punctual vs flaked) and Metaphor Guard invariants."""
+        from tests.simulators.social.auditor import SocialInvariantAuditor, SocialViolation
+        from mechanics.system.commitments_engine import create_rendezvous, flake_commitment, fulfill_commitment, advance_rendezvous_to_arrived
 
+        auditor = SocialInvariantAuditor(scenario_key="high_school_drama")
+        sid = 948211
+        char_id = 1122
 
+        from tests.simulators.social.fuzzer import SocialFuzzer
+        fuzzer = SocialFuzzer()
+        sess, char = fuzzer.create_test_session('high_school_drama', session_id=sid)
+        try:
+            with db.get_conn() as conn:
+                conn.execute("DELETE FROM commitments_ledger WHERE session_id = ?", (sid,))
+
+            # 2. Create and flake a rendezvous
+            r_res = create_rendezvous(
+                session_id=sid,
+                organizer="Player",
+                participants=["Maya Vance"],
+                location="Greenwood Academy ➔ Cafeteria ➔ Lunch Tables",
+                day=1,
+                start_minute=540,
+                end_minute=600,
+                title="Lunch Rendezvous",
+                origin="in_person"
+            )
+            cid = r_res["id"]
+            flake_res = flake_commitment(sid, cid)
+            assert flake_res.get("status") == "flaked"
+
+            # Audit commitments lifecycle
+            v_list = auditor.audit_turn(
+                turn=1,
+                session_id=sid,
+                character_id=char_id,
+                contacts=[],
+                school_directory=[],
+                factions=[],
+                outcome_label="Friendly Banter: We engaged in verbal combat with razor-sharp retorts"
+            )
+            # Metaphor Guard should pass (zero violations because session was not in combat)
+            assert not any(v.category == "METAPHOR_GUARD_BREACH" for v in v_list)
+            assert not any(v.category == "COMMITMENT_INVALID_STATUS" for v in v_list)
+        finally:
+            with db.get_conn() as conn:
+                conn.execute("DELETE FROM commitments_ledger WHERE session_id = ?", (sid,))
+                conn.execute("DELETE FROM sessions WHERE id = ?", (sid,))

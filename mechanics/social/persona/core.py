@@ -14,8 +14,8 @@ HAIR_LENGTHS = {"short", "medium", "long", "shoulder_length", "bald", "waist_len
 
 HAIR_STYLES = {"straight", "wavy", "curly", "braided", "ponytail", "messy", "afro", "bob", "bun", "spiky"}
 
-STATURE_TIERS = ("short", "below_average", "average", "tall", "towering")
-STATURES = {"short", "below_average", "average", "tall", "towering", "gigantic", "dwarf", "petite"}
+STATURE_TIERS = ("miniature", "short", "below_average", "average", "tall", "towering")
+STATURES = {"miniature", "short", "below_average", "average", "tall", "towering", "gigantic", "dwarf", "petite", "diminutive"}
 
 BREAST_SIZES = {"flat", "small", "medium", "large", "huge", "hyper"}
 
@@ -834,10 +834,7 @@ def infer_humanoid_skin_color(race: str, name: str = "", seed: str = "") -> str:
     if name:
         try:
             import namegen
-            parts = name.strip().split()
-            first = parts[0].lower() if parts else ""
-            last = parts[-1].lower() if len(parts) > 1 else ""
-            raw_cult = namegen._SURNAME_TO_CULTURE.get(last) or namegen._FIRST_NAME_TO_CULTURE.get(first) or ""
+            raw_cult = namegen.infer_name_culture(name)
             cult_group = CULTURE_TO_GROUP.get(raw_cult)
         except Exception:
             cult_group = None
@@ -1113,10 +1110,7 @@ def infer_natural_hair_color(
     if name:
         try:
             import namegen
-            parts = name.strip().split()
-            first = parts[0].lower() if parts else ""
-            last = parts[-1].lower() if len(parts) > 1 else ""
-            raw_cult = namegen._SURNAME_TO_CULTURE.get(last) or namegen._FIRST_NAME_TO_CULTURE.get(first) or ""
+            raw_cult = namegen.infer_name_culture(name)
             cult_group = CULTURE_TO_GROUP.get(raw_cult)
         except Exception:
             cult_group = None
@@ -1452,8 +1446,8 @@ def is_nsfw_scenario(scen_key: str = "fantasy") -> bool:
 
 def get_default_stature_for_race(race_str: str) -> str:
     r = (race_str or "human").lower()
-    if r in ("dwarf", "goblin", "halfling", "gnome"):
-        return "short"
+    if any(k in r for k in ("dwarf", "goblin", "halfling", "gnome", "kobold", "pixie", "fairy")):
+        return "miniature"
     if r in ("elf", "dark_elf"):
         return "tall"
     return "average"
@@ -1469,17 +1463,33 @@ def infer_contact_gender(contact: Dict[str, Any]) -> str:
     basic = contact.get("basic_info") or {}
     bg = str(basic.get("gender") or "").strip().lower() if isinstance(basic, dict) else ""
 
-    name_str = str(contact.get("name", "")).strip().lower()
-    first_name = name_str.split()[0] if name_str else ""
+    raw_name_str = str(contact.get("name", "")).strip()
+    name_str = raw_name_str.lower()
+    given_name = ""
+    extracted_surname = ""
 
     known_male = False
     known_female = False
+    has_female_surname_inflection = False
     try:
-        from namegen import is_known_male_name, is_known_female_name
-        known_male = bool(is_known_male_name(first_name) or is_known_male_name(name_str))
-        known_female = bool(is_known_female_name(first_name) or is_known_female_name(name_str))
+        from namegen import extract_first_and_last_name, is_known_male_name, is_known_female_name
+        ex_first, ex_last = extract_first_and_last_name(raw_name_str)
+        given_name = (ex_first or "").strip().lower()
+        extracted_surname = (ex_last or "").strip().lower()
+        check_tok = given_name or (name_str.split()[0] if name_str and len(name_str.split()) == 1 else "")
+        if check_tok:
+            known_male = bool(is_known_male_name(check_tok))
+            known_female = bool(is_known_female_name(check_tok))
+        if extracted_surname.endswith(("ska", "cka", "dzka", "skaya", "ova", "eva", "sdottir", "dottir", "poulou", "idou", "iadou")):
+            has_female_surname_inflection = True
     except Exception:
-        pass
+        first_fallback = name_str.split()[0] if name_str else ""
+        try:
+            from namegen import is_known_male_name, is_known_female_name
+            known_male = bool(is_known_male_name(first_fallback))
+            known_female = bool(is_known_female_name(first_fallback))
+        except Exception:
+            pass
 
     app = contact.get("appearance") or {}
     has_breast = False
@@ -1500,10 +1510,10 @@ def infer_contact_gender(contact: Dict[str, Any]) -> str:
     ).lower()
 
     words = set(text.replace(".", " ").replace(",", " ").replace("!", " ").replace("?", " ").split())
-    female_kws = {"girl", "woman", "female", "lady", "she", "her", "hers", "daughter", "mother", "sister", "queen", "princess", "heroine", "mrs", "miss", "ms", "waifu"}
-    male_kws = {"boy", "man", "male", "guy", "he", "him", "his", "son", "father", "brother", "king", "prince", "lord", "sir", "mr"}
+    female_kws = {"girl", "woman", "female", "lady", "she", "her", "hers", "daughter", "mother", "sister", "queen", "princess", "heroine", "mrs", "miss", "ms", "madame", "madam", "binti", "waifu", "waitress", "priestess", "headmistress"}
+    male_kws = {"boy", "man", "male", "guy", "he", "him", "his", "son", "father", "brother", "king", "prince", "lord", "sir", "mr", "bin", "headmaster"}
 
-    has_f = bool(words.intersection(female_kws)) or has_breast
+    has_f = bool(words.intersection(female_kws)) or has_breast or has_female_surname_inflection
     has_m = bool(words.intersection(male_kws)) or has_penis
 
     # Self-healing: if an unambiguous male name (e.g. Ronald, Robert) was saved with gender 'female'

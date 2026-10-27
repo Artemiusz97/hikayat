@@ -34,9 +34,9 @@ class TestNaturalFactionDiscovery(unittest.TestCase):
         self.assertEqual(len(esports_locs), 3)
 
         sub_names = {l["sub_name"] for l in esports_locs}
-        self.assertIn("PC Battle Stations", sub_names)
-        self.assertIn("Strategy Meeting Area", sub_names)
-        self.assertIn("Console Lounge & Trophy Shelf", sub_names)
+        self.assertIn("Clubroom Entrance & Check-In", sub_names)
+        self.assertIn("Competitive PC Arena", sub_names)
+        self.assertIn("Strategy & Console Lounge", sub_names)
 
     def test_faction_dynamic_emojis(self):
         """Verify dynamic emojis match the faction category/club theme."""
@@ -106,9 +106,9 @@ class TestNaturalFactionDiscovery(unittest.TestCase):
         self.assertGreaterEqual(len(alch_locs), 3)
 
         sub_names = {l["sub_name"] for l in alch_locs}
-        self.assertIn("Brewing & Distillation Station", sub_names)
-        self.assertIn("Reagent Vault & Ingredient Shelves", sub_names)
-        self.assertIn("Classified Alchemical Archive", sub_names)
+        self.assertIn("Apothecary Front Entrance", sub_names)
+        self.assertIn("Distillation Laboratory", sub_names)
+        self.assertIn("Classified Reagent Vault", sub_names)
 
     def test_alchemy_promotion_trial_directive(self):
         """Verify promotion trials for alchemy produce scholarly/distillation directives rather than sword sparring."""
@@ -207,19 +207,19 @@ class TestNaturalFactionDiscovery(unittest.TestCase):
         """Verify thematic Tier 2 HQ naming and Tier 3 sub-area generation for all 6 archetypes."""
         archetype_cases = [
             ("Machinists Union", "steampunk", "Machinists Union Foundry & Labor Hall",
-             {"Piston Foundry & Forge Floor", "Union Steward's Office", "Boiler Pressure Testing Array"}),
+             {"Foundry Gatehouse Entrance", "Piston Forge Floor", "Union Steward's Office"}),
             ("Royal Airship Fleet", "steampunk", "Royal Airship Fleet Aerodrome Gantry",
-             {"Bridge & Navigation Helm", "Flight Deck & Launch Catapult", "Officer's Mess & Briefing Room"}),
+             {"Boarding Gangway Entrance", "Command Bridge & Helm", "Officers' Briefing Wardroom"}),
             ("Orbital Fleet", "space", "Orbital Fleet Command Bridge",
-             {"Bridge & Navigation Helm", "Flight Deck & Launch Catapult", "Officer's Mess & Briefing Room"}),
+             {"Boarding Gangway Entrance", "Command Bridge & Helm", "Officers' Briefing Wardroom"}),
             ("Golden Caravan", "fantasy", "Golden Caravan Grand Exchange & Trading Post",
-             {"Bourse & Ledger Counting Room", "Vault & Secured Lockboxes", "Caravan Staging Yard"}),
+             {"Exchange Portico Entrance", "Ledger & Counting Hall", "Secured Bullion Vault"}),
             ("Holy Inquisition", "dark_fantasy", "Holy Inquisition Iron Sanctum & Citadel",
-             {"Sanctified Interrogation Chamber", "Relic & Purging Armory", "Lord Inquisitor's Private Quarters"}),
+             {"Sanctum Gatehouse Entrance", "Sanctified Interrogation Hall", "Relic & Purging Armory"}),
             ("Obsidian Coven", "dark_fantasy", "Obsidian Coven Hidden Catacomb & Altar",
-             {"Sacrificial Obsidian Altar", "Forbidden Reliquary & Tome Shelves", "Chanting Catacomb Vault"}),
+             {"Ward-Sealed Threshold Entrance", "Chanting Catacomb Hall", "Forbidden Reliquary Vault"}),
             ("Wasteland Salvage Crew", "post_apocalypse", "Wasteland Salvage Crew Scrapyard Depot & Workshop",
-             {"Salvage Sifting Bay", "Scrap Smelting Crucible", "Prospector's Trade Outpost"}),
+             {"Scrapyard Gate Checkpoint", "Salvage Sifting Bay", "Smelting & Trade Hall"}),
         ]
 
         for faction_name, scen_key, expected_hq, expected_subs in archetype_cases:

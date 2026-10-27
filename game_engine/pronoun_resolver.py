@@ -197,42 +197,20 @@ def tag_narrative_pronouns(
     if not actors:
         return clean_text
 
-    # Precompile search patterns for actor names
-    # Count occurrences of single-name tokens across all actors to prevent shared surname collisions
-    first_tok_counts: Dict[str, int] = {}
-    last_tok_counts: Dict[str, int] = {}
-    for act in actors:
-        a_low = act["name"].lower()
-        parts = a_low.split()
-        if parts:
-            f = parts[0]
-            first_tok_counts[f] = first_tok_counts.get(f, 0) + 1
-            if len(parts) > 1:
-                l = parts[-1]
-                last_tok_counts[l] = last_tok_counts.get(l, 0) + 1
-
+    # Precompile search patterns for actor names using culturally disambiguated tokens
+    # (handles East Asian surname-first order, 2-3 char given names, compound surnames, patronymics, and honorifics)
+    import namegen
+    peer_actor_names = [act["name"] for act in actors if act.get("name")]
     actor_patterns = []
+    generic_role_exclusions = {"smith", "rep", "student", "dean", "chief"}
     for act in actors:
         a_name = act["name"]
         a_low = a_name.lower()
-        parts = a_low.split()
-        first_tok = parts[0] if parts else ""
-        last_tok = parts[-1] if len(parts) > 1 else ""
-
-        # Avoid overly generic single-name tokens like honorifics or tokens shared across multiple actors
+        raw_disambig = namegen.get_unique_person_tokens(a_name, peer_names=peer_actor_names, min_len=2)
         cand_tokens = [a_low]
-        if (
-            len(first_tok) >= 3
-            and first_tok not in ("the", "and", "mr", "ms", "dr", "miss", "coach", "nurse")
-            and first_tok_counts.get(first_tok, 0) == 1
-        ):
-            cand_tokens.append(first_tok)
-        if (
-            len(last_tok) >= 4
-            and last_tok not in ("smith", "rep", "student", "dean", "chief")
-            and last_tok_counts.get(last_tok, 0) == 1
-        ):
-            cand_tokens.append(last_tok)
+        for tok in sorted(raw_disambig, key=len, reverse=True):
+            if tok != a_low and tok not in generic_role_exclusions and tok not in cand_tokens:
+                cand_tokens.append(tok)
 
         regex_pat = re.compile(rf"\b(?:{'|'.join(re.escape(t) for t in cand_tokens)})(?:'s|’s)?\b", re.IGNORECASE)
         actor_patterns.append((act, regex_pat))
@@ -255,45 +233,63 @@ def tag_narrative_pronouns(
         tagged_sentences = []
 
         for sentence in sentences:
-            # Check for actor name mentions in this sentence OUTSIDE quotes
-            # Text inside quotes is dialogue spoken to addressees/listeners, not narrative speaker attribution
-            quote_parts = re.split(r'("[^"]*"|[“][^”]*[”])', sentence)
-            nar_parts = [p for p in quote_parts if not ((p.startswith('"') and p.endswith('"')) or (p.startswith('“') and p.endswith('”')))]
-            sent_nar_text = " ".join(nar_parts)
+            # Identify quote spans in sentence to protect interior dialogue
+            quote_spans = []
+            for qm in re.finditer(r'("[^"]*"|[“][^”]*[”])', sentence):
+                quote_spans.append((qm.start(), qm.end()))
 
+            def _in_quotes(pos: int) -> bool:
+                return any(qs <= pos < qe for qs, qe in quote_spans)
+
+            # Collect narrative actor mention events and pronoun events strictly in sentence order
+            events = []
             for act, pat in actor_patterns:
-                if pat.search(sent_nar_text):
-                    if act.get("gender") == "female":
-                        current_female = act
-                    elif act.get("gender") == "male":
-                        current_male = act
+                for m in pat.finditer(sentence):
+                    if not _in_quotes(m.start()):
+                        events.append((m.start(), m.end(), "actor", act, m.group(0)))
 
-            # Replace pronouns in this sentence
-            def _replace_pronoun(m: re.Match) -> str:
-                word = m.group(1)
-                w_low = word.lower()
-                target_actor = None
+            for m in PRONOUN_REGEX.finditer(sentence):
+                if not _in_quotes(m.start()):
+                    events.append((m.start(), m.end(), "pronoun", None, m.group(0)))
 
-                if w_low in FEMININE_PRONOUNS:
-                    target_actor = current_female
-                elif w_low in MASCULINE_PRONOUNS:
-                    target_actor = current_male
+            events.sort(key=lambda x: x[0])
 
-                # If sentence addresses the player in 2nd person ("you/your"), third-person pronouns
-                # in speech attribution or perspective cannot refer to the player
-                if target_actor and target_actor.get("is_player"):
-                    if re.search(r'\b(?:you|your|yours|yourself)\b', sentence, re.I):
+            # Left-to-right sequential discourse attribution:
+            # Pronouns directly following an actor reference that actor immediately,
+            # avoiding forward-overwriting by characters mentioned later in the sentence.
+            out_parts = []
+            last_idx = 0
+            has_2nd_person = bool(re.search(r'\b(?:you|your|yours|yourself)\b', sentence, re.I))
+
+            for start, end, ev_type, data, tok_text in events:
+                if start < last_idx:
+                    continue
+                out_parts.append(sentence[last_idx:start])
+
+                if ev_type == "actor":
+                    if data.get("gender") == "female":
+                        current_female = data
+                    elif data.get("gender") == "male":
+                        current_male = data
+                    out_parts.append(tok_text)
+                elif ev_type == "pronoun":
+                    w_low = tok_text.lower()
+                    target_actor = current_female if w_low in FEMININE_PRONOUNS else current_male
+
+                    if target_actor and target_actor.get("is_player") and has_2nd_person:
                         alt_cands = [a for a in actors if a.get("gender") == target_actor.get("gender") and not a.get("is_player")]
                         target_actor = alt_cands[0] if alt_cands else None
 
-                if target_actor and target_actor.get("name"):
-                    role_attr = f' role="{target_actor["role"]}"' if target_actor.get("role") else ""
-                    return f'<ref char="{target_actor["name"]}"{role_attr}>{word}</ref>'
+                    if target_actor and target_actor.get("name"):
+                        role_attr = f' role="{target_actor["role"]}"' if target_actor.get("role") else ""
+                        out_parts.append(f'<ref char="{target_actor["name"]}"{role_attr}>{tok_text}</ref>')
+                    else:
+                        out_parts.append(tok_text)
 
-                return word
+                last_idx = end
 
-            tagged_sentence = PRONOUN_REGEX.sub(_replace_pronoun, sentence)
-            tagged_sentences.append(tagged_sentence)
+            out_parts.append(sentence[last_idx:])
+            tagged_sentences.append("".join(out_parts))
 
         resolved_paragraphs.append("".join(tagged_sentences))
 

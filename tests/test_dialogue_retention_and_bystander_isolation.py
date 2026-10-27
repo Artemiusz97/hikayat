@@ -10,7 +10,7 @@ import db
 import game_engine
 from cogs.adventure import AdventureCog
 from mechanics.world.mobility import has_narrative_continuity_bridge, is_dialogue_partner
-from game_engine.npcs import extract_speaking_npcs_from_narrative
+
 from game_engine.choices_cleaner import clean_choices_impl, is_exempt_free_action, infer_choice_stat_and_dc
 
 
@@ -92,7 +92,7 @@ class TestDialogueRetentionAndBystanderIsolation(unittest.TestCase):
             {"name": "Coach Kai Nakamura", "role": "Athletic Coach"}
         ]
 
-        speakers = extract_speaking_npcs_from_narrative(narrative, npcs_present)
+        _, _, _, speakers, _ = game_engine.extract_scene_fields({"dialogue_partners": ["Mia Yamada"], "outcome_narrative": narrative, "npcs_present": npcs_present})
 
         # Coach Kai must NOT be in speaking NPCs (title word 'coach' must not trigger a match for Kai)
         self.assertNotIn("Coach Kai Nakamura", speakers)
@@ -265,6 +265,7 @@ class TestDialogueRetentionAndBystanderIsolation(unittest.TestCase):
                 {"name": "Mia Yamada", "role": "Track Athlete"},
                 {"name": "Sofia Anderson", "role": "Student Journalist"}
             ],
+            "cast_events": [{"type": "engage", "npc": "Sofia Anderson", "reason": "Urgent news"}],
             "next_choices": [
                 {"label": "Ask Sofia what she found", "stat": "CHA", "requirement": 6},
                 {"label": "Reassure Mia and keep focused", "stat": "CHA", "requirement": 6},

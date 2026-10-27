@@ -1,3 +1,11 @@
+from .cast_planner import (
+    CastPlan,
+    plan_pre_turn,
+    render_stage_plan,
+    apply_cast_events,
+    get_cast_state,
+    save_cast_state,
+)
 """NPC dialogue tracking, room presence, and post-turn entity reconciliation."""
 from .dialogue_tracking import (
     DIALOGUE_STALL_VERBS,
@@ -9,7 +17,6 @@ from .dialogue_tracking import (
     evaluate_and_tick_scene_tension_timer,
     get_session_dialogue_partners,
     is_dialogue_partner,
-    extract_speaking_npcs_from_narrative,
     is_npc_invited_in_action,
     can_chime_in_to_dialogue,
     evaluate_scene_attention_transition,
@@ -18,7 +25,6 @@ from .dialogue_tracking import (
 from .presence import (
     sync_hostile_entities,
     classify_scene_npcs,
-    extract_departed_npcs_from_narrative,
     is_mentioned_only_in_absence_or_memory,
     reset_departed_guest_locations,
     _distribute_fallback_locations,
@@ -36,6 +42,12 @@ from .stage_manager import (
 )
 
 __all__ = [
+    "CastPlan",
+    "plan_pre_turn",
+    "render_stage_plan",
+    "apply_cast_events",
+    "get_cast_state",
+    "save_cast_state",
     "DIALOGUE_STALL_VERBS",
     "DIALOGUE_TITLE_WORDS",
     "count_dialogue_stall_turns",
@@ -46,13 +58,11 @@ __all__ = [
     "evaluate_and_tick_scene_tension_timer",
     "get_session_dialogue_partners",
     "is_dialogue_partner",
-    "extract_speaking_npcs_from_narrative",
     "is_npc_invited_in_action",
     "can_chime_in_to_dialogue",
     "evaluate_scene_attention_transition",
     "sync_hostile_entities",
     "classify_scene_npcs",
-    "extract_departed_npcs_from_narrative",
     "is_mentioned_only_in_absence_or_memory",
     "reset_departed_guest_locations",
     "_distribute_fallback_locations",

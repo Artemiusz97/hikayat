@@ -15,13 +15,13 @@ class TestClassTemplates(unittest.TestCase):
         expected_scenarios = [
             "fantasy", "sci_fi", "cyberpunk", "steampunk",
             "dark_fantasy", "isekai_fantasy", "high_school_drama", "nuclear_post_apocalypse",
-            "slice_of_life"
+            "slice_of_life", "anomalous_incursions", "urban_anomalies", "urban_fantasy"
         ]
         self.assertEqual(list(self.class_templates.keys()), expected_scenarios)
         self.assertEqual(list(self.starting_weapons.keys()), expected_scenarios)
 
         for scen, classes in self.class_templates.items():
-            expected_count = 14 if scen == "high_school_drama" else 6
+            expected_count = 14 if scen == "high_school_drama" else (26 if scen in ("anomalous_incursions", "urban_anomalies", "urban_fantasy") else 6)
             self.assertEqual(len(classes), expected_count, f"Scenario '{scen}' should have {expected_count} classes")
             for c_name, c_data in classes.items():
                 self.assertIn("description", c_data, f"Class {c_name} missing description")
@@ -48,16 +48,16 @@ class TestClassTemplates(unittest.TestCase):
 
     def test_starting_weapons_count(self):
         for scen, weapons in self.starting_weapons.items():
-            expected_weapons = 0 if scen == "high_school_drama" else 6
+            expected_weapons = 0 if scen == "high_school_drama" else (30 if scen in ("anomalous_incursions", "urban_anomalies", "urban_fantasy") else 6)
             self.assertEqual(len(weapons), expected_weapons, f"Scenario '{scen}' should have {expected_weapons} starting weapons")
 
     def test_character_data_helpers(self):
         all_classes = cd.get_all_class_templates()
-        self.assertEqual(len(all_classes), 62)
+        self.assertEqual(len(all_classes), 88)
 
         for scen, classes in self.class_templates.items():
             scen_classes = cd.get_class_templates(scen)
-            expected_count = 14 if scen == "high_school_drama" else 6
+            expected_count = 14 if scen == "high_school_drama" else (5 if scen in ("anomalous_incursions", "urban_anomalies", "urban_fantasy") else 6)
             self.assertEqual(len(scen_classes), expected_count)
             for c_name in classes:
                 gear_map = cd.get_starter_gear_by_class(scen, c_name)

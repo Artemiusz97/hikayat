@@ -74,25 +74,92 @@ def _get_connection(conn: Optional[sqlite3.Connection] = None):
 
 # --- Person Registry & Key Helpers ---
 
-def player_person_key(character_id: Any) -> str:
-    """Returns canonical person key for a player character."""
-    return f"player:{character_id}"
+def player_person_key(character_id: Any = None) -> str:
+    """Returns the single session-scoped canonical person key for the player character."""
+    return "player"
 
 
 def is_player_person_key(key: Any) -> bool:
     """Checks if a person key refers to the player."""
     clean = str(key or "").strip().lower()
-    return clean in ("player", "you") or clean.startswith("player:")
+    return clean in ("player", "you") or clean.startswith("player:") or clean.startswith("player_")
 
 
 def canonical_person_key(name: str, disambiguator: str = "") -> str:
     """Produces a clean canonical text key from a name."""
+    if not disambiguator and is_player_person_key(name):
+        return "player"
     clean = re.sub(r"[^a-z0-9]+", "_", (name or "").lower().strip()).strip("_")
     if disambiguator:
         d_clean = re.sub(r"[^a-z0-9]+", "_", str(disambiguator).lower().strip()).strip("_")
         if d_clean:
             clean = f"{clean}_{d_clean}"
     return clean or "unknown_person"
+
+
+def _resolve_player_display_name(session_id: int, conn: sqlite3.Connection) -> str:
+    """Resolves the player's actual character display name for a session."""
+    try:
+        sp = conn.execute(
+            "SELECT display_name FROM social_persons WHERE session_id = ? AND person_key = 'player'",
+            (session_id,),
+        ).fetchone()
+        if sp and sp["display_name"] and not is_player_person_key(sp["display_name"]):
+            return str(sp["display_name"]).strip()
+        row = conn.execute(
+            """SELECT c.name FROM characters c
+               JOIN sessions s ON (s.character_id = c.id OR c.active_session_id = s.id)
+               WHERE s.id = ? LIMIT 1""",
+            (session_id,),
+        ).fetchone()
+        if row and row["name"]:
+            return str(row["name"]).strip()
+        sm = conn.execute(
+            """SELECT c.name FROM session_members m
+               JOIN characters c ON c.user_id = m.user_id
+               WHERE m.session_id = ? LIMIT 1""",
+            (session_id,),
+        ).fetchone()
+        if sm and sm["name"]:
+            return str(sm["name"]).strip()
+    except Exception:
+        pass
+    return "Player"
+
+
+def resolve_npc_id_for_person(
+    session_id: int,
+    person_key_or_id: str,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[str]:
+    """Resolves contacts.npc_id reliably across slug variations (hyphens, apostrophes, accents)."""
+    raw = str(person_key_or_id or "").strip()
+    if not raw or is_player_person_key(raw):
+        return None
+    p_key = canonical_person_key(raw)
+    with _get_connection(conn) as c:
+        p_row = c.execute(
+            "SELECT contact_npc_id FROM social_persons WHERE session_id = ? AND person_key = ?",
+            (session_id, p_key),
+        ).fetchone()
+        if p_row and p_row["contact_npc_id"]:
+            return str(p_row["contact_npc_id"])
+        c_direct = c.execute(
+            "SELECT npc_id FROM contacts WHERE session_id = ? AND (npc_id = ? OR lower(name) = ?)",
+            (session_id, raw.lower().replace(" ", "_"), raw.lower()),
+        ).fetchone()
+        if c_direct and c_direct["npc_id"]:
+            link_person_to_contact(session_id, p_key, c_direct["npc_id"], conn=c)
+            return str(c_direct["npc_id"])
+        all_c = c.execute(
+            "SELECT npc_id, name FROM contacts WHERE session_id = ?",
+            (session_id,),
+        ).fetchall()
+        for cr in all_c:
+            if canonical_person_key(cr["npc_id"]) == p_key or canonical_person_key(cr["name"]) == p_key:
+                link_person_to_contact(session_id, p_key, cr["npc_id"], conn=c)
+                return str(cr["npc_id"])
+    return None
 
 
 def canonical_pair(a: str, b: str, is_directed: bool = False) -> Tuple[str, str]:
@@ -311,19 +378,26 @@ def form_tie(
     - Canonical pair ordering
     - Write-through materialization to legacy relations_json
     """
-    if a == b:
-        raise ValueError(f"Cannot form tie between a person and themselves ({a})")
+    a_norm = "player" if is_player_person_key(a) else canonical_person_key(a)
+    b_norm = "player" if is_player_person_key(b) else canonical_person_key(b)
+    if a_norm == b_norm:
+        raise ValueError(f"Cannot form tie between a person and themselves ({a_norm})")
 
     is_directed = 1 if tie_type in DIRECTED_TYPES else 0
-    a_canon, b_canon = canonical_pair(a, b, is_directed=bool(is_directed))
+    a_canon, b_canon = canonical_pair(a_norm, b_norm, is_directed=bool(is_directed))
     now = time.time()
     closeness_clamped = max(0, min(100, int(closeness)))
     meta_json = json.dumps(metadata or {})
 
     with _get_connection(conn) as c:
-        # Ensure both nodes exist in registry
-        get_or_create_person(session_id, a_canon, conn=c)
-        get_or_create_person(session_id, b_canon, conn=c)
+        # Ensure both nodes exist in registry without stripping colons or clobbering display names
+        for endpoint_key, raw_arg in ((a_canon, a), (b_canon, b)):
+            if endpoint_key == "player":
+                p_disp = _resolve_player_display_name(session_id, c)
+                get_or_create_person(session_id, p_disp, person_key="player", origin="player", conn=c)
+            else:
+                disp_hint = raw_arg if (raw_arg and " " in str(raw_arg)) else endpoint_key.replace("_", " ").title()
+                get_or_create_person(session_id, disp_hint, person_key=endpoint_key, conn=c)
 
         # 1. Incest guard
         if tie_type in ROMANTIC_TYPES:
@@ -383,10 +457,10 @@ def form_tie(
                     # Break old tie
                     if conflict_a:
                         reason = "left_for_player" if is_player_involved else "left_for_partner"
-                        end_tie(session_id, a_canon, partner_a["person_key"], partner_a["tie_type"], turn=turn, reason=reason, materialize=False, conn=c)
+                        end_tie(session_id, a_canon, partner_a["person_key"], partner_a["tie_type"], turn=turn, reason=reason, materialize=materialize, conn=c)
                     if conflict_b:
                         reason = "left_for_player" if is_player_involved else "left_for_partner"
-                        end_tie(session_id, b_canon, partner_b["person_key"], partner_b["tie_type"], turn=turn, reason=reason, materialize=False, conn=c)
+                        end_tie(session_id, b_canon, partner_b["person_key"], partner_b["tie_type"], turn=turn, reason=reason, materialize=materialize, conn=c)
                 elif is_player_involved or affair:
                     # Decision 1: Allow multi-dating as Secret Affair
                     actual_tie_type = TIETYPE_AFFAIR
@@ -464,60 +538,64 @@ def end_tie(
 ) -> bool:
     """
     Ends an active tie between a and b, preserving it as an ended historical tie.
+    Respects directed tie orientation even when the player is an endpoint.
     """
     now = time.time()
-    a_is_p = is_player_person_key(a)
-    b_is_p = is_player_person_key(b)
+    a_norm = "player" if is_player_person_key(a) else canonical_person_key(a)
+    b_norm = "player" if is_player_person_key(b) else canonical_person_key(b)
 
     with _get_connection(conn) as c:
-        is_directed = bool(tie_type and tie_type in DIRECTED_TYPES)
-        a_canon, b_canon = canonical_pair(a, b, is_directed=is_directed)
-
         if tie_type:
-            if a_is_p or b_is_p:
-                cond_a = "(person_a_key = ? OR person_a_key = 'player' OR person_a_key LIKE 'player:%')" if a_is_p else "person_a_key = ?"
-                cond_b = "(person_b_key = ? OR person_b_key = 'player' OR person_b_key LIKE 'player:%')" if b_is_p else "person_b_key = ?"
-                cond_rev_a = "(person_a_key = ? OR person_a_key = 'player' OR person_a_key LIKE 'player:%')" if b_is_p else "person_a_key = ?"
-                cond_rev_b = "(person_b_key = ? OR person_b_key = 'player' OR person_b_key LIKE 'player:%')" if a_is_p else "person_b_key = ?"
-                cur = c.execute(
-                    f"""UPDATE social_ties
-                       SET status = 'ended', ended_turn = ?, end_reason = ?, updated_at = ?
-                       WHERE session_id = ? AND (({cond_a} AND {cond_b}) OR ({cond_rev_a} AND {cond_rev_b})) AND tie_type = ? AND status = 'active'""",
-                    (turn, reason, now, session_id, a, b, b, a, tie_type),
-                )
-            else:
-                cur = c.execute(
-                    """UPDATE social_ties
-                       SET status = 'ended', ended_turn = ?, end_reason = ?, updated_at = ?
-                       WHERE session_id = ? AND person_a_key = ? AND person_b_key = ? AND tie_type = ? AND status = 'active'""",
-                    (turn, reason, now, session_id, a_canon, b_canon, tie_type),
-                )
+            is_directed = bool(tie_type in DIRECTED_TYPES)
+            a_canon, b_canon = canonical_pair(a_norm, b_norm, is_directed=is_directed)
+            cur = c.execute(
+                """UPDATE social_ties
+                   SET status = 'ended', ended_turn = ?, end_reason = ?, updated_at = ?
+                   WHERE session_id = ? AND person_a_key = ? AND person_b_key = ? AND tie_type = ? AND status = 'active'""",
+                (turn, reason, now, session_id, a_canon, b_canon, tie_type),
+            )
         else:
-            if a_is_p or b_is_p:
-                cond_a = "(person_a_key = ? OR person_a_key = 'player' OR person_a_key LIKE 'player:%')" if a_is_p else "person_a_key = ?"
-                cond_b = "(person_b_key = ? OR person_b_key = 'player' OR person_b_key LIKE 'player:%')" if b_is_p else "person_b_key = ?"
-                cond_rev_a = "(person_a_key = ? OR person_a_key = 'player' OR person_a_key LIKE 'player:%')" if b_is_p else "person_a_key = ?"
-                cond_rev_b = "(person_b_key = ? OR person_b_key = 'player' OR person_b_key LIKE 'player:%')" if a_is_p else "person_b_key = ?"
-                cur = c.execute(
-                    f"""UPDATE social_ties
-                       SET status = 'ended', ended_turn = ?, end_reason = ?, updated_at = ?
-                       WHERE session_id = ? AND (({cond_a} AND {cond_b}) OR ({cond_rev_a} AND {cond_rev_b}))
-                         AND status = 'active'""",
-                    (turn, reason, now, session_id, a, b, b, a),
-                )
-            else:
-                cur = c.execute(
-                    """UPDATE social_ties
-                       SET status = 'ended', ended_turn = ?, end_reason = ?, updated_at = ?
-                       WHERE session_id = ? AND ((person_a_key = ? AND person_b_key = ?) OR (person_a_key = ? AND person_b_key = ?))
-                         AND status = 'active'""",
-                    (turn, reason, now, session_id, a, b, b, a),
-                )
+            cur = c.execute(
+                """UPDATE social_ties
+                   SET status = 'ended', ended_turn = ?, end_reason = ?, updated_at = ?
+                   WHERE session_id = ? AND ((person_a_key = ? AND person_b_key = ?) OR (person_a_key = ? AND person_b_key = ?))
+                     AND status = 'active'""",
+                (turn, reason, now, session_id, a_norm, b_norm, b_norm, a_norm),
+            )
 
         changed = cur.rowcount > 0
         if changed and materialize:
-            _materialize_endpoints(session_id, a, b, conn=c)
+            _materialize_endpoints(session_id, a_norm, b_norm, conn=c)
         return changed
+
+
+def end_all_romantic_ties(
+    session_id: int,
+    a: str,
+    b: str,
+    *,
+    turn: int = 0,
+    reason: str = "breakup",
+    materialize: bool = True,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    """Ends all active romantic ties (dating, engaged, married, affair) between a and b."""
+    now = time.time()
+    a_norm = "player" if is_player_person_key(a) else canonical_person_key(a)
+    b_norm = "player" if is_player_person_key(b) else canonical_person_key(b)
+    a_canon, b_canon = canonical_pair(a_norm, b_norm, is_directed=False)
+    with _get_connection(conn) as c:
+        cur = c.execute(
+            """UPDATE social_ties
+               SET status = 'ended', ended_turn = ?, end_reason = ?, updated_at = ?
+               WHERE session_id = ? AND person_a_key = ? AND person_b_key = ?
+                 AND tie_type IN ('dating', 'engaged', 'married', 'affair') AND status = 'active'""",
+            (turn, reason, now, session_id, a_canon, b_canon),
+        )
+        cnt = cur.rowcount
+        if cnt > 0 and materialize:
+            _materialize_endpoints(session_id, a_norm, b_norm, conn=c)
+        return cnt
 
 
 def transition_tie(
@@ -569,57 +647,31 @@ def adjust_closeness(
     materialize: bool = True,
     conn: Optional[sqlite3.Connection] = None,
 ) -> int:
-    """Adjusts closeness on an active tie, clamped between 0 and 100."""
+    """Adjusts closeness on an active tie, clamped between 0 and 100. Respects directed tie orientation."""
     if isinstance(tie_type, (int, float)):
         delta = int(tie_type)
         tie_type = None
 
-    a_is_p = is_player_person_key(a)
-    b_is_p = is_player_person_key(b)
+    a_norm = "player" if is_player_person_key(a) else canonical_person_key(a)
+    b_norm = "player" if is_player_person_key(b) else canonical_person_key(b)
 
     with _get_connection(conn) as c:
         if tie_type:
             is_dir = bool(tie_type in DIRECTED_TYPES)
-            a_canon, b_canon = canonical_pair(a, b, is_directed=is_dir)
-            if a_is_p or b_is_p:
-                cond_a = "(person_a_key = ? OR person_a_key = 'player' OR person_a_key LIKE 'player:%')" if a_is_p else "person_a_key = ?"
-                cond_b = "(person_b_key = ? OR person_b_key = 'player' OR person_b_key LIKE 'player:%')" if b_is_p else "person_b_key = ?"
-                cond_rev_a = "(person_a_key = ? OR person_a_key = 'player' OR person_a_key LIKE 'player:%')" if b_is_p else "person_a_key = ?"
-                cond_rev_b = "(person_b_key = ? OR person_b_key = 'player' OR person_b_key LIKE 'player:%')" if a_is_p else "person_b_key = ?"
-                row = c.execute(
-                    f"""SELECT id, closeness FROM social_ties
-                        WHERE session_id = ? AND (({cond_a} AND {cond_b}) OR ({cond_rev_a} AND {cond_rev_b}))
-                          AND tie_type = ? AND status = 'active'
-                        ORDER BY updated_at DESC LIMIT 1""",
-                    (session_id, a, b, b, a, tie_type),
-                ).fetchone()
-            else:
-                row = c.execute(
-                    """SELECT id, closeness FROM social_ties
-                       WHERE session_id = ? AND person_a_key = ? AND person_b_key = ? AND tie_type = ? AND status = 'active'""",
-                    (session_id, a_canon, b_canon, tie_type),
-                ).fetchone()
+            a_canon, b_canon = canonical_pair(a_norm, b_norm, is_directed=is_dir)
+            row = c.execute(
+                """SELECT id, closeness FROM social_ties
+                   WHERE session_id = ? AND person_a_key = ? AND person_b_key = ? AND tie_type = ? AND status = 'active'""",
+                (session_id, a_canon, b_canon, tie_type),
+            ).fetchone()
         else:
-            if a_is_p or b_is_p:
-                cond_a = "(person_a_key = ? OR person_a_key = 'player' OR person_a_key LIKE 'player:%')" if a_is_p else "person_a_key = ?"
-                cond_b = "(person_b_key = ? OR person_b_key = 'player' OR person_b_key LIKE 'player:%')" if b_is_p else "person_b_key = ?"
-                cond_rev_a = "(person_a_key = ? OR person_a_key = 'player' OR person_a_key LIKE 'player:%')" if b_is_p else "person_a_key = ?"
-                cond_rev_b = "(person_b_key = ? OR person_b_key = 'player' OR person_b_key LIKE 'player:%')" if a_is_p else "person_b_key = ?"
-                row = c.execute(
-                    f"""SELECT id, closeness FROM social_ties
-                        WHERE session_id = ? AND (({cond_a} AND {cond_b}) OR ({cond_rev_a} AND {cond_rev_b}))
-                          AND status = 'active'
-                        ORDER BY updated_at DESC LIMIT 1""",
-                    (session_id, a, b, b, a),
-                ).fetchone()
-            else:
-                row = c.execute(
-                    """SELECT id, closeness FROM social_ties
-                       WHERE session_id = ? AND ((person_a_key = ? AND person_b_key = ?) OR (person_a_key = ? AND person_b_key = ?))
-                         AND status = 'active'
-                       ORDER BY updated_at DESC LIMIT 1""",
-                    (session_id, a, b, b, a),
-                ).fetchone()
+            row = c.execute(
+                """SELECT id, closeness FROM social_ties
+                   WHERE session_id = ? AND ((person_a_key = ? AND person_b_key = ?) OR (person_a_key = ? AND person_b_key = ?))
+                     AND status = 'active'
+                   ORDER BY updated_at DESC LIMIT 1""",
+                (session_id, a_norm, b_norm, b_norm, a_norm),
+            ).fetchone()
 
         if not row:
             return 50
@@ -629,7 +681,7 @@ def adjust_closeness(
             (new_val, time.time(), row["id"]),
         )
         if materialize:
-            _materialize_endpoints(session_id, a, b, conn=c)
+            _materialize_endpoints(session_id, a_norm, b_norm, conn=c)
         return new_val
 
 
@@ -646,7 +698,7 @@ def get_ties(
     """
     Returns all ties connected to person_key, enriched with the other person's details.
     """
-    is_player_query = is_player_person_key(person_key)
+    target_key = "player" if is_player_person_key(person_key) else canonical_person_key(person_key)
     with _get_connection(conn) as c:
         query = [
             "SELECT t.*, pa.display_name AS a_name, pa.role AS a_role, pa.gender AS a_gender, pa.contact_npc_id AS a_contact,",
@@ -654,13 +706,9 @@ def get_ties(
             "FROM social_ties t",
             "LEFT JOIN social_persons pa ON pa.session_id = t.session_id AND pa.person_key = t.person_a_key",
             "LEFT JOIN social_persons pb ON pb.session_id = t.session_id AND pb.person_key = t.person_b_key",
+            "WHERE t.session_id = ? AND (t.person_a_key = ? OR t.person_b_key = ?)",
         ]
-        if is_player_query:
-            query.append("WHERE t.session_id = ? AND (t.person_a_key = 'player' OR t.person_a_key LIKE 'player:%' OR t.person_b_key = 'player' OR t.person_b_key LIKE 'player:%')")
-            params: list[Any] = [session_id]
-        else:
-            query.append("WHERE t.session_id = ? AND (t.person_a_key = ? OR t.person_b_key = ?)")
-            params = [session_id, person_key, person_key]
+        params: list[Any] = [session_id, target_key, target_key]
 
         if active_only:
             query.append("AND t.status = 'active'")
@@ -671,21 +719,36 @@ def get_ties(
 
         query.append("ORDER BY t.updated_at DESC")
         rows = c.execute(" ".join(query), params).fetchall()
+        player_disp: Optional[str] = None
 
         results = []
         for r in rows:
             d = dict(r)
-            a_is_target = is_player_person_key(d["person_a_key"]) if is_player_query else (d["person_a_key"] == person_key)
+            a_is_target = (d["person_a_key"] == target_key)
             if a_is_target:
-                d["other_person_key"] = d["person_b_key"]
-                d["other_display_name"] = "Player" if is_player_person_key(d["person_b_key"]) else (d.get("b_name") or d["person_b_key"])
+                other_k = d["person_b_key"]
+                if is_player_person_key(other_k):
+                    if player_disp is None:
+                        player_disp = _resolve_player_display_name(session_id, c)
+                    other_disp = player_disp
+                else:
+                    other_disp = d.get("b_name") or other_k
+                d["other_person_key"] = other_k
+                d["other_display_name"] = other_disp
                 d["other_role"] = d.get("b_role") or ""
                 d["other_gender"] = d.get("b_gender") or ""
                 d["other_contact_id"] = d.get("b_contact")
                 d["direction"] = "outbound" if d["is_directed"] else "mutual"
             else:
-                d["other_person_key"] = d["person_a_key"]
-                d["other_display_name"] = "Player" if is_player_person_key(d["person_a_key"]) else (d.get("a_name") or d["person_a_key"])
+                other_k = d["person_a_key"]
+                if is_player_person_key(other_k):
+                    if player_disp is None:
+                        player_disp = _resolve_player_display_name(session_id, c)
+                    other_disp = player_disp
+                else:
+                    other_disp = d.get("a_name") or other_k
+                d["other_person_key"] = other_k
+                d["other_display_name"] = other_disp
                 d["other_role"] = d.get("a_role") or ""
                 d["other_gender"] = d.get("a_gender") or ""
                 d["other_contact_id"] = d.get("a_contact")
@@ -746,39 +809,31 @@ def get_ex_partners(
     Returns ex-partners derived from ended romantic and affair ties.
     Fixes the bug in social.py where breakup overwrote ex history.
     """
-    is_player = is_player_person_key(person_key)
+    target_key = "player" if is_player_person_key(person_key) else canonical_person_key(person_key)
     with _get_connection(conn) as c:
-        if is_player:
-            query = """
-                SELECT t.*, pa.display_name AS a_name, pa.role AS a_role, pa.gender AS a_gender, pa.contact_npc_id AS a_contact,
-                       pb.display_name AS b_name, pb.role AS b_role, pb.gender AS b_gender, pb.contact_npc_id AS b_contact
-                FROM social_ties t
-                LEFT JOIN social_persons pa ON pa.session_id = t.session_id AND pa.person_key = t.person_a_key
-                LEFT JOIN social_persons pb ON pb.session_id = t.session_id AND pb.person_key = t.person_b_key
-                WHERE t.session_id = ? AND (t.person_a_key = 'player' OR t.person_a_key LIKE 'player:%' OR t.person_b_key = 'player' OR t.person_b_key LIKE 'player:%')
-                  AND t.tie_type IN ('dating', 'engaged', 'married', 'affair')
-                  AND t.status = 'ended'
-                ORDER BY t.ended_turn DESC, t.updated_at DESC
-            """
-            rows = c.execute(query, (session_id,)).fetchall()
-        else:
-            query = """
-                SELECT t.*, pa.display_name AS a_name, pa.role AS a_role, pa.gender AS a_gender, pa.contact_npc_id AS a_contact,
-                       pb.display_name AS b_name, pb.role AS b_role, pb.gender AS b_gender, pb.contact_npc_id AS b_contact
-                FROM social_ties t
-                LEFT JOIN social_persons pa ON pa.session_id = t.session_id AND pa.person_key = t.person_a_key
-                LEFT JOIN social_persons pb ON pb.session_id = t.session_id AND pb.person_key = t.person_b_key
-                WHERE t.session_id = ? AND (t.person_a_key = ? OR t.person_b_key = ?)
-                  AND t.tie_type IN ('dating', 'engaged', 'married', 'affair')
-                  AND t.status = 'ended'
-                ORDER BY t.ended_turn DESC, t.updated_at DESC
-            """
-            rows = c.execute(query, (session_id, person_key, person_key)).fetchall()
+        query = """
+            SELECT t.*, pa.display_name AS a_name, pa.role AS a_role, pa.gender AS a_gender, pa.contact_npc_id AS a_contact,
+                   pb.display_name AS b_name, pb.role AS b_role, pb.gender AS b_gender, pb.contact_npc_id AS b_contact
+            FROM social_ties t
+            LEFT JOIN social_persons pa ON pa.session_id = t.session_id AND pa.person_key = t.person_a_key
+            LEFT JOIN social_persons pb ON pb.session_id = t.session_id AND pb.person_key = t.person_b_key
+            WHERE t.session_id = ? AND (t.person_a_key = ? OR t.person_b_key = ?)
+              AND t.tie_type IN ('dating', 'engaged', 'married', 'affair')
+              AND t.status = 'ended'
+            ORDER BY t.ended_turn DESC, t.updated_at DESC
+        """
+        rows = c.execute(query, (session_id, target_key, target_key)).fetchall()
+        player_disp: Optional[str] = None
         exes = []
         for r in rows:
-            is_a = is_player_person_key(r["person_a_key"]) if is_player else (r["person_a_key"] == person_key)
+            is_a = (r["person_a_key"] == target_key)
             other_key = r["person_b_key"] if is_a else r["person_a_key"]
-            other_name = (r["b_name"] if is_a else r["a_name"]) or other_key
+            if is_player_person_key(other_key):
+                if player_disp is None:
+                    player_disp = _resolve_player_display_name(session_id, c)
+                other_name = player_disp
+            else:
+                other_name = (r["b_name"] if is_a else r["a_name"]) or other_key
             other_role = (r["b_role"] if is_a else r["a_role"]) or ""
             other_contact = r["b_contact"] if is_a else r["a_contact"]
             exes.append({
@@ -826,8 +881,7 @@ def materialize_relations(
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
     """
-    Rebuilds the legacy relations_json dictionary from the normalized graph + household data.
-    Guarantees 100% backward compatibility for CodexPanel.jsx, cogs/contacts.py, and actor_card.
+    Rebuilds the relations_json projection from the normalized graph + household data.
     """
     c_dict = dict(contact)
     npc_id = c_dict.get("npc_id", "")
@@ -844,16 +898,18 @@ def materialize_relations(
         residence = ""
         if hid:
             try:
-                from mechanics.social.genealogy import build_family_tree_from_household, _hydrate_household_entity
+                from mechanics.social.genealogy import build_family_tree_for_member, _hydrate_household_entity
                 hh_row = c.execute("SELECT * FROM households WHERE id = ?", (hid,)).fetchone()
                 if hh_row:
+                    s_row = c.execute("SELECT scenario FROM sessions WHERE id = ?", (session_id,)).fetchone()
+                    scen = str(s_row["scenario"] or "fantasy") if s_row else "fantasy"
                     residence = hh_row["residence_location"] or ""
                     hh_dict = dict(hh_row)
                     hh_dict["father"] = hh_dict.get("father_json", "{}")
                     hh_dict["mother"] = hh_dict.get("mother_json", "{}")
                     hh_dict["narrative_siblings"] = hh_dict.get("narrative_siblings_json", "[]")
-                    hydrated_hh = _hydrate_household_entity(hh_dict, c_dict, "fantasy")
-                    family_tree = build_family_tree_from_household(hydrated_hh, name)
+                    hydrated_hh = _hydrate_household_entity(hh_dict, c_dict, scen, conn=c)
+                    family_tree = build_family_tree_for_member(hydrated_hh, name, member_role=c_dict.get("household_role"))
             except Exception as e:
                 logger.warning(f"Failed to build family tree from household {hid}: {e}")
 
@@ -876,27 +932,38 @@ def materialize_relations(
         else:
             romance_status = "Single"
 
-        # 3. Friends
-        plat_ties = get_ties(session_id, person_key, active_only=True, types=PLATONIC_TYPES, conn=conn)
+        # 3. Friends (use active connection c!)
+        plat_ties = get_ties(session_id, person_key, active_only=True, types=PLATONIC_TYPES, conn=c)
         friends = []
         for t in plat_ties:
+            try:
+                t_meta = json.loads(t.get("metadata_json") or "{}")
+            except Exception:
+                t_meta = {}
+            closeness_out = t_meta.get("closeness_label") if t_meta.get("closeness_label") else t["closeness"]
             friends.append({
                 "name": t["other_display_name"],
                 "role": t["other_role"],
-                "closeness": t["closeness"],
+                "closeness": closeness_out,
+                "closeness_score": t["closeness"],
                 "is_contactable": bool(t["other_contact_id"]),
                 "npc_id": t["other_contact_id"],
                 "person_key": t["other_person_key"],
             })
 
-        # 4. Rivals
-        antag_ties = get_ties(session_id, person_key, active_only=True, types=ANTAGONISTIC_TYPES, conn=conn)
+        # 4. Rivals (use active connection c!)
+        antag_ties = get_ties(session_id, person_key, active_only=True, types=ANTAGONISTIC_TYPES, conn=c)
         rivals = []
         for t in antag_ties:
+            try:
+                t_meta = json.loads(t.get("metadata_json") or "{}")
+            except Exception:
+                t_meta = {}
+            rival_label = t_meta.get("rival_type") or t["tie_type"].capitalize()
             rivals.append({
                 "name": t["other_display_name"],
                 "role": t["other_role"],
-                "type": t["tie_type"].capitalize(),
+                "type": rival_label,
                 "is_contactable": bool(t["other_contact_id"]),
                 "npc_id": t["other_contact_id"],
                 "person_key": t["other_person_key"],
@@ -924,7 +991,7 @@ def materialize_and_save_relations(
 ) -> Optional[dict]:
     """
     Materializes relations for a contact and writes them to contacts.relations_json.
-    Also synchronizes contacts.track if romantically linked to the player.
+    Also synchronizes contacts.track if romantically linked to (or broken up with) the player.
     """
     with _get_connection(conn) as c:
         contact_row = c.execute(
@@ -937,14 +1004,17 @@ def materialize_and_save_relations(
         mat = materialize_relations(session_id, contact_row, conn=c)
         mat_json = json.dumps(mat)
 
-        # Sync track: if player is current partner, track is 'romantic'
         curr = mat.get("romance", {}).get("current_partner")
+        sec = mat.get("romance", {}).get("secret_partner")
+        exes = mat.get("romance", {}).get("ex_partners") or []
+        player_primary = bool(curr and is_player_person_key(curr.get("person_key", "")))
+        player_secret = bool(sec and is_player_person_key(sec.get("person_key", "")))
+        player_ex = any(is_player_person_key(ex.get("person_key", "")) for ex in exes)
+
         track_update = ""
-        track_param = None
-        if curr and is_player_person_key(curr.get("person_key", "")):
+        if player_primary:
             track_update = ", track = 'romantic'"
-        elif contact_row["track"] == "romantic":
-            # Was romantic, but no longer dating player
+        elif contact_row["track"] == "romantic" and not player_secret and player_ex:
             track_update = ", track = 'platonic'"
 
         c.execute(
@@ -965,17 +1035,7 @@ def _materialize_endpoints(
         for k in (a_key, b_key):
             if is_player_person_key(k):
                 continue
-            p = get_person_by_key(session_id, k, conn=c)
-            npc_id = p.get("contact_npc_id") if p else None
-            if not npc_id:
-                # Self-healing: check contacts by npc_id or canonical name match
-                c_row = c.execute(
-                    "SELECT npc_id, name FROM contacts WHERE session_id = ? AND (npc_id = ? OR lower(name) = ?)",
-                    (session_id, k, k.replace("_", " ")),
-                ).fetchone()
-                if c_row:
-                    npc_id = c_row["npc_id"]
-                    link_person_to_contact(session_id, k, npc_id, conn=c)
+            npc_id = resolve_npc_id_for_person(session_id, k, conn=c)
             if npc_id:
                 materialize_and_save_relations(session_id, npc_id, conn=c)
 
@@ -1416,10 +1476,22 @@ def seed_contact_social_graph(
             conn=c,
         )
 
-        # 2. Check if this person already has ties in this session
+        # 2. Check if this person's non-player social circle is already seeded in this session
         existing = get_ties(session_id, c_key, active_only=False, conn=c)
-        if existing:
+        has_friend_or_rival_ties = any(
+            not is_player_person_key(t.get("other_person_key", ""))
+            and t.get("tie_type") in (PLATONIC_TYPES | ANTAGONISTIC_TYPES)
+            for t in existing
+        )
+        if has_friend_or_rival_ties:
             return
+        player_rom = any(
+            is_player_person_key(t.get("other_person_key", ""))
+            and t.get("tie_type") in ROMANTIC_TYPES
+            and t.get("status") == "active"
+            for t in existing
+        )
+        is_initial_romantic_track = str(contact.get("track") or "").strip().lower() == "romantic"
 
         # 3. Collect family names to exclude
         family_names: set[str] = set()
@@ -1443,16 +1515,20 @@ def seed_contact_social_graph(
                 except Exception:
                     pass
 
-        # 4. Sinks exes from Intimacy Ledger
+        # 4. Sinks exes from Intimacy Ledger (insert directly as ended so pre-seeded active partners are preserved)
+        existing_partner = get_current_partner(session_id, c_key, conn=c)
         ledger_rows = c.execute(
             """SELECT DISTINCT partner_name, partner_role FROM intimate_events
                WHERE session_id = ? AND character_id = ? AND event_origin = 'past_history'""",
             (session_id, c_npc_id or c_key),
         ).fetchall()
+        now_ex_ts = time.time()
         for lr in ledger_rows:
             p_name = lr["partner_name"]
             if p_name and p_name.lower().strip() not in ("player", "you") and p_name.lower().strip() not in family_names:
                 ex_key = canonical_person_key(p_name)
+                if existing_partner and existing_partner.get("person_key") == ex_key:
+                    continue
                 get_or_create_person(
                     session_id,
                     p_name,
@@ -1461,8 +1537,22 @@ def seed_contact_social_graph(
                     origin="procedural",
                     conn=c,
                 )
-                form_tie(session_id, c_key, ex_key, TIETYPE_DATING, closeness=50, origin="procedural", turn=0, materialize=False, conn=c)
-                end_tie(session_id, c_key, ex_key, TIETYPE_DATING, turn=0, reason="past_relationship", materialize=False, conn=c)
+                ex_a, ex_b = canonical_pair(c_key, ex_key, is_directed=False)
+                already_ex = c.execute(
+                    """SELECT id FROM social_ties
+                       WHERE session_id = ? AND person_a_key = ? AND person_b_key = ?
+                         AND tie_type = ? AND status = 'ended'""",
+                    (session_id, ex_a, ex_b, TIETYPE_DATING),
+                ).fetchone()
+                if not already_ex:
+                    c.execute(
+                        """INSERT INTO social_ties
+                           (session_id, person_a_key, person_b_key, tie_type, is_directed, status,
+                            closeness, visibility, origin, started_turn, ended_turn, end_reason,
+                            metadata_json, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, 0, 'ended', 50, 'public', 'procedural', 0, 0, 'past_relationship', '{}', ?, ?)""",
+                        (session_id, ex_a, ex_b, TIETYPE_DATING, now_ex_ts, now_ex_ts),
+                    )
 
         # 5. Background or Provided Romantic Partner
         provided_partner = None
@@ -1476,26 +1566,74 @@ def seed_contact_social_graph(
             if rom.get("status") == "Single" and not provided_partner:
                 is_explicitly_single = True
 
-        if provided_partner and isinstance(provided_partner, dict) and provided_partner.get("name"):
+        if existing_partner and not is_player_person_key(existing_partner.get("person_key")):
+            if player_rom or is_initial_romantic_track:
+                end_tie(
+                    session_id,
+                    c_key,
+                    existing_partner["person_key"],
+                    existing_partner.get("tie_type") or TIETYPE_DATING,
+                    turn=0,
+                    reason="left_for_player",
+                    materialize=False,
+                    conn=c,
+                )
+        elif provided_partner and isinstance(provided_partner, dict) and provided_partner.get("name"):
             p_name = provided_partner["name"]
             p_role = provided_partner.get("role", "Partner")
-            p_key = canonical_person_key(p_name)
-            get_or_create_person(session_id, p_name, person_key=p_key, role=p_role, origin="procedural", conn=c)
-            form_tie(session_id, c_key, p_key, TIETYPE_DATING, closeness=70, origin="procedural", turn=0, materialize=False, conn=c)
-        elif not is_explicitly_single:
-            # 15% taken roll - Decision 4
-            is_taken = ((abs(hash_val) % 100) < 15)
+            if not is_player_person_key(p_name):
+                p_key = canonical_person_key(p_name)
+                get_or_create_person(session_id, p_name, person_key=p_key, role=p_role, origin="procedural", conn=c)
+                form_tie(session_id, c_key, p_key, TIETYPE_DATING, closeness=70, origin="procedural", turn=0, materialize=False, conn=c)
+                if player_rom:
+                    end_tie(session_id, c_key, p_key, TIETYPE_DATING, turn=0, reason="left_for_player", materialize=False, conn=c)
+        elif not is_explicitly_single and not player_rom and not is_initial_romantic_track:
+            # Openness-scaled taken roll - Decision 4
+            rg_app = contact.get("appearance") or {}
+            if isinstance(rg_app, str):
+                try:
+                    import json
+                    rg_app = json.loads(rg_app)
+                except Exception:
+                    rg_app = {}
+            rg_binfo = contact.get("basic_info") or {}
+            if isinstance(rg_binfo, str):
+                try:
+                    import json
+                    rg_binfo = json.loads(rg_binfo)
+                except Exception:
+                    rg_binfo = {}
+            rg_open = str(
+                rg_app.get("erotic_openness")
+                or rg_app.get("openness")
+                or contact.get("openness")
+                or rg_binfo.get("openness")
+                or "moderate"
+            ).lower()
+            if "prude" in rg_open or "modest" in rg_open or "chaste" in rg_open:
+                taken_rate = 8
+            elif "shameless" in rg_open or "lewd" in rg_open:
+                taken_rate = 35
+            elif "bold" in rg_open or "uninhibited" in rg_open:
+                taken_rate = 25
+            else:
+                taken_rate = 15
+            is_taken = ((abs(hash_val) % 100) < taken_rate)
             if is_taken:
-                from mechanics.social.genealogy import get_deterministic_firstname, get_deterministic_surname
+                from mechanics.social.genealogy import generate_deterministic_full_name
                 import namegen
                 p_gender = "female" if (contact.get("gender") == "male") else "male"
-                p_first = get_deterministic_firstname(scenario, p_gender, hash_val * 47 + 13)
-                p_last = get_deterministic_surname(scenario, hash_val * 31 + 29)
+                partner_name = generate_deterministic_full_name(scenario, p_gender, hash_val * 47 + 13)
                 p_role = namegen.generate_role(scenario, hash_val=hash_val * 19 + 7)
-                partner_name = f"{p_first} {p_last}"
                 partner_key = canonical_person_key(partner_name)
                 get_or_create_person(session_id, partner_name, person_key=partner_key, gender=p_gender, role=p_role, origin="procedural", conn=c)
                 form_tie(session_id, c_key, partner_key, TIETYPE_DATING, closeness=70, origin="procedural", turn=0, materialize=False, conn=c)
+
+        if is_initial_romantic_track and not player_rom and not get_current_partner(session_id, c_key, conn=c):
+            p_disp = _resolve_player_display_name(session_id, c)
+            get_or_create_person(session_id, p_disp, person_key="player", origin="player", conn=c)
+            init_close = max(60, int(contact.get("relationship_score") or 60))
+            form_tie(session_id, c_key, "player", TIETYPE_DATING, closeness=init_close, origin="initial_track", turn=0, supersede=True, materialize=False, conn=c)
 
         # 6. Friends & Rivals (Decision 4)
         binfo = {}
@@ -1539,14 +1677,12 @@ def seed_contact_social_graph(
                 form_tie(session_id, c_key, f_key, TIETYPE_FRIEND, closeness=80 if i == 0 else 65, origin="procedural", turn=0, materialize=False, conn=c)
                 picked_friends.append(f_name.lower().strip())
             else:
-                from mechanics.social.genealogy import get_deterministic_firstname, get_deterministic_surname
+                from mechanics.social.genealogy import generate_deterministic_full_name
                 import namegen
                 f_hash = hash_val * 83 + (i + 1) * 97
                 f_gender = "female" if ((abs(f_hash) % 2) == 0) else "male"
-                f_first = get_deterministic_firstname(scenario, f_gender, f_hash)
-                f_last = get_deterministic_surname(scenario, f_hash * 3 + 7)
+                f_name = generate_deterministic_full_name(scenario, f_gender, f_hash)
                 f_role = namegen.generate_role(scenario, hash_val=f_hash)
-                f_name = f"{f_first} {f_last}"
                 f_key = canonical_person_key(f_name)
                 get_or_create_person(session_id, f_name, person_key=f_key, gender=f_gender, role=f_role, origin="procedural", conn=c)
                 form_tie(session_id, c_key, f_key, TIETYPE_FRIEND, closeness=80 if i == 0 else 65, origin="procedural", turn=0, materialize=False, conn=c)
@@ -1573,14 +1709,12 @@ def seed_contact_social_graph(
             )
             form_tie(session_id, c_key, r_key, TIETYPE_RIVAL, closeness=50, origin="procedural", turn=0, materialize=False, conn=c)
         else:
-            from mechanics.social.genealogy import get_deterministic_firstname, get_deterministic_surname
+            from mechanics.social.genealogy import generate_deterministic_full_name
             import namegen
             r_hash = hash_val * 101 + 53
             r_gender = contact.get("gender") or "female"
-            r_first = get_deterministic_firstname(scenario, r_gender, r_hash)
-            r_last = get_deterministic_surname(scenario, r_hash * 5 + 17)
+            r_name = generate_deterministic_full_name(scenario, r_gender, r_hash)
             r_role = namegen.generate_role(scenario, hash_val=r_hash)
-            r_name = f"{r_first} {r_last}"
             r_key = canonical_person_key(r_name)
             get_or_create_person(session_id, r_name, person_key=r_key, gender=r_gender, role=r_role, origin="procedural", conn=c)
             form_tie(session_id, c_key, r_key, TIETYPE_RIVAL, closeness=50, origin="procedural", turn=0, materialize=False, conn=c)
@@ -1588,5 +1722,218 @@ def seed_contact_social_graph(
         # 7. Materialize
         if c_npc_id:
             materialize_and_save_relations(session_id, c_npc_id, conn=c)
+
+
+def get_canonical_peer_couples(
+    session_id: int,
+    *,
+    active_only: bool = True,
+    conn: Optional[sqlite3.Connection] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Returns canonical peer couples seeded in `social_ties` (`origin = 'canonical_couple'`),
+    enriched with both partners' display names, roles, genders, and contact IDs.
+    """
+    if not session_id:
+        return []
+    with _get_connection(conn) as c:
+        sql = [
+            "SELECT t.*, pa.display_name AS a_name, pa.role AS a_role, pa.gender AS a_gender, pa.contact_npc_id AS a_contact,",
+            "pb.display_name AS b_name, pb.role AS b_role, pb.gender AS b_gender, pb.contact_npc_id AS b_contact",
+            "FROM social_ties t",
+            "LEFT JOIN social_persons pa ON pa.session_id = t.session_id AND pa.person_key = t.person_a_key",
+            "LEFT JOIN social_persons pb ON pb.session_id = t.session_id AND pb.person_key = t.person_b_key",
+            "WHERE t.session_id = ? AND t.origin = 'canonical_couple' AND t.tie_type = ?",
+        ]
+        params: list[Any] = [session_id, TIETYPE_DATING]
+        if active_only:
+            sql.append("AND t.status = 'active'")
+        sql.append("ORDER BY t.id ASC")
+        rows = c.execute(" ".join(sql), params).fetchall()
+        couples: List[Dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            couples.append({
+                "id": d.get("id"),
+                "person_a_key": d["person_a_key"],
+                "person_a_name": d.get("a_name") or d["person_a_key"],
+                "person_a_role": d.get("a_role") or "",
+                "person_a_gender": d.get("a_gender") or "",
+                "person_a_contact_id": d.get("a_contact"),
+                "person_b_key": d["person_b_key"],
+                "person_b_name": d.get("b_name") or d["person_b_key"],
+                "person_b_role": d.get("b_role") or "",
+                "person_b_gender": d.get("b_gender") or "",
+                "person_b_contact_id": d.get("b_contact"),
+                "closeness": d.get("closeness", 75),
+                "status": d.get("status", "active"),
+            })
+        return couples
+
+
+def ensure_canonical_peer_couples(
+    session_id: int,
+    scen_key: str = "high_school_drama",
+    count: int = 5,
+    conn: Optional[sqlite3.Connection] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Deterministically seeds `count` (default 5) canonical `TIETYPE_DATING` peer couples
+    among pregenerated Campus & Youth Peer characters (~85% of the student body stays single).
+    Idempotent per session: once seeded, even if a couple later breaks up (status='ended'),
+    they are not re-seeded.
+    """
+    if not session_id or count <= 0:
+        return []
+    import hashlib
+    import namegen
+
+    with _get_connection(conn) as c:
+        existing_any = get_canonical_peer_couples(session_id, active_only=False, conn=c)
+        if existing_any:
+            return [cp for cp in existing_any if cp.get("status") == "active"]
+
+        peer_rows = c.execute(
+            """SELECT npc_id, name, gender, role, grade, club, sibling_name, is_hydrated
+               FROM school_directory
+               WHERE session_id = ?
+                 AND grade IN ('Freshman', 'Sophomore', 'Junior', 'Senior', 'Youth Peer')
+               ORDER BY id ASC""",
+            (session_id,),
+        ).fetchall()
+        if len(peer_rows) < 2:
+            return []
+
+        # Exclude any peer already dating someone or on the player's romantic track
+        taken_keys: Set[str] = set()
+        active_rom_rows = c.execute(
+            """SELECT person_a_key, person_b_key FROM social_ties
+               WHERE session_id = ? AND status = 'active'
+                 AND tie_type IN ('dating', 'engaged', 'married')""",
+            (session_id,),
+        ).fetchall()
+        for rr in active_rom_rows:
+            taken_keys.add(rr["person_a_key"])
+            taken_keys.add(rr["person_b_key"])
+
+        contact_map: Dict[str, Dict[str, Any]] = {}
+        c_rows = c.execute(
+            "SELECT npc_id, name, track FROM contacts WHERE session_id = ?",
+            (session_id,),
+        ).fetchall()
+        for cr in c_rows:
+            cd = dict(cr)
+            ck = canonical_person_key(cd.get("name") or cd.get("npc_id") or "")
+            contact_map[ck] = cd
+            if str(cd.get("track") or "").strip().lower() == "romantic":
+                taken_keys.add(ck)
+
+        pool: List[Dict[str, Any]] = []
+        for pr in peer_rows:
+            pd = dict(pr)
+            pk = canonical_person_key(pd.get("name") or "")
+            if not pk or pk in taken_keys or is_player_person_key(pk):
+                continue
+            pd["_pkey"] = pk
+            _, raw_sur = namegen.extract_first_and_last_name(pd.get("name") or "")
+            pd["_base_sur"] = namegen.normalize_base_surname(raw_sur).lower()
+            pool.append(pd)
+
+        # Deterministic sort seeded by session_id so every run with the same session_id picks identical couples
+        def _det_rank(entry: Dict[str, Any], salt: str = "a") -> int:
+            h = hashlib.md5(f"canon_couple:{session_id}:{salt}:{entry['_pkey']}".encode("utf-8")).hexdigest()
+            return int(h[:8], 16)
+
+        ordered = sorted(pool, key=lambda x: _det_rank(x, "lead"))
+        grade_num = {"Freshman": 1, "Sophomore": 2, "Junior": 3, "Senior": 4, "Youth Peer": 3}
+
+        used_keys: Set[str] = set()
+        formed_count = 0
+
+        for idx_a, cand_a in enumerate(ordered):
+            if formed_count >= count:
+                break
+            ka = cand_a["_pkey"]
+            if ka in used_keys:
+                continue
+
+            ga = grade_num.get(str(cand_a.get("grade") or ""), 3)
+            sib_a = str(cand_a.get("sibling_name") or "").strip().lower()
+            sur_a = cand_a["_base_sur"]
+            gen_a = str(cand_a.get("gender") or "").lower()
+
+            best_b: Optional[Dict[str, Any]] = None
+            best_score: Tuple[int, int] = (-999, 0)
+
+            for cand_b in ordered[idx_a + 1:]:
+                kb = cand_b["_pkey"]
+                if kb in used_keys or kb == ka:
+                    continue
+                name_b_low = str(cand_b.get("name") or "").strip().lower()
+                sib_b = str(cand_b.get("sibling_name") or "").strip().lower()
+                name_a_low = str(cand_a.get("name") or "").strip().lower()
+                if sib_a and sib_a == name_b_low:
+                    continue
+                if sib_b and sib_b == name_a_low:
+                    continue
+                if sur_a and cand_b["_base_sur"] and sur_a == cand_b["_base_sur"]:
+                    continue
+
+                gb = grade_num.get(str(cand_b.get("grade") or ""), 3)
+                grade_gap = abs(ga - gb)
+                if grade_gap > 1:
+                    continue
+
+                gen_b = str(cand_b.get("gender") or "").lower()
+                # Mostly mixed-gender couples with ~20% same-gender variety
+                want_same_gender = (formed_count == 4)
+                gender_fit = (1 if (gen_a == gen_b) == want_same_gender else 0)
+                same_grade_fit = 2 if grade_gap == 0 else 1
+                tie_break = -(_det_rank(cand_b, f"match_{ka}") % 10000)
+                cand_score = (gender_fit * 4 + same_grade_fit, tie_break)
+                if cand_score > best_score:
+                    # Also verify incest guard if contacts exist
+                    if is_incestuous(session_id, ka, kb, conn=c):
+                        continue
+                    best_score = cand_score
+                    best_b = cand_b
+
+            if not best_b:
+                continue
+
+            kb = best_b["_pkey"]
+            for member in (cand_a, best_b):
+                mk = member["_pkey"]
+                c_info = contact_map.get(mk)
+                c_id = c_info["npc_id"] if c_info else (member.get("npc_id") if member.get("is_hydrated") else None)
+                get_or_create_person(
+                    session_id,
+                    member["name"],
+                    person_key=mk,
+                    gender=member.get("gender") or "",
+                    role=member.get("role") or "",
+                    origin="contact" if c_id else "roster",
+                    contact_npc_id=c_id,
+                    conn=c,
+                )
+
+            tie_res = form_tie(
+                session_id,
+                ka,
+                kb,
+                TIETYPE_DATING,
+                closeness=75,
+                origin="canonical_couple",
+                turn=0,
+                materialize=True,
+                conn=c,
+            )
+            if tie_res is not None:
+                used_keys.add(ka)
+                used_keys.add(kb)
+                formed_count += 1
+
+        return get_canonical_peer_couples(session_id, active_only=True, conn=c)
+
 
 

@@ -1,10 +1,18 @@
 import os
+import tempfile
 os.environ.setdefault("DISCORD_TOKEN", "mock_test_discord_token")
 os.environ.setdefault("LLM_API_KEY", "mock_test_llm_api_key")
 import shutil
 import random
 import pytest
 import db
+
+# Isolate database at worker import time before test collection begins
+_xdist_worker = os.environ.get("PYTEST_XDIST_WORKER")
+if _xdist_worker:
+    _temp_db_dir = os.path.join(tempfile.gettempdir(), f"pytest_hikayat_{_xdist_worker}_{os.getpid()}")
+    os.makedirs(_temp_db_dir, exist_ok=True)
+    db.DB_PATH = os.path.join(_temp_db_dir, f"hikayat_{_xdist_worker}.db")
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -25,6 +33,8 @@ def configure_worker_db(tmp_path_factory, worker_id):
 
     # Point database path to the isolated temporary DB file
     db.DB_PATH = worker_db_path
+    if hasattr(db, "core"):
+        db.core.DB_PATH = worker_db_path
     db.init_db()
 
     # Apply fast in-memory SQLite pragmas for tests on Windows
@@ -93,6 +103,8 @@ def close_db_connections_after_test(configure_worker_db):
     yield
     worker_db_path = configure_worker_db
     db.DB_PATH = worker_db_path
+    if hasattr(db, "core"):
+        db.core.DB_PATH = worker_db_path
     if hasattr(db, "core") and hasattr(db.core, "_POOL"):
         with db.core._POOL_LOCK:
             extra_paths = [p for p in db.core._POOL if p != worker_db_path]
