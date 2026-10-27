@@ -1,3 +1,4 @@
+import random
 import pytest
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
@@ -7,12 +8,14 @@ import mechanics.social.genealogy as genealogy
 
 def test_concurrent_create_household_race_condition():
     """Verify db.create_household handles concurrent inserts for the same session and key without IntegrityError."""
-    session_id = 88776655
+    session_id = 99880000 + random.randint(1000, 99999)
     household_key = f"concurrent_test_hh_{session_id}"
 
     try:
-        # Clean up any existing records
+        # Clean up any existing records (contacts must be unlinked/deleted before households due to foreign keys)
         with db.get_conn() as conn:
+            conn.execute("UPDATE contacts SET household_id = NULL WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM contacts WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM households WHERE session_id = ?", (session_id,))
 
         def _worker(idx):
@@ -41,16 +44,19 @@ def test_concurrent_create_household_race_condition():
 
     finally:
         with db.get_conn() as conn:
+            conn.execute("UPDATE contacts SET household_id = NULL WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM contacts WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM households WHERE session_id = ?", (session_id,))
 
 
 def test_concurrent_get_or_create_household():
     """Verify genealogy.get_or_create_household is idempotent and safe under concurrent calls."""
-    session_id = 88776656
+    session_id = 99890000 + random.randint(1000, 99999)
     try:
         with db.get_conn() as conn:
-            conn.execute("DELETE FROM households WHERE session_id = ?", (session_id,))
+            conn.execute("UPDATE contacts SET household_id = NULL WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM contacts WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM households WHERE session_id = ?", (session_id,))
 
         contact = {
             "id": 991122,
@@ -73,5 +79,7 @@ def test_concurrent_get_or_create_household():
 
     finally:
         with db.get_conn() as conn:
-            conn.execute("DELETE FROM households WHERE session_id = ?", (session_id,))
+            conn.execute("UPDATE contacts SET household_id = NULL WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM contacts WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM households WHERE session_id = ?", (session_id,))
+

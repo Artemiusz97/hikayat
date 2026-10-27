@@ -571,4 +571,73 @@ class TestNarrativeSimulation:
 
         assert len(violations) == 0, f"Unexpected violation on legitimate chime-in: {violations}"
 
+    def test_cross_locale_stat_bracket_parsing(self, capsys):
+        """Verify stat brackets ([STR], [CHA], [INT], [PER], [AGI]), choice parsing,
+        and UTF-8 console output function across all 5 languages (en, ms, id, ja, zh).
+        """
+        from scripts.simulate_narrative import safe_print
+
+        multilingual_inputs = [
+            # English
+            {"label": "[STR] Force the heavy iron door open", "requirement": 10},
+            # Malay
+            {"label": "[STR] Robohkan pintu pagar besi dengan sekuat tenaga", "requirement": 8},
+            # Indonesian
+            {"label": "[CHA] Yakinkan penjaga pos untuk memberi jalan masuk", "requirement": 6},
+            # Japanese
+            {"label": "[INT] 古代の碑文を慎重に解読する", "requirement": 9},
+            # Chinese
+            {"label": "[AGI] 悄悄潜行穿过守卫的巡逻区", "requirement": 7},
+            # Indonesian / Malay PER
+            {"label": "[PER] Mengamati tanda-tanda jebakan di sepanjang koridor", "requirement": 6},
+        ]
+
+        cleaned = sanitize_and_diversify_choices(multilingual_inputs, scenario="fantasy")
+
+        # Verify all choices were parsed and cleaned
+        assert len(cleaned) >= 5
+
+        # Check stat extraction and label cleaning
+        stats_by_label_token = {
+            "heavy iron door": ("STR", 10),
+            "Robohkan pintu": ("STR", 8),
+            "penjaga pos": ("CHA", 6),
+            "古代の碑文": ("INT", 9),
+            "悄悄潜行": ("AGI", 7),
+            "tanda-tanda": ("PER", 6),
+        }
+
+        for c in cleaned:
+            lbl = c.get("label", "")
+            # Ensure stat bracket was stripped from the clean label
+            assert not lbl.startswith("["), f"Stat bracket was not stripped from label: '{lbl}'"
+            for token, (expected_stat, expected_req) in stats_by_label_token.items():
+                if token in lbl:
+                    assert c.get("stat") == expected_stat, f"Mismatch stat for '{lbl}': expected {expected_stat}, got {c.get('stat')}"
+                    assert c.get("requirement") == expected_req, f"Mismatch req for '{lbl}': expected {expected_req}, got {c.get('requirement')}"
+
+        # Verify string inputs also extract stats correctly
+        raw_strings = [
+            "[STR] Bash the reinforced gate",
+            "[CHA] Pujuk pengawal pintu",
+            "[INT] 呪文の構造を分析する",
+            "[AGI] 翻越坚固的城墙",
+        ]
+        cleaned_strings = sanitize_and_diversify_choices(raw_strings, scenario="fantasy")
+        assert len(cleaned_strings) >= 4
+        assert any(c.get("stat") == "STR" and "Bash the reinforced gate" in c.get("label") for c in cleaned_strings)
+        assert any(c.get("stat") == "CHA" and "Pujuk pengawal pintu" in c.get("label") for c in cleaned_strings)
+        assert any(c.get("stat") == "INT" and "呪文の構造を分析する" in c.get("label") for c in cleaned_strings)
+        assert any(c.get("stat") == "AGI" and "翻越坚固的城墙" in c.get("label") for c in cleaned_strings)
+
+        # Test NarrativeActorAI can process and choose among multilingual options
+        actor = NarrativeActorAI(archetype="bold_adventurer", seed=777)
+        chosen = actor.choose_action(session={}, choices=cleaned, current_npcs=[], turn=1, scenario="fantasy")
+        assert chosen.action_type == "choice"
+        assert chosen.stat in ("STR", "AGI", "CHA", "INT", "PER")
+        assert chosen.requirement > 0
+
+        # Verify safe_print console output doesn't crash on multilingual text
+        for c in cleaned:
+            safe_print(f"  [Choice Locale Test] {c.get('stat')} DC {c.get('requirement')}: {c.get('label')}")
 

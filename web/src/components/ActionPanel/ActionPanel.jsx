@@ -570,7 +570,7 @@ const ActionPanel = ({
 
                 {/* Active Combat Deck Cards (Compact Horizontal Rows, Scrollable when needed) */}
                 {combatTab === 'choices' ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-1 sm:gap-1.5 md:gap-2 max-h-[35vh] sm:max-h-[42vh] md:max-h-[45vh] overflow-y-auto custom-scrollbar pr-0.5">
+                  <div className="hk-choice-grid max-h-[28dvh] sm:max-h-[32dvh] lg:max-h-[36dvh] overflow-y-auto custom-scrollbar pr-0.5">
                     {(choices || []).map((choice, idx) => {
                       const pct = choice.success_pct !== undefined ? choice.success_pct : choice.chance;
                       const mpCost = choice.mp_cost || 0;
@@ -609,7 +609,7 @@ const ActionPanel = ({
                             {isPending && (
                               <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-amber-300 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40">
                                 <Loader2 size={11} className="animate-spin text-amber-300" />
-                                <span>{t('actions.resolving') || 'Resolving...'}</span>
+                                <span>{t('actions.resolving', 'Resolving...')}</span>
                               </span>
                             )}
                             {mpCost > 0 && !isPending && (
@@ -628,7 +628,7 @@ const ActionPanel = ({
                     })}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-1 sm:gap-1.5 md:gap-2 max-h-[35vh] sm:max-h-[42vh] md:max-h-[45vh] overflow-y-auto custom-scrollbar pr-0.5">
+                  <div className="hk-choice-grid max-h-[28dvh] sm:max-h-[32dvh] lg:max-h-[36dvh] overflow-y-auto custom-scrollbar pr-0.5">
                     {(combatTab === 'attacks' ? deckAttacks : combatTab === 'spells' ? deckSpells : deckTactics).length === 0 ? (
                       <div className="col-span-full text-center py-2 text-xs text-gray-500 italic">
                         No {combatTab} available right now. Study spellbooks or switch tabs!
@@ -676,7 +676,7 @@ const ActionPanel = ({
                               {isPending && (
                                 <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-amber-300 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40">
                                   <Loader2 size={11} className="animate-spin text-amber-300" />
-                                  <span>{t('actions.resolving') || 'Resolving...'}</span>
+                                  <span>{t('actions.resolving', 'Resolving...')}</span>
                                 </span>
                               )}
                               {mpCost > 0 && !isPending && (
@@ -748,7 +748,7 @@ const ActionPanel = ({
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-1 sm:gap-1.5 md:gap-2 max-h-[35vh] sm:max-h-[42vh] md:max-h-[45vh] overflow-y-auto custom-scrollbar pr-0.5">
+                <div className="hk-choice-grid max-h-[28dvh] sm:max-h-[32dvh] lg:max-h-[36dvh] overflow-y-auto custom-scrollbar pr-0.5">
                   {(choices || []).map((choice, idx) => {
                     const pct = choice.success_pct !== undefined ? choice.success_pct : choice.chance;
                     const mpCost = choice.mp_cost || 0;
@@ -820,10 +820,11 @@ const ActionPanel = ({
                         <div className="flex items-center gap-1 shrink-0">
                           {questBadge && (
                             <span
+                              title={questBadge.label}
                               className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9.5px] md:text-[10px] font-mono font-extrabold uppercase tracking-wider border ${questBadge.className}`}
                             >
                               <span className="text-xs leading-none">{questBadge.icon}</span>
-                              <span>{questBadge.label}</span>
+                              <span className="hidden 2xl:inline">{questBadge.label}</span>
                             </span>
                           )}
                           {(!questBadge || !isFreeAction) && (
@@ -858,7 +859,7 @@ const ActionPanel = ({
                           {isPending && (
                             <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-amber-300 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40">
                               <Loader2 size={11} className="animate-spin text-amber-300" />
-                              <span>{t('actions.resolving') || 'Resolving...'}</span>
+                              <span>{t('actions.resolving', 'Resolving...')}</span>
                             </span>
                           )}
                           {mpCost > 0 && !isPending && (

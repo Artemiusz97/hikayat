@@ -24,12 +24,14 @@ const TacticalActionDock = ({
 }) => {
   const { t } = useTranslation();
 
-  const inCombat = Boolean(
-    session?.in_combat ||
-    session?.combat_state?.in_combat ||
-    (session?.nearby_enemies && session.nearby_enemies.length > 0) ||
-    (session?.monsters && session.monsters.length > 0)
-  );
+  const inCombat = typeof session?.is_in_combat === 'boolean'
+    ? session.is_in_combat
+    : Boolean(
+        session?.in_combat ||
+        session?.combat_state?.in_combat ||
+        (session?.nearby_enemies || []).some((e) => e && (e.hp ?? 1) > 0) ||
+        (session?.monsters || []).some((m) => m && (m.hp ?? 1) > 0)
+      );
 
   const npcs = (session?.current_npcs || []).map((n) =>
     typeof n === 'string' ? n : n?.name
@@ -60,23 +62,49 @@ const TacticalActionDock = ({
   const handleStealthClick = async () => {
     if (processing) return;
     if (inCombat) {
+      const activeDeck =
+        (selectedCombatTarget && session?.combat_decks_by_target?.[selectedCombatTarget]) ||
+        session?.combat_deck ||
+        {};
       if (stealthState.combat_vanished) {
+        const backstabCard =
+          (activeDeck.attacks || []).find(
+            (a) => a && (a.stance === 'stealth' || String(a.label || '').toLowerCase().includes('backstab'))
+          ) || {
+            label: '🗡️ Flanking Backstab',
+            choice_type: 'MELEE_SLASHING_PIERCING',
+            action_category: 'attack',
+            attack_type: 'pierce',
+            stat: 'AGI',
+            requirement: 0,
+            mp_cost: 0,
+            stance: 'stealth',
+            is_stealth: true
+          };
         await onAction({
-          custom_action_text: "I strike from the shadows with a surprise flanking backstab!",
-          choice_type: "MELEE_SLASHING_PIERCING",
-          action_category: "attack",
-          attack_type: "pierce",
-          stat: "AGI",
-          stance: "stealth",
+          label: backstabCard.label,
+          direct_choice: { ...backstabCard, stance: 'stealth', is_stealth: true },
+          combat_target: selectedCombatTarget,
+          stance: 'stealth',
           is_stealth: true
         });
       } else {
+        const vanishCard =
+          (activeDeck.tactics || []).find((c) => c && c.choice_type === 'STEALTH_VANISH') || {
+            label: '💨 Vanish into Shadows',
+            choice_type: 'STEALTH_VANISH',
+            action_category: 'tactics',
+            stat: 'AGI',
+            requirement: 8,
+            mp_cost: 0,
+            stance: 'stealth',
+            is_stealth: true
+          };
         await onAction({
-          custom_action_text: "I slip into the shadows and attempt to vanish from enemy sight.",
-          choice_type: "STEALTH_VANISH",
-          action_category: "tactics",
-          stat: "AGI",
-          stance: "stealth",
+          label: vanishCard.label,
+          direct_choice: { ...vanishCard, stance: 'stealth', is_stealth: true },
+          combat_target: selectedCombatTarget,
+          stance: 'stealth',
           is_stealth: true
         });
       }
@@ -134,232 +162,146 @@ const TacticalActionDock = ({
     }
   };
 
+  const stealthBadge = inCombat && stealthState.combat_vanished
+    ? t('stealth_dock.vanished', 'VANISHED')
+    : !isStealthActive
+    ? null
+    : detectionMeter > 0
+    ? `${detectionMeter}%`
+    : t('stealth_dock.on', 'ON');
+  const stealthTone = !isStealthActive && !(inCombat && stealthState.combat_vanished)
+    ? ''
+    : alertLevel === 'detected'
+    ? 'is-danger'
+    : alertLevel === 'searching' || alertLevel === 'suspicious'
+    ? 'is-warn'
+    : 'is-active';
+
+  const deviceName = phoneHook?.branding?.device_name || 'Smartphone';
+
+  const tiles = [
+    {
+      id: 'stealth',
+      emoji: '🥷',
+      label: inCombat
+        ? (stealthState.combat_vanished ? t('stealth_dock.backstab', 'Backstab') : t('stealth_dock.hide', 'Hide'))
+        : (isStealthActive ? t('stealth_dock.sneaking', 'Sneaking') : t('stealth_dock.stealth', 'Stealth')),
+      title: inCombat
+        ? (stealthState.combat_vanished
+            ? t('stealth_dock.tooltip_combat_backstab', 'Strike from the shadows with a guaranteed flanking backstab')
+            : t('stealth_dock.tooltip_combat_hide', 'Attempt to vanish into shadows (AGI check vs Enemy PER)'))
+        : isStealthActive
+        ? t('stealth_dock.tooltip_drop_stealth', 'Drop out of Stealth Mode')
+        : t('stealth_dock.tooltip_enter_stealth', 'Enter Stealth Stance (Covert Actions)'),
+      onClick: handleStealthClick,
+      disabled: processing,
+      badge: stealthBadge,
+      tone: stealthTone,
+      pressed: isStealthActive || Boolean(inCombat && stealthState.combat_vanished),
+    },
+    {
+      id: 'throw',
+      emoji: '🎯',
+      label: inCombat ? t('stealth_dock.throw', 'Throw') : t('stealth_dock.distract', 'Distract'),
+      title: inCombat
+        ? t('stealth_dock.tooltip_throw', 'Throw weapon/projectile at active target (AGI)')
+        : t('stealth_dock.tooltip_distract', 'Throw a distraction to divert attention (AGI)'),
+      onClick: handleThrow,
+      disabled: processing,
+    },
+    {
+      id: 'quick',
+      emoji: '🧪',
+      label: 'Quick Use',
+      title: 'Open Quick Consumable Belt (Potions, Food, Buffs)',
+      onClick: onOpenQuickBelt,
+      disabled: processing,
+      badge: usableItems.length > 0 ? usableItems.length : null,
+    },
+    {
+      id: 'gift',
+      emoji: '🎁',
+      label: 'Gift',
+      title: inCombat
+        ? 'Cannot give gifts during combat'
+        : npcs.length === 0
+        ? 'No NPCs present in this scene to give gifts to'
+        : 'Give an item/gift to a nearby NPC',
+      onClick: onOpenGiveGift,
+      disabled: processing || inCombat || npcs.length === 0,
+      badge: npcs.length > 0 && !inCombat ? npcs.length : null,
+    },
+    {
+      id: 'loot',
+      emoji: '🔍',
+      label: inCombat ? 'Scavenge' : 'Loot',
+      title: inCombat ? 'Scavenge ground for weapons/supplies' : 'Search immediate area for items, loot, and clues',
+      onClick: handleTakeLoot,
+      disabled: processing,
+    },
+    {
+      id: 'examine',
+      emoji: '👁️',
+      label: inCombat ? 'Assess' : 'Examine',
+      title: inCombat ? 'Assess threat and enemy positioning (PER)' : 'Carefully scout surroundings and search for clues (PER)',
+      onClick: handleExamineScout,
+      disabled: processing,
+    },
+    {
+      id: 'time',
+      emoji: '⏳',
+      label: session?.sleep_context?.can_sleep === false ? 'Wait' : 'Rest',
+      title: inCombat ? 'Cannot rest during combat' : 'Open Chronos Dial to advance time and rest',
+      onClick: onOpenTimeSkip,
+      disabled: processing || inCombat,
+    },
+    {
+      id: 'phone',
+      icon: Smartphone,
+      label: deviceName,
+      title: phoneOpen ? 'Close Smartphone Window' : `Open ${deviceName}`,
+      onClick: () => (phoneOpen && onClosePhone ? onClosePhone() : onOpenPhone()),
+      disabled: processing,
+      dot: hasPhoneNotifications,
+      pressed: phoneOpen,
+      tone: phoneOpen ? 'is-active' : '',
+    },
+  ];
+
   return (
-    <div className="space-y-1.5 select-none">
-      {/* Dock Title & Stance Header */}
-      <div className="flex items-center justify-between px-1">
-        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-          <span>Tactical Field Actions</span>
-        </span>
-        {isStealthActive && (
-          <span className={`text-[9.5px] font-mono font-extrabold uppercase px-1.5 py-0.2 rounded border ${
-            alertLevel === 'detected'
-              ? 'bg-red-950 border-red-500 text-red-300 animate-pulse'
-              : alertLevel === 'searching'
-              ? 'bg-amber-950 border-amber-500 text-amber-300 animate-pulse'
-              : alertLevel === 'suspicious'
-              ? 'bg-yellow-950 border-yellow-500 text-yellow-300'
-              : 'bg-violet-950 border-violet-500 text-violet-300 animate-pulse'
-          }`}>
-            🥷 {detectionMeter > 0 ? `${alertLevel.toUpperCase()} (${detectionMeter}%)` : 'Stealth Mode ON'}
-          </span>
-        )}
-      </div>
-
-      {/* 8-Button Matrix (2 columns × 4 rows) */}
-      <div className="grid grid-cols-2 gap-1.5">
-        
-        {/* 1. Stealth Stance Toggle */}
-        <button
-          type="button"
-          disabled={processing}
-          onClick={handleStealthClick}
-          title={
-            inCombat
-              ? "Attempt to vanish into shadows (AGI check vs Enemy PER)"
-              : isStealthActive
-              ? "Drop out of Stealth Mode"
-              : "Enter Stealth Stance (Covert Actions)"
-          }
-          className={`flex items-center justify-between p-2 rounded-lg border transition-all disabled:opacity-50 text-left ${
-            isStealthActive
-              ? alertLevel === 'searching'
-                ? 'bg-gradient-to-r from-amber-950/80 to-yellow-900/60 border-amber-500 text-amber-100 ring-2 ring-amber-500/40 shadow-[0_0_12px_rgba(245,158,11,0.3)]'
-                : alertLevel === 'suspicious'
-                ? 'bg-gradient-to-r from-yellow-950/80 to-amber-900/60 border-yellow-500 text-yellow-100 ring-2 ring-yellow-500/40 shadow-[0_0_12px_rgba(234,179,8,0.3)]'
-                : 'bg-gradient-to-r from-violet-950/80 to-purple-900/60 border-violet-400 text-violet-100 ring-2 ring-violet-500/40 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
-              : 'bg-black/55 border-fantasy-border/80 hover:border-violet-500/60 text-gray-300 hover:text-white'
-          }`}
-        >
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-sm shrink-0">🥷</span>
-            <span className="text-xs font-bold truncate">
-              {inCombat ? (stealthState.combat_vanished ? 'Backstab' : 'Hide / Ambush') : (isStealthActive ? 'Sneaking' : 'Stealth')}
+    <div className="select-none space-y-1.5">
+      {isStealthActive && (
+        <div className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-semibold ${
+          alertLevel === 'detected'
+            ? 'bg-red-500/15 text-red-300'
+            : alertLevel === 'searching' || alertLevel === 'suspicious'
+            ? 'bg-amber-500/15 text-amber-300'
+            : 'bg-violet-500/15 text-violet-300'
+        }`}>
+          <span>🥷</span>
+          <span>{detectionMeter > 0 ? `${alertLevel.charAt(0).toUpperCase()}${alertLevel.slice(1)} · ${detectionMeter}%` : 'Stealth mode on'}</span>
+        </div>
+      )}
+      <div className={`grid grid-cols-4 ${isMobile ? 'gap-1.5' : 'gap-1'}`}>
+        {tiles.map((tile) => (
+          <button
+            key={tile.id}
+            type="button"
+            onClick={tile.onClick}
+            disabled={tile.disabled}
+            title={tile.title}
+            aria-label={tile.title}
+            aria-pressed={tile.pressed ?? undefined}
+            className={`hk-dock-tile ${tile.tone || ''}`}
+          >
+            <span className="relative grid place-items-center h-6">
+              {tile.icon ? <tile.icon size={17} /> : <span className="text-base leading-none">{tile.emoji}</span>}
+              {tile.dot && <span className="absolute -top-0.5 -right-1.5 w-2 h-2 rounded-full bg-pink-400 animate-pulse" />}
             </span>
-          </div>
-          <span className={`text-[9px] font-mono font-bold px-1 rounded uppercase ${
-            inCombat && stealthState.combat_vanished
-              ? 'bg-violet-900 text-violet-200 border border-violet-400/50'
-              : !isStealthActive
-              ? 'bg-black/60 text-gray-400'
-              : alertLevel === 'detected'
-              ? 'bg-red-800 text-red-100 animate-pulse'
-              : alertLevel === 'searching'
-              ? 'bg-amber-800 text-amber-100 animate-pulse'
-              : alertLevel === 'suspicious'
-              ? 'bg-yellow-800 text-yellow-100'
-              : 'bg-violet-800 text-violet-100'
-          }`}>
-            {inCombat && stealthState.combat_vanished
-              ? 'VANISHED'
-              : !isStealthActive
-              ? 'OFF'
-              : detectionMeter > 0
-              ? `${alertLevel.slice(0, 4).toUpperCase()} ${detectionMeter}%`
-              : 'HIDDEN'}
-          </span>
-        </button>
-
-        {/* 2. Throw / Distract */}
-        <button
-          type="button"
-          disabled={processing}
-          onClick={handleThrow}
-          title={inCombat ? "Throw weapon/projectile at active target" : "Throw a distraction to divert attention"}
-          className="flex items-center justify-between p-2 rounded-lg bg-black/55 border border-fantasy-border/80 hover:border-amber-500/60 hover:bg-neutral-900/60 text-gray-300 hover:text-white transition-all disabled:opacity-50 text-left"
-        >
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-sm shrink-0">🎯</span>
-            <span className="text-xs font-bold truncate">
-              {inCombat ? 'Throw Attack' : 'Distract'}
-            </span>
-          </div>
-          <span className="text-[9px] font-mono font-bold text-gray-400 uppercase bg-black/60 px-1 rounded">
-            AGI
-          </span>
-        </button>
-
-        {/* 3. Quick Use (Consumable Belt) */}
-        <button
-          type="button"
-          disabled={processing}
-          onClick={onOpenQuickBelt}
-          title="Open Quick Consumable Belt (Potions, Food, Buffs)"
-          className="flex items-center justify-between p-2 rounded-lg bg-black/55 border border-fantasy-border/80 hover:border-emerald-500/60 hover:bg-neutral-900/60 text-gray-300 hover:text-white transition-all disabled:opacity-50 text-left"
-        >
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-sm shrink-0">🧪</span>
-            <span className="text-xs font-bold truncate">Quick Use</span>
-          </div>
-          {usableItems.length > 0 && (
-            <span className="text-[9px] font-mono font-bold px-1 rounded bg-emerald-950/80 border border-emerald-600/60 text-emerald-300">
-              {usableItems.length}
-            </span>
-          )}
-        </button>
-
-        {/* 4. Give Gift to NPC */}
-        <button
-          type="button"
-          disabled={processing || inCombat || npcs.length === 0}
-          onClick={onOpenGiveGift}
-          title={
-            inCombat
-              ? "Cannot give gifts during combat"
-              : npcs.length === 0
-                ? "No NPCs present in this scene to give gifts to"
-                : "Give an item/gift to a nearby NPC"
-          }
-          className={`flex items-center justify-between p-2 rounded-lg border transition-all text-left ${
-            inCombat || npcs.length === 0
-              ? 'bg-black/30 border-fantasy-border/40 text-gray-500 cursor-not-allowed opacity-60'
-              : 'bg-black/55 border-fantasy-border/80 hover:border-pink-500/60 hover:bg-neutral-900/60 text-gray-300 hover:text-white'
-          }`}
-        >
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-sm shrink-0">🎁</span>
-            <span className="text-xs font-bold truncate">Give Gift</span>
-          </div>
-          {npcs.length > 0 && !inCombat && (
-            <span className="text-[9px] font-mono font-bold px-1 rounded bg-pink-950/80 border border-pink-700/60 text-pink-300">
-              {npcs.length} NPC{npcs.length > 1 ? 's' : ''}
-            </span>
-          )}
-        </button>
-
-        {/* 5. Take / Loot */}
-        <button
-          type="button"
-          disabled={processing}
-          onClick={handleTakeLoot}
-          title={inCombat ? "Scavenge ground for weapons/supplies" : "Search immediate area for items, loot, and clues"}
-          className="flex items-center justify-between p-2 rounded-lg bg-black/55 border border-fantasy-border/80 hover:border-amber-500/60 hover:bg-neutral-900/60 text-gray-300 hover:text-white transition-all disabled:opacity-50 text-left"
-        >
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-sm shrink-0">🔍</span>
-            <span className="text-xs font-bold truncate">
-              {inCombat ? 'Scavenge' : 'Take / Loot'}
-            </span>
-          </div>
-          <span className="text-[9px] font-mono font-bold text-gray-400 uppercase bg-black/60 px-1 rounded">
-            Loot
-          </span>
-        </button>
-
-        {/* 6. Examine / Scout */}
-        <button
-          type="button"
-          disabled={processing}
-          onClick={handleExamineScout}
-          title={inCombat ? "Assess threat and enemy positioning" : "Carefully scout surroundings and search for clues"}
-          className="flex items-center justify-between p-2 rounded-lg bg-black/55 border border-fantasy-border/80 hover:border-cyan-500/60 hover:bg-neutral-900/60 text-gray-300 hover:text-white transition-all disabled:opacity-50 text-left"
-        >
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-sm shrink-0">👁️</span>
-            <span className="text-xs font-bold truncate">
-              {inCombat ? 'Assess' : 'Examine'}
-            </span>
-          </div>
-          <span className="text-[9px] font-mono font-bold text-gray-400 uppercase bg-black/60 px-1 rounded">
-            PER
-          </span>
-        </button>
-
-        {/* 7. Rest / Time Skip (Genshin Clock Dial) */}
-        <button
-          type="button"
-          disabled={processing || inCombat}
-          onClick={onOpenTimeSkip}
-          title={inCombat ? "Cannot rest during combat" : "Open Chronos Dial to advance time and rest"}
-          className={`flex items-center justify-between p-2 rounded-lg border transition-all text-left ${
-            inCombat
-              ? 'bg-black/30 border-fantasy-border/40 text-gray-500 cursor-not-allowed opacity-60'
-              : 'bg-black/55 border-fantasy-border/80 hover:border-amber-500/60 hover:bg-neutral-900/60 text-gray-300 hover:text-white'
-          }`}
-        >
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-sm shrink-0">⏳</span>
-            <span className="text-xs font-bold truncate">Time Skip</span>
-          </div>
-          <span className="text-[9px] font-mono font-bold text-amber-400/90 uppercase bg-black/60 px-1 rounded">
-            Rest
-          </span>
-        </button>
-
-        {/* 8. Smartphone OS Launcher */}
-        <button
-          type="button"
-          disabled={processing}
-          onClick={() => (phoneOpen && onClosePhone ? onClosePhone() : onOpenPhone())}
-          title={phoneOpen ? "Close Smartphone Window" : `Open ${phoneHook?.branding?.device_name || 'Smartphone'}`}
-          className={`flex items-center justify-between p-2 rounded-lg border transition-all text-left ${
-            phoneOpen
-              ? 'bg-pink-950/80 border-pink-500 text-pink-100 ring-2 ring-pink-500/40 shadow-sm'
-              : 'bg-black/55 border-fantasy-border/80 hover:border-pink-500/70 hover:bg-neutral-900/60 text-gray-200 hover:text-pink-300'
-          }`}
-        >
-          <div className="flex items-center gap-1.5 min-w-0">
-            <Smartphone size={15} className={phoneOpen ? "text-pink-300 animate-pulse" : "text-pink-400"} />
-            <span className="text-xs font-bold truncate">
-              {phoneHook?.branding?.device_name || 'Smartphone'}
-            </span>
-          </div>
-          {hasPhoneNotifications && (
-            <span className="w-2 h-2 rounded-full bg-pink-400 animate-pulse shadow-[0_0_8px_rgba(244,114,182,0.8)]" />
-          )}
-        </button>
-
+            <span className="block w-full truncate text-[10.5px] font-semibold leading-tight">{tile.label}</span>
+            {tile.badge != null && <span className="hk-dock-badge">{tile.badge}</span>}
+          </button>
+        ))}
       </div>
     </div>
   );

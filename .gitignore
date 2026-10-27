@@ -35,6 +35,7 @@ archives/
 Thumbs.db
 .vscode/
 .idea/
+.agents/mcp_config.json
 
 # Databases & SQLite Runtime
 *.db

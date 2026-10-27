@@ -38,12 +38,16 @@ const StoryFeed = ({
   const lastHist = histList.length > 0 ? histList[histList.length - 1] : null;
   const lastHistNextNar = (
     lastHist?.next_narrative ||
+    lastHist?.outcome_narrative ||
     (lastHist?.type === 'scene' ? lastHist?.narrative : '') ||
     ''
   ).trim();
   const currentNar = (currentScene?.narrative || '').trim();
   const isCurrentSceneAlreadyInHistory = Boolean(
-    lastHistNextNar && currentNar && lastHistNextNar === currentNar
+    currentNar && (
+      (lastHistNextNar && lastHistNextNar === currentNar) ||
+      (lastHist?.outcome_narrative && String(lastHist.outcome_narrative).trim() === currentNar)
+    )
   );
 
   const streamAction = streamingState?.action || null;

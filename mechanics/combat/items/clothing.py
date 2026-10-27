@@ -3,7 +3,7 @@ import random
 from typing import Dict, Any, Optional
 
 from mechanics.combat.items.tags import derive_clothing_tags
-from mechanics.combat.items.envelope import serialize_item
+from mechanics.combat.items.envelope import parse_item, serialize_item
 
 # -----------------------------------------------------------------------------
 # CIVILIAN CLOTHING ARCHETYPES
@@ -708,8 +708,12 @@ def generate_random_clothing(
     suffixes = affix_data.get("suffixes", {})
 
     if item_tier == 2:
-        # Tier 2 (Enchanted): EVA +1 bonus
+        # Tier 2 (Enchanted / Stylish): EVA +1 bonus; SPECIAL strictly capped at +1
         mods["eva"] = mods.get("eva", 0) + 1
+        if "cha" in mods and mods["cha"] > 0:
+            mods["cha"] = 1
+        if "per" in mods and mods["per"] > 0:
+            mods["per"] = 1
         p_list = prefixes.get(2, ["Enchanted"])
         pref = random.choice(p_list)
         s_list = suffixes.get(2, [])
@@ -718,7 +722,7 @@ def generate_random_clothing(
         else:
             name = f"{pref} {base_name}"
     elif item_tier == 1:
-        # Tier 1 (Masterwork): EVA +2 bonus; SPECIAL capped strictly at +1 (CHA / PER)
+        # Tier 1 (Masterwork / Haute Couture): EVA +2 bonus; SPECIAL capped strictly at +1 (CHA / PER)
         mods["eva"] = mods.get("eva", 0) + 2
         if "cha" in mods and mods["cha"] > 0:
             mods["cha"] = 1
@@ -732,7 +736,11 @@ def generate_random_clothing(
         else:
             name = f"{pref} {base_name}"
     else:
-        # Tier 3 (Standard): ~40% chance of standard flavor prefix, otherwise clean base name
+        # Tier 3 (Standard): ~40% chance of standard flavor prefix, otherwise clean base name; CHA strictly <= 1
+        if "cha" in mods and mods["cha"] > 1:
+            mods["cha"] = 1
+        if "per" in mods and mods["per"] > 1:
+            mods["per"] = 1
         if random.random() < 0.40 and 3 in prefixes and prefixes[3]:
             pref = random.choice(prefixes[3])
             name = f"{pref} {base_name}"
@@ -755,6 +763,8 @@ def generate_random_clothing(
             if "tail-slotted" in name.lower():
                 name = name.replace("Tail-Slotted ", "").replace("tail-slotted ", "").replace("Tail-slotted ", "")
 
+    social_affinity_bonus = 4 if item_tier == 1 else (2 if item_tier == 2 else 0)
+
     metadata = {
         "name": name,
         "tier": item_tier,
@@ -767,6 +777,7 @@ def generate_random_clothing(
         "type_dt": {},
         "social_modifiers": mods,
         "stat_modifiers": dict(mods),
+        "social_affinity_bonus": social_affinity_bonus,
         "social_flags": social_flags,
         "tags": derive_clothing_tags(style=base_data["style"], social_vibe=social_flags)
     }
@@ -780,6 +791,57 @@ def generate_random_clothing(
         "slot_cost": 1
     }
 
+def get_equipped_clothing_affinity_bonus(inventory: list | None) -> tuple[int, str]:
+    """
+    Returns (affinity_bonus, item_name) from the highest-tier equipped civilian garment/accessory.
+    - Tier 3 Standard: +0 affinity
+    - Tier 2 Stylish / Brand: +2 affinity
+    - Tier 1 Luxury / Haute Couture: +4 affinity
+    """
+    if not isinstance(inventory, list) or not inventory:
+        return 0, ""
+    best_bonus = 0
+    best_name = ""
+    fashion_types = {"clothing", "top", "bottom", "accessory", "lingerie", "outerwear", "shoes"}
+    for inv_item in inventory:
+        if not isinstance(inv_item, dict):
+            continue
+        is_eq = bool(inv_item.get("equipped") or inv_item.get("is_equipped")) or bool(
+            inv_item.get("slot")
+            and str(inv_item.get("slot")).strip()
+            in ("Top", "Bottom", "Outerwear", "Shoes", "Accessory 1", "Accessory 2", "Lingerie")
+            and inv_item.get("equipped") is not False
+            and inv_item.get("is_equipped") is not False
+            and ("equipped" in inv_item or "is_equipped" in inv_item)
+        )
+        if not is_eq:
+            continue
+        meta = inv_item.get("metadata") if isinstance(inv_item.get("metadata"), dict) else None
+        if not meta and inv_item.get("effect"):
+            try:
+                meta = parse_item(str(inv_item.get("effect") or ""))
+            except Exception:
+                meta = None
+        bonus = 0
+        if isinstance(meta, dict) and meta.get("social_affinity_bonus") is not None:
+            try:
+                bonus = int(meta.get("social_affinity_bonus") or 0)
+            except (TypeError, ValueError):
+                bonus = 0
+        else:
+            itype = str(inv_item.get("item_type") or (meta or {}).get("item_type") or "").strip().lower()
+            if itype in fashion_types:
+                t_val = int((meta or {}).get("tier") or inv_item.get("tier") or 3)
+                if t_val == 1:
+                    bonus = 4
+                elif t_val == 2:
+                    bonus = 2
+        if bonus > best_bonus:
+            best_bonus = min(4, bonus)
+            best_name = str(inv_item.get("name") or (meta or {}).get("name") or "Stylish Outfit")
+    return best_bonus, best_name
+
+
 def format_clothing_card(metadata: Dict[str, Any]) -> str:
     name = metadata.get("name", "Clothing")
     tier_name = metadata.get("tier_name", "Standard")
@@ -790,6 +852,7 @@ def format_clothing_card(metadata: Dict[str, Any]) -> str:
         style = str(metadata.get("style") or "casual").title()
     social_mods = metadata.get("social_modifiers") or metadata.get("stat_modifiers") or {}
     social_flags = ", ".join(metadata.get("social_flags", []))
+    aff_bonus = int(metadata.get("social_affinity_bonus") or 0)
 
     mods_parts = []
     # SPECIAL stats
@@ -816,6 +879,8 @@ def format_clothing_card(metadata: Dict[str, Any]) -> str:
         f"**{name}** ({tier_name})",
         f"**Slot:** {metadata.get('slot', 'Clothing')} • **Style:** {style}",
         f"**Modifiers:** {mods_str}",
-        f"**Vibe:** {social_flags}"
     ]
+    if aff_bonus > 0:
+        lines.append(f"**Social Impression:** +{aff_bonus} Affinity")
+    lines.append(f"**Vibe:** {social_flags}")
     return "\n".join(lines)

@@ -33,6 +33,8 @@ def configure_worker_db(tmp_path_factory, worker_id):
 
     # Point database path to the isolated temporary DB file
     db.DB_PATH = worker_db_path
+    if hasattr(db, "core"):
+        db.core.DB_PATH = worker_db_path
     db.init_db()
 
     # Apply fast in-memory SQLite pragmas for tests on Windows
@@ -101,6 +103,8 @@ def close_db_connections_after_test(configure_worker_db):
     yield
     worker_db_path = configure_worker_db
     db.DB_PATH = worker_db_path
+    if hasattr(db, "core"):
+        db.core.DB_PATH = worker_db_path
     if hasattr(db, "core") and hasattr(db.core, "_POOL"):
         with db.core._POOL_LOCK:
             extra_paths = [p for p in db.core._POOL if p != worker_db_path]

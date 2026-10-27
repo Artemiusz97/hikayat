@@ -132,6 +132,23 @@ export const useCodex = (sessionId, user) => {
     return data;
   };
 
+  const cancelCommitment = async (commitmentId, reason = 'player_cancelled') => {
+    if (!sessionId || !commitmentId) return null;
+    const data = await apiCall(`/api/commitments/${sessionId}/${commitmentId}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: user?.user_id,
+        reason,
+      }),
+    });
+    if (data?.commitments) {
+      setCommitments(data.commitments);
+    } else {
+      setCommitments(prev => prev.filter(c => (c.commitment_id || c.id) !== commitmentId));
+    }
+    return data;
+  };
+
   return {
     contacts,
     factions,
@@ -154,6 +171,7 @@ export const useCodex = (sessionId, user) => {
     generateBounties,
     bountyAction,
     deduceClues,
+    cancelCommitment,
   };
 };
 

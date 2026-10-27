@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import './i18n.js'
 import App from './App.jsx'
+import { ThemeProvider } from './theme/ThemeProvider.jsx'
 import './index.css'
 
 // Dynamically sync visible viewport height (excluding Edge/Chrome mobile bottom address bar and toolbars)
@@ -57,7 +58,9 @@ class ErrorBoundary extends React.Component {
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <App />
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>
     </ErrorBoundary>
   </React.StrictMode>,
 )

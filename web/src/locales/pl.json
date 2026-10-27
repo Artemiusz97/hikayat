@@ -32,7 +32,10 @@
     "party": "Drużyna",
     "quests": "Zadania",
     "codex": "Kodeks",
-    "outcomes": "Dziennik Świata"
+    "outcomes": "Dziennik Świata",
+    "menu": "Menu",
+    "journal": "Dziennik i narzędzia",
+    "contacts": "Kontakty"
   },
   "stats": {
     "str": "Siła",
@@ -220,7 +223,27 @@
       "neutral": "Neutralny",
       "unfavorable": "Nieprzychylny",
       "hostile_rival": "Wrogi / Rywal"
-    }
+    },
+    "agenda": "Terminarz",
+    "no_agenda": "Brak aktywnych zobowiązań lub spotkań",
+    "cancel_commitment": "Anuluj",
+    "cancelled_commitment": "Anulowano „{{title}}”.",
+    "profile_locked": "Osobiste akta zablokowane",
+    "profile_locked_desc": "Osiągnij status Przyjaciela (100+ Sympatii) lub zrekrutuj postać do drużyny, aby zobaczyć pełny profil.",
+    "special_agent": "Agent Specjalny",
+    "civilian": "Cywil",
+    "deceased": "Zmarły",
+    "operative_dossier": "Akta Bojowe Agenta",
+    "innate_abilities": "Wrodzone Zdolności Specjalne",
+    "abilities_locked_note": "Osiągnij status Przyjaciela (100+ Sympatii) lub zrekrutuj postać do drużyny, aby odkryć zdolności.",
+    "civilian_classification": "Klasyfikacja Cywilna",
+    "civilian_party_note": "Zwykły obywatel bez many i zdolności specjalnych. Może zostać Kontaktem, lecz nie może dołączyć do drużyny bojowej.",
+    "civilian_deceased_note": "Poległ na stałe podczas anomalnego wtargnięcia z braku wrodzonej osłony many.",
+    "saved_contact": "Zapisany kontakt",
+    "open_in_contacts": "Otwórz w Kontaktach",
+    "search_known_characters": "Szukaj znanych postaci...",
+    "unlock_contact_hint": "Odblokuj jako kontakt, aby zobaczyć pełne akta osobiste",
+    "operational_info": "Status polowy"
   },
   "scene": {
     "title": "Scena i Świat",
@@ -278,7 +301,7 @@
   },
   "settings": {
     "title": "Ustawienia Gry",
-    "modal_title": "Ustawienia Kronik i Telemetria",
+    "modal_title": "Ustawienia",
     "tab_preferences": "Preferencje",
     "tab_telemetry": "Telemetria i Piaskownica",
     "language": "Język",
@@ -339,7 +362,9 @@
     "new_adventure_desc": "Wybierz krainę i klasę, aby rozpocząć wyprawę",
     "hero_stats_preview": "Podgląd Statystyk Bohatera",
     "configure_loadout": "Skonfiguruj Ekwipunek →",
-    "logout": "Wyloguj się"
+    "logout": "Wyloguj się",
+    "level_short": "Poz.",
+    "welcome_title": "Rozpocznij swoją kronikę"
   },
   "outcomes": {
     "turn_outcome": "Wynik Tury #{{turn}}",
@@ -370,7 +395,8 @@
     "shop": "SKLEP",
     "browse": "Przeglądaj",
     "fallback_warning": "Dla tej tury użyto awaryjnego generowania sceny.",
-    "truncated_warning": "Narracja sceny wydaje się nietypowo krótka lub ucięta."
+    "truncated_warning": "Narracja sceny wydaje się nietypowo krótka lub ucięta.",
+    "resolving": "Rozstrzyganie..."
   },
   "party": {
     "roster": "Skład Drużyny",
@@ -406,5 +432,70 @@
     "discord_link": "Połączenie Discord",
     "discord_placeholder": "ID Discord lub Nazwa Użytkownika...",
     "connect_discord": "Połącz z Discord"
+  },
+  "embark": {
+    "starting_faction_legend": "Początkowa Przynależność Frakcyjna",
+    "starting_faction_hint": "Określa kwaterę główną, mundur startowy, dzienne przydziały, zniżki i uprawnienia agenta.",
+    "default_badge": "Domyślna",
+    "faction_public_name": "Publiczna Agencja Zabezpieczeń",
+    "faction_public_desc": "Dzienna pensja (50G–300G) • -50% w sklepie HQ • Obowiązkowe zlecenie dnia • Brak łupów ze zleceń Agencji • Start w HQ Biura",
+    "faction_private_name": "Prywatna Agencja Zabezpieczeń #1",
+    "faction_private_desc": "100% złota i łupów • Zbrojownia wysokiej klasy (+35% ceny) • Kontrakty publiczne • Obowiązkowe zlecenie dnia • Start w Wieży Korporacji",
+    "faction_private_2_name": "Prywatna Agencja Zabezpieczeń #2 (Syndykat Rywali)",
+    "faction_private_2_desc": "100% złota i łupów • Zbrojownia Syndykatu (+35% ceny) • Kontrakty publiczne • Obowiązkowe zlecenie dnia • Start w HQ Syndykatu",
+    "faction_monastic_name": "Zakon Świątynnych Egzorcystów",
+    "faction_monastic_desc": "2–3 darmowe dary dziennie • Zachowujesz łupy z walki • Darmowe leczenie w Świątyni • Obowiązkowe zlecenie dnia • Start w Wielkiej Świątyni",
+    "faction_freelancer_name": "Niezależny Najemnik (Freelancer)",
+    "faction_freelancer_desc": "Brak dziennych przydziałów • Pełne wypłaty z aplikacji i kontraktów publicznych • Start w Domu na Przedmieściach"
+  },
+  "theme": {
+    "title": "Motyw",
+    "appearance": "Wygląd",
+    "appearance_desc": "Pozwól, by interfejs dopasował się do scenariusza, lub wybierz własny styl.",
+    "auto": "Dopasuj do scenariusza",
+    "auto_desc": "Kolory dostosowują się do świata, w którym grasz",
+    "auto_active": "Według świata · {{name}}",
+    "names": {
+      "ember": "Żar",
+      "nebula": "Mgławica",
+      "neon": "Neon",
+      "brass": "Mosiądz",
+      "crimson": "Szkarłat",
+      "containment": "Izolacja",
+      "wasteland": "Pustkowie",
+      "daylight": "Dzień",
+      "aero": "Frutiger Aero",
+      "midas": "Na bogato"
+    }
+  },
+  "stealth_dock": {
+    "stealth": "Skradanie",
+    "sneaking": "W ukryciu",
+    "hide": "Ukryj się",
+    "backstab": "Cios w plecy",
+    "vanished": "UKRYTY",
+    "on": "WŁ.",
+    "throw": "Rzut",
+    "distract": "Odwróć uwagę",
+    "tooltip_combat_hide": "Spróbuj zniknąć w cieniu (test AGI przeciw PER wroga)",
+    "tooltip_combat_backstab": "Uderz z cienia pewnym ciosem z flanki",
+    "tooltip_drop_stealth": "Wyjdź z trybu skradania",
+    "tooltip_enter_stealth": "Wejdź w postawę skradania (akcje skryte)",
+    "tooltip_throw": "Rzuć bronią/pociskiem w wybrany cel (AGI)",
+    "tooltip_distract": "Rzuć przedmiotem, aby odwrócić uwagę (AGI)"
+  },
+  "contacts": {
+    "title": "Kontakty",
+    "count": "Zapisane: {{count}}",
+    "search_placeholder": "Szukaj w kontaktach...",
+    "no_contacts": "Nie odblokowano jeszcze żadnych kontaktów osobistych.",
+    "unlock_hint": "Poproś o numer w rozmowie, dodaj znajomego w PeerPulse lub osiągnij poziom Przyjaciela (100+).",
+    "message_btn": "Napisz",
+    "blocked_badge": "Zablokowany"
+  },
+  "phone": {
+    "alerts_dispatch": "Alerty / Komunikaty",
+    "read_only_broadcast": "Automatyczny oficjalny kanał komunikatów — tylko do odczytu",
+    "blocked_notice": "Ten kontakt zablokował Twój numer z powodu wrogości. Pogódź się najpierw osobiście."
   }
 }

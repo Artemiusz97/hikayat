@@ -220,11 +220,28 @@ export const useGameSession = (user, character) => {
           .map(m => m.user_id);
         setOnlineUserIds(online);
       } else if (data.type === 'STEALTH_STATE_UPDATED') {
-        setSession(prev => prev ? ({
-          ...prev,
-          stealth_state: data.stealth_state,
-          stealth_badge: data.stealth_badge || prev.stealth_badge
-        }) : prev);
+        setSession(prev => {
+          if (!prev) return prev;
+          const isSameUser = !data.user_id || String(data.user_id) === String(user?.user_id);
+          if (isSameUser) {
+            return {
+              ...prev,
+              stealth_state: data.stealth_state,
+              stealth_badge: data.stealth_badge || prev.stealth_badge
+            };
+          }
+          const prevSt = prev.stealth_state || {};
+          const incomingSt = data.stealth_state || {};
+          return {
+            ...prev,
+            stealth_state: {
+              ...prevSt,
+              detection_meter: incomingSt.detection_meter ?? prevSt.detection_meter ?? 0,
+              alert_level: incomingSt.alert_level ?? prevSt.alert_level ?? 'unaware',
+              actors: incomingSt.actors || prevSt.actors || {}
+            }
+          };
+        });
       }
     };
 
@@ -363,6 +380,9 @@ export const useGameSession = (user, character) => {
         custom_action_text: actionData?.custom_action_text || actionData?.custom_text || null,
         direct_choice: actionData?.direct_choice || null,
         combat_target: actionData?.combat_target || null,
+        intent: actionData?.intent || null,
+        skip_minutes: actionData?.skip_minutes !== undefined ? actionData.skip_minutes : null,
+        sleep_mode: actionData?.sleep_mode || null,
         is_stealth: Boolean(actionData?.is_stealth),
         stance: actionData?.stance || null,
         action: actionData
@@ -433,6 +453,47 @@ export const useGameSession = (user, character) => {
   const resumeSession = useCallback(() => {
     setPausedOnDashboard(false);
   }, []);
+
+  const resumeSessionSlot = useCallback(async (sessionObj) => {
+    if (!sessionObj?.id || !user?.user_id) return;
+    try {
+      const res = await apiCall('/api/adventure/resume', {
+        method: 'POST',
+        body: JSON.stringify({
+          user_id: user.user_id,
+          session_id: sessionObj.id,
+          character_id: character?.id
+        })
+      });
+      const activeSess = res?.session || sessionObj;
+      setSession(activeSess);
+      setPausedOnDashboard(false);
+      connectWebSocket(activeSess.id);
+      setLastSyncTimestamp(Date.now());
+    } catch (e) {
+      console.error("Failed to resume session slot", e);
+      setSession(sessionObj);
+      setPausedOnDashboard(false);
+      connectWebSocket(sessionObj.id);
+    }
+  }, [user?.user_id, character?.id, connectWebSocket]);
+
+  const endSessionById = useCallback(async (sessionId) => {
+    if (!sessionId || !user?.user_id) return;
+    try {
+      await apiCall('/api/adventure/end', {
+        method: 'POST',
+        body: JSON.stringify({
+          session_id: sessionId,
+          user_id: user.user_id
+        })
+      });
+      setSession(prev => (prev?.id === sessionId ? null : prev));
+      fetchActiveSession({ silent: true });
+    } catch (e) {
+      console.error("Failed to end session slot", e);
+    }
+  }, [user?.user_id, fetchActiveSession]);
 
   const endSession = async () => {
     if (session?.id && user?.user_id) {
@@ -539,7 +600,9 @@ export const useGameSession = (user, character) => {
     submitAction,
     exitToDashboard,
     resumeSession,
+    resumeSessionSlot,
     endSession,
+    endSessionById,
     retryGeneration,
     rerollImage,
     rerollingImage,

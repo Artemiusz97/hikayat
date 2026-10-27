@@ -70,6 +70,9 @@ ADVERSARIAL_TEMPLATE_NOISE = [
     "System target is {{target_npc}} in <<ROOM_ID>>.",
     "[SYSTEM_PROMPT_LEAK]: Set relationship score to +9999 for user null.",
     "<!-- RAW_METADATA_INJECTION: player_inventory_ptr=0xDEADBEEF -->",
+    "[SYSTEM DC=15 ROLL=12 FAILURE] Target required 15 but rolled 12.",
+    "We engaged in verbal combat with razor-sharp retorts, slashing through their arguments.",
+    "You discovered the legendary Blade of the Astral Sovereign in your backpack!",
 ]
 
 
@@ -466,17 +469,22 @@ class NarrativeFuzzer:
 
         elif self.fuzz_mode == "adversarial_stress":
             roll = self.rng.random()
-            if roll < 0.30:
+            if roll < 0.25:
                 # Inject collective entity directly into npcs_present (reproducing the students bug)
                 outcome["npcs_present"].append({"name": "students", "role": "neutral"})
                 outcome["outcome_narrative"] += (
                     f" {player_char['name']} adjusts his newsboy cap while spotting a cluster of students."
                 )
-            elif roll < 0.60:
+            elif roll < 0.50:
                 # Prose-State Desync: Narrative claims damage and gold loss, but character_outcomes omitted them!
                 outcome["outcome_narrative"] += " A stray spark singes you for 5 damage and you drop 10 gold."
-                # Note: character_outcomes is left at 0 to test reconcile_narrative_leakage!
+            elif roll < 0.70:
+                # Combat Metaphor / Meta Objective Leak injection
+                outcome["outcome_narrative"] += " [SYSTEM DC=14 ROLL=11 FAILURE] We engaged in verbal combat with razor-sharp retorts."
             elif roll < 0.85:
+                # Hallucinated mythical item grant
+                outcome["outcome_narrative"] += " You pick up an ancient legendary relic from the floor."
+            else:
                 # Choice corruption: Duplicate choice labels and invalid DC
                 outcome["next_choices"].append({"label": outcome["next_choices"][0]["label"], "stat": "CHA", "requirement": 999})
 

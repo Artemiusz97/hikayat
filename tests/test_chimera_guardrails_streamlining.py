@@ -32,11 +32,15 @@ def setup_chimera_session_fixture():
     with db.get_conn() as conn:
         conn.execute("DELETE FROM sessions WHERE id = ?", (SESSION_1,))
         conn.execute("DELETE FROM session_locations WHERE session_id = ?", (SESSION_1,))
+        conn.execute("DELETE FROM world_nodes WHERE session_id = ?", (SESSION_1,))
+        conn.execute("DELETE FROM world_edges WHERE session_id = ?", (SESSION_1,))
         conn.commit()
     yield
     with db.get_conn() as conn:
         conn.execute("DELETE FROM sessions WHERE id = ?", (SESSION_1,))
         conn.execute("DELETE FROM session_locations WHERE session_id = ?", (SESSION_1,))
+        conn.execute("DELETE FROM world_nodes WHERE session_id = ?", (SESSION_1,))
+        conn.execute("DELETE FROM world_edges WHERE session_id = ?", (SESSION_1,))
         conn.commit()
 
 

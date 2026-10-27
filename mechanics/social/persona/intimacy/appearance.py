@@ -45,7 +45,7 @@ def extract_appearance_from_text(text: str, name: str = "") -> Dict[str, str]:
 
     # 2. Stature
     m_stat = re.search(
-        r"\b(below[\s\-_]average|short|petite|compact|average[\s\-_]height|average|tall|towering|gigantic|statuesque)\b",
+        r"\b(miniature|dwarf|diminutive|below[\s\-_]average|short|petite|compact|average[\s\-_]height|average|tall|towering|gigantic|statuesque)\b",
         target,
         re.IGNORECASE
     )
@@ -384,11 +384,13 @@ def roll_dynamic_asset_texture(
         if pick_val < cumulative:
             return item
 def normalize_stature_tier(stature_str: str) -> str:
-    """Normalizes any stature descriptor or legacy alias into one of the 5 canonical tiers:
-    'short', 'below_average', 'average', 'tall', 'towering'.
+    """Normalizes any stature descriptor or legacy alias into one of the 6 canonical tiers:
+    'miniature', 'short', 'below_average', 'average', 'tall', 'towering'.
     """
     s = (stature_str or "").strip().lower().replace("-", "_").replace(" ", "_")
-    if s in ("dwarf", "petite", "short", "compact", "small"):
+    if s in ("miniature", "dwarf", "dwarven", "halfling", "gnome", "goblin", "diminutive", "tiny", "pint_sized"):
+        return "miniature"
+    if s in ("petite", "short", "compact", "small"):
         return "short"
     if s in ("below_average", "below", "shortish", "short_average"):
         return "below_average"
@@ -398,20 +400,22 @@ def normalize_stature_tier(stature_str: str) -> str:
         return "tall"
     if s in ("average", "moderate", "medium", "normal"):
         return "average"
+    if "miniature" in s or "diminutive" in s or "dwarf" in s or "halfling" in s or "gnome" in s:
+        return "miniature"
     if "below" in s:
         return "below_average"
     if "tower" in s or "gigan" in s:
         return "towering"
     if "tall" in s:
         return "tall"
-    if "short" in s or "dwarf" in s or "petite" in s:
+    if "short" in s or "petite" in s:
         return "short"
     return "average"
 
 
 def get_stature_distribution_for_race(race_str: str, gender: str = "") -> Dict[str, float]:
-    """Returns the 5-tier probability distribution dictionary for a given race or species and gender.
-    - Miniature races (dwarf, gnome, halfling, goblin): 100% short for both genders.
+    """Returns the 6-tier probability distribution dictionary for a given race or species and gender.
+    - Miniature races (dwarf, gnome, halfling, goblin): 100% miniature for both genders.
     - Male Standard Races & Medium Beastfolk (Default): 5% short, 15% below_avg, 50% avg, 25% tall, 5% towering.
     - Female Standard Races & Medium Beastfolk (Default): 10% short, 34% below_avg, 45% avg, 10% tall, 1% towering.
     - Male Large Beastfolk & Strong Races: 1% short, 4% below_avg, 25% avg, 45% tall, 25% towering.
@@ -426,8 +430,8 @@ def get_stature_distribution_for_race(race_str: str, gender: str = "") -> Dict[s
     is_male = any(kw in g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in g for kw in ("female", "woman", "girl", "lady", "she", "her"))
     is_fem = any(kw in g for kw in ("female", "woman", "girl", "lady", "she", "her")) or (not is_male and ("fem" in g or g.startswith("f")))
 
-    # 1. Miniature Fantasy Species (strictly short for both genders)
-    if any(k in r for k in ("dwarf", "gnome", "halfling", "goblin")):
+    # 1. Miniature Fantasy Species (strictly miniature for both genders)
+    if any(k in r for k in ("dwarf", "gnome", "halfling", "goblin", "kobold", "pixie", "fairy")):
         return dict(STATURE_WEIGHTS_MINIATURE)
 
     # 2. Hybrids / Half-Beast default to Standard
@@ -455,10 +459,12 @@ def get_stature_distribution_for_race(race_str: str, gender: str = "") -> Dict[s
 
 
 def roll_dynamic_stature(race: str = "", gender: str = "", seed: Any = None) -> str:
-    """Rolls a canonical 5-tier stature based on species- and gender-weighted distribution.
+    """Rolls a canonical 6-tier stature based on species- and gender-weighted distribution.
     Deterministic if seed is provided.
     """
     dist = get_stature_distribution_for_race(race, gender=gender)
+    if dist.get("miniature", 0.0) >= 0.999:
+        return "miniature"
     if dist.get("short", 0.0) >= 0.999:
         return "short"
 
@@ -511,7 +517,7 @@ def roll_dynamic_physique(
             weights[p] = 1.0   # Standard baseline
 
     # 3. Stature modifiers
-    if norm_stature in ("short", "below_average"):
+    if norm_stature in ("miniature", "short", "below_average"):
         if "Petite & Soft" in weights:
             weights["Petite & Soft"] *= 2.0
         if "Soft & Curved" in weights:
@@ -530,6 +536,11 @@ def roll_dynamic_physique(
 
     # 4. Race modifiers
     r = (race or "").lower()
+    if "dwarf" in r:
+        if "Stocky & Thick" in weights:
+            weights["Stocky & Thick"] *= 2.2
+        if "Muscular & Powerful" in weights:
+            weights["Muscular & Powerful"] *= 1.8
     is_small_beast = any(k in r for k in ("cat", "neko", "fox", "kitsune", "fennec", "rabbit", "bunny", "mouse", "rat", "hamster", "squirrel"))
     is_large_beast = not is_small_beast and any((bool(re.search(r"\box(en)?\b", r)) if k == "ox" else k in r) for k in ("wolf", "tiger", "lion", "bear", "dragon", "orc", "minotaur", "rhino", "elephant", "ox", "boar", "bovine"))
 

@@ -1,5 +1,6 @@
+from __future__ import annotations
 from typing import List, Optional, Dict, Literal, Any, Union
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 from .trackers import (
     EntityAudit, CharacterOutcome, TrackerEntity,
@@ -18,17 +19,66 @@ _VALID_INTENTS = {
 }
 
 _VALID_SUB_INTENTS = {
-    "", "kiss", "foreplay", "manual_give", "manual_receive",
+    "", "kiss", "foreplay", "manual_give", "manual_receive", "manual_mutual",
     "oral_give", "oral_receive", "oral_mutual", "intercourse",
-    "anal_give", "anal_receive", "aftercare", "redress", "date", "lockpick", "pickpocket",
+    "anal_give", "anal_receive", "anal_mutual", "aftercare", "redress", "date", "confession",
+    "lockpick", "pickpocket", "gamble", "use_item", "deduce_clues", "explore",
     "hide", "eavesdrop", "combat_attack", "combat_magic", "combat_tactic", "combat_flee"
 }
 
-class Choice(BaseModel):
+
+def _coerce_bool_value(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes")
+    return False
+
+
+def _filter_valid_cast_events_list(v: Any) -> List[Any]:
+    if not v or not isinstance(v, list):
+        return []
+    cleaned = []
+    for item in v:
+        if isinstance(item, BaseModel):
+            ev_type = str(getattr(item, "type", "") or "").strip().lower()
+            ev_npc = str(getattr(item, "npc", "") or "").strip()
+            if ev_type in ("arrive", "depart", "engage") and ev_npc:
+                cleaned.append(item)
+        elif isinstance(item, dict):
+            ev_type = str(item.get("type") or "").strip().lower()
+            ev_npc = str(item.get("npc") or "").strip()
+            if ev_type in ("arrive", "depart", "engage") and ev_npc:
+                cleaned.append({
+                    "type": ev_type,
+                    "npc": ev_npc,
+                    "reason": str(item.get("reason") or "").strip(),
+                })
+    return cleaned
+
+
+class DictAccessibleModel(BaseModel):
+    """Base Pydantic model that provides dict-like subscripting and .get() for legacy consumer compatibility."""
+    def __getitem__(self, item: str) -> Any:
+        try:
+            return getattr(self, item)
+        except AttributeError:
+            raise KeyError(item)
+
+    def get(self, item: str, default: Any = None) -> Any:
+        return getattr(self, item, default)
+
+
+class Choice(DictAccessibleModel):
+    model_config = ConfigDict(extra="allow")
     label: str = Field(..., description="Concise, max 6-8 words")
     stat: str = Field(default="NONE")  # Accept any string; validated below
     requirement: int = Field(default=0, ge=0, le=20)
     mp_cost: int = Field(default=0)
+    gold_spent: int = Field(default=0, ge=0)
+    triggers_loot_roll: bool = Field(default=False)
     intent: str = Field(default="general_action")
     sub_intent: Optional[str] = Field(default="")
     target_npc: Optional[str] = Field(default="")
@@ -49,13 +99,13 @@ class Choice(BaseModel):
         s = str(v).upper().strip() if v else "NONE"
         return s if s in _VALID_STATS else "NONE"
 
-    @field_validator("requirement", "mp_cost", mode="before")
+    @field_validator("requirement", "mp_cost", "gold_spent", "stage_index", mode="before")
     @classmethod
     def coerce_int_zero(cls, v: Any) -> int:
         if v is None:
             return 0
         try:
-            return int(v)
+            return max(0, int(v)) if v != "" else 0
         except (TypeError, ValueError):
             return 0
 
@@ -65,20 +115,30 @@ class Choice(BaseModel):
         if not v:
             return "general_action"
         s = str(v).lower().strip()
+        if s in ("move", "travel"):
+            return "movement"
         return s if s in _VALID_INTENTS else "general_action"
 
-    @field_validator("ends_dialogue", mode="before")
+    @field_validator(
+        "ends_dialogue", "dismisses_npc", "is_quest_action",
+        "is_climax_action", "breakthrough_leveraged", "triggers_loot_roll",
+        mode="before",
+    )
     @classmethod
-    def coerce_ends_dialogue(cls, v: Any) -> bool:
-        if isinstance(v, bool):
-            return v
-        if isinstance(v, (int, float)):
-            return bool(v)
-        if isinstance(v, str):
-            return v.strip().lower() in ("true", "1", "yes")
-        return False
+    def coerce_bool_fields(cls, v: Any) -> bool:
+        return _coerce_bool_value(v)
 
-    @field_validator("sub_intent", "target_npc", "target_node_id", "target_location", mode="before")
+    @field_validator("sub_intent", mode="before")
+    @classmethod
+    def coerce_sub_intent(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        s = str(v).strip().lower()
+        if s in ("none", "null", "undefined", ""):
+            return ""
+        return s if s in _VALID_SUB_INTENTS else ""
+
+    @field_validator("target_npc", "target_node_id", "target_location", "quest_id", mode="before")
     @classmethod
     def coerce_str_empty(cls, v: Any) -> str:
         if v is None:
@@ -347,24 +407,14 @@ class CastEvent(BaseModel):
     @classmethod
     def coerce_type(cls, v: Any) -> str:
         s = str(v or "").strip().lower()
-        return s if s in ("arrive", "depart", "engage") else "arrive"
+        if s not in ("arrive", "depart", "engage"):
+            raise ValueError(f"Invalid cast event type: {v!r}")
+        return s
 
     @field_validator("npc", "reason", mode="before")
     @classmethod
     def coerce_str(cls, v: Any) -> str:
         return str(v or "").strip()
-
-
-class DictAccessibleModel(BaseModel):
-    """Base Pydantic model that provides dict-like subscripting and .get() for legacy consumer compatibility."""
-    def __getitem__(self, item: str) -> Any:
-        try:
-            return getattr(self, item)
-        except AttributeError:
-            raise KeyError(item)
-
-    def get(self, item: str, default: Any = None) -> Any:
-        return getattr(self, item, default)
 
 
 class NarrationOutcome(DictAccessibleModel):
@@ -373,6 +423,12 @@ class NarrationOutcome(DictAccessibleModel):
     next_narrative: str = Field(default="")
     scene_title: str = Field(default="")
     next_choices: List[Choice] = Field(default_factory=list)
+    cast_events: List[CastEvent] = Field(default_factory=list)
+
+    @field_validator("cast_events", mode="before")
+    @classmethod
+    def coerce_cast_events(cls, v: Any) -> List[Any]:
+        return _filter_valid_cast_events_list(v)
 
     @field_validator("next_choices", mode="before")
     @classmethod
@@ -418,6 +474,11 @@ class DeterministicTurnNarration(DictAccessibleModel):
     episodic_memory: Optional[str] = Field(default=None)
     image_prompt: Optional[str] = Field(default=None)
     cast_events: List[CastEvent] = Field(default_factory=list)
+
+    @field_validator("cast_events", mode="before")
+    @classmethod
+    def coerce_cast_events(cls, v: Any) -> List[Any]:
+        return _filter_valid_cast_events_list(v)
 
     @field_validator("outcome_narrative", "next_narrative", "scene_title", mode="before")
     @classmethod
@@ -480,6 +541,35 @@ class DeterministicTurnNarration(DictAccessibleModel):
             return None if s.lower() in ("none", "null", "n/a", "") else s[:300]
         return None
 
+    @model_validator(mode="after")
+    def coerce_extra_list_fields(self) -> "DeterministicTurnNarration":
+        _extra = getattr(self, "__pydantic_extra__", None)
+        if isinstance(_extra, dict):
+            for _k in (
+                "character_outcomes",
+                "relationship_updates",
+                "quest_updates",
+                "faction_updates",
+                "npcs_present",
+                "nearby_enemies",
+                "new_entities",
+                "choices",
+                "npc_departures",
+                "dead_enemies",
+                "dead_monsters",
+                "deceased_characters",
+                "speaking_characters",
+            ):
+                if _k in _extra and not isinstance(_extra[_k], list):
+                    _val = _extra[_k]
+                    if isinstance(_val, dict):
+                        _extra[_k] = [_val] if _val else []
+                    elif isinstance(_val, str) and _val.strip():
+                        _extra[_k] = [_val.strip()]
+                    else:
+                        _extra[_k] = []
+        return self
+
 
 class DeterministicCombatNarration(DictAccessibleModel):
     """Prose-first narrator schema for active combat turns (next_choices omitted; 100% Python-generated)."""
@@ -491,6 +581,11 @@ class DeterministicCombatNarration(DictAccessibleModel):
     episodic_memory: Optional[str] = Field(default=None)
     image_prompt: Optional[str] = Field(default=None)
     cast_events: List[CastEvent] = Field(default_factory=list)
+
+    @field_validator("cast_events", mode="before")
+    @classmethod
+    def coerce_cast_events(cls, v: Any) -> List[Any]:
+        return _filter_valid_cast_events_list(v)
 
     @field_validator("outcome_narrative", "next_narrative", "scene_title", mode="before")
     @classmethod
@@ -513,6 +608,10 @@ class DeterministicCombatNarration(DictAccessibleModel):
     def coerce_optional_str(cls, v: Any) -> Optional[str]:
         return DeterministicTurnNarration.coerce_optional_str(v)
 
+    @model_validator(mode="after")
+    def coerce_extra_list_fields(self) -> "DeterministicCombatNarration":
+        return DeterministicTurnNarration.coerce_extra_list_fields(self)  # type: ignore[return-value]
+
 
 class TurnOutcome(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
@@ -532,6 +631,11 @@ class TurnOutcome(DictAccessibleModel):
     faction_updates: List[FactionUpdate] = Field(default_factory=list)
     faction_promotion_result: Optional[str] = None
     image_prompt: Optional[str] = None
+
+    @field_validator("cast_events", mode="before")
+    @classmethod
+    def coerce_cast_events(cls, v: Any) -> List[Any]:
+        return _filter_valid_cast_events_list(v)
 
     @field_validator("location", mode="before")
     @classmethod
@@ -813,26 +917,47 @@ class ActionClassification(DictAccessibleModel):
         if not v:
             return "general_action"
         s = str(v).lower().strip()
+        if s in ("move", "travel"):
+            return "movement"
         return s if s in _VALID_INTENTS else "general_action"
 
-    @field_validator("ends_dialogue", mode="before")
+    @field_validator(
+        "ends_dialogue", "dismisses_npc", "is_quest_action",
+        "is_climax_action", "breakthrough_leveraged", "triggers_loot_roll",
+        "is_memory_recall",
+        mode="before",
+    )
     @classmethod
-    def coerce_action_ends_dialogue(cls, v: Any) -> bool:
-        if isinstance(v, bool):
-            return v
-        if isinstance(v, (int, float)):
-            return bool(v)
-        if isinstance(v, str):
-            return v.strip().lower() in ("true", "1", "yes")
-        return False
+    def coerce_action_bools(cls, v: Any) -> bool:
+        return _coerce_bool_value(v)
 
-    @field_validator("sub_intent", "target_npc", "target_node_id", "target_location", "spawns_npc_role", mode="before")
+    @field_validator("sub_intent", mode="before")
+    @classmethod
+    def coerce_sub_intent(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        s = str(v).strip().lower()
+        if s in ("none", "null", "undefined", ""):
+            return ""
+        return s if s in _VALID_SUB_INTENTS else ""
+
+    @field_validator("target_npc", "target_node_id", "target_location", "spawns_npc_role", "quest_id", mode="before")
     @classmethod
     def coerce_str_empty(cls, v: Any) -> str:
         if v is None:
             return ""
         s = str(v).strip()
         return "" if s.lower() in ("none", "null", "undefined") else s
+
+    @field_validator("requirement", "mp_cost", "stage_index", mode="before")
+    @classmethod
+    def coerce_int_fields(cls, v: Any) -> int:
+        if v is None or v == "":
+            return 0
+        try:
+            return max(0, int(v))
+        except (ValueError, TypeError):
+            return 0
 
     @field_validator("combat_tactical_archetype", mode="before")
     @classmethod
@@ -878,6 +1003,8 @@ class ActionCommand(DictAccessibleModel):
     target_npc: Optional[str] = None
     target_node_id: str = ""
     target_location: str = ""
+    ends_dialogue: bool = False
+    dismisses_npc: bool = False
     combat_target: Optional[str] = None
     combat_tactical_archetype: str = ""
     spawns_npc_role: str = ""
@@ -885,6 +1012,7 @@ class ActionCommand(DictAccessibleModel):
     spell_id: str = ""
     is_quest_action: bool = False
     is_climax_action: bool = False
+    breakthrough_leveraged: bool = False
     quest_id: str = ""
     sub_obj_id: Optional[str] = None
     stage_index: Optional[int] = None

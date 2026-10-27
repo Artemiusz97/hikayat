@@ -73,3 +73,18 @@ class TestCombatSimulation:
         violations = CombatInvariantAuditor.audit_turn(41, session, party, action, precomputed)
         # Verify auditor handles turn 41 inspection without crashing
         assert isinstance(violations, list)
+    def test_combat_archetypes_and_modern_stances(self):
+        """Verify all 4 modernized combat archetypes (berserker, defender, infiltrator, chaos_fuzzer)
+        execute successfully with stance resolution and zero invariant violations."""
+        for arch in ["berserker", "defender", "infiltrator", "chaos_fuzzer"]:
+            res = self.simulator.run_battle(
+                battle_id=10,
+                scenario="fantasy",
+                level=3,
+                party_size=1,
+                seed=777,
+                archetype=arch
+            )
+            assert res.outcome in ("victory", "defeat", "fled", "stalemate")
+            assert res.outcome != "crash"
+            assert len(res.violations) == 0

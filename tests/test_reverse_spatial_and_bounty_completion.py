@@ -68,19 +68,20 @@ class TestReverseSpatialAndBountyCompletion(unittest.TestCase):
         self.assertEqual(p2, "Anderson Residence")
         self.assertEqual(s2, "Maya's Room")
 
-        # 2. Known Tier 2 primary place resolves to parent campus zone as primary
-        from mechanics.world.locations import get_session_cultural_arts_name
+        # 2. Known Tier 3 campus room resolves to parent campus zone and building
+        from mechanics.world.locations import get_session_cultural_arts_name, get_session_school_name
+        school_name = get_session_school_name(self.session_id, "high_school_drama")
         arts_name = get_session_cultural_arts_name(self.session_id, "high_school_drama")
         z3, p3, s3 = parse_tiered_location("Student Council Office", "high_school_drama", session_id=self.session_id)
-        self.assertEqual(z3, arts_name)
-        self.assertEqual(p3, "Student Council Office")
-        self.assertEqual(s3, "Main Area")
+        self.assertEqual(z3, school_name)
+        self.assertEqual(p3, arts_name)
+        self.assertEqual(s3, "Student Council Office")
 
         # 3. 3-part inversion auto-corrects primary place and prunes intermediate wings
         z4, p4, s4 = parse_tiered_location(f"{arts_name} -> Administration Wing -> Student Council Office", "high_school_drama", session_id=self.session_id)
-        self.assertEqual(z4, arts_name)
-        self.assertEqual(p4, "Student Council Office")
-        self.assertEqual(s4, "Main Area")
+        self.assertEqual(z4, school_name)
+        self.assertEqual(p4, arts_name)
+        self.assertEqual(s4, "Student Council Office")
 
         # 4. 2-part Primary -> Sub resolves parent zone
         z5, p5, s5 = parse_tiered_location("Artemiusz's House -> Bedroom", "high_school_drama", session_id=self.session_id, char_name="Artemiusz")

@@ -6,7 +6,6 @@ import logging
 import re
 
 import db
-import config
 from mechanics.combat import is_in_combat
 from game_engine.npcs.presence import classify_scene_npcs
 from game_engine.core import _get_npc_name
@@ -102,8 +101,21 @@ def _spawn_canonical_role_npc_pre_turn(
         gender = str(matched_seed_char.get("gender") or "").strip().lower() or infer_contact_gender({"name": npc_name, "basic_info": {"role": clean_role}}) or "female"
         race_val = str(matched_seed_char.get("race") or "human").strip() or "human"
     else:
-        npc_name = namegen.generate_person_name(scenario=scen_key)
-        gender = infer_contact_gender({"name": npc_name, "basic_info": {"role": clean_role}}) or "female"
+        role_words = set(re.findall(r"[a-z]+", clean_role.lower()))
+        role_gender_hint = ""
+        if role_words & {
+            "waitress", "actress", "hostess", "priestess", "headmistress", "mistress",
+            "barmaid", "maid", "queen", "princess", "lady", "madam", "madame",
+            "sister", "mother", "matron", "girl", "woman", "heroine",
+        }:
+            role_gender_hint = "female"
+        elif role_words & {
+            "waiter", "host", "priest", "headmaster", "master", "barman",
+            "king", "prince", "lord", "sir", "father", "brother", "boy", "man", "gentleman",
+        }:
+            role_gender_hint = "male"
+        npc_name = namegen.generate_person_name(scenario=scen_key, gender=role_gender_hint)
+        gender = role_gender_hint or infer_contact_gender({"name": npc_name, "basic_info": {"role": clean_role}}) or "female"
         from mechanics.social.races import normalize_race
         race_val = normalize_race("", scen_key, seed=f"{sess_id or 0}:{npc_name.lower()}") or "human"
 
@@ -142,6 +154,7 @@ def _spawn_canonical_role_npc_pre_turn(
             "role": clean_role,
             "gender": gender,
             "location": effective_location,
+            "met_in_person": True,
         },
     }
 
@@ -181,6 +194,8 @@ def compute_pre_turn_stage(
     actions: list,
     party: list = None,
     ctx: any = None,
+    persist_db: bool = True,
+    stage_clock_cb: Optional[Any] = None,
 ) -> dict:
     """
     Deterministically computes the active stage roster, effective location,
@@ -252,82 +267,119 @@ def compute_pre_turn_stage(
         if not sess_id or not target_loc:
             return
         try:
-            from mechanics.world.waypoints import check_location_matches_waypoint
-            from mechanics.system.commitments_engine import get_active_commitments
+            from mechanics.system.commitments_engine import get_active_rendezvous_at_node, _canon_key
 
-            # Query commitments ledger for active rendezvous
-            ledger_rendezvous = get_active_commitments(sess_id, commitment_type="rendezvous", limit=20)
-            if not ledger_rendezvous:
-                if ctx and hasattr(ctx, "pending_appointments"):
-                    appts = ctx.pending_appointments + getattr(ctx, "arrived_appointments", [])
-                else:
-                    appts = db.get_phone_appointments(sess_id, status="pending") + db.get_phone_appointments(sess_id, status="arrived")
-            else:
-                appts = ledger_rendezvous
+            s_day = session.get("current_day") if isinstance(session, dict) else None
+            s_min = session.get("current_minute") if isinstance(session, dict) else None
+
+            appts = []
+            seen_ids = set()
+            if target_nid:
+                for r in get_active_rendezvous_at_node(sess_id, target_nid, current_day=s_day, current_minute=s_min):
+                    rid = r.get("id") or id(r)
+                    if rid not in seen_ids:
+                        seen_ids.add(rid)
+                        appts.append(r)
+            for r in get_active_rendezvous_at_node(sess_id, target_loc, current_day=s_day, current_minute=s_min):
+                rid = r.get("id") or id(r)
+                if rid not in seen_ids:
+                    seen_ids.add(rid)
+                    appts.append(r)
+
+            if not appts and s_min is None:
+                eff_day = int(s_day or 1)
+                for loc_probe in ([target_nid, target_loc] if target_nid else [target_loc]):
+                    for r in get_active_rendezvous_at_node(sess_id, loc_probe, current_day=s_day, current_minute=s_min, enforce_window=False):
+                        if int(r.get("scheduled_day") or 1) == eff_day and r.get("origin") in ("dialogue", "phone", "in_person"):
+                            rid = r.get("id") or id(r)
+                            if rid not in seen_ids:
+                                seen_ids.add(rid)
+                                appts.append(r)
+
+            if not appts:
+                return
+
+            contact_display_map: dict[str, str] = {}
+            if hasattr(db, "get_contacts"):
+                try:
+                    for c in (db.get_contacts(sess_id) or []):
+                        c_nm = str(c.get("name") or "").strip()
+                        if not c_nm:
+                            continue
+                        for k in (c.get("npc_id"), c_nm, _canon_key(c_nm)):
+                            if k:
+                                contact_display_map[str(k).strip().lower()] = c_nm
+                except Exception:
+                    pass
 
             for appt in appts:
-                appt_loc = appt.get("target_location") or appt.get("rendezvous_location") or ""
-                if not appt_loc:
-                    continue
-                if check_location_matches_waypoint(
-                    target_loc, appt_loc,
-                    session_id=sess_id, current_node_id=target_nid,
-                    target_node_id=appt.get("target_node_id")
-                ):
-                    is_conf = bool(appt.get("is_confidential") or (appt.get("metadata") or {}).get("is_romantic"))
-                    if is_conf:
-                        has_confidential_rendezvous = True
+                is_conf = bool(appt.get("is_confidential") or (appt.get("metadata") or {}).get("is_romantic"))
+                if is_conf:
+                    has_confidential_rendezvous = True
 
-                    # Multi-NPC group rendezvous support
-                    parts = appt.get("participants") or []
-                    if not parts and appt.get("participants_json"):
-                        try:
-                            import json as _json
-                            parts = _json.loads(appt["participants_json"])
-                        except Exception:
-                            parts = []
+                parts = appt.get("participants") or []
+                if not parts and appt.get("participants_json"):
+                    try:
+                        import json as _json
+                        parts = _json.loads(appt["participants_json"])
+                    except Exception:
+                        parts = []
 
-                    spawned_any = False
-                    if parts:
-                        for p in parts:
-                            p_role = p.get("role", "")
-                            if p_role == "organizer" and p.get("person_key") == "player":
-                                continue
-                            p_name = p.get("name") or p.get("person_key") or p.get("npc_id")
-                            p_key = p.get("person_key") or p.get("npc_id")
-                            if p_name:
-                                if "_" in p_name:
-                                    p_name = p_name.replace("_", " ").title()
-                                rendezvous_participant_names.add(p_name.strip().lower())
-                                if p_key:
-                                    rendezvous_participant_names.add(str(p_key).strip().lower())
-                                _add_stage_npc({"name": p_name, "role": "Rendezvous Partner", "status_effects": ["Present"]})
-                                if p_name not in new_partners:
-                                    new_partners.append(p_name)
-                                spawned_any = True
+                spawned_any = False
+                if parts:
+                    for p in parts:
+                        p_role = p.get("role", "")
+                        p_key = str(p.get("person_key") or p.get("npc_id") or "").strip()
+                        if p_role == "organizer" and p_key.lower() == "player":
+                            continue
+                        if p_key.lower() == "player":
+                            continue
+                        raw_name = str(p.get("name") or p_key or "").strip()
+                        p_name = (
+                            contact_display_map.get(p_key.lower())
+                            or contact_display_map.get(_canon_key(raw_name))
+                            or contact_display_map.get(raw_name.lower())
+                            or (raw_name.replace("_", " ").title() if "_" in raw_name else raw_name)
+                        )
+                        if p_name:
+                            rendezvous_participant_names.add(p_name.strip().lower())
+                            if p_key:
+                                rendezvous_participant_names.add(p_key.lower())
+                            _add_stage_npc({"name": p_name, "role": "Rendezvous Partner", "status_effects": ["Present"]})
+                            if p_name not in new_partners:
+                                new_partners.append(p_name)
+                            spawned_any = True
 
-                    # Fallback for single NPC rendezvous
-                    if not spawned_any:
-                        npc_name = appt.get("npc_name") or appt.get("target_entity", "")
-                        if npc_name and npc_name != "group":
-                            if "_" in npc_name:
-                                npc_name = npc_name.replace("_", " ").title()
-                            rendezvous_participant_names.add(npc_name.strip().lower())
-                            if appt.get("target_entity"):
-                                rendezvous_participant_names.add(str(appt["target_entity"]).strip().lower())
-                            _add_stage_npc({"name": npc_name, "role": "Rendezvous Partner", "status_effects": ["Present"]})
-                            if npc_name not in new_partners:
-                                new_partners.append(npc_name)
-                    has_exited_convo = False
+                # Fallback for single NPC rendezvous
+                if not spawned_any:
+                    raw_npc = str(appt.get("npc_name") or appt.get("target_entity") or "").strip()
+                    if raw_npc and raw_npc.lower() not in ("group", "player"):
+                        npc_name = (
+                            contact_display_map.get(raw_npc.lower())
+                            or contact_display_map.get(_canon_key(raw_npc))
+                            or (raw_npc.replace("_", " ").title() if "_" in raw_npc else raw_npc)
+                        )
+                        rendezvous_participant_names.add(npc_name.strip().lower())
+                        rendezvous_participant_names.add(raw_npc.lower())
+                        _add_stage_npc({"name": npc_name, "role": "Rendezvous Partner", "status_effects": ["Present"]})
+                        if npc_name not in new_partners:
+                            new_partners.append(npc_name)
+                has_exited_convo = False
         except Exception:
             pass
 
     # Check combat retreat / flee (A7, A12)
+    unlocked_edges: list = []
+    unlocked_nodes: list = []
+    consumed_key_items: list = []
+    blocked_invalid_exit = False
+    party_cohesion_deferred = False
+
     is_flee = any(
         (isinstance(a, dict) and (a.get("sub_intent") == "combat_flee" or a.get("intent") == "combat_flee"))
         for a in (actions or [])
     )
-    if is_flee and getattr(config, "DETERMINISTIC_MOVEMENT", True) and sess_id:
+    if is_flee and sess_id:
         from mechanics.world.locations.pathfinding import resolve_flee_destination
         curr_nid = session.get("current_node_id") or db.resolve_node_id_from_location(sess_id, raw_curr)
         prev_nid = session.get("previous_node_id") or (session.get("extra") or {}).get("previous_node_id")
@@ -342,34 +394,103 @@ def compute_pre_turn_stage(
 
     # Check movement intent across actions (only when not in active combat)
     if not is_movement and not is_in_combat(session) and actions:
+        from mechanics.world.locations.movement import is_movement_action, resolve_hybrid_sublocation_or_focal_point
+
+        # Multiplayer Co-op Local-First Priority (D15):
+        # Only execute party movement when no teammate is performing a non-movement local room action.
+        if len(actions) > 1:
+            move_reqs = 0
+            local_reqs = 0
+            for a_chk in actions:
+                a_lbl_chk = a_chk.get("label", "") if isinstance(a_chk, dict) else str(a_chk)
+                a_int_chk = str(a_chk.get("intent") or "").strip().lower() if isinstance(a_chk, dict) else ""
+                is_a_move = bool(
+                    (isinstance(a_chk, dict) and (a_chk.get("target_node_id") or a_chk.get("target_location")))
+                    or a_int_chk in ("movement", "travel", "fast_travel", "move")
+                    or is_movement_action(a_lbl_chk)
+                )
+                if is_a_move:
+                    move_reqs += 1
+                else:
+                    local_reqs += 1
+            if move_reqs > 0 and local_reqs > 0:
+                party_cohesion_deferred = True
+                session["travel_minutes_elapsed"] = 0
+                stage_directives.append(
+                    "[STAGE DIRECTION — PARTY COHESION]: Party movement deferred because a teammate is acting locally in the current room."
+                )
+
         target_nid = None
         target_loc_candidate = None
-        for a in actions:
-            if not isinstance(a, dict):
-                continue
-            if a.get("target_node_id"):
-                target_nid = a["target_node_id"]
-                break
-            if a.get("target_location"):
-                target_loc_candidate = a["target_location"]
-                break
+        move_action_lbl = ""
+        move_action_intent = ""
+        if not party_cohesion_deferred:
+            for a in actions:
+                if not isinstance(a, dict):
+                    a_lbl = str(a)
+                    if is_movement_action(a_lbl) and not move_action_lbl:
+                        move_action_lbl = a_lbl
+                    continue
+                a_lbl = str(a.get("label") or "")
+                a_int = str(a.get("intent") or "").strip().lower()
+                if a.get("target_node_id"):
+                    target_nid = a["target_node_id"]
+                    move_action_lbl = a_lbl
+                    move_action_intent = a_int or "movement"
+                    break
+                if a.get("target_location"):
+                    target_loc_candidate = a["target_location"]
+                    move_action_lbl = a_lbl
+                    move_action_intent = a_int or "movement"
+                    break
+                if (a_int in ("movement", "travel", "fast_travel", "move") or is_movement_action(a_lbl)) and not move_action_lbl:
+                    move_action_lbl = a_lbl
+                    move_action_intent = a_int
 
         if not target_nid and target_loc_candidate and sess_id:
             target_nid = db.resolve_node_id_from_location(sess_id, target_loc_candidate)
 
         curr_nid = session.get("current_node_id") or (db.resolve_node_id_from_location(sess_id, raw_curr) if sess_id else None)
 
-        # Freeform text matching (A10)
-        if not target_nid and getattr(config, "DETERMINISTIC_MOVEMENT", True) and sess_id and curr_nid:
-            from mechanics.world.locations.pathfinding import match_freeform_spatial_destination
+        # Freeform text matching (A10) — strictly gated on movement intent + word boundaries
+        if not party_cohesion_deferred and not target_nid and sess_id and curr_nid:
+            from mechanics.world.locations.pathfinding import (
+                match_freeform_spatial_destination,
+                resolve_unmatched_movement_destination,
+            )
             for a in actions:
                 lbl = a.get("label", "") if isinstance(a, dict) else str(a)
-                matched_nid = match_freeform_spatial_destination(sess_id, curr_nid, lbl)
+                a_int = str(a.get("intent") or "").strip().lower() if isinstance(a, dict) else ""
+                matched_nid = match_freeform_spatial_destination(sess_id, curr_nid, lbl, intent=a_int)
                 if matched_nid:
                     target_nid = matched_nid
                     break
 
-        if target_nid and getattr(config, "DETERMINISTIC_MOVEMENT", True) and sess_id:
+            # Open-World vs. Campus Freeform Unmatched Destination Resolution (D10)
+            if not target_nid and (target_loc_candidate or move_action_lbl):
+                cand_lbl = move_action_lbl or (actions[0].get("label", "") if isinstance(actions[0], dict) else str(actions[0]))
+                # Check micro-positioning / hybrid sub-location first so local room props aren't flagged as invalid exits
+                hybrid_probe = resolve_hybrid_sublocation_or_focal_point(sess_id, raw_curr, curr_nid, cand_lbl, scen_key=scen_key)
+                is_threshold_turn_back = any(k in cand_lbl.lower() for k in ("turn back", "step away", "step back", "return to campus"))
+                if not hybrid_probe.get("matched") and not is_threshold_turn_back:
+                    unmatched_res = resolve_unmatched_movement_destination(
+                        sess_id,
+                        curr_nid,
+                        target_location_str=target_loc_candidate or "",
+                        action_text=cand_lbl,
+                        scen_key=scen_key,
+                    )
+                    if unmatched_res.get("blocked"):
+                        blocked_invalid_exit = True
+                        session["travel_minutes_elapsed"] = 0
+                        if unmatched_res.get("directive"):
+                            stage_directives.append(unmatched_res["directive"])
+                    elif unmatched_res.get("spawned_node_id"):
+                        target_nid = unmatched_res["spawned_node_id"]
+                        if unmatched_res.get("directive"):
+                            stage_directives.append(unmatched_res["directive"])
+
+        if not party_cohesion_deferred and target_nid and sess_id:
             from mechanics.world.locations.pathfinding import find_spatial_path, evaluate_spatial_route
             if not curr_nid or target_nid == curr_nid:
                 route = [target_nid]
@@ -380,6 +501,8 @@ def compute_pre_turn_stage(
                 dest_node = db.get_world_node(sess_id, target_nid)
                 if dest_node and dest_node.get("is_hidden") == 1:
                     stage_directives.append("[STAGE DIRECTION — ACCESS BLOCKED]: Location is hidden or undiscovered.")
+                    blocked_invalid_exit = True
+                    session["travel_minutes_elapsed"] = 0
             else:
                 dest_node = db.get_world_node(sess_id, target_nid)
                 dest_primary = (dest_node.get("name") if dest_node else "") or ""
@@ -401,12 +524,16 @@ def compute_pre_turn_stage(
                 route_res = evaluate_spatial_route(
                     sess_id, route, session,
                     party=party, actions=actions,
-                    traveling_companions=traveling_companions
+                    traveling_companions=traveling_companions,
+                    persist_db=persist_db,
                 )
                 is_movement = True
                 effective_location = route_res["effective_location"]
                 effective_node_id = route_res["effective_node_id"]
                 movement_dest_str = effective_location
+                if route_res.get("focal_point"):
+                    focal_point = route_res["focal_point"]
+                    session["focal_point"] = focal_point
                 if curr_nid:
                     session["previous_node_id"] = curr_nid
                     if "extra" not in session or not isinstance(session["extra"], dict):
@@ -416,11 +543,13 @@ def compute_pre_turn_stage(
                 session["travel_minutes_elapsed"] = route_res["travel_minutes"]
                 traveling_companions = route_res["traveling_companions"]
                 stage_directives.extend(route_res["stage_directives"])
+                unlocked_edges = list(route_res.get("unlocked_edges") or [])
+                unlocked_nodes = list(route_res.get("unlocked_nodes") or [])
+                consumed_key_items = list(route_res.get("consumed_key_items") or [])
                 access_gate_info = route_res.get("access_gate") or {"gated": route_res["gated"], "barrier_node_id": route_res["barrier_node_id"]}
 
-        # Legacy movement fallback (runs if movement wasn't resolved by spatial graph,
-        # or when session does not have a spatial graph)
-        if not is_movement and (not getattr(config, "DETERMINISTIC_MOVEMENT", True) or not curr_nid):
+        # Hydrated fallback ONLY when session does not yet have a spatial graph node
+        if not party_cohesion_deferred and not blocked_invalid_exit and not is_movement and not curr_nid:
             for a in actions:
                 label = a.get("label", "") if isinstance(a, dict) else str(a)
                 action_dest = extract_movement_destination(label, sess_id, current_zone=parsed_z, scen_key=scen_key)
@@ -487,8 +616,7 @@ def compute_pre_turn_stage(
                     break
 
         # If not moving between primary facilities, evaluate hybrid sublocation or tactical focal point
-        if not is_movement and actions:
-            from mechanics.world.locations.movement import resolve_hybrid_sublocation_or_focal_point
+        if not party_cohesion_deferred and not blocked_invalid_exit and not is_movement and actions:
             act_lbl = actions[0].get("label", "") if isinstance(actions[0], dict) else str(actions[0])
             c_node = session.get("current_node_id") or (db.resolve_node_id_from_location(sess_id, raw_curr) if sess_id else None)
             hybrid_res = resolve_hybrid_sublocation_or_focal_point(sess_id, raw_curr, c_node, act_lbl, scen_key=scen_key)
@@ -506,6 +634,15 @@ def compute_pre_turn_stage(
                     traveling_companions = t_comps or []
                     left_behind_patrons = l_patrons or []
                     stage_directives.append(f"[STAGE DIRECTION — ARCHITECTURAL EXPLORATION]: Entered inner chamber {effective_location}.")
+
+    # Advance staged clock AFTER Phase 4 Spatial/Dijkstra so schedule checks use post-travel clock (D3)
+    if callable(stage_clock_cb):
+        stage_clock_cb(
+            is_movement=is_movement,
+            effective_location=effective_location,
+            travel_minutes=session.get("travel_minutes_elapsed"),
+            blocked_invalid_exit=blocked_invalid_exit,
+        )
 
     # Compute dialogue intent
     from game_engine.turn.dialogue import _compute_dialogue_intent
@@ -535,41 +672,57 @@ def compute_pre_turn_stage(
         if not ('effective_node_id' in locals() and effective_node_id):
             effective_node_id = db.resolve_node_id_from_location(sess_id, effective_location) if (sess_id and effective_location) else None
 
-        if sess_id and effective_node_id and not access_gate_info.get("gated") and not getattr(config, "DETERMINISTIC_MOVEMENT", True):
-            try:
-                from mechanics.world.locations.access_gate import evaluate_node_access_gate
-                access_gate_info = evaluate_node_access_gate(
-                    sess_id, effective_node_id, session,
-                    actions=actions, party=party, companions=traveling_companions
-                )
-                if access_gate_info.get("gated"):
-                    if access_gate_info.get("halt_location_override"):
-                        effective_location = access_gate_info["halt_location_override"]
-                    else:
-                        sep = "➔" if "➔" in effective_location else "->"
-                        parts = [p.strip() for p in effective_location.split(sep) if p.strip()]
-                        pz = parts[0] if len(parts) >= 1 else "Main Academy Campus"
-                        pp = parts[1] if len(parts) >= 2 else (parts[0] if parts else "Main Area")
-                        effective_location = f"{pz} ➔ {pp} ➔ Outside the Locked Entrance"
-                if access_gate_info.get("patrol_npc"):
-                    _add_stage_npc(access_gate_info["patrol_npc"])
-                    patrol_nm = access_gate_info["patrol_npc"].get("name")
-                    if patrol_nm and patrol_nm not in new_partners:
-                        new_partners.append(patrol_nm)
-            except Exception:
-                access_gate_info = {"gated": False}
+        if access_gate_info.get("patrol_npc"):
+            _add_stage_npc(access_gate_info["patrol_npc"])
+            patrol_nm = access_gate_info["patrol_npc"].get("name")
+            if patrol_nm and patrol_nm not in new_partners:
+                new_partners.append(patrol_nm)
 
         # 2. Check for active/pending phone appointments / commitments at arrival destination
         if not access_gate_info.get("gated"):
             _check_rendezvous_for_stage(effective_location, effective_node_id)
 
-        # 3. Add target resident or canonical facility occupants stationed there
-        if target_resident_name and not access_gate_info.get("gated"):
-            _add_stage_npc({"name": target_resident_name, "role": "Resident", "status_effects": ["Present"]})
+        # 3. Add target resident or schedule-verified facility occupants stationed there
+        curr_stage_min = int(session.get("current_minute", 480) or 480)
+        curr_stage_day = int(session.get("current_day", 1) or 1)
+        scheduled_residents = []
+        if not access_gate_info.get("gated") and sess_id and effective_location:
+            try:
+                from mechanics.world.mobility import is_campus_scenario
+                if is_campus_scenario(scen_key):
+                    from mechanics.social.school_roster import get_facility_ambient_characters
+                    scheduled_residents = get_facility_ambient_characters(
+                        sess_id,
+                        effective_location,
+                        limit=3,
+                        current_day=curr_stage_day,
+                        current_minute=curr_stage_min,
+                        active_npc_names=seen_stage_names,
+                    )
+                elif scenario_data.is_anomalous_incursions_scenario(scen_key):
+                    from mechanics.social.agent_roster import get_anomalous_facility_ambient_agents
+                    scheduled_residents = get_anomalous_facility_ambient_agents(
+                        sess_id,
+                        effective_location,
+                        limit=3,
+                        current_day=curr_stage_day,
+                        current_minute=curr_stage_min,
+                        active_npc_names=seen_stage_names,
+                    )
+                elif 420 <= (curr_stage_min % 1440) < 1200:
+                    scheduled_residents = list(facility_residents or [])
+            except Exception:
+                scheduled_residents = list(facility_residents or []) if (420 <= (curr_stage_min % 1440) < 1200) else []
 
-        if not access_gate_info.get("gated") and facility_residents:
+        if target_resident_name and not access_gate_info.get("gated"):
+            sched_res_names = {str(r.get("name") or "").strip().lower() for r in scheduled_residents}
+            # Never auto-stage a campus/HQ resident who is off-duty at night unless verified by schedule
+            if target_resident_name.strip().lower() in sched_res_names or (420 <= (curr_stage_min % 1440) < 1200):
+                _add_stage_npc({"name": target_resident_name, "role": "Resident", "status_effects": ["Present"]})
+
+        if not access_gate_info.get("gated") and scheduled_residents:
             fac_added = 0
-            for fr in facility_residents:
+            for fr in scheduled_residents:
                 if len(stage_npcs) >= 4 or fac_added >= 3:
                     break
                 fr_nm = fr.get("name")
@@ -585,7 +738,55 @@ def compute_pre_turn_stage(
                 })
                 fac_added += 1
 
-        # 4. Add scheduled NPCs at arrival destination (capped at 2 max, Ring 2/3 bystanders)
+        # 4. Add explicitly relocated schedule-departed NPCs + scheduled NPCs at arrival destination
+        if effective_location and not access_gate_info.get("gated"):
+            try:
+                from mechanics.world.schedules import get_time_block_key
+                from mechanics.world.waypoints import check_location_matches_waypoint
+                curr_min_rel = int(session.get("current_minute", 480) or 480)
+                curr_day_rel = int(session.get("current_day", 1) or 1)
+                curr_blk_rel = get_time_block_key(curr_min_rel)
+                rel_overrides = session.get("npc_relocated_overrides")
+                if not isinstance(rel_overrides, dict) and isinstance(session.get("extra"), dict):
+                    rel_overrides = session["extra"].get("npc_relocated_overrides")
+                if isinstance(rel_overrides, dict):
+                    for _, r_rec in rel_overrides.items():
+                        if not isinstance(r_rec, dict):
+                            continue
+                        r_nm = str(r_rec.get("name") or "").strip()
+                        r_loc = str(r_rec.get("location") or "").strip()
+                        r_nid = str(r_rec.get("node_id") or "").strip()
+                        if not r_nm or r_nm.lower() in seen_stage_names:
+                            continue
+                        if int(r_rec.get("day") or curr_day_rel) != curr_day_rel:
+                            continue
+                        dep_min = int(r_rec.get("minute") if r_rec.get("minute") is not None else curr_min_rel)
+                        same_blk = (not r_rec.get("block")) or (str(r_rec.get("block")) == curr_blk_rel)
+                        if not same_blk and not (0 <= (curr_min_rel - dep_min) <= 180):
+                            continue
+                        rel_match = False
+                        if r_nid and effective_node_id and sess_id:
+                            rel_match = (
+                                r_nid == effective_node_id
+                                or db.is_descendant_of(sess_id, effective_node_id, r_nid)
+                                or db.is_descendant_of(sess_id, r_nid, effective_node_id)
+                            )
+                        if not rel_match and r_loc:
+                            rel_match = check_location_matches_waypoint(
+                                effective_location, r_loc, session_id=sess_id, current_node_id=effective_node_id
+                            ) or (r_loc.split("➔")[-1].strip().lower() in effective_location.lower())
+                        if rel_match:
+                            _add_stage_npc({
+                                "name": r_nm,
+                                "role": "Resident",
+                                "status_effects": ["Present"],
+                                "stage_role": "room_bystander",
+                                "attention_ring": "ring_3_bystander",
+                                "scheduled_station": True,
+                            })
+            except Exception:
+                pass
+
         if len(stage_npcs) < 4 and sess_id and effective_location and not access_gate_info.get("gated"):
             try:
                 from mechanics.world.schedules import get_npc_scheduled_node_id, get_npc_scheduled_location
@@ -763,11 +964,16 @@ def compute_pre_turn_stage(
                             focal_point = None
                         else:
                             # Unlocked! Clear threshold sub-location and move inside!
-                            sep = "➔" if "➔" in curr_loc else "->"
-                            parts = [p.strip() for p in curr_loc.split(sep) if p.strip()]
-                            pz = parts[0] if len(parts) >= 1 else "Main Academy Campus"
-                            pp = parts[1] if len(parts) >= 2 else (parts[0] if parts else "Main Area")
-                            effective_location = f"{pz} ➔ {pp} ➔ Main Area"
+                            from mechanics.world.locations.pathfinding import format_node_hierarchy
+                            node_loc = format_node_hierarchy(sess_id, curr_node_id) if curr_node_id else ""
+                            if node_loc and "➔" in node_loc:
+                                effective_location = node_loc
+                            else:
+                                sep = "➔" if "➔" in curr_loc else "->"
+                                parts = [p.strip() for p in curr_loc.split(sep) if p.strip()]
+                                pz = parts[0] if len(parts) >= 1 else "Main Academy Campus"
+                                pp = parts[1] if len(parts) >= 2 else (parts[0] if parts else "Main Area")
+                                effective_location = f"{pz} ➔ {pp} ➔ Main Area"
                             focal_point = None
                     else:
                         if access_gate_info.get("halt_location_override"):
@@ -795,21 +1001,24 @@ def compute_pre_turn_stage(
         if isinstance(c, dict) and c.get("name")
     }
 
+    import namegen
+    contact_peer_names = list(contacts_by_low.keys())
+    contact_tokens_map = {
+        k: namegen.get_unique_person_tokens(k, peer_names=contact_peer_names)
+        for k in contact_peer_names
+    }
     for npc in stage_npcs:
         nm = _get_npc_name(npc)
         if not nm:
             continue
         nm_low = nm.strip().lower()
-        import namegen
         c_match = contacts_by_low.get(nm_low)
-        if not c_match and nm_low.split():
-            first_tok = nm_low.split()[0]
-            given_tok = namegen.extract_first_and_last_name(nm)[0].lower().strip()
-            for tok in {first_tok, given_tok}:
-                if len(tok) >= 3 and tok not in namegen.NAME_PARTICLES_AND_HONORIFICS:
-                    c_match = next((c for k, c in contacts_by_low.items() if tok in {k.split()[0], namegen.extract_first_and_last_name(k)[0].lower().strip()}), None)
-                    if c_match:
-                        break
+        if not c_match:
+            npc_toks = namegen.get_unique_person_tokens(nm, peer_names=stage_npcs) - {nm_low}
+            if npc_toks:
+                matches = [c for k, c in contacts_by_low.items() if npc_toks & contact_tokens_map.get(k, set())]
+                if len(matches) == 1:
+                    c_match = matches[0]
         if c_match:
             for fld in (
                 "relationship_score", "track", "relations", "unlocked_traits",
@@ -1002,6 +1211,11 @@ def compute_pre_turn_stage(
         "schedule_departed_npcs": schedule_departed_npcs,
         "spawned_role_npcs": spawned_role_npcs,
         "stage_directives": stage_directives,
+        "unlocked_edges": unlocked_edges,
+        "unlocked_nodes": unlocked_nodes,
+        "consumed_key_items": consumed_key_items,
+        "blocked_invalid_exit": blocked_invalid_exit,
+        "party_cohesion_deferred": party_cohesion_deferred,
     }
     if isinstance(session, dict):
         session["pre_turn_stage_npcs"] = list(stage_npcs)
@@ -1184,12 +1398,13 @@ def resolve_post_turn_stage_delta(
     contacts: list = None,
     scenario_key: str = "",
     excluded_names: set = None,
+    skip_prose_departures: bool = False,
 ) -> list:
     """
     Resolves the post-turn physical stage roster by applying stateful deltas:
     1. Uses session["pre_turn_stage_npcs"] as the baseline roster when not location_changed.
        If pre_turn_stage_npcs is absent or empty, falls back to raw_npcs_present.
-    2. Removes NPCs with verified narrative departures (extract_departed_npcs_from_narrative).
+    2. Removes NPCs in excluded_names (e.g. departed, left behind, or remote).
     3. Validates any newly reported NPC in raw_npcs_present not in baseline:
        - Rejects mentions only in absence/memory (is_mentioned_only_in_absence_or_memory)
        - Rejects stationary role-locked NPCs belonging to another room (is_character_mobile == False)
@@ -1198,51 +1413,7 @@ def resolve_post_turn_stage_delta(
     actions = actions or []
     scenario_key = scenario_key or (session.get("scenario", "fantasy") if session else "fantasy")
 
-    # Normalize excluded names (e.g. left behind, remote, departed)
-    clean_excluded = set()
-    for ex in (excluded_names or set()):
-        if ex:
-            ex_s = str(ex).strip().lower()
-            if ex_s:
-                clean_excluded.add(ex_s)
-                ex_f = (ex_s.split() or [""])[0]
-                if len(ex_f) >= 3:
-                    clean_excluded.add(ex_f)
-
-    # Collect nearby enemies to prevent hostile enemies from being staged as social bystanders
-    enemy_names = set()
-    if session and session.get("nearby_enemies"):
-        for e in session["nearby_enemies"]:
-            if isinstance(e, dict):
-                en = _get_npc_name(e).strip().lower()
-                if en:
-                    enemy_names.add(en)
-                    ef = (en.split() or [""])[0]
-                    if len(ef) >= 3:
-                        enemy_names.add(ef)
-            elif isinstance(e, str) and e.strip():
-                en = e.strip().lower()
-                enemy_names.add(en)
-                ef = (en.split() or [""])[0]
-                if len(ef) >= 3:
-                    enemy_names.add(ef)
-
-    # Collect player character names to prevent players being treated as staged NPCs
-    player_names = set()
-    if session and session.get("turn_order"):
-        for uid in session["turn_order"]:
-            try:
-                with db.get_conn() as conn:
-                    c_rows = conn.execute("SELECT name FROM characters WHERE user_id = ?", (uid,)).fetchall()
-                    for cr in c_rows:
-                        if cr["name"]:
-                            pn = str(cr["name"]).strip().lower()
-                            player_names.add(pn)
-                            pf = (pn.split() or [""])[0]
-                            if len(pf) >= 3:
-                                player_names.add(pf)
-            except Exception:
-                pass
+    import namegen
 
     # Baseline selection
     # 1. Baseline determination
@@ -1256,7 +1427,47 @@ def resolve_post_turn_stage_delta(
         # Location changed: raw_npcs_present represents the arrival stage roster
         baseline = [dict(n) if isinstance(n, dict) else {"name": str(n)} for n in (raw_npcs_present or [])]
 
-    from game_engine.npcs.presence import extract_departed_npcs_from_narrative, is_mentioned_only_in_absence_or_memory
+    all_stage_peer_names = [
+        _get_npc_name(x) for x in list(baseline) + list(raw_npcs_present or []) if _get_npc_name(x)
+    ]
+
+    # Normalize excluded names (e.g. left behind, remote, departed)
+    clean_excluded = set()
+    for ex in (excluded_names or set()):
+        if ex:
+            ex_s = str(ex).strip().lower()
+            if ex_s:
+                clean_excluded.add(ex_s)
+                if " " in ex_s:
+                    clean_excluded |= namegen.get_unique_person_tokens(ex_s, peer_names=all_stage_peer_names)
+
+    # Collect nearby enemies to prevent hostile enemies from being staged as social bystanders
+    enemy_names = set()
+    if session and session.get("nearby_enemies"):
+        for e in session["nearby_enemies"]:
+            en = (_get_npc_name(e) if isinstance(e, dict) else (e if isinstance(e, str) else "")).strip().lower()
+            if en:
+                enemy_names.add(en)
+                enemy_names |= namegen.get_unique_person_tokens(en, peer_names=all_stage_peer_names)
+
+    # Collect player character names to prevent players being treated as staged NPCs
+    player_names = set()
+    if session and session.get("turn_order"):
+        for uid in session["turn_order"]:
+            try:
+                with db.get_conn() as conn:
+                    c_rows = conn.execute("SELECT name FROM characters WHERE user_id = ?", (uid,)).fetchall()
+                    for cr in c_rows:
+                        if cr["name"]:
+                            pn = str(cr["name"]).strip().lower()
+                            player_names.add(pn)
+                            p_given = namegen.get_given_name(cr["name"]).strip().lower()
+                            if len(p_given) >= 3 and p_given not in namegen.NAME_PARTICLES_AND_HONORIFICS:
+                                player_names.add(p_given)
+            except Exception:
+                pass
+
+    from game_engine.npcs.presence import is_mentioned_only_in_absence_or_memory
     from game_engine.npcs.dialogue_tracking import is_npc_invited_in_action
     from mechanics.world.mobility import (
         is_character_mobile,
@@ -1265,21 +1476,37 @@ def resolve_post_turn_stage_delta(
         is_rendezvous_target,
     )
 
-    # 2. Extract Departures
+    # 2. Structured Departures (dismisses_npc action tag; cast_events departures applied by CastPlanner)
+    from game_engine.matching import matches_keyword_boundary
     departed_names = set()
-    if baseline and narrative:
-        narr_departed = extract_departed_npcs_from_narrative(narrative, baseline, actions=actions)
-        for d in narr_departed:
-            d_nm = str(d).strip().lower()
+    raw_present_low = {_get_npc_name(rn).strip().lower() for rn in (raw_npcs_present or []) if _get_npc_name(rn)}
+    for a_dep in (actions or []):
+        if isinstance(a_dep, dict):
+            raw_d_val = a_dep.get("dismisses_npc")
+            d_nm = ""
+            if isinstance(raw_d_val, str) and raw_d_val.strip() and raw_d_val.strip().lower() not in ("true", "false", "0", "1"):
+                d_nm = raw_d_val.strip().lower()
+            elif raw_d_val and a_dep.get("target_npc"):
+                d_nm = str(a_dep["target_npc"]).strip().lower()
+            else:
+                a_lbl_low = str(a_dep.get("label") or "").strip().lower()
+                if a_lbl_low and any(kw in a_lbl_low for kw in ("goodbye", "farewell", "head home", "go home", "dismiss", "send away")):
+                    for b_n in baseline:
+                        b_nm = _get_npc_name(b_n).strip().lower()
+                        b_toks = namegen.get_unique_person_tokens(b_nm, peer_names=baseline)
+                        if b_nm and b_nm not in raw_present_low and any(
+                            matches_keyword_boundary(a_lbl_low, tok) for tok in b_toks if len(tok) >= 2
+                        ):
+                            d_nm = b_nm
+                            break
             if d_nm:
                 departed_names.add(d_nm)
-                d_first = d_nm.split()[0]
-                if len(d_first) >= 3:
-                    departed_names.add(d_first)
+                departed_names |= namegen.get_unique_person_tokens(d_nm, peer_names=all_stage_peer_names)
 
     # Retain non-departed baseline NPCs
     retained_stage = []
     retained_names_lower = set()
+    retained_token_owner: dict[str, dict] = {}
     for n in baseline:
         n_name = _get_npc_name(n)
         if not n_name:
@@ -1287,17 +1514,18 @@ def resolve_post_turn_stage_delta(
         n_low = n_name.strip().lower()
         if n_low in player_names:
             continue
-        n_first = n_low.split()[0] if n_low else ""
-        if n_low in departed_names or (n_first and n_first in departed_names):
+        n_toks = namegen.get_unique_person_tokens(n_name, peer_names=all_stage_peer_names)
+        if n_low in departed_names or bool(n_toks & departed_names):
             continue
-        if n_low in enemy_names or (n_first and n_first in enemy_names):
+        if n_low in enemy_names or bool(n_toks & enemy_names):
             continue
-        if n_low in clean_excluded or (n_first and n_first in clean_excluded):
+        if n_low in clean_excluded or bool(n_toks & clean_excluded):
             continue
         retained_stage.append(n)
         retained_names_lower.add(n_low)
-        if len(n_first) >= 3:
-            retained_names_lower.add(n_first)
+        for tok in n_toks:
+            retained_names_lower.add(tok)
+            retained_token_owner.setdefault(tok, n)
 
     # 3. Inspect newcomers in raw_npcs_present (for walk-ins when not location_changed)
     if contacts is None and session and session.get("id"):
@@ -1315,18 +1543,21 @@ def resolve_post_turn_stage_delta(
         c_low = cand_name.strip().lower()
         if c_low in player_names:
             continue
-        c_first = c_low.split()[0] if c_low else ""
-        if c_low in enemy_names or (c_first and c_first in enemy_names):
+        c_toks = namegen.get_unique_person_tokens(cand_name, peer_names=all_stage_peer_names)
+        if c_low in enemy_names or bool(c_toks & enemy_names):
             continue
-        if c_low in clean_excluded or (c_first and c_first in clean_excluded):
+        if c_low in clean_excluded or bool(c_toks & clean_excluded):
             continue
 
         # If already retained in stage, merge attributes if cand has extra info
-        if c_low in retained_names_lower or (c_first and c_first in retained_names_lower):
-            existing = next((
-                n for n in retained_stage
-                if _get_npc_name(n).strip().lower() == c_low or (_get_npc_name(n).strip().lower().split() or [""])[0] == c_first
-            ), None)
+        matched_retained_toks = ({c_low} | c_toks) & retained_names_lower
+        if matched_retained_toks:
+            existing = retained_token_owner.get(c_low)
+            if existing is None:
+                for m_tok in matched_retained_toks:
+                    if m_tok in retained_token_owner:
+                        existing = retained_token_owner[m_tok]
+                        break
             if existing and isinstance(existing, dict) and isinstance(cand, dict):
                 for k, v in cand.items():
                     if v not in (None, "", [], {}) and existing.get(k) in (None, "", [], {}):
@@ -1334,7 +1565,7 @@ def resolve_post_turn_stage_delta(
             continue
 
         # If departed this turn, do not re-add
-        if c_low in departed_names or (c_first and c_first in departed_names):
+        if c_low in departed_names or bool(c_toks & departed_names):
             continue
 
         # Check absence/memory
@@ -1343,8 +1574,14 @@ def resolve_post_turn_stage_delta(
 
         # Check mobility & role locks
         matched_contact = contacts_map.get(c_low)
-        if not matched_contact and len(c_first) >= 3:
-            matched_contact = next((c for k, c in contacts_map.items() if (k.split() or [""])[0] == c_first), None)
+        if not matched_contact and c_toks:
+            contact_keys_list = list(contacts_map.keys())
+            c_matches = [
+                c for k, c in contacts_map.items()
+                if c_toks & namegen.get_unique_person_tokens(k, peer_names=contact_keys_list, min_len=2)
+            ]
+            if len(c_matches) == 1:
+                matched_contact = c_matches[0]
 
         if matched_contact:
             if not is_character_mobile(cand_name, matched_contact, scen_key=scenario_key):
@@ -1367,8 +1604,9 @@ def resolve_post_turn_stage_delta(
             )
         retained_stage.append(cand_dict)
         retained_names_lower.add(c_low)
-        if len(c_first) >= 3:
-            retained_names_lower.add(c_first)
+        for tok in c_toks:
+            retained_names_lower.add(tok)
+            retained_token_owner.setdefault(tok, cand_dict)
 
     # 4. Ensure all retained NPCs have micro_blocking initialized
     for n in retained_stage:

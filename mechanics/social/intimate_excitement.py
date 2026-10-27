@@ -1550,8 +1550,7 @@ def compute_excitement_step(
     any_act_genital_or_cont = any(act_has_genital_or_cont.values())
 
     partner_classifications: Dict[str, Dict[str, Any]] = {}
-    from config import DETERMINISTIC_INTIMACY
-    if DETERMINISTIC_INTIMACY and sub_intent:
+    if sub_intent:
         _ACT_MAP = {
             "intercourse": "penetrative",
             "oral_give": "oral_give",
@@ -1559,8 +1558,10 @@ def compute_excitement_step(
             "oral_mutual": "oral_mutual",
             "manual_give": "manual_give",
             "manual_receive": "manual_receive",
+            "manual_mutual": "manual_give",
             "anal_give": "anal_give",
             "anal_receive": "anal_receive",
+            "anal_mutual": "anal_give",
             "kiss": "foreplay_nongenital",
             "foreplay": "foreplay_nongenital",
             "aftercare": "none",
@@ -1572,13 +1573,51 @@ def compute_excitement_step(
         for n_k, n_d, pc in partner_actor_tuples:
             is_targeted = any(t in n_k.lower() or n_k.lower() in t for t in target_tokens) if target_tokens else True
             if is_targeted:
+                appr = pc.get("appearance", {}) if isinstance(pc, dict) else {}
+                turn_offs_val = appr.get("turn_offs") or ""
+                turn_offs_str = (
+                    ", ".join(str(x) for x in turn_offs_val).lower()
+                    if isinstance(turn_offs_val, (list, tuple))
+                    else str(turn_offs_val).lower()
+                )
+                turn_off_hit = False
+                if turn_offs_str and turn_offs_str not in ("none", "unknown", ""):
+                    from mechanics.social.persona.intimacy.logic import is_turn_off_triggered
+                    likes_val = appr.get("act_likes") or appr.get("desires_and_kinks") or ""
+                    likes_str = (
+                        ", ".join(str(x) for x in likes_val).lower()
+                        if isinstance(likes_val, (list, tuple))
+                        else str(likes_val).lower()
+                    )
+                    act_clean = (action_str or "").lower()
+                    if ("anal" in sub_intent and ("anal" in turn_offs_str or "backdoor" in turn_offs_str)) or is_turn_off_triggered(act_clean, turn_offs_str, likes_str):
+                        turn_off_hit = True
+
+                spot_matched = False
+                matched_spot = None
+                if not turn_off_hit and (sub_intent != "none"):
+                    spots = appr.get("sensitive_spots") or appr.get("desires_and_kinks") or []
+                    if isinstance(spots, str):
+                        spots = [s.strip() for s in spots.split(",") if s.strip()]
+                    act_spot_text = (action_str or "").lower()
+                    stop_words = {"physical", "action", "base", "line", "slow", "firm", "soft", "with", "from"}
+                    for s in spots:
+                        s_clean = re.sub(r'\([^)]*\)', '', str(s).lower()).strip()
+                        if not s_clean:
+                            continue
+                        core_words = [w for w in re.split(r'[\s/&]+', s_clean) if len(w) >= 4 and w not in stop_words]
+                        if s_clean in act_spot_text or any(w in act_spot_text for w in core_words):
+                            spot_matched = True
+                            matched_spot = s
+                            break
+
                 p_cl = {
                     "act_type": mapped_type,
-                    "player_stimulated": sub_intent in ("intercourse", "oral_receive", "oral_mutual", "manual_receive", "anal_receive", "kiss", "foreplay"),
-                    "partner_stimulated": sub_intent in ("intercourse", "oral_give", "oral_mutual", "manual_give", "anal_give", "kiss", "foreplay"),
-                    "sensitive_spot_matched": False,
-                    "matched_spot": None,
-                    "turn_off_triggered": False,
+                    "player_stimulated": sub_intent in ("intercourse", "oral_receive", "oral_mutual", "manual_receive", "anal_receive"),
+                    "partner_stimulated": (not turn_off_hit) and (sub_intent in ("intercourse", "oral_give", "oral_mutual", "manual_give", "anal_give")),
+                    "sensitive_spot_matched": spot_matched,
+                    "matched_spot": matched_spot,
+                    "turn_off_triggered": turn_off_hit,
                 }
             else:
                 p_cl = {
@@ -1672,6 +1711,15 @@ def compute_excitement_step(
     else:
         player_in_refr = bool(in_refr and (player_already_climaxed or "ongoing for player" not in curr_ic_low))
     male_spent = (not is_female_player) and (player_already_climaxed or player_in_refr)
+    refractory_downgraded = bool(
+        male_spent and (
+            sub_intent in ("intercourse", "anal_give")
+            or act_type in ("penetrative", "anal_give")
+        )
+    )
+    effective_sub_intent = "foreplay" if refractory_downgraded else (sub_intent or "")
+    if refractory_downgraded:
+        act_type = "foreplay_nongenital"
 
     player_stimulated = any(cl["player_stimulated"] for cl in partner_classifications.values())
     any_partner_stimulated_now = any(cl.get("partner_stimulated") for cl in partner_classifications.values())
@@ -1733,7 +1781,7 @@ def compute_excitement_step(
         elif cl["partner_stimulated"]:
             n_d["idle_turns"] = 0
             n_d["aroused_turns"] = 3
-            base_n = 18 if act_type in ("penetrative", "anal_give", "anal_receive", "oral_give", "oral_mutual") else 14
+            base_n = 14 if refractory_downgraded else (18 if act_type in ("penetrative", "anal_give", "anal_receive", "oral_give", "oral_mutual") else 14)
             n_delta = calculate_excitement_delta(
                 base_n,
                 n_d.get("endurance", 10),
@@ -1934,7 +1982,9 @@ def compute_excitement_step(
             curr_day = (session or {}).get("current_day", 1)
             curr_min = (session or {}).get("current_minute", 480)
             target_abs = (curr_day * 1440) + curr_min + cooldown_dur
+            curr_turn = int((session or {}).get("turn_count") or len((session or {}).get("history") or []) or 0)
             curr_excitement["refractory_until_minute"] = target_abs
+            curr_excitement["refractory_until_turn"] = curr_turn + 3
             curr_excitement["cooldown_notified"] = False
             curr_excitement["player_in_refractory"] = True
     elif p_delta < 0:
@@ -2050,6 +2100,8 @@ def compute_excitement_step(
         "player_stimulated": bool(player_stimulated),
         "is_sensual_action": bool(is_sensual_action),
         "any_partner_stimulated": bool(any(cl.get("partner_stimulated") for cl in partner_classifications.values())),
+        "refractory_downgraded": bool(refractory_downgraded),
+        "effective_sub_intent": effective_sub_intent,
     }
 
 
@@ -2142,7 +2194,8 @@ def check_and_resolve_refractory_clock(
     """
     excitement = physical_state.get("excitement", {}) if isinstance(physical_state, dict) else {}
     target_abs = excitement.get("refractory_until_minute") or (physical_state.get("refractory_until_minute") if isinstance(physical_state, dict) else None)
-    if not target_abs:
+    target_turn = excitement.get("refractory_until_turn") or (physical_state.get("refractory_until_turn") if isinstance(physical_state, dict) else None)
+    if not target_abs and not target_turn:
         return False, None
 
     if excitement.get("cooldown_notified"):
@@ -2151,14 +2204,23 @@ def check_and_resolve_refractory_clock(
     curr_day = session.get("current_day", 1)
     curr_min = session.get("current_minute", 480)
     current_abs = (curr_day * 1440) + curr_min
+    curr_turn = int(session.get("turn_count") or len(session.get("history") or []) or 0)
 
-    if current_abs >= target_abs:
+    is_elapsed = False
+    if target_abs and current_abs >= int(target_abs):
+        is_elapsed = True
+    elif not target_abs and target_turn and curr_turn >= int(target_turn):
+        is_elapsed = True
+
+    if is_elapsed:
         excitement["cooldown_notified"] = True
         excitement["refractory_until_minute"] = None
+        excitement["refractory_until_turn"] = 0
         excitement["player_in_refractory"] = False
         excitement["refractory_partners"] = {}
         if isinstance(physical_state, dict):
             physical_state["refractory_until_minute"] = None
+            physical_state["refractory_until_turn"] = 0
         excitement["premature_finish"] = False
         excitement["partner_demanded"] = False
         excitement["unsatisfied_partner"] = ""
@@ -2203,15 +2265,18 @@ def is_in_refractory_cooldown(
     """
     excitement = physical_state.get("excitement", {}) if isinstance(physical_state, dict) else {}
     target_abs = excitement.get("refractory_until_minute") or (physical_state.get("refractory_until_minute") if isinstance(physical_state, dict) else None)
-    if not target_abs:
-        return False, 0
+    if target_abs:
+        curr_day = session.get("current_day", 1)
+        curr_min = session.get("current_minute", 480)
+        current_abs = (curr_day * 1440) + curr_min
+        if current_abs < target_abs:
+            return True, target_abs - current_abs
 
-    curr_day = session.get("current_day", 1)
-    curr_min = session.get("current_minute", 480)
-    current_abs = (curr_day * 1440) + curr_min
-
-    if current_abs < target_abs:
-        return True, target_abs - current_abs
+    target_turn = excitement.get("refractory_until_turn") or (physical_state.get("refractory_until_turn") if isinstance(physical_state, dict) else None)
+    if target_turn:
+        curr_turn = int(session.get("turn_count") or len(session.get("history") or []) or 0)
+        if curr_turn < int(target_turn):
+            return True, max(1, (int(target_turn) - curr_turn) * 10)
 
     return False, 0
 
@@ -2649,7 +2714,11 @@ def build_intimate_choice_blueprints(
             c["ends_dialogue"] = False
             if any(w in lbl_low for w in ("anal", "pegging", "rear", "anus")):
                 c["sub_intent"] = "anal_receive" if any(w in lbl_low for w in ("pegs", "takes you", "into your rear")) else "anal_give"
-            elif any(w in lbl_low for w in ("thrust", "drive deeper", "penetrat", "intercourse", "ride his", "ride her", "deeper angle")):
+            elif any(w in lbl_low for w in (
+                "thrust", "drive deeper", "penetrat", "intercourse", "ride his", "ride her",
+                "deeper angle", "deeper intimacy", "more intimate position", "escalate from manual",
+                "shift positions", "rising passion", "drive toward your own release"
+            )):
                 c["sub_intent"] = "intercourse"
             elif any(w in lbl_low for w in ("oral", "tongue", "lick", "suck", "mouth")):
                 if act_nm == "oral_receive" or "mouth around" in lbl_low or "pleasures you with" in lbl_low:
@@ -3318,15 +3387,37 @@ def resolve_pre_turn_intimacy_and_clothing(
     if not isinstance(player_char, dict):
         player_char = {}
 
-    player_name = str(player_char.get("name") or "Player").strip()
-
+    # Select active intimate/redress/disengage action across all co-op actions (D15)
+    selected_act_dict: Dict[str, Any] = {}
     action_str = ""
-    if actions:
+    _INTIMATE_SUB_SET = {
+        "intercourse", "oral_give", "oral_receive", "oral_mutual",
+        "manual_give", "manual_receive", "manual_mutual",
+        "anal_give", "anal_receive", "anal_mutual",
+        "kiss", "foreplay", "aftercare", "redress",
+    }
+    for _cand_a in (actions or []):
+        if isinstance(_cand_a, dict):
+            _cr = _cand_a.get("resolved_intent") if isinstance(_cand_a.get("resolved_intent"), dict) else {}
+            _cs = str(_cr.get("sub_intent") or _cand_a.get("sub_intent") or "").lower().strip()
+            _ci = str(_cr.get("intent") or _cand_a.get("intent") or "").lower().strip()
+            if _cs in _INTIMATE_SUB_SET or _ci in ("intimate_act", "dialogue_exit") or _cand_a.get("ends_dialogue") or _cr.get("ends_dialogue"):
+                selected_act_dict = _cand_a
+                action_str = str(_cand_a.get("label") or _cand_a.get("action") or "")
+                if isinstance(_cand_a.get("char"), dict) and _cand_a["char"].get("name"):
+                    player_char = _cand_a["char"]
+                break
+    if not selected_act_dict and actions:
         first_act = actions[0]
         if isinstance(first_act, dict):
+            selected_act_dict = first_act
             action_str = str(first_act.get("label") or first_act.get("action") or "")
+            if isinstance(first_act.get("char"), dict) and first_act["char"].get("name"):
+                player_char = first_act["char"]
         else:
             action_str = str(first_act or "")
+
+    player_name = str(player_char.get("name") or "Player").strip()
 
     session_id = session.get("id") or 0
     physical_state = session.get("_physical_state") or session.get("physical_state")
@@ -3342,11 +3433,14 @@ def resolve_pre_turn_intimacy_and_clothing(
     session["_physical_state"] = physical_state
 
     is_check_success = True
-    if actions and isinstance(actions[0], dict) and actions[0].get("check"):
-        chk = actions[0]["check"]
+    if selected_act_dict and selected_act_dict.get("check"):
+        chk = selected_act_dict["check"]
         tier = getattr(chk, "tier", None) if not isinstance(chk, dict) else chk.get("tier")
-        if tier in ("fail", "crit_fail"):
+        succeeded_flag = getattr(chk, "succeeded", None) if not isinstance(chk, dict) else chk.get("succeeded")
+        if tier in ("fail", "crit_fail") or succeeded_flag is False:
             is_check_success = False
+    elif selected_act_dict and selected_act_dict.get("success") is False:
+        is_check_success = False
 
     from mechanics.world.mobility import get_session_dialogue_partners
     sess_dps = list(get_session_dialogue_partners(session))
@@ -3372,14 +3466,44 @@ def resolve_pre_turn_intimacy_and_clothing(
 
     primary_contact = partner_contacts[0] if partner_contacts else {"name": partner_name}
 
-    from config import DETERMINISTIC_INTIMACY
+    r_intent = selected_act_dict.get("resolved_intent") if isinstance(selected_act_dict.get("resolved_intent"), dict) else {}
+    sub_intent = str(r_intent.get("sub_intent") or selected_act_dict.get("sub_intent") or "").lower().strip()
+    target_npc = str(r_intent.get("target_npc") or selected_act_dict.get("target_npc") or "").strip()
+    orig_sub_intent = sub_intent
 
-    first_act_dict = actions[0] if (actions and isinstance(actions[0], dict)) else {}
-    r_intent = first_act_dict.get("resolved_intent") if isinstance(first_act_dict.get("resolved_intent"), dict) else {}
-    sub_intent = str(r_intent.get("sub_intent") or first_act_dict.get("sub_intent") or "").lower().strip()
-    target_npc = str(r_intent.get("target_npc") or first_act_dict.get("target_npc") or "").strip()
+    directives: List[str] = []
 
-    if DETERMINISTIC_INTIMACY and sub_intent:
+    # Male Refractory Soft-Gate: penetrative intercourse/anal_give during active refractory downgrades to foreplay
+    p_gender_low = str(player_char.get("gender") or player_char.get("sex") or "male").lower()
+    is_female_pl = "female" in p_gender_low or "woman" in p_gender_low or "girl" in p_gender_low
+    in_refr_now, _ = is_in_refractory_cooldown(session or {}, physical_state)
+    excit_now = physical_state.get("excitement") if isinstance(physical_state.get("excitement"), dict) else {}
+    climax_now = physical_state.get("climax_state") if isinstance(physical_state.get("climax_state"), dict) else {}
+    male_refr_active = (
+        not is_female_pl
+        and in_refr_now
+        and bool(
+            excit_now.get("player_in_refractory")
+            or climax_now.get("player_climaxed")
+            or excit_now.get("refractory_until_turn")
+            or physical_state.get("refractory_until_turn")
+        )
+    )
+    refractory_soft_gated = False
+    if male_refr_active and is_check_success and sub_intent in ("intercourse", "anal_give"):
+        refractory_soft_gated = True
+        sub_intent = "foreplay"
+        if selected_act_dict:
+            selected_act_dict["sub_intent"] = "foreplay"
+            selected_act_dict["_refractory_downgraded_from"] = orig_sub_intent
+            if isinstance(selected_act_dict.get("resolved_intent"), dict):
+                selected_act_dict["resolved_intent"]["sub_intent"] = "foreplay"
+        t_lbl = target_npc or partner_name
+        directives.append(
+            f"[STAGE DIRECTION — REFRACTORY LIMIT]: {player_name} is still in post-climax refractory recovery and cannot perform penetrative intercourse yet; narrate shifting seamlessly into tender hands/lips foreplay to pleasure {t_lbl} instead."
+        )
+
+    if sub_intent:
         _ACT_MAP = {
             "intercourse": "penetrative",
             "oral_give": "oral_give",
@@ -3387,8 +3511,10 @@ def resolve_pre_turn_intimacy_and_clothing(
             "oral_mutual": "oral_mutual",
             "manual_give": "manual_give",
             "manual_receive": "manual_receive",
+            "manual_mutual": "manual_give",
             "anal_give": "anal_give",
             "anal_receive": "anal_receive",
+            "anal_mutual": "anal_give",
             "kiss": "foreplay_nongenital",
             "foreplay": "foreplay_nongenital",
             "aftercare": "none",
@@ -3397,8 +3523,8 @@ def resolve_pre_turn_intimacy_and_clothing(
         act_type = _ACT_MAP.get(sub_intent, "foreplay_nongenital")
         act_class = {
             "act_type": act_type,
-            "player_stimulated": sub_intent in ("intercourse", "oral_receive", "oral_mutual", "manual_receive", "anal_receive", "kiss", "foreplay"),
-            "partner_stimulated": sub_intent in ("intercourse", "oral_give", "oral_mutual", "manual_give", "anal_give", "kiss", "foreplay"),
+            "player_stimulated": (not refractory_soft_gated) and sub_intent in ("intercourse", "oral_receive", "oral_mutual", "manual_receive", "anal_receive"),
+            "partner_stimulated": refractory_soft_gated or sub_intent in ("intercourse", "oral_give", "oral_mutual", "manual_give", "manual_mutual", "anal_give", "anal_mutual"),
             "target_partner": target_npc or partner_name,
         }
     else:
@@ -3419,7 +3545,7 @@ def resolve_pre_turn_intimacy_and_clothing(
     # Displace clothing for participating actors when check succeeds
     if is_genital_or_escalated and is_check_success:
         actors_dict = physical_state.setdefault("actors", {})
-        if DETERMINISTIC_INTIMACY and target_npc:
+        if target_npc:
             target_list = [t.strip() for t in target_npc.split(",") if t.strip()]
             participating_names = [player_name] + target_list
         else:
@@ -3453,20 +3579,31 @@ def resolve_pre_turn_intimacy_and_clothing(
                         continue
                     cloth[slot] = "Disheveled"
 
-    if DETERMINISTIC_INTIMACY:
-        if first_act_dict.get("ends_dialogue") or r_intent.get("ends_dialogue") or sub_intent in ("aftercare", "redress"):
-            physical_state["intimate_contact"] = "none"
-            if isinstance(physical_state.get("excitement"), dict):
-                physical_state["excitement"]["active"] = False
-        elif is_check_success and is_genital_or_escalated:
-            t_str = target_npc or partner_name
-            physical_state["intimate_contact"] = f"{sub_intent} with {t_str}"
-        elif not is_check_success:
-            physical_state["intimate_contact"] = "none"
+    if sub_intent == "redress":
+        from mechanics.social.physical_state import redress_actor_to_canonical
+        physical_state["intimate_contact"] = "none"
+        if isinstance(physical_state.get("excitement"), dict):
+            physical_state["excitement"]["active"] = False
+        actors_dict = physical_state.get("actors") if isinstance(physical_state.get("actors"), dict) else {}
+        for _ak, _adata in actors_dict.items():
+            if isinstance(_adata, dict) and isinstance(_adata.get("clothing"), dict):
+                _adata["clothing"] = redress_actor_to_canonical(_adata["clothing"], _adata.get("canonical_outfit"))
+        physical_state["dropped_clothing"] = []
+    elif selected_act_dict.get("ends_dialogue") or r_intent.get("ends_dialogue") or sub_intent == "aftercare":
+        physical_state["intimate_contact"] = "none"
+        if isinstance(physical_state.get("excitement"), dict):
+            physical_state["excitement"]["active"] = False
+    elif is_check_success and (is_genital_or_escalated or refractory_soft_gated):
+        t_str = target_npc or partner_name
+        physical_state["intimate_contact"] = f"{sub_intent} with {t_str}"
+    elif not is_check_success:
+        physical_state["intimate_contact"] = "none"
 
-    is_erotic = is_erotic_intimate_contact(physical_state.get("intimate_contact", "")) or (act_type not in ("none", "") and is_check_success)
+    is_erotic = (
+        is_erotic_intimate_contact(physical_state.get("intimate_contact", ""))
+        or ((act_type not in ("none", "") or refractory_soft_gated) and is_check_success)
+    )
     excitement_res = None
-    directives: List[str] = []
 
     if is_erotic:
         excitement_res = compute_excitement_step(
@@ -3477,13 +3614,13 @@ def resolve_pre_turn_intimacy_and_clothing(
             session=session,
             narrative_str="",
             partner_contacts=partner_contacts,
-            sub_intent=sub_intent if DETERMINISTIC_INTIMACY else None,
-            target_npc=target_npc if DETERMINISTIC_INTIMACY else None,
+            sub_intent=orig_sub_intent if refractory_soft_gated else (sub_intent or None),
+            target_npc=target_npc or None,
         )
         session["_pre_turn_excitement_res"] = excitement_res
 
         if excitement_res:
-            if excitement_res.get("player_climaxed"):
+            if excitement_res.get("player_climaxed") and not male_refr_active:
                 directives.append(
                     f"[MANDATORY CLIMAX DIRECTIVE]: Player character {player_name} has deterministically reached climax (meter at {excitement_res.get('player_meter', 100)}%). Narrate {player_name}'s peak/release vividly and authentically."
                 )

@@ -252,7 +252,7 @@ class TestNamegenCultures(unittest.TestCase):
     def test_dialogue_partner_and_particle_non_collision(self):
         """Unrelated NPCs sharing patronymic/surname particles ('bin', 'binti', 'van', 'der') never false-match each other."""
         from mechanics.world.mobility import is_dialogue_partner
-        from game_engine.npcs.dialogue_tracking import extract_speaking_npcs_from_narrative
+        from game_engine.npcs.cast_planner import CastPlan, apply_cast_events
 
         self.assertFalse(is_dialogue_partner("Zayd bin Mansoor", ["Danial bin Ismail"]))
         self.assertFalse(is_dialogue_partner("Nur binti Hassan", ["Melati binti Nasution"]))
@@ -263,7 +263,7 @@ class TestNamegenCultures(unittest.TestCase):
         # Ensure English prose words 'bin' and 'van' don't falsely trigger speaking NPC detection
         npcs = [{"name": "Danial bin Ismail"}, {"name": "Lars van der Berg"}, {"name": "Tanaka Ren"}]
         prose = 'Ren smiled and said, "Throw that wrapper in the trash bin by the white van."'
-        speaking = extract_speaking_npcs_from_narrative(prose, npcs)
+        plan, _ = apply_cast_events(CastPlan(present_npcs=npcs, bystander_npcs=[n["name"] for n in npcs]), [{"type": "engage", "npc": "Ren"}], {"id": 0, "current_turn_index": 1}, []); speaking = plan.dialogue_partners
         self.assertEqual(speaking, ["Tanaka Ren"])
 
     def test_canonical_name_resolver_east_asian_and_patronymic(self):
@@ -321,17 +321,17 @@ class TestNamegenCultures(unittest.TestCase):
             self.assertIn("Kowalska", nm, f"Polish female surname should inflect to Kowalska: {nm}")
 
     def test_campus_directory_deterministic_cultural_roster(self):
-        """Verifies 50 campus directory characters have cultural names and proper sibling lineages."""
+        """Verifies 88 campus directory characters have cultural names, proper sibling/town lineages, and clean formal titles."""
         from mechanics.social.school_roster import generate_campus_directory
         roster1 = generate_campus_directory(9999)
         roster2 = generate_campus_directory(9999)
 
-        self.assertEqual(len(roster1), 50)
+        self.assertEqual(len(roster1), 88)
         self.assertEqual([c["name"] for c in roster1], [c["name"] for c in roster2])
 
-        # Sibling lineages
+        # Sibling lineages (8 pairs = 16 students)
         siblings = [c for c in roster1 if c.get("sibling_name")]
-        self.assertEqual(len(siblings), 10)  # Exactly 5 pairs = 10 students
+        self.assertEqual(len(siblings), 16)
 
         for sib in siblings:
             partner = next(c for c in roster1 if c["name"] == sib["sibling_name"])
@@ -340,6 +340,24 @@ class TestNamegenCultures(unittest.TestCase):
             p_sur = namegen.normalize_base_surname(namegen.extract_first_and_last_name(partner["name"])[1])
             self.assertEqual(s_sur.lower(), p_sur.lower())
 
+        # Town relative surname consistency
+        for c in roster1:
+            if c.get("town_relative_name"):
+                rel = next(x for x in roster1 if x["name"] == c["town_relative_name"])
+                c_sur = namegen.normalize_base_surname(namegen.extract_first_and_last_name(c["name"])[1])
+                r_sur = namegen.normalize_base_surname(namegen.extract_first_and_last_name(rel["name"])[1])
+                self.assertEqual(c_sur.lower(), r_sur.lower())
+
+        # Faculty formal_title rules
+        for fac in [c for c in roster1 if c.get("is_faculty")]:
+            ft = fac.get("formal_title", "")
+            self.assertTrue(bool(ft))
+            # Never emit full 3-token name after 'Chef' when a surname exists
+            self.assertLessEqual(len(ft.split()), 3)
+            if " binti " in f" {fac['name'].lower()} " or " bin " in f" {fac['name'].lower()} ":
+                first_nm, _ = namegen.extract_first_and_last_name(fac["name"])
+                self.assertIn(first_nm, ft)
+
     def test_past_partner_name_cultural_generation(self):
         """Verifies generate_past_partner_name generates full cultural names."""
         from mechanics.social.persona.intimacy.generation import generate_past_partner_name
@@ -347,6 +365,88 @@ class TestNamegenCultures(unittest.TestCase):
             p_name = generate_past_partner_name("high_school_drama", partner_gender="female", hash_val=i * 29 + 7)
             parts = p_name.split()
             self.assertGreaterEqual(len(parts), 2, f"Expected at least first + last name, got: {p_name}")
+
+    def test_ungendered_generation_and_indonesian_greek_slavic_rules(self):
+        """Verifies un-gendered rolls inflect female surnames, Indonesian surnames skip bin/binti, Greek -idis/-akis inflect, and Russian != Slavic."""
+        import random
+        # 1. Un-gendered rolls must never produce female given name + masculine Polish/Russian/Icelandic surname or 'bin'
+        rng_state = random.getstate()
+        try:
+            random.seed(12345)
+            for _ in range(150):
+                nm = namegen.generate_person_name("default")
+                first, last = namegen.extract_first_and_last_name(nm)
+                if namegen.is_known_female_name(first) and not namegen.is_known_male_name(first):
+                    self.assertNotIn(" bin ", f" {nm.lower()} ", f"Female name got 'bin': {nm}")
+                    self.assertFalse(last.endswith(("ski", "cki", "dzki", "sson")), f"Uninflected surname on female roll: {nm}")
+        finally:
+            random.setstate(rng_state)
+
+        # 2. Indonesian non-patronymic surnames never take bin/binti by default
+        for indo_sur in ("Wijaya", "Saputra", "Kusuma", "Santoso", "Setiawan", "Hidayat", "Pratama", "Nasution"):
+            for seed_i in range(8):
+                nm = namegen.format_cultural_full_name("Putri", indo_sur, "malay", "malay", "female", deterministic_seed=f"s_{seed_i}")
+                self.assertEqual(nm, f"Putri {indo_sur}")
+
+        # 3. Greek -idis/-iadis -> -idou/-iadou and -akis -> -aki + normalize_base_surname round-trip
+        self.assertEqual(namegen.format_cultural_full_name("Eleni", "Nikolaidis", "greek", "greek", "female"), "Eleni Nikolaidou")
+        self.assertEqual(namegen.format_cultural_full_name("Sofia", "Papadakis", "greek", "greek", "female"), "Sofia Papadaki")
+        self.assertEqual(namegen.normalize_base_surname("Nikolaidou"), "Nikolaidis")
+        self.assertEqual(namegen.normalize_base_surname("Papadaki"), "Papadakis")
+
+        # 4. Slavic vs Russian separation
+        self.assertEqual(namegen.infer_surname_culture("Volkov"), "russian")
+        self.assertEqual(namegen.infer_surname_culture("Novak"), "slavic")
+
+    def test_cross_cultural_extraction_gender_inference_and_disambiguation(self):
+        """Verifies tricky cross-cultural East Asian extraction, gender inference, UI short names, and peer token disambiguation."""
+        from mechanics.social.persona.core import infer_contact_gender
+        from game_engine.keywords import sanitize_npc_pronoun_consistency
+
+        # 1. Tricky East Asian & hybrid name extraction
+        self.assertEqual(namegen.extract_first_and_last_name("Zhang Chen"), ("Chen", "Zhang"))
+        self.assertEqual(namegen.extract_first_and_last_name("Tanaka Mai"), ("Mai", "Tanaka"))
+        self.assertEqual(namegen.extract_first_and_last_name("Chen Kelly"), ("Chen", "Kelly"))
+        self.assertEqual(namegen.extract_first_and_last_name("Kim Kowalska"), ("Kim", "Kowalska"))
+        self.assertEqual(namegen.extract_first_and_last_name("Ms. Watanabe Mei"), ("Mei", "Watanabe"))
+        self.assertEqual(namegen.extract_first_and_last_name("Chef Watanabe Mei"), ("Mei", "Watanabe"))
+
+        # 2. Gender inference does not flip male East Asian names whose surname overlaps Western female names (Kim, Li, Lin)
+        self.assertEqual(infer_contact_gender({"name": "Kim Min-jun"}), "male")
+        self.assertEqual(infer_contact_gender({"name": "Li Wei"}), "male")
+        self.assertEqual(infer_contact_gender({"name": "Chen Mei"}), "female")
+        self.assertEqual(infer_contact_gender({"name": "Zofia Kowalska"}), "female")
+
+        # 3. UI short display names and formal titles never truncate to bare honorifics
+        self.assertEqual(namegen.get_display_short_name("Ms. Watanabe Mei", max_len=15), "Ms. Watanabe")
+        self.assertEqual(namegen.get_display_short_name("Ms. Zofia Kowalska", max_len=15), "Ms. Kowalska")
+        self.assertEqual(namegen.get_display_short_name("Chef Watanabe Mei", max_len=15), "Chef Watanabe")
+        self.assertEqual(namegen.format_formal_title("Ms.", "Siti binti Rahman"), "Ms. Siti")
+        self.assertEqual(namegen.format_formal_title("Ms.", "Birgitta Magnusdottir"), "Ms. Birgitta")
+
+        # 4. Peer token disambiguation drops shared surnames and never emits honorifics
+        peers_ea = ["Tanaka Ren", "Tanaka Yui"]
+        ren_toks = namegen.get_unique_person_tokens("Tanaka Ren", peer_names=peers_ea)
+        yui_toks = namegen.get_unique_person_tokens("Tanaka Yui", peer_names=peers_ea)
+        self.assertIn("ren", ren_toks)
+        self.assertNotIn("tanaka", ren_toks)
+        self.assertIn("yui", yui_toks)
+        self.assertNotIn("tanaka", yui_toks)
+
+        peers_fac = ["Ms. Watanabe Mei", "Ms. Zofia Kowalska"]
+        wat_toks = namegen.get_unique_person_tokens("Ms. Watanabe Mei", peer_names=peers_fac)
+        self.assertNotIn("ms.", wat_toks)
+        self.assertNotIn("ms", wat_toks)
+        self.assertIn("watanabe", wat_toks)
+        self.assertIn("mei", wat_toks)
+
+        # 5. Pronoun sanitizer never corrupts prose when opposite-sex siblings share a surname
+        prose = "Tanaka Yui smiled as she waved at Tanaka Ren while he closed his notebook."
+        sanitized = sanitize_npc_pronoun_consistency(
+            prose,
+            session={"current_npcs": [{"name": "Tanaka Yui", "gender": "female"}, {"name": "Tanaka Ren", "gender": "male"}]},
+        )
+        self.assertEqual(sanitized, prose)
 
 
 if __name__ == "__main__":

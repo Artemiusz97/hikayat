@@ -224,6 +224,42 @@ ARCHETYPE_KEYWORD_TO_BLUEPRINT: dict[str, str] = {
     "bondage": "INTIMATE_ENCOUNTER",
     "revelry": "INTIMATE_ENCOUNTER",
     "masquerade": "INTIMATE_ENCOUNTER",
+
+    # ANOMALOUS_INCURSIONS (12 Scenario Bounty & Story Archetypes)
+    "eliminate hostile anomalous entity": "NEUTRALIZATION",
+    "rogue_entity_termination": "NEUTRALIZATION",
+    "apocalyptic boss confrontation": "NEUTRALIZATION",
+    "secure non-hostile anomalous entity": "ESCORT_RESCUE",
+    "non_hostile_entity_pacification": "ESCORT_RESCUE",
+    "contain anomalous phenomenon": "SITE_DEFENSE_RITUAL",
+    "spatial_rift_sealing": "SITE_DEFENSE_RITUAL",
+    "sensory_anomaly_purge": "SITE_DEFENSE_RITUAL",
+    "investigate anomalous phenomenon": "INVESTIGATION",
+    "temporal_loop_anchor": "INVESTIGATION",
+    "find missing person (spirited away)": "ESCORT_RESCUE",
+    "spirited away": "ESCORT_RESCUE",
+    "missing_agent_rescue": "ESCORT_RESCUE",
+    "retrieve altered item / cursed relic": "ACQUISITION",
+    "retrieve altered item": "ACQUISITION",
+    "cursed relic": "ACQUISITION",
+    "cursed_relic_retrieval": "ACQUISITION",
+    "disrupt cult ritual / clandestine auction": "HEIST_INFILTRATION",
+    "disrupt cult ritual": "HEIST_INFILTRATION",
+    "clandestine auction": "HEIST_INFILTRATION",
+    "cult_ritual_disruption": "HEIST_INFILTRATION",
+    "syndicate_black_market_interception": "HEIST_INFILTRATION",
+    "spatial distortion mapping": "EXPLORATION_HAZARD",
+    "cognitohazard & urban legend suppression": "SOCIAL_MANIPULATION",
+    "urban legend suppression": "SOCIAL_MANIPULATION",
+    "urban_legend_debunking": "SOCIAL_MANIPULATION",
+    "quarantine perimeter defense": "SITE_DEFENSE_RITUAL",
+    "cognitohazard_quarantine": "SITE_DEFENSE_RITUAL",
+    "rogue operative / rival hunter interception": "CONTEST_RIVALRY",
+    "rogue operative": "CONTEST_RIVALRY",
+    "rival hunter": "CONTEST_RIVALRY",
+    "high-sensitivity esper / witness escort": "ESCORT_RESCUE",
+    "esper escort": "ESCORT_RESCUE",
+    "anomalous_autopsy_escort": "ESCORT_RESCUE",
 }
 
 GENERIC_ITEM_STOPWORDS = {
@@ -431,6 +467,14 @@ def classify_choice_approach(label: str) -> str:
         return "direct"
 
     # Explicit approach bracket tags take absolute priority
+    if "[persuade]" in lbl:
+        return "nh_persuade"
+    if "[calm]" in lbl:
+        return "nh_calm"
+    if "[outwit]" in lbl:
+        return "nh_outwit"
+    if "[use environment]" in lbl:
+        return "nh_environment"
     if "[breakthrough leverage]" in lbl or "breakthrough leverage" in lbl:
         return "breakthrough_leverage"
     if "[companion assist" in lbl or "companion assist" in lbl:
@@ -908,5 +952,221 @@ def format_quest_comms_message(
             body = f"Fresh intelligence on '{quest_title}': Informants confirm {tgt_str} is sighted{loc_str}. Strike swiftly and maintain your guard."
 
     return channel_prefix, body
+
+
+# -----------------------------------------------------------------------------
+# 8. Anomalous Incursions: 11-Chapter Cataclysm + Epilogue & World-Ending Anomaly
+# -----------------------------------------------------------------------------
+
+def get_max_campaign_chapters(scen_key: str = "fantasy") -> int:
+    """
+    Returns the total number of campaign chapters for the scenario:
+    - Anomalous Incursions (and its 3 variants): 11 Chapters (Ch 1-10 Cataclysm + Ch 11 Epilogue/Resolution)
+    - All other scenarios: 10 Chapters
+    """
+    import scenario_data
+    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        return 11
+    return 10
+
+
+def ensure_world_ending_anomaly_blueprint(
+    session_id: int,
+    session: dict | None = None,
+) -> dict:
+    """
+    Deterministically rolls and persists the session's World-Ending Anomaly Antagonist profile
+    in `session["world_ending_anomaly"]` (and `extra_json`).
+    """
+    import db
+    import namegen
+
+    if session is None and session_id:
+        session = db.get_session(session_id) or {}
+    elif session is None:
+        session = {}
+
+    existing = session.get("world_ending_anomaly")
+    if isinstance(existing, dict) and existing.get("name"):
+        return existing
+
+    seed_val = int(session_id or 1)
+    profile = namegen.generate_world_ending_anomaly_profile(hash_val=seed_val)
+    session["world_ending_anomaly"] = profile
+    if session_id:
+        try:
+            db.update_session(session_id, extra={"world_ending_anomaly": profile})
+        except Exception:
+            pass
+    return profile
+
+
+def generate_anomalous_campaign_blueprint(
+    session_id: int,
+    session: dict | None = None,
+) -> dict:
+    """
+    Generates the structured 11-Chapter Campaign Blueprint for Anomalous Incursions,
+    mapping each chapter to its narrative phase, overarching archetype, and 3 scenario sub-objective archetypes.
+    """
+    anomaly = ensure_world_ending_anomaly_blueprint(session_id, session=session)
+    entity_name = anomaly.get("name", "The Non-Euclidean Convergence")
+    entity_title = anomaly.get("title", "Sovereign of the Folded Horizon")
+    omen = anomaly.get("foreshadow_sign") or anomaly.get("omen_signature") or "geometric distortions and bleeding static"
+    cult_goal = anomaly.get("cult_goal", "awaken the World-Ending Anomaly across the metropolitan grid")
+    syndicate_goal = anomaly.get("syndicate_goal", "traffic uncatalogued resonance catalysts on the black market")
+    harbinger_name = anomaly.get("harbinger_name", "The Convergence Harbinger")
+
+    chapters = {
+        1: {
+            "chapter": 1,
+            "phase": "inciting_foreshadowing",
+            "title_template": "Chapter #1: First Breach & The Silent Omen",
+            "archetype": "Inciting Containment & Foreshadowing",
+            "sub_archetypes": [
+                "Investigate Anomalous Phenomenon",
+                "Contain Anomalous Phenomenon",
+                "Eliminate Hostile Anomalous Entity",
+            ],
+            "pacing_directive": (
+                f"CHAPTER 1 (INCITING CONTAINMENT & FORESHADOWING): "
+                f"Conclude the chapter with an eerie resonance spike ({omen}) foreshadowing the distant awakening of {entity_name} ({entity_title})."
+            ),
+        },
+        2: {
+            "chapter": 2,
+            "phase": "mystery_unraveling",
+            "title_template": "Chapter #2: Whispers in the Reliquary",
+            "archetype": "Investigate Anomalous Phenomenon",
+            "sub_archetypes": [
+                "Investigate Anomalous Phenomenon",
+                "Retrieve Altered Item / Cursed Relic",
+                "Cognitohazard & Urban Legend Suppression",
+            ],
+            "pacing_directive": f"CHAPTER 2 (UNRAVELING THE MYSTERY): Trace altered relics bearing the signature of {entity_name}.",
+        },
+        3: {
+            "chapter": 3,
+            "phase": "mystery_unraveling",
+            "title_template": "Chapter #3: Spirited Beyond the Threshold",
+            "archetype": "Find Missing Person (Spirited Away)",
+            "sub_archetypes": [
+                "Spatial Distortion Mapping",
+                "Find Missing Person (Spirited Away)",
+                "Secure Non-Hostile Anomalous Entity",
+            ],
+            "pacing_directive": f"CHAPTER 3 (UNRAVELING THE MYSTERY): Map expanding spatial rifts and rescue civilians spirited into pocket folds linked to {entity_name}.",
+        },
+        4: {
+            "chapter": 4,
+            "phase": "mystery_unraveling",
+            "title_template": "Chapter #4: Black-Market Resonance",
+            "archetype": "Disrupt Cult Ritual / Clandestine Auction",
+            "sub_archetypes": [
+                "Investigate Anomalous Phenomenon",
+                "Disrupt Cult Ritual / Clandestine Auction",
+                "Retrieve Altered Item / Cursed Relic",
+            ],
+            "pacing_directive": f"CHAPTER 4 (UNRAVELING THE MYSTERY): Expose Clandestine Syndicate trafficking ({syndicate_goal}) feeding {entity_name}.",
+        },
+        5: {
+            "chapter": 5,
+            "phase": "mystery_unraveling",
+            "title_template": "Chapter #5: Choir of the Occult Conduit",
+            "archetype": "Disrupt Cult Ritual / Clandestine Auction",
+            "sub_archetypes": [
+                "Cognitohazard & Urban Legend Suppression",
+                "Disrupt Cult Ritual / Clandestine Auction",
+                "Eliminate Hostile Anomalous Entity",
+            ],
+            "pacing_directive": f"CHAPTER 5 (MID-CAMPAIGN REVELATION): Uncover the Occult Cult's ritual network seeking to {cult_goal} for {entity_name}.",
+        },
+        6: {
+            "chapter": 6,
+            "phase": "mystery_unraveling",
+            "title_template": "Chapter #6: The Convergence Blueprint",
+            "archetype": "Spatial Distortion Mapping",
+            "sub_archetypes": [
+                "Spatial Distortion Mapping",
+                "High-Sensitivity Esper / Witness Escort",
+                "Contain Anomalous Phenomenon",
+            ],
+            "pacing_directive": f"CHAPTER 6 (FINAL BUILDUP): Escort a high-sensitivity Esper witness and decode the exact coordinates where {entity_name} will breach reality.",
+        },
+        7: {
+            "chapter": 7,
+            "phase": "active_escalation",
+            "title_template": f"Chapter #7: Harbingers of {entity_name}",
+            "archetype": "Quarantine Perimeter Defense",
+            "sub_archetypes": [
+                "Quarantine Perimeter Defense",
+                "Eliminate Hostile Anomalous Entity",
+                "High-Sensitivity Esper / Witness Escort",
+            ],
+            "pacing_directive": f"CHAPTER 7 (ACTIVE ESCALATION): {entity_name} begins actively causing city-wide chaos and manifesting {harbinger_name} across district perimeters!",
+        },
+        8: {
+            "chapter": 8,
+            "phase": "active_escalation",
+            "title_template": "Chapter #8: Shattered Cordons & Rogue Operatives",
+            "archetype": "Rogue Operative / Rival Hunter Interception",
+            "sub_archetypes": [
+                "Rogue Operative / Rival Hunter Interception",
+                "Disrupt Cult Ritual / Clandestine Auction",
+                "Quarantine Perimeter Defense",
+            ],
+            "pacing_directive": f"CHAPTER 8 (ACTIVE ESCALATION): Intercept compromised operatives and cult saboteurs tearing down containment wards for {entity_name}.",
+        },
+        9: {
+            "chapter": 9,
+            "phase": "active_escalation",
+            "title_template": "Chapter #9: Eve of the Cataclysm",
+            "archetype": "Contain Anomalous Phenomenon",
+            "sub_archetypes": [
+                "Retrieve Altered Item / Cursed Relic",
+                "Contain Anomalous Phenomenon",
+                "Eliminate Hostile Anomalous Entity",
+            ],
+            "pacing_directive": f"CHAPTER 9 (PENULTIMATE ESCALATION): The sky fractures with {omen}. Secure the final containment anchors and slay {harbinger_name} before {entity_name} manifests.",
+        },
+        10: {
+            "chapter": 10,
+            "phase": "cataclysm_climax",
+            "title_template": f"Chapter #10: Cataclysm — {entity_name}",
+            "archetype": "Apocalyptic Boss Confrontation",
+            "sub_archetypes": [
+                "Spatial Distortion Mapping",
+                "Contain Anomalous Phenomenon",
+                "Apocalyptic Boss Confrontation",
+            ],
+            "pacing_directive": (
+                f"CHAPTER 10 (CLIMAX — WORLD-ENDING BOSS BATTLE): Breach the non-Euclidean epicenter, sever the convergence anchors, "
+                f"and engage {entity_name} ({entity_title}) in an apocalyptic multi-phase final boss confrontation!"
+            ),
+        },
+        11: {
+            "chapter": 11,
+            "phase": "resolution_epilogue",
+            "title_template": "Chapter #11: Aftermath & Commendation of the Watch",
+            "archetype": "Post-Crisis Resolution & Epilogue",
+            "sub_archetypes": [
+                "Contain Anomalous Phenomenon",
+                "Cognitohazard & Urban Legend Suppression",
+                "Investigate Anomalous Phenomenon",
+            ],
+            "pacing_directive": (
+                f"CHAPTER 11 (RESOLUTION & EPILOGUE): Following the defeat of {entity_name}, stabilize the city's remaining residual rifts, "
+                f"debrief with Faction Leadership & Special Agent companions, and receive your post-crisis commendation. "
+                f"Upon completion, present the Post-Game Epilogue choice: [🏁 Conclude Campaign (Archive Chronicle)] or [♾️ Continue in Endless Containment Mode]."
+            ),
+        },
+    }
+
+    return {
+        "world_ending_anomaly": anomaly,
+        "max_chapters": 11,
+        "chapters": chapters,
+    }
+
 
 

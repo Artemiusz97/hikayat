@@ -6,6 +6,7 @@ import re
 from typing import Optional, Any
 
 import db
+import scenario_data
 from .templates import parse_zone_primary
 
 
@@ -134,11 +135,20 @@ def get_waypoint_npc_schedule_info(session_id: int, wp: dict, current_minute: Op
         phase_key = get_detailed_npc_time_phase(safe_min, current_day=curr_day, scen_key=scen_key)
 
         contact = db.get_contact(session_id, target_npc)
+        if not contact and scenario_data.is_anomalous_incursions_scenario(scen_key):
+            try:
+                from mechanics.social.agent_roster import find_special_agent_by_name
+                contact = find_special_agent_by_name(session_id, target_npc, scen_key=scen_key)
+            except Exception:
+                contact = None
         affinity = int((contact or {}).get("relationship_score") or 0)
 
         # Check if waypoint explicitly expects Night/Midnight
         v_phases = [str(p).lower() for p in (wp.get("valid_time_phases") or [])]
         night_allowed = any(p in ("night", "midnight") for p in v_phases)
+        if not night_allowed and contact:
+            from mechanics.world.schedules import is_npc_nocturnal_or_night_shift
+            night_allowed = is_npc_nocturnal_or_night_shift(contact, scen_key=scen_key, current_day=curr_day)
 
         is_night = (safe_min >= 1200 or safe_min < wake_min)
         if is_night and not night_allowed and affinity < 40:
@@ -190,7 +200,16 @@ def get_waypoint_npc_schedule_info(session_id: int, wp: dict, current_minute: Op
 def resolve_effective_waypoint_location(session_id: int, wp: dict) -> str:
     """Returns the effective live target location for a waypoint, resolving NPC schedule if tagged."""
     info = get_waypoint_npc_schedule_info(session_id, wp)
-    return info["effective_location"]
+    eff = info["effective_location"]
+    if eff and "{" in eff and session_id:
+        try:
+            from mechanics.world.locations.hierarchy import resolve_session_location_tokens
+            sess = db.get_session(session_id)
+            scen_key = sess.get("scenario", "fantasy") if sess else "fantasy"
+            eff = resolve_session_location_tokens(session_id, eff, scen_key)
+        except Exception:
+            pass
+    return eff
 
 
 def resolve_waypoint_target_npc(session_id: int, wp: dict) -> str:
@@ -249,6 +268,41 @@ def resolve_waypoint_target_npc(session_id: int, wp: dict) -> str:
     return ""
 
 
+GENERIC_WAYPOINT_NPC_STOPWORDS = {
+    "officer", "dispatch", "agency", "guard", "clerk", "receptionist",
+    "staff", "patrol", "investigator", "detective", "worker", "soldier",
+    "bureau", "directorate", "operative", "agent", "captain", "lieutenant",
+    "sergeant", "commander", "specialist", "technician", "doctor", "researcher",
+    "member", "patron", "civilian", "person", "contact", "handler",
+    "central", "initiative", "division", "security", "defense", "control",
+}
+
+
+def can_waypoint_match_via_npc_presence(target_npc: str, stage_key: str = "", current_location: str = "", waypoint: Optional[dict] = None) -> bool:
+    """
+    Returns True ONLY if the waypoint stage is explicitly an NPC dialogue / interaction stage
+    (e.g. talk_to, report_to, turn_in, rendezvous) AND not an arrival/investigation/combat stage.
+    Site investigation or combat stages (e.g. investigate, slay, scout, explore, recover)
+    CANNOT be satisfied merely because an NPC with a matching title/stopword is nearby.
+    """
+    st_low = str(stage_key or (waypoint.get("stage_key") if waypoint else "") or "").lower()
+    st_lbl_low = str((waypoint.get("stage_label") if waypoint else "") or "").lower()
+    comp_trig = str((waypoint.get("completion_trigger") if waypoint else "") or "").lower()
+
+    if any(k in st_low for k in ("investigate", "explore", "slay", "combat", "scout", "breach", "clear", "neutralize", "gather_clues", "arrive", "travel", "reach")):
+        return False
+    dialogue_verbs = (
+        "talk", "report", "turn_in", "speak", "deliver", "rendezvous", "return to",
+        "interrogate", "question", "convince", "persuade", "negotiate", "interview",
+        "consult", "confront", "discuss", "brief", "debrief", "meet with", "present",
+    )
+    if comp_trig == "arrival" and not any(k in st_low or k in st_lbl_low for k in dialogue_verbs):
+        return False
+    if comp_trig in ("action_choice", "combat_victory", "skill_check", "inspect_prop", "resource_progress", "defeat_target") and not any(k in st_low or k in st_lbl_low for k in dialogue_verbs):
+        return False
+    return True
+
+
 def is_waypoint_npc_present_in_scene(session_id: int, target_npc: str) -> bool:
     """Returns True if target_npc is physically present at the player's current scene or active dialogue."""
     if not session_id or not target_npc or not str(target_npc).strip():
@@ -260,13 +314,25 @@ def is_waypoint_npc_present_in_scene(session_id: int, target_npc: str) -> bool:
             return False
 
         t_clean = str(target_npc).strip().lower()
-        t_words = [w for w in t_clean.split() if len(w) >= 3]
+        # Distinctive tokens only: must have length >= 4 and not be a generic organizational/occupational stopword
+        t_distinctive = [w for w in t_clean.split() if len(w) >= 4 and w not in GENERIC_WAYPOINT_NPC_STOPWORDS]
+
+        def _matches_npc(candidate_name: str) -> bool:
+            c_low = candidate_name.strip().lower()
+            if not c_low:
+                return False
+            # 1. Exact or whole-string containment
+            if t_clean == c_low or t_clean in c_low or c_low in t_clean:
+                return True
+            # 2. Distinctive name matching (e.g. 'Astarion' or 'Vance' or 'Kurosawa')
+            if t_distinctive and any(w in c_low for w in t_distinctive):
+                return True
+            return False
 
         from mechanics.world.mobility import get_session_dialogue_partners
         dps = get_session_dialogue_partners(session) or []
         for dp in dps:
-            dp_low = str(dp).strip().lower()
-            if t_clean in dp_low or dp_low in t_clean or any(w in dp_low for w in t_words):
+            if _matches_npc(str(dp)):
                 return True
 
         curr_npcs = session.get("current_npcs")
@@ -279,8 +345,8 @@ def is_waypoint_npc_present_in_scene(session_id: int, target_npc: str) -> bool:
                     curr_npcs = [curr_npcs]
             if isinstance(curr_npcs, list):
                 for npc in curr_npcs:
-                    npc_name = (npc.get("name") if isinstance(npc, dict) else str(npc)).strip().lower()
-                    if t_clean in npc_name or npc_name in t_clean or any(w in npc_name for w in t_words):
+                    npc_name = (npc.get("name") if isinstance(npc, dict) else str(npc))
+                    if _matches_npc(npc_name):
                         return True
     except Exception:
         pass
@@ -329,7 +395,7 @@ def try_advance_on_arrival(session_id: int, quest_id: str, sub_obj_id: Optional[
         matched = check_location_matches_waypoint(current_location, target_loc)
     if not matched and static_target_loc:
         matched = check_location_matches_waypoint(current_location, static_target_loc)
-    if not matched and target_npc and is_waypoint_npc_present_in_scene(session_id, target_npc):
+    if not matched and target_npc and can_waypoint_match_via_npc_presence(target_npc, waypoint=waypoint) and is_waypoint_npc_present_in_scene(session_id, target_npc):
         matched = True
     elif not matched and not curr_node and not target_loc and not target_npc:
         matched = True
@@ -435,7 +501,7 @@ def check_action_matches_waypoint(
     stage_lower = str(stage_label or "").lower()
     is_dialogue_stage = any(
         dw in stage_lower
-        for dw in ("talk", "speak", "ask", "interrogate", "question", "interview", "convince", "persuade", "negotiate", "consult", "inquire", "gossip", "bribe", "confront", "discuss", "chat")
+        for dw in ("talk", "speak", "ask", "interrogate", "question", "interview", "convince", "persuade", "negotiate", "consult", "inquire", "gossip", "bribe", "confront", "discuss", "chat", "non-hostile", "contain", "pacify", "calm")
     ) or bool(target_npc and str(target_npc).strip())
 
     if is_conversational_action_flag and not is_dialogue_stage:
@@ -531,7 +597,7 @@ def does_action_target_waypoint(
         matched = check_location_matches_waypoint(current_location, target_loc)
     if not matched and static_target_loc:
         matched = check_location_matches_waypoint(current_location, static_target_loc)
-    if not matched and target_npc and is_waypoint_npc_present_in_scene(session_id, target_npc):
+    if not matched and target_npc and can_waypoint_match_via_npc_presence(target_npc, waypoint=waypoint) and is_waypoint_npc_present_in_scene(session_id, target_npc):
         matched = True
     elif not matched and not curr_node and not target_loc and not target_npc:
         matched = True

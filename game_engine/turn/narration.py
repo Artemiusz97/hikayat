@@ -232,8 +232,41 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
 
     context_str = f"{scenario_str}\n\n{style_str}\n\n{known_world_str}{char_sheet_str}{contact_block}{phys_block_str}\n\nRECENT HISTORY:\n{history_str}"
     
-    # 3. Build frozen state text
+    # 3. Build frozen state text + D13 frozen deterministic stage plan
     frozen_state_text = _build_frozen_state_text(snapshot)
+    applied_snap = snapshot.get("applied", {})
+    frozen_present = list(applied_snap.get("npcs_present") or session.get("current_npcs") or [])
+    frozen_partners = list(
+        applied_snap.get("dialogue_partners")
+        if "dialogue_partners" in applied_snap
+        else ([applied_snap["dialogue_partner"]] if applied_snap.get("dialogue_partner") else [])
+    )
+    from game_engine.npcs.cast_planner import CastPlan, render_stage_plan
+    partner_lows = {str(p).strip().lower() for p in frozen_partners if p}
+    frozen_bystanders = [
+        (n.get("name") if isinstance(n, dict) else str(n)).strip()
+        for n in frozen_present
+        if n and (n.get("name") if isinstance(n, dict) else str(n)).strip().lower() not in partner_lows
+    ]
+    any_stealth_ok = any(
+        isinstance(a, dict) and a.get("is_stealth") and (
+            a.get("check", {}).get("succeeded", True) if isinstance(a.get("check"), dict) else getattr(a.get("check"), "succeeded", True)
+        )
+        for a in actions
+    )
+    frozen_cast_plan = CastPlan(
+        present_npcs=[n if isinstance(n, dict) else {"name": str(n)} for n in frozen_present if n],
+        dialogue_partners=frozen_partners,
+        bystander_npcs=frozen_bystanders,
+        departing_npcs=[],
+        has_exited_convo=any(
+            isinstance(a, dict) and (a.get("ends_dialogue") or a.get("intent") == "dialogue_exit")
+            for a in actions
+        ),
+        stealth_active=any_stealth_ok,
+    )
+    stage_plan_block = render_stage_plan(frozen_cast_plan)
+    frozen_state_text = f"{frozen_state_text}\n\n{stage_plan_block}"
     
     sys_prompt = NARRATION_SYSTEM_PROMPT.replace(
         "{actions_text}", actions_text

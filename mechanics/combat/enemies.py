@@ -83,6 +83,18 @@ SCENARIO_ENEMY_TEMPLATES = {
         {"name": "Billiards Hall Hustler", "archetype": "Skirmisher", "category": ["humanoid"], "form": "corporeal", "essence": "mundane"},
         {"name": "Rival Gym Brawler", "archetype": "Brute", "category": ["humanoid"], "form": "corporeal", "essence": "mundane"},
         {"name": "Stray Alley Hound", "archetype": "Feral Beast", "category": ["beast"], "form": "corporeal", "essence": "mundane"}
+    ],
+    "anomalous_incursions": [
+        {"name": "Signal Choir Wraith", "archetype": "Cognitohazard Caster", "category": ["aberration", "incorporeal", "cognitohazard", "spectral_echo"], "form": "incorporeal", "essence": "psionic"},
+        {"name": "Redacted Broadcast Phantom", "archetype": "Cognitohazard Caster", "category": ["undead", "aberration", "cognitohazard", "spectral_echo"], "form": "incorporeal", "essence": "occult"},
+        {"name": "Non-Euclidean Stalker", "archetype": "Spatial Stalker", "category": ["aberration", "spatial_warp"], "form": "corporeal", "essence": "eldritch"},
+        {"name": "Subway Rift Hound", "archetype": "Spatial Stalker", "category": ["aberration", "beast", "spatial_warp"], "form": "corporeal", "essence": "eldritch"},
+        {"name": "Amalgamated Flesh Weaver", "archetype": "Bio-Horror Brute", "category": ["aberration", "demon", "bio_aberration"], "form": "corporeal", "essence": "biological"},
+        {"name": "Parasitic Spore Swarm", "archetype": "Void Swarm", "category": ["aberration", "swarm", "bio_aberration"], "form": "swarm", "essence": "biological"},
+        {"name": "Weeping Concrete Effigy", "archetype": "Cursed Construct", "category": ["construct", "cursed_relic"], "form": "corporeal", "essence": "occult"},
+        {"name": "Animated Mannequin Collective", "archetype": "Cursed Construct", "category": ["construct", "undead", "cursed_relic"], "form": "corporeal", "essence": "occult"},
+        {"name": "Rift-Cult Fanatic", "archetype": "Caster", "category": ["humanoid", "cognitohazard"], "form": "corporeal", "essence": "occult"},
+        {"name": "Syndicate Relic Enforcer", "archetype": "Corporate Operative", "category": ["humanoid", "cursed_relic"], "form": "corporeal", "essence": "technological"}
     ]
 }
 
@@ -94,6 +106,14 @@ def _resolve_enemy_scenario_key(scenario: str) -> str:
     scen = (scenario or "fantasy").lower().strip()
     if scen in SCENARIO_ENEMY_TEMPLATES:
         return scen
+    try:
+        from scenario_data import is_anomalous_incursions_scenario
+        if is_anomalous_incursions_scenario(scen):
+            return "anomalous_incursions"
+    except Exception:
+        pass
+    if any(w in scen for w in ("anomalous_incursions", "urban_anomalies", "urban_fantasy")):
+        return "anomalous_incursions"
     if "slice_of_life" in scen or "slice" in scen:
         return "slice_of_life"
     if "dark_fantasy" in scen:
@@ -134,7 +154,11 @@ ARCHETYPE_RULES = {
     "Rad-Mutant": {"primary": ["STR", "END"], "forbidden": ["CHA"]},
     "Scrap-Scavenger": {"primary": ["PER", "LUK"], "forbidden": ["INT"]},
     "Toxic Abomination": {"primary": ["END", "INT"], "forbidden": ["CHA"]},
-    "Feral Beast": {"primary": ["AGI", "PER"], "forbidden": ["CHA", "INT"]}
+    "Feral Beast": {"primary": ["AGI", "PER"], "forbidden": ["CHA", "INT"]},
+    "Cognitohazard Caster": {"primary": ["INT", "PER"], "forbidden": ["STR"]},
+    "Spatial Stalker": {"primary": ["AGI", "PER"], "forbidden": ["CHA"]},
+    "Bio-Horror Brute": {"primary": ["STR", "END"], "forbidden": ["CHA"]},
+    "Cursed Construct": {"primary": ["END", "STR"], "forbidden": ["AGI"]}
 }
 
 GENERIC_ENEMY_KEYWORDS = {
@@ -370,6 +394,23 @@ def derive_taxonomy_weaknesses(categories: list, form: str, essence: str) -> tup
         elif cat in ("aquatic", "marine"):
             weaknesses.extend(["shock", "ice"])
             resistances.extend(["water", "fire"])
+        elif cat == "cognitohazard":
+            resistances.extend(["physical", "ballistic"])
+            weaknesses.extend(["holy", "shock", "magical"])
+        elif cat == "spatial_warp":
+            resistances.extend(["ranged", "ballistic", "wind"])
+            weaknesses.extend(["earth", "ice", "holy"])
+        elif cat == "bio_aberration":
+            resistances.extend(["poison", "bludgeoning"])
+            weaknesses.extend(["fire", "slashing"])
+        elif cat == "cursed_relic":
+            immunities.extend(["poison", "bleed"])
+            resistances.extend(["slashing", "piercing"])
+            weaknesses.extend(["holy", "bludgeoning", "shock"])
+        elif cat == "spectral_echo":
+            immunities.extend(["bleed", "poison"])
+            resistances.extend(["physical", "slashing"])
+            weaknesses.extend(["holy", "fire", "magical"])
             
     if essence in ("technological", "cybernetic"):
         weaknesses.extend(["shock"])
@@ -426,6 +467,14 @@ def infer_taxonomy_from_archetype(archetype: str, scenario: str = "fantasy") -> 
 
     if arch in ("Security Drone", "Heavy Mech", "Heavy Borg"):
         return ["construct", "robot"], "corporeal", "technological"
+    if arch == "Cognitohazard Caster":
+        return ["aberration", "incorporeal", "cognitohazard", "spectral_echo"], "incorporeal", "psionic"
+    if arch == "Spatial Stalker":
+        return ["aberration", "spatial_warp"], "corporeal", "eldritch"
+    if arch == "Bio-Horror Brute":
+        return ["aberration", "demon", "bio_aberration"], "corporeal", "biological"
+    if arch == "Cursed Construct":
+        return ["construct", "cursed_relic"], "corporeal", "occult"
     if arch in ("Netrunner Spec-Op", "Chrome Cyberhound"):
         return ["humanoid" if "Netrunner" in arch else "beast", "cybernetic"], "corporeal", "cybernetic"
     if arch in ("Corporate Operative", "Campus Bully", "Rival Debater", "Hall Monitor", "Gossip Monger", "Scrap-Scavenger"):
@@ -457,14 +506,14 @@ def roll_enemy_intent(archetype: str) -> str:
     """Generates an initial or round-based telegraphed combat intent based on archetype."""
     arch = (archetype or "Brute").strip()
     intents = ["Preparing next strike", "Analyzing targets", "Shifting stance"]
-    if arch in ("Stalker", "Assassin", "Dark Elf Assassin"):
-        intents = ["Preparing to Ambush", "Fading into shadows", "Targeting the weak"]
-    elif arch in ("Caster", "Psionic Alien", "Netrunner Spec-Op"):
-        intents = ["Channeling a massive spell", "Drawing arcane energy", "Preparing a burst"]
-    elif arch in ("Brute", "Heavy Mech", "Heavy Borg"):
-        intents = ["Winding up a heavy swing", "Preparing a devastating crush", "Overcharging weapons"]
-    elif arch in ("Guardian", "Corrupted Treant"):
-        intents = ["Assuming a defensive posture", "Shielding allies", "Preparing a counter"]
+    if arch in ("Stalker", "Assassin", "Dark Elf Assassin", "Spatial Stalker"):
+        intents = ["Preparing to Ambush", "Fading into shadows", "Targeting the weak", "Folding spatial vectors for a blink-strike"]
+    elif arch in ("Caster", "Psionic Alien", "Netrunner Spec-Op", "Cognitohazard Caster"):
+        intents = ["Channeling a massive spell", "Drawing arcane energy", "Preparing a burst", "Broadcasting a cognitohazardous frequency"]
+    elif arch in ("Brute", "Heavy Mech", "Heavy Borg", "Bio-Horror Brute"):
+        intents = ["Winding up a heavy swing", "Preparing a devastating crush", "Overcharging weapons", "Lashing out with mutated tendrils"]
+    elif arch in ("Guardian", "Corrupted Treant", "Cursed Construct"):
+        intents = ["Assuming a defensive posture", "Shielding allies", "Preparing a counter", "Hardening its cursed exterior"]
     elif arch == "Void Swarm":
         intents = ["Preparing to swarm", "Multiplying rapidly"]
     return random.choice(intents)
@@ -491,6 +540,14 @@ def generate_scenario_enemy(scenario: str, location: str, chapter: int, custom_n
         pool = SCENARIO_ENEMY_TEMPLATES.get(scenario_lower, SCENARIO_ENEMY_TEMPLATES["fantasy"])
         template = random.choice(pool)
         name, arch_name = template["name"], template["archetype"]
+        if scenario_lower == "anomalous_incursions":
+            try:
+                import namegen
+                anom_tags = [c for c in (template.get("category") or []) if c in ("cognitohazard", "spatial_warp", "bio_aberration", "cursed_relic", "spectral_echo")]
+                cat_tag = anom_tags[0] if anom_tags else "spatial_warp"
+                name = namegen.generate_anomalous_entity_name(category_tag=cat_tag)
+            except Exception:
+                pass
         
     if custom_archetype:
         arch_name = custom_archetype
@@ -669,6 +726,14 @@ def generate_balanced_encounter(party_members: list, scenario: str, location: st
             exact_tier=tier_rank, exact_extra_points=extra_pts,
             language=language
         )
+        if scenario_lower == "anomalous_incursions":
+            try:
+                import namegen
+                anom_tags = [c for c in (category or []) if c in ("cognitohazard", "spatial_warp", "bio_aberration", "cursed_relic", "spectral_echo")]
+                cat_tag = anom_tags[0] if anom_tags else "spatial_warp"
+                e_obj["name"] = namegen.generate_anomalous_entity_name(category_tag=cat_tag)
+            except Exception:
+                pass
         
         # Fix name disambiguation 
         final_base = e_obj["name"]
@@ -697,7 +762,7 @@ def resolve_party_member_actions(companions: list, enemies: list) -> str:
 def get_enemy_armor_profile(archetype: str) -> dict:
     """Returns the default armor class, protection types, base DT, and type DT traits for an enemy archetype."""
     arch = (archetype or "").strip()
-    if arch in ("Guardian", "Heavy Mech", "Heavy Borg"):
+    if arch in ("Guardian", "Heavy Mech", "Heavy Borg", "Cursed Construct"):
         return {
             "armor_type": "heavy",
             "protection_types": ["physical", "ballistic"],
@@ -712,7 +777,7 @@ def get_enemy_armor_profile(archetype: str) -> dict:
             "mdef_bonus": 8,
             "block_chance": 20
         }
-    elif arch in ("Brute", "Rad-Mutant", "Campus Bully"):
+    elif arch in ("Brute", "Rad-Mutant", "Campus Bully", "Bio-Horror Brute"):
         return {
             "armor_type": "medium",
             "protection_types": ["physical"],
@@ -727,7 +792,7 @@ def get_enemy_armor_profile(archetype: str) -> dict:
             "mdef_bonus": 4,
             "block_chance": 0
         }
-    elif arch in ("Caster", "Psionic Alien", "Netrunner Spec-Op"):
+    elif arch in ("Caster", "Psionic Alien", "Netrunner Spec-Op", "Cognitohazard Caster"):
         return {
             "armor_type": "magic_robe",
             "protection_types": ["magical"],
@@ -755,7 +820,7 @@ def get_enemy_armor_profile(archetype: str) -> dict:
             "mdef_bonus": 8,
             "block_chance": 0
         }
-    elif arch in ("Skirmisher", "Stalker", "Chrome Cyberhound", "Feral Beast", "Void Swarm"):
+    elif arch in ("Skirmisher", "Stalker", "Chrome Cyberhound", "Feral Beast", "Void Swarm", "Spatial Stalker"):
         return {
             "armor_type": "light",
             "protection_types": ["physical"],
@@ -789,7 +854,7 @@ def get_enemy_armor_profile(archetype: str) -> dict:
 def get_enemy_weapon_profile(archetype: str) -> dict:
     """Returns the default weapon attack types and damage profile for an enemy archetype."""
     arch = (archetype or "").strip()
-    if arch in ("Caster", "Psionic Alien", "Netrunner Spec-Op"):
+    if arch in ("Caster", "Psionic Alien", "Netrunner Spec-Op", "Cognitohazard Caster"):
         return {
             "attack_types": ["ranged"],
             "damage_types": {"magical": 1.0},
@@ -801,13 +866,13 @@ def get_enemy_weapon_profile(archetype: str) -> dict:
             "damage_types": {"ballistic": 1.0},
             "atk_bonus": 14
         }
-    elif arch in ("Guardian", "Heavy Mech", "Heavy Borg"):
+    elif arch in ("Guardian", "Heavy Mech", "Heavy Borg", "Cursed Construct"):
         return {
             "attack_types": ["blunt", "hack"],
             "damage_types": {"physical": 1.0},
             "atk_bonus": 16
         }
-    elif arch in ("Skirmisher", "Stalker", "Chrome Cyberhound", "Feral Beast"):
+    elif arch in ("Skirmisher", "Stalker", "Chrome Cyberhound", "Feral Beast", "Spatial Stalker"):
         return {
             "attack_types": ["slash", "thrust"],
             "damage_types": {"physical": 1.0},
@@ -818,5 +883,176 @@ def get_enemy_weapon_profile(archetype: str) -> dict:
         "damage_types": {"physical": 1.0},
         "atk_bonus": 10
     }
+
+
+# ---------------------------------------------------------------------------
+# Anomalous Incursions Conditional Random Encounter Rules
+# ---------------------------------------------------------------------------
+
+ANOMALOUS_TIER2_FACILITY_IDS = {
+    "loc_hq_containment_sector",
+    "loc_platform_zero",
+    "loc_inverted_skybridge",
+    "loc_endless_dept_store",
+    "loc_static_cinema",
+    "loc_whispering_paleontology",
+    "loc_weeping_crypt",
+    "loc_crimson_auction_house",
+    "loc_glass_mirage_estate",
+    "loc_liminal_residential",
+    "loc_flesh_sewer_junction",
+    "loc_subterranean_bunker",
+    "loc_reactor_silo_7",
+    "loc_ghost_freighter",
+    "loc_abyssal_drydock",
+    "loc_hilltop_shrine",
+    "loc_haunted_manor",
+    "loc_abandoned_school_wing",
+    "loc_13th_stairwell",
+    "loc_fog_lighthouse",
+    "loc_singing_sea_grotto",
+    "loc_crooked_monolith",
+    "loc_woods_staircase",
+    "loc_tp_mirror_labyrinth",
+    "loc_tp_midnight_carousel",
+    "loc_et_weeping_statues",
+    "loc_et_fox_torii_tunnel",
+    "loc_ap_ghost_runway",
+    "loc_ap_baggage_void",
+    "loc_hosp_floor_13",
+    "loc_hosp_theater_zero",
+    "loc_uni_parapsych_lab",
+    "loc_uni_escher_stairwell",
+    "loc_ct_paper_opera",
+    "loc_ct_blood_jade_vault",
+    "loc_uc_ossuary_catacombs",
+    "loc_uc_fault_monolith",
+    "loc_bz_carnivorous_dome",
+    "loc_bz_tank_nine",
+    "loc_cult_sanctum_hq",
+    "loc_clandestine_syndicate_hq",
+    "sub_cult_threshold",
+    "sub_cult_altar",
+    "sub_cult_reliquary",
+    "sub_cult_catacombs",
+    "sub_cult_scriptorium",
+    "sub_cult_sanctum",
+    "sub_synd_loading",
+    "sub_synd_auction",
+    "sub_synd_vault",
+    "sub_synd_chop_shop",
+    "sub_synd_ledger",
+    "sub_synd_penthouse",
+}
+
+ANOMALOUS_FACILITY_NAME_KEYWORDS = (
+    "anomaly", "quarantined", "platform zero", "inverted skybridge", "endless department",
+    "static cinema", "whispering paleontology", "weeping bell-tower", "weeping crypt",
+    "crimson masquerade", "glass mirage", "room 404", "flesh-stitched", "reactor silo",
+    "ghost freighter", "abyssal drydock", "haunted hill", "13th stairwell", "abandoned old campus",
+    "fog-locked lighthouse", "singing sea grotto", "crooked monolith", "staircase in the woods",
+    "hall of mirrors", "reversed calliope", "weeping statues", "fox-spirit torii",
+    "ghost flight", "endless baggage", "floor 13", "operating theater 0", "parapsychology lab",
+    "non-euclidean", "paper-effigy", "blood-jade", "bone-ossuary", "obsidian monolith",
+    "carnivorous flora", "tank 9", "containment & quarantine sector",
+)
+
+
+def is_anomalous_danger_zone(
+    location_name: str = "",
+    location_id: str = "",
+    current_minute: int = 720,
+    session_id: int = 0,
+    scen_key: str = "anomalous_incursions",
+) -> bool:
+    """
+    Returns True ONLY when the player is inside one of the 40 Anomalous Tier-2 Facilities
+    OR inside the Theme Park Zone (`zone_theme_park`) during its 22:00-08:00 Anomalous Shift.
+    """
+    loc_id_low = str(location_id or "").strip().lower()
+    loc_name_low = str(location_name or "").strip().lower()
+
+    if any(fid in loc_id_low for fid in ANOMALOUS_TIER2_FACILITY_IDS):
+        return True
+
+    if any(kw in loc_name_low for kw in ANOMALOUS_FACILITY_NAME_KEYWORDS):
+        return True
+
+    # Check if dynamic procedural facility name in this session matches one of the 40 anomalous facility IDs
+    if session_id:
+        try:
+            import db
+            nodes = db.get_session_world_nodes(session_id) or []
+            for n in nodes:
+                nid = str(n.get("node_id") or "").lower()
+                nname = str(n.get("name") or "").lower()
+                pid = str(n.get("parent_id") or "").lower()
+                if (nid in ANOMALOUS_TIER2_FACILITY_IDS or pid in ANOMALOUS_TIER2_FACILITY_IDS) and nname and nname in loc_name_low:
+                    return True
+        except Exception:
+            pass
+
+    # Check Theme Park (loc_theme_park / zone_theme_park) during Anomalous Shift (22:00 - 08:00 -> minute >= 1320 or < 480)
+    tod = int(current_minute or 0) % 1440
+    is_anomalous_shift = (tod >= 1320 or tod < 480)
+    if is_anomalous_shift:
+        if any(k in loc_id_low for k in ("zone_theme_park", "loc_theme_park", "loc_tp_")):
+            return True
+        if any(k in loc_name_low for k in ("theme park", "amusement park", "carnival", "wonderland", "funfair", "ferris wheel", "roller coaster", "carousel", "midway")):
+            return True
+        if session_id:
+            try:
+                from mechanics.world.locations.seeds import get_session_urban_facility_name
+                tp_name = get_session_urban_facility_name(session_id, "zone_seaside_beach", "loc_theme_park", "Theme Park & Amusement Resort", scen_key).lower()
+                if tp_name and tp_name in loc_name_low:
+                    return True
+            except Exception:
+                pass
+
+    return False
+
+
+def should_allow_random_encounter(
+    scen_key: str,
+    location_name: str = "",
+    location_id: str = "",
+    current_minute: int = 720,
+    session_id: int = 0,
+) -> tuple[bool, float]:
+    """
+    Determines whether random encounters can occur and at what probability:
+    - In `Anomalous Incursions`:
+      - 0% in all normal city zones/facilities.
+      - ~25% (0.25) ONLY inside the 40 Anomalous Tier-2 Facilities OR inside Theme Park during 22:00-08:00.
+    - In all other tactical combat scenarios:
+      - Standard 8% (0.08) ambush probability.
+    """
+    try:
+        from scenario_data import is_anomalous_incursions_scenario
+        if is_anomalous_incursions_scenario(scen_key):
+            if session_id:
+                try:
+                    from mechanics.world.anomalous_events import get_active_incursion_at_location
+                    if get_active_incursion_at_location(
+                        session_id,
+                        location_str=location_name,
+                        node_id=location_id,
+                    ):
+                        return False, 0.0
+                except Exception:
+                    pass
+            if is_anomalous_danger_zone(
+                location_name=location_name,
+                location_id=location_id,
+                current_minute=current_minute,
+                session_id=session_id,
+                scen_key=scen_key,
+            ):
+                return True, 0.25
+            return False, 0.0
+    except Exception:
+        pass
+    return True, 0.08
+
 
 

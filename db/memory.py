@@ -28,6 +28,7 @@ def add_commitment(
     commitment_type: str,
     description: str,
     turn_number: int = 0,
+    metadata: dict | None = None,
 ) -> dict:
     """Record a new commitment (promise, pact, secret, etc.) between entities.
 
@@ -39,15 +40,21 @@ def add_commitment(
     # Delegate to commitments_engine for full unified schema population
     try:
         from mechanics.system.commitments_engine import create_promise
+        merged_meta = dict(metadata or {})
+        if target_entity and target_entity.strip():
+            merged_meta.setdefault("raw_target_entity", target_entity.strip())
         res = create_promise(
             session_id=session_id,
             promiser=source_entity or "player",
             promisee=target_entity or "player",
             description=description.strip(),
             commitment_type=commitment_type or "promise",
-            turn_created=turn_number
+            turn_created=turn_number,
+            metadata=merged_meta,
         )
         if res:
+            if merged_meta.get("raw_target_entity"):
+                res["target_entity"] = merged_meta["raw_target_entity"]
             return res
     except Exception:
         pass
@@ -61,8 +68,8 @@ def add_commitment(
         cur = conn.execute(
             """INSERT INTO commitments_ledger
                (session_id, source_entity, target_entity, commitment_type,
-                description, status, turn_created, updated_at)
-               VALUES (?, ?, ?, ?, ?, 'active', ?, ?)""",
+                description, status, turn_created, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)""",
             (
                 session_id,
                 (source_entity or "player").strip(),
@@ -71,10 +78,25 @@ def add_commitment(
                 description.strip(),
                 turn_number,
                 now,
+                now,
             ),
         )
         row_id = cur.lastrowid
     return get_commitment(session_id, row_id)
+
+
+def _hydrate_memory_commitment_row(row_dict: dict) -> dict:
+    if not row_dict:
+        return {}
+    meta_raw = row_dict.get("metadata_json")
+    if meta_raw:
+        try:
+            meta = json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
+            if isinstance(meta, dict) and meta.get("raw_target_entity"):
+                row_dict["target_entity"] = meta["raw_target_entity"]
+        except Exception:
+            pass
+    return row_dict
 
 
 def get_commitment(session_id: int, commitment_id: int) -> dict:
@@ -83,7 +105,7 @@ def get_commitment(session_id: int, commitment_id: int) -> dict:
             "SELECT * FROM commitments_ledger WHERE id=? AND session_id=?",
             (commitment_id, session_id),
         ).fetchone()
-    return dict(row) if row else {}
+    return _hydrate_memory_commitment_row(dict(row)) if row else {}
 
 
 def get_active_commitments(
@@ -97,12 +119,14 @@ def get_active_commitments(
     with get_conn() as conn:
         if entity_name:
             name_lower = entity_name.strip().lower()
+            name_slug = name_lower.replace(" ", "_")
+            name_spaced = name_lower.replace("_", " ")
             rows = conn.execute(
                 """SELECT * FROM commitments_ledger
                    WHERE session_id=? AND status IN ('active', 'pending', 'approaching', 'arrived', 'in_progress')
-                     AND (lower(source_entity)=? OR lower(target_entity)=? OR participants_json LIKE ?)
+                     AND (lower(source_entity) IN (?, ?) OR lower(target_entity) IN (?, ?) OR lower(participants_json) LIKE ? OR lower(participants_json) LIKE ?)
                    ORDER BY turn_created ASC LIMIT ?""",
-                (session_id, name_lower, name_lower, f"%{name_lower}%", limit),
+                (session_id, name_slug, name_spaced, name_slug, name_spaced, f"%{name_slug}%", f"%{name_spaced}%", limit),
             ).fetchall()
         else:
             rows = conn.execute(
@@ -111,17 +135,37 @@ def get_active_commitments(
                    ORDER BY turn_created ASC LIMIT ?""",
                 (session_id, limit),
             ).fetchall()
-    return [dict(r) for r in rows]
+    return [_hydrate_memory_commitment_row(dict(r)) for r in rows]
 
 
 def update_commitment_status(
     session_id: int, commitment_id: int, status: str
 ) -> bool:
-    """Update commitment status to 'fulfilled', 'broken', 'active', 'flaked', etc. Returns True on success."""
+    """Update commitment status via commitments_engine so affinity, memory, and social ties stay synchronized."""
     status = status.lower().strip()
     valid_statuses = ("fulfilled", "broken", "active", "flaked", "completed", "cancelled", "voided", "abandoned")
     if status not in valid_statuses:
         return False
+    try:
+        from mechanics.system.commitments_engine import (
+            fulfill_commitment,
+            flake_commitment,
+            cancel_commitment,
+            void_commitment,
+            abandon_rendezvous,
+        )
+        if status in ("fulfilled", "completed"):
+            return fulfill_commitment(session_id, commitment_id)
+        if status in ("broken", "flaked"):
+            return bool(flake_commitment(session_id, commitment_id, reason="broken promise" if status == "broken" else "time_window_elapsed"))
+        if status == "cancelled":
+            return cancel_commitment(session_id, commitment_id)
+        if status == "voided":
+            return void_commitment(session_id, commitment_id)
+        if status == "abandoned":
+            return bool(abandon_rendezvous(session_id, commitment_id))
+    except Exception:
+        pass
     now = time.time()
     with get_conn() as conn:
         conn.execute(

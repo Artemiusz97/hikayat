@@ -1,46 +1,52 @@
+from __future__ import annotations
 import unittest
 from unittest.mock import patch, AsyncMock
 from skill_check import CheckResult
 import game_engine
-from game_engine.npcs.dialogue_tracking import extract_speaking_npcs_from_narrative
+from game_engine.npcs.cast_planner import plan_pre_turn, apply_cast_events
 from game_engine.state.social import resolve_pre_turn_social_and_disclosures
-from mechanics.social.affinity_engine import calculate_social_affinity_delta
 
 
 class TestTargetedDialogueAndNameCollisionGuard(unittest.IsolatedAsyncioTestCase):
     """Verifies that:
-    1. Player character name tokens do not cause NPCs with overlapping names to be misidentified as speaking.
+    1. Player character name tokens do not cause NPCs with overlapping names to be misidentified as speaking/engaged.
     2. Failed checks targeting a specific NPC in a multi-dialogue scene do not penalize other dialogue partners.
     """
 
-    def test_extract_speaking_npcs_ignores_player_name_collision(self):
-        party = [({"id": 1, "name": "Artem"}, [])]
+    def test_cast_planner_ignores_player_name_collision(self):
+        party = [({"id": 1, "name": "Artem", "user_id": 1001}, [])]
         npcs_present = [
             {"name": "Alicja Yamamoto"},
             {"name": "Artem Suzuki"},
             {"name": "Henry Sterling"},
         ]
-
-        narrative = (
-            "Artem offers a reassuring, easygoing shrug, his voice maintaining a steady, conversational pitch. "
-            "'A casual approach is better,' she says, leaning slightly toward Alicja with a relaxed posture. "
-            "Alicja smiles and replies, 'That makes sense.' "
-            "Henry Sterling nods in agreement."
+        session = {
+            "id": 8887710,
+            "current_location": "Homeroom 204",
+            "current_turn_index": 2,
+            "current_npcs": npcs_present,
+            "dialogue_partner": "Alicja Yamamoto",
+            "dialogue_partners": ["Alicja Yamamoto"],
+            "extra_json": {},
+        }
+        plan = plan_pre_turn(
+            session,
+            party,
+            [{"label": "Chat casually with Alicja Yamamoto", "target_npc": "Alicja Yamamoto"}],
         )
-
-        speaking = extract_speaking_npcs_from_narrative(
-            narrative,
-            npcs_present,
-            party=party,
-            player_name="Artem",
+        # Henry chimes in via structured cast_event; player name 'Artem' in prose never promotes 'Artem Suzuki'
+        final_plan, _ = apply_cast_events(
+            plan,
+            [{"type": "engage", "npc": "Henry Sterling", "reason": "Nods in agreement"}],
+            session,
+            party,
         )
-
-        self.assertIn("Alicja Yamamoto", speaking)
-        self.assertIn("Henry Sterling", speaking)
+        self.assertIn("Alicja Yamamoto", final_plan.dialogue_partners)
+        self.assertIn("Henry Sterling", final_plan.dialogue_partners)
         self.assertNotIn(
             "Artem Suzuki",
-            speaking,
-            "Artem Suzuki must not be extracted as speaking when only player Artem spoke.",
+            final_plan.dialogue_partners,
+            "Artem Suzuki must not be promoted when only player Artem spoke.",
         )
 
     def test_multi_dialogue_partner_targeted_failure_affinity_isolation(self):
@@ -96,7 +102,7 @@ class TestTargetedDialogueAndNameCollisionGuard(unittest.IsolatedAsyncioTestCase
             "next_narrative": "The air in the classroom feels colder.",
             "character_outcomes": [],
             "relationship_updates": [],
-            "next_choices": [{"label": "Apologize politely", "stat": "CHA", "requirement": 4}]
+            "next_choices": [{"label": "Apologize politely", "stat": "CHA", "requirement": 4}],
         }
 
         char = {"id": 1, "user_id": 1001, "name": "Artem", "hp": 100, "max_hp": 100, "mp": 50, "max_mp": 50, "gold": 10, "status_effects": []}
@@ -108,7 +114,7 @@ class TestTargetedDialogueAndNameCollisionGuard(unittest.IsolatedAsyncioTestCase
             "current_npcs": [{"name": "Alicja Yamamoto"}, {"name": "Artem Suzuki"}],
             "history": [],
             "current_location": "Homeroom 204",
-            "status": "active"
+            "status": "active",
         }
 
         failed_check = CheckResult(

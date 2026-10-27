@@ -115,7 +115,7 @@ export const SceneImageCard = ({
           className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/90 backdrop-blur-md animate-fadeIn"
           onClick={() => setLightboxOpen(false)}
         >
-          <div className="relative max-w-5xl max-h-[92vh] flex flex-col items-center">
+          <div className="relative max-w-5xl max-h-[calc(var(--app-height,100dvh)-1.5rem)] flex flex-col items-center">
             {/* Close Button */}
             <button
               type="button"
@@ -130,7 +130,7 @@ export const SceneImageCard = ({
             <img
               src={imageUrl}
               alt={title || 'Scene Illustration'}
-              className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl border border-fantasy-border/40 select-none"
+              className="max-w-full max-h-[calc(var(--app-height,100dvh)-3rem)] object-contain rounded-lg shadow-2xl border border-fantasy-border/40 select-none"
               onClick={(e) => e.stopPropagation()}
             />
 

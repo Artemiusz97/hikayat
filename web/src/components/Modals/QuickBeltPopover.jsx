@@ -46,7 +46,20 @@ const QuickBeltPopover = ({
   if (!isOpen) return null;
 
   const items = inventoryHook?.items || [];
-  const quickItems = items.filter(isQuickBeltItem);
+  const quickItems = (() => {
+    const map = new Map();
+    for (const it of items) {
+      if (!it || it.equipped || !isQuickBeltItem(it)) continue;
+      const key = `${it.name || ''}::${it.item_type || it.type || ''}::${it.effect || ''}`;
+      if (map.has(key)) {
+        const existing = map.get(key);
+        existing.count += 1;
+      } else {
+        map.set(key, { ...it, count: 1 });
+      }
+    }
+    return Array.from(map.values());
+  })();
 
   const handleUse = async (item) => {
     if (!item || usingId || processing) return;
@@ -87,7 +100,7 @@ const QuickBeltPopover = ({
         className="fixed inset-0"
         onClick={onClose}
       />
-      <div className="relative w-full max-w-sm bg-fantasy-panel border border-fantasy-border/90 rounded-xl shadow-2xl p-3.5 space-y-3 z-10">
+      <div className="relative w-full max-w-sm max-h-[calc(var(--app-height,100dvh)-1.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain custom-scrollbar bg-fantasy-panel border border-fantasy-border/90 rounded-xl shadow-2xl p-3.5 space-y-3 z-10">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-fantasy-border/60 pb-2">
           <div className="flex items-center gap-2">
@@ -153,8 +166,13 @@ const QuickBeltPopover = ({
                       )}
                     </div>
                     <div className="min-w-0">
-                      <div className="text-xs font-bold text-gray-200 truncate">
-                        {item.name}
+                      <div className="text-xs font-bold text-gray-200 truncate flex items-center gap-1.5">
+                        <span className="truncate">{item.name}</span>
+                        {item.count > 1 && (
+                          <span className="shrink-0 text-[10px] font-mono font-bold px-1.5 py-0.2 bg-fantasy-accent/20 text-fantasy-accent rounded border border-fantasy-accent/40">
+                            x{item.count}
+                          </span>
+                        )}
                       </div>
                       {eff && (
                         <div className="text-[10px] text-gray-400 truncate font-mono">

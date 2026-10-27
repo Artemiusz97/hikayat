@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { X, Sparkles, Shield, Sword, RotateCcw, Wand2, Compass, Tag, RefreshCw, Globe, Shirt, Check, Link, Play } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useId } from 'react';
+import { X, Sparkles, Shield, Sword, RotateCcw, Wand2, Compass, Tag, RefreshCw, Globe, Shirt, Check, Link, Play, Building2, Landmark, Smartphone } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { apiCall } from '../../api/client';
 
 const STAT_KEYS = [
@@ -14,10 +15,10 @@ const STAT_KEYS = [
 
 function computeClassPreset(className = '', classDesc = '') {
   const text = `${className} ${classDesc}`.toLowerCase();
-  if (/mage|wizard|sorcerer|warlock|arcan|scholar|psion|netrunner|alchemist|hacker/.test(text)) return { str: 1, per: 2, end: 2, cha: 1, int: 4, agi: 1, luk: 1 };
-  if (/rogue|thief|assassin|ranger|scout|sniper|infiltrator|smuggler|delinquent/.test(text)) return { str: 1, per: 3, end: 1, cha: 1, int: 1, agi: 3, luk: 2 };
-  if (/bard|diplomat|idol|president|noble|social|merchant|cleric|healer|priest/.test(text)) return { str: 1, per: 1, end: 2, cha: 4, int: 2, agi: 1, luk: 1 };
-  if (/paladin|knight|templar|guardian|vanguard|enforcer/.test(text)) return { str: 3, per: 1, end: 3, cha: 2, int: 1, agi: 1, luk: 1 };
+  if (/mage|wizard|sorcerer|warlock|arcan|scholar|psion|netrunner|alchemist|hacker|technolog|esper|scribe|investigator/.test(text)) return { str: 1, per: 2, end: 2, cha: 1, int: 4, agi: 1, luk: 1 };
+  if (/rogue|thief|assassin|ranger|scout|sniper|infiltrator|smuggler|delinquent|marksman|wetwork|stalker|runner/.test(text)) return { str: 1, per: 3, end: 1, cha: 1, int: 1, agi: 3, luk: 2 };
+  if (/bard|diplomat|idol|president|noble|social|merchant|cleric|healer|priest|ritualist|broker|exorcist|escort/.test(text)) return { str: 1, per: 1, end: 2, cha: 4, int: 2, agi: 1, luk: 1 };
+  if (/paladin|knight|templar|guardian|vanguard|enforcer|juggernaut|breacher|engineer|warden/.test(text)) return { str: 3, per: 1, end: 3, cha: 2, int: 1, agi: 1, luk: 1 };
   return { str: 3, per: 1, end: 3, cha: 1, int: 1, agi: 2, luk: 1 };
 }
 
@@ -60,12 +61,16 @@ const MALE_TEXTURE_OPTIONS = [
   { value: 'Sturdy Draconic Build', label: 'Sturdy Draconic Build (Scaly/Draconic)' },
 ];
 
-const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = [], availableTags = [] }) => {
+const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = [], availableTags = [], targetSlot = 1 }) => {
+  const { t } = useTranslation();
+  const factionFieldId = useId();
   const [step, setStep] = useState(1);
   const [scenario, setScenario] = useState('fantasy');
   const [customTags, setCustomTags] = useState(['fantasy']);
   const [charClass, setCharClass] = useState(character?.char_class || 'Warrior');
   const [startingWeapon, setStartingWeapon] = useState('Rusty Sword');
+  const [startingFaction, setStartingFaction] = useState('public_agency');
+  const [previewStartingItems, setPreviewStartingItems] = useState(null);
   
   const [templates, setTemplates] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -158,41 +163,152 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     return false;
   }, [templates, scenario, customTags, scenarios]);
 
-  const activeClassesMap = templates?.classes || {};
+  const isAnomalousIncursions = useMemo(() => {
+    if (templates?.is_anomalous_incursions) return true;
+    const scenStr = String(scenario || '').toLowerCase();
+    return [
+      'anomalous_incursions',
+      'nsfw_gore_anomalous_incursions',
+      'furry_anomalous_incursions',
+      'nsfw_furry_gore_anomalous_incursions',
+      'urban_anomalies',
+    ].includes(scenStr);
+  }, [templates, scenario]);
+
+  const anomalousFactionOptions = useMemo(() => [
+    {
+      id: 'public_agency',
+      Icon: Landmark,
+      isDefault: true,
+      name: t('embark.faction_public_name', 'Public Containment Agency'),
+      desc: t('embark.faction_public_desc', 'Daily Salary (50G–300G) • 50% HQ Shop Discount • Mandatory Daily Bounty • 0G/0 Loot on Agency Bounties • Starts at Bureau HQ'),
+    },
+    {
+      id: 'private_agency_1',
+      Icon: Building2,
+      isDefault: false,
+      name: t('embark.faction_private_name', 'Private Containment Agency #1'),
+      desc: t('embark.faction_private_desc', 'Keep 100% Bounty Gold & Loot • High-Tier Armory (+35% Price) • Public Contracts Allowed • Mandatory Daily Bounty • Starts at Corporate HQ'),
+    },
+    {
+      id: 'private_agency_2',
+      Icon: Building2,
+      isDefault: false,
+      name: t('embark.faction_private_2_name', 'Private Containment Agency #2 (Rival Syndicate)'),
+      desc: t('embark.faction_private_2_desc', 'Keep 100% Bounty Gold & Loot • Rival Syndicate Armory (+35% Price) • Public Contracts Allowed • Mandatory Daily Bounty • Starts at Rival Syndicate HQ'),
+    },
+    {
+      id: 'monastic_order',
+      Icon: Sparkles,
+      isDefault: false,
+      name: t('embark.faction_monastic_name', 'Monastic Shrine Order'),
+      desc: t('embark.faction_monastic_desc', '2–3 Free Sacred Items Daily • Keep Combat Loot (0G Order Fee) • Free Temple Healing • Mandatory Daily Bounty • Starts at Grand Temple'),
+    },
+    {
+      id: 'freelancer',
+      Icon: Smartphone,
+      isDefault: false,
+      name: t('embark.faction_freelancer_name', 'Independent Freelancer'),
+      desc: t('embark.faction_freelancer_desc', 'No Mandatory Daily Quotas • Full Payouts on Public Contracts & Freelance App • Starts at Suburb Home'),
+    },
+  ], [t]);
+
+  const activeClassesMap = useMemo(() => {
+    if (isAnomalousIncursions && templates?.faction_classes?.[startingFaction]) {
+      return templates.faction_classes[startingFaction];
+    }
+    return templates?.classes || {};
+  }, [isAnomalousIncursions, templates, startingFaction]);
+
   const activeClassInfo = activeClassesMap[charClass] || {};
   
   const weaponsList = useMemo(() => {
+    if (isAnomalousIncursions && templates?.faction_starting_weapons?.[startingFaction]) {
+      return templates.faction_starting_weapons[startingFaction];
+    }
     const rawList = (templates?.starting_weapons || []).map(w => typeof w === 'object' ? w.name : w);
     return rawList.length > 0 ? rawList : ['Rusty Sword', 'Oak Staff', 'Hunting Bow', 'Iron Dagger'];
-  }, [templates]);
+  }, [isAnomalousIncursions, templates, startingFaction]);
+
+  useEffect(() => {
+    const classNames = Object.keys(activeClassesMap);
+    if (classNames.length > 0 && !classNames.includes(charClass)) {
+      setCharClass(classNames[0]);
+    }
+  }, [activeClassesMap, charClass]);
+
+  useEffect(() => {
+    if (weaponsList.length > 0 && !weaponsList.includes(startingWeapon)) {
+      setStartingWeapon(weaponsList[0]);
+    }
+  }, [weaponsList, startingWeapon]);
 
   const displayedLoadout = useMemo(() => {
+    let loadout = {};
     if (regeneratedLoadout) {
-      if (isNonCombat) {
-        const copy = { ...regeneratedLoadout };
-        delete copy['Weapon'];
-        delete copy['Shield'];
-        delete copy['Armor'];
-        return copy;
-      }
-      return regeneratedLoadout;
+      loadout = { ...regeneratedLoadout };
+    } else {
+      const rawGear = activeClassInfo?.starter_gear || {};
+      Object.entries(rawGear).forEach(([slot, entry]) => {
+        if (slot === 'Weapon' || !entry) return;
+        if (isNonCombat && (slot === 'Shield' || slot === 'Armor')) return;
+        if (Array.isArray(entry) && entry.length >= 1) {
+          loadout[slot] = {
+            name: entry[0],
+            description: entry[1] ? String(entry[1]) : 'Starter equipment',
+          };
+        } else if (typeof entry === 'object' && entry.name) {
+          loadout[slot] = entry;
+        }
+      });
     }
-    const rawGear = activeClassInfo?.starter_gear || {};
-    const loadout = {};
-    Object.entries(rawGear).forEach(([slot, entry]) => {
-      if (slot === 'Weapon' || !entry) return;
-      if (isNonCombat && (slot === 'Shield' || slot === 'Armor')) return;
-      if (Array.isArray(entry) && entry.length >= 1) {
-        loadout[slot] = {
-          name: entry[0],
-          description: entry[1] ? String(entry[1]) : 'Starter equipment',
-        };
-      } else if (typeof entry === 'object' && entry.name) {
-        loadout[slot] = entry;
-      }
-    });
+
+    if (isNonCombat) {
+      delete loadout['Weapon'];
+      delete loadout['Shield'];
+      delete loadout['Armor'];
+    } else if (startingWeapon && (!loadout['Weapon'] || !isAnomalousIncursions)) {
+      loadout['Weapon'] = {
+        name: startingWeapon,
+        description: 'Starter weapon',
+      };
+    }
     return loadout;
-  }, [regeneratedLoadout, activeClassInfo, isNonCombat]);
+  }, [regeneratedLoadout, activeClassInfo, isNonCombat, isAnomalousIncursions, startingWeapon]);
+
+  useEffect(() => {
+    if (!isOpen || !isAnomalousIncursions || !charClass) {
+      setPreviewStartingItems(null);
+      return;
+    }
+    let cancelled = false;
+    setRegeneratingGear(true);
+    apiCall('/api/character/preview-gear', {
+      method: 'POST',
+      body: JSON.stringify({
+        char_class: charClass,
+        scenario,
+        tags: scenario === 'custom' ? customTags : undefined,
+        gender: character?.gender || 'Male',
+        race: character?.race || 'Human',
+        starting_weapon: isNonCombat ? '' : startingWeapon,
+        force_dynamic: true,
+        starting_faction: startingFaction,
+      }),
+    })
+      .then((res) => {
+        if (cancelled) return;
+        if (res?.loadout) setRegeneratedLoadout(res.loadout);
+        if (res?.starting_items) setPreviewStartingItems(res.starting_items);
+      })
+      .catch((err) => console.error(err))
+      .finally(() => {
+        if (!cancelled) setRegeneratingGear(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, isAnomalousIncursions, startingFaction, charClass, scenario, startingWeapon, character?.gender, character?.race, isNonCombat, customTags]);
 
   const maxTotalPoints = 12;
   const totalAllocated = Object.values(stats).reduce((acc, v) => acc + Number(v || 1), 0);
@@ -224,9 +340,11 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
           race: character?.race || 'Human',
           starting_weapon: isNonCombat ? '' : startingWeapon,
           force_dynamic: true,
+          starting_faction: isAnomalousIncursions ? startingFaction : undefined,
         }),
       });
       if (res?.loadout) setRegeneratedLoadout(res.loadout);
+      if (res?.starting_items) setPreviewStartingItems(res.starting_items);
     } catch (err) {
       console.error(err);
     } finally {
@@ -270,14 +388,25 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         }
       }
 
+      const finalStarterLoadout = { ...(displayedLoadout || {}) };
+      if (!isNonCombat && startingWeapon && !finalStarterLoadout['Weapon']?.effect) {
+        finalStarterLoadout['Weapon'] = {
+          name: startingWeapon,
+          description: 'Starter weapon',
+        };
+      }
+
       onClose();
       await onEmbark({
+        slot: targetSlot || 1,
         scenario,
         mode,
         tags: scenario === 'custom' ? customTags : undefined,
         char_class: charClass,
         weapon_name: isNonCombat ? '' : startingWeapon,
-        starter_loadout: displayedLoadout || undefined,
+        starter_loadout: finalStarterLoadout,
+        starting_items: isAnomalousIncursions && previewStartingItems ? previewStartingItems : undefined,
+        starting_faction: isAnomalousIncursions ? startingFaction : undefined,
         str_val: stats.str,
         per: stats.per,
         end: stats.end,
@@ -299,10 +428,10 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4">
       <div className="fixed inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
 
-      <div className="relative w-full max-w-4xl bg-fantasy-panel border border-fantasy-border rounded-xl shadow-2xl overflow-hidden z-10 flex flex-col max-h-[90vh]">
+      <div className="relative w-full max-w-4xl bg-fantasy-panel border border-fantasy-border rounded-xl shadow-2xl overflow-hidden z-10 flex flex-col max-h-[calc(var(--app-height,100dvh)-2rem)]">
         <div className="p-4 border-b border-fantasy-border bg-black/50 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-lg bg-fantasy-accent/15 border border-fantasy-accent/40 text-fantasy-accent">
@@ -397,6 +526,64 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                     </div>
                   </div>
                 )}
+
+                {isAnomalousIncursions && (
+                  <fieldset className="pt-3 mt-2 border-t border-fantasy-border/60 space-y-2">
+                    <legend className="text-[11px] uppercase tracking-wider font-bold text-fantasy-accent mb-0.5 flex items-center gap-1.5">
+                      <Shield size={13} aria-hidden="true" />
+                      <span>{t('embark.starting_faction_legend', 'Starting Faction Affiliation')}</span>
+                    </legend>
+                    <p className="text-[11px] text-gray-400 leading-snug">
+                      {t('embark.starting_faction_hint', 'Shapes your starting HQ, uniform loadout, daily mandates, merchant perks, and agent clearance.')}
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      {anomalousFactionOptions.map((fac) => {
+                        const optId = `${factionFieldId}-${fac.id}`;
+                        const descId = `${factionFieldId}-${fac.id}-desc`;
+                        const isSelected = startingFaction === fac.id;
+                        const FacIcon = fac.Icon;
+                        return (
+                          <label
+                            key={fac.id}
+                            htmlFor={optId}
+                            className={`min-h-[52px] p-3 rounded-lg border cursor-pointer flex items-start gap-2.5 transition-all has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-fantasy-accent ${
+                              isSelected
+                                ? 'bg-fantasy-accent/15 border-fantasy-accent shadow-sm'
+                                : 'bg-black/40 border-fantasy-border/70 hover:border-gray-500'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              id={optId}
+                              name="starting_faction"
+                              value={fac.id}
+                              checked={isSelected}
+                              onChange={() => setStartingFaction(fac.id)}
+                              aria-describedby={descId}
+                              className="mt-1 accent-amber-500 shrink-0"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <FacIcon size={13} aria-hidden="true" className={isSelected ? 'text-fantasy-accent shrink-0' : 'text-gray-400 shrink-0'} />
+                                <span className={`text-xs font-bold ${isSelected ? 'text-amber-200' : 'text-gray-200'}`}>
+                                  {fac.name}
+                                </span>
+                                {fac.isDefault && (
+                                  <span className="px-1.5 py-0.5 rounded bg-fantasy-accent/20 border border-fantasy-accent/40 text-fantasy-accent text-[9px] uppercase font-mono">
+                                    {t('embark.default_badge', 'Default')}
+                                  </span>
+                                )}
+                              </div>
+                              <p id={descId} className="text-[10px] text-gray-400 leading-relaxed mt-1">
+                                {fac.desc}
+                              </p>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </fieldset>
+                )}
               </section>
 
               {/* Class & Stats Reallocation */}
@@ -433,12 +620,33 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                      </div>
 
                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto custom-scrollbar pr-1">
-                       {Object.entries(displayedLoadout).map(([slot, item]) => (
-                         <div key={slot} className="p-2 rounded bg-black/40 border border-fantasy-border/60 flex flex-col justify-center">
-                           <span className="text-[9px] uppercase tracking-wider text-gray-400 font-semibold">{slot}</span>
-                           <span className="text-xs font-bold text-gray-200 leading-snug break-words" title={item.description || item.name}>{item.name}</span>
-                         </div>
-                       ))}
+                       {Object.entries(displayedLoadout).map(([slot, item]) => {
+                         const isAnomItem = String(item?.name || '').includes('[Anomalous]');
+                         const grantMatch = String(item?.description || '').match(/✨ Grants Ability[^•]*/);
+                         return (
+                           <div
+                             key={slot}
+                             className={`p-2 rounded border flex flex-col justify-center ${
+                               isAnomItem
+                                 ? 'bg-purple-950/30 border-purple-500/60'
+                                 : 'bg-black/40 border-fantasy-border/60'
+                             }`}
+                           >
+                             <span className="text-[9px] uppercase tracking-wider text-gray-400 font-semibold">{slot}</span>
+                             <span
+                               className={`text-xs font-bold leading-snug break-words ${isAnomItem ? 'text-purple-200' : 'text-gray-200'}`}
+                               title={item.description || item.name}
+                             >
+                               {item.name}
+                             </span>
+                             {grantMatch && (
+                               <span className="text-[10px] text-amber-300 font-medium leading-tight mt-0.5">
+                                 {grantMatch[0].trim()}
+                               </span>
+                             )}
+                           </div>
+                         );
+                       })}
                        {Object.keys(displayedLoadout).length === 0 && (
                          <div className="col-span-1 sm:col-span-2 text-center text-[10px] text-gray-500 py-2 italic">
                            Default gear will be forged upon embarkation.

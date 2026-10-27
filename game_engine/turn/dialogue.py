@@ -88,8 +88,22 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
                 if not is_acc:
                     is_departing_venue = True
 
-        # Check for conversational exit: unified intent engine
-        is_explicit_exit = parsed_action.category == IntentCategory.DIALOGUE_EXIT
+        # Check for conversational exit: unified intent engine + explicit server-stamped flags
+        is_let_single_depart = isinstance(a, dict) and a.get("departure_action") == "let_npc_depart"
+        is_explicit_exit = (
+            not is_let_single_depart
+            and (
+                parsed_action.category == IntentCategory.DIALOGUE_EXIT
+                or (
+                    isinstance(a, dict)
+                    and (
+                        a.get("intent") == "dialogue_exit"
+                        or a.get("ends_dialogue") is True
+                        or a.get("_pinned_dialogue_exit") is True
+                    )
+                )
+            )
+        )
         is_departure_exit = (parsed_action.category == IntentCategory.MOVEMENT and is_departing_venue and not is_acc)
         is_rendezvous_proposal = (parsed_action.category == IntentCategory.SOCIAL_INVITE and bool(parsed_action.metadata.get("is_rendezvous")))
         is_accompany_proposal = (parsed_action.category == IntentCategory.SOCIAL_INVITE and bool(parsed_action.metadata.get("is_accompany")))
@@ -577,9 +591,11 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
         if not _is_combat_scen:
             recruitment_prompt = "  * PARTY RECRUITMENT DISABLED: This is a non-combat / civilian scenario. NEVER generate party recruitment, mercenary hire, or companion joining choices.\n"
         elif not _in_active_erotic_dlg and (human_count + len(party_npcs) < 4):
+            from mechanics.social.relationships import get_scenario_recruitment_phrasing
             enemy_list = game_engine.get_active_enemies(session) or []
             enemy_names = {game_engine._get_npc_name(e).lower() for e in enemy_list if e}
             lore_people = db.get_lorebook(session["id"]).get("person", []) if session.get("id") else []
+            is_anom_dlg = scenario_data.is_anomalous_incursions_scenario(_scen_name)
             for partner in new_partners:
                 if not partner or partner.lower() in enemy_names:
                     continue
@@ -587,11 +603,23 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                 t_role = str(lore_ent.get("role") or lore_ent.get("occupation") or lore_ent.get("description") or "").lower()
                 if any(m in t_role for m in ("merchant", "shopkeeper", "vendor", "apothecary", "peddler", "trader")):
                     continue
+                if is_anom_dlg and session.get("id"):
+                    try:
+                        from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag, TAG_CIVILIAN
+                        if classify_anomalous_npc_tag(lore_ent or partner, session_id=session["id"], scen_key=_scen_name) == TAG_CIVILIAN:
+                            continue
+                    except Exception:
+                        pass
                 cd = db.get_recruitment_cooldown(session["id"], partner) if session.get("id") else 0
                 if cd == 0 and not any(p.get("name", "").lower() == partner.lower() for p in party_npcs):
-                    recruitment_prompt += f"  * 🤝 [CHA] Party Recruitment check: 'Invite {partner} to join your party as a permanent companion' (Offer this skill check choice when talking to friendly/allied NPCs to recruit them).\n"
+                    rec_phrasing = get_scenario_recruitment_phrasing(_scen_name, partner)
+                    recruitment_prompt += (
+                        f"  * 🤝 [CHA] Companion Team-Up / Recruitment check: '{rec_phrasing['choice_label']}' "
+                        f"(Offer this skill check choice when talking to friendly/allied NPCs to invite them onto your {rec_phrasing['group_noun']}. "
+                        f"{rec_phrasing['narration_guidance']}).\n"
+                    )
                 elif cd > 0:
-                    recruitment_prompt += f"  * Note: {partner} declined a party recruitment invitation earlier and cannot be invited again today (on cooldown until next day/tomorrow). NEVER offer a recruitment choice for {partner}.\n"
+                    recruitment_prompt += f"  * Note: {partner} declined a team-up / recruitment invitation earlier and cannot be invited again today (on cooldown until next day/tomorrow). NEVER offer a recruitment choice for {partner}.\n"
 
         contact_exchange_prompt = ""
         from mechanics.system.phone import scenario_has_smartphone
@@ -709,32 +737,40 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                         if is_quest_interrogation:
                             break
 
+            import namegen
+            contact_peer_pool = [c.get("name", "") for c in contacts if isinstance(c, dict) and c.get("name")]
+            stg_npcs_all = (session.get("pre_turn_stage_npcs") or []) + (session.get("current_npcs") or [])
+            stg_peer_pool = [game_engine._get_npc_name(n) for n in stg_npcs_all if isinstance(n, dict) and game_engine._get_npc_name(n)]
             for p in new_partners:
 
                 p_low = p.lower().strip()
+                p_toks = namegen.get_unique_person_tokens(p, peer_names=new_partners, min_len=2)
+                p_given = namegen.get_given_name(p).lower().strip()
 
-                p_first = (p_low.split() or [""])[0]
                 matched_c = next((
                     c for c in contacts
                     if c.get("name", "").lower().strip() == p_low or
                     c.get("npc_id", "").lower().strip() == p_low.replace(" ", "_")
                 ), None)
-                if not matched_c and len(p_first) >= 3:
-                    matched_c = next((
+                if not matched_c and p_toks:
+                    c_cands = [
                         c for c in contacts
-                        if (c.get("name", "").lower().strip().split() or [""])[0] == p_first
-                    ), None)
+                        if p_toks & namegen.get_unique_person_tokens(c.get("name", ""), peer_names=contact_peer_pool, min_len=2)
+                    ]
+                    if len(c_cands) == 1:
+                        matched_c = c_cands[0]
                 if not matched_c:
-                    stg_npcs = (session.get("pre_turn_stage_npcs") or []) + (session.get("current_npcs") or [])
                     matched_c = next((
-                        n for n in stg_npcs
+                        n for n in stg_npcs_all
                         if isinstance(n, dict) and n.get("name", "").lower().strip() == p_low
                     ), None)
-                    if not matched_c and len(p_first) >= 3:
-                        matched_c = next((
-                            n for n in stg_npcs
-                            if isinstance(n, dict) and (n.get("name", "").lower().strip().split() or [""])[0] == p_first
-                        ), None)
+                    if not matched_c and p_toks:
+                        s_cands = [
+                            n for n in stg_npcs_all
+                            if isinstance(n, dict) and (p_toks & namegen.get_unique_person_tokens(n.get("name", ""), peer_names=stg_peer_pool, min_len=2))
+                        ]
+                        if len(s_cands) == 1:
+                            matched_c = s_cands[0]
 
                 if matched_c:
                     from mechanics.social.persona.actor_card import build_actor_direction_card
@@ -754,14 +790,16 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
                     # Overlay living scene stage state (micro_blocking, composure_state, attention_ring, stage_role)
                     stage_source = None
-                    for stg in (session.get("pre_turn_stage_npcs") or []):
+                    pre_stage_list = session.get("pre_turn_stage_npcs") or []
+                    for stg in pre_stage_list:
                         if isinstance(stg, dict):
                             s_nm = game_engine._get_npc_name(stg).lower().strip()
-                            if s_nm == p_low or (len(p_first) >= 3 and (s_nm.split() or [""])[0] == p_first):
+                            s_toks = namegen.get_unique_person_tokens(s_nm, peer_names=pre_stage_list, min_len=2)
+                            if s_nm == p_low or bool(p_toks & s_toks):
                                 stage_source = stg
                                 break
                     if not stage_source and isinstance(session.get("scene_stage_state"), dict):
-                        st_dict = session["scene_stage_state"].get(p_low) or (session["scene_stage_state"].get(p_first) if len(p_first) >= 3 else None)
+                        st_dict = session["scene_stage_state"].get(p_low) or (session["scene_stage_state"].get(p_given) if len(p_given) >= 2 else None)
                         if isinstance(st_dict, dict):
                             stage_source = st_dict
                     if stage_source:
@@ -898,34 +936,43 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
             from mechanics.social.physical_state import is_erotic_intimate_contact, _match_actor_key
             from mechanics.social.intimate_excitement import is_in_refractory_cooldown, infer_last_act_from_state
 
+            import namegen
+            contact_peer_pool_2 = [c.get("name", "") for c in contacts if isinstance(c, dict) and c.get("name")]
+            curr_npcs_list = session.get("current_npcs") or []
+            curr_peer_pool_2 = [game_engine._get_npc_name(n) for n in curr_npcs_list if isinstance(n, dict) and game_engine._get_npc_name(n)]
             for p in new_partners:
 
                 p_low = p.lower().strip()
-                p_first = (p_low.split() or [""])[0]
+                p_toks = namegen.get_unique_person_tokens(p, peer_names=new_partners, min_len=2)
+                p_given = namegen.get_given_name(p).lower().strip()
 
                 matched_c = next((
                     c for c in contacts
                     if c.get("name", "").lower().strip() == p_low or
                     c.get("npc_id", "").lower().strip() == p_low.replace(" ", "_")
                 ), None)
-                if not matched_c and len(p_first) >= 3:
-                    matched_c = next((
+                if not matched_c and p_toks:
+                    c_cands = [
                         c for c in contacts
-                        if (c.get("name", "").lower().strip().split() or [""])[0] == p_first
-                    ), None)
+                        if p_toks & namegen.get_unique_person_tokens(c.get("name", ""), peer_names=contact_peer_pool_2, min_len=2)
+                    ]
+                    if len(c_cands) == 1:
+                        matched_c = c_cands[0]
                 if not matched_c:
                     matched_c = next((
-                        n for n in (session.get("current_npcs") or [])
+                        n for n in curr_npcs_list
                         if isinstance(n, dict) and n.get("name", "").lower().strip() == p_low
                     ), None)
-                if not matched_c and len(p_first) >= 3:
-                    matched_c = next((
-                        n for n in (session.get("current_npcs") or [])
-                        if isinstance(n, dict) and (n.get("name", "").lower().strip().split() or [""])[0] == p_first
-                    ), None)
+                if not matched_c and p_toks:
+                    n_cands = [
+                        n for n in curr_npcs_list
+                        if isinstance(n, dict) and (p_toks & namegen.get_unique_person_tokens(n.get("name", ""), peer_names=curr_peer_pool_2, min_len=2))
+                    ]
+                    if len(n_cands) == 1:
+                        matched_c = n_cands[0]
 
                 curr_ic = str(curr_phys.get("intimate_contact", "")).lower() if curr_phys else ""
-                if is_nsfw and not _is_disengaging_dlg and (is_erotic_intimate_contact(curr_ic) or _in_active_erotic_dlg) and (p_low in curr_ic or (len(p_first) >= 3 and p_first in curr_ic) or " with " not in curr_ic or _in_active_erotic_dlg):
+                if is_nsfw and not _is_disengaging_dlg and (is_erotic_intimate_contact(curr_ic) or _in_active_erotic_dlg) and (p_low in curr_ic or (len(p_given) >= 2 and p_given in curr_ic) or any(t in curr_ic for t in p_toks if len(t) >= 3) or " with " not in curr_ic or _in_active_erotic_dlg):
                     climax_info = curr_phys.get("climax_state", {}) if curr_phys else {}
                     excitement_data = curr_phys.get("excitement", {}) if curr_phys else {}
                     actors_exc = excitement_data.get("actors", {}) if isinstance(excitement_data, dict) else {}
@@ -1068,10 +1115,15 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
         _partner_stage_npc = None
         _all_stage = (session.get("pre_turn_stage_npcs") or []) + (session.get("current_npcs") or [])
         if new_partners:
+            import namegen
             _p_first_low = new_partners[0].lower().strip()
+            _p_toks = namegen.get_unique_person_tokens(new_partners[0], peer_names=new_partners, min_len=2)
             _partner_stage_npc = next((
                 n for n in _all_stage
-                if isinstance(n, dict) and (n.get("name", "").lower().strip() == _p_first_low or (n.get("name", "").lower().strip().split() or [""])[0] == _p_first_low.split()[0])
+                if isinstance(n, dict) and (
+                    n.get("name", "").lower().strip() == _p_first_low
+                    or bool(_p_toks & namegen.get_unique_person_tokens(n.get("name", ""), peer_names=_all_stage, min_len=2))
+                )
             ), None)
         if not _partner_stage_npc:
             _partner_stage_npc = {"name": partner_str}
@@ -1093,6 +1145,37 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
         )
 
         ring2_peer_section = _fmt_ring2(session.get("pre_turn_stage_npcs") or session.get("current_npcs") or [], active_partners=new_partners)
+
+        _dynamic_ledger_section = ""
+        if not _in_active_erotic_dlg and new_partners and new_partners[0]:
+            try:
+                from mechanics.social.conversation_choices import (
+                    resolve_partner_conversation_profile,
+                    get_partner_conversation_budget_state,
+                    _recent_action_labels_lower,
+                )
+                _lead_prof = resolve_partner_conversation_profile(session, new_partners[0], party=party)
+                _b_state = get_partner_conversation_budget_state(session, _lead_prof)
+                _asked = _recent_action_labels_lower(session, limit=12, actions=actions, partner_name=new_partners[0])
+                _rem_b = int(_b_state.get("remaining_budget", 3))
+                _ledger_lines = []
+                if _asked:
+                    _asked_fmt = "; ".join(f"'{x}'" for x in _asked[:8])
+                    _ledger_lines.append(
+                        f"  * ALREADY ASKED / DISCUSSED (DO NOT REPEAT OR PARAPHRASE IN `next_choices`): {_asked_fmt}"
+                    )
+                if _lead_prof.get("is_private_meetup"):
+                    _ledger_lines.append(
+                        f"  * PRIVATE MEETUP / DATE FOCUS: Prioritize personal getting-to-know-you questions, venue small talk, warm compliments, lighthearted jokes, and natural chemistry over generic work/agency rumors."
+                    )
+                if _rem_b <= 1:
+                    _ledger_lines.append(
+                        f"  * [NATURAL CONVERSATION PAUSE]: Small-talk budget is nearly exhausted ({_rem_b} exchange left). Have {new_partners[0]} answer warmly/naturally while subtly signaling a natural pause (glancing at their duties, watch, or surroundings) so the player feels comfortable wrapping up the conversation."
+                    )
+                if _ledger_lines:
+                    _dynamic_ledger_section = "- [DYNAMIC CONVERSATION LEDGER & PACING]:\n" + "\n".join(_ledger_lines) + "\n"
+            except Exception:
+                _dynamic_ledger_section = ""
 
 
 
@@ -1154,6 +1237,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
                 f"- `next_choices`: Generate 3 to 5 conversational choices reacting directly to what {partner_str} just said. You MUST include at least 1-2 choices that directly advance, accept, clarify, or commit to the bounty task (e.g. accepting the notes, agreeing to the delivery, asking for delivery instructions). Every substantive choice MUST require a skill check (`stat: 'CHA'`, `'INT'`, `'PER'`, or `'AGI'`, requirement: 5-8). Only the 1 dedicated conversational exit has `stat: 'NONE'`, `requirement: 0`.\n"
                 f"{ring2_peer_section}"
+                f"{_dynamic_ledger_section}"
                 f"{_stall_note}"
                 f"{multi_partner_note}"
                 f"{recruitment_prompt}"
@@ -1195,6 +1279,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                 f"- `next_choices`: Generate 3 to 5 organic, distinct conversational choices reacting directly to what {partner_str} just said or proposed. Every substantive choice (pressing for evidence/clues, negotiating terms, challenging motives, strategic cooperation) MUST require a skill check (`stat: 'INT'`, `'CHA'`, or `'PER'`, requirement: 5-8). Only the 1 dedicated conversational exit has `stat: 'NONE'`, `requirement: 0`.\n"
                 f"- Give distinct tactical stances (e.g. pressing for evidence/clues, negotiating terms/compromise, challenging motives, or offering strategic cooperation).\n"
                 f"{ring2_peer_section}"
+                f"{_dynamic_ledger_section}"
                 f"{_stall_note}"
 
                 f"{multi_partner_note}"
@@ -1295,6 +1380,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
                 f"  * In social dialogues, `CHA` choices represent warmth, charm, humor, or genuine personal sharing (NOT 'negotiating contractual terms').\n"
                 f"{ring2_peer_section}"
+                f"{_dynamic_ledger_section}"
                 f"{_stall_note}"
 
                 f"{multi_partner_note}"

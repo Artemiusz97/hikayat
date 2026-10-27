@@ -28,7 +28,9 @@ def is_hub_location(location_str: str) -> bool:
 
         "starship", "vanguard", "airship", "zeppelin", "hub", "leviathan", "sovereign",
 
-        "dreadnought", "hms", "ironclad", "zephyr", "aether", "celestial", "capital"
+        "dreadnought", "hms", "ironclad", "zephyr", "aether", "celestial", "capital",
+        "headquarters", "operations facility", "command complex", "directorate",
+        "uptown", "downtown", "suburb", "city center", "theme park", "amusement", "grand temple", "airport", "hospital", "university", "night market", "botanical"
 
     ]
 
@@ -63,6 +65,40 @@ def get_zone_emoji(zone_name: str, scen_key: str = "") -> str:
     z_lower = zone_name.lower()
 
 
+
+    # Agency & Operations Headquarters
+    if any(k in z_lower for k in ("headquarters", "operations facility", "command complex", "central spire", "citadel &", "containment", " hq", "_hq")) or z_lower.endswith(" hq"):
+        return "🏢"
+    # Ultra-Rich Estates & Sovereign Hills
+    if any(k in z_lower for k in ("sovereign hills", "sky-estates", "penthouse", "billionaire")):
+        return "💎"
+    # Industrial Zones & Districts
+    if any(k in z_lower for k in ("industrial zone", "industrial", "refinery", "smelting", "factory")):
+        return "🏭"
+    # Uptown Cultural & Civic District
+    if "uptown" in z_lower:
+        return "🏛️"
+    # Theme Park & Amusement Resort
+    if any(k in z_lower for k in ("theme park", "amusement")):
+        return "🎡"
+    # Eastern Grand Temple & Sanctuary
+    if any(k in z_lower for k in ("grand temple", "eastern temple", "torii")):
+        return "⛩️"
+    # International Airport & Airfield
+    if any(k in z_lower for k in ("airport", "airfield")):
+        return "✈️"
+    # General Hospital & Medical Center
+    if any(k in z_lower for k in ("hospital", "medical center")):
+        return "🏥"
+    # University & Parapsychology Campus
+    if any(k in z_lower for k in ("university", "parapsychology")):
+        return "🎓"
+    # Old Eastern Quarter & Night Market (Chinatown)
+    if any(k in z_lower for k in ("eastern quarter", "night market", "chinatown")):
+        return "🏮"
+    # Botanical Gardens, Zoo & Aquarium
+    if any(k in z_lower for k in ("botanical", "aquarium", "zoo")):
+        return "🌿"
 
     # Space & Planets
 
@@ -262,13 +298,13 @@ def get_location_scout_description(session_id: int, location_str: str, scen_key:
 
     for z in zone_list:
 
-        if z.get("name", "").lower() == z_name.lower() or z_name.lower() in z.get("name", "").lower():
+        if z.get("name", "").lower() == z_name.lower() or z_name.lower() in z.get("name", "").lower() or z.get("name", "").lower() in z_name.lower():
 
             matched_zone = z
 
             for p in z.get("primary_locations", []):
 
-                if p.get("name", "").lower() == p_name.lower() or p_name.lower() in p.get("name", "").lower():
+                if p.get("name", "").lower() == p_name.lower() or p_name.lower() in p.get("name", "").lower() or p.get("name", "").lower() in p_name.lower():
 
                     matched_primary = p
 
@@ -284,7 +320,7 @@ def get_location_scout_description(session_id: int, location_str: str, scen_key:
 
             for p in z.get("primary_locations", []):
 
-                if p.get("name", "").lower() == p_name.lower() or p_name.lower() in p.get("name", "").lower():
+                if p.get("name", "").lower() == p_name.lower() or p_name.lower() in p.get("name", "").lower() or p.get("name", "").lower() in p_name.lower():
 
                     matched_primary = p
 
@@ -301,12 +337,34 @@ def get_location_scout_description(session_id: int, location_str: str, scen_key:
 
 
     sub_names = []
+    matched_sub = None
 
     if matched_primary:
-
-        sub_names = [sub.get("name") for sub in matched_primary.get("sub_locations", []) if sub.get("name")]
-
-    
+        for sub in matched_primary.get("sub_locations", []):
+            sub_nm = sub.get("name", "") if isinstance(sub, dict) else ""
+            if s_name and sub_nm and (sub_nm.lower() == s_name.lower() or s_name.lower() in sub_nm.lower() or sub_nm.lower() in s_name.lower()):
+                matched_sub = sub
+                break
+        if matched_sub and isinstance(matched_sub.get("props"), list) and matched_sub["props"]:
+            sub_names = [str(pr) for pr in matched_sub["props"] if isinstance(pr, str) and pr]
+        else:
+            sub_names = [sub.get("name") for sub in matched_primary.get("sub_locations", []) if sub.get("name")]
+    else:
+        for z in zone_list:
+            for p in z.get("primary_locations", []):
+                for sub in p.get("sub_locations", []):
+                    sub_nm = sub.get("name", "") if isinstance(sub, dict) else ""
+                    if sub_nm and p_name and (sub_nm.lower() == p_name.lower() or p_name.lower() in sub_nm.lower() or sub_nm.lower() in p_name.lower()):
+                        matched_sub = sub
+                        if not matched_zone:
+                            matched_zone = z
+                        if isinstance(sub.get("props"), list) and sub["props"]:
+                            sub_names = [str(pr) for pr in sub["props"] if isinstance(pr, str) and pr]
+                        break
+                if matched_sub:
+                    break
+            if matched_sub:
+                break
 
     if not sub_names and session_id:
 
@@ -332,7 +390,8 @@ def get_location_scout_description(session_id: int, location_str: str, scen_key:
 
     lines = []
 
-    lines.append(f"**📍 Scouting Area: {p_name} ({z_name})**\n")
+    area_label = f"{p_name} — {matched_sub.get('name')}" if (matched_primary and matched_sub and matched_sub.get("name") and matched_sub.get("name", "").lower() != p_name.lower()) else p_name
+    lines.append(f"**📍 Scouting Area: {area_label} ({z_name})**\n")
 
 
 
@@ -377,6 +436,19 @@ def get_location_scout_description(session_id: int, location_str: str, scen_key:
             lines.append(f"• **⭐ {tag}**: Notable interest centered around *\"{wp_label}\"*.")
 
 
+
+    if any(k in z_name.lower() for k in ("theme park", "amusement")):
+        try:
+            sess = db.get_session(session_id) if session_id else None
+            cur_min = int((sess or {}).get("current_minute", 480)) % 1440
+            if cur_min >= 1320 or cur_min < 480:
+                lines.append(
+                    "• **🌙 After-Hours Anomalous Manifestation (22:00–08:00)**: The park gates closed at 10:00 PM; "
+                    "reversed calliope organ music echoes through the fog, riderless coasters roar along inverted tracks, "
+                    "and anomalous distortions actively manifest across the midway until the 08:00 AM reopening bell."
+                )
+        except Exception:
+            pass
 
     return "\n".join(lines)
 
@@ -756,63 +828,70 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
 
     if scen_key and is_school_scenario(scen_key):
 
+        # Mirage Boutique Love Hotel uses clerkless automated suite fees, not a merchant shop
+        if any(k in loc_lower for k in ["love hotel", "mirage boutique"]):
+            return []
+
         stores = []
 
-        if any(k in loc_lower for k in ["co-op", "bookstore", "school store", "stationery"]):
+        if is_nsfw and any(k in loc_lower for k in ["adult boutique", "velvet curtain", "adult store", "erotic boutique", "afterdark", "secret boutique", "adult novelty"]):
+            stores.append({"type": "adult_store_merchant", **MERCHANT_ARCHETYPES["adult_store_merchant"]})
 
-            stores.append({"type": "school_merchant", **MERCHANT_ARCHETYPES["school_merchant"]})
+        if is_nsfw and any(k in loc_lower for k in ["nightclub", "neon pulse", "vip lounge"]):
+            stores.append({"type": "nightclub_merchant", **MERCHANT_ARCHETYPES["nightclub_merchant"]})
 
-        if any(k in loc_lower for k in ["cafe", "café", "boba", "bakery", "diner", "coffee", "canteen", "cafeteria", "tea house"]):
-
-            stores.append({"type": "cafe_merchant", **MERCHANT_ARCHETYPES["cafe_merchant"]})
-
-        if any(k in loc_lower for k in ["boutique", "clothing", "apparel", "fashion", "mall"]):
-
+        if any(k in loc_lower for k in ["luxury designer", "designer boutique", "brand clothing", "haute couture", "high-end fashion"]):
+            stores.append({"type": "brand_clothes_merchant", **MERCHANT_ARCHETYPES["brand_clothes_merchant"]})
+        elif any(k in loc_lower for k in ["streetwear", "casual apparel", "clothing", "apparel", "fashion boutique", "boutique"]) and not any(
+            k in loc_lower for k in ["adult", "velvet curtain", "erotic"]
+        ):
             stores.append({"type": "clothes_merchant", **MERCHANT_ARCHETYPES["clothes_merchant"]})
 
-        if any(k in loc_lower for k in ["gift", "merchandise", "souvenir", "shrine shop", "merch", "toy shop"]):
+        if any(k in loc_lower for k in ["accessories", "bijoux", "jewelry", "jewellery"]):
+            stores.append({"type": "accessories_merchant", **MERCHANT_ARCHETYPES["accessories_merchant"]})
 
+        if any(k in loc_lower for k in ["gift", "curio", "merchandise", "souvenir", "shrine shop", "merch", "toy shop"]):
             stores.append({"type": "gift_merchant", **MERCHANT_ARCHETYPES["gift_merchant"]})
 
-        if any(k in loc_lower for k in ["hallway", "lockers", "rooftop", "behind the gym", "quiet alley", "courtyard"]):
+        if any(k in loc_lower for k in ["night market", "lantern night", "street bazaar", "night bazaar"]):
+            stores.append({"type": "night_market_merchant", **MERCHANT_ARCHETYPES["night_market_merchant"]})
 
+        if any(k in loc_lower for k in ["downtown diner", "family restaurant", "restaurant", "ramen", "steakhouse", "bistro"]):
+            stores.append({"type": "restaurant_merchant", **MERCHANT_ARCHETYPES["restaurant_merchant"]})
+
+        if any(k in loc_lower for k in ["convenience store", "24-hour convenience", "konbini", "mini-mart"]):
+            stores.append({"type": "convenience_merchant", **MERCHANT_ARCHETYPES["convenience_merchant"]})
+
+        if any(k in loc_lower for k in ["cafe", "café", "boba", "bakery", "coffee", "espresso", "canteen", "cafeteria", "tea house", "snack bar", "beach shack"]):
+            stores.append({"type": "cafe_merchant", **MERCHANT_ARCHETYPES["cafe_merchant"]})
+
+        if any(k in loc_lower for k in ["co-op", "bookstore", "school store", "stationery", "campus kiosk"]):
+            stores.append({"type": "school_merchant", **MERCHANT_ARCHETYPES["school_merchant"]})
+
+        if any(k in loc_lower for k in ["hallway", "lockers", "rooftop", "behind the gym", "storage shed", "quiet alley", "underpass", "courtyard"]):
             stores.append({"type": "student_merchant", **MERCHANT_ARCHETYPES["student_merchant"]})
 
         if any(k in loc_lower for k in ["club room", "gang", "hideout", "hangout", "clubhouse"]):
-
             stores.append({"type": "club_merchant", **MERCHANT_ARCHETYPES["club_merchant"]})
 
-        if is_nsfw and any(k in loc_lower for k in ["adult", "novelty", "afterdark", "secret boutique", "lingerie"]):
-
-            stores.append({"type": "adult_store_merchant", **MERCHANT_ARCHETYPES["adult_store_merchant"]})
-
-
-
-        # Downtown Mall / Commercial Arcade hub
-
-        if any(k in loc_lower for k in ["downtown", "commercial", "shopping mall", "arcade", "plaza"]):
-
-            hub_stores = [
-
-                {"type": "cafe_merchant", **MERCHANT_ARCHETYPES["cafe_merchant"]},
-
-                {"type": "clothes_merchant", **MERCHANT_ARCHETYPES["clothes_merchant"]},
-
-                {"type": "gift_merchant", **MERCHANT_ARCHETYPES["gift_merchant"]}
-
-            ]
-
-            if is_nsfw:
-
-                hub_stores.append({"type": "adult_store_merchant", **MERCHANT_ARCHETYPES["adult_store_merchant"]})
-
-            return hub_stores
-
-
-
+        # Specific matched shop venues take precedence before generic Downtown/City Square hub fallback
         if stores:
-
             return stores
+
+        # Generic Downtown / City Square / Shopping Arcade hub directory
+        if any(k in loc_lower for k in ["downtown", "commercial", "shopping mall", "arcade", "city square", "plaza"]):
+            hub_stores = [
+                {"type": "cafe_merchant", **MERCHANT_ARCHETYPES["cafe_merchant"]},
+                {"type": "restaurant_merchant", **MERCHANT_ARCHETYPES["restaurant_merchant"]},
+                {"type": "clothes_merchant", **MERCHANT_ARCHETYPES["clothes_merchant"]},
+                {"type": "brand_clothes_merchant", **MERCHANT_ARCHETYPES["brand_clothes_merchant"]},
+                {"type": "accessories_merchant", **MERCHANT_ARCHETYPES["accessories_merchant"]},
+                {"type": "gift_merchant", **MERCHANT_ARCHETYPES["gift_merchant"]},
+            ]
+            if is_nsfw:
+                hub_stores.append({"type": "adult_store_merchant", **MERCHANT_ARCHETYPES["adult_store_merchant"]})
+                hub_stores.append({"type": "nightclub_merchant", **MERCHANT_ARCHETYPES["nightclub_merchant"]})
+            return hub_stores
 
         return [{"type": "school_merchant", **MERCHANT_ARCHETYPES["school_merchant"]}]
 
@@ -832,6 +911,9 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
 
     ]
 
+    from scenario_data import is_anomalous_incursions_scenario
+    is_anom_scen = is_anomalous_incursions_scenario(scen_key) if scen_key else False
+
     if any(k in loc_lower for k in bazaar_hub_keywords):
 
         hub_stores = [
@@ -844,13 +926,13 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
 
             {"type": "magic_merchant", **MERCHANT_ARCHETYPES["magic_merchant"]},
 
-            {"type": "spellbook_merchant", **MERCHANT_ARCHETYPES["spellbook_merchant"]},
-
             {"type": "food_merchant", **MERCHANT_ARCHETYPES["food_merchant"]},
 
             {"type": "general_merchant", **MERCHANT_ARCHETYPES["general_merchant"]},
 
         ]
+        if not is_anom_scen:
+            hub_stores.insert(4, {"type": "spellbook_merchant", **MERCHANT_ARCHETYPES["spellbook_merchant"]})
 
         if is_nsfw:
 
@@ -861,32 +943,78 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
 
 
     # Specific dedicated shops
+    from scenario_data import is_anomalous_incursions_scenario
+    is_anom_scen = is_anomalous_incursions_scenario(scen_key) if scen_key else False
 
-    stores = []
+    raw_parts = [
+        p.strip()
+        for p in re.split(r"➔|->", str(location_str))
+        if p.strip()
+    ]
+    multi_wing_complex_markers = (
+        "tower hq", "operations hq", "operations spire hq", "headquarters", "agency hq",
+        "theme park", "amusement", "grand temple", "eastern temple", "hospital",
+        "medical center", "botanical",
+    )
+    is_multi_wing_target = (
+        len(raw_parts) >= 2
+        and any(m in " ".join(raw_parts[:-1]).lower() for m in multi_wing_complex_markers)
+    )
+    match_lower = raw_parts[-1].lower() if is_multi_wing_target else loc_lower
 
-    if any(k in loc_lower for k in ["forge", "smithy", "blacksmith", "weaponsmith", "armory"]):
+    def _collect_specialist_stores(target_lower: str) -> list[dict]:
+        found = []
+        if any(k in target_lower for k in ["regional tower hq", "operations spire hq", "tower hq", "operations hq", "syndicate anomalous armory", "syndicate tactical armory", "requisition shop", "requisition depot"]):
+            found.append({"type": "weapon_merchant", **MERCHANT_ARCHETYPES["weapon_merchant"]})
+            found.append({"type": "armor_merchant", **MERCHANT_ARCHETYPES["armor_merchant"]})
+            found.append({"type": "potion_merchant", **MERCHANT_ARCHETYPES["potion_merchant"]})
+        if any(k in target_lower for k in ["tactical armory", "ordnance depot"]):
+            if not any(s["type"] == "weapon_merchant" for s in found):
+                found.append({"type": "weapon_merchant", **MERCHANT_ARCHETYPES["weapon_merchant"]})
+        elif any(k in target_lower for k in ["forge", "smithy", "blacksmith", "weaponsmith", "armory"]):
+            if not any(s["type"] == "weapon_merchant" for s in found):
+                found.append({"type": "weapon_merchant", **MERCHANT_ARCHETYPES["weapon_merchant"]})
+            if not any(s["type"] == "armor_merchant" for s in found):
+                found.append({"type": "armor_merchant", **MERCHANT_ARCHETYPES["armor_merchant"]})
+        if any(k in target_lower for k in ["field outfitter", "tailoring quartermaster", "bespoke ballistic outfitter", "outfitter", "couture", "boutique", "apparel"]):
+            if not any(s["type"] == "armor_merchant" for s in found):
+                found.append({"type": "armor_merchant", **MERCHANT_ARCHETYPES["armor_merchant"]})
+            if not any(s["type"] == "clothes_merchant" for s in found):
+                found.append({"type": "clothes_merchant", **MERCHANT_ARCHETYPES["clothes_merchant"]})
+        if any(k in target_lower for k in ["apothecary", "alchemist", "herbalist", "potion", "pharmacy", "cleansing bay", "psychic detox", "dispensary", "medical", "clinic", "emergency trauma", "ambulance triage"]):
+            if not any(s["type"] == "potion_merchant" for s in found):
+                found.append({"type": "potion_merchant", **MERCHANT_ARCHETYPES["potion_merchant"]})
+        if any(k in target_lower for k in ["arcane", "magic", "mystic", "enchanter", "sorcery", "grimoire", "scribe", "library", "antiquities", "licensed wards", "curio", "omikuji", "talisman stand", "alchemical apothecary", "campus bookstore"]):
+            if not any(s["type"] == "magic_merchant" for s in found):
+                found.append({"type": "magic_merchant", **MERCHANT_ARCHETYPES["magic_merchant"]})
+            if not is_anom_scen and not any(s["type"] == "spellbook_merchant" for s in found):
+                found.append({"type": "spellbook_merchant", **MERCHANT_ARCHETYPES["spellbook_merchant"]})
+            if is_anom_scen and any(k in target_lower for k in ["omikuji", "talisman stand"]):
+                if not any(s["type"] == "potion_merchant" for s in found):
+                    found.append({"type": "potion_merchant", **MERCHANT_ARCHETYPES["potion_merchant"]})
+                if not any(s["type"] == "weapon_merchant" for s in found):
+                    found.append({"type": "weapon_merchant", **MERCHANT_ARCHETYPES["weapon_merchant"]})
+        if any(k in target_lower for k in ["omikuji", "talisman stand", "carnival midway", "gift emporium", "duty-free"]):
+            if not any(s["type"] == "gift_merchant" for s in found):
+                found.append({"type": "gift_merchant", **MERCHANT_ARCHETYPES["gift_merchant"]})
+        if any(k in target_lower for k in ["bakery", "tavern", "inn", "saloon", "canteen", "mess hall", "food stall", "diner", "espresso", "roastery", "ramen", "izakaya", "cafe", "café", "konbini", "convenience", "fish market", "carnival midway", "night market", "street food", "tea house", "garden terrace", "duty-free", "black bazaar"]):
+            found.append({"type": "food_merchant", **MERCHANT_ARCHETYPES["food_merchant"]})
+        if any(k in target_lower for k in ["espresso", "roastery", "cafe", "café", "canteen", "boba"]):
+            found.append({"type": "cafe_merchant", **MERCHANT_ARCHETYPES["cafe_merchant"]})
+        if any(k in target_lower for k in ["black market", "pawn", "crimson masquerade", "black bazaar", "drifter enclave"]):
+            if not any(s["type"] == "weapon_merchant" for s in found):
+                found.append({"type": "weapon_merchant", **MERCHANT_ARCHETYPES["weapon_merchant"]})
+            if not any(s["type"] == "magic_merchant" for s in found):
+                found.append({"type": "magic_merchant", **MERCHANT_ARCHETYPES["magic_merchant"]})
+            if not any(s["type"] == "potion_merchant" for s in found):
+                found.append({"type": "potion_merchant", **MERCHANT_ARCHETYPES["potion_merchant"]})
+        if is_nsfw and any(k in target_lower for k in ["adult", "brothel", "pleasure", "cyber-den", "erotic", "novelty", "afterdark", "velvet mirage", "red-lantern"]):
+            found.append({"type": "adult_store_merchant", **MERCHANT_ARCHETYPES["adult_store_merchant"]})
+        return found
 
-        stores.append({"type": "weapon_merchant", **MERCHANT_ARCHETYPES["weapon_merchant"]})
-
-        stores.append({"type": "armor_merchant", **MERCHANT_ARCHETYPES["armor_merchant"]})
-
-    if any(k in loc_lower for k in ["apothecary", "alchemist", "herbalist", "potion", "pharmacy"]):
-
-        stores.append({"type": "potion_merchant", **MERCHANT_ARCHETYPES["potion_merchant"]})
-
-    if any(k in loc_lower for k in ["arcane", "magic", "mystic", "enchanter", "sorcery", "grimoire", "scribe", "library"]):
-
-        stores.append({"type": "magic_merchant", **MERCHANT_ARCHETYPES["magic_merchant"]})
-
-        stores.append({"type": "spellbook_merchant", **MERCHANT_ARCHETYPES["spellbook_merchant"]})
-
-    if any(k in loc_lower for k in ["bakery", "tavern", "inn", "saloon", "canteen", "mess hall", "food stall", "diner"]):
-
-        stores.append({"type": "food_merchant", **MERCHANT_ARCHETYPES["food_merchant"]})
-
-    if is_nsfw and any(k in loc_lower for k in ["adult", "brothel", "pleasure", "cyber-den", "erotic", "novelty"]):
-
-        stores.append({"type": "adult_store_merchant", **MERCHANT_ARCHETYPES["adult_store_merchant"]})
+    stores = _collect_specialist_stores(match_lower)
+    if not stores and match_lower != loc_lower:
+        stores = _collect_specialist_stores(loc_lower)
 
 
 
@@ -980,11 +1108,33 @@ def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
 
         "bakery", "stall", "merchant", "trader", "noodle bar", "canteen", "saloon", "tavern",
 
-        "inn", "trading post", "general store", "guild shop", "alchemist", "herbalist", "forge"
+        "inn", "trading post", "general store", "guild shop", "alchemist", "herbalist", "forge",
+        "outfitter", "cleansing bay", "psychic detox", "dispensary", "clinic", "roastery", "izakaya", "ramen",
+        "antiquities", "licensed wards", "pawn", "black market", "afterdark", "red-lantern",
+        "konbini", "auction house", "espresso", "velvet mirage", "crimson masquerade", "fish market", "omikuji", "talisman", "carnival midway", "gift emporium", "duty-free", "night market", "apothecary", "black bazaar", "tea house", "bookstore", "trauma center", "emergency trauma", "ambulance triage",
+        "regional tower hq", "operations spire hq", "tower hq", "operations hq", "requisition shop", "requisition depot"
 
     )
 
-    return any(k in p_lower for k in shop_keywords)
+    raw_parts = [
+        pt.strip()
+        for pt in re.split(r"➔|->", str(location_str))
+        if pt.strip()
+    ]
+    if len(raw_parts) >= 2 and any(
+        hq_k in " ".join(raw_parts[:-1]).lower()
+        for hq_k in ("tower hq", "operations hq", "operations spire hq", "headquarters", "agency hq")
+    ):
+        leaf_lower = raw_parts[-1].lower()
+        hq_shop_wing_keywords = (
+            "armory", "ordnance", "requisition", "outfitter", "tailoring",
+            "cleansing bay", "psychic detox", "dispensary", "clinic", "medical",
+            "canteen", "espresso", "cafe", "café", "shop", "store",
+        )
+        return any(k in leaf_lower for k in hq_shop_wing_keywords)
+
+    full_lower = str(location_str).lower()
+    return any(k in p_lower or k in full_lower for k in shop_keywords)
 
 def location_has_faction_hq(location_str: str, session_id: int = None) -> bool:
 

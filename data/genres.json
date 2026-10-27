@@ -20,7 +20,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 540,
         "hook": "at 09:00 AM in a dimly lit, bustling tavern as mercenaries review contract notices and an informant flags your table",
-        "suggested_location": "{session_kingdom} ➔ The Boar's Tusk Tavern ➔ Hearthside Table",
+        "suggested_location": "{session_kingdom} ➔ Adventurers' Guild Hall ➔ Guild Underground Tavern",
         "directive": "Open Hub Exploration: Establish ambient tavern atmosphere, 2-3 present patrons/NPCs with distinct rumors, notice board access, and open choices.",
         "focal_point": "Hearthside corner table near the roaring stone fireplace",
         "scheduled_roles": [
@@ -46,7 +46,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 600,
         "hook": "at 10:00 AM in a vibrant open-air grand bazaar surrounded by aromatic spice stalls, arcane trinket peddlers, and lively caravans",
-        "suggested_location": "{session_kingdom} ➔ Sunfire Grand Bazaar ➔ Silk Merchant Pavilion",
+        "suggested_location": "{session_kingdom} ➔ Cobblestone Market Plaza ➔ Central Fountain & Bazaar Row",
         "directive": "Open Hub Exploration: Establish vibrant marketplace bustle, colorful merchants, local rumors, and trade opportunities.",
         "focal_point": "Shaded silk pavilion inspecting exotic trade goods",
         "scheduled_roles": [
@@ -72,7 +72,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 510,
         "hook": "at 08:30 AM in the grand registration hall of the Adventurers' Guild as scouts report new territorial anomalies and expedition leaders recruit companions",
-        "suggested_location": "{session_kingdom} ➔ Adventurers' Guild Headquarters ➔ Expedition Registry",
+        "suggested_location": "{session_kingdom} ➔ Adventurers' Guild Hall ➔ Main Guild Hall & Quest Lobby",
         "directive": "Open Hub Exploration: Guild hall atmosphere, active bulletin ledger, seasoned adventurers, and mission opportunities.",
         "focal_point": "Front counter before the massive ironwood bulletin ledger",
         "scheduled_roles": [
@@ -98,7 +98,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 450,
         "hook": "at 07:30 AM at a high frontier watchtower garrison overlooking the vast wilderness as rangers warm their hands over a stone brazier",
-        "suggested_location": "{session_mountain} ➔ Highwatch Frontier Outpost ➔ Signal Tower Lookout",
+        "suggested_location": "{session_mountain} ➔ Dwarven Mining Stronghold ➔ Carved Granite Gatehouse",
         "directive": "Open Hub Exploration: Frontier outpost atmosphere, vigilant rangers, wilderness scouting maps, and border contracts.",
         "focal_point": "Stone lookout parapet gazing across the windswept valley",
         "scheduled_roles": [
@@ -124,7 +124,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 660,
         "hook": "at 11:00 AM beneath the towering stained-glass dome of an arcane academy conservatory as scholar-mages debate fluctuating leylines",
-        "suggested_location": "{session_kingdom} ➔ Grand Arcanum Conservatory ➔ Star-Globe Balcony",
+        "suggested_location": "{session_kingdom} ➔ Cobblestone Market Plaza ➔ Alchemist & Herbalist Apothecary",
         "directive": "Open Hub Exploration: Scholarly arcane sanctum, floating grimoires, curious mages, and magical inquiry choices.",
         "focal_point": "Balcony railing beside the floating brass orrery",
         "scheduled_roles": [
@@ -150,7 +150,7 @@
         "archetype": "in_media_res",
         "starting_minute": 990,
         "hook": "at 04:30 PM along a rocky mountain pass under sudden attack by mountain raiders as your transport wagon overturns",
-        "suggested_location": "{session_mountain} ➔ Mountain Pass Crossing ➔ Overturned Wagon",
+        "suggested_location": "{session_mountain} ➔ Treacherous Mountain Pass ➔ Windswept Switchback & Alcove",
         "directive": "In Media Res: Immediate crisis with weapons drawn, rolling debris, and urgent tactical choices (counter-attack, rescue companion, arcane shield, take cover).",
         "focal_point": "Crouched behind the shattered wagon wheel on the rocky verge",
         "scheduled_roles": [
@@ -176,7 +176,7 @@
         "archetype": "in_media_res",
         "starting_minute": 1260,
         "hook": "at 09:00 PM atop a wooden frontier palisade as a sudden beast horde charges out from the forest shadows against the outer gates",
-        "suggested_location": "{session_forest} ➔ Pineguard Palisade ➔ Breached Wooden Gate",
+        "suggested_location": "{session_forest} ➔ Hunter's Trail & Outpost ➔ Trailhead Clearing & Camp",
         "directive": "In Media Res: Desperate outpost defense, crashing gate timbers, charging beasts, and decisive combat/barrier choices.",
         "focal_point": "Cracked gate timber bracing against the heavy iron bar",
         "scheduled_roles": [
@@ -202,7 +202,7 @@
         "archetype": "in_media_res",
         "starting_minute": 870,
         "hook": "at 02:30 PM on a swaying stone bridge as a flash-flood river surge fractures the central arch beneath your boots",
-        "suggested_location": "{session_mountain} ➔ Ironbridge Crossing ➔ Fractured Stone Span",
+        "suggested_location": "{session_mountain} ➔ Treacherous Mountain Pass ➔ Gorge Rope-and-Plank Bridge",
         "directive": "In Media Res: Environmental collapse crisis, roaring white-water rapids, cracking stone, and high-agility reflex choices.",
         "focal_point": "Balancing on the crumbling keystone above the raging river gorge",
         "scheduled_roles": [
@@ -227,7 +227,7 @@
         "archetype": "in_media_res",
         "starting_minute": 1140,
         "hook": "at 07:00 PM outside the capital outer gates as an alarm bell clangs and a rogue magical construct shatters the iron portcullis",
-        "suggested_location": "{session_kingdom} ➔ Royal Capital Outer Gates ➔ Smoldering Portcullis",
+        "suggested_location": "{session_kingdom} ➔ Imperial Palace Grounds ➔ Castle Great Gate & Courtyard",
         "directive": "In Media Res: Rampaging construct crisis, scattered city guards, electrical sparks, and immediate tactical engagement choices.",
         "focal_point": "Ducking beside the smoking gatehouse archway as arcane arcs crackle overhead",
         "scheduled_roles": [
@@ -253,7 +253,7 @@
         "archetype": "in_media_res",
         "starting_minute": 780,
         "hook": "at 01:00 PM deep in a subterranean cavern as an earthquake tremors through the stone, shattering luminescent crystals and opening a chasm",
-        "suggested_location": "{session_caves} ➔ Crystal Cavern Tunnel ➔ Fractured Chasm",
+        "suggested_location": "{session_caves} ➔ Crystal Geode Grotto ➔ Prism Cavern Archway",
         "directive": "In Media Res: Cavern tremor emergency, falling stalactites, glowing crystal shrapnel, and rapid escape/stabilization choices.",
         "focal_point": "Edge of the widening crystal fracture holding back a companion",
         "scheduled_roles": [
@@ -279,7 +279,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 390,
         "hook": "at 06:30 AM before the ancient overgrown archway of a sunken ruin as a mystical seal hums and glowing runes flare to life",
-        "suggested_location": "{session_forest} ➔ Sunken Moonwell ➔ Ruined Archway",
+        "suggested_location": "{session_ancient_forest} ➔ Druidic Tree Sanctuary ➔ Sacred Moonwell Basin",
         "directive": "Delve Threshold: Stage the mystery of the ancient ruin threshold, survival/scouting choices, deciphering inscriptions, and preparing expedition gear.",
         "focal_point": "Kneeling before the ancient carved threshold stone tracing glowing glyphs",
         "scheduled_roles": [
@@ -305,7 +305,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 1080,
         "hook": "at 06:00 PM at the sealed iron ossuary gate of the mountain catacombs where cold subterranean air whispers through ancient carved gargoyles",
-        "suggested_location": "{session_mountain} ➔ Whispering Catacombs ➔ Sealed Ossuary Gate",
+        "suggested_location": "Ancient Dungeon Complex ➔ Upper Trap Galleries & Antechamber ➔ Portcullis Entry & Explorer Camp",
         "directive": "Delve Threshold: Dark catacomb expedition threshold, ancient funerary wards, inspecting stone sarcophagi, and lighting torches.",
         "focal_point": "Standing before the heavy iron-barred ossuary grate checking the lock tumblers",
         "scheduled_roles": [
@@ -331,7 +331,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 480,
         "hook": "at 08:00 AM before the towering shattered vestibule of a ruined arcane spire jutting above the ancient tree canopy",
-        "suggested_location": "{session_ancient_forest} ➔ Spire of the Fallen Archmage ➔ Shattered Vestibule",
+        "suggested_location": "{session_ancient_forest} ➔ Gnarled Root Archway ➔ Standing Stones & Root Arch",
         "directive": "Delve Threshold: High-magic ruin exploration, floating architectural remnants, deciphering arcane wards, and preparing ascent.",
         "focal_point": "Resting on a floating marble pedestal studying the inverted staircase",
         "scheduled_roles": [
@@ -356,7 +356,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 900,
         "hook": "at 03:00 PM behind a thunderous mountain waterfall where an ancient dwarven blast gate stands half-buried beneath mineral crust",
-        "suggested_location": "{session_caves} ➔ Deep Iron Under-Vault ➔ Runic Blast Gate",
+        "suggested_location": "{session_caves} ➔ Forgotten Deep-Vein Mines ➔ Timber-Shored Cart Tunnel",
         "directive": "Delve Threshold: Subterranean industrial vault mystery, heavy dwarven cogs, analyzing runic locks, and gearing up for the delve.",
         "focal_point": "Gazing into the massive keyhole mechanism of the sealed dwarven cog-door",
         "scheduled_roles": [
@@ -381,7 +381,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 1020,
         "hook": "at 05:00 PM at the tidal entrance of a drowned sea-grotto where luminescent barnacles illuminate a submerged pre-cataclysm archway",
-        "suggested_location": "{session_forest} ➔ Drowned Leviathan Sanctum ➔ Tidal Archway",
+        "suggested_location": "{session_swamp} ➔ Sunken Temple Ruins ➔ Drowned Mossy Colonnade",
         "directive": "Delve Threshold: Coastal grotto expedition, checking tidal currents, inspecting luminous sea-runes, and preparing aquatic gear.",
         "focal_point": "Perched on a barnacle-crusted sea boulder watching the ebbing tide reveal the entrance",
         "scheduled_roles": [
@@ -426,7 +426,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 600,
         "hook": "at 10:00 AM in a crowded planetary spaceport concourse surrounded by alien traders, holographic flight boards, and cargo haulers",
-        "suggested_location": "{session_station} ➔ Concourse Promenade ➔ Observation Lounge",
+        "suggested_location": "{session_station} ➔ Station Central Promenade ➔ Customs Concourse & Security Arch",
         "directive": "Open Hub Exploration: Establish vibrant starport atmosphere, alien merchants, job bulletin terminal, and open choices.",
         "focal_point": "Curved observation deck railing looking out at the starfield",
         "scheduled_roles": [
@@ -452,7 +452,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 840,
         "hook": "at 02:00 PM inside the orbital station hydroponics biosphere as artificial mist cools lush alien flora and off-duty pilots exchange sector coordinates",
-        "suggested_location": "{session_station} ➔ Hydroponics Biosphere ➔ Arboretum Walkway",
+        "suggested_location": "The Vanguard Starship ➔ Crew Habitation & Medbay Deck ➔ Crew Recreation Lounge & Galley",
         "directive": "Open Hub Exploration: Relaxed station biosphere atmosphere, botanical researchers, flight crew rumors, and supply trade opportunities.",
         "focal_point": "Seated on a bio-luminescent stone bench beside nutrient mist towers",
         "scheduled_roles": [
@@ -478,7 +478,7 @@
         "archetype": "in_media_res",
         "starting_minute": 855,
         "hook": "at 02:15 PM inside a starship cargo bay as a red-alert siren blares and an automated airlock seal begins decompression",
-        "suggested_location": "{session_station} ➔ Cargo Bay 3 ➔ Decompression Airlock",
+        "suggested_location": "The Vanguard Starship ➔ Engineering & Hangar Deck ➔ Docking Airlock & Cargo Hold",
         "directive": "In Media Res: Immediate hull breach crisis, blinking emergency lights, and urgent tactical choices (override terminal, seal bulkhead, magnetic grapple, evacuate crew).",
         "focal_point": "Clinging to the emergency mag-rail beside the cycling outer airlock",
         "scheduled_roles": [
@@ -504,7 +504,7 @@
         "archetype": "in_media_res",
         "starting_minute": 1350,
         "hook": "at 10:30 PM inside the station secondary engineering wing as coolant conduits rupture and rogue combat drones breach the blast gate",
-        "suggested_location": "{session_station} ➔ Secondary Engineering Wing ➔ Coolant Manifold",
+        "suggested_location": "The Vanguard Starship ➔ Engineering & Hangar Deck ➔ Hyperdrive Engineering Bay",
         "directive": "In Media Res: Reactor corridor skirmish, scalding coolant mist, charging automated drones, and rapid defensive choices.",
         "focal_point": "Bracing behind a reinforced steel manifold pillar as sparks shower down",
         "scheduled_roles": [
@@ -530,7 +530,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 1260,
         "hook": "at 09:00 PM outside the unpowered docking port of a derelict alien vessel drifting in deep orbit as anomalous radio echoes pulse through your comms",
-        "suggested_location": "{session_planet} ➔ Derelict Orbital Wreckage ➔ Docking Umbilical Hatch",
+        "suggested_location": "Asteroid Belt Mining Colony ➔ Contested Ore-Claim & Corsair Wreck ➔ Gutted Pirate Corvette Hull",
         "directive": "Delve Threshold: Deep-space derelict investigation, docking seal alignment, checking oxygen reserve, and entering the silent alien hull.",
         "focal_point": "Standing on the docking umbilical clamp examining the unpowered alien portal",
         "scheduled_roles": [
@@ -556,7 +556,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 420,
         "hook": "at 07:00 AM on the lowered hydraulic landing ramp of an expedition shuttle touching down on an uncharted jungle planet under dual suns",
-        "suggested_location": "{session_planet} ➔ Landing Zone Alpha ➔ Shuttle Entry Ramp",
+        "suggested_location": "Bioluminescent Jungle Planet ➔ Canopy Research Platform ➔ Suspended Treetop Walkway & Lift",
         "directive": "Delve Threshold: Stage the planetary surface descent, analyzing atmospheric readings, prepping environmental suits, and stepping into the alien wild.",
         "focal_point": "Poised at the edge of the lowered hydraulic ramp scanning strange planetary soil",
         "scheduled_roles": [
@@ -601,7 +601,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 1230,
         "hook": "at 08:30 PM in a crowded underground synth-wave lounge while waiting to meet a shady corporate fixer beneath flickering holographic signs",
-        "suggested_location": "{session_cyber_city} ➔ The Wiretap Lounge ➔ VIP Synth Booth",
+        "suggested_location": "{session_cyber_city} - Downtown ➔ Neon Pulse Nightclub ➔ Soundproof Fixer VIP Mezzanine",
         "directive": "Open Hub Exploration: Establish gritty neon lounge atmosphere, fixer contacts, data-slate feeds, and open choices.",
         "focal_point": "Slumped in a worn synthetic leather booth beneath humming violet neon",
         "scheduled_roles": [
@@ -627,7 +627,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 720,
         "hook": "at 12:00 PM perched at a crowded street noodle stall under a plastic rain awning as heavy acid drizzle patters against neon billboards and couriers hustle past",
-        "suggested_location": "{session_cyber_city} ➔ Neon Street Arcade ➔ Ramen Stall Counter",
+        "suggested_location": "{session_cyber_city} - Slums & Wards ➔ Street Noodle Bar ➔ Rain-Curtained Street Counter",
         "directive": "Open Hub Exploration: Gritty street-level neon market, boiling broth steam, street gossip, black market tech peddlers, and relaxed social choices.",
         "focal_point": "Perched on a round metal stool steaming broth bowl in hand under the plastic awning",
         "scheduled_roles": [
@@ -653,7 +653,7 @@
         "archetype": "in_media_res",
         "starting_minute": 1425,
         "hook": "at 11:45 PM in a rain-slicked back-alley as corporate security drones sweep overhead with active spotlights and sirens blaring",
-        "suggested_location": "{session_cyber_city} ➔ Neon Alleyway Sector 4 ➔ Dumpster Barricade",
+        "suggested_location": "{session_cyber_city} - Slums & Wards ➔ Backstreet Neon Alley ➔ Steam-Choked Market Laneway",
         "directive": "In Media Res: Urgent extraction firefight/pursuit, blinding searchlights, and tactical choices (neural breach ICE, suppressing fire, parkour escape, EMP trap).",
         "focal_point": "Pressed flat behind a reinforced titanium dumpster as plasma rounds scorch the brick",
         "scheduled_roles": [
@@ -679,7 +679,7 @@
         "archetype": "in_media_res",
         "starting_minute": 1095,
         "hook": "at 06:15 PM inside a speeding elevated mag-lev commuter train as an alarm siren shrieks and rival street gang hackers blow the carriage security doors",
-        "suggested_location": "{session_cyber_city} ➔ Mag-Lev Skyway Line ➔ Commuter Carriage 4",
+        "suggested_location": "{session_cyber_city} - Downtown ➔ Commercial Plaza Center ➔ Holographic Koi Plaza & Maglev",
         "directive": "In Media Res: High-speed transit carriage crisis, sparking hacked doors, screaming commuters, and decisive combat/counter-intrusion choices.",
         "focal_point": "Hanging from the overhead transit hand-rail as rival gang hackers breach the carriage door",
         "scheduled_roles": [
@@ -705,7 +705,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 180,
         "hook": "at 03:00 AM outside the heavy blast door of a derelict underground sub-level lab as your cyberdeck hooks into an encrypted data terminal",
-        "suggested_location": "{session_cyber_city} ➔ Sub-Level Research Vault ➔ Access Hatch",
+        "suggested_location": "{session_cyber_city} - City Center ➔ Corporate Monolith Tower ➔ Sub-Level Counter-Intel Server Vault",
         "directive": "Delve Threshold: Deep-net infiltration threshold, power routing, security bypass, and scouting the dark corridor ahead.",
         "focal_point": "Kneeling before the severed security terminal with cyberdeck optic cables jacked in",
         "scheduled_roles": [
@@ -730,7 +730,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 90,
         "hook": "at 01:30 AM on the rusted service catwalk overlooking a flooded megabuilding sewer duct as your night-vision optics highlight a hidden black-site intake valve",
-        "suggested_location": "{session_cyber_city} ➔ Under-City Drainage Basin ➔ Siphon Catwalk",
+        "suggested_location": "Industrial Zone & Docks ➔ Decommissioned Droid Assembly Plant ➔ Dormant Assembly Conveyor Hall",
         "directive": "Delve Threshold: Grimy under-city exploration, checking toxic runoff meters, prying security grates, and entering secret conduits.",
         "focal_point": "Prying open the rusted ventilation grate overlooking the corporate server atrium",
         "scheduled_roles": [
@@ -775,7 +775,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 510,
         "hook": "at 08:30 AM in an aristocratic Victorian passenger airship lounge as brass-suited inventors demonstrate controversial clockwork contraptions",
-        "suggested_location": "{session_airship} ➔ Grand Passenger Salon ➔ Observation Balcony",
+        "suggested_location": "{session_airship} ➔ Grand Passenger Promenade & Staterooms ➔ Grand Passenger Salon & Dining Hall",
         "directive": "Open Hub Exploration: Opulent airship salon, eccentric inventors, social factions, notice ledger, and open choices.",
         "focal_point": "Leaning on the polished brass balustrade sipping tea above the cloud layer",
         "scheduled_roles": [
@@ -801,7 +801,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 600,
         "hook": "at 10:00 AM on the cavernous grand concourse of the Imperial Railway Station as soaring iron arches catch morning sunbeams through billowing steam plumes",
-        "suggested_location": "{session_airship} ➔ Central Railway Terminal ➔ Grand Concourse",
+        "suggested_location": "Grand Clockwork Aerodrome & City Center ➔ Airship Docking Terminal ➔ Brass Ticket Rotunda & Concourse",
         "directive": "Open Hub Exploration: Bustling locomotive terminal, newsboys shouting headlines, guild dispatch boards, ticket counters, and lively travel choices.",
         "focal_point": "Standing under the massive stained-glass timetable clock as steam trains hiss into the terminal",
         "scheduled_roles": [
@@ -827,7 +827,7 @@
         "archetype": "in_media_res",
         "starting_minute": 1065,
         "hook": "at 05:45 PM inside a roaring clockwork engine bay as a high-pressure steam valve ruptures and loose gears spin out of control",
-        "suggested_location": "{session_airship} ➔ Boiler Engine Bay ➔ Ruptured Pressure Valve",
+        "suggested_location": "{session_airship} ➔ Lower Engineering & Cargo Hold ➔ Engine & Boiler Room",
         "directive": "In Media Res: High-pressure industrial emergency, scalding steam, and urgent tactical choices (wrench pressure valve, vent steam chamber, emergency brake, rescue mechanic).",
         "focal_point": "Bracing with an insulated monkey wrench against a screaming steam pipe",
         "scheduled_roles": [
@@ -853,7 +853,7 @@
         "archetype": "in_media_res",
         "starting_minute": 1170,
         "hook": "at 07:30 PM on the open observation deck of an airship as grappling hooks crash into the mahogany railings and masked sky-pirates swing aboard amid screaming wind",
-        "suggested_location": "{session_airship} ➔ Upper Weather Deck ➔ Boarding Gangway",
+        "suggested_location": "{session_airship} ➔ Upper Command & Observation Deck ➔ Panoramic Observation Deck",
         "directive": "In Media Res: High-altitude aerial boarding battle, gusting clouds, grappling cables, and urgent combat/counter-boarding choices.",
         "focal_point": "Crouched behind a coil of hemp mooring rope as grapples hook into the mahogany deck",
         "scheduled_roles": [
@@ -879,7 +879,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 1320,
         "hook": "at 10:00 PM at the foggy threshold of an abandoned clockwork foundry as automated steam sentinels creak back to life",
-        "suggested_location": "{session_airship} ➔ Derelict Foundry Gates ➔ Iron Sluice Chamber",
+        "suggested_location": "Underbelly Boiler Foundries ➔ Guild Clockwork Assembly Works ➔ Steam-Gantry Chassis Hall",
         "directive": "Delve Threshold: Victorian industrial ruin exploration, clockwork puzzle deciphering, oiling mechanisms, and gear preparation.",
         "focal_point": "Holding a brass gas lantern before the colossal dormant gear-wall",
         "scheduled_roles": [
@@ -904,7 +904,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 360,
         "hook": "at 06:00 AM at the intake basin of a massive subterranean waterworks pump as green canal mist swirls around ancient brass pistons and iron sluices",
-        "suggested_location": "{session_airship} ➔ Sunken Canal Siphon ➔ Pump Room Threshold",
+        "suggested_location": "Subterranean Canals & Alleys ➔ Hidden Waterway Pier ➔ Locked Sluice-Gate Contraband Vault",
         "directive": "Delve Threshold: Subterranean aqueduct investigation, inspecting pressure meters, checking chemical neutralizers, and descending into the siphon.",
         "focal_point": "Peering down the spiral iron stairwell into the flooded pump machinery",
         "scheduled_roles": [
@@ -947,7 +947,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 660,
         "hook": "at 11:00 AM in the middle of a bustling fantasy capital marketplace as your glowing status window hovers before your eyes and merchants hawk strange fruits",
-        "suggested_location": "{session_kingdom} ➔ Central Market Square ➔ Fountain Plaza",
+        "suggested_location": "{session_kingdom} ➔ Cobblestone Market Plaza ➔ Central Fountain & Street Stalls",
         "directive": "Open Hub Exploration: Modern protagonist in a vibrant fantasy hub, evaluating status screen, talking to curious locals, checking guild boards, and exploring.",
         "focal_point": "Sitting on the stone rim of the goddess fountain reading your floating blue status window",
         "scheduled_roles": [
@@ -973,7 +973,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 780,
         "hook": "at 01:00 PM seated inside the lively royal adventurer guild feast hall as seasoned companions tackle colossal roasted dragon-fowl and swap dungeon gossip",
-        "suggested_location": "{session_kingdom} ➔ Royal Guild Tavern ➔ Main Banquet Hall",
+        "suggested_location": "{session_kingdom} ➔ Adventurers' Guild Hall ➔ Guild Underground Tavern",
         "directive": "Open Hub Exploration: Lively isekai guild tavern atmosphere, eccentric companions, overflowing feast platters, and rookie mission bulletin choices.",
         "focal_point": "At a corner table marveling at gigantic grilled monster steaks and fantasy drinks",
         "scheduled_roles": [
@@ -999,7 +999,7 @@
         "archetype": "in_media_res",
         "starting_minute": 930,
         "hook": "at 03:30 PM in a radiant summoning chamber as an unstable magic circle fractures and alarmed court mages scramble for protective wards",
-        "suggested_location": "{session_kingdom} ➔ Grand Summoning Chamber ➔ Fractured Runed Dais",
+        "suggested_location": "{session_kingdom} ➔ Royal Summoning Cathedral ➔ Hero's Astral Summoning Sanctum",
         "directive": "In Media Res: Sudden summoning malfunction, glowing magical discharge, shocked royal guards, and tactical cheat-skill/reflex choices.",
         "focal_point": "Shielding your eyes as the blinding summoning circle fractures and court mages panic",
         "scheduled_roles": [
@@ -1025,7 +1025,7 @@
         "archetype": "in_media_res",
         "starting_minute": 990,
         "hook": "at 04:30 PM materialized directly into an overgrown forest clearing as the ground shakes and a stampede of horned dire-boars crashes through the foliage",
-        "suggested_location": "{session_forest} ➔ Dire-Boar Hollow ➔ Stampede Clearing",
+        "suggested_location": "{session_forest} ➔ Hunter's Ranger Outpost ➔ Trailhead Clearing & Campfire",
         "directive": "In Media Res: Sudden isekai wilderness drop, thundering monster herd, flying timber, and rapid cheat-power or evasion choices.",
         "focal_point": "Hiding behind a colossal mossy stump as a herd of horned boars thunders through",
         "scheduled_roles": [
@@ -1050,7 +1050,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 480,
         "hook": "at 08:00 AM at the edge of an enchanted primeval forest where giant glowing flora pulse and your newly unlocked cheat appraisal skill triggers",
-        "suggested_location": "{session_forest} ➔ Edge of Whispering Woods ➔ Mossy Clearing",
+        "suggested_location": "{session_ancient_forest} ➔ Elven World-Tree Sanctuary ➔ Sacred Spirit Moonwell",
         "directive": "Delve Threshold: First steps into an unknown fantasy wilderness, testing skills, harvesting strange materials, and scouting ahead.",
         "focal_point": "Kneeling by a patch of glowing rainbow mushrooms as your appraisal skill activates",
         "scheduled_roles": [
@@ -1075,7 +1075,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 1020,
         "hook": "at 05:00 PM before the bioluminescent entrance of the Rookie Slime Cavern as translucent slimes bounce harmlessly near the threshold and your starter quest log updates",
-        "suggested_location": "{session_forest} ➔ Slime Caverns Threshold ➔ Glowing Grotto Mouth",
+        "suggested_location": "{session_forest} ➔ Lumbermill & Beginner Fields ➔ Timber Yard & Slime Meadows",
         "directive": "Delve Threshold: Rookie dungeon threshold, checking beginner equipment, reviewing basic spell slots, and stepping into the glowing cave.",
         "focal_point": "Standing before the softly glowing cave mouth holding a starter wooden buckler",
         "scheduled_roles": [
@@ -1120,7 +1120,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 510,
         "hook": "at 08:30 AM at a sunlit window booth inside an artisanal coffee roastery along the covered shopping arcade as rain patters against the glass and neighborhood regulars trade local gossip",
-        "suggested_location": "Downtown Shopping Arcade & Café Row ➔ Roastery & Artisanal Café ➔ Window Corner Booth",
+        "suggested_location": "Downtown Shopping Arcade & Café Row ➔ Roastery & Artisanal Café ➔ Main Pour-Over Bar & Window Booths",
         "directive": "Open Hub Exploration: Warm urban neighborhood hub, friendly regulars, community bulletin board with local gigs/notices, café menu choices, and relaxed social interactions.",
         "focal_point": "Seated at a small wooden window table watching raindrops trace down the glass",
         "scheduled_roles": [
@@ -1146,7 +1146,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 840,
         "hook": "at 02:00 PM lounging on a wooden park bench under a weeping willow along the municipal river greenway as cyclists coast past and sunlight glints off the water",
-        "suggested_location": "Civic Riverwalk & Greenway ➔ Riverside Park Lawn ➔ Shaded Bench",
+        "suggested_location": "Residential Neighborhood & Apartments ➔ Local Hilltop Shrine & Park ➔ Panoramic City Overlook Terrace",
         "directive": "Open Hub Exploration: Gentle urban park atmosphere, passing dog-walkers, community events banner, and leisurely afternoon choices.",
         "focal_point": "Lounging on a wooden park bench under a flowering willow tree",
         "scheduled_roles": [
@@ -1172,7 +1172,7 @@
         "archetype": "in_media_res",
         "starting_minute": 1080,
         "hook": "at 06:00 PM in a neon-lit back-alley behind a basement jazz bar as rowdy street thugs overturn trash cans and corner a local shopkeeper over a protection dispute",
-        "suggested_location": "Nightlife & Entertainment District ➔ Neon Back-Alley ➔ Rain-Slicked Dead End",
+        "suggested_location": "Nightlife & Entertainment District ➔ Neon Back-Alley ➔ Rain-Slicked Lantern Passageway",
         "directive": "In Media Res: Immediate street-level urban confrontation, shouting thugs, cornered local resident, and urgent tactical or social de-escalation choices.",
         "focal_point": "Stepping between shouting street toughs and an upset shopkeeper near the brick wall",
         "scheduled_roles": [
@@ -1198,7 +1198,7 @@
         "archetype": "in_media_res",
         "starting_minute": 525,
         "hook": "at 08:45 AM on a crowded morning train station platform as the rush-hour express train halts and an elder commuter drops a briefcase spilling sensitive papers across the yellow line",
-        "suggested_location": "Central Metro Station ➔ Track 3 Commuter Platform ➔ Boarding Queue",
+        "suggested_location": "Harbor Pier & Civic Bayfront ➔ Central Transit Station Plaza ➔ Station Turnstile Concourse",
         "directive": "In Media Res: Rush-hour station commotion, blaring departure chimes, frantic passengers, and quick choices to assist, recover documents, or navigate crowds.",
         "focal_point": "Caught in the rush-hour bottleneck as a dropped briefcase spills documents across the yellow safety line",
         "scheduled_roles": [
@@ -1224,7 +1224,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 1230,
         "hook": "at 08:30 PM before the padlocked chain-link gate of an after-hours harbor warehouse pier while following a late-night lead from a neighborhood contact about missing local goods",
-        "suggested_location": "Harbor Pier & Civic Bayfront ➔ Container Pier & Warehouse Lot ➔ Padlocked Chain-Link Gate",
+        "suggested_location": "Harbor Pier & Civic Bayfront ➔ Container Pier & Warehouse Lot ➔ Floodlit Container Yard",
         "directive": "Delve Threshold: Urban investigation threshold, checking the rusted padlock, scanning for night watchmen, reviewing smartphone clues, and slipping inside.",
         "focal_point": "Examining the rusted brass padlock on the pier gate under a lone halogen lamp",
         "scheduled_roles": [
@@ -1250,7 +1250,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 990,
         "hook": "at 04:30 PM at the foot of the dark wooden cellar staircase inside an eccentric antique curiosity shop as grandfather clocks tick in strange synchronization",
-        "suggested_location": "Historic Old Quarter ➔ Curio & Antiquities Shop ➔ Basement Threshold",
+        "suggested_location": "Downtown Shopping Arcade & Café Row ➔ Secondhand Bookstore & Vinyl Shop ➔ Front Rare-Book & Zine Stacks",
         "directive": "Delve Threshold: Curiosity shop investigation, examining antique appraisal tags, checking basement floorboards, and deciphering strange relics.",
         "focal_point": "Standing at the top of the creaking wooden stairs looking into the curiosities below",
         "scheduled_roles": [
@@ -1319,7 +1319,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 465,
         "hook": "at 07:45 AM walking toward the bustling {session_school} main entrance gates and sakura-lined courtyard as commuting students stream onto campus and club representatives hand out morning flyers before the 08:00 AM bell",
-        "suggested_location": "{session_school} ➔ School Main Gates ➔ Front Gate Path",
+        "suggested_location": "{session_school} ➔ Main Campus Building ➔ School Main Gates",
         "directive": "Open Hub Exploration (07:45 AM Campus Arrival): Establish lively morning commute atmosphere at the school entrance before the 08:00 AM first bell, chatting with arriving classmates, club reps pitching memberships, and heading inside.",
         "focal_point": "Standing beneath the blooming sakura trees near the main gate",
         "scheduled_roles": [
@@ -1345,7 +1345,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 480,
         "hook": "at 08:00 AM seated at your desk in {session_classroom} as the morning homeroom bell rings across {session_school} and classmates settle in while trading morning gossip",
-        "suggested_location": "{session_school} ➔ {session_classroom} ➔ {session_player_desk}",
+        "suggested_location": "{session_school} ➔ Main Campus Building ➔ {session_classroom}",
         "directive": "Open Hub Exploration (08:00 AM Homeroom Bell): Establish vibrant morning classroom atmosphere as first period begins at 08:00 AM, classmates whispering nearby, homeroom announcements, and open social/academic choices.",
         "focal_point": "Seated at your window-side wooden desk in {session_classroom}",
         "scheduled_roles": [
@@ -1371,7 +1371,7 @@
         "archetype": "in_media_res",
         "starting_minute": 465,
         "hook": "at 07:45 AM in the crowded entrance foyer and shoe lockers of {session_school} as a sudden morning commotion breaks out between the disciplinary committee and a cornered student just fifteen minutes before the 08:00 AM bell",
-        "suggested_location": "{session_school} ➔ Entrance Foyer & Shoe Lockers ➔ Main Entrance Lobby",
+        "suggested_location": "{session_school} ➔ Main Campus Building ➔ Entrance Foyer & Shoe Lockers",
         "directive": "In Media Res (07:45 AM Pre-Bell Commotion): Immediate morning campus tension at the shoe lockers before the 08:00 AM first bell, onlookers gathering, and urgent social or tactical choices to intervene, defuse, or investigate.",
         "focal_point": "Standing by your metal shoe locker ducking past the gathering crowd",
         "scheduled_roles": [
@@ -1397,7 +1397,7 @@
         "archetype": "in_media_res",
         "starting_minute": 480,
         "hook": "at 08:00 AM in the 3F science wing hallway as the first-period bell rings and an accidental morning chemical reaction triggers the fire alarm outside the lab doors",
-        "suggested_location": "{session_school} ➔ Chemistry & Science Lab ➔ Lab Benches",
+        "suggested_location": "{session_school} ➔ Main Campus Building ➔ Chemistry & Science Lab",
         "directive": "In Media Res (08:00 AM Morning Class Crisis): School commotion/crisis at the 08:00 AM bell, teachers directing evacuation, trapped project or missing student, and quick tactical/social choices.",
         "focal_point": "Bracing against the lab workbench as amber alarm strobes flash",
         "scheduled_roles": [
@@ -1423,7 +1423,7 @@
         "archetype": "in_media_res",
         "starting_minute": 450,
         "hook": "at 07:30 AM in the school bicycle sheds as an accidental morning collision tangles several handlebars and a heated dispute erupts between sports club rivals before the 08:00 AM bell",
-        "suggested_location": "{session_school} ➔ School Main Gates ➔ Bicycle Parking Shed",
+        "suggested_location": "{session_school} ➔ Main Campus Building ➔ School Main Gates",
         "directive": "In Media Res (07:30 AM Parking Commotion): Morning argument between rival club athletes over fallen bicycles, gathered student onlookers, and quick social or physical intervention choices.",
         "focal_point": "Untangling bicycle handlebars beside the metal rack as an argument flares up",
         "scheduled_roles": [
@@ -1449,7 +1449,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 450,
         "hook": "at 07:30 AM on the quiet school rooftop in the crisp morning air before the 08:00 AM first bell as rumors of an old campus mystery echo in the breeze",
-        "suggested_location": "{session_school} ➔ School Rooftop ➔ Rooftop Benches",
+        "suggested_location": "{session_school} ➔ Main Campus Building ➔ School Rooftop",
         "directive": "Delve Threshold (07:30 AM Early Morning Campus): Solitary reflective threshold before 08:00 AM morning classes, uncovering a hidden message or key behind the water tank, and deciding which campus mystery to pursue.",
         "focal_point": "Leaning against the chain-link fence behind the blue water tank",
         "scheduled_roles": [
@@ -1474,7 +1474,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 465,
         "hook": "at 07:45 AM before the overgrown torii gate of the hidden campus fox shrine tucked in the secluded forest grove behind the athletics field before the 08:00 AM bell",
-        "suggested_location": "{session_school} ➔ Athletics Complex & Fields ➔ Overgrown Shrine Grove",
+        "suggested_location": "{session_school} ➔ {session_athletics_complex} ➔ Athletic Field",
         "directive": "Delve Threshold (07:45 AM Shaded Grove): Mysterious secluded shrine on campus grounds, rustling bamboo leaves, strange omens, and occult investigation choices.",
         "focal_point": "Parting the dense wisteria vines before the forgotten stone fox shrine",
         "scheduled_roles": [
@@ -1499,7 +1499,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 480,
         "hook": "at 08:00 AM standing in the dim dust-moted hallway of the locked Old School Building wing just as the morning bell echoes through the boarded-up windows",
-        "suggested_location": "{session_school} ➔ Abandoned Old Campus Wing ➔ Locked Archive Corridor",
+        "suggested_location": "{session_school} ➔ {session_abandoned_campus} ➔ Overgrown Hallway Wing",
         "directive": "Delve Threshold (08:00 AM Old Wing Intrigue): Forbidden historic campus wing, peeling paint, creaking floorboards, locked archives, and urban legend investigation choices.",
         "focal_point": "Checking the rusted padlock on the heavy wooden double doors of the Old Building",
         "scheduled_roles": [
@@ -1542,7 +1542,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 600,
         "hook": "at 10:00 AM in a fortified wasteland trading post built from rusted shipping containers as scavengers barter scrap and clean water",
-        "suggested_location": "{session_desert} ➔ Rustfall Trading Post ➔ Container Bar",
+        "suggested_location": "Scrap-Town Settlement ➔ Rusty Canteen Saloon ➔ Oil-Drum Taproom & Grill",
         "directive": "Open Hub Exploration: Rugged wasteland haven, mercenary barter posts, salvage bounty board, and cautious survivor interactions.",
         "focal_point": "Leaning against the sheet-metal counter sipping filtered rain-water from a tin can",
         "scheduled_roles": [
@@ -1568,7 +1568,7 @@
         "archetype": "hub_launchpad",
         "starting_minute": 960,
         "hook": "at 04:00 PM inside the domed greenhouse of a survivor oasis settlement as solar moisture evaporators hum and farmers harvest clean hydroponic greens",
-        "suggested_location": "{session_desert} ➔ Oasis Enclave ➔ Hydroponic Greenhouse Dome",
+        "suggested_location": "Underground Vault Shelter ➔ Atrium & Overseer Command Sector ➔ Vault Medbay & Hydroponics Lab",
         "directive": "Open Hub Exploration: Rare verdant wasteland sanctuary, thriving solar agriculture, community barter ledgers, and hopeful survivor choices.",
         "focal_point": "Resting beside the bubbling water-purification tanks admiring clean tomato plants",
         "scheduled_roles": [
@@ -1594,7 +1594,7 @@
         "archetype": "in_media_res",
         "starting_minute": 780,
         "hook": "at 01:00 PM beside an overturned armored buggy in a dusty crater as raider buggy engines roar in the distance",
-        "suggested_location": "{session_desert} ➔ Crater Convoy Wreck ➔ Overturned Buggy",
+        "suggested_location": "Irradiated Crater Basin ➔ Ground Zero Crater Rim ➔ Vitrified Glass Rim Overlook",
         "directive": "In Media Res: High-octane wasteland skirmish, approaching raiders, limited ammo, and urgent tactical defense/evasion choices.",
         "focal_point": "Crouched behind the smoking roll-cage of your buggy as raider engines roar across the salt flat",
         "scheduled_roles": [
@@ -1620,7 +1620,7 @@
         "archetype": "in_media_res",
         "starting_minute": 900,
         "hook": "at 03:00 PM sheltering beneath a fractured highway overpass as a howling radiation dust storm rolls in and green static lightning arcs across the ruins",
-        "suggested_location": "{session_desert} ➔ Highway Overpass Ruins ➔ Concrete Pillar Shelter",
+        "suggested_location": "Highway Badlands & Scrapyards ➔ Highway Overpass Outpost ➔ Barricaded On-Ramp & Bus Shelter",
         "directive": "In Media Res: Environmental wasteland crisis, stinging radioactive winds, falling concrete rebar, and urgent shelter/filtration choices.",
         "focal_point": "Shivering beneath a collapsed concrete highway slab as radioactive green lightning splits the orange dust clouds",
         "scheduled_roles": [
@@ -1645,7 +1645,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 1110,
         "hook": "at 06:30 PM before the cracked blast doors of a sealed pre-war bunker as your Geiger counter clicks softly against the iron seal",
-        "suggested_location": "{session_desert} ➔ Vault 108 Blast Gate ➔ Decontamination Threshold",
+        "suggested_location": "Underground Vault Shelter ➔ Blast Door & Security Sector ➔ Heavy Gear Blast Airlock",
         "directive": "Delve Threshold: Bunker expedition threshold, checking radiation levels, battery power, prying rusted doors, and entering Chamber 1.",
         "focal_point": "Kneeling before the massive round cog-door prying at the manual emergency release wheel",
         "scheduled_roles": [
@@ -1670,7 +1670,7 @@
         "archetype": "delve_threshold",
         "starting_minute": 360,
         "hook": "at 06:00 AM outside the shattered subterranean delivery bay of an overgrown pre-war commercial superstore as your flashlight beam cuts through thick darkness",
-        "suggested_location": "{session_desert} ➔ Sub-Level Superstore ➔ Loading Bay Roller Shutter",
+        "suggested_location": "Ruined Megacity Ruins ➔ Collapsed Subway Terminal ➔ Shattered Turnstile Concourse",
         "directive": "Delve Threshold: Ruined shopping complex exploration, checking structural integrity, testing darkness with flares, and looting intact aisles.",
         "focal_point": "Shining your flashlight through the breached security roller-shutter into the dark aisles",
         "scheduled_roles": [
@@ -1690,6 +1690,180 @@
           "effect": "A tempered steel crowbar indispensable for forcing jammed doors, crates, and security grates"
         },
         "visual_cues": "pitch black interior, narrow white beam of flashlight illuminating abandoned shopping aisles, water dripping from rusted ceiling pipes"
+      }
+    ]
+  },
+  "urban_fantasy": {
+    "name": "Urban Fantasy",
+    "category": "genre",
+    "prompt_instructions": [
+      "Juxtapose contemporary everyday urban society (traffic, high-rises, electronic networks, municipal bureaucracy) with anomalous phenomena, occult secrets, and reality distortions.",
+      "Frame public awareness of anomalies through civic protocols (containment cordons, public alerts, certified protection talismans) without mentioning numeric hazard grades or threat tiers.",
+      "Combine modern tactical gear, communication devices, and firearms with occult charms, binding seals, and supernatural affinities."
+    ],
+    "allowed_mechanics": [
+      "tactical_combat",
+      "smartphone_hub",
+      "faction_reputation",
+      "contact_list",
+      "relationship_meter",
+      "merchant_encounters"
+    ],
+    "starting_hooks": [
+      {
+        "archetype": "hub_launchpad",
+        "starting_minute": 510,
+        "hook": "at 08:30 AM in the tactical dispatch hall of {session_agency_hq} as incident monitors flicker with active metropolitan anomaly reports and field operatives check their gear",
+        "suggested_location": "City Center ➔ {session_agency_hq} ➔ Executive & Tactical Dispatch Wing",
+        "directive": "Open Hub Exploration: Tactical operations atmosphere, terminal monitors reporting citywide manifestations, requisition staff, and open investigation choices.",
+        "focal_point": "Standing before the illuminated glass situational board reviewing overnight containment reports",
+        "scheduled_roles": [
+          "Dispatch Operator",
+          "Senior Field Agent"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "before the tactical situational board",
+          "holding": "encrypted bureau terminal pad",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Encrypted Agency Terminal",
+          "item_type": "tool",
+          "effect": "A ruggedized government handheld terminal linking to dispatch records, incident manifests, and secure frequencies"
+        },
+        "visual_cues": "flickering terminal banks, cool fluorescent strip lighting, muffled tactical radio traffic, maps of metropolitan sectors, sharp smell of coffee and ozone"
+      },
+      {
+        "archetype": "hub_launchpad",
+        "starting_minute": 840,
+        "hook": "at 02:00 PM inside the subterranean containment examination bay of {session_agency_hq} as research staff observe a newly secured anomalous artifact pulsing behind reinforced ward glass",
+        "suggested_location": "City Center ➔ {session_agency_hq} ➔ Occult Forensics & Entity Research Division",
+        "directive": "Open Hub Exploration: Laboratory containment environment, analyzing anomalous properties, consulting research scientists, and selecting requisitioned equipment.",
+        "focal_point": "Leaning against the reinforced observation console watching resonance ripples flutter across the containment glass",
+        "scheduled_roles": [
+          "Lead Researcher",
+          "Containment Specialist"
+        ],
+        "initial_physical_state": {
+          "posture": "leaning",
+          "posture_qualifier": "against the observation console",
+          "holding": "containment dossier",
+          "stance": "Relaxed",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Anomalous Specimen Dossier",
+          "item_type": "tool",
+          "effect": "A classified binder containing documented containment protocols, behavioral tendencies, and known hazards"
+        },
+        "visual_cues": "heavy lead-lined glass, humming electromagnetic stabilizers, sterile white tile flooring, faint ultraviolet radiation glow, clipboards and sensor readouts"
+      },
+      {
+        "archetype": "in_media_res",
+        "starting_minute": 1395,
+        "hook": "at 11:15 PM on the tiled platform of a cordoned transit hub as a sudden spatial distortion flickers across the tracks, warping overhead fluorescent tubes and setting off emergency containment klaxons",
+        "suggested_location": "City Center ➔ Central Transit Terminal ➔ Lower Subway Platform",
+        "directive": "High-Tension Crisis: Uncontained spatial manifestation in progress, emergency civil barriers deployed, flickering reality tears, and immediate tactical containment decisions.",
+        "focal_point": "Crouching behind an iron pillar with weapon drawn as reality warps over the stalled train cars",
+        "scheduled_roles": [
+          "Perimeter Enforcer",
+          "Field Operative"
+        ],
+        "initial_physical_state": {
+          "posture": "crouching",
+          "posture_qualifier": "behind a reinforced steel column",
+          "holding": "service firearm",
+          "stance": "Defensive",
+          "composure": "focused",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Resonance Stabilization Flare",
+          "item_type": "tool",
+          "effect": "A magnesium-and-salt emergency flare that anchors reality and suppresses minor spatial warps for several minutes"
+        },
+        "visual_cues": "strobe lights from hazard barriers, bending light along train tracks, humming electromagnetic static, distant mechanical warning klaxons"
+      },
+      {
+        "archetype": "in_media_res",
+        "starting_minute": 945,
+        "hook": "at 03:45 PM in the glass-domed plaza of a downtown commercial galleria as an anomalous manifestation shatters the decorative fountain, sending shoppers fleeing toward emergency exits as civil hazard sirens begin to echo",
+        "suggested_location": "City Center ➔ Sunken Plaza Galleria ➔ Shattered Fountain Atrium",
+        "directive": "High-Tension Crisis: Sudden public daytime incursion, coordinating civilian evacuation, containing anomalous spread, and engaging the hostile entity before peripheral damage spreads.",
+        "focal_point": "Standing at the top of the atrium escalator establishing an interception perimeter while urging fleeing civilians toward safety",
+        "scheduled_roles": [
+          "Civil Defense Warden",
+          "Panicked Citizen"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "at the head of the descending escalators",
+          "holding": "tactical suppression shotgun",
+          "stance": "Aggressive",
+          "composure": "focused",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Emergency Ward Talisman",
+          "item_type": "tool",
+          "effect": "A fast-deploying paper talisman that creates a brief kinetic deflection barrier against anomalous attacks"
+        },
+        "visual_cues": "shattered fountain marble, water raining through sunlight, echoing evacuation broadcasts, running shoppers, unnatural violet smoke coiling from the crater"
+      },
+      {
+        "archetype": "delve_threshold",
+        "starting_minute": 1080,
+        "hook": "at 06:00 PM outside an evacuated multi-story tenement complex wrapped in yellow hazard tape, where distorted shadows stretch upward across the windows and ambient temperatures plummet",
+        "suggested_location": "The Lower Wards & Tenements ➔ Tenement Block 4 & Room 404 Anomaly ➔ Entrance Vestibule",
+        "directive": "Delve Threshold: Approaching an altered interior structure, checking perimeter containment wards, verifying scanner readouts, and breaching Room 101.",
+        "focal_point": "Standing before the cracked glass entry door cutting through peeling hazard seals with an anomaly scanner",
+        "scheduled_roles": [
+          "Quarantine Specialist",
+          "Perimeter Guard"
+        ],
+        "initial_physical_state": {
+          "posture": "standing",
+          "posture_qualifier": "before the taped entrance vestibule",
+          "holding": "handheld anomaly scanner",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Sub-Harmonic Anomaly Scanner",
+          "item_type": "tool",
+          "effect": "A handheld sensor measuring electromagnetic frequency spikes, spatial warping, and residual esoteric energy"
+        },
+        "visual_cues": "dusk twilight falling over empty sidewalks, yellow barrier tape fluttering in cold wind, dark unlit windows with faint unnatural purple luminescence"
+      },
+      {
+        "archetype": "delve_threshold",
+        "starting_minute": 90,
+        "hook": "at 01:30 AM before the rusted hydraulic bulkhead of an abandoned subterranean civil defense shelter beneath the city, where deep electromagnetic static drowns out all surface communication",
+        "suggested_location": "Industrial Zone ➔ Subterranean Cold-War Bunker ➔ Hydraulic Air-Lock Door",
+        "directive": "Delve Threshold: Descending beneath city street level into an unmapped anomalous zone, priming tactical flashlights, checking air filters, and breaking the rusted pressure seal.",
+        "focal_point": "Prying at the emergency hydraulic pressure valve of the blast door as anomalous static buzzes in your earpiece",
+        "scheduled_roles": [
+          "Field Investigator Partner"
+        ],
+        "initial_physical_state": {
+          "posture": "kneeling",
+          "posture_qualifier": "before the hydraulic blast valve",
+          "holding": "pneumatic pry-tool",
+          "stance": "Neutral",
+          "composure": "composed",
+          "is_wet": 0
+        },
+        "starting_prop": {
+          "name": "Spectral Frequency Earpiece",
+          "item_type": "tool",
+          "effect": "A comms earpiece that registers anomalous acoustic vibrations and whispers imperceptible to normal ears"
+        },
+        "visual_cues": "flickering yellow emergency bulb, condensation running down rusted green steel plates, deep underground chill, heavy rhythmic pulsing vibrations behind the bulkhead"
       }
     ]
   },
@@ -1740,6 +1914,16 @@
       "Avoid tame wording like 'hurt,' 'wounded,' or 'injured.' Use direct visceral terms (e.g., gore, guts, severed, mangled, crushed, dismembered, blood) instead.",
       "Describe graphic violence in explicit detail — torn flesh, broken bones, spilled entrails, and killing blows that leave the scene drenched in blood.",
       "Include gory encounters, gruesome corpses, and mutilated remains as environmental storytelling and quest hooks."
+    ]
+  },
+  "horror": {
+    "name": "Horror",
+    "category": "modifier",
+    "prompt_instructions": [
+      "Cultivate psychological dread, suspense, and the uncanny rather than simple despair or cynicism.",
+      "Emphasize sensory anomalies: unnatural silence, flickering fluorescents, warped acoustics, shifting shadows, and cognitive dissonance.",
+      "Highlight vulnerability and the unknown: anomalies should feel unpredictable, rules-defying, or cognitively dissonant.",
+      "Structure pacing with quiet, tense investigations building up to sudden, high-stress escalations or chilling revelations."
     ]
   }
 }

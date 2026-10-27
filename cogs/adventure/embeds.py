@@ -6,7 +6,11 @@ import random
 import re
 import time
 import discord
-from mechanics.world.locations import format_tiered_location_string
+from mechanics.world.locations import (
+    format_tiered_location_string,
+    format_clean_location_badge,
+    clean_narrative_location_arrows,
+)
 from discord import app_commands
 from discord.ext import commands
 logger = logging.getLogger("hikayat.adventure")
@@ -109,11 +113,11 @@ def _party_vitals_text(session: dict) -> str:
         status_items = [str(s.get("name", s)) if isinstance(s, dict) else str(s) for s in status if s]
         st = session.get("stealth_state") or {}
         has_vanished_buff = any("Hidden in Shadows" in s for s in status_items)
-        turn_order = session.get("turn_order", [])
-        if has_vanished_buff or (st.get("combat_vanished") and len(turn_order) <= 1):
+        from mechanics.stealth import is_actor_combat_vanished, is_actor_hidden
+        if has_vanished_buff or is_actor_combat_vanished(session, uid):
             status_items = [s for s in status_items if "Hidden in Shadows" not in s]
             status_items.insert(0, "💨 Vanished")
-        elif st.get("is_hidden"):
+        elif is_actor_hidden(session, uid):
             meter = int(st.get("detection_meter", 0))
             status_items.insert(0, f"🥷 Sneaking ({meter}%)")
         status_text = ", ".join(status_items) if status_items else "None"
@@ -134,7 +138,8 @@ def _party_vitals_text(session: dict) -> str:
                 status = _parse_status_effects(npc.get("status_effects"))
                 status_text = ", ".join(str(s.get("name", s)) if isinstance(s, dict) else str(s) for s in status if s) if status else "None"
                 role_tag = f" ({npc['role']})" if npc.get("role") else ""
-                lines.append(f"🤝 Lvl {lvl} **{npc['name']}**{role_tag} — ❤️ {hp}/{max_hp} | "
+                sa_tag = " `[⚡ Special Agent]`" if npc.get("anomalous_npc_tag") == "special_agent" else ""
+                lines.append(f"🤝 Lvl {lvl} **{npc['name']}**{sa_tag}{role_tag} — ❤️ {hp}/{max_hp} | "
                              f"💙 {mp}/{max_mp} | Status: {status_text}")
 
     return _truncate_field_value("\n".join(lines), 1024)
@@ -195,48 +200,12 @@ def _norm_name(text: str) -> str:
     return unicodedata.normalize('NFKD', str(text)).encode('ASCII', 'ignore').decode('utf-8').strip().lower()
 
 def _is_dialogue_partner(name: str, dialogue_partners: list | str = None) -> bool:
-    if not name or not dialogue_partners:
-        return False
-    if isinstance(dialogue_partners, str):
-        try:
-            parsed = json.loads(dialogue_partners)
-            partners_list = parsed if isinstance(parsed, list) else [dialogue_partners]
-        except Exception:
-            partners_list = [dialogue_partners]
-    elif isinstance(dialogue_partners, list):
-        partners_list = []
-        for p in dialogue_partners:
-            if isinstance(p, list):
-                partners_list.extend(str(x) for x in p if x)
-            elif p:
-                partners_list.append(str(p))
-    else:
-        partners_list = [str(dialogue_partners)]
-
-    n_raw = name.strip().lower()
-    n_clean = _norm_name(name)
-    title_words = {
-        "the", "elder", "lord", "lady", "sir", "madam", "captain", "dr", "mr", "ms", "mrs",
-        "scholar", "guardian", "druid", "student", "council", "president", "vice", "secretary",
-        "representative", "officer", "member", "guildmaster", "archivist", "warden"
-    }
-    n_tokens = [t for t in n_clean.split() if len(t) > 2 and t not in title_words]
-    if not n_tokens and len(n_clean) > 2:
-        n_tokens = [n_clean]
-
-    for p in partners_list:
-        p_raw = str(p).strip().lower()
-        p_clean = _norm_name(p)
-        if p_raw in n_raw or n_raw in p_raw or p_clean in n_clean or n_clean in p_clean:
-            return True
-        for t in n_tokens:
-            if t in p_clean or t in p_raw:
-                return True
-    return False
+    from mechanics.world.mobility import is_dialogue_partner as _mobility_is_dp
+    return _mobility_is_dp(name, dialogue_partners)
 
 def is_matching_contact_dialogue_partner(contact: dict, partner_str: str) -> bool:
     """Returns True if the contact matches the specified dialogue partner string.
-    Ensures that shared family surnames do not cause false positives (e.g. Amanda vs Sofia Anderson)."""
+    Ensures that shared family surnames, honorifics, and East Asian surname-first order do not cause false positives."""
     if not contact or not partner_str:
         return False
     p_raw = str(partner_str).strip()
@@ -246,46 +215,45 @@ def is_matching_contact_dialogue_partner(contact: dict, partner_str: str) -> boo
     c_name = str(contact.get("name") or "").strip()
     c_nid = str(contact.get("npc_id") or "").strip()
 
-    p_norm = p_raw.lower().replace("_", " ")
-    c_name_norm = c_name.lower().replace("_", " ")
-    c_nid_norm = c_nid.lower().replace("_", " ")
+    p_norm = _norm_name(p_raw.replace("_", " "))
+    c_name_norm = _norm_name(c_name.replace("_", " "))
+    c_nid_norm = _norm_name(c_nid.replace("_", " "))
 
     if p_norm in (c_name_norm, c_nid_norm):
         return True
 
-    title_words = {
-        "the", "elder", "lord", "lady", "sir", "madam", "captain", "dr", "mr", "ms", "mrs", "miss",
+    role_title_prefixes = {
+        "the", "elder", "lord", "lady", "sir", "madam", "madame", "captain", "dr", "mr", "ms", "mrs", "miss", "mx",
         "prof", "professor", "scholar", "guardian", "druid", "student", "council", "president", "vice",
-        "secretary", "representative", "officer", "member", "guildmaster", "archivist", "warden", "coach"
+        "secretary", "representative", "officer", "member", "guildmaster", "archivist", "warden", "coach",
+        "chef", "nurse", "principal", "headmaster", "headmistress", "dean", "sensei",
     }
 
-    import re
-    def clean_tokens(s: str) -> list[str]:
-        cleaned = re.sub(r"[^a-zA-Z0-9\s]", " ", s).lower()
-        return [t for t in cleaned.split() if t and t not in title_words]
+    def _strip_role_prefix(s: str) -> str:
+        pts = s.replace("_", " ").strip().split()
+        while len(pts) >= 2 and pts[0].lower().strip(".,") in role_title_prefixes:
+            pts = pts[1:]
+        return " ".join(pts)
 
-    p_tokens = clean_tokens(p_norm)
-    c_tokens = clean_tokens(c_name_norm)
-    c_nid_tokens = clean_tokens(c_nid_norm)
+    import namegen
+    p_stripped = _strip_role_prefix(p_raw)
+    c_stripped = _strip_role_prefix(c_name)
+    p_first, p_last = namegen.extract_first_and_last_name(p_stripped)
+    c_first, c_last = namegen.extract_first_and_last_name(c_stripped)
+    if p_first and p_last and c_first and c_last:
+        return _norm_name(p_first) == _norm_name(c_first) and (
+            _norm_name(namegen.normalize_base_surname(p_last)) == _norm_name(namegen.normalize_base_surname(c_last))
+        )
 
-    if not p_tokens or not (c_tokens or c_nid_tokens):
-        return False
-
-    for target_tokens in (c_tokens, c_nid_tokens):
-        if not target_tokens:
-            continue
-        if p_tokens == target_tokens:
+    p_toks = namegen.get_unique_person_tokens(p_raw.replace("_", " "), min_len=2)
+    c_toks = namegen.get_unique_person_tokens(c_name, min_len=2)
+    if p_toks and c_toks:
+        c_given = _norm_name(c_first) if c_first else ""
+        p_given = _norm_name(p_first) if p_first else ""
+        if c_given and p_given and c_given == p_given:
             return True
-        if len(p_tokens) >= 2 and len(target_tokens) >= 2:
-            if p_tokens[0] == target_tokens[0] and p_tokens[-1] == target_tokens[-1]:
-                return True
-            if p_tokens[0] != target_tokens[0]:
-                continue
-        if len(p_tokens) == 1 and p_tokens[0] == target_tokens[0]:
+        if any(" " in t for t in (p_toks & c_toks)):
             return True
-        if len(target_tokens) == 1 and target_tokens[0] == p_tokens[0]:
-            return True
-
     return False
 
 def _format_tracker_entity(entity: dict, dialogue_partners: list = None, show_vitals: bool = True) -> str:
@@ -328,6 +296,11 @@ def _format_tracker_entity(entity: dict, dialogue_partners: list = None, show_vi
         tier_badge = " `[Miniboss]`"
     elif tier_rank == 3 or tier_name == "elite":
         tier_badge = " `[Elite]`"
+
+    if entity.get("anomalous_npc_tag") == "special_agent":
+        tier_badge += " `[⚡ Special Agent]`"
+    elif entity.get("anomalous_npc_tag") == "civilian":
+        tier_badge += " `[Civilian]`"
 
     intent = entity.get("intent")
     intent_line = f"\n   ↳ ⚡ *Intent: {intent}*" if intent else ""
@@ -1109,7 +1082,8 @@ def build_world_map_embed(session_id: int, scen_key: str, current_loc: str = "",
     for z in zones[:25]:
         z_name = z["zone_name"]
         z_emoji = z.get("emoji", "📍")
-        curr_badge = " `[Current Region]`" if z.get("is_current") else ""
+        eta_tag = z.get("travel_tag") or ""
+        curr_badge = " `[Current Region]`" if z.get("is_current") else (f" `[⏱️ {eta_tag}]`" if eta_tag else "")
         header = f"{'🧭 ' if z.get('is_current') else z_emoji + ' '}{z_name}{curr_badge}"
         lines = []
         theme_tag = z.get("theme")
@@ -1127,9 +1101,10 @@ def build_zone_places_embed(session_id: int, zone_name: str, scen_key: str, curr
     zones = get_zone_summary_tree(session_id, scen_key, current_loc=current_loc, char_name=char_name)
     target_zone = next((z for z in zones if z["zone_name"].lower() == zone_name.lower()), None)
     z_emoji = target_zone.get("emoji", get_zone_emoji(zone_name, scen_key)) if target_zone else get_zone_emoji(zone_name, scen_key)
+    z_eta = f" `[⏱️ {target_zone['travel_tag']}]`" if (target_zone and not target_zone.get("is_current") and target_zone.get("travel_tag")) else ""
 
     embed = discord.Embed(
-        title=f"{z_emoji} Region: {zone_name}",
+        title=f"{z_emoji} Region: {zone_name}{z_eta}",
         color=discord.Color.gold()
     )
     if target_zone and target_zone.get("theme"):
@@ -1148,6 +1123,8 @@ def build_zone_places_embed(session_id: int, zone_name: str, scen_key: str, curr
                 arch_emoji = p.get("archetype_emoji") or p.get("emoji") or "📍"
                 badges = p.get("badges", "")
                 badge_str = f" {badges}" if badges else ""
+                eta_tag = p.get("travel_tag") or ""
+                eta_str = f" `[⏱️ {eta_tag}]`" if eta_tag else ""
 
                 # Access and curfew indicators
                 access_badge = p.get("access_badge")
@@ -1160,7 +1137,7 @@ def build_zone_places_embed(session_id: int, zone_name: str, scen_key: str, curr
                     elif access_badge != "Open":
                         access_str = f" `[{access_badge}]`"
 
-                line = f"• {arch_emoji} **{p['name']}**{badge_str}{access_str}"
+                line = f"• {arch_emoji} **{p['name']}**{badge_str}{eta_str}{access_str}"
 
                 # Live Occupancy (Known contacts, rendezvous partners, unmet roster students)
                 occ_parts = []
@@ -1182,6 +1159,48 @@ def build_zone_places_embed(session_id: int, zone_name: str, scen_key: str, curr
 
                 place_lines.append(line)
             _safe_add_field(embed, name="📍 Discovered Locations", value="\n".join(place_lines), inline=False)
+    return embed
+
+
+def build_facility_rooms_embed(zone_name: str, primary_item: dict) -> discord.Embed:
+    """Builds a Tier-3 Room/Wing selector embed for a multi-room Building, Deck, or Complex."""
+    p_name = primary_item.get("name", "Facility")
+    p_emoji = primary_item.get("archetype_emoji") or primary_item.get("emoji") or "🏛️"
+    eta_tag = primary_item.get("travel_tag") or ""
+    eta_hdr = f" `[⏱️ {eta_tag}]`" if eta_tag else ""
+
+    embed = discord.Embed(
+        title=f"{p_emoji} {p_name}{eta_hdr}",
+        description=f"📍 **Region:** `{zone_name}`\nSelect a specific room or wing below, or click **Enter Main Entrance**.",
+        color=discord.Color.gold()
+    )
+
+    room_details = primary_item.get("sub_location_details") or []
+    raw_subs = primary_item.get("sub_locations") or []
+    room_lines = []
+    if room_details:
+        for rd in room_details[:15]:
+            r_name = rd.get("name", "")
+            if not r_name:
+                continue
+            r_eta = rd.get("travel_tag") or ""
+            r_badge = rd.get("access_badge") or "Open"
+            r_locked = (not rd.get("is_unlocked")) and (
+                "Closed" in r_badge or "Locked" in r_badge or r_badge in ("Restricted", "Private")
+            )
+            icon = "📍" if rd.get("is_current_room") else ("🔒" if r_locked else "🚪")
+            lock_str = f" `🔒 {r_badge}`" if r_locked else (" `🔓 Unlocked`" if rd.get("is_unlocked") and r_badge != "Open" else "")
+            eta_str = f" `[⏱️ {r_eta}]`" if r_eta else ""
+            props = rd.get("props") or []
+            prop_str = f"\n  ↳ *Props: {', '.join(props[:4])}*" if props else ""
+            room_lines.append(f"• {icon} **{r_name}**{eta_str}{lock_str}{prop_str}")
+    else:
+        for s_name in raw_subs[:15]:
+            if s_name:
+                room_lines.append(f"• 🚪 **{s_name}**")
+
+    if room_lines:
+        _safe_add_field(embed, name="🚪 Rooms & Wings", value="\n".join(room_lines), inline=False)
     return embed
 
 def _get_quest_scenario_labels(scen_key: str = None) -> dict:
@@ -1266,9 +1285,9 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
         )
         return embed
 
-    title = active_sq.get("title", "Active Chapter")
+    title = clean_narrative_location_arrows(active_sq.get("title", "Active Chapter"))
     q_type = active_sq.get("quest_type", "Story Quest")
-    obj = active_sq.get("objective", "")
+    obj = clean_narrative_location_arrows(active_sq.get("objective", ""))
     sub_objs = active_sq.get("sub_objectives", []) or []
     all_so_done = bool(sub_objs and all(isinstance(so, dict) and so.get("completed") for so in sub_objs))
 
@@ -1300,8 +1319,8 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
 
     if active_wp_lead:
         s_idx = active_wp_lead.get("stage_index", 1)
-        s_lbl = active_wp_lead.get("stage_label", "")
-        s_loc = active_wp_lead.get("target_location", "")
+        s_lbl = clean_narrative_location_arrows(active_wp_lead.get("stage_label", ""))
+        s_loc = format_clean_location_badge(active_wp_lead.get("target_location", ""))
         embed.add_field(
             name="📍 Current Waypoint Lead",
             value=f"**Stage {s_idx}/3:** *{s_lbl}*\n➔ 📍 **Target Location:** `{s_loc}`",
@@ -1315,7 +1334,7 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
             is_done = bool(so.get("completed"))
             chk = "☑️" if is_done else "☐"
             arch = f" [{so['archetype']}]" if so.get("archetype") else ""
-            raw_text = str(so.get("text", "")).strip()
+            raw_text = clean_narrative_location_arrows(str(so.get("text", "")).strip())
             if len(raw_text) > 175:
                 raw_text = raw_text[:172].rstrip() + "..."
             line = f"{chk}{arch} {raw_text}"
@@ -1324,8 +1343,8 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
                     wp = db.get_active_waypoint(session_id, active_sq.get("quest_id"), so["id"])
                     if wp:
                         s_idx = wp.get("stage_index", 1)
-                        s_lbl = wp.get("stage_label", "")
-                        s_loc = wp.get("target_location", "")
+                        s_lbl = clean_narrative_location_arrows(wp.get("stage_label", ""))
+                        s_loc = format_clean_location_badge(wp.get("target_location", ""))
                         loc_display = f" ➔ 📍 `{s_loc}`" if s_loc else ""
                         line += f"\n   ↳ *Stage {s_idx}/3: {s_lbl}{loc_display}*"
                 except Exception:
@@ -1336,7 +1355,7 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
         if all_so_done:
             from mechanics.world.waypoints import get_story_quest_climax_location
             _, climax_loc = get_story_quest_climax_location(session_id)
-            climax_display = f"`{climax_loc}`" if climax_loc else "`Local Area`"
+            climax_display = f"`{format_clean_location_badge(climax_loc)}`" if climax_loc else "`Local Area`"
             sub_val += (
                 f"\n\n⚡ **CLIMAX READY — FINAL SHOWDOWN:**\n"
                 f"• All preliminary sub-objectives completed!\n"
@@ -1408,10 +1427,10 @@ def _build_bounties_embed(session_id: int, selected_quest_id: str | None = None)
 
         if target_bounty:
             b_id = target_bounty.get("quest_id", "")
-            title = target_bounty.get("title", "Bounty Details")
+            title = clean_narrative_location_arrows(target_bounty.get("title", "Bounty Details"))
             q_type = target_bounty.get("quest_type", "Side Bounty")
             icon = _quest_type_icon(q_type)
-            obj = target_bounty.get("objective", "")
+            obj = clean_narrative_location_arrows(target_bounty.get("objective", ""))
             clues = target_bounty.get("current_clues", "")
 
             wps = db.get_quest_waypoints(session_id, b_id, sub_obj_id=None)
@@ -1435,8 +1454,8 @@ def _build_bounties_embed(session_id: int, selected_quest_id: str | None = None)
                 for wp in wps:
                     st_idx = wp.get("stage_index", 1)
                     st_status = wp.get("status", "locked")
-                    st_lbl = wp.get("stage_label", "")
-                    st_loc = wp.get("target_location", "")
+                    st_lbl = clean_narrative_location_arrows(wp.get("stage_label", ""))
+                    st_loc = format_clean_location_badge(wp.get("target_location", ""))
                     st_npc = wp.get("target_npc", "")
 
                     if st_status == "completed":
@@ -1476,9 +1495,9 @@ def _build_bounties_embed(session_id: int, selected_quest_id: str | None = None)
 
             # 2. Active Action Callout Box
             if active_wp:
-                action_lines = [f"**Current Task:** {active_wp.get('stage_label', '')}"]
+                action_lines = [f"**Current Task:** {clean_narrative_location_arrows(active_wp.get('stage_label', ''))}"]
                 if active_wp.get("target_location"):
-                    action_lines.append(f"📍 **Destination:** `{active_wp['target_location']}`")
+                    action_lines.append(f"📍 **Destination:** `{format_clean_location_badge(active_wp['target_location'])}`")
                 if active_wp.get("target_npc"):
                     action_lines.append(f"👤 **Key Contact:** `{active_wp['target_npc']}`")
                 trig = active_wp.get("completion_trigger", "arrival")
@@ -1528,12 +1547,12 @@ def _build_bounties_embed(session_id: int, selected_quest_id: str | None = None)
     for idx, b in enumerate(active_bounties[:5], start=1):
         q_type = b.get("quest_type", "Side Bounty")
         icon = _quest_type_icon(q_type)
-        obj = b.get("objective", "")
+        obj = clean_narrative_location_arrows(b.get("objective", ""))
         if len(obj) > 200:
             obj = obj[:197].rstrip() + "..."
 
         embed.add_field(
-            name=f"{idx}. {icon} {b['title']} [{q_type}]",
+            name=f"{idx}. {icon} {clean_narrative_location_arrows(b['title'])} [{q_type}]",
             value=f"**Objective:** {obj}",
             inline=False
         )
@@ -1685,7 +1704,7 @@ def _build_caseboard_embed(session_id: int, selected_suspect: str | None = None)
                     status_icon = "✅ [Verified]"
                 else:
                     status_icon = "⏳ [Open Lead]"
-                loc_str = f"📍 {c['source_location']}" if c.get("source_location") else "📍 Unspecified"
+                loc_str = f"📍 {format_clean_location_badge(c['source_location'])}" if c.get("source_location") else "📍 Unspecified"
                 npc_str = f" • 👤 {c['linked_npc']}" if c.get("linked_npc") else ""
                 lines.append(
                     f"{status_icon} **{c['title']}**\n"
@@ -1743,8 +1762,8 @@ def _build_bounty_board_embed(session: dict, bounties: list[dict]) -> discord.Em
         icon = _quest_type_icon(q_type)
 
         embed.add_field(
-            name=f"{idx}. {icon} {b['title']} [{q_type}]",
-            value=f"**Objective:** {b['objective']}\n**Rewards:** {rew_str}",
+            name=f"{idx}. {icon} {clean_narrative_location_arrows(b['title'])} [{q_type}]",
+            value=f"**Objective:** {clean_narrative_location_arrows(b['objective'])}\n**Rewards:** {rew_str}",
             inline=False
         )
 

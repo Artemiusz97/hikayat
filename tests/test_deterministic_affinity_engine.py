@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import unittest
 from skill_check import CheckResult
 from mechanics.social.affinity_engine import calculate_social_affinity_delta
@@ -38,52 +40,100 @@ class TestDeterministicSocialAffinityEngine(unittest.TestCase):
     # 1. BASELINE TESTS (SUCCESS / FAILURE / CRIT / AMBIENT)
     # -------------------------------------------------------------------------
     def test_base_delta_regular_success(self):
-        """Standard check success with no matching traits/prefs yields base +1."""
+        """Standard check success against Stranger (< 50) with no matching traits/prefs yields base +8."""
         action = {
             "label": "Ask about the student council report format",
             "stat": "INT",
             "check": CheckResult(chance=70, roll=50.0, tier="success", tier_label="Success", succeeded=True, requirement=5)
         }
         delta, reasons, breakdown = calculate_social_affinity_delta(action, "Generic Student", {})
-        self.assertEqual(delta, 1)
-        self.assertEqual(breakdown["base_delta"], 1)
-        self.assertIn("Check Success (+1)", reasons)
+        self.assertEqual(delta, 8)
+        self.assertEqual(breakdown["base_delta"], 8)
+        self.assertIn("Check Success (+8)", reasons)
 
     def test_base_delta_critical_success(self):
-        """Critical check success yields base +2."""
+        """Critical check success against Stranger (< 50) yields base +12."""
         action = {
             "label": "Deliver an impeccably structured proposal",
             "stat": "CHA",
             "check": CheckResult(chance=95, roll=98.0, tier="crit_success", tier_label="Critical Success", succeeded=True, requirement=8)
         }
         delta, reasons, breakdown = calculate_social_affinity_delta(action, "Generic Student", {})
-        self.assertEqual(delta, 2)
-        self.assertEqual(breakdown["base_delta"], 2)
-        self.assertIn("Critical Success (+2)", reasons)
+        self.assertEqual(delta, 12)
+        self.assertEqual(breakdown["base_delta"], 12)
+        self.assertIn("Critical Success (+12)", reasons)
 
     def test_base_delta_regular_failure(self):
-        """Standard check failure with no matching traits/prefs yields base -1."""
+        """Standard check failure with no matching traits/prefs yields base -2."""
         action = {
             "label": "Attempt to explain the scheduling conflict",
             "stat": "CHA",
             "check": CheckResult(chance=50, roll=65.0, tier="fail", tier_label="Failure", succeeded=False, requirement=6)
         }
         delta, reasons, breakdown = calculate_social_affinity_delta(action, "Generic Student", {})
-        self.assertEqual(delta, -1)
-        self.assertEqual(breakdown["base_delta"], -1)
-        self.assertIn("Check Failure (-1)", reasons)
+        self.assertEqual(delta, -2)
+        self.assertEqual(breakdown["base_delta"], -2)
+        self.assertIn("Check Failure (-2)", reasons)
 
     def test_base_delta_critical_failure(self):
-        """Critical check failure yields base -2."""
+        """Critical check failure yields base -4."""
         action = {
             "label": "Stumble over words and drop the paperwork",
             "stat": "CHA",
             "check": CheckResult(chance=30, roll=5.0, tier="crit_fail", tier_label="Critical Failure", succeeded=False, requirement=6)
         }
         delta, reasons, breakdown = calculate_social_affinity_delta(action, "Generic Student", {})
-        self.assertEqual(delta, -2)
-        self.assertEqual(breakdown["base_delta"], -2)
-        self.assertIn("Critical Failure (-2)", reasons)
+        self.assertEqual(delta, -4)
+        self.assertEqual(breakdown["base_delta"], -4)
+        self.assertIn("Critical Failure (-4)", reasons)
+
+    def test_tapered_base_deltas_acquaintance_friend_meetup_and_clamp(self):
+        """Acquaintance (+4/+6), Friend+ (+3/+5), Private Meetup (+2), and [-10, 18] clamp."""
+        ok_chk = CheckResult(chance=75, roll=30.0, tier="success", tier_label="Success", succeeded=True, requirement=6)
+        crit_chk = CheckResult(chance=90, roll=99.0, tier="crit_success", tier_label="Critical Success", succeeded=True, requirement=6)
+
+        # Acquaintance (50..99)
+        d_acq, r_acq, _ = calculate_social_affinity_delta(
+            {"label": "Discuss club logistics", "stat": "INT", "check": ok_chk},
+            "Student",
+            {"relationship_score": 65},
+        )
+        self.assertEqual(d_acq, 4)
+        self.assertIn("Check Success (+4)", r_acq)
+
+        d_acq_crit, r_acq_crit, _ = calculate_social_affinity_delta(
+            {"label": "Discuss club logistics", "stat": "INT", "check": crit_chk},
+            "Student",
+            {"relationship_score": 65},
+        )
+        self.assertEqual(d_acq_crit, 6)
+        self.assertIn("Critical Success (+6)", r_acq_crit)
+
+        # Friend+ (>= 100) + Private Meetup (+2)
+        d_fr, r_fr, _ = calculate_social_affinity_delta(
+            {"label": "Share stories over coffee", "stat": "CHA", "check": ok_chk, "is_private_meetup": True},
+            "Student",
+            {"relationship_score": 120},
+        )
+        self.assertEqual(d_fr, 5)
+        self.assertIn("Check Success (+3)", r_fr)
+        self.assertIn("Private Meetup / Date chemistry (+2)", r_fr)
+
+        # Single-turn upper clamp at +18 (Stranger Crit +12 + Meetup +2 + Vintage Favorite Gift +5 + Playful +1 = +20 -> 18)
+        d_cap, _, b_cap = calculate_social_affinity_delta(
+            {
+                "label": "Playfully tease and present Vintage Aged Earl Grey Tea",
+                "action_category": "gift_offer",
+                "item_name": "Vintage Aged Earl Grey Tea",
+                "stat": "CHA",
+                "check": crit_chk,
+                "is_private_meetup": True,
+            },
+            "Mia Yamada",
+            self.mia_contact,
+        )
+        self.assertEqual(d_cap, 18)
+        self.assertEqual(b_cap["capped_delta"], 18)
 
     def test_neutral_ambient_dialogue_choice_yields_zero(self):
         """Neutral ambient dialogue choices (stat: NONE, no check) must yield exactly 0 delta."""
@@ -125,7 +175,7 @@ class TestDeterministicSocialAffinityEngine(unittest.TestCase):
     # 2. PHYSICAL GIFT SCALING TESTS
     # -------------------------------------------------------------------------
     def test_gift_scaling_common_favorite(self):
-        """Standard/common favorite gift yields +3."""
+        """Standard/common favorite gift yields +3 additive bonus."""
         action = {
             "label": "Offer her a cup of Earl Grey Tea",
             "action_category": "gift_offer",
@@ -134,11 +184,11 @@ class TestDeterministicSocialAffinityEngine(unittest.TestCase):
             "check": CheckResult(chance=90, roll=50.0, tier="success", tier_label="Success", succeeded=True, requirement=4)
         }
         delta, reasons, breakdown = calculate_social_affinity_delta(action, "Mia Yamada", self.mia_contact)
-        self.assertGreaterEqual(delta, 4)  # Base 1 + Gift 3 = 4
+        self.assertGreaterEqual(delta, 4)
         self.assertIn("Loves gift: Earl Grey Tea (+3)", reasons)
 
     def test_gift_scaling_vintage_rare_favorite(self):
-        """Vintage/rare favorite gift scales up to +5."""
+        """Vintage/rare favorite gift scales up to +5 additive bonus."""
         action = {
             "label": "Present a canister of Vintage Aged Earl Grey Tea",
             "action_category": "gift_offer",
@@ -147,11 +197,11 @@ class TestDeterministicSocialAffinityEngine(unittest.TestCase):
             "check": CheckResult(chance=90, roll=50.0, tier="success", tier_label="Success", succeeded=True, requirement=4)
         }
         delta, reasons, breakdown = calculate_social_affinity_delta(action, "Mia Yamada", self.mia_contact)
-        self.assertGreaterEqual(delta, 6)  # Base 1 + Gift 5 = 6
+        self.assertGreaterEqual(delta, 6)
         self.assertIn("Loves gift: Vintage Aged Earl Grey Tea (+5)", reasons)
 
     def test_gift_scaling_disliked_gift(self):
-        """Disliked gift yields negative penalty (-3 to -5)."""
+        """Disliked gift yields negative penalty (-3 to -5) even on check success."""
         action = {
             "label": "Offer her a cup of Instant Coffee",
             "action_category": "gift_offer",
@@ -179,7 +229,7 @@ class TestDeterministicSocialAffinityEngine(unittest.TestCase):
             "check": CheckResult(chance=80, roll=40.0, tier="success", tier_label="Success", succeeded=True, requirement=5)
         }
         delta, reasons, breakdown = calculate_social_affinity_delta(action, "Yea-ji Kang", contact_diligent)
-        self.assertGreaterEqual(delta, 2)  # Base 1 + Diligent 1 = 2
+        self.assertGreaterEqual(delta, 2)
         self.assertIn("Diligent appreciates studious focus (+1)", reasons)
 
     def test_demeanor_and_dynamic_alignment(self):
@@ -246,18 +296,7 @@ class TestDeterministicSocialAffinityEngine(unittest.TestCase):
     # 5. TURN 12 EXACT SCENARIO (MIA YAMADA REGRESSION TEST)
     # -------------------------------------------------------------------------
     def test_turn_12_mia_yamada_failed_prying_challenge(self):
-        """In Turn 12, player rolled a failed CHA check on 'Playfully challenge her about past experiences'.
-        Historically, LLM hallucinated 0 affinity delta and dealt -12 HP damage.
-        The deterministic engine must:
-        - Base: -1 (Check Failure)
-        - Sensitive trait: -2 (invasive/blunt clash on failure)
-        - Preference: -3 (Dislikes Invasive Prying)
-        - Demeanor: -1 (Pressures Hesitant Demeanor)
-        - Turn-off: -4 (Prying into past intimacy triggered)
-        - Erotic Openness: -2 (Modest recoils at premature intimacy)
-        Net delta capped to [-10, 10]: -10 (or strong penalty <= -3).
-        NEVER 0, and NEVER positive.
-        """
+        """In Turn 12, player rolled a failed CHA check on 'Playfully challenge her about past experiences'."""
         action = {
             "label": "Playfully challenge her about past experiences",
             "action_category": "dialogue",
@@ -270,7 +309,7 @@ class TestDeterministicSocialAffinityEngine(unittest.TestCase):
         )
 
         self.assertLessEqual(delta, -3, f"Expected significant negative affinity penalty, got {delta}")
-        self.assertIn("Check Failure (-1)", reasons)
+        self.assertIn("Check Failure (-2)", reasons)
         self.assertTrue(any("Invasive Prying" in r for r in reasons), f"Preferences dislike should be triggered: {reasons}")
         self.assertTrue(any("Turn-off triggered" in r for r in reasons), f"Turn-off should be triggered: {reasons}")
         self.assertLessEqual(breakdown["capped_delta"], -3)

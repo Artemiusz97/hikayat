@@ -57,7 +57,12 @@ def handle_npc_status_changed(event: NPCStatusChangedEvent):
         log.warning(f"Error evaluating quest predicates on npc status changed: {e}")
 
 def handle_item_gifted(event: ItemGiftedEvent):
-    # The gift is given, we remove from user and modify contact disposition
+    # Lookup item metadata before removing from user inventory so wearable gifts equip cleanly
+    inv = db.get_inventory(event.user_id) or []
+    gifted_obj = next(
+        (it for it in inv if isinstance(it, dict) and str(it.get("name", "")).lower() == str(event.item_name or "").lower()),
+        None,
+    )
     db.remove_item_by_name(event.user_id, event.item_name)
     char = db.get_character(event.user_id)
     char_id = char["id"] if char else 0
@@ -69,6 +74,17 @@ def handle_item_gifted(event: ItemGiftedEvent):
         character_id=char_id,
         delta_score=2,  # Gifting gives +2 disposition
     )
+    try:
+        from mechanics.social.physical_state import apply_wearable_gift_to_npc
+        apply_wearable_gift_to_npc(
+            session_id=event.session_id,
+            character_id=char_id,
+            npc_name=npc_clean,
+            item_dict=gifted_obj,
+            item_name=event.item_name,
+        )
+    except Exception as e:
+        log.warning(f"Error equipping wearable gift on {npc_clean}: {e}")
     try:
         from game_engine.quests import evaluate_quest_state_predicates
         evaluate_quest_state_predicates(event.session_id, user_id=event.user_id)

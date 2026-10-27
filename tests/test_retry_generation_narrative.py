@@ -1,21 +1,28 @@
+from __future__ import annotations
+
+import json
+import os
+import tempfile
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 
 import db
+import db.core
 import game_engine
 from cogs.adventure import AdventureCog
 
+
 class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        self._tmp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self._orig_db_path = db.DB_PATH
+        self._orig_core_db_path = db.core.DB_PATH
+        test_db = os.path.join(self._tmp_dir.name, "test_retry_narrative.db")
+        db.DB_PATH = test_db
+        db.core.DB_PATH = test_db
         db.init_db()
         self.user_id = 9991234
-        self.session_id = 7771234
-
-        # Clean DB
-        with db.get_conn() as conn:
-            conn.execute("DELETE FROM sessions WHERE id = ?", (self.session_id,))
-            conn.execute("DELETE FROM characters WHERE user_id = ?", (self.user_id,))
 
         db.create_character(user_id=self.user_id, name="Artemiusz", char_class="Warrior", gender="male", race="human")
         self.session_id = db.create_session(
@@ -32,8 +39,12 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
         self.bot = MagicMock()
         self.cog = AdventureCog(self.bot)
 
+    def tearDown(self):
+        db.DB_PATH = self._orig_db_path
+        db.core.DB_PATH = self._orig_core_db_path
+        self._tmp_dir.cleanup()
+
     async def test_handle_retry_embeds_action_outcome_in_main_scene(self):
-        # Setup session in fallback state
         db.save_session_scene(
             self.session_id,
             scene_title="The Cheetah's Challenge",
@@ -42,7 +53,6 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
             history=["[SUCCESS] Artemiusz: Lean back and enjoy her efforts in silence. -> Artemiusz acts with deliberate intent: Lean back and enjoy her efforts in silence."]
         )
 
-        # Mock interaction
         interaction = MagicMock(spec=discord.Interaction)
         interaction.user.id = self.user_id
         interaction.response.is_done.return_value = False
@@ -51,7 +61,6 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
         interaction.followup.edit_message = AsyncMock()
         interaction.message = MagicMock(spec=discord.Message)
 
-        # Mock last pick info
         self.cog._last_picks[self.session_id] = (
             self.user_id,
             {"direct_choice": {"label": "Lean back and enjoy her efforts in silence.", "stat": "NONE", "requirement": 0, "mp_cost": 0}}
@@ -86,19 +95,17 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
 
                 await self.cog.handle_retry(interaction, self.session_id)
 
-                # Verify interaction.followup.send was called
                 self.assertEqual(interaction.followup.send.call_count, 2)
-                
+
                 outcome_kwargs = interaction.followup.send.call_args_list[0][1]
                 outcome_embeds = outcome_kwargs.get("embeds", [])
                 self.assertTrue(len(outcome_embeds) >= 1)
                 self.assertIn("Artemiusz leans back against the stone railing", outcome_embeds[0].description)
-                
+
                 next_kwargs = interaction.followup.send.call_args_list[1][1]
                 next_embeds = next_kwargs.get("embeds", [])
                 self.assertTrue(len(next_embeds) >= 1)
                 self.assertIn("The cool evening breeze sweeps across the terrace", next_embeds[0].description)
-
 
     async def test_handle_retry_does_not_embed_fallback_placeholder(self):
         db.save_session_scene(
@@ -149,13 +156,10 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
             embeds = send_kwargs.get("embeds", [])
             story_embed = embeds[0]
 
-            # Should NOT prepend "🎯 Action Outcome:" when the outcome is a fallback placeholder
             self.assertNotIn("**🎯 Action Outcome:**", story_embed.description)
             self.assertEqual(story_embed.description, "The atmosphere settles around the area as the immediate action resolves.")
 
     async def test_run_narration_pass_end_to_end_batch_and_stream(self):
-        """Verify that game_engine.turn.narration.run_narration_pass executes without import errors
-        and correctly invokes call_llm_json and call_llm_json_stream."""
         from game_engine.turn.narration import run_narration_pass
         from models.llm_schemas import NarrationOutcome, DeterministicTurnNarration
 
@@ -180,7 +184,6 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
             "next_choices": [{"label": "Step closer to the fountain"}]
         }
 
-        # 1. Test batch execution
         with patch("game_engine.turn.narration.call_llm_json", new=AsyncMock(return_value=mock_llm_result)) as mock_call:
             res = await run_narration_pass(session, snapshot, attempt=1)
             self.assertEqual(res["outcome_narrative"], "You survey the moonlit garden in calm silence.")
@@ -190,7 +193,6 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
             self.assertIn(call_kwargs["response_model"], (DeterministicTurnNarration, NarrationOutcome))
             self.assertTrue(call_kwargs["is_nsfw"])
 
-        # 2. Test stream execution
         stream_cb = AsyncMock()
         with patch("game_engine.turn.narration.call_llm_json_stream", new=AsyncMock(return_value=mock_llm_result)) as mock_stream_call:
             res_stream = await run_narration_pass(session, snapshot, attempt=2, stream_callback=stream_cb)
@@ -198,13 +200,11 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
             mock_stream_call.assert_called_once()
             call_kwargs = mock_stream_call.call_args[1]
             self.assertEqual(call_kwargs["on_narrative_token"], stream_cb)
-            self.assertGreater(call_kwargs["temperature"], 0.7)  # Bumped on attempt 2
+            self.assertGreater(call_kwargs["temperature"], 0.7)
 
     async def test_turn_service_retry_narration_real_pipeline(self):
-        """Verify TurnService.retry_narration end-to-end pipeline without mocking retry_narration itself."""
         from services.turn_service import TurnService
 
-        # Seed turn snapshot in DB
         snapshot = {
             "status": "completed",
             "retry_attempts": 0,
@@ -240,17 +240,14 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(turn_response.outcome["outcome_narrative"], "You offer a warm smile to the classmate beside you.")
             self.assertEqual(turn_response.outcome["scene_title"], "Morning Greetings")
 
-            # Check snapshot attempts were incremented in DB
             updated_snap = db.get_turn_snapshot(self.session_id)
             self.assertEqual(updated_snap["retry_attempts"], 1)
 
-            # Check history in DB was updated
             fresh_session = db.get_session(self.session_id)
             last_hist = fresh_session["history"][-1]
             self.assertEqual(last_hist["outcome_narrative"], "You offer a warm smile to the classmate beside you.")
 
     async def test_retry_narration_preserves_frozen_location_when_llm_hallucinates_location_dict(self):
-        """Verify TurnService.retry_narration never allows LLM output to overwrite the snapshot's frozen location."""
         from services.turn_service import TurnService
 
         frozen_loc = "Sakuragaoka Academy ➔ Class 2-B (Homeroom) ➔ Artemiusz's Desk"
@@ -293,12 +290,10 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
         with patch("game_engine.turn.narration.call_llm_json", new=AsyncMock(return_value=mock_llm_result)):
             turn_response = await TurnService.retry_narration(self.session_id, self.user_id)
             self.assertTrue(turn_response.success)
-            # The outcome location MUST remain the frozen location, NOT the hallucinated dict
             self.assertEqual(turn_response.outcome["location"], frozen_loc)
 
     def test_parse_tiered_location_handles_structured_json_dict(self):
-        """Verify parse_tiered_location decodes structured dicts and JSON strings."""
-        from mechanics.world.locations.hierarchy import parse_tiered_location, format_tiered_location_string
+        from mechanics.world.locations.hierarchy import parse_tiered_location
         from cogs.adventure.embeds import _location_text
 
         raw_dict = {
@@ -311,23 +306,19 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(p, "Class 2-B (Homeroom)")
         self.assertEqual(s, "Artemiusz's Desk")
 
-        import json
         raw_json_str = json.dumps(raw_dict)
         z2, p2, s2 = parse_tiered_location(raw_json_str, scenario_key="nsfw_furry_high_school_drama")
         self.assertEqual(z2, "Sakuragaoka Academy")
         self.assertEqual(p2, "Class 2-B (Homeroom)")
         self.assertEqual(s2, "Artemiusz's Desk")
 
-        # Test dashboard embed output
         mock_sess = {"current_location": raw_json_str, "scenario": "nsfw_furry_high_school_drama"}
         loc_display = _location_text(mock_sess, char_name="Artemiusz")
         self.assertNotIn("{", loc_display)
         self.assertIn("Sakuragaoka Academy ➔ Class 2-B (Homeroom) ➔ Artemiusz's Desk", loc_display)
 
     async def test_retry_clears_stale_fallback_text_when_outcome_narrative_is_empty(self):
-        """Verify that when retry returns only next_narrative, previous fallback text is cleared."""
         from services.turn_service import TurnService
-        # Setup snapshot and history with emergency fallback text
         fallback_history_entry = {
             "type": "action",
             "label": "Observe your surroundings and inspect those present",
@@ -350,7 +341,6 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
             "applied": {}
         })
 
-        # Mock LLM return where outcome_narrative is empty but next_narrative is vivid prose
         mock_retry_result = {
             "outcome_narrative": "",
             "next_narrative": "The main hallway opens into a wide, sun-drenched corridor...",
@@ -361,16 +351,13 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
             turn_response = await TurnService.retry_narration(self.session_id, self.user_id)
             self.assertTrue(turn_response.success)
 
-            # Check DB session history
             s = db.get_session(self.session_id)
             updated_entry = s["history"][-1]
-            # Stale fallback text must NOT remain in outcome_narrative!
             self.assertEqual(updated_entry["outcome_narrative"], "")
             self.assertIn("The main hallway opens into a wide", updated_entry["next_narrative"])
             self.assertFalse(updated_entry.get("is_fallback", False))
 
     def test_enrich_session_detects_deliberate_intent_in_history(self):
-        """Verify _enrich_session_for_client flags is_fallback_generation when history has deliberate intent fallback."""
         from api.adventure import _enrich_session_for_client
         mock_session = {
             "id": self.session_id,
@@ -387,22 +374,60 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
         enriched = _enrich_session_for_client(mock_session, self.user_id)
         self.assertTrue(enriched["is_fallback_generation"])
 
+    def test_enrich_session_no_false_positive_fallback_on_deterministic_supplement_or_outcome_only(self):
+        """Verify healthy LLM turns with deterministic Band-1/2 supplemented choices or single-paragraph
+        outcome_narrative do NOT trigger the false-positive Fallback scene generation banner."""
+        from api.adventure import _enrich_session_for_client
+
+        # Case A: Healthy LLM turn supplemented by deterministic conversation choices
+        healthy_supplemented = {
+            "id": self.session_id,
+            "current_day": 1,
+            "current_minute": 510,
+            "narrative": "Putri adjusts her field tablet and smiles politely.",
+            "choices": [
+                {"label": "Ask Putri Wijaya about her work as Junior Operative", "stat": "INT", "requirement": 6, "_deterministic_supplement": True, "is_fallback": False},
+                {"label": "Leave conversation with Putri Wijaya", "stat": "NONE", "requirement": 0, "_pinned_dialogue_exit": True},
+            ],
+            "history": [{
+                "type": "turn",
+                "outcome_narrative": "You ask Putri how containment patrols have been going.",
+                "next_narrative": "Putri adjusts her field tablet and smiles politely.",
+                "is_fallback": False,
+            }],
+        }
+        enriched_a = _enrich_session_for_client(healthy_supplemented, self.user_id)
+        self.assertFalse(enriched_a["is_fallback_generation"])
+
+        # Case B: Healthy LLM turn where full prose was placed into outcome_narrative with empty next_narrative
+        healthy_outcome_only = {
+            "id": self.session_id,
+            "current_day": 1,
+            "current_minute": 515,
+            "narrative": "",
+            "choices": [{"label": "Continue talking", "stat": "CHA", "requirement": 6}],
+            "history": [{
+                "type": "turn",
+                "outcome_narrative": "Putri leans against the railing and explains the S.O.A.I. containment protocols in crisp detail.",
+                "next_narrative": "",
+                "is_fallback": False,
+            }],
+        }
+        enriched_b = _enrich_session_for_client(healthy_outcome_only, self.user_id)
+        self.assertFalse(enriched_b["is_fallback_generation"])
+
     def test_observation_and_subject_verb_agreement_fallbacks(self):
-        """Verify subject-verb agreement and natural prose generation for perception fallbacks."""
         from game_engine.keywords import sanitize_narrative_context_echo
         echoed_prose = "The hallway is completely silent as the heavy rain continues pouring outside against the glass windows."
         session_prev = {"narrative": echoed_prose}
 
-        # Test keywords echo fallback helper for second-person
         echo_res_you = sanitize_narrative_context_echo(echoed_prose, session_prev, action_label="Open the door", character_name="You")
         self.assertEqual(echo_res_you, "You act with deliberate intent: Open the door.")
 
-        # Test keywords echo fallback helper for third-person
         echo_res_npc = sanitize_narrative_context_echo(echoed_prose, session_prev, action_label="Open the door", character_name="Leon")
         self.assertEqual(echo_res_npc, "Leon acts with deliberate intent: Open the door.")
 
     async def test_run_narration_pass_sanitizes_echo_and_absent_npcs_without_name_error(self):
-        """Verify run_narration_pass executes sanitize_narrative_context_echo and sanitize_absent_npc_hallucinations without session_for_next NameError."""
         from game_engine.turn.narration import run_narration_pass
         snapshot = {
             "status": "completed",
@@ -426,7 +451,6 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Mia smiles", out["next_narrative"])
 
     async def test_handle_retry_opening_scene_reinvokes_launch_opening_scene(self):
-        """Verify that handle_retry on Turn 0 (empty history, no snapshot) delegates to launch_opening_scene."""
         db.save_session_scene(
             self.session_id,
             scene_title="Hikayat",
@@ -444,17 +468,15 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.cog, "launch_opening_scene", new=AsyncMock()) as mock_launch:
             await self.cog.handle_retry(interaction, self.session_id)
             mock_launch.assert_called_once()
-            called_args, called_kwargs = mock_launch.call_args
+            _, called_kwargs = mock_launch.call_args
             self.assertEqual(called_kwargs.get("use_followup"), True)
 
     async def test_generate_opening_scene_empty_narrative_generates_contextual_fallback(self):
-        """Verify that generate_opening_scene creates a rich fallback when LLM yields empty prose."""
         from game_engine.turn.generation import generate_opening_scene
         session = db.get_session(self.session_id)
         char = db.get_character(self.user_id)
         party = [(char, [])]
 
-        # LLM returns empty narrative and empty scene_title
         empty_llm_result = {
             "narrative": "",
             "scene_title": "",
@@ -466,11 +488,9 @@ class TestRetryGenerationNarrative(unittest.IsolatedAsyncioTestCase):
             scene = await generate_opening_scene(session, party)
             self.assertTrue(len(scene["narrative"]) > 0)
             self.assertTrue(scene.get("is_fallback"))
-            self.assertIn("Student Commons", scene["narrative"])
+            self.assertIn("Central Courtyard", scene["narrative"])
             self.assertNotEqual(scene.get("scene_title"), "")
 
 
 if __name__ == "__main__":
     unittest.main()
-
-

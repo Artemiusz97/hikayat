@@ -5,12 +5,16 @@ from db import adb
 import character_data as cd
 from mechanics.combat.merchant import (
     generate_merchant_shop,
+    generate_grounded_merchant_rumors,
+    reveal_hidden_node_from_rumor,
     discounted_price,
     sell_bonus_price,
     calculate_balanced_price,
     get_store_key,
     get_or_create_merchant_catalogue,
     update_merchant_catalogue,
+    get_anomalous_shop_faction_context,
+    compute_anomalous_resale_price,
 )
 from mechanics.combat.items import (
     apply_item_to_target,
@@ -196,6 +200,11 @@ def _enrich_inventory_item(item: dict, char: dict, equipment: dict) -> dict:
                 stats_badges.append(f"+{int(eq_meta['base_dt'])} DT")
             if eq_meta.get("block_chance"):
                 stats_badges.append(f"+{int(eq_meta['block_chance'])}% Block")
+            if eq_meta.get("is_anomalous"):
+                stats_badges.append(f"⚡ Anomalous ({str(eq_meta.get('element') or 'Arcane').title()})")
+            granted_sp = eq_meta.get("granted_spell")
+            if isinstance(granted_sp, dict) and granted_sp.get("name"):
+                stats_badges.append(f"✨ Grants: {granted_sp['name']}")
             mods = dict(eq_meta.get("stat_modifiers") or {})
             for sk, sv in (eq_meta.get("social_modifiers") or {}).items():
                 mods[sk] = mods.get(sk, 0) + sv
@@ -354,7 +363,7 @@ async def unequip_slot(req: UnequipRequest):
 
 @router.post("/api/inventory/drop")
 async def drop_item(req: ItemDropRequest):
-    """Drops/discards an item from the user's inventory."""
+    """Drops/discards an item from the user's inventory onto the active room floor (D20)."""
     items = await adb(db.get_inventory, req.user_id)
     target_item = next((dict(i) for i in (items or []) if i.get("id") == req.item_id), None)
     if target_item and is_key_item(target_item):
@@ -363,6 +372,8 @@ async def drop_item(req: ItemDropRequest):
     removed = await adb(db.remove_item, req.user_id, req.item_id)
     if not removed:
         raise HTTPException(status_code=404, detail="Item not found or could not be removed")
+    if target_item:
+        await adb(db.drop_item_to_session_floor, req.user_id, target_item)
     return {"success": True}
 
 
@@ -446,8 +457,27 @@ async def get_merchant_shop(
 
     prev_m_type = merchant.get("merchant_type") or "general_merchant"
     m_type = "online_delivery" if is_phone_shop else (merchant_type or prev_m_type)
-    switched_store = bool(not is_phone_shop and merchant_type and merchant_type != prev_m_type)
-    store_key = get_store_key(merchant, is_phone_shop=is_phone_shop, merchant_type=m_type, location=loc)
+    from scenario_data import is_anomalous_incursions_scenario as _is_anom_merch
+    if _is_anom_merch(scen_key) and m_type in ("spellbook_merchant", "magic_merchant"):
+        m_type = "general_merchant"
+    # If player explicitly switches store tabs at a street location, clear stale Quartermaster flag
+    if not is_phone_shop and merchant_type and merchant.get("is_faction_quartermaster"):
+        merchant["is_faction_quartermaster"] = False
+        merchant.pop("quartermaster_faction_arch", None)
+    pre_shop_ctx = get_anomalous_shop_faction_context(session, location=loc, is_phone_shop=is_phone_shop, user_id=user_id)
+    if not pre_shop_ctx.get("allowed", True):
+        raise HTTPException(status_code=403, detail=pre_shop_ctx.get("access_denied_reason") or "Access denied to this faction store.")
+    is_monastic_member_shrine = (
+        not is_phone_shop
+        and pre_shop_ctx.get("shop_faction_archetype") == "monastic_order"
+        and pre_shop_ctx.get("player_faction_archetype") == "monastic_order"
+    )
+    switched_store = bool(not is_phone_shop and not is_monastic_member_shrine and merchant_type and merchant_type != prev_m_type)
+    store_key = (
+        f"{loc or 'monastic_shrine'}:monastic_shrine_daily"
+        if is_monastic_member_shrine
+        else get_store_key(merchant, is_phone_shop=is_phone_shop, merchant_type=m_type, location=loc)
+    )
 
     stock_field = "phone_stock" if is_phone_shop else "stock"
     catalogue, needs_restock = get_or_create_merchant_catalogue(merchant, store_key, cur_day, cur_min)
@@ -485,7 +515,7 @@ async def get_merchant_shop(
                     {"name": "Express Energy Drink", "item_type": "Drink", "description": "Restores 10 HP and 10 MP.", "price": 20, "quantity": 3, "tier": 2},
                     {"name": "Artisan Gift Box", "item_type": "Gift", "description": "A thoughtful gift for a close friend.", "price": 35, "quantity": 2, "tier": 2},
                 ],
-                "rumors": [{"text": "Strange lights were spotted near the old ruins last night.", "revealed": False}],
+                "rumors": [] if is_phone_shop else await adb(generate_grounded_merchant_rumors, session_id, scen_key),
             }
         catalogue = update_merchant_catalogue(merchant, store_key, shop_data, cur_day, cur_min)
         merchant[stock_field] = catalogue.get("stock", [])
@@ -532,16 +562,37 @@ async def get_merchant_shop(
             await adb(db.save_merchant_state, session_id, merchant)
 
     discount_pct = _compute_charisma_discount(char, merchant)
+    shop_ctx = get_anomalous_shop_faction_context(session, location=loc, is_phone_shop=is_phone_shop, user_id=user_id)
+    if not shop_ctx.get("allowed", True):
+        raise HTTPException(status_code=403, detail=shop_ctx.get("access_denied_reason") or "Access denied to this faction store.")
     raw_stock = merchant.get(stock_field) or (catalogue.get("stock", []) if catalogue else [])
+    if (
+        shop_ctx.get("shop_faction_archetype") == "monastic_order"
+        and shop_ctx.get("player_faction_archetype") == "monastic_order"
+    ):
+        raw_stock = raw_stock[:3]
+        for s_it in raw_stock:
+            if isinstance(s_it, dict) and int(s_it.get("quantity", 1) or 1) > 1:
+                s_it["quantity"] = 1
     stock = []
     for item in raw_stock:
         if item.get("quantity", 1) <= 0:
             continue
         base_price = int(item.get("price", 15) or 15)
-        final_price = discounted_price(base_price, discount_pct)
+        if shop_ctx.get("is_monastic_free_shop"):
+            final_price = 0
+        elif shop_ctx.get("is_public_discounted_shop"):
+            final_price = max(1, int(round(base_price * 0.50)))
+        elif shop_ctx.get("price_multiplier", 1.0) != 1.0:
+            marked_up = int(round(base_price * float(shop_ctx["price_multiplier"])))
+            final_price = discounted_price(marked_up, discount_pct)
+        else:
+            final_price = discounted_price(base_price, discount_pct)
         entry = dict(item)
         entry["base_price"] = base_price
         entry["final_price"] = final_price
+        if shop_ctx.get("pricing_badge"):
+            entry["faction_pricing_badge"] = shop_ctx["pricing_badge"]
         stock.append(entry)
 
     # Compute sellable items from player inventory
@@ -554,6 +605,7 @@ async def get_merchant_shop(
         tier = parse_item_tier(it_dict)
         base_val = max(2, calculate_balanced_price(it_dict.get("item_type", "Item"), it_dict.get("name", "Item"), tier=tier, scen_key=scen_key) // 3)
         sell_price = sell_bonus_price(base_val, discount_pct // 2)
+        sell_price = compute_anomalous_resale_price(it_dict, sell_price)
         it_dict["sell_price"] = sell_price
         sellable.append(it_dict)
 
@@ -563,6 +615,8 @@ async def get_merchant_shop(
         seen_types = set()
         for s in loc_stores:
             st = s.get("type", "general_merchant")
+            if _is_anom_merch(scen_key) and st in ("spellbook_merchant", "magic_merchant"):
+                continue
             seen_types.add(st)
             available_stores.append({
                 "type": st,
@@ -571,10 +625,15 @@ async def get_merchant_shop(
                 "description": s.get("intro_template", "")
             })
         # Ensure specialist tabs are browsable in standard fantasy/sci-fi hubs
+        from scenario_data import is_anomalous_incursions_scenario
         default_tabs = (
             ["school_merchant", "cafe_merchant", "clothes_merchant", "gift_merchant"]
             if is_school_scenario(scen_key)
-            else ["general_merchant", "weapon_merchant", "armor_merchant", "potion_merchant", "magic_merchant", "spellbook_merchant", "food_merchant"]
+            else (
+                ["general_merchant", "weapon_merchant", "armor_merchant", "potion_merchant", "food_merchant"]
+                if is_anomalous_incursions_scenario(scen_key)
+                else ["general_merchant", "weapon_merchant", "armor_merchant", "potion_merchant", "magic_merchant", "spellbook_merchant", "food_merchant"]
+            )
         )
         for dt in default_tabs:
             if dt not in seen_types and dt in MERCHANT_ARCHETYPES:
@@ -592,11 +651,15 @@ async def get_merchant_shop(
         if isinstance(r, str):
             normalized_rumors.append({"text": r, "revealed": False})
         elif isinstance(r, dict):
-            normalized_rumors.append({
+            r_entry = {
                 "text": r.get("text", ""),
                 "revealed": bool(r.get("revealed", False)),
-                "succeeded": r.get("succeeded", True)
-            })
+                "succeeded": r.get("succeeded", True),
+            }
+            for _rk in ("linked_quest_id", "linked_node_id", "linked_npc", "linked_location"):
+                if r.get(_rk):
+                    r_entry[_rk] = r[_rk]
+            normalized_rumors.append(r_entry)
 
     arch_info = MERCHANT_ARCHETYPES.get(m_type, {})
     merchant_name = "Express E-Shop" if is_phone_shop else (
@@ -745,18 +808,26 @@ async def merchant_reveal_rumor(req: MerchantRumorRequest):
             session.get("choices", []),
             new_history
         )
-        cur_ch = await adb(db.get_session_chapter, req.session_id) or 1
-        await adb(
-            db.add_session_clue,
-            session_id=req.session_id,
-            title=rumor_text[:60],
-            lead_text=rumor_text,
-            category="testimonial",
-            source_location=session.get("current_location", "Merchant Shop"),
-            linked_npc=merchant.get("flavor_name") or merchant.get("name") or "Merchant",
-            chapter=cur_ch
-        )
-        msg = f'"{rumor_text}" — Logged to your Clue Caseboard!'
+        linked_qid = str(target_rumor.get("linked_quest_id") or "").strip()
+        linked_nid = str(target_rumor.get("linked_node_id") or "").strip()
+        if linked_nid:
+            await adb(reveal_hidden_node_from_rumor, req.session_id, linked_nid)
+        if linked_qid or linked_nid:
+            cur_ch = await adb(db.get_session_chapter, req.session_id) or 1
+            await adb(
+                db.add_session_clue,
+                session_id=req.session_id,
+                title=rumor_text[:60],
+                lead_text=rumor_text,
+                category="testimonial",
+                source_location=session.get("current_location", "Merchant Shop"),
+                linked_npc=str(target_rumor.get("linked_npc") or merchant.get("flavor_name") or merchant.get("name") or "Merchant"),
+                quest_id=linked_qid,
+                chapter=cur_ch,
+            )
+            msg = f'"{rumor_text}" — Logged to your Clue Caseboard!'
+        else:
+            msg = f'"{rumor_text}"'
     else:
         msg = f"{char['name']} couldn't get a straight answer ({check.chance}% chance — {check.tier_label})."
 
@@ -794,16 +865,74 @@ async def merchant_buy(req: MerchantBuyRequest):
 
     stock_item = dict(stock[target_idx])
     discount_pct = _compute_charisma_discount(char, merchant)
-    price = discounted_price(int(stock_item.get("price", 15) or 15), discount_pct)
+    shop_ctx = get_anomalous_shop_faction_context(
+        session,
+        location=session.get("current_location", ""),
+        is_phone_shop=bool(req.is_phone_shop),
+        user_id=req.user_id,
+    )
+    if not shop_ctx.get("allowed", True):
+        raise HTTPException(status_code=403, detail=shop_ctx.get("access_denied_reason") or "Access denied to this faction store.")
+    if shop_ctx.get("shrine_daily_exhausted"):
+        raise HTTPException(status_code=400, detail="Daily Sacred Shrine provisions (3/3) have been claimed today. Stock refreshes tomorrow morning.")
+    base_price = int(stock_item.get("price", 15) or 15)
+    if shop_ctx.get("is_monastic_free_shop"):
+        price = 0
+    elif shop_ctx.get("is_public_discounted_shop"):
+        price = max(1, int(round(base_price * 0.50)))
+    elif shop_ctx.get("price_multiplier", 1.0) != 1.0:
+        marked_up = int(round(base_price * float(shop_ctx["price_multiplier"])))
+        price = discounted_price(marked_up, discount_pct)
+    else:
+        price = discounted_price(base_price, discount_pct)
 
     if (char.get("gold", 0) or 0) < price:
         raise HTTPException(status_code=400, detail=f"Not enough gold! Need {price}g, have {char.get('gold', 0)}g.")
 
-    capacity = cd.inventory_capacity(char["str_"])
-    used = await adb(db.used_slots, req.user_id)
     slot_cost = int(stock_item.get("slot_cost", 1) or 1)
-    if used + slot_cost > capacity:
+
+    # Embed anti-exploit resale metadata if applicable before stack/capacity check
+    item_eff = str(stock_item.get("effect") or stock_item.get("description", ""))
+    if shop_ctx.get("is_monastic_free_shop") or shop_ctx.get("is_public_discounted_shop"):
+        import json as _json
+        for prefix in ("[ITEM_JSON]", "[GEAR_JSON]", "[CONSUMABLE_JSON]"):
+            if item_eff.startswith(prefix):
+                try:
+                    meta_obj = _json.loads(item_eff[len(prefix):])
+                    if shop_ctx.get("is_monastic_free_shop"):
+                        meta_obj["shrine_sacred_grant"] = True
+                    if shop_ctx.get("is_public_discounted_shop"):
+                        meta_obj["purchase_price_paid"] = price
+                        meta_obj["public_requisition_item"] = True
+                    item_eff = f"{prefix}{_json.dumps(meta_obj)}"
+                except Exception:
+                    pass
+                break
+        else:
+            # Plain effect string: wrap or append marker
+            if shop_ctx.get("is_monastic_free_shop"):
+                item_eff = f"[CONSUMABLE_JSON]{_json.dumps({'description': item_eff, 'shrine_sacred_grant': True})}"
+            elif shop_ctx.get("is_public_discounted_shop"):
+                item_eff = f"[CONSUMABLE_JSON]{_json.dumps({'description': item_eff, 'purchase_price_paid': price, 'public_requisition_item': True})}"
+
+    can_fit = await adb(
+        db.can_add_item,
+        req.user_id,
+        slot_cost,
+        stock_item["name"],
+        stock_item.get("item_type", "Item"),
+        item_eff,
+    )
+    if not can_fit:
         raise HTTPException(status_code=400, detail="Inventory is full!")
+
+    if shop_ctx.get("is_monastic_free_shop"):
+        from mechanics.social.factions import get_anomalous_faction_state, save_anomalous_faction_state
+        a_state = await adb(get_anomalous_faction_state, req.session_id, req.user_id)
+        new_claims = int(a_state.get("shrine_free_claims_today", a_state.get("shrine_free_claimed_today", 0)) or 0) + 1
+        a_state["shrine_free_claims_today"] = new_claims
+        a_state["shrine_free_claimed_today"] = new_claims
+        await adb(save_anomalous_faction_state, req.session_id, a_state, req.user_id)
 
     await adb(db.apply_hp_mp_delta, req.user_id, gold_delta=-price)
     item_id = await adb(
@@ -811,7 +940,7 @@ async def merchant_buy(req: MerchantBuyRequest):
         req.user_id,
         stock_item["name"],
         item_type=stock_item.get("item_type", "Item"),
-        effect=stock_item.get("effect") or stock_item.get("description", ""),
+        effect=item_eff,
         slot_cost=slot_cost
     )
 
@@ -835,7 +964,35 @@ async def merchant_buy(req: MerchantBuyRequest):
                     cat["stock"] = stock
 
     await adb(db.save_merchant_state, req.session_id, merchant)
+    quest_updates = await adb(game_engine.evaluate_quest_state_predicates, req.session_id, req.user_id)
     updated_char = await adb(db.get_character, req.user_id)
+
+    # Re-annotate stock with updated faction pricing / remaining daily Shrine grants
+    post_shop_ctx = get_anomalous_shop_faction_context(
+        session,
+        location=session.get("current_location", ""),
+        is_phone_shop=bool(req.is_phone_shop),
+        user_id=req.user_id,
+    )
+    annotated_stock = []
+    for s_item in stock:
+        if s_item.get("quantity", 1) <= 0:
+            continue
+        b_price = int(s_item.get("price", 15) or 15)
+        if post_shop_ctx.get("is_monastic_free_shop"):
+            f_price = 0
+        elif post_shop_ctx.get("is_public_discounted_shop"):
+            f_price = max(1, int(round(b_price * 0.50)))
+        elif post_shop_ctx.get("price_multiplier", 1.0) != 1.0:
+            f_price = discounted_price(int(round(b_price * float(post_shop_ctx["price_multiplier"]))), discount_pct)
+        else:
+            f_price = discounted_price(b_price, discount_pct)
+        s_copy = dict(s_item)
+        s_copy["base_price"] = b_price
+        s_copy["final_price"] = f_price
+        if post_shop_ctx.get("pricing_badge"):
+            s_copy["faction_pricing_badge"] = post_shop_ctx["pricing_badge"]
+        annotated_stock.append(s_copy)
 
     return {
         "success": True,
@@ -843,7 +1000,8 @@ async def merchant_buy(req: MerchantBuyRequest):
         "item_name": stock_item["name"],
         "price_paid": price,
         "gold": updated_char.get("gold", 0) if updated_char else 0,
-        "stock": stock
+        "stock": annotated_stock,
+        "quest_updates": quest_updates or [],
     }
 
 
@@ -874,6 +1032,7 @@ async def merchant_sell(req: MerchantSellRequest):
     tier = parse_item_tier(target_item)
     base_val = max(2, calculate_balanced_price(target_item.get("item_type", "Item"), target_item.get("name", "Item"), tier=tier, scen_key=scen_key) // 3)
     sell_price = sell_bonus_price(base_val, discount_pct // 2)
+    sell_price = compute_anomalous_resale_price(target_item, sell_price)
 
     removed = await adb(db.remove_item, req.user_id, req.item_id)
     if not removed:

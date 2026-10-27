@@ -161,6 +161,25 @@ export const usePhone = (sessionId, user) => {
     return data;
   };
 
+  const cancelCommitment = async (commitmentId, reason = 'player_cancelled') => {
+    if (!sessionId || !commitmentId) return null;
+    const data = await apiCall(`/api/commitments/${sessionId}/${commitmentId}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: user?.user_id,
+        reason,
+      }),
+    });
+    if (data) {
+      setPhoneData(prev => ({
+        ...(prev || {}),
+        commitments: data.commitments || [],
+        appointments: data.appointments || [],
+      }));
+    }
+    return data;
+  };
+
   return {
     phoneData,
     isSupported: true,
@@ -173,9 +192,11 @@ export const usePhone = (sessionId, user) => {
       emoji: '📱'
     },
     appointments: phoneData?.appointments || [],
+    commitments: phoneData?.commitments || phoneData?.appointments || [],
     gossipFeed: phoneData?.gossip_feed || [],
     mediaGallery: phoneData?.media_gallery || [],
     contacts: phoneData?.contacts || [],
+    dispatchChannels: phoneData?.dispatch_channels || [],
     suggestedPeers: phoneData?.suggested_peers || [],
     socialState: phoneData?.social_state || { charges: 3, turn_count: 0 },
     loading,
@@ -185,6 +206,7 @@ export const usePhone = (sessionId, user) => {
     scourFeed,
     discoverPeer,
     sendFriendRequest,
+    cancelCommitment,
     activeChatNpc,
     chatMessages,
     dailyLimits,

@@ -157,14 +157,8 @@ def get_contact_request_cooldown(session_id: int, npc_name: str) -> int:
             return 0
 
         clean_name = str(npc_name).strip().lower()
-        entry = cds.get(clean_name)
-        if not entry:
-            clean_first = clean_name.split()[0] if clean_name else ""
-            for k, v in cds.items():
-                k_first = k.split()[0] if k else ""
-                if k == clean_name or (len(clean_first) >= 3 and clean_first == k_first) or (clean_name in k) or (k in clean_name):
-                    entry = v
-                    break
+        clean_slug = clean_name.replace(" ", "_")
+        entry = cds.get(clean_name) or cds.get(clean_slug)
         if not entry:
             return 0
 
@@ -219,9 +213,9 @@ def set_contact_request_cooldown(session_id: int, npc_name: str, hours: int = 24
             "hours": hours,
         }
         cds[clean_name] = cd_data
-        clean_first = clean_name.split()[0] if clean_name else ""
-        if clean_first and clean_first != clean_name and len(clean_first) >= 3:
-            cds[clean_first] = cd_data
+        clean_slug = clean_name.replace(" ", "_")
+        if clean_slug and clean_slug != clean_name:
+            cds[clean_slug] = cd_data
 
         extra["contact_request_cooldowns"] = cds
         conn.execute("UPDATE sessions SET extra_json=?, updated_at=? WHERE id=?",
@@ -536,7 +530,7 @@ def _enrich_contact_basic_info(
     # 1. Cross-reference school_directory
     try:
         sd_row = conn.execute(
-            """SELECT role, grade, club, clique, personality_summary, race
+            """SELECT role, grade, club, clique, primary_facility, secondary_facility, personality_summary, race
                FROM school_directory
                WHERE session_id=? AND (lower(name)=? OR npc_id=?)
                LIMIT 1""",
@@ -544,7 +538,7 @@ def _enrich_contact_basic_info(
         ).fetchone()
         if not sd_row and " " not in name_clean:
             cand_rows = conn.execute(
-                """SELECT role, grade, club, clique, personality_summary, race
+                """SELECT role, grade, club, clique, primary_facility, secondary_facility, personality_summary, race
                    FROM school_directory
                    WHERE session_id=? AND (lower(name) LIKE ? OR lower(name) LIKE ? OR npc_id LIKE ? OR npc_id LIKE ?)
                    LIMIT 2""",
@@ -565,6 +559,10 @@ def _enrich_contact_basic_info(
                     info["faction"] = club_val
             if _is_empty_info_val(info.get("clique")) and not _is_empty_info_val(sd_row["clique"]):
                 info["clique"] = sd_row["clique"].strip()
+            if _is_empty_info_val(info.get("primary_facility")) and not _is_empty_info_val(sd_row["primary_facility"]):
+                info["primary_facility"] = sd_row["primary_facility"].strip()
+            if _is_empty_info_val(info.get("secondary_facility")) and not _is_empty_info_val(sd_row["secondary_facility"]):
+                info["secondary_facility"] = sd_row["secondary_facility"].strip()
             if _is_empty_info_val(info.get("description")) and not _is_empty_info_val(sd_row["personality_summary"]):
                 info["description"] = sd_row["personality_summary"].strip()
             if _is_empty_info_val(info.get("race")) and not _is_empty_info_val(sd_row["race"]):
@@ -694,10 +692,13 @@ def _enrich_contact_basic_info(
         faculty_keywords = (
             "teacher", "faculty", "professor", "instructor", "principal", "vice-principal",
             "headmaster", "dean", "counselor", "nurse", "librarian", "custodian", "janitor",
-            "coach", "athletic director", "advisor", "parent", "detective", "police", "officer", "vendor"
+            "coach", "athletic director", "advisor", "parent", "father", "mother", "detective", "police", "officer", "vendor"
         )
-        is_faculty_or_adult = any(kw in role_lower for kw in faculty_keywords) or (
-            str(info.get("grade")).strip().lower() == "faculty"
+        grade_lower = str(info.get("grade") or "").strip().lower()
+        is_faculty_or_adult = (
+            any(kw in role_lower for kw in faculty_keywords)
+            or grade_lower in ("faculty", "adult")
+            or bool(info.get("is_adult_family"))
         )
 
         if not is_faculty_or_adult:
@@ -789,7 +790,8 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                    basic_info: dict = None, delta_score: int = 0, track: str = None,
                    new_traits: list = None, new_preferences: list = None, race: str = "", gender: str = "", appearance: dict = None,
                    new_memory: str = None, new_general_memory: str = None, narrative_text: str = "",
-                   open_thread: str = "", emotional_tone: str = "", intimate_profile: dict = None) -> dict:
+                   open_thread: str = "", emotional_tone: str = "", intimate_profile: dict = None,
+                   household_role: str | None = None) -> dict:
     import mechanics.social.persona as persona
     import namegen
 
@@ -850,7 +852,11 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
     import mechanics.social.relationships as relationships
     n_role = (basic_info.get("role") if isinstance(basic_info, dict) else "") or ""
     n_desc = (basic_info.get("description") if isinstance(basic_info, dict) else "") or ""
-    if not relationships.is_contact_eligible(name=name, role=n_role, description=n_desc, scenario=scen, session_id=session_id):
+    is_promoted_adult_family = (
+        str(household_role or "").strip().lower() in ("father", "mother")
+        or bool(isinstance(basic_info, dict) and basic_info.get("is_adult_family"))
+    )
+    if not is_promoted_adult_family and not relationships.is_contact_eligible(name=name, role=n_role, description=n_desc, scenario=scen, session_id=session_id):
         return {}
 
     now = time.time()
@@ -899,6 +905,8 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
 
             raw_cur_info = json.loads(existing["basic_info_json"] or "{}")
             cur_info = _merge_basic_info_safely(raw_cur_info, basic_info)
+            if current_score >= 100:
+                cur_info["unlocked_via_friendship"] = True
             if race and not _is_empty_info_val(race):
                 cur_info["race"] = race
             cur_info = _enrich_contact_basic_info(
@@ -984,6 +992,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 seed_str=f"{final_name}_{cur_info.get('description', '')}"
             )
             
+            pending_past_history_str = None
             if new_memory and isinstance(new_memory, str) and new_memory.strip():
                 m_str = new_memory.strip()
                 if m_str.startswith("Past History:") or is_romantic_milestone_str(m_str):
@@ -991,78 +1000,8 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                         cur_memories.append(m_str)
                         if len(cur_memories) > 100:
                             cur_memories = cur_memories[-100:]
-
-                    # Synchronize into intimate_events ledger
-                    try:
-                        if m_str.startswith("Past History:"):
-                            from mechanics.social.persona.intimacy.ledger import parse_past_history_entry_to_events, record_intimate_event
-                            for pev in parse_past_history_entry_to_events(m_str, char_gender=cur_gender):
-                                record_intimate_event(
-                                    session_id=session_id,
-                                    character_id=final_npc_id,
-                                    partner_name=pev.get("partner_name", "Past Partner"),
-                                    act_type=pev.get("act_type", "intercourse"),
-                                    direction=pev.get("direction", "mutual"),
-                                    partner_id=None,
-                                    partner_role=pev.get("partner_role", "Former Classmate"),
-                                    turn_number=0,
-                                    event_origin="past_history",
-                                    is_physical=bool(pev.get("is_physical", True)),
-                                    count=pev.get("count", 1),
-                                    climax_count=0,
-                                    is_secret_affair=bool(pev.get("is_secret_affair", False)),
-                                    narrative_summary=m_str,
-                                    character_gender=cur_gender,
-                                    conn=conn
-                                )
-                        else:
-                            from mechanics.social.persona.intimacy.ledger import record_intimate_turn_encounter
-                            curr_turn = 1
-                            try:
-                                s_row = conn.execute("SELECT current_day FROM sessions WHERE id=?", (session_id,)).fetchone()
-                                if s_row and s_row["current_day"]:
-                                    curr_turn = int(s_row["current_day"])
-                            except Exception:
-                                pass
-                            low = m_str.lower()
-                            m_ev = "kiss"
-                            if "intercourse" in low or "intimate night" in low or "bed with" in low or "sex with" in low:
-                                m_ev = "intercourse"
-                            elif "oral" in low or "fellatio" in low or "cunnilingus" in low or "blowjob" in low:
-                                if "received" in low:
-                                    m_ev = "oral_receive"
-                                elif "provided" in low or "performed" in low:
-                                    m_ev = "oral_give"
-                                else:
-                                    oral_in = appearance.get("oral_experience") if isinstance(appearance, dict) else None
-                                    if oral_in == "has_done_oral":
-                                        m_ev = "oral_give"
-                                    elif oral_in == "has_received_oral":
-                                        m_ev = "oral_receive"
-                                    else:
-                                        m_ev = "oral" 
-                            elif "manual" in low or "handjob" in low or "fingered" in low:
-                                m_ev = "manual_receive" if "received" in low else ("manual_give" if "stimulated" in low or "gave" in low else "manual")
-                            elif "anal" in low or "backdoor" in low:
-                                m_ev = "anal_receive" if "received" in low else "anal_give"
-                            elif "confess" in low:
-                                m_ev = "confession"
-                            elif "date" in low:
-                                m_ev = "date"
-
-                            record_intimate_turn_encounter(
-                                session_id=session_id,
-                                character_id=final_npc_id,
-                                partner_id="player",
-                                partner_name="Player",
-                                milestone_event=m_ev,
-                                turn_number=curr_turn,
-                                custom_summary=m_str,
-                                character_gender=cur_gender,
-                                conn=conn
-                            )
-                    except Exception:
-                        pass
+                    if m_str.startswith("Past History:"):
+                        pending_past_history_str = m_str
                 else:
                     if m_str not in cur_recent_memories:
                         cur_recent_memories.append(m_str)
@@ -1124,16 +1063,49 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 except Exception:
                     pass
 
-            existing_dict = dict(existing)
+            if pending_past_history_str:
+                try:
+                    from mechanics.social.persona.intimacy.ledger import parse_past_history_entry_to_events, record_intimate_event
+                    for pev in parse_past_history_entry_to_events(pending_past_history_str, char_gender=cur_gender):
+                        record_intimate_event(
+                            session_id=session_id,
+                            character_id=final_npc_id,
+                            partner_name=pev.get("partner_name", "Past Partner"),
+                            act_type=pev.get("act_type", "intercourse"),
+                            direction=pev.get("direction", "mutual"),
+                            partner_id=None,
+                            partner_role=pev.get("partner_role", "Former Classmate"),
+                            turn_number=0,
+                            event_origin="past_history",
+                            is_physical=bool(pev.get("is_physical", True)),
+                            count=pev.get("count", 1),
+                            climax_count=0,
+                            is_secret_affair=bool(pev.get("is_secret_affair", False)),
+                            narrative_summary=pending_past_history_str,
+                            character_gender=cur_gender,
+                            conn=conn
+                        )
+                except Exception:
+                    pass
+
             cur_open_thread = open_thread or existing_dict.get("open_thread", "")
             cur_emotional_tone = emotional_tone or existing_dict.get("emotional_tone", "")
+            cur_hh_id = existing_dict.get("household_id")
+            cur_hh_role = str(household_role or existing_dict.get("household_role") or "child").strip().lower()
 
+            fresh_prof_row = conn.execute("SELECT intimate_profile_json FROM contacts WHERE id=?", (existing["id"],)).fetchone()
             try:
-                cur_prof = json.loads(existing_dict.get("intimate_profile_json") or "{}")
+                cur_prof = json.loads((fresh_prof_row["intimate_profile_json"] if fresh_prof_row else existing_dict.get("intimate_profile_json")) or "{}")
             except Exception:
                 cur_prof = {}
             if intimate_profile and isinstance(intimate_profile, dict):
-                cur_prof.update(intimate_profile)
+                for ip_k, ip_v in intimate_profile.items():
+                    if ip_k == "disclosure_flags" and isinstance(ip_v, dict):
+                        cur_prof.setdefault("disclosure_flags", {}).update(ip_v)
+                    elif ip_k == "tracks" and isinstance(ip_v, dict):
+                        cur_prof.setdefault("tracks", {}).update(ip_v)
+                    else:
+                        cur_prof[ip_k] = ip_v
 
             # Move any intimate keys that arrived in cur_app into cur_prof
             _intimate_keys = (
@@ -1183,55 +1155,62 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
             cur_prof["tracks"].setdefault("manual", "inexperienced")
             cur_prof["tracks"].setdefault("anal", "inexperienced")
 
-            # If contact has non-baseline experience tracks but no events in ledger, persist backstory events
-            from mechanics.social.persona.intimacy.ledger import get_intimate_events, compute_intimate_tracks_from_ledger, record_intimate_event
+            # Deterministically seed named backstory partners once if non-baseline tracks exist with empty past_history
+            from mechanics.social.persona.intimacy.ledger import get_intimate_events, compute_intimate_tracks_from_ledger
             existing_evs = get_intimate_events(session_id, final_npc_id, origin="past_history", conn=conn)
-            for act in ("intercourse", "oral", "manual", "anal"):
-                trk = cur_prof["tracks"].get(act)
-                if trk and trk not in ("virgin", "inexperienced", "unknown", ""):
-                    act_evs = [e for e in existing_evs if e.get("act_type") == act]
-                    dirs_needed = []
-                    if "receive" in trk and not any(e.get("direction") in ("receive", "mutual") for e in act_evs):
-                        dirs_needed.append("receive")
-                    if "done" in trk and not any(e.get("direction") in ("give", "mutual") for e in act_evs):
-                        dirs_needed.append("give")
-                    if not dirs_needed and not act_evs:
-                        dirs_needed.append("mutual")
-
-                    for req_dir in dirs_needed:
-                        narr_sum = ""
-                        if act == "oral":
-                            narr_sum = "Past History: performed oral on 'Past Partner' (Former Acquaintance)" if req_dir == "give" else ("Past History: Received oral from 'Past Partner' (Former Acquaintance)" if req_dir == "receive" else "Past History: Mutual oral intimacy with 'Past Partner' (Former Acquaintance)")
-                        elif act == "manual":
-                            narr_sum = "Past History: Manually stimulated 'Past Partner' (Former Acquaintance)" if req_dir == "give" else ("Past History: Received manual stimulation from 'Past Partner' (Former Acquaintance)" if req_dir == "receive" else "Past History: Mutual manual petting & foreplay with 'Past Partner' (Former Acquaintance)")
-                        elif act == "anal":
-                            narr_sum = "Past History: Received anal intimacy from 'Past Partner' (Former Acquaintance)" if req_dir == "receive" else "Past History: Performed anal on 'Past Partner' (Former Acquaintance)"
-                        elif act == "intercourse":
-                            narr_sum = "Past History: Prior intercourse encounter (1 times) with 'Past Partner' (Former Acquaintance)"
-                        record_intimate_event(
-                            session_id=session_id,
-                            character_id=final_npc_id,
-                            partner_name="Past Partner",
-                            act_type=act,
-                            direction=req_dir,
-                            partner_id=None,
-                            partner_role="Former Acquaintance",
-                            turn_number=0,
-                            event_origin="past_history",
-                            is_physical=True,
-                            count=1,
-                            narrative_summary=narr_sum,
-                            character_gender=cur_gender,
-                            conn=conn
-                        )
+            has_non_baseline = any(
+                cur_prof["tracks"].get(act) not in ("virgin", "inexperienced", "unknown", "", None)
+                for act in ("intercourse", "oral", "manual", "anal")
+            )
+            if has_non_baseline and not existing_evs and not cur_prof.get("had_first_time_with_player"):
+                from mechanics.social.persona.intimacy.generation import generate_past_intimate_history, persist_generated_past_history
+                h_seed = int(hashlib.md5(f"{final_name}_{cur_race or 'human'}_{session_id}".encode("utf-8")).hexdigest(), 16)
+                past_hist = generate_past_intimate_history(
+                    hash_val=h_seed,
+                    race=cur_race or "human",
+                    gender=cur_gender or "female",
+                    scenario=scen,
+                    openness=str(cur_prof.get("erotic_openness") or "moderate"),
+                    intercourse=cur_prof["tracks"].get("intercourse", "virgin"),
+                    oral=cur_prof["tracks"].get("oral", "inexperienced"),
+                    manual=cur_prof["tracks"].get("manual", "inexperienced"),
+                    anal=cur_prof["tracks"].get("anal", "inexperienced"),
+                )
+                if past_hist:
+                    persist_generated_past_history(
+                        session_id=session_id,
+                        character_id=final_npc_id,
+                        history_dict=past_hist,
+                        character_gender=cur_gender,
+                        conn=conn
+                    )
+                    for ph_entry in (past_hist.get("entries") or []):
+                        if ph_entry and ph_entry not in cur_memories:
+                            cur_memories.append(ph_entry)
 
             # Deterministically synchronize from intimate_events ledger
             char_events = get_intimate_events(session_id, final_npc_id, physical_only=True, conn=conn)
             if char_events:
                 ledger_tracks = compute_intimate_tracks_from_ledger(char_events)
-                for act, trk in ledger_tracks.items():
-                    if trk not in ("virgin", "inexperienced") or act not in cur_prof["tracks"]:
-                        cur_prof["tracks"][act] = trk
+                cur_prof["tracks"]["intercourse"] = merge_intercourse_states(
+                    cur_prof["tracks"].get("intercourse", "virgin"),
+                    ledger_tracks.get("intercourse", "virgin"),
+                )
+                cur_prof["tracks"]["oral"] = merge_oral_states(
+                    cur_prof["tracks"].get("oral", "inexperienced"),
+                    ledger_tracks.get("oral", "inexperienced"),
+                )
+                cur_prof["tracks"]["manual"] = merge_manual_states(
+                    cur_prof["tracks"].get("manual", "inexperienced"),
+                    ledger_tracks.get("manual", "inexperienced"),
+                )
+                merged_ledger_anal = merge_anal_states(
+                    cur_prof["tracks"].get("anal", "inexperienced"),
+                    ledger_tracks.get("anal", "inexperienced"),
+                )
+                if normalize_gender(cur_gender) == "female" and merged_ledger_anal in ("has_done_anal", "has_done_and_received_anal"):
+                    merged_ledger_anal = "has_received_anal"
+                cur_prof["tracks"]["anal"] = merged_ledger_anal
 
             # Pop experience tracks from cur_app so appearance_json stays purely physical
             for k in ("intercourse_experience", "oral_experience", "manual_experience", "anal_experience",
@@ -1257,10 +1236,15 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
             conn.execute(
                 """UPDATE contacts SET name=?, basic_info_json=?, relationship_score=?,
                                        track=?, unlocked_traits_json=?, preferences_json=?, race=?, gender=?, appearance_json=?, intimate_memories_json=?, rel_history_json=?,
-                                       emotional_tone=?, open_thread=?, intimate_profile_json=?, updated_at=?
+                                       emotional_tone=?, open_thread=?, intimate_profile_json=?, household_role=?, updated_at=?
                     WHERE id=?""",
-                (final_name, json.dumps(cur_info), current_score, cur_track, json.dumps(clean_traits), json.dumps(clean_prefs), cur_race, cur_gender, json.dumps(cur_app), json.dumps(cur_memories), json.dumps(cur_recent_memories), cur_emotional_tone, cur_open_thread, json.dumps(cur_prof), now, existing["id"])
+                (final_name, json.dumps(cur_info), current_score, cur_track, json.dumps(clean_traits), json.dumps(clean_prefs), cur_race, cur_gender, json.dumps(cur_app), json.dumps(cur_memories), json.dumps(cur_recent_memories), cur_emotional_tone, cur_open_thread, json.dumps(cur_prof), cur_hh_role, now, existing["id"])
             )
+            if session_id and (cur_track == "romantic" or (track is not None and str(track).strip().lower() == "platonic" and existing_track == "romantic")):
+                _sync_contact_track_to_social_graph(
+                    conn, session_id, final_npc_id, final_name, cur_track,
+                    score=current_score, gender=cur_gender, character_id=character_id,
+                )
             return {
                 "id": existing["id"],
                 "session_id": session_id,
@@ -1281,12 +1265,16 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 "intimate_profile": cur_prof,
                 "emotional_tone": cur_emotional_tone,
                 "open_thread": cur_open_thread,
+                "household_id": cur_hh_id,
+                "household_role": cur_hh_role,
                 "updated_at": now
             }
         else:
             final_npc_id = str(npc_id or name.lower().replace(" ", "_")).strip()
             initial_score = relationships.clamp_score(delta_score)
             info = _merge_basic_info_safely({}, basic_info)
+            if initial_score >= 100:
+                info["unlocked_via_friendship"] = True
             if race and not _is_empty_info_val(race):
                 info["race"] = race
             info = _enrich_contact_basic_info(
@@ -1332,6 +1320,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 if m_str not in cur_recent_memories:
                     cur_recent_memories.append(m_str)
 
+            pending_past_history_str = None
             if new_memory and isinstance(new_memory, str) and new_memory.strip():
                 m_str = new_memory.strip()
                 if m_str.startswith("Past History:") or is_romantic_milestone_str(m_str):
@@ -1339,78 +1328,8 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                         cur_memories.append(m_str)
                         if len(cur_memories) > 100:
                             cur_memories = cur_memories[-100:]
-
-                    # Synchronize into intimate_events ledger
-                    try:
-                        if m_str.startswith("Past History:"):
-                            from mechanics.social.persona.intimacy.ledger import parse_past_history_entry_to_events, record_intimate_event
-                            for pev in parse_past_history_entry_to_events(m_str, char_gender=cur_gender):
-                                record_intimate_event(
-                                    session_id=session_id,
-                                    character_id=final_npc_id,
-                                    partner_name=pev.get("partner_name", "Past Partner"),
-                                    act_type=pev.get("act_type", "intercourse"),
-                                    direction=pev.get("direction", "mutual"),
-                                    partner_id=None,
-                                    partner_role=pev.get("partner_role", "Former Classmate"),
-                                    turn_number=0,
-                                    event_origin="past_history",
-                                    is_physical=bool(pev.get("is_physical", True)),
-                                    count=pev.get("count", 1),
-                                    climax_count=0,
-                                    is_secret_affair=bool(pev.get("is_secret_affair", False)),
-                                    narrative_summary=m_str,
-                                    character_gender=cur_gender,
-                                    conn=conn
-                                )
-                        else:
-                            from mechanics.social.persona.intimacy.ledger import record_intimate_turn_encounter
-                            curr_turn = 1
-                            try:
-                                s_row = conn.execute("SELECT current_day FROM sessions WHERE id=?", (session_id,)).fetchone()
-                                if s_row and s_row["current_day"]:
-                                    curr_turn = int(s_row["current_day"])
-                            except Exception:
-                                pass
-                            low = m_str.lower()
-                            m_ev = "kiss"
-                            if "intercourse" in low or "intimate night" in low or "bed with" in low or "sex with" in low:
-                                m_ev = "intercourse"
-                            elif "oral" in low or "fellatio" in low or "cunnilingus" in low or "blowjob" in low:
-                                if "received" in low:
-                                    m_ev = "oral_receive"
-                                elif "provided" in low or "performed" in low:
-                                    m_ev = "oral_give"
-                                else:
-                                    oral_in = appearance.get("oral_experience") if isinstance(appearance, dict) else None
-                                    if oral_in == "has_done_oral":
-                                        m_ev = "oral_give"
-                                    elif oral_in == "has_received_oral":
-                                        m_ev = "oral_receive"
-                                    else:
-                                        m_ev = "oral" 
-                            elif "manual" in low or "handjob" in low or "fingered" in low:
-                                m_ev = "manual_receive" if "received" in low else ("manual_give" if "stimulated" in low or "gave" in low else "manual")
-                            elif "anal" in low or "backdoor" in low:
-                                m_ev = "anal_receive" if "received" in low else "anal_give"
-                            elif "confess" in low:
-                                m_ev = "confession"
-                            elif "date" in low:
-                                m_ev = "date"
-
-                            record_intimate_turn_encounter(
-                                session_id=session_id,
-                                character_id=final_npc_id,
-                                partner_id="player",
-                                partner_name="Player",
-                                milestone_event=m_ev,
-                                turn_number=curr_turn,
-                                custom_summary=m_str,
-                                character_gender=cur_gender,
-                                conn=conn
-                            )
-                    except Exception:
-                        pass
+                    if m_str.startswith("Past History:"):
+                        pending_past_history_str = m_str
                 else:
                     if m_str not in cur_recent_memories:
                         cur_recent_memories.append(m_str)
@@ -1440,6 +1359,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
 
             cur_open_thread = open_thread or ""
             cur_emotional_tone = emotional_tone or ""
+            cur_hh_role = str(household_role or "child").strip().lower()
 
             prof_dict = dict(intimate_profile or {})
             _intimate_keys = (
@@ -1489,60 +1409,111 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
             prof_dict["tracks"].setdefault("manual", "inexperienced")
             prof_dict["tracks"].setdefault("anal", "inexperienced")
 
-            # If contact has non-baseline experience tracks but no events in ledger, persist backstory events
-            from mechanics.social.persona.intimacy.ledger import get_intimate_events, compute_intimate_tracks_from_ledger, record_intimate_event
-            existing_evs = get_intimate_events(session_id, final_npc_id, origin="past_history", conn=conn)
-            for act in ("intercourse", "oral", "manual", "anal"):
-                trk = prof_dict["tracks"].get(act)
-                if trk and trk not in ("virgin", "inexperienced", "unknown", ""):
-                    act_evs = [e for e in existing_evs if e.get("act_type") == act]
-                    dirs_needed = []
-                    if "receive" in trk and not any(e.get("direction") in ("receive", "mutual") for e in act_evs):
-                        dirs_needed.append("receive")
-                    if "done" in trk and not any(e.get("direction") in ("give", "mutual") for e in act_evs):
-                        dirs_needed.append("give")
-                    if not dirs_needed and not act_evs:
-                        dirs_needed.append("mutual")
+            # Pop experience tracks from app_dict so appearance_json stays purely physical
+            for k in ("intercourse_experience", "oral_experience", "manual_experience", "anal_experience",
+                      "past_intimate_history", "past_intimate_entries"):
+                app_dict.pop(k, None)
 
-                    for req_dir in dirs_needed:
-                        narr_sum = ""
-                        if act == "oral":
-                            narr_sum = "Past History: performed oral on 'Past Partner' (Former Acquaintance)" if req_dir == "give" else ("Past History: Received oral from 'Past Partner' (Former Acquaintance)" if req_dir == "receive" else "Past History: Mutual oral intimacy with 'Past Partner' (Former Acquaintance)")
-                        elif act == "manual":
-                            narr_sum = "Past History: Manually stimulated 'Past Partner' (Former Acquaintance)" if req_dir == "give" else ("Past History: Received manual stimulation from 'Past Partner' (Former Acquaintance)" if req_dir == "receive" else "Past History: Mutual manual petting & foreplay with 'Past Partner' (Former Acquaintance)")
-                        elif act == "anal":
-                            narr_sum = "Past History: Received anal intimacy from 'Past Partner' (Former Acquaintance)" if req_dir == "receive" else "Past History: Performed anal on 'Past Partner' (Former Acquaintance)"
-                        elif act == "intercourse":
-                            narr_sum = "Past History: Prior intercourse encounter (1 times) with 'Past Partner' (Former Acquaintance)"
+            cursor = conn.execute(
+                """INSERT INTO contacts (session_id, character_id, npc_id, name, basic_info_json,
+                                          relationship_score, track, unlocked_traits_json, preferences_json, race, gender, appearance_json, intimate_memories_json, rel_history_json, emotional_tone, open_thread, intimate_profile_json, household_role, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (session_id, character_id, final_npc_id, name, json.dumps(info), initial_score,
+                 cur_track, json.dumps(clean_traits), json.dumps(clean_prefs), cur_race, cur_gender, json.dumps(app_dict), json.dumps(cur_memories), json.dumps(cur_recent_memories), cur_emotional_tone, cur_open_thread, json.dumps(prof_dict), cur_hh_role, now, now)
+            )
+            new_row_id = cursor.lastrowid
+            if session_id and cur_track == "romantic":
+                _sync_contact_track_to_social_graph(
+                    conn, session_id, final_npc_id, name, cur_track,
+                    score=initial_score, gender=cur_gender, character_id=character_id,
+                )
+
+            if pending_past_history_str:
+                try:
+                    from mechanics.social.persona.intimacy.ledger import parse_past_history_entry_to_events, record_intimate_event
+                    for pev in parse_past_history_entry_to_events(pending_past_history_str, char_gender=cur_gender):
                         record_intimate_event(
                             session_id=session_id,
                             character_id=final_npc_id,
-                            partner_name="Past Partner",
-                            act_type=act,
-                            direction=req_dir,
+                            partner_name=pev.get("partner_name", "Past Partner"),
+                            act_type=pev.get("act_type", "intercourse"),
+                            direction=pev.get("direction", "mutual"),
                             partner_id=None,
-                            partner_role="Former Acquaintance",
+                            partner_role=pev.get("partner_role", "Former Classmate"),
                             turn_number=0,
                             event_origin="past_history",
-                            is_physical=True,
-                            count=1,
-                            narrative_summary=narr_sum,
+                            is_physical=bool(pev.get("is_physical", True)),
+                            count=pev.get("count", 1),
+                            climax_count=0,
+                            is_secret_affair=bool(pev.get("is_secret_affair", False)),
+                            narrative_summary=pending_past_history_str,
                             character_gender=cur_gender,
                             conn=conn
                         )
+                except Exception:
+                    pass
+
+            # Deterministically seed named backstory partners once if non-baseline tracks exist with empty past_history
+            from mechanics.social.persona.intimacy.ledger import get_intimate_events, compute_intimate_tracks_from_ledger
+            existing_evs = get_intimate_events(session_id, final_npc_id, origin="past_history", conn=conn)
+            has_non_baseline = any(
+                prof_dict["tracks"].get(act) not in ("virgin", "inexperienced", "unknown", "", None)
+                for act in ("intercourse", "oral", "manual", "anal")
+            )
+            if has_non_baseline and not existing_evs and not prof_dict.get("had_first_time_with_player"):
+                from mechanics.social.persona.intimacy.generation import generate_past_intimate_history, persist_generated_past_history
+                h_seed = int(hashlib.md5(f"{name}_{cur_race or 'human'}_{session_id}".encode("utf-8")).hexdigest(), 16)
+                past_hist = generate_past_intimate_history(
+                    hash_val=h_seed,
+                    race=cur_race or "human",
+                    gender=cur_gender or "female",
+                    scenario=scen,
+                    openness=str(prof_dict.get("erotic_openness") or "moderate"),
+                    intercourse=prof_dict["tracks"].get("intercourse", "virgin"),
+                    oral=prof_dict["tracks"].get("oral", "inexperienced"),
+                    manual=prof_dict["tracks"].get("manual", "inexperienced"),
+                    anal=prof_dict["tracks"].get("anal", "inexperienced"),
+                )
+                if past_hist:
+                    persist_generated_past_history(
+                        session_id=session_id,
+                        character_id=final_npc_id,
+                        history_dict=past_hist,
+                        character_gender=cur_gender,
+                        conn=conn
+                    )
+                    for ph_entry in (past_hist.get("entries") or []):
+                        if ph_entry and ph_entry not in cur_memories:
+                            cur_memories.append(ph_entry)
 
             # Deterministically synchronize from intimate_events ledger
             char_events = get_intimate_events(session_id, final_npc_id, physical_only=True, conn=conn)
             if char_events:
                 ledger_tracks = compute_intimate_tracks_from_ledger(char_events)
-                for act, trk in ledger_tracks.items():
-                    if trk not in ("virgin", "inexperienced") or act not in prof_dict["tracks"]:
-                        prof_dict["tracks"][act] = trk
-
-            # Pop experience tracks from app_dict so appearance_json stays purely physical
-            for k in ("intercourse_experience", "oral_experience", "manual_experience", "anal_experience",
-                      "past_intimate_history", "past_intimate_entries"):
-                app_dict.pop(k, None)
+                prof_dict["tracks"]["intercourse"] = merge_intercourse_states(
+                    prof_dict["tracks"].get("intercourse", "virgin"),
+                    ledger_tracks.get("intercourse", "virgin"),
+                )
+                prof_dict["tracks"]["oral"] = merge_oral_states(
+                    prof_dict["tracks"].get("oral", "inexperienced"),
+                    ledger_tracks.get("oral", "inexperienced"),
+                )
+                prof_dict["tracks"]["manual"] = merge_manual_states(
+                    prof_dict["tracks"].get("manual", "inexperienced"),
+                    ledger_tracks.get("manual", "inexperienced"),
+                )
+                merged_ledger_anal = merge_anal_states(
+                    prof_dict["tracks"].get("anal", "inexperienced"),
+                    ledger_tracks.get("anal", "inexperienced"),
+                )
+                if normalize_gender(cur_gender) == "female" and merged_ledger_anal in ("has_done_anal", "has_done_and_received_anal"):
+                    merged_ledger_anal = "has_received_anal"
+                prof_dict["tracks"]["anal"] = merged_ledger_anal
+                app_dict["intimate_memories"] = list(cur_memories)
+                conn.execute(
+                    "UPDATE contacts SET appearance_json=?, intimate_memories_json=?, intimate_profile_json=? WHERE id=?",
+                    (json.dumps(app_dict), json.dumps(cur_memories), json.dumps(prof_dict), new_row_id)
+                )
 
             # Build backward-compatible appearance dictionary for return
             ret_app = dict(app_dict)
@@ -1560,15 +1531,8 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
             if prof_dict.get("had_first_time_with_player"):
                 ret_app["had_first_time_with_player"] = prof_dict["had_first_time_with_player"]
 
-            cursor = conn.execute(
-                """INSERT INTO contacts (session_id, character_id, npc_id, name, basic_info_json,
-                                          relationship_score, track, unlocked_traits_json, preferences_json, race, gender, appearance_json, intimate_memories_json, rel_history_json, emotional_tone, open_thread, intimate_profile_json, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (session_id, character_id, final_npc_id, name, json.dumps(info), initial_score,
-                 cur_track, json.dumps(clean_traits), json.dumps(clean_prefs), cur_race, cur_gender, json.dumps(app_dict), json.dumps(cur_memories), json.dumps(cur_recent_memories), cur_emotional_tone, cur_open_thread, json.dumps(prof_dict), now, now)
-            )
             return {
-                "id": cursor.lastrowid,
+                "id": new_row_id,
                 "session_id": session_id,
                 "character_id": character_id,
                 "npc_id": final_npc_id,
@@ -1587,6 +1551,8 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 "intimate_profile": prof_dict,
                 "emotional_tone": cur_emotional_tone,
                 "open_thread": cur_open_thread,
+                "household_id": None,
+                "household_role": cur_hh_role,
                 "created_at": now,
                 "updated_at": now
             }
@@ -1606,10 +1572,33 @@ def ensure_scene_npcs_in_contacts(session_id: int, character_id: int = 0):
         return
 
     import game_engine
+    present_lower_names = {
+        game_engine._get_npc_name(npc).lower()
+        for npc in current_npcs
+        if game_engine._get_npc_name(npc)
+    }
     with get_conn() as conn:
-        existing_rows = conn.execute("SELECT npc_id, name FROM contacts WHERE session_id=?", (session_id,)).fetchall()
+        existing_rows = conn.execute(
+            "SELECT id, npc_id, name, basic_info_json FROM contacts WHERE session_id=?",
+            (session_id,),
+        ).fetchall()
         existing_names = {str(r["name"]).strip().lower() for r in existing_rows if r["name"]}
         existing_ids = {str(r["npc_id"]).strip().lower() for r in existing_rows if r["npc_id"]}
+        for r in existing_rows:
+            r_name = str(r["name"] or "").strip().lower()
+            r_id = str(r["npc_id"] or "").strip().lower()
+            if r_name in present_lower_names or r_id in present_lower_names:
+                try:
+                    b_existing = json.loads(r["basic_info_json"] or "{}")
+                    if isinstance(b_existing, dict) and (not b_existing.get("met_in_person") or b_existing.get("offscreen_ripple_only")):
+                        b_existing["met_in_person"] = True
+                        b_existing.pop("offscreen_ripple_only", None)
+                        conn.execute(
+                            "UPDATE contacts SET basic_info_json=? WHERE id=?",
+                            (json.dumps(b_existing), r["id"]),
+                        )
+                except Exception:
+                    pass
 
     unadded = []
     for npc in current_npcs:
@@ -1643,6 +1632,15 @@ def ensure_scene_npcs_in_contacts(session_id: int, character_id: int = 0):
         if not n_name or n_name.lower() in enemy_names or n_name.lower() in party_char_names:
             continue
 
+        # A1: If an NPC parent from an existing household appears in-scene, promote them to a Contact
+        try:
+            import mechanics.social.genealogy as genealogy
+            promoted_parent = genealogy.maybe_promote_scene_parent(session_id, n_name)
+            if promoted_parent:
+                continue
+        except Exception:
+            pass
+
         n_role = (npc.get("role") if isinstance(npc, dict) else "") or ""
         n_desc = (npc.get("description") if isinstance(npc, dict) else "") or ""
 
@@ -1657,7 +1655,7 @@ def ensure_scene_npcs_in_contacts(session_id: int, character_id: int = 0):
         if namegen.is_generic_role_name(n_name) and not is_dialogue and disp not in ("friendly", "companion", "ally"):
             continue
 
-        b_info = {}
+        b_info = {"met_in_person": True}
         if isinstance(npc, dict):
             for k in ("role", "occupation", "description", "faction", "club", "club_role", "grade", "clique", "age", "mannerisms", "motivation", "disposition"):
                 val = npc.get(k)
@@ -1711,6 +1709,33 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
                 scene_narrative = s_row["narrative"] or ""
         except Exception:
             pass
+
+        # Batch-load all intimate_events and households for this session in 2 queries (eliminating N+1 queries)
+        events_by_char: dict[str, list[dict]] = {}
+        try:
+            ev_rows = conn.execute(
+                "SELECT * FROM intimate_events WHERE session_id = ? ORDER BY turn_number ASC, id ASC",
+                (session_id,)
+            ).fetchall()
+            for er in ev_rows:
+                ed = dict(er)
+                ed["is_physical"] = bool(ed.get("is_physical", 1))
+                ed["is_secret_affair"] = bool(ed.get("is_secret_affair", 0))
+                ck = str(ed.get("character_id") or "").strip().lower()
+                if ck:
+                    events_by_char.setdefault(ck, []).append(ed)
+        except Exception:
+            events_by_char = {}
+
+        households_by_id: dict[int, dict] = {}
+        if resolve_relations:
+            try:
+                hh_rows = conn.execute("SELECT * FROM households WHERE session_id = ?", (session_id,)).fetchall()
+                for hr in hh_rows:
+                    parsed_hh = _parse_household_row(hr)
+                    households_by_id[int(parsed_hh["id"])] = parsed_hh
+            except Exception:
+                households_by_id = {}
 
         contacts = []
         seen_keys = set()
@@ -1827,9 +1852,14 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
                 if "tracks" in d["intimate_profile"] and "intercourse" in d["intimate_profile"]["tracks"]:
                     d["appearance"].setdefault("predetermined_intercourse", d["intimate_profile"]["tracks"]["intercourse"])
 
-            from mechanics.social.persona.intimacy.ledger import get_intimate_events
-            char_ref = str(d.get("npc_id") or d["id"])
-            evs = get_intimate_events(session_id, char_ref)
+            char_nid_key = str(d.get("npc_id") or "").strip().lower()
+            char_id_key = str(d.get("id") or "").strip().lower()
+            evs = list(events_by_char.get(char_nid_key) or [])
+            if char_id_key and char_id_key != char_nid_key:
+                seen_ev_ids = {e.get("id") for e in evs if e.get("id")}
+                for extra_ev in (events_by_char.get(char_id_key) or []):
+                    if extra_ev.get("id") not in seen_ev_ids:
+                        evs.append(extra_ev)
             past_evs = [e for e in evs if e.get("event_origin") == "past_history" or e.get("turn_number") == 0]
             game_evs = [e for e in evs if e.get("event_origin") == "gameplay" or e.get("turn_number", 0) > 0]
             d["past_intimate_events"] = past_evs
@@ -1940,12 +1970,18 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
         for d in contacts:
             if d.get("household_id"):
                 import mechanics.social.genealogy as genealogy
-                hh = get_household_by_id(d["household_id"])
+                hh_id_int = int(d["household_id"])
+                hh = households_by_id.get(hh_id_int) or get_household_by_id(hh_id_int)
                 if hh:
                     hydrated_hh = genealogy._hydrate_household_entity(hh, d, scen_key)
                     if not isinstance(d.get("relations"), dict):
                         d["relations"] = {}
-                    d["relations"]["family"] = genealogy.build_family_tree_from_household(hydrated_hh, d.get("name", ""), scenario=scen_key)
+                    d["relations"]["family"] = genealogy.build_family_tree_from_household(
+                        hydrated_hh,
+                        d.get("name", ""),
+                        scenario=scen_key,
+                        member_role=d.get("household_role"),
+                    )
                     if hh.get("residence_location"):
                         d["relations"]["residence_location"] = hh["residence_location"]
                     d["household_id"] = hh["id"]
@@ -1975,12 +2011,103 @@ def update_contact_score(session_id: int, npc_id: str, new_score: int, character
     npc_raw_name = str(npc_id or "").strip().lower()
     character_id = int(character_id or 0)
     with get_conn() as conn:
+        if clamped_score >= 100:
+            rows_to_stamp = conn.execute(
+                """SELECT id, basic_info_json FROM contacts
+                   WHERE session_id=? AND (? = 0 OR character_id=? OR character_id=0)
+                   AND (npc_id=? OR lower(npc_id)=? OR lower(name)=? OR lower(name)=?)""",
+                (session_id, character_id, character_id, npc_clean_id, npc_raw_name, npc_raw_name, npc_clean_id),
+            ).fetchall()
+            for r_st in rows_to_stamp:
+                try:
+                    b_st = json.loads(r_st["basic_info_json"] or "{}")
+                except Exception:
+                    b_st = {}
+                if isinstance(b_st, dict) and not b_st.get("unlocked_via_friendship"):
+                    b_st["unlocked_via_friendship"] = True
+                    conn.execute(
+                        "UPDATE contacts SET basic_info_json=? WHERE id=?",
+                        (json.dumps(b_st), r_st["id"]),
+                    )
         conn.execute(
             """UPDATE contacts SET relationship_score=?, updated_at=?
                WHERE session_id=? AND (? = 0 OR character_id=? OR character_id=0)
                AND (npc_id=? OR lower(npc_id)=? OR lower(name)=? OR lower(name)=?)""",
             (clamped_score, now, session_id, character_id, character_id, npc_clean_id, npc_raw_name, npc_raw_name, npc_clean_id)
         )
+
+def _sync_contact_track_to_social_graph(
+    conn,
+    session_id: int,
+    contact_npc_id: str,
+    contact_name: str,
+    norm_track: str,
+    score: int = 60,
+    gender: str = "",
+    character_id: int = 0,
+) -> None:
+    """Write-time synchronization from contacts.track mutations into social_ties."""
+    if not session_id:
+        return
+    try:
+        import mechanics.social.relationship_graph as rg
+        c_key = rg.canonical_person_key(contact_name or contact_npc_id)
+        if not c_key:
+            return
+        rg.get_or_create_person(
+            session_id,
+            contact_name or contact_npc_id,
+            person_key=c_key,
+            gender=gender or "",
+            origin="contact",
+            contact_npc_id=contact_npc_id,
+            conn=conn,
+        )
+        p_disp = "Player"
+        if character_id:
+            ch_r = conn.execute("SELECT name FROM characters WHERE id = ? LIMIT 1", (character_id,)).fetchone()
+            if ch_r and ch_r["name"]:
+                p_disp = str(ch_r["name"]).strip()
+        if p_disp == "Player":
+            p_disp = rg._resolve_player_display_name(session_id, conn)
+        rg.get_or_create_person(session_id, p_disp, person_key="player", origin="player", conn=conn)
+
+        if norm_track == "romantic":
+            a_c, b_c = rg.canonical_pair(c_key, "player", is_directed=False)
+            cur_player_p = rg.get_current_partner(session_id, "player", conn=conn)
+            player_has_other_partner = bool(cur_player_p and cur_player_p.get("person_key") != c_key)
+            has_rom = conn.execute(
+                """SELECT 1 FROM social_ties
+                   WHERE session_id = ? AND person_a_key = ? AND person_b_key = ?
+                     AND tie_type IN ('dating', 'engaged', 'married')
+                     AND status = 'active'
+                   LIMIT 1""",
+                (session_id, a_c, b_c),
+            ).fetchone()
+            if not has_rom:
+                if not player_has_other_partner:
+                    rg.end_tie(session_id, c_key, "player", rg.TIETYPE_AFFAIR, reason="promoted_to_dating", materialize=False, conn=conn)
+                rg.form_tie(
+                    session_id,
+                    c_key,
+                    "player",
+                    rg.TIETYPE_DATING,
+                    closeness=max(60, int(score or 60)),
+                    origin="gameplay",
+                    supersede=not player_has_other_partner,
+                    conn=conn,
+                )
+        else:
+            rg.end_all_romantic_ties(
+                session_id,
+                c_key,
+                "player",
+                reason="track_switched_platonic",
+                conn=conn,
+            )
+    except Exception:
+        pass
+
 
 def update_contact_track(session_id: int, npc_id: str, new_track: str, character_id: int = 0) -> bool:
     """Updates the social track (platonic or romantic) for a contact."""
@@ -1992,13 +2119,32 @@ def update_contact_track(session_id: int, npc_id: str, new_track: str, character
     norm_track = "romantic" if str(new_track).strip().lower() == "romantic" else "platonic"
     now = time.time()
     with get_conn() as conn:
+        target_rows = conn.execute(
+            """SELECT npc_id, name, relationship_score, gender FROM contacts
+               WHERE session_id=? AND (? = 0 OR character_id=? OR character_id=0)
+               AND (npc_id=? OR lower(npc_id)=? OR lower(name)=? OR lower(name)=?)""",
+            (session_id, character_id, character_id, clean_id, clean_name, clean_name, clean_id),
+        ).fetchall()
         cursor = conn.execute(
             """UPDATE contacts SET track=?, updated_at=?
                WHERE session_id=? AND (? = 0 OR character_id=? OR character_id=0)
                AND (npc_id=? OR lower(npc_id)=? OR lower(name)=? OR lower(name)=?)""",
             (norm_track, now, session_id, character_id, character_id, clean_id, clean_name, clean_name, clean_id)
         )
-        return cursor.rowcount > 0
+        updated = cursor.rowcount > 0
+        if updated and session_id:
+            for tr in target_rows:
+                _sync_contact_track_to_social_graph(
+                    conn,
+                    session_id,
+                    tr["npc_id"],
+                    tr["name"],
+                    norm_track,
+                    score=tr["relationship_score"] or 60,
+                    gender=tr["gender"] or "",
+                    character_id=character_id,
+                )
+        return updated
 
 def update_contact_open_thread(session_id: int, npc_id: str, open_thread: str, emotional_tone: str = "", character_id: int = 0) -> bool:
     """Updates the open thread and emotional tone for a contact."""
@@ -2246,24 +2392,30 @@ def update_household(household_id: int, **fields) -> bool:
         return cursor.rowcount > 0
 
 
-def assign_contact_household(session_id: int, contact_identifier: int | str, household_id: int) -> bool:
+def assign_contact_household(
+    session_id: int,
+    contact_identifier: int | str,
+    household_id: int,
+    household_role: str | None = None,
+) -> bool:
     """Assigns or re-links a contact to a household by contact ID or npc_id/name."""
     if not contact_identifier or not household_id:
         return False
     now = time.time()
+    role_clean = str(household_role).strip().lower() if household_role else None
     with get_conn() as conn:
         if isinstance(contact_identifier, int) or (isinstance(contact_identifier, str) and str(contact_identifier).isdigit()):
             cursor = conn.execute(
-                "UPDATE contacts SET household_id = ?, updated_at = ? WHERE id = ? AND session_id = ?",
-                (household_id, now, int(contact_identifier), session_id)
+                "UPDATE contacts SET household_id = ?, household_role = COALESCE(?, household_role, 'child'), updated_at = ? WHERE id = ? AND session_id = ?",
+                (household_id, role_clean, now, int(contact_identifier), session_id)
             )
         else:
             clean_id = str(contact_identifier).strip().lower().replace(" ", "_")
             clean_name = str(contact_identifier).strip().lower()
             cursor = conn.execute(
-                """UPDATE contacts SET household_id = ?, updated_at = ?
+                """UPDATE contacts SET household_id = ?, household_role = COALESCE(?, household_role, 'child'), updated_at = ?
                    WHERE session_id = ? AND (npc_id = ? OR lower(npc_id) = ? OR lower(name) = ?)""",
-                (household_id, now, session_id, clean_id, clean_id, clean_name)
+                (household_id, role_clean, now, session_id, clean_id, clean_id, clean_name)
             )
         return cursor.rowcount > 0
 
@@ -2413,6 +2565,11 @@ def get_contact(session_id: int, npc_id: str, character_id: int = 0) -> dict | N
     from mechanics.social.persona.intimacy.ledger import get_intimate_events
     char_ref = str(d.get("npc_id") or d["id"])
     evs = get_intimate_events(session_id, char_ref)
+    if d.get("id") and str(d["id"]) != char_ref:
+        seen_ev_ids = {e.get("id") for e in evs if e.get("id")}
+        for extra_ev in get_intimate_events(session_id, str(d["id"])):
+            if extra_ev.get("id") not in seen_ev_ids:
+                evs.append(extra_ev)
     past_evs = [e for e in evs if e.get("event_origin") == "past_history" or e.get("turn_number") == 0]
     game_evs = [e for e in evs if e.get("event_origin") == "gameplay" or e.get("turn_number", 0) > 0]
     d["past_intimate_events"] = past_evs
@@ -2523,7 +2680,12 @@ def get_contact(session_id: int, npc_id: str, character_id: int = 0) -> dict | N
         hh = get_household_by_id(d["household_id"])
         if hh:
             hydrated_hh = genealogy._hydrate_household_entity(hh, d, scen_key)
-            d["relations"]["family"] = genealogy.build_family_tree_from_household(hydrated_hh, d.get("name", ""), scenario=scen_key)
+            d["relations"]["family"] = genealogy.build_family_tree_from_household(
+                hydrated_hh,
+                d.get("name", ""),
+                scenario=scen_key,
+                member_role=d.get("household_role"),
+            )
             if hh.get("residence_location"):
                 d["relations"]["residence_location"] = hh["residence_location"]
             d["household_id"] = hh["id"]
@@ -2746,24 +2908,60 @@ def set_faction_reinforcements_used(session_id: int, used: bool = True) -> None:
             "UPDATE sessions SET faction_reinforcements_used=? WHERE id=?",
             (1 if used else 0, session_id))
 
+def _resolve_phone_contact_keys(conn: sqlite3.Connection, session_id: int, contact_npc_id: str) -> tuple[str, list[str]]:
+    raw = str(contact_npc_id or "").strip()
+    raw_slug = raw.lower().replace(" ", "_")
+    try:
+        from mechanics.social.relationship_graph import canonical_person_key
+        canon_slug = canonical_person_key(raw)
+    except Exception:
+        canon_slug = raw_slug
+
+    keys: list[str] = []
+    for k in (raw_slug, canon_slug):
+        if k and k not in keys:
+            keys.append(k)
+
+    if session_id and raw:
+        row = conn.execute(
+            "SELECT npc_id, name FROM contacts WHERE session_id=? AND (lower(npc_id) IN (?, ?) OR lower(name)=?)",
+            (session_id, raw_slug, canon_slug, raw.lower()),
+        ).fetchone()
+        if row:
+            db_npc_id = str(row["npc_id"] or "").strip().lower().replace(" ", "_")
+            db_name_slug = str(row["name"] or "").strip().lower().replace(" ", "_")
+            for k in (db_npc_id, db_name_slug):
+                if k and k not in keys:
+                    keys.append(k)
+            if db_npc_id:
+                return db_npc_id, keys
+
+    return (raw_slug or canon_slug), keys
+
+
 def save_phone_message(session_id: int, contact_npc_id: str, sender: str, message: str, intent: str = "chat"):
     now = time.time()
     with get_conn() as conn:
+        primary_key, _ = _resolve_phone_contact_keys(conn, session_id, contact_npc_id)
         conn.execute(
             "INSERT INTO phone_messages (session_id, contact_npc_id, sender, message, intent, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
-            (session_id, contact_npc_id.strip().lower().replace(" ", "_"), sender, message, intent, now)
+            (session_id, primary_key, sender, message, intent, now)
         )
 
 def get_phone_messages(session_id: int, contact_npc_id: str, limit: int = 15) -> list[dict]:
     with get_conn() as conn:
+        _, keys = _resolve_phone_contact_keys(conn, session_id, contact_npc_id)
+        if not keys:
+            return []
+        placeholders = ",".join("?" for _ in keys)
         rows = conn.execute(
-            """SELECT * FROM (
+            f"""SELECT * FROM (
                 SELECT * FROM phone_messages
-                WHERE session_id=? AND contact_npc_id=?
+                WHERE session_id=? AND contact_npc_id IN ({placeholders})
                 ORDER BY timestamp DESC, id DESC
                 LIMIT ?
             ) ORDER BY timestamp ASC, id ASC""",
-            (session_id, contact_npc_id.strip().lower().replace(" ", "_"), limit)
+            (session_id, *keys, limit)
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -2824,6 +3022,83 @@ def get_gossip_feed(session_id: int, limit: int = 10) -> list[dict]:
         ).fetchall()
         return [dict(r) for r in rows]
 
+def _commitment_row_to_appointment_dict(r: sqlite3.Row | dict) -> dict:
+    """Projects a normalized commitments_ledger row into the phone appointment dict view."""
+    d = dict(r)
+    try:
+        participants = json.loads(d.get("participants_json") or "[]")
+    except Exception:
+        participants = []
+    try:
+        meta = json.loads(d.get("metadata_json") or "{}")
+    except Exception:
+        meta = {}
+
+    npc_id = ""
+    npc_name = ""
+    for p in participants:
+        if not isinstance(p, dict):
+            continue
+        pk = str(p.get("npc_id") or p.get("person_key") or "").strip()
+        if pk and pk.lower() != "player" and not pk.lower().startswith("player:"):
+            npc_id = pk.lower().replace(" ", "_")
+            npc_name = str(p.get("name") or pk.replace("_", " ").title()).strip()
+            break
+    if not npc_id:
+        tgt = str(d.get("target_entity") or "").strip()
+        src = str(d.get("source_entity") or "").strip()
+        cand = tgt if (tgt and tgt.lower() != "player") else src
+        npc_id = cand.lower().replace(" ", "_")
+        npc_name = cand.replace("_", " ").title()
+
+    s_day = max(1, int(d.get("scheduled_day") or 1))
+    s_min = max(0, int(d.get("start_minute") or 0))
+    e_min = max(0, int(d.get("end_minute") if d.get("end_minute") is not None else 1439))
+    raw_end_day = d.get("end_day")
+    if raw_end_day is not None:
+        e_day = max(s_day, int(raw_end_day))
+    else:
+        e_day = s_day + 1 if e_min < s_min else s_day
+
+    created_min = (s_day - 1) * 1440 + s_min
+    expiry_min = (e_day - 1) * 1440 + e_min
+
+    raw_status = str(d.get("status") or "pending").strip().lower()
+    if raw_status == "fulfilled":
+        mapped_status = "completed"
+    elif raw_status in ("flaked", "broken", "expired"):
+        mapped_status = "stood_up"
+    elif raw_status in ("arrived", "in_progress"):
+        mapped_status = "arrived"
+    elif raw_status == "cancelled":
+        mapped_status = "cancelled"
+    else:
+        mapped_status = "pending"
+
+    return {
+        "id": d.get("id"),
+        "commitment_id": d.get("id"),
+        "session_id": d.get("session_id"),
+        "npc_id": npc_id,
+        "npc_name": npc_name,
+        "rendezvous_location": d.get("target_location") or "",
+        "target_node_id": d.get("target_node_id") or "",
+        "topic": d.get("description") or d.get("title") or "",
+        "is_confidential": 1 if d.get("is_confidential") else 0,
+        "origin": d.get("origin") or "phone",
+        "created_minute": created_min,
+        "expiry_minute": expiry_min,
+        "reminder_sent": 1 if meta.get("reminder_sent") else 0,
+        "status": mapped_status,
+        "ledger_status": raw_status,
+        "scheduled_day": s_day,
+        "end_day": e_day,
+        "start_minute": s_min,
+        "end_minute": e_min,
+        "created_at": d.get("created_at") or 0.0,
+    }
+
+
 def save_phone_appointment(
     session_id: int,
     npc_id: str,
@@ -2833,9 +3108,11 @@ def save_phone_appointment(
     is_confidential: bool = False,
     origin: str = "phone",
     created_minute: int = 0,
-    expiry_minute: int = 0
+    expiry_minute: int = 0,
+    expiry_minutes: int = 0,
+    target_node_id: str = "",
 ) -> bool:
-    """Upserts a pending meetup appointment set via DM or dialogue. Returns True if saved."""
+    """Upserts a pending meetup appointment into commitments_ledger. Returns True if saved."""
     if not rendezvous_location or not npc_id:
         return False
     clean_npc_id = npc_id.strip().lower().replace(" ", "_")
@@ -2846,56 +3123,53 @@ def save_phone_appointment(
             created_minute = max(0, curr_day - 1) * 1440 + curr_min
         except Exception:
             pass
-    if not expiry_minute and created_minute:
+    if not expiry_minute and expiry_minutes > 0 and created_minute >= 0:
+        expiry_minute = created_minute + int(expiry_minutes)
+    elif not expiry_minute and created_minute:
         expiry_minute = created_minute + 45
+
+    day_val = (created_minute // 1440) + 1 if created_minute > 0 else 1
+    start_m = created_minute % 1440 if created_minute > 0 else 0
+    end_day_val = (expiry_minute // 1440) + 1 if expiry_minute > 0 else day_val
+    end_m = expiry_minute % 1440 if expiry_minute > 0 else (min(1439, start_m + 45) if created_minute > 0 else 1439)
+    if end_day_val < day_val:
+        end_day_val = day_val
+
+    try:
+        from mechanics.social.relationship_graph import canonical_person_key
+        canon_npc_id = canonical_person_key(npc_id)
+    except Exception:
+        canon_npc_id = clean_npc_id
+
     with get_conn() as conn:
+        # Supersede any prior pending/approaching 1-on-1 rendezvous with this exact NPC (e.g. meetup relocation)
         conn.execute(
-            """INSERT INTO phone_appointments (
-                   session_id, npc_id, npc_name, rendezvous_location,
-                   topic, is_confidential, origin, created_minute, expiry_minute, reminder_sent,
-                   status, created_at
-               )
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'pending', ?)
-               ON CONFLICT(session_id, npc_id) DO UPDATE SET
-               rendezvous_location=excluded.rendezvous_location,
-               topic=excluded.topic,
-               is_confidential=excluded.is_confidential,
-               origin=excluded.origin,
-               created_minute=excluded.created_minute,
-               expiry_minute=excluded.expiry_minute,
-               reminder_sent=0,
-               status='pending',
-               created_at=excluded.created_at""",
-            (
-                session_id, clean_npc_id, npc_name.strip(), rendezvous_location.strip(),
-                topic.strip(), 1 if is_confidential else 0, origin,
-                created_minute, expiry_minute, now
-            )
+            """UPDATE commitments_ledger
+               SET status = 'cancelled', updated_at = ?
+               WHERE session_id = ? AND commitment_type = 'rendezvous'
+                 AND status IN ('pending', 'approaching')
+                 AND (lower(target_entity) IN (?, ?) OR lower(source_entity) IN (?, ?))""",
+            (now, session_id, clean_npc_id, canon_npc_id, clean_npc_id, canon_npc_id)
         )
-        # Synchronize with unified commitments_ledger
-        try:
-            from mechanics.system.commitments_engine import create_rendezvous
-            day_val = (created_minute // 1440) + 1 if created_minute > 0 else 1
-            start_m = created_minute % 1440 if created_minute > 0 else 0
-            end_m = expiry_minute % 1440 if expiry_minute > 0 else 1439
-            create_rendezvous(
-                session_id=session_id,
-                organizer="player",
-                participants=[{"npc_id": clean_npc_id, "name": npc_name.strip()}],
-                location=rendezvous_location.strip(),
-                day=day_val,
-                start_minute=start_m,
-                end_minute=end_m,
-                title=f"Meetup with {npc_name.strip()}",
-                description=topic.strip() or f"Meet at {rendezvous_location.strip()}",
-                origin=origin,
-                is_confidential=is_confidential,
-                conn=conn,
-                sync_legacy=False
-            )
-        except Exception:
-            pass
-    return True
+        from mechanics.system.commitments_engine import create_rendezvous
+        created = create_rendezvous(
+            session_id=session_id,
+            organizer="player",
+            participants=[{"npc_id": clean_npc_id, "name": npc_name.strip()}],
+            location=rendezvous_location.strip(),
+            day=day_val,
+            end_day=end_day_val,
+            start_minute=start_m,
+            end_minute=end_m,
+            title=f"Meetup with {npc_name.strip()}",
+            description=topic.strip() or f"Meet at {rendezvous_location.strip()}",
+            origin=origin,
+            node_id=target_node_id or None,
+            is_confidential=is_confidential,
+            conn=conn,
+        )
+        return bool(created)
+
 
 def save_rendezvous_appointment(
     session_id: int,
@@ -2905,7 +3179,9 @@ def save_rendezvous_appointment(
     topic: str = "",
     is_confidential: bool = True,
     created_minute: int = 0,
-    expiry_minute: int = 0
+    expiry_minute: int = 0,
+    expiry_minutes: int = 0,
+    target_node_id: str = "",
 ) -> bool:
     """Specialized helper for in-person dialogue rendezvous appointments."""
     return save_phone_appointment(
@@ -2918,118 +3194,149 @@ def save_rendezvous_appointment(
         origin="dialogue",
         created_minute=created_minute,
         expiry_minute=expiry_minute,
+        expiry_minutes=expiry_minutes,
+        target_node_id=target_node_id,
     )
 
+
 def get_phone_appointments(session_id: int, status: str = "pending") -> list[dict]:
-    """Returns all appointments for a session with the given status."""
+    """Returns all rendezvous appointments for a session matching the requested status."""
+    st_clean = str(status or "pending").strip().lower()
+    if st_clean == "completed":
+        ledger_statuses = ("fulfilled",)
+    elif st_clean in ("stood_up", "flaked", "missed"):
+        ledger_statuses = ("flaked", "broken", "expired")
+    elif st_clean == "arrived":
+        ledger_statuses = ("arrived", "in_progress")
+    elif st_clean == "cancelled":
+        ledger_statuses = ("cancelled",)
+    else:
+        ledger_statuses = ("pending", "approaching")
+
+    placeholders = ",".join("?" for _ in ledger_statuses)
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM phone_appointments WHERE session_id=? AND status=? ORDER BY created_at ASC",
-            (session_id, status)
+            f"""SELECT * FROM commitments_ledger
+                WHERE session_id=? AND commitment_type='rendezvous'
+                  AND status IN ({placeholders})
+                ORDER BY created_at ASC, id ASC""",
+            (session_id, *ledger_statuses)
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [_commitment_row_to_appointment_dict(r) for r in rows]
+
 
 def get_active_rendezvous_appointments(session_id: int) -> list[dict]:
-    """Returns all active appointments (pending or arrived) for a session."""
+    """Returns all active rendezvous appointments (pending, approaching, arrived, in_progress) for a session."""
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM phone_appointments WHERE session_id=? AND status IN ('pending', 'arrived') ORDER BY created_at ASC",
+            """SELECT * FROM commitments_ledger
+               WHERE session_id=? AND commitment_type='rendezvous'
+                 AND status IN ('pending', 'approaching', 'arrived', 'in_progress')
+               ORDER BY created_at ASC, id ASC""",
             (session_id,)
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [_commitment_row_to_appointment_dict(r) for r in rows]
+
 
 def update_phone_appointment_status(session_id: int, npc_id: str, status: str):
-    """Updates a meetup appointment status (e.g. 'arrived', 'completed', 'stood_up', 'cancelled')."""
+    """Updates a meetup appointment status in commitments_ledger."""
     clean_npc_id = npc_id.strip().lower().replace(" ", "_")
+    ledger_status = str(status or "").strip().lower()
+    if ledger_status == "stood_up":
+        ledger_status = "flaked"
+    elif ledger_status == "completed":
+        ledger_status = "fulfilled"
+    now = time.time()
     with get_conn() as conn:
         conn.execute(
-            "UPDATE phone_appointments SET status=? WHERE session_id=? AND npc_id=?",
-            (status, session_id, clean_npc_id)
+            """UPDATE commitments_ledger
+               SET status=?, updated_at=?
+               WHERE session_id=? AND commitment_type='rendezvous'
+                 AND (lower(target_entity)=? OR lower(source_entity)=? OR lower(participants_json) LIKE ?)
+                 AND status IN ('pending', 'approaching', 'arrived', 'in_progress', 'active')""",
+            (ledger_status, now, session_id, clean_npc_id, clean_npc_id, f"%{clean_npc_id}%")
         )
-        ledger_status = status
-        if status == "stood_up":
-            ledger_status = "flaked"
-        elif status == "completed":
-            ledger_status = "fulfilled"
-        try:
-            now = time.time()
-            conn.execute(
-                """UPDATE commitments_ledger
-                   SET status=?, updated_at=?
-                   WHERE session_id=? AND commitment_type='rendezvous'
-                     AND (lower(target_entity)=? OR lower(source_entity)=? OR participants_json LIKE ?)
-                     AND status IN ('pending', 'approaching', 'arrived', 'in_progress', 'active')""",
-                (ledger_status, now, session_id, clean_npc_id, clean_npc_id, f"%{clean_npc_id}%")
-            )
-        except Exception:
-            pass
+
 
 def mark_rendezvous_reminder_sent(session_id: int, npc_id: str):
-    """Marks that an SMS reminder has been sent to the player for this appointment."""
+    """Marks in commitments_ledger.metadata_json that an SMS reminder has been sent."""
     clean_npc_id = npc_id.strip().lower().replace(" ", "_")
+    now = time.time()
     with get_conn() as conn:
-        conn.execute(
-            "UPDATE phone_appointments SET reminder_sent=1 WHERE session_id=? AND npc_id=?",
-            (session_id, clean_npc_id)
-        )
+        rows = conn.execute(
+            """SELECT id, metadata_json FROM commitments_ledger
+               WHERE session_id=? AND commitment_type='rendezvous'
+                 AND status IN ('pending', 'approaching')
+                 AND (lower(target_entity)=? OR lower(source_entity)=? OR lower(participants_json) LIKE ?)""",
+            (session_id, clean_npc_id, clean_npc_id, f"%{clean_npc_id}%")
+        ).fetchall()
+        for r in rows:
+            try:
+                meta = json.loads(r["metadata_json"] or "{}")
+            except Exception:
+                meta = {}
+            meta["reminder_sent"] = True
+            conn.execute(
+                "UPDATE commitments_ledger SET metadata_json=?, updated_at=? WHERE id=?",
+                (json.dumps(meta), now, r["id"])
+            )
+
 
 def get_due_reminder_appointments(session_id: int, current_minute: int) -> list[dict]:
-    """Finds appointments that have been waiting >= 30 minutes and have not sent a reminder yet."""
+    """Finds pending rendezvous appointments waiting >= 30 minutes without a reminder sent."""
     if not current_minute or current_minute <= 0:
         return []
     with get_conn() as conn:
         rows = conn.execute(
-            """SELECT * FROM phone_appointments
-               WHERE session_id=? AND status='pending' AND reminder_sent=0
-               AND created_minute > 0""",
+            """SELECT * FROM commitments_ledger
+               WHERE session_id=? AND commitment_type='rendezvous'
+                 AND status IN ('pending', 'approaching')""",
             (session_id,)
         ).fetchall()
         due = []
         for r in rows:
-            d = dict(r)
-            c_min = d.get("created_minute", 0)
-            if current_minute >= 1440 and c_min < 1440:
-                time_of_day = current_minute % 1440
-                if (current_minute - c_min) >= 30 or (time_of_day >= c_min and (time_of_day - c_min) >= 30):
-                    due.append(d)
-            elif (current_minute - c_min) >= 30:
-                due.append(d)
+            appt = _commitment_row_to_appointment_dict(r)
+            if appt.get("reminder_sent"):
+                continue
+            c_min = appt.get("created_minute", 0)
+            if c_min > 0 and (current_minute - c_min) >= 30:
+                due.append(appt)
         return due
 
+
 def expire_overdue_appointments(session_id: int, current_minute: int) -> list[dict]:
-    """Finds appointments that have exceeded their expiry_minute and marks them as stood_up."""
+    """Delegates overdue rendezvous expiration to commitments_ledger using monotonic absolute minutes."""
     if not current_minute or current_minute <= 0:
         return []
+    curr_day = (int(current_minute) // 1440) + 1
+    curr_min_of_day = int(current_minute) % 1440
+    from mechanics.system.commitments_engine import flake_commitment
+    expired_appts = []
     with get_conn() as conn:
         rows = conn.execute(
-            """SELECT * FROM phone_appointments
-               WHERE session_id=? AND status='pending' AND expiry_minute > 0""",
+            """SELECT * FROM commitments_ledger
+               WHERE session_id=? AND commitment_type='rendezvous'
+                 AND status IN ('pending', 'approaching')""",
             (session_id,)
         ).fetchall()
-        expired = []
+        overdue_rows = []
         for r in rows:
-            d = dict(r)
-            exp_min = d.get("expiry_minute", 0)
-            is_expired = False
-            if current_minute >= 1440 and exp_min < 1440:
-                is_expired = True
-            elif current_minute >= exp_min:
-                is_expired = True
+            appt = _commitment_row_to_appointment_dict(r)
+            exp_min = appt.get("expiry_minute", 0)
+            if exp_min > 0 and int(current_minute) >= exp_min:
+                overdue_rows.append((r["id"], appt))
 
-            if is_expired:
-                expired.append(d)
-
-        if expired:
-            ids = [e["id"] for e in expired]
-            conn.execute(
-                f"""UPDATE phone_appointments SET status='stood_up'
-                    WHERE session_id=? AND status='pending'
-                    AND id IN ({','.join('?' for _ in ids)})""",
-                [session_id] + ids
-            )
-            for exp in expired:
-                exp["status"] = "stood_up"
-        return expired
+    for cid, appt in overdue_rows:
+        flake_commitment(
+            session_id,
+            cid,
+            flaked_entity="player",
+            reason="deadline_elapsed",
+        )
+        appt["status"] = "stood_up"
+        appt["ledger_status"] = "flaked"
+        expired_appts.append(appt)
+    return expired_appts
 
 def save_school_roster(session_id: int, roster: list[dict]) -> bool:
     """Saves or updates a pre-generated school directory roster for a session."""
@@ -3085,6 +3392,19 @@ def get_school_roster(session_id: int) -> list[dict]:
             (session_id,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def get_anomalous_agent_roster(session_id: int) -> list[dict]:
+    """Returns the anomalous special agents roster for a session if present."""
+    if not session_id:
+        return []
+    sess = db.get_session(session_id)
+    if not sess:
+        return []
+    roster = sess.get("anomalous_agent_roster")
+    if not isinstance(roster, list) and isinstance(sess.get("extra"), dict):
+        roster = sess["extra"].get("anomalous_agent_roster")
+    return list(roster) if isinstance(roster, list) else []
 
 def get_school_characters_by_facility(session_id: int, location_str: str, limit: int = 3, allow_off_campus: bool = False) -> list[dict]:
     """
@@ -3225,7 +3545,9 @@ _active_resolving_contacts = set()
 def get_phone_daily_limits(session_id: int, npc_id: str, current_day: int) -> dict:
     """Returns structured daily action allowances, usage counts, and status for a contact on current_day."""
     clean_npc_id = str(npc_id).strip().lower().replace(" ", "_")
+    raw_npc_low = str(npc_id).strip().lower()
     limits = {
+        "chat": {"used": 0, "max": 3, "locked": False, "over_limit_count": 0},
         "flirt": {"used": 0, "max": 3, "locked": False, "history": [], "last_outcome": "", "over_limit_count": 0},
         "meetup": {"used": 0, "max": 1, "locked": False, "status": "available", "relocations_left": 0, "relocations_used": 0, "last_outcome": "", "over_limit_count": 0},
         "photo": {"used": 0, "max": 3, "locked": False, "over_limit_count": 0},
@@ -3233,12 +3555,26 @@ def get_phone_daily_limits(session_id: int, npc_id: str, current_day: int) -> di
         "rumor": {"used": 0, "max": 1, "locked": False, "over_limit_count": 0},
     }
     with get_conn() as conn:
-        # Check active appointments for this NPC
-        appt_row = conn.execute(
-            "SELECT rendezvous_location, status FROM phone_appointments WHERE session_id=? AND npc_id=?",
-            (session_id, clean_npc_id)
+        c_row = conn.execute(
+            """SELECT relationship_score FROM contacts
+               WHERE session_id=? AND (lower(npc_id)=? OR lower(name)=? OR lower(name)=?)
+               ORDER BY relationship_score DESC LIMIT 1""",
+            (session_id, clean_npc_id, raw_npc_low, clean_npc_id.replace("_", " ")),
         ).fetchone()
-        has_active_appt = bool(appt_row and appt_row["status"] == "pending")
+        contact_score = int(c_row["relationship_score"] or 0) if c_row else 0
+        max_chat = 5 if contact_score >= 100 else 3
+        limits["chat"]["max"] = max_chat
+
+        # Check active rendezvous commitments for this NPC
+        appt_row = conn.execute(
+            """SELECT target_location AS rendezvous_location, status FROM commitments_ledger
+               WHERE session_id=? AND commitment_type='rendezvous'
+                 AND status IN ('pending', 'approaching')
+                 AND (lower(target_entity)=? OR lower(source_entity)=? OR lower(participants_json) LIKE ?)
+               ORDER BY id DESC LIMIT 1""",
+            (session_id, clean_npc_id, clean_npc_id, f"%{clean_npc_id}%")
+        ).fetchone()
+        has_active_appt = bool(appt_row)
 
         try:
             rows = conn.execute(
@@ -3310,7 +3646,11 @@ def get_phone_daily_limits(session_id: int, npc_id: str, current_day: int) -> di
                 limits["rumor"]["used"] += used
                 limits["rumor"]["locked"] = limits["rumor"]["used"] >= 1
                 limits["rumor"]["over_limit_count"] += over_limit
+            elif intent in ("chat", "custom"):
+                limits["chat"]["used"] += used
+                limits["chat"]["over_limit_count"] += over_limit
 
+        limits["chat"]["locked"] = limits["chat"]["used"] >= limits["chat"]["max"]
         limits["photo"]["locked"] = limits["photo"]["used"] >= 3
         limits["spicy"]["locked"] = limits["spicy"]["used"] >= 3
         limits["flirt"]["locked"] = limits["flirt"]["used"] >= 3
@@ -3336,6 +3676,8 @@ def record_phone_daily_interaction(session_id: int, npc_id: str, current_day: in
         norm_intent = "spicy"
     elif intent in ("intel_rumor", "intel"):
         norm_intent = "rumor"
+    elif intent in ("chat", "custom"):
+        norm_intent = "chat"
 
     with get_conn() as conn:
         try:

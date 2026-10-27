@@ -54,6 +54,276 @@ TITLE_AND_ARTICLE_PREFIXES = frozenset({
     "officer", "constable", "father", "mother", "sister", "brother"
 })
 
+_RECRUIT_CHOICE_KEYWORDS: Tuple[str, ...] = (
+    "join your party", "join party", "join our party", "permanent companion",
+    "join the party", "invite into party", "invite to party", "hire as a mercenary",
+    "hire to join", "companion to travel", "travel with us as a companion", "hire as a companion",
+    "recruit into party", "recruit to your party", "join your field team", "join your field party",
+    "onto your field squad", "onto your field team", "join your retinue", "travel with your retinue",
+    "join your band", "travel with your group", "join your group", "run with your team",
+    "join your team", "join your crew", "join your expedition crew",
+    "partner up and join", "team up and join", "team up and travel", "partner up and run", "join forces and travel",
+)
+
+_CHOICE_STOPWORDS = frozenset({
+    "the", "and", "for", "with", "from", "into", "onto", "toward", "towards",
+    "your", "their", "his", "her", "this", "that", "these", "those", "while",
+    "then", "before", "after", "about", "over", "under", "around", "through",
+    "upon", "near", "beside", "against", "across", "within", "without", "regarding",
+    "concerning", "further", "more", "some", "any", "all", "both", "each", "other",
+    "out", "off", "down", "away", "back", "here", "there", "now",
+})
+
+_CHOICE_PREP_VERBS = frozenset({
+    "draw", "unholster", "unsheathe", "ready", "prepare", "raise", "brandish",
+    "step", "move", "walk", "turn", "try", "attempt", "begin", "start", "use",
+    "take", "make", "keep", "quickly", "carefully", "quietly", "cautiously",
+    "closely", "firmly", "gently", "slowly", "immediately", "directly",
+})
+
+_CHOICE_SPEECH_VERBS = frozenset({
+    "ask", "inquire", "question", "talk", "speak", "converse", "chat", "discuss",
+    "tell", "say", "mention", "bring", "reply", "respond", "answer", "invite",
+})
+
+_CHOICE_SYNONYM_MAP: Dict[str, str] = {
+    "point": "aim",
+    "level": "aim",
+    "target": "aim",
+    "examine": "inspect",
+    "search": "inspect",
+    "check": "inspect",
+    "scan": "inspect",
+    "investigate": "inspect",
+    "study": "inspect",
+    "inquire": "ask",
+    "question": "ask",
+    "converse": "speak",
+    "talk": "speak",
+}
+
+
+def _stem_choice_word(word: str) -> str:
+    w = _CHOICE_SYNONYM_MAP.get(word, word)
+    if len(w) > 5 and w.endswith("ing"):
+        w = w[:-3]
+    elif len(w) > 4 and w.endswith("ed"):
+        w = w[:-2]
+    elif len(w) > 4 and w.endswith("es"):
+        w = w[:-2]
+    elif len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+        w = w[:-1]
+    return _CHOICE_SYNONYM_MAP.get(w, w)
+
+
+def _extract_choice_semantic_stems(
+    choice: Dict[str, Any],
+    extra_ignore_names: Optional[List[str]] = None,
+) -> Tuple[set[str], set[str]]:
+    """
+    Returns `(full_substantive_stems, core_action_object_stems)` for semantic choice comparison.
+    Strips leading badges/emojis, stopwords, generic speech prefixes, and target NPC name tokens
+    so two choices discussing different topics with the same NPC are never conflated.
+    """
+    raw_lbl = str(choice.get("label") or "").strip()
+    clean_lbl = _strip_leading_emojis(raw_lbl)
+    clean_lbl = re.sub(r"^(?:[⭐🎯⚡🔹📱⏳💌🛏️🛋️🏕️🧩🤝\s\[\]]+|\s*\[[^\]]+\]\s*)+", "", clean_lbl).strip()
+
+    ignore_tokens: set[str] = set()
+    t_npc = str(choice.get("target_npc") or "").strip()
+    if t_npc:
+        for tok in re.findall(r"[a-z0-9]{2,}", t_npc.lower()):
+            ignore_tokens.add(tok)
+            ignore_tokens.add(_stem_choice_word(tok))
+    for nm in (extra_ignore_names or []):
+        if nm:
+            for tok in re.findall(r"[a-z0-9]{2,}", str(nm).lower()):
+                ignore_tokens.add(tok)
+                ignore_tokens.add(_stem_choice_word(tok))
+
+    words = re.findall(r"[a-z0-9]{3,}", clean_lbl.lower())
+    full_stems: set[str] = set()
+    core_stems: set[str] = set()
+    for w in words:
+        if w in _CHOICE_STOPWORDS or w in ignore_tokens:
+            continue
+        st = _stem_choice_word(w)
+        if not st or len(st) < 3 or st in _CHOICE_STOPWORDS or st in ignore_tokens:
+            continue
+        if st in _CHOICE_SPEECH_VERBS:
+            continue
+        full_stems.add(st)
+        if w not in _CHOICE_PREP_VERBS and st not in _CHOICE_PREP_VERBS:
+            core_stems.add(st)
+
+    if not core_stems and full_stems:
+        core_stems = set(full_stems)
+    return full_stems, core_stems
+
+
+def _choice_dedup_priority_key(c: Dict[str, Any]) -> Tuple[int, int, int, int, int, int, int]:
+    """Higher tuple wins when two choices are semantically redundant."""
+    stat_u = str(c.get("stat") or "NONE").upper()
+    return (
+        1 if c.get("_priority_slot") else 0,
+        1 if c.get("is_climax_action") else 0,
+        1 if c.get("is_story_quest") else 0,
+        1 if (c.get("is_quest_action") or c.get("_python_verified_quest") or c.get("quest_id")) else 0,
+        1 if c.get("_server_stamped") else 0,
+        1 if stat_u not in ("NONE", "FREE", "") else 0,
+        len(str(c.get("label") or "")),
+    )
+
+
+def are_choices_semantically_redundant(
+    c1: Dict[str, Any],
+    c2: Dict[str, Any],
+    ignore_names: Optional[List[str]] = None,
+) -> bool:
+    """
+    Deterministically detects whether two action choices are near-duplicates or redundant
+    (e.g., '[⭐ STORY QUEST] [👁️ PER] Draw service pistol and aim at the breach' vs
+    '[👁️ PER] Aim service pistol at the breach').
+    """
+    if not isinstance(c1, dict) or not isinstance(c2, dict):
+        return False
+    lbl1 = _strip_leading_emojis(str(c1.get("label") or "")).strip().lower()
+    lbl2 = _strip_leading_emojis(str(c2.get("label") or "")).strip().lower()
+    if not lbl1 or not lbl2:
+        return False
+    if lbl1 == lbl2:
+        return True
+
+    # 1. Never merge exit vs non-exit
+    from mechanics.narrative.intent import is_conversational_exit
+    exit1 = bool(c1.get("_pinned_dialogue_exit") or c1.get("intent") == "dialogue_exit" or c1.get("ends_dialogue") or is_conversational_exit(lbl1))
+    exit2 = bool(c2.get("_pinned_dialogue_exit") or c2.get("intent") == "dialogue_exit" or c2.get("ends_dialogue") or is_conversational_exit(lbl2))
+    if exit1 != exit2:
+        return False
+    if exit1 and exit2:
+        return True
+
+    # 2. Never merge choices targeting different explicit NPCs or different spatial destinations
+    npc1 = str(c1.get("target_npc") or "").strip().lower()
+    npc2 = str(c2.get("target_npc") or "").strip().lower()
+    if npc1 and npc2 and npc1 != npc2 and npc1 not in npc2 and npc2 not in npc1:
+        return False
+
+    loc1 = str(c1.get("target_location") or c1.get("target_node_id") or "").strip().lower()
+    loc2 = str(c2.get("target_location") or c2.get("target_node_id") or "").strip().lower()
+    if loc1 and loc2 and loc1 != loc2:
+        return False
+
+    # 3. Never merge distinct server-stamped combat actions or distinct multi-approach quest options
+    if c1.get("_server_stamped") and c2.get("_server_stamped"):
+        if (
+            c1.get("choice_type") != c2.get("choice_type")
+            or c1.get("attack_type") != c2.get("attack_type")
+            or c1.get("spell_id") != c2.get("spell_id")
+            or c1.get("combat_tactical_archetype") != c2.get("combat_tactical_archetype")
+            or c1.get("sub_intent") != c2.get("sub_intent")
+        ):
+            return False
+
+    app1 = str(c1.get("approach") or "").strip().lower()
+    app2 = str(c2.get("approach") or "").strip().lower()
+    special_approaches = {"buyout_bribe", "counter_offer", "companion_assist", "breakthrough_leverage", "stealth"}
+    if (app1 in special_approaches or app2 in special_approaches) and app1 != app2:
+        return False
+
+    # 4. Same special social milestone intent targeting the same person (e.g. duplicate recruitment / contact / confession)
+    int1 = str(c1.get("intent") or "").strip().lower()
+    int2 = str(c2.get("intent") or "").strip().lower()
+    rec1 = int1 == "party_recruit" or any(kw in lbl1 for kw in _RECRUIT_CHOICE_KEYWORDS)
+    rec2 = int2 == "party_recruit" or any(kw in lbl2 for kw in _RECRUIT_CHOICE_KEYWORDS)
+    if rec1 and rec2:
+        return True
+    if int1 and int1 == int2 and int1 in ("romantic_confession", "phone_contact_exchange", "rest_sleep"):
+        return True
+
+    # 5. Content-stem containment and core-stem equivalence
+    names_ctx = list(ignore_names or [])
+    if npc1:
+        names_ctx.append(npc1)
+    if npc2:
+        names_ctx.append(npc2)
+    full1, core1 = _extract_choice_semantic_stems(c1, extra_ignore_names=names_ctx)
+    full2, core2 = _extract_choice_semantic_stems(c2, extra_ignore_names=names_ctx)
+    if not full1 or not full2:
+        return False
+
+    stat1 = str(c1.get("stat") or "NONE").upper()
+    stat2 = str(c2.get("stat") or "NONE").upper()
+    same_stat = (stat1 == stat2)
+
+    # 5a. Identical core action+object stems (e.g. "Draw service pistol and aim at the breach" vs "Aim service pistol at the breach")
+    if len(core1) >= 2 and core1 == core2:
+        return True
+
+    # 5b. Smaller core stem set is 100% contained in larger core stem set
+    smaller_core = core1 if len(core1) <= len(core2) else core2
+    larger_core = core2 if len(core1) <= len(core2) else core1
+    if len(smaller_core) >= 3 and smaller_core.issubset(larger_core):
+        return True
+    if len(smaller_core) == 2 and smaller_core.issubset(larger_core) and (same_stat or len(larger_core) <= 3):
+        return True
+
+    # 5c. High overlap on full substantive stems
+    shared_full = full1 & full2
+    union_full = full1 | full2
+    min_full_len = min(len(full1), len(full2))
+    if min_full_len >= 3 and len(shared_full) >= 3:
+        containment = len(shared_full) / float(min_full_len)
+        jaccard = len(shared_full) / float(len(union_full))
+        if containment >= 0.75 and (jaccard >= 0.55 or same_stat):
+            return True
+
+    return False
+
+
+def deduplicate_redundant_choices(
+    choices: List[Dict[str, Any]],
+    ignore_names: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Deduplicates exact and semantically redundant choices in a single pass,
+    preserving the higher-priority choice (e.g. `[⭐ STORY QUEST]` / `_priority_slot` / longer descriptive action)
+    in its original slot position.
+    """
+    if not choices:
+        return []
+    deduped: List[Dict[str, Any]] = []
+    for cand in choices:
+        if not isinstance(cand, dict):
+            continue
+        lbl = str(cand.get("label") or "").strip()
+        if not lbl:
+            continue
+        matched_idx = None
+        for idx, existing in enumerate(deduped):
+            if are_choices_semantically_redundant(existing, cand, ignore_names=ignore_names):
+                matched_idx = idx
+                break
+        if matched_idx is None:
+            deduped.append(cand)
+        else:
+            existing = deduped[matched_idx]
+            if _choice_dedup_priority_key(cand) > _choice_dedup_priority_key(existing):
+                winner = dict(cand)
+                loser = existing
+            else:
+                winner = dict(existing)
+                loser = cand
+            # Preserve verified quest / target metadata if winner lacked it
+            for k_meta in ("target_npc", "quest_id", "sub_obj_id", "stage_index", "contract_type"):
+                if not winner.get(k_meta) and loser.get(k_meta):
+                    winner[k_meta] = loser[k_meta]
+            for k_bool in ("is_quest_action", "is_story_quest", "is_climax_action", "_python_verified_quest", "_priority_slot"):
+                if loser.get(k_bool) and not winner.get(k_bool):
+                    winner[k_bool] = True
+            deduped[matched_idx] = winner
+    return deduped
+
 
 def _get_effective_first_name(name: str) -> str:
     tokens = [t.strip(".,'\"") for t in str(name).lower().split() if t.strip(".,'\"")]
@@ -399,6 +669,15 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
         or not is_mechanic_enabled(scenario, "tactical_combat")
     )
 
+    partners_list = []
+    if dialogue_partner:
+        raw_dp_items = dialogue_partner if isinstance(dialogue_partner, list) else [dialogue_partner]
+        for raw_dp in raw_dp_items:
+            for chunk in str(raw_dp).split(","):
+                for sp in chunk.split(" and "):
+                    if sp.strip():
+                        partners_list.append(sp.strip())
+
     cleaned = []
     if isinstance(choices, list):
         for c in choices[:25]:
@@ -419,9 +698,21 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 }
             elif not isinstance(c, dict):
                 continue
-            stat = c.get("stat", "AGI")
+
+            raw_label = c.get("label") or c.get("text") or c.get("action")
+            label_str = str(raw_label).strip() if raw_label is not None else ""
+            label_lower = label_str.lower()
+
+            stat = c.get("stat")
             if not isinstance(stat, str) or (stat not in STAT_COLUMN and stat not in ("ITEM", "NONE", "FREE")):
-                stat = "AGI"
+                if label_str.startswith("[") and "]" in label_str:
+                    prefix = label_str[1:label_str.index("]")].upper()
+                    if prefix in STAT_COLUMN or prefix in ("ITEM", "NONE", "FREE"):
+                        stat = prefix
+                    else:
+                        stat = "AGI"
+                else:
+                    stat = "AGI"
 
             req_val = c.get("requirement")
             if req_val is None:
@@ -431,22 +722,37 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
             mp_val = c.get("mp_cost", 0)
             mp_cost = (cls._safe_int(mp_val, default=0) if cls is not None and hasattr(cls, '_safe_int') else _safe_int(mp_val, default=0))
 
-            raw_label = c.get("label") or c.get("text") or c.get("action")
-            label_str = str(raw_label).strip() if raw_label is not None else ""
-            label_lower = label_str.lower()
-
             from game_engine.matching import matches_keyword_boundary
             is_party_recruit = (
                 c.get("intent") == "party_recruit"
-                or matches_keyword_boundary(label_lower, (
-                    "join your party", "join party", "join our party", "permanent companion",
-                    "join the party", "invite into party", "invite to party", "hire as a mercenary",
-                    "hire to join", "companion to travel", "travel with us as a companion", "hire as a companion",
-                    "recruit into party", "recruit to your party"
-                ))
+                or matches_keyword_boundary(label_lower, _RECRUIT_CHOICE_KEYWORDS)
             )
             if is_non_combat and is_party_recruit:
                 continue
+            t_npc_rec = str(c.get("target_npc") or "").strip()
+            if not t_npc_rec and partners_list:
+                for p_cand in partners_list:
+                    if p_cand and p_cand.lower() in label_lower:
+                        t_npc_rec = p_cand
+                        break
+                if not t_npc_rec and len(partners_list) == 1:
+                    t_npc_rec = partners_list[0]
+            if is_party_recruit and session_id:
+                try:
+                    import scenario_data as _sd_cc1
+                    if _sd_cc1.is_anomalous_incursions_scenario(scenario):
+                        from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag, TAG_CIVILIAN
+                        scene_ent_cc = next(
+                            (
+                                n for n in (current_npcs or [])
+                                if isinstance(n, dict) and t_npc_rec and str(n.get("name") or "").strip().lower() == t_npc_rec.lower()
+                            ),
+                            None,
+                        )
+                        if t_npc_rec and classify_anomalous_npc_tag(scene_ent_cc or t_npc_rec, session_id=session_id, scen_key=scenario) == TAG_CIVILIAN:
+                            continue
+                except Exception:
+                    pass
 
             has_climax_prefix = "⚡" in label_str or "[story climax]" in label_lower
             has_story_prefix = "⭐" in label_str or "[story quest]" in label_lower or "sq-" in str(c.get("quest_id", "")).lower()
@@ -454,6 +760,12 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
             clean_label_str = _strip_leading_emojis(label_str)
             if not clean_label_str or clean_label_str.lower() in ("act", "action", "choice", "none", "null"):
                 clean_label_str = getattr(cls, 'STAT_FALLBACK_LABELS', DEFAULT_STAT_FALLBACK_LABELS).get(stat, 'Take action')
+            elif is_party_recruit:
+                try:
+                    from mechanics.social.relationships import normalize_recruitment_choice_label
+                    clean_label_str = normalize_recruitment_choice_label(clean_label_str, scenario=scenario, target_npc=t_npc_rec)
+                except Exception:
+                    pass
 
             # Topic Embargo Filter:
             # If there's an active confidential appointment, filter out choices that leak the confidential topic
@@ -506,32 +818,58 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
             early_sub_intent = c.get("sub_intent") or (parsed_early.sub_target if parsed_early else "")
             early_target_npc = c.get("target_npc") or (parsed_early.target_entity if parsed_early else "")
 
-            cleaned.append({
+            _is_server_stamped = bool(
+                c.get("_server_stamped")
+                or c.get("_python_verified_quest")
+                or c.get("_priority_slot")
+            )
+            if _is_intimate_lbl:
+                _verified_quest = False
+            elif "_python_verified_quest" in c:
+                _verified_quest = bool(c.get("_python_verified_quest"))
+            elif _is_server_stamped or not session_id:
+                _verified_quest = bool(c.get("is_quest_action", False))
+            else:
+                _verified_quest = False
+
+            entry_dict = {
                 "label": clean_label_str[:190],
                 "stat": stat,
                 "requirement": max(0, min(20, requirement)),
                 "mp_cost": max(0, mp_cost),
+                "gold_spent": max(0, _safe_int(c.get("gold_spent", c.get("gold_cost", 0)), default=0) or 0),
+                "triggers_loot_roll": bool(c.get("triggers_loot_roll", False)),
                 "is_fallback": bool(c.get("is_fallback", False)),
-                "is_quest_action": False if _is_intimate_lbl else bool(c.get("is_quest_action", False) or has_climax_prefix or has_story_prefix or has_bounty_prefix),
-                "is_climax_action": False if _is_intimate_lbl else bool(c.get("is_climax_action", False) or has_climax_prefix),
-                "is_story_quest": False if _is_intimate_lbl else bool(c.get("is_story_quest", False) or has_story_prefix or has_climax_prefix),
+                "_server_stamped": bool(_is_server_stamped or _verified_quest),
+                "_python_verified_quest": _verified_quest,
+                "is_quest_action": _verified_quest,
+                "is_climax_action": bool(c.get("is_climax_action", False) and _verified_quest),
+                "is_premature_climax": bool(c.get("is_premature_climax", False) and _verified_quest),
+                "is_story_quest": bool(c.get("is_story_quest", False) and _verified_quest),
+                "breakthrough_leveraged": bool(c.get("breakthrough_leveraged", False)) if (_is_server_stamped or _verified_quest or not session_id) else False,
                 "intent": early_intent,
                 "sub_intent": early_sub_intent,
                 "target_npc": early_target_npc,
-                "quest_id": "" if _is_intimate_lbl else c.get("quest_id", ""),
-                "sub_obj_id": None if _is_intimate_lbl else c.get("sub_obj_id"),
-                "stage_index": None if _is_intimate_lbl else c.get("stage_index"),
-                "contract_type": "" if _is_intimate_lbl else c.get("contract_type", ""),
-            })
-
-    partners_list = []
-    if dialogue_partner:
-        raw_dp_items = dialogue_partner if isinstance(dialogue_partner, list) else [dialogue_partner]
-        for raw_dp in raw_dp_items:
-            for chunk in str(raw_dp).split(","):
-                for sp in chunk.split(" and "):
-                    if sp.strip():
-                        partners_list.append(sp.strip())
+                "ends_dialogue": bool(c.get("ends_dialogue", False)),
+                "dismisses_npc": bool(c.get("dismisses_npc", False)),
+                "target_node_id": str(c.get("target_node_id") or "") if (_is_server_stamped or not session_id) else "",
+                "target_location": str(c.get("target_location") or ""),
+                "quest_id": c.get("quest_id", "") if _verified_quest else "",
+                "sub_obj_id": c.get("sub_obj_id") if _verified_quest else None,
+                "_raw_sub_obj_id": c.get("sub_obj_id") if (_is_server_stamped or not session_id) else None,
+                "stage_index": c.get("stage_index") if _verified_quest else None,
+                "contract_type": c.get("contract_type", "") if _verified_quest else "",
+            }
+            for _extra_k in (
+                "hit_chance", "choice_type", "attack_type", "action_category",
+                "dual_wield", "stance", "label_detail", "spell_id", "combat_target",
+                "combat_tactical_archetype", "item_name", "item", "item_consumed",
+                "skip_minutes", "sleep_mode", "approach", "gold_cost", "dc_mod",
+                "_priority_slot", "clue_pair_ids", "is_phase2_choice",
+            ):
+                if _extra_k in c and c[_extra_k] is not None:
+                    entry_dict[_extra_k] = c[_extra_k]
+            cleaned.append(entry_dict)
 
     if not partners_list and session_id:
         try:
@@ -889,10 +1227,12 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 continue
 
             # 6. Filter out conversation initiation / greeting choices targeting the active dialogue partner
+            import namegen
             is_initiation = False
             for pn in partners_list:
                 p_low = pn.lower()
-                p_first = p_low.split()[0] if p_low else ""
+                p_toks = namegen.get_unique_person_tokens(pn, peer_names=partners_list, min_len=2) if pn else set()
+                p_variants = {p_low} | {t for t in p_toks if len(t) >= 2}
                 init_prefixes = (
                     "greet and talk with ", "greet and speak with ", "greet ", "approach ",
                     "start conversation with ", "initiate conversation with ", "introduce yourself to ",
@@ -902,15 +1242,20 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 for ip in init_prefixes:
                     if lbl.startswith(ip):
                         sub_rest = lbl[len(ip):].strip().rstrip(".")
-                        if (sub_rest == p_low or sub_rest == p_first or
-                            sub_rest.startswith(f"{p_low} ") or sub_rest.startswith(f"{p_first} ") or
-                            any(filler in sub_rest for filler in ("take a seat", "by the benches", "at the benches", "take a chair", "sit down"))):
+                        if (
+                            sub_rest in p_variants
+                            or any(sub_rest.startswith(f"{pv} ") for pv in p_variants)
+                            or any(filler in sub_rest for filler in ("take a seat", "by the benches", "at the benches", "take a chair", "sit down"))
+                        ):
                             if c.get("stat") in ("NONE", "FREE") or c.get("requirement", 0) <= 0 or any(kw in lbl for kw in ("take a seat", "greet", "approach", "by the benches")):
                                 is_initiation = True
                                 break
                 if is_initiation:
                     break
-                if any(kw in lbl for kw in (f"greet and talk with {p_low}", f"greet {p_low}", f"speak with {p_low}", f"talk to {p_low}", f"greet {p_first}")) and (c.get("stat") in ("NONE", "FREE") or c.get("requirement", 0) <= 0):
+                greet_phrases = [f"greet and talk with {p_low}", f"greet {p_low}", f"speak with {p_low}", f"talk to {p_low}"] + [
+                    f"greet {pv}" for pv in p_variants
+                ]
+                if any(kw in lbl for kw in greet_phrases) and (c.get("stat") in ("NONE", "FREE") or c.get("requirement", 0) <= 0):
                     if not is_exit:
                         is_initiation = True
                         break
@@ -1149,21 +1494,33 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 c for c in dialogue_filtered
                 if not (
                     c.get("intent") == "party_recruit"
-                    or matches_keyword_boundary(c.get("label", "").lower(), (
-                        "join your party", "join party", "join our party", "permanent companion",
-                        "join the party", "invite into party", "invite to party", "hire as a mercenary",
-                        "hire to join", "companion to travel", "travel with us as a companion", "hire as a companion",
-                        "recruit into party", "recruit to your party"
-                    ))
+                    or matches_keyword_boundary(c.get("label", "").lower(), _RECRUIT_CHOICE_KEYWORDS)
                 )
             ]
         elif not is_active_intimate and not is_non_combat and is_mechanic_enabled(scenario, "tactical_combat") and session_id:
+            import scenario_data as _sd_cc2
+            from mechanics.social.relationships import get_scenario_recruitment_phrasing
+            is_anom_cc = _sd_cc2.is_anomalous_incursions_scenario(scenario)
             for p_name in partners_list:
-                if p_name and db.get_recruitment_cooldown(session_id, p_name) > 0:
+                if not p_name:
+                    continue
+                is_civ_partner = False
+                if is_anom_cc:
+                    try:
+                        from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag, TAG_CIVILIAN
+                        if classify_anomalous_npc_tag(p_name, session_id=session_id, scen_key=scenario) == TAG_CIVILIAN:
+                            is_civ_partner = True
+                    except Exception:
+                        pass
+                if is_civ_partner or db.get_recruitment_cooldown(session_id, p_name) > 0:
                     dialogue_filtered = [
                         c for c in dialogue_filtered
                         if not (
-                            any(kw in c.get("label", "").lower() for kw in ("join your party", "join party", "recruit", "join our party", "permanent companion", "travel with us"))
+                            (
+                                c.get("intent") == "party_recruit"
+                                or any(kw in c.get("label", "").lower() for kw in _RECRUIT_CHOICE_KEYWORDS)
+                                or "recruit" in c.get("label", "").lower()
+                            )
                             and (p_name.lower() in c.get("label", "").lower() or len(partners_list) == 1)
                         )
                     ]
@@ -1177,7 +1534,9 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 lore_people = db.get_lorebook(session_id).get("person", []) if session_id else []
 
                 has_recruit = any(
-                    any(kw in c.get("label", "").lower() for kw in ("join your party", "join party", "recruit", "join our party", "permanent companion", "travel with us"))
+                    c.get("intent") == "party_recruit"
+                    or any(kw in c.get("label", "").lower() for kw in _RECRUIT_CHOICE_KEYWORDS)
+                    or "recruit" in c.get("label", "").lower()
                     for c in dialogue_filtered
                 )
                 if not has_recruit:
@@ -1188,13 +1547,59 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                         t_role = str(lore_ent.get("role") or lore_ent.get("occupation") or lore_ent.get("description") or "").lower()
                         if any(m in t_role for m in ("merchant", "shopkeeper", "vendor", "apothecary", "peddler", "trader")):
                             continue
+                        if is_anom_cc:
+                            try:
+                                from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag, TAG_CIVILIAN
+                                from mechanics.social.agent_roster import evaluate_anomalous_companion_recruitment
+                                if classify_anomalous_npc_tag(lore_ent or p_name, session_id=session_id, scen_key=scenario) == TAG_CIVILIAN:
+                                    continue
+                                lead_uid_cc = (char.get("user_id") if isinstance(char, dict) else 0) or (sess.get("host_user_id") if isinstance(sess, dict) else 0)
+                                c_rec_cc = db.get_contact(session_id, p_name)
+                                aff_cc = int((c_rec_cc or {}).get("relationship_score", 0) or 0)
+                                lvl_cc = int((char.get("level", 1) if isinstance(char, dict) else 1) or 1)
+                                cand_cc = dict(lore_ent or {})
+                                if isinstance(c_rec_cc, dict):
+                                    cand_cc.update(c_rec_cc)
+                                cand_cc["name"] = p_name
+                                eval_cc = evaluate_anomalous_companion_recruitment(sess or {"id": session_id, "scenario": scenario}, lead_uid_cc, cand_cc, aff_cc, lvl_cc)
+                                if not eval_cc.get("allowed"):
+                                    continue
+                                cost_cc = int(eval_cc.get("cost", 0) or 0)
+                                if cost_cc > 0:
+                                    rec_label = f"Hire Special Agent {p_name} onto your field team ({cost_cc}G)"
+                                    rec_stat, rec_req = "NONE", 0
+                                else:
+                                    rec_label = f"Ask Special Agent {p_name} to partner up and join your field team"
+                                    rec_stat, rec_req = "NONE", 0
+                                cd = db.get_recruitment_cooldown(session_id, p_name)
+                                if cd == 0:
+                                    recruit_choice = {
+                                        "label": rec_label,
+                                        "stat": rec_stat,
+                                        "requirement": rec_req,
+                                        "mp_cost": 0,
+                                        "intent": "party_recruit",
+                                        "target_npc": p_name,
+                                        "is_fallback": False,
+                                    }
+                                    if len(dialogue_filtered) > 1 and dialogue_filtered[-1].get("stat") == "NONE":
+                                        dialogue_filtered.insert(len(dialogue_filtered) - 1, recruit_choice)
+                                    else:
+                                        dialogue_filtered.append(recruit_choice)
+                                    break
+                                continue
+                            except Exception:
+                                continue
                         cd = db.get_recruitment_cooldown(session_id, p_name)
                         if cd == 0:
+                            rec_phrasing = get_scenario_recruitment_phrasing(scenario, p_name)
                             recruit_choice = {
-                                "label": f"Invite {p_name} to join your party as a permanent companion",
+                                "label": rec_phrasing["choice_label"],
                                 "stat": "CHA",
                                 "requirement": 6,
                                 "mp_cost": 0,
+                                "intent": "party_recruit",
+                                "target_npc": p_name,
                                 "is_fallback": False,
                             }
                             # Insert right before the exit choice if one exists, otherwise append
@@ -1400,16 +1805,36 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
         except Exception:
             pass
 
-        known_absent_names = set()
+        import namegen
+        present_full_names = {
+            tok for tok in present_npc_tokens if " " in tok
+        } | {str(dp or "").strip().lower() for dp in (partners_list or []) if str(dp or "").strip()}
         try:
-            for c_rec in db.get_contacts(session_id):
-                c_nm = str(c_rec.get("name") or c_rec.get("npc_id") or "").strip().lower()
-                if c_nm and c_nm not in present_npc_tokens:
-                    first_c = c_nm.split()[0] if c_nm else ""
-                    if first_c not in present_npc_tokens:
-                        known_absent_names.add(c_nm)
+            all_session_contacts = db.get_contacts(session_id)
         except Exception:
-            pass
+            all_session_contacts = []
+        all_choice_peer_names = list(present_full_names) + [
+            str(cr.get("name") or "").strip() for cr in all_session_contacts if cr.get("name")
+        ]
+        present_disambig_tokens: set[str] = set()
+        for pfn in present_full_names:
+            present_disambig_tokens |= namegen.get_unique_person_tokens(pfn, peer_names=all_choice_peer_names, min_len=2)
+        for s_tok in present_npc_tokens:
+            if " " not in s_tok and s_tok.rstrip(".") not in namegen.NAME_PARTICLES_AND_HONORIFICS:
+                # Single-word present NPC (e.g. fantasy mononym)
+                if not any(s_tok in pfn.split() for pfn in present_full_names):
+                    present_disambig_tokens.add(s_tok)
+
+        known_absent_names = set()
+        absent_disambig_map: dict[str, set[str]] = {}
+        for c_rec in all_session_contacts:
+            c_nm = str(c_rec.get("name") or c_rec.get("npc_id") or "").strip().lower()
+            if not c_nm or c_nm in present_full_names or c_nm in present_disambig_tokens:
+                continue
+            c_toks = namegen.get_unique_person_tokens(c_nm, peer_names=all_choice_peer_names, min_len=3)
+            if not (c_toks & present_disambig_tokens):
+                known_absent_names.add(c_nm)
+                absent_disambig_map[c_nm] = c_toks
 
         if known_absent_names:
             filtered_absent_choices = []
@@ -1420,14 +1845,14 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 if not is_phone and not is_travel_back:
                     targets_absent = False
                     for an in known_absent_names:
-                        an_first = an.split()[0] if an else ""
                         an_pats = [
                             rf'\b(?:glance|look|turn|wink|smile|nod|step|walk|reach|listen|talk|speak|converse|chat|greet|approach|meet|interview|interrogate|tell|ask|signal)\s+(?:at|to|toward|with)?\s*{re.escape(an)}\b',
                             rf'\b(?:hand|give|offer|pass|show)\s+.*?\bto\s+{re.escape(an)}\b',
                         ]
-                        if len(an_first) >= 3 and an_first not in ("the", "and", "one", "two", "red", "old", "new", "man", "guy", "boy", "her", "she", "him", "his", "well", "will", "can", "may"):
-                            an_pats.append(rf'\b(?:glance|look|turn|wink|smile|nod|step|walk|reach|listen|talk|speak|converse|chat|greet|approach|meet|interview|interrogate|tell|ask|signal)\s+(?:at|to|toward|with)?\s*{re.escape(an_first)}\b')
-                            an_pats.append(rf'\b(?:hand|give|offer|pass|show)\s+.*?\bto\s+{re.escape(an_first)}\b')
+                        for an_tok in absent_disambig_map.get(an, set()):
+                            if an_tok != an and len(an_tok) >= 3 and an_tok not in ("the", "and", "one", "two", "red", "old", "new", "man", "guy", "boy", "her", "she", "him", "his", "well", "will", "can", "may"):
+                                an_pats.append(rf'\b(?:glance|look|turn|wink|smile|nod|step|walk|reach|listen|talk|speak|converse|chat|greet|approach|meet|interview|interrogate|tell|ask|signal)\s+(?:at|to|toward|with)?\s*{re.escape(an_tok)}\b')
+                                an_pats.append(rf'\b(?:hand|give|offer|pass|show)\s+.*?\bto\s+{re.escape(an_tok)}\b')
 
                         for pat in an_pats:
                             if re.search(pat, lbl):
@@ -1479,7 +1904,8 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 for c in cleaned:
                     raw_lbl = c.get("label", "").lower()
                     # Prune tagged actions matching a completed sub-objective ID
-                    c_sub_id = str(c.get("sub_obj_id", ""))
+                    raw_sub_id = c.get("sub_obj_id") if c.get("sub_obj_id") is not None else c.get("_raw_sub_obj_id")
+                    c_sub_id = str(raw_sub_id) if raw_sub_id is not None else ""
                     if c_sub_id and c_sub_id in completed_sub_ids:
                         continue
 
@@ -1496,8 +1922,9 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                     # Prune in-situ action choices matching completed sub-objective action phrases
                     targets_completed_action = False
                     for phrase in completed_action_phrases:
-                        p_keywords = [w for w in re.findall(r"\b[a-z]{4,}\b", phrase) if w not in stopwords]
-                        if len(p_keywords) >= 2 and all(kw in raw_lbl for kw in p_keywords[:3]):
+                        p_keywords = [w for w in re.findall(r"\b[a-z]{4,}\b", phrase) if w not in stopwords and w != "left"]
+                        matched_kws = [kw for kw in p_keywords if kw in raw_lbl]
+                        if len(p_keywords) >= 2 and (len(matched_kws) >= 3 or len(matched_kws) == len(p_keywords)):
                             targets_completed_action = True
                             break
                     if targets_completed_action:
@@ -1509,6 +1936,9 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                     cleaned = filtered_choices
         except Exception:
             pass
+    for _c_tmp in cleaned:
+        if isinstance(_c_tmp, dict):
+            _c_tmp.pop("_raw_sub_obj_id", None)
 
     # 6.5. Unowned Item Offering & Inventory Possession Guardrail:
     # Reject choices proposing to give, offer, share, hand over, or slide items
@@ -1531,6 +1961,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
     cleaned = filtered_inventory_choices
 
     # 7. Final Choice Deduplication & Speak-Choice Consolidation Pass:
+    dedup_ignore_names = list(partners_list or []) + [game_engine._get_npc_name(n) for n in (current_npcs or []) if n]
     if cleaned:
         unique_choices = []
         seen_labels = set()
@@ -1553,25 +1984,50 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
 
             seen_labels.add(lbl_norm)
             unique_choices.append(c)
-        cleaned = unique_choices
+        cleaned = deduplicate_redundant_choices(unique_choices, ignore_names=dedup_ignore_names)
 
-    # 8. Nighttime / Bedtime Sleep Action Auto-Injector (Open Exploration only):
+    # 8. Nighttime / Bedtime Sleep Action Gating & Auto-Injection (Open Exploration only):
     if session_id and not partners_list:
         try:
-            from mechanics.system.time_engine import is_sleep_time, is_sleep_action, format_clock
+            from mechanics.system.time_engine import (
+                is_sleep_time,
+                is_sleep_action,
+                is_nap_action,
+                format_clock,
+                get_location_sleep_context,
+            )
             from mechanics.world.world_schedule import get_scenario_wake_minute
             _, curr_min, _ = db.get_session_time(session_id)
-            if is_sleep_time(curr_min, scen_key=scenario):
-                has_sleep = any(is_sleep_action(c.get("label", "")) for c in cleaned)
-                if not has_sleep:
-                    wake_clock = format_clock(get_scenario_wake_minute(scenario))
-                    cleaned.append({
-                        "label": f"🛏️ [Rest] Sleep until morning ({wake_clock} AM)",
-                        "stat": "NONE",
-                        "requirement": 0,
-                        "mp_cost": 0,
-                        "is_fallback": False,
-                    })
+            sleep_ctx = get_location_sleep_context(location, scenario=scenario, session_id=session_id)
+
+            if not sleep_ctx.get("can_sleep", False):
+                # Prune illegal sleep/nap choices when no bed, couch, or camp is available in modern/urban settings
+                cleaned = [
+                    c for c in cleaned
+                    if not is_sleep_action(c.get("label", ""))
+                    and not is_nap_action(c.get("label", ""))[0]
+                    and c.get("intent") != "rest_sleep"
+                ]
+            else:
+                if is_sleep_time(curr_min, scen_key=scenario):
+                    has_sleep = any(is_sleep_action(c.get("label", "")) for c in cleaned)
+                    if not has_sleep:
+                        wake_clock = format_clock(get_scenario_wake_minute(scenario))
+                        surf = sleep_ctx.get("surface", "bed")
+                        if surf == "bed":
+                            lbl = f"🛏️ [Rest] Sleep in bed until morning ({wake_clock} AM)"
+                        elif surf == "couch":
+                            lbl = f"🛋️ [Rest] Sleep on sofa until morning ({wake_clock} AM)"
+                        else:
+                            lbl = f"🏕️ [Rest] Camp and sleep until morning ({wake_clock} AM)"
+                        cleaned.append({
+                            "label": lbl,
+                            "stat": "NONE",
+                            "requirement": 0,
+                            "mp_cost": 0,
+                            "is_fallback": False,
+                            "intent": "rest_sleep",
+                        })
         except Exception:
             pass
 
@@ -1593,7 +2049,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 for tc in tagged:
                     if isinstance(tc, dict) and tc.get("label"):
                         tc["label"] = _strip_leading_emojis(tc["label"])[:190]
-                cleaned = tagged
+                cleaned = deduplicate_redundant_choices(tagged, ignore_names=dedup_ignore_names)
         except Exception:
             pass
 
@@ -1639,6 +2095,33 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                     filtered_departed.append(c)
             cleaned = filtered_departed
 
+    partner_profile = None
+    if session_id and partners_list and not is_active_intimate:
+        try:
+            from mechanics.social.conversation_choices import (
+                get_npc_departure_states,
+                is_choice_allowed_for_partner_profile,
+                resolve_partner_conversation_profile,
+            )
+            sess_obj = db.get_session(session_id) or {"id": session_id, "scenario": scenario, "current_location": location}
+            partner_profile = resolve_partner_conversation_profile(
+                sess_obj,
+                partners_list[0],
+                party=[(char, [])] if isinstance(char, dict) else None,
+                current_npcs=current_npcs,
+            )
+            dep_st = get_npc_departure_states(sess_obj)
+            allow_stay = any(
+                dep_st.get(re.sub(r"\s+", " ", str(p).strip().lower()), {}).get("stage") in ("stage_1_warning", "stage_2_ultimatum")
+                for p in partners_list
+            )
+            cleaned = [
+                c for c in cleaned
+                if is_choice_allowed_for_partner_profile(c, partner_profile, session=sess_obj, allow_convince_stay=allow_stay)
+            ]
+        except Exception:
+            partner_profile = None
+
     in_dlg = bool(partners_list)
     substantive_now = [c for c in cleaned if not is_exempt_free_action(c, in_dialogue_mode=in_dlg)]
     exit_now = [c for c in cleaned if is_exempt_free_action(c, in_dialogue_mode=in_dlg)]
@@ -1679,6 +2162,9 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                     present_bystanders=bystanders,
                     location=location,
                     char=char,
+                    affinity_score=int(partner_profile["score"]) if partner_profile else 0,
+                    relationship_track=str(partner_profile["track"]) if partner_profile else "platonic",
+                    is_private_meetup=bool(partner_profile["is_private_meetup"]) if partner_profile else False,
                 )
             for fb in dialogue_fallbacks:
                 fb_label = str(fb.get("label", "")).strip().lower()
@@ -1713,13 +2199,37 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
             c for c in cleaned
             if not (
                 c.get("intent") == "party_recruit"
-                or matches_keyword_boundary(c.get("label", "").lower(), (
-                    "join your party", "join party", "join our party", "permanent companion",
-                    "join the party", "invite into party", "invite to party", "hire as a mercenary",
-                    "hire to join", "companion to travel", "travel with us as a companion", "hire as a companion",
-                ))
+                or matches_keyword_boundary(c.get("label", "").lower(), _RECRUIT_CHOICE_KEYWORDS)
             )
         ]
+    elif session_id:
+        try:
+            import scenario_data as _sd_cc3
+            if _sd_cc3.is_anomalous_incursions_scenario(scenario):
+                from game_engine.matching import matches_keyword_boundary
+                from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag, TAG_CIVILIAN
+                filtered_anom_rec = []
+                for c in cleaned:
+                    c_lbl_low = str(c.get("label", "") if isinstance(c, dict) else "").lower()
+                    is_rec_c = isinstance(c, dict) and (
+                        c.get("intent") == "party_recruit"
+                        or matches_keyword_boundary(c_lbl_low, _RECRUIT_CHOICE_KEYWORDS)
+                    )
+                    if is_rec_c:
+                        t_n = str(c.get("target_npc") or "").strip()
+                        if not t_n and partners_list:
+                            for p_cand in partners_list:
+                                if p_cand and p_cand.lower() in c_lbl_low:
+                                    t_n = p_cand
+                                    break
+                            if not t_n and len(partners_list) == 1:
+                                t_n = partners_list[0]
+                        if t_n and classify_anomalous_npc_tag(t_n, session_id=session_id, scen_key=scenario) == TAG_CIVILIAN:
+                            continue
+                    filtered_anom_rec.append(c)
+                cleaned = filtered_anom_rec
+        except Exception:
+            pass
     if session_id and partners_list:
         try:
             for p in partners_list:
@@ -1819,14 +2329,37 @@ def build_hybrid_turn_choices(
             monster=active_monsters[0],
             location=eff_loc or "area",
             scenario=scen_key,
+            session=session,
         )
-        code_choices = (
-            [a["label"] for a in cat.get("attacks", [])]
-            + [m["label"] for m in cat.get("magic", [])]
-            + [t["label"] for t in cat.get("tactics", [])]
-        )
-        if cat.get("flee"):
-            code_choices.append(cat["flee"]["label"])
+        enemy_target_name = str(active_monsters[0].get("name") or "Enemy").strip() if isinstance(active_monsters[0], dict) else "Enemy"
+        code_choices = []
+        for a in cat.get("attacks", []):
+            if isinstance(a, dict):
+                d = dict(a)
+                d.setdefault("sub_intent", "combat_attack")
+                d.setdefault("combat_target", enemy_target_name)
+                d["_server_stamped"] = True
+                code_choices.append(d)
+        for m in cat.get("magic", []):
+            if isinstance(m, dict):
+                d = dict(m)
+                d.setdefault("sub_intent", "combat_magic")
+                d.setdefault("combat_target", enemy_target_name)
+                d["_server_stamped"] = True
+                code_choices.append(d)
+        for t in cat.get("tactics", []):
+            if isinstance(t, dict):
+                d = dict(t)
+                d.setdefault("sub_intent", "combat_tactic")
+                d.setdefault("combat_target", enemy_target_name)
+                d["_server_stamped"] = True
+                code_choices.append(d)
+        if isinstance(cat.get("flee"), dict):
+            f_d = dict(cat["flee"])
+            f_d.setdefault("sub_intent", "combat_flee")
+            f_d.setdefault("combat_target", enemy_target_name)
+            f_d["_server_stamped"] = True
+            code_choices.append(f_d)
         if code_choices:
             return clean_choices_impl(
                 None,
@@ -1904,11 +2437,35 @@ def build_hybrid_turn_choices(
     if in_active_intimate_turn:
         return cleaned[:5]
 
+    # 3b. Guarantee Quest / Story Climax Action Choices when at an active waypoint in live session
+    if session_id and eff_loc and not any(isinstance(c, dict) and c.get("is_quest_action") for c in cleaned):
+        try:
+            from mechanics.world.waypoints import tag_and_enrich_quest_choices
+            tagged_fb = tag_and_enrich_quest_choices(
+                cleaned,
+                session_id,
+                eff_loc,
+                scen_key=scen_key,
+                char=lead_char,
+                dialogue_partner=new_partners,
+                current_npcs=eff_npcs,
+                allow_fallback=True,
+            )
+            if tagged_fb:
+                for tc in tagged_fb:
+                    if isinstance(tc, dict) and tc.get("label"):
+                        tc["label"] = _strip_leading_emojis(tc["label"])[:190]
+                cleaned = deduplicate_redundant_choices(tagged_fb)
+        except Exception:
+            pass
+
     # 4. Priority Engine Buttons (up to 2 priority slots)
     priority_buttons: list[dict] = []
     for rc in (raw_choices or []):
         if isinstance(rc, dict) and rc.get("_priority_slot") and len(priority_buttons) < 2:
-            priority_buttons.append(dict(rc))
+            d_rc = dict(rc)
+            d_rc["_server_stamped"] = True
+            priority_buttons.append(d_rc)
 
     def _to_choice_dict(item: Any, default_stat: str = "NONE", default_req: int = 0) -> dict:
         if hasattr(item, "to_dict"):
@@ -1921,16 +2478,18 @@ def build_hybrid_turn_choices(
         d.setdefault("requirement", default_req)
         d.setdefault("mp_cost", 0)
         d["_priority_slot"] = True
+        d["_server_stamped"] = True
         return d
 
     active_gate = stage_info.get("access_gate", {}) if isinstance(stage_info, dict) else {}
-    if active_gate.get("gated") and active_gate.get("barrier_choices"):
+    has_access_barrier = bool(active_gate.get("gated") and active_gate.get("barrier_choices"))
+    if has_access_barrier:
         for bc in active_gate["barrier_choices"][:2]:
             priority_buttons.append(_to_choice_dict(bc))
     else:
-        if schedule_transition_choice is not None:
+        if schedule_transition_choice is not None and not in_active_dialogue_turn:
             priority_buttons.append(_to_choice_dict(schedule_transition_choice, "NONE", 0))
-        if schedule_stay_choice is not None and len(priority_buttons) < 2:
+        if schedule_stay_choice is not None and not in_active_dialogue_turn and len(priority_buttons) < 2:
             priority_buttons.append(_to_choice_dict(schedule_stay_choice, "CHA", 11))
         if new_partners and session_id and eff_node_id and len(priority_buttons) < 2:
             try:
@@ -1940,6 +2499,48 @@ def build_hybrid_turn_choices(
                     priority_buttons.insert(0, _to_choice_dict(priv_choice, "NONE", 0))
             except Exception:
                 pass
+
+    # 4b. Caseboard Deductive Synthesis Choice ([🧩 Synthesize Leads]) when corroborating unconsumed pair exists (D18)
+    if session_id and not in_active_dialogue_turn and len(priority_buttons) < 2:
+        try:
+            attempted_deduce_this_turn = any(
+                isinstance(a, dict) and str(a.get("sub_intent") or "").lower() == "deduce_clues"
+                for a in (actions or [])
+            )
+            if not attempted_deduce_this_turn:
+                from mechanics.narrative.clues import evaluate_clue_deduction
+                open_clues = [
+                    c for c in (db.get_session_clues(session_id, is_verified=0) or [])
+                    if isinstance(c, dict) and not c.get("is_consumed") and c.get("category") != "deduction"
+                ]
+                if len(open_clues) >= 2:
+                    found_pair = None
+                    for i in range(len(open_clues)):
+                        for j in range(i + 1, len(open_clues)):
+                            ca, cb = open_clues[i], open_clues[j]
+                            is_valid, _, _ = evaluate_clue_deduction(ca, cb, scen_key=scen_key)
+                            if is_valid:
+                                found_pair = (ca, cb)
+                                break
+                        if found_pair:
+                            break
+                    if found_pair:
+                        ca, cb = found_pair
+                        t_a = str(ca.get("title") or "Lead A")[:35]
+                        t_b = str(cb.get("title") or "Lead B")[:35]
+                        priority_buttons.append({
+                            "label": f"🧩 [Synthesize Leads] Cross-reference '{t_a}' & '{t_b}'",
+                            "stat": "INT",
+                            "requirement": 6,
+                            "mp_cost": 0,
+                            "intent": "investigate_clue",
+                            "sub_intent": "deduce_clues",
+                            "clue_pair_ids": [ca["id"], cb["id"]],
+                            "_priority_slot": True,
+                            "_server_stamped": True,
+                        })
+        except Exception:
+            pass
 
     # Smartphone Contact Request Priority Button (when in active dialogue with eligible non-contact peer)
     from mechanics.system.phone import scenario_has_smartphone
@@ -1958,13 +2559,14 @@ def build_hybrid_turn_choices(
                 p_lower = partner.lower().strip()
                 p_first = p_lower.split()[0] if p_lower else ""
 
+                existing_c = db.get_contact(session_id, partner) if session_id else None
+                b_info_c = (existing_c.get("basic_info") or {}) if isinstance(existing_c, dict) and isinstance(existing_c.get("basic_info"), dict) else {}
                 lore_ent = next((p for p in lore_people if p.get("name", "").lower() == p_lower), {})
-                t_role = str(lore_ent.get("role") or lore_ent.get("occupation") or "").lower()
-                t_desc = str(lore_ent.get("description") or "").lower()
+                t_role = str(lore_ent.get("role") or lore_ent.get("occupation") or b_info_c.get("role") or b_info_c.get("occupation") or "").lower()
+                t_desc = str(lore_ent.get("description") or b_info_c.get("description") or "").lower()
                 if not is_contact_eligible(name=partner, role=t_role, description=t_desc, scenario=scen_key):
                     continue
-                existing_c = db.get_contact(session_id, partner) if session_id else None
-                if is_unlocked_contact(existing_c, party_names_lower) or p_lower in party_names_lower:
+                if is_unlocked_contact(existing_c) or p_lower in party_names_lower:
                     continue
 
                 # Check if contact request was attempted during the current turn
@@ -2021,7 +2623,7 @@ def build_hybrid_turn_choices(
                         and (p_lower in str(c.get("label", "") if isinstance(c, dict) else c).lower() or (p_first and p_first in str(c.get("label", "") if isinstance(c, dict) else c).lower()))
                         for c in (priority_buttons + cleaned)
                     )
-                    if not already_has and len(priority_buttons) < 2:
+                    if not already_has:
                         dc = calculate_contact_exchange_dc(existing_c or lore_ent, scenario=scen_key)
                         priority_buttons.append({
                             "label": f"📱 Ask for {partner}'s Phone Number / Contact Info",
@@ -2035,31 +2637,54 @@ def build_hybrid_turn_choices(
         except Exception:
             pass
 
-    # Merge priority buttons ahead of cleaned choices (deduplicating by label)
-    seen_labels = set()
-    merged_choices: list[dict] = []
-    for pc in priority_buttons:
-        if len(merged_choices) >= 2:
-            break
-        lbl_k = str(pc.get("label", "")).strip().lower()
-        if lbl_k and lbl_k not in seen_labels:
+    # 4c. Active Non-Intimate Conversation -> 3-Band Architecture (Band 1 Checks + Band 2 Social + Band 3 Pinned Leave)
+    if in_active_dialogue_turn and not in_active_intimate_turn and not has_access_barrier:
+        from mechanics.social.conversation_choices import enforce_conversation_choice_bands, pin_dialogue_exit_last
+        sess_for_bands = dict(session)
+        if eff_loc:
+            sess_for_bands["current_location"] = eff_loc
+        if eff_node_id:
+            sess_for_bands["current_node_id"] = eff_node_id
+        merged_choices = enforce_conversation_choice_bands(
+            cleaned_choices=cleaned,
+            session=sess_for_bands,
+            partners=new_partners,
+            party=party,
+            current_npcs=eff_npcs,
+            priority_buttons=priority_buttons,
+            actions=actions,
+        )
+    else:
+        # Merge priority buttons ahead of cleaned choices (deduplicating by label & semantic overlap)
+        seen_labels = set()
+        merged_choices = []
+        for pc in priority_buttons:
+            if len(merged_choices) >= 2:
+                break
+            lbl_k = str(pc.get("label", "")).strip().lower()
+            if lbl_k and lbl_k not in seen_labels:
+                seen_labels.add(lbl_k)
+                pc["_priority_slot"] = True
+                pc["_server_stamped"] = True
+                merged_choices.append(pc)
+
+        for cc in cleaned:
+            if not isinstance(cc, dict):
+                continue
+            lbl_k = str(cc.get("label", "")).strip().lower()
+            if not lbl_k or lbl_k in seen_labels:
+                continue
+            if carrying_tether and any(w in lbl_k for w in ("attack", "strike")):
+                continue
             seen_labels.add(lbl_k)
-            pc["_priority_slot"] = True
-            merged_choices.append(pc)
+            merged_choices.append(cc)
 
-    for cc in cleaned:
-        if not isinstance(cc, dict):
-            continue
-        lbl_k = str(cc.get("label", "")).strip().lower()
-        if not lbl_k or lbl_k in seen_labels:
-            continue
-        if carrying_tether and any(w in lbl_k for w in ("attack", "strike")):
-            continue
-        seen_labels.add(lbl_k)
-        merged_choices.append(cc)
-
-    # Cap core choices to 5 before appending utility free actions (Redress / Carrying / Observe)
-    merged_choices = merged_choices[:5]
+        merged_choices = deduplicate_redundant_choices(
+            merged_choices,
+            ignore_names=list(new_partners or []) + [game_engine._get_npc_name(n) for n in (eff_npcs or []) if n],
+        )
+        # Cap core choices to 5 before appending utility free actions (Redress / Carrying / Observe)
+        merged_choices = merged_choices[:5]
 
     # 5. Utility Free Actions (Redress, Put Down Burden, Open Exploration Observe)
     for entry in (party or []):
@@ -2079,6 +2704,9 @@ def build_hybrid_turn_choices(
                         "stat": "FREE",
                         "requirement": 0,
                         "mp_cost": 0,
+                        "intent": "general_action",
+                        "sub_intent": "redress",
+                        "_server_stamped": True,
                     })
 
     if carrying_tether:
@@ -2087,6 +2715,8 @@ def build_hybrid_turn_choices(
             "stat": "FREE",
             "requirement": 0,
             "mp_cost": 0,
+            "intent": "general_action",
+            "_server_stamped": True,
         })
 
     if not in_active_dialogue_turn and not in_active_intimate_turn:
@@ -2096,6 +2726,11 @@ def build_hybrid_turn_choices(
                 "stat": "FREE",
                 "requirement": 0,
                 "mp_cost": 0,
+                "intent": "area_scout",
+                "_server_stamped": True,
             })
+    elif in_active_dialogue_turn and not in_active_intimate_turn and not has_access_barrier:
+        from mechanics.social.conversation_choices import pin_dialogue_exit_last
+        merged_choices = pin_dialogue_exit_last(merged_choices, new_partners, max_total=8)
 
     return merged_choices

@@ -2,8 +2,9 @@ from __future__ import annotations
 """
 Social graph connections, profile lookup, friend request resolution, and peer discovery for Hikayat.
 """
-import random
 import json
+import random
+import re
 import db
 from skill_check import resolve_check
 
@@ -196,12 +197,13 @@ def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dic
     role = target_rec.get("role", "Student")
     desc = target_rec.get("personality_summary", "")
 
-    # Check eligibility (faculty/staff/adults cannot be contacts in high school scenarios)
+    # Check eligibility (faculty/staff/adult citizens cannot be contacts in high school scenarios)
     from mechanics import relationships
     grade_val = target_rec.get("grade", "")
-    if str(grade_val).strip().lower() == "faculty":
+    grade_low = str(grade_val).strip().lower()
+    if grade_low in ("faculty", "citizen"):
         is_eligible = False
-    elif str(grade_val).strip().lower() in ("freshman", "sophomore", "junior", "senior", "grade 9", "grade 10", "grade 11", "grade 12"):
+    elif grade_low in ("freshman", "sophomore", "junior", "senior", "youth peer", "grade 9", "grade 10", "grade 11", "grade 12"):
         is_eligible = True
     else:
         is_eligible = relationships.is_contact_eligible(
@@ -217,16 +219,11 @@ def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dic
     party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
     is_connected = bool(existing_contact and is_unlocked_contact(existing_contact, party_names))
 
-    # Check cooldown
+    # Check cooldown (keyed strictly by npc_id or exact canonical full name to prevent shared-surname / honorific collisions)
     state = db.get_phone_social_state(session_id) or {}
     cds = state.get("friend_request_cooldowns", {})
-    entry = cds.get(contact_npc_id) or cds.get(name.lower().strip())
-    clean_first = name.lower().strip().split()[0] if name else ""
-    if not entry and clean_first and len(clean_first) >= 3:
-        for k, v in cds.items():
-            if k == clean_first or k.startswith(clean_first) or clean_first in k:
-                entry = v
-                break
+    clean_full = name.lower().strip()
+    entry = cds.get(contact_npc_id) or cds.get(clean_full)
 
     s_row = db.get_session(session_id) if session_id else None
     curr_day = int((session.get("current_day") if session else None) or (s_row.get("current_day") if s_row else 1) or 1)
@@ -248,7 +245,12 @@ def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dic
 
     ties = get_mutual_friends_and_ties(session_id, user_id, target_rec)
 
-    clean_handle = "@" + name.lower().replace(" ", "_").replace(".", "").replace("'", "")[:14]
+    import namegen
+    first_h, last_h = namegen.extract_first_and_last_name(name)
+    raw_handle_core = f"{first_h}_{last_h}" if (first_h and last_h) else (first_h or last_h or name)
+    slug_core = re.sub(r"[^a-z0-9_]", "", raw_handle_core.lower().replace(" ", "_").replace("-", "_"))
+    slug_core = re.sub(r"_+", "_", slug_core).strip("_")[:16]
+    clean_handle = "@" + (slug_core or "student")
     if "president" in role.lower():
         clean_handle += "_sc"
     elif "captain" in role.lower():
@@ -290,7 +292,7 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
         return {
             "accepted": False,
             "error": "restricted",
-            "message": f"🔒 **Account Restricted:** Faculty and staff accounts cannot be added to student friend circles under Academy digital policy."
+            "message": "🔒 **Account Restricted:** Faculty, staff, and adult town accounts cannot be added to student friend circles under Academy digital policy."
         }
 
     if profile.get("is_already_contact"):
@@ -300,16 +302,10 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
             "message": f"👥 **{name}** is already in your Contacts!"
         }
 
-    # Check cooldown
+    # Check cooldown (keyed strictly by npc_id or exact canonical full name)
     state = db.get_phone_social_state(session_id) or {}
     cds = state.setdefault("friend_request_cooldowns", {})
     entry = cds.get(npc_id) or cds.get(name.lower().strip())
-    clean_first = name.lower().strip().split()[0] if name else ""
-    if not entry and clean_first and len(clean_first) >= 3:
-        for k, v in cds.items():
-            if k == clean_first or k.startswith(clean_first) or clean_first in k:
-                entry = v
-                break
 
     s_row = db.get_session(session_id) if session_id else None
     curr_day = int((session.get("current_day") if session else None) or (s_row.get("current_day") if s_row else 1) or 1)
@@ -390,6 +386,7 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
                         b_info = {}
                 b_info["contact_added"] = True
                 b_info["is_contact"] = True
+                b_info["added_via_peerpulse"] = True
                 db.upsert_contact(
                     session_id=session_id,
                     npc_id=npc_id,
@@ -408,7 +405,8 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
                     "role": profile.get("role", "Contact"),
                     "description": profile.get("personality", ""),
                     "contact_added": True,
-                    "is_contact": True
+                    "is_contact": True,
+                    "added_via_peerpulse": True,
                 },
                 track="platonic"
             )
@@ -430,11 +428,8 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
         }
         cds[npc_id] = cd_data
         clean_name = name.lower().strip()
-        if clean_name != npc_id:
+        if clean_name and clean_name != npc_id:
             cds[clean_name] = cd_data
-        clean_first = clean_name.split()[0] if clean_name else ""
-        if clean_first and clean_first != clean_name and len(clean_first) >= 3:
-            cds[clean_first] = cd_data
 
         db.update_phone_social_state(session_id, state)
         profile["cooldown_turns_left"] = 5
@@ -460,7 +455,8 @@ def discover_suggested_peer(session_id: int, user_id: int) -> dict:
     roster = db.get_school_roster(session_id)
     eligible_uncontacted = [
         r for r in roster
-        if r.get("grade") != "Faculty" and r["npc_id"].lower() not in contact_ids
+        if str(r.get("grade", "")).strip().lower() not in ("faculty", "citizen")
+        and r["npc_id"].lower() not in contact_ids
     ]
 
     chosen = None
@@ -550,7 +546,7 @@ def get_suggested_peers(session_id: int, user_id: int, limit: int = 12) -> list[
             break
         r_name = str(r.get("name") or "").strip()
         grade = str(r.get("grade", "")).strip().lower()
-        if r_name and r_name.lower() not in seen_names and grade != "faculty":
+        if r_name and r_name.lower() not in seen_names and grade not in ("faculty", "citizen"):
             suggested_names.append(r_name)
             seen_names.add(r_name.lower())
 
@@ -596,9 +592,38 @@ def evaluate_pre_turn_witness_detection(
 
     session_id = session.get("id") or 0
     loc_display = str(location_str or session.get("current_location", "")).strip()
+    curr_node_id = str(session.get("current_node_id") or "").strip()
+
+    p_gender = str(session.get("lead_character_gender") or "").strip()
+    if not p_gender and session.get("host_user_id") and hasattr(db, "get_character"):
+        try:
+            c_host = db.get_character(session["host_user_id"])
+            if c_host and c_host.get("gender"):
+                p_gender = str(c_host["gender"])
+        except Exception:
+            pass
 
     # Check for Public Indecency / Exposure (Invariant 4)
-    from mechanics.social.physical_state import check_venue_indecency_exposure, find_player_actor_key
+    from mechanics.social.physical_state import (
+        check_venue_indecency_exposure,
+        find_player_actor_key,
+        is_private_intimate_venue,
+        is_discreet_venue,
+    )
+    is_undressing_or_showering_only = (
+        not is_illicit
+        and (not is_romantic_or_intimate or any(w in act_low for w in ("undress", "strip", "shower", "wash", "change")))
+        and not target_npc
+    )
+    if is_private_intimate_venue(
+        loc_display,
+        curr_node_id,
+        session_id=session_id,
+        player_gender=p_gender,
+        is_undressing_or_showering_only=is_undressing_or_showering_only,
+    ):
+        return {"witness_spotted": False, "private": True}
+
     phys_st = session.get("physical_state") or (db.get_session_physical_state(session_id) if session_id else {})
     is_public_exposure = False
     exposure_type = "none"
@@ -607,7 +632,7 @@ def evaluate_pre_turn_witness_detection(
         p_key = find_player_actor_key(actors_map, session_id=session_id)
         if p_key and p_key in actors_map:
             p_cloth = actors_map[p_key].get("clothing") or {}
-            exp_info = check_venue_indecency_exposure(p_cloth, loc_display)
+            exp_info = check_venue_indecency_exposure(p_cloth, loc_display, gender=p_gender or "female")
             if exp_info.get("requires_reaction"):
                 is_public_exposure = True
                 exposure_type = exp_info.get("exposure_type", "exposed")
@@ -615,7 +640,7 @@ def evaluate_pre_turn_witness_detection(
     if not is_illicit and not is_romantic_or_intimate and not is_public_exposure:
         return {"witness_spotted": False}
 
-    # Cover / Concealment check
+    # Cover / Concealment check (0% behind stall / curtain / hidden prop)
     focal_point = str(session.get("focal_point") or "").lower()
     if any(cover in focal_point for cover in ("behind", "under", "hidden", "private", "curtain", "bleacher", "stall", "secluded", "alcove", "closet")):
         return {"witness_spotted": False, "covered": True}
@@ -637,16 +662,33 @@ def evaluate_pre_turn_witness_detection(
         event_kind = "scandal" if exposure_type in ("fully_naked", "bottomless") else "indecency"
     elif is_romantic_or_intimate:
         event_kind = "intimate"
+        if session_id and target_npc:
+            try:
+                import mechanics.social.relationship_graph as rg
+                prim_partner = rg.get_current_partner(session_id, "player")
+                tgt_canon = rg.canonical_person_key(target_npc)
+                if prim_partner and prim_partner.get("person_key") and prim_partner.get("person_key") != tgt_canon:
+                    event_kind = "secret_affair"
+            except Exception:
+                pass
     else:
         event_kind = "illicit"
 
+    is_discreet_spot = is_discreet_venue(loc_display, curr_node_id, session_id=session_id)
     witness_name = None
     if candidate_witnesses:
         witness_name = candidate_witnesses[0]
     elif is_public_exposure:
         witness_name = "Shocked Bystander"
-    elif any(k in loc_low for k in ("hallway", "corridor", "courtyard", "cafeteria", "plaza", "street", "quad", "library", "park", "campus", "classroom")):
-        # 35% passerby chance in public areas
+    elif is_discreet_spot:
+        # 8% passerby thrill risk in secluded `is_discreet` spots
+        if random.random() < 0.08:
+            witness_name = "Passerby Student"
+    elif any(k in loc_low for k in (
+        "hallway", "corridor", "courtyard", "cafeteria", "plaza", "city square",
+        "street", "quad", "library", "park", "campus", "classroom", "beach", "pier", "lookout",
+    )):
+        # 35% passerby chance in open public areas
         if random.random() < 0.35:
             witness_name = "Passerby Student"
 
@@ -662,6 +704,50 @@ def evaluate_pre_turn_witness_detection(
         event_kind=event_kind,
     )
 
+    affair_confrontation_triggered = False
+    if event_kind == "secret_affair" and session_id:
+        try:
+            import mechanics.social.relationship_graph as rg
+            prim_partner = rg.get_current_partner(session_id, "player")
+            if prim_partner and prim_partner.get("person_key"):
+                prim_key = str(prim_partner["person_key"])
+                prim_disp = str(prim_partner.get("display_name") or prim_key.replace("_", " ").title()).strip()
+                prim_npc_id = rg.resolve_npc_id_for_person(session_id, prim_key) or prim_key
+                soc_state = db.get_phone_social_state(session_id) or {}
+                leak_counts = dict(soc_state.get("affair_leak_counts") or {})
+                new_leaks = int(leak_counts.get(prim_key, 0)) + 1
+                leak_counts[prim_key] = new_leaks
+                soc_state["affair_leak_counts"] = leak_counts
+                db.update_phone_social_state(session_id, soc_state)
+                if new_leaks >= 2 and not (soc_state.get("affair_confronted") or {}).get(prim_key):
+                    confronted_map = dict(soc_state.get("affair_confronted") or {})
+                    confronted_map[prim_key] = True
+                    soc_state["affair_confronted"] = confronted_map
+                    db.update_phone_social_state(session_id, soc_state)
+                    affair_confrontation_triggered = True
+                    db.update_relationship_score(session_id, prim_npc_id, -25)
+                    rg.adjust_closeness(session_id, "player", prim_key, delta=-25)
+                    if hasattr(db, "save_phone_message"):
+                        db.save_phone_message(
+                            session_id=session_id,
+                            contact_npc_id=prim_npc_id,
+                            sender="npc",
+                            message=f"People keep sending me posts about you and {target_npc or 'someone else'}. What is going on between you two?! We need to talk.",
+                            intent="confrontation",
+                        )
+                    if hasattr(db, "add_npc_memory"):
+                        db.add_npc_memory(
+                            session_id=session_id,
+                            npc_name=prim_disp,
+                            turn_index=len(session.get("history") or []) + 1,
+                            memory_fact=f"Saw multiple #SecretAffair rumors linking {player_name} and {target_npc} and sent an angry confrontation message.",
+                            importance=5,
+                            emotional_tone="angry",
+                            open_thread="affair_suspicion_confrontation",
+                        )
+        except Exception:
+            pass
+
     directive = (
         f"[STAGE DIRECTION: PUBLIC INDECENCY]: {player_name} is visibly {exposure_type} at {loc_display or 'the scene'}! {witness_name} and nearby bystanders are startled and scandalized."
         if is_public_exposure
@@ -672,6 +758,7 @@ def evaluate_pre_turn_witness_detection(
         "witness_spotted": True,
         "witness_name": witness_name,
         "event_kind": event_kind,
+        "affair_confrontation_triggered": affair_confrontation_triggered,
         "post": post,
         "directive": directive,
     }

@@ -1,8 +1,10 @@
+from __future__ import annotations
 """
 Stealth & Infiltration Alert Tracker.
 
 Manages the 0-100 Detection Meter, discrete alert stages, accumulation on
-failed checks, natural decay over unpatrolled turns, and distraction reductions.
+failed checks, natural decay over unpatrolled turns, spatial transition resets,
+and distraction reductions.
 """
 from typing import Dict, Any, Tuple
 
@@ -70,17 +72,31 @@ def accumulate_detection(
     return new_meter, get_alert_stage(new_meter)
 
 
-def apply_natural_decay(current_meter: int, quiet_turns: int = 1) -> Tuple[int, str]:
+def apply_natural_decay(current_meter: int, quiet_turns: int = 1, per_turn_decay: int = 10) -> Tuple[int, str]:
     """
     Passively reduce detection when the player stays still in cover
     or moves quietly through unpatrolled waypoints.
-    Reduces detection by 10% per quiet turn (minimum 0).
+    Reduces detection by per_turn_decay (default 10%, or 15% when waiting still) per quiet turn.
     """
     meter = max(0, min(100, int(current_meter or 0)))
     turns = max(1, int(quiet_turns or 1))
-    decay_amount = 10 * turns
+    step = max(1, int(per_turn_decay or 10))
+    decay_amount = step * turns
     new_meter = max(0, meter - decay_amount)
     return new_meter, get_alert_stage(new_meter)
+
+
+def apply_spatial_transition_decay(current_meter: int, same_facility: bool = False) -> Tuple[int, str]:
+    """
+    Adjusts detection meter across spatial movement:
+    - Leaving a facility/zone resets local sentry suspicion to 0%.
+    - Moving to an adjacent room inside the same facility carries over half the meter.
+    """
+    meter = max(0, min(100, int(current_meter or 0)))
+    if not same_facility:
+        return 0, ALERT_UNAWARE
+    halved = meter // 2
+    return halved, get_alert_stage(halved)
 
 
 def apply_distraction(current_meter: int, reduction: int = 30) -> Tuple[int, str]:

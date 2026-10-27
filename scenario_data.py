@@ -127,6 +127,12 @@ TAG_ALIASES = {
     "noncombat": "non_combat",
     "violent": "gore",
     "violence": "gore",
+    "modern": "urban_fantasy",
+    "urban-fantasy": "urban_fantasy",
+    "urban_fantasy": "urban_fantasy",
+    "urban": "urban_fantasy",
+    "paranormal": "horror",
+    "eldritch": "horror",
 }
 
 
@@ -228,6 +234,15 @@ COMMON_SCENARIO_ALIASES = {
     "post_apocalypse": "nuclear_post_apocalypse",
     "darkfantasy": "dark_fantasy",
     "isekai": "isekai_fantasy",
+    "anomalies": "anomalous_incursions",
+    "anomaly": "anomalous_incursions",
+    "anomalous": "anomalous_incursions",
+    "incursions": "anomalous_incursions",
+    "incursion": "anomalous_incursions",
+    "urban_anomalies": "anomalous_incursions",
+    "mcb": "anomalous_incursions",
+    "scp": "anomalous_incursions",
+    "control": "anomalous_incursions",
 }
 
 
@@ -646,3 +661,46 @@ def opening_environment_note(scenario: dict | str | None, session_id: int = 0, c
     loc_note = f" (Suggested Location: {hook_info['suggested_location']})" if hook_info["suggested_location"] else ""
     return f"OPENING ENVIRONMENT [{arch_label}]: {hook_info['hook_text']}{loc_note}\nARCHETYPE DIRECTIVE: {hook_info['directive']}"
 
+
+
+ANOMALOUS_INCURSIONS_SCENARIO_KEYS = frozenset({
+    "anomalous_incursions",
+    "nsfw_gore_anomalous_incursions",
+    "furry_anomalous_incursions",
+    "nsfw_furry_gore_anomalous_incursions",
+    "urban_anomalies",
+})
+
+
+def is_anomalous_incursions_scenario(scenario_or_key: dict | str | None) -> bool:
+    """Return True strictly if the scenario is one of the 4 Anomalous Incursions preset scenarios
+    (or legacy alias 'urban_anomalies'), keeping generic custom 'urban_fantasy' scenarios separate."""
+    if not scenario_or_key:
+        return False
+    if isinstance(scenario_or_key, dict):
+        k = str(scenario_or_key.get("key") or scenario_or_key.get("scenario") or "").strip().lower()
+        base = str(scenario_or_key.get("base_scenario") or "").strip().lower()
+        name = str(scenario_or_key.get("name") or "").strip().lower()
+        if k in ANOMALOUS_INCURSIONS_SCENARIO_KEYS or base in ANOMALOUS_INCURSIONS_SCENARIO_KEYS:
+            return True
+        return "anomalous incursions" in name
+    s = str(scenario_or_key).strip().lower()
+    if s in ANOMALOUS_INCURSIONS_SCENARIO_KEYS:
+        return True
+    if s.startswith("custom"):
+        return False
+    resolved = resolve_scenario_key(s)
+    if resolved in ANOMALOUS_INCURSIONS_SCENARIO_KEYS:
+        return True
+    try:
+        scen = get_scenario(s)
+        return str(scen.get("base_scenario") or "").strip().lower() in ANOMALOUS_INCURSIONS_SCENARIO_KEYS
+    except Exception:
+        return False
+
+
+def get_max_campaign_chapters(scenario_or_key: dict | str | None) -> int:
+    """Returns 11 for Anomalous Incursions (10 story chapters + Chapter 11 Resolution/Epilogue), and 10 for others."""
+    if is_anomalous_incursions_scenario(scenario_or_key):
+        return 11
+    return 10

@@ -105,18 +105,18 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
   const circuitBreakers = Object.entries(telemetry?.circuit_breakers || {});
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
       <div 
         className="fixed inset-0" 
         onClick={onClose}
       />
       
-      <div className="relative w-full max-w-lg bg-fantasy-panel border border-fantasy-border rounded-xl shadow-2xl overflow-hidden z-10">
+      <div className="relative w-full max-w-lg max-h-[calc(var(--app-height,100dvh)-1.5rem)] flex flex-col bg-fantasy-panel border border-fantasy-border rounded-xl shadow-2xl overflow-hidden z-10">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-fantasy-border bg-black/40">
           <div className="flex items-center gap-2">
             <Sliders className="text-fantasy-accent" size={18} />
-            <h2 className="font-rpg font-bold text-lg text-gray-100">{t('settings.modal_title', 'Chronicle Settings & Telemetry')}</h2>
+            <h2 className="font-rpg font-bold text-lg text-gray-100">{t('settings.modal_title', 'Settings')}</h2>
           </div>
           <button 
             onClick={onClose} 
@@ -153,10 +153,10 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
         </div>
 
         {/* Content */}
-        <div className="p-5 space-y-5 max-h-[75vh] overflow-y-auto custom-scrollbar">
+        <div className="flex-1 min-h-0 p-4 sm:p-5 space-y-5 overflow-y-auto overscroll-contain custom-scrollbar">
           {activeTab === 'preferences' ? (
             <>
-              {/* Section 0A: Interface Language (UI & System) */}
+{/* Section 0A: Interface Language (UI & System) */}
               <div className="bg-black/30 border border-fantasy-border/60 rounded-lg p-4">
                 <div className="flex items-start justify-between gap-4 mb-3">
                   <div className="space-y-1">

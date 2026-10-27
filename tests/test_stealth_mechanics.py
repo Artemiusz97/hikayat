@@ -2,6 +2,18 @@
 Unit Tests for Stealth & Infiltration Mechanics.
 """
 import pytest
+import db
+import db.core
+
+
+@pytest.fixture(autouse=True)
+def _isolate_stealth_test_db(tmp_path, monkeypatch):
+    """Ensure no test in test_stealth_mechanics ever mutates live hikayat.db (AGENTS.md §3)."""
+    test_db = str(tmp_path / "test_stealth_isolated.db")
+    monkeypatch.setattr(db, "DB_PATH", test_db)
+    monkeypatch.setattr(db.core, "DB_PATH", test_db)
+    db.init_db()
+    yield
 from mechanics.stealth.alert_tracker import (
     ALERT_UNAWARE,
     ALERT_SUSPICIOUS,
@@ -206,7 +218,8 @@ def test_badge_and_truth_directive():
     directive = format_stealth_truth_directive(session)
     assert "[MANDATORY STEALTH & CONCEALMENT DIRECTIVE]" in directive
     assert "SUSPICIOUS" in directive
-    assert "45/100" in directive
+    assert "45/100" not in directive
+    assert "NEVER mention" in directive
 
 
 import pytest
@@ -837,3 +850,409 @@ def test_post_combat_cleanup_resets_combat_vanished(monkeypatch):
 
     precompute_combat_turn(session, party, [action_kill])
     assert session["stealth_state"]["combat_vanished"] is False
+
+
+# ==============================================================================
+# Step 4 Comprehensive Architectural & Omnichannel Regression Suite
+# ==============================================================================
+
+
+def test_unequipped_backpack_armor_and_gear_json_tags():
+    from mechanics.stealth.formulas import calculate_armor_noise
+
+    backpack_and_equipped = [
+        # Heavy armor sitting UNEQUIPPED in backpack must contribute 0 noise!
+        {
+            "name": "Looted Full Plate",
+            "slot": "Armor",
+            "equipped": 0,
+            "effect": '[GEAR_JSON]{"slot":"Armor","weight_class":"heavy","tags":["heavy","plate"]}',
+        },
+        # Equipped silent leather with [GEAR_JSON] metadata grants stealth bonus
+        {
+            "name": "Shadow-Stitched Jerkin",
+            "slot": "Armor",
+            "equipped": 1,
+            "effect": '[GEAR_JSON]{"slot":"Armor","weight_class":"light","tags":["stealth","silent_step"]}',
+        },
+    ]
+    noise_pen, stealth_bon = calculate_armor_noise(backpack_and_equipped)
+    assert noise_pen == 0
+    assert stealth_bon >= 10
+
+    # Equipping that plate immediately triggers heavy noise penalty
+    backpack_and_equipped[0]["equipped"] = 1
+    backpack_and_equipped[1]["equipped"] = 0
+    eq_noise, _ = calculate_armor_noise(backpack_and_equipped)
+    assert eq_noise >= 25
+
+
+def test_sqlite_agi_column_scales_opposed_stealth_odds():
+    # Live SQLite character rows use 'agi_' and 'luk' rather than nested 'stats'
+    agile_row = {"user_id": 11, "name": "Shade", "agi_": 10, "luk": 7}
+    clumsy_row = {"user_id": 12, "name": "Clump", "agi_": 1, "luk": 1}
+
+    odds_high = calculate_opposed_stealth_odds(actor_stats=agile_row, target_per=4, current_minute=720)
+    odds_low = calculate_opposed_stealth_odds(actor_stats=clumsy_row, target_per=4, current_minute=720)
+    assert odds_high["success_chance"] >= odds_low["success_chance"] + 35
+
+
+def test_cast_planner_graduated_alert_preserves_cover_below_100():
+    from game_engine.npcs.cast_planner import plan_pre_turn
+    from skill_check import CheckResult
+
+    failed_chk = CheckResult(chance=55, roll=88.0, tier="fail", tier_label="Failure", succeeded=False, requirement=6)
+    sentry_npc = {"name": "Watchman Voss", "role": "Guard", "location": "Vault Hallway"}
+
+    # At 35% (SUSPICIOUS) and 70% (SEARCHING), a failed stealth roll must NOT break cover!
+    for meter, stage in ((35, ALERT_SUSPICIOUS), (70, ALERT_SEARCHING)):
+        session = {
+            "id": 9101,
+            "scenario": "fantasy",
+            "current_location": "Keep ➔ Vault Hallway",
+            "current_npcs": [dict(sentry_npc)],
+            "stealth_state": {
+                "is_hidden": True,
+                "detection_meter": meter,
+                "alert_level": stage,
+                "actors": {"501": {"is_hidden": True, "combat_vanished": False}},
+            },
+        }
+        plan = plan_pre_turn(
+            session=session,
+            party=[({"user_id": 501, "name": "Lyra"}, [])],
+            actions=[{"user_id": 501, "label": "Creep past Watchman Voss", "is_stealth": True, "stance": "stealth", "check": failed_chk}],
+            is_combat=False,
+            persist_db=False,
+        )
+        assert plan.stealth_active is True
+        assert session["stealth_state"]["is_hidden"] is True
+        assert "Watchman Voss" not in plan.dialogue_partners
+        assert "Watchman Voss" in plan.bystander_npcs
+
+    # At 100% (DETECTED), cover breaks and stealth_active drops to False
+    session_detected = {
+        "id": 9102,
+        "scenario": "fantasy",
+        "current_location": "Keep ➔ Vault Hallway",
+        "current_npcs": [dict(sentry_npc)],
+        "stealth_state": {
+            "is_hidden": False,
+            "detection_meter": 100,
+            "alert_level": ALERT_DETECTED,
+            "actors": {"501": {"is_hidden": False, "combat_vanished": False}},
+        },
+    }
+    plan_det = plan_pre_turn(
+        session=session_detected,
+        party=[({"user_id": 501, "name": "Lyra"}, [])],
+        actions=[{"user_id": 501, "label": "Creep past Watchman Voss", "is_stealth": True, "stance": "stealth", "check": failed_chk}],
+        is_combat=False,
+        persist_db=False,
+    )
+    assert plan_det.stealth_active is False
+
+
+def test_combat_vanished_persists_across_apply_outcome():
+    import game_engine
+    from mechanics.stealth import is_actor_combat_vanished
+
+    uid = 6101
+    db.create_character(
+        user_id=uid,
+        name="Vesper",
+        char_class="Rogue",
+        stats={"STR": 5, "PER": 6, "END": 5, "CHA": 4, "INT": 5, "AGI": 9, "LUK": 6},
+        gold=50,
+    )
+    sid = db.create_session(
+        host_user_id=uid, mode="solo", capacity=1, verbosity="normal", dialogue_mode="balanced", image_gen_enabled=False
+    )
+    enemy = {"name": "Crypt Stalker", "hp": 45, "max_hp": 45, "stats": {"STR": 5, "PER": 3, "END": 4, "AGI": 4}}
+    db.update_session(sid, nearby_enemies=[enemy], current_location="Catacombs ➔ Bone Nave")
+
+    session = db.get_session(sid)
+    char = db.get_character(uid)
+    party = [(char, [])]
+    vanish_action = [{
+        "user_id": uid,
+        "character_name": "Vesper",
+        "choice_type": "STEALTH_VANISH",
+        "label": "💨 Vanish into Shadows",
+        "stat": "AGI",
+        "tier": "success",
+    }]
+    combat_res = precompute_combat_turn(session, party, vanish_action)
+    assert is_actor_combat_vanished(session, uid) is True
+
+    outcome = {
+        "outcome_narrative": "Vesper melts into the pillared gloom.",
+        "next_narrative": "The Crypt Stalker snarls, scanning the empty dark.",
+        "nearby_enemies": combat_res["surviving_monsters"],
+        "stealth_state": session["stealth_state"],
+        "choices": [],
+    }
+    game_engine.apply_outcome(
+        session_id=sid,
+        party=party,
+        outcome=outcome,
+        actions=vanish_action,
+    )
+
+    reloaded = db.get_session(sid)
+    assert is_actor_combat_vanished(reloaded, uid) is True
+
+
+def test_context_aware_100_percent_escalation_combat_vs_confrontation():
+    from mechanics.stealth.escalation import reduce_stealth_turn_outcome
+
+    # 1. Restricted dungeon/vault in fantasy -> immediate sentry combat spawn (is_ambush=False)
+    dungeon_sess = {
+        "id": 0,
+        "scenario": "fantasy",
+        "current_location": "Obsidian Citadel ➔ Restricted Treasury Vault",
+        "nearby_enemies": [],
+        "current_npcs": [],
+        "stealth_state": {"is_hidden": True, "detection_meter": 100, "alert_level": "detected"},
+    }
+    dungeon_out = {"next_narrative": "Torchlight flares across the flagstones.", "choices": []}
+    reduce_stealth_turn_outcome(
+        session_id=0,
+        session=dungeon_sess,
+        party=[({"user_id": 1, "name": "Garrett", "level": 4}, [])],
+        outcome=dungeon_out,
+        actions=[{"stealth_outcome": {"trigger_combat": True, "trigger_confrontation": False}}],
+        scen_key="fantasy",
+        is_combat=False,
+    )
+    assert len(dungeon_out["nearby_enemies"]) >= 1
+    assert dungeon_out["is_ambush"] is False
+    assert "Cover Blown!" in dungeon_out["next_narrative"]
+
+    # 2. Civilian town tavern in fantasy -> authority confrontation + 4 deterministic choices (no combat)
+    tavern_sess = {
+        "id": 0,
+        "scenario": "fantasy",
+        "current_location": "Oakhaven ➔ Town Market Tavern ➔ Back Counter",
+        "nearby_enemies": [],
+        "current_npcs": [{"name": "Barkeep Marta", "role": "Innkeeper"}],
+        "stealth_state": {"is_hidden": True, "detection_meter": 100, "alert_level": "detected"},
+    }
+    tavern_out = {"next_narrative": "A floorboard groans behind the counter.", "choices": []}
+    tid_flag_combat, tid_flag_conf = False, True
+    reduce_stealth_turn_outcome(
+        session_id=0,
+        session=tavern_sess,
+        party=[({"user_id": 1, "name": "Garrett", "level": 4}, [])],
+        outcome=tavern_out,
+        actions=[{"stealth_outcome": {"trigger_combat": tid_flag_combat, "trigger_confrontation": tid_flag_conf}}],
+        scen_key="fantasy",
+        is_combat=False,
+    )
+    assert not tavern_out.get("nearby_enemies")
+    assert tavern_out["dialogue_partner"] == "Barkeep Marta"
+    assert len(tavern_out["choices"]) == 4
+    assert any(c.get("gold_cost") == 15 for c in tavern_out["choices"])
+
+
+def test_spatial_suspicion_halving_reset_and_quiet_decay():
+    from mechanics.stealth.core import apply_stealth_spatial_transition, apply_stealth_decay_turn
+
+    session = {
+        "id": 0,
+        "scenario": "cyberpunk",
+        "stealth_state": {
+            "is_hidden": True,
+            "detection_meter": 70,
+            "alert_level": "searching",
+            "free_distraction_used": True,
+            "actors": {"1": {"is_hidden": True, "combat_vanished": False}},
+        },
+    }
+
+    # Same facility room hop halves meter (70 -> 35) and resets per-room free distraction
+    apply_stealth_spatial_transition(
+        session,
+        prev_location="Arasaka Tower ➔ Sublevel Lab ➔ Server Room A",
+        new_location="Arasaka Tower ➔ Sublevel Lab ➔ Server Room B",
+    )
+    assert session["stealth_state"]["detection_meter"] == 35
+    assert session["stealth_state"]["alert_level"] == "suspicious"
+    assert session["stealth_state"]["free_distraction_used"] is False
+
+    # Waiting motionless decays by -15% (35 -> 20)
+    apply_stealth_decay_turn(session, is_waiting_still=True)
+    assert session["stealth_state"]["detection_meter"] == 20
+    assert session["stealth_state"]["alert_level"] == "unaware"
+
+    # Standard quiet turn decays by -10% (20 -> 10)
+    apply_stealth_decay_turn(session, is_waiting_still=False)
+    assert session["stealth_state"]["detection_meter"] == 10
+
+    # Exiting facility resets suspicion to 0%
+    apply_stealth_spatial_transition(
+        session,
+        prev_location="Arasaka Tower ➔ Sublevel Lab ➔ Server Room B",
+        new_location="Night Market ➔ Noodle Stall ➔ Counter",
+    )
+    assert session["stealth_state"]["detection_meter"] == 0
+
+
+def test_distraction_anti_spam_free_then_contested():
+    from mechanics.stealth.core import resolve_distraction_action
+
+    session = {
+        "id": 0,
+        "scenario": "fantasy",
+        "stealth_state": {
+            "is_hidden": True,
+            "detection_meter": 65,
+            "alert_level": "searching",
+            "free_distraction_used": False,
+            "actors": {"77": {"is_hidden": True, "combat_vanished": False}},
+        },
+    }
+    actor = {"user_id": 77, "name": "Trickster", "agi_": 7, "luk": 6}
+
+    # 1st distraction in cycle: guaranteed roll-free -30% (65 -> 35)
+    r1 = resolve_distraction_action(session, actor_char=actor, user_id=77)
+    assert r1["was_free_distraction"] is True
+    assert r1["check"].chance == 100 and r1["check"].requirement == 0 and r1["check"].succeeded is True
+    assert session["stealth_state"]["detection_meter"] == 35
+    assert session["stealth_state"]["free_distraction_used"] is True
+
+    # 2nd distraction in same cycle: contested roll — failure backfires (+15% -> 50)
+    r2_fail = resolve_distraction_action(session, actor_char=actor, user_id=77, check_mode="always_fail")
+    assert r2_fail["was_free_distraction"] is False
+    assert r2_fail["check"] is not None and r2_fail["check"].succeeded is False
+    assert session["stealth_state"]["detection_meter"] == 50
+
+    # Contested success sheds -25% (50 -> 25)
+    r3_pass = resolve_distraction_action(session, actor_char=actor, user_id=77, check_mode="always_success")
+    assert r3_pass["check"].succeeded is True
+    assert session["stealth_state"]["detection_meter"] == 25
+
+
+def test_one_turn_alert_transient_consumption_prevents_prompt_poisoning():
+    from mechanics.stealth.core import consume_stealth_turn_transients
+
+    session = {"id": 1, "scenario": "fantasy"}
+    toggle_stealth_stance(session, True, user_id=10)
+    break_stealth(session, reason="unsuppressed_offensive_magic", user_id=10, break_all=True)
+
+    # On the turn stealth breaks, directive instructs LLM to narrate cover blowing once
+    d_turn1 = format_stealth_truth_directive(session)
+    assert "COVER WAS JUST BROKEN" in d_turn1
+
+    # After Phase 4 consumes transients, subsequent normal turns emit empty directive
+    consume_stealth_turn_transients(session)
+    d_turn2 = format_stealth_truth_directive(session)
+    assert d_turn2 == ""
+
+
+def test_recursive_serializable_action_handles_nested_stealth_check():
+    import json
+    from api.deps import _serializable_action
+
+    session = {"id": 1, "scenario": "fantasy"}
+    actor = {"user_id": 42, "name": "Shade", "agi_": 8, "luk": 5}
+    so = resolve_stealth_action(
+        session=session,
+        actor_char=actor,
+        action_data={"label": "Sneak through archway", "action_type": "sneak"},
+        check_mode="always_success",
+        user_id=42,
+    )
+    raw_action = {
+        "user_id": 42,
+        "label": "Sneak through archway",
+        "is_stealth": True,
+        "check": so["check"],
+        "stealth_outcome": so,
+    }
+    safe_payload = _serializable_action(raw_action)
+    encoded = json.dumps(safe_payload)
+    decoded = json.loads(encoded)
+    assert decoded["stealth_outcome"]["check"]["succeeded"] is True
+
+
+def test_coop_per_player_stealth_isolation_and_projection(monkeypatch):
+    from mechanics.stealth import (
+        is_actor_hidden,
+        project_stealth_state_for_user,
+        set_actor_combat_vanished,
+        is_actor_combat_vanished,
+    )
+    from cogs.adventure.embeds import _party_vitals_text
+
+    session = {
+        "id": 500,
+        "mode": "turn",
+        "turn_order": [101, 202],
+        "scenario": "fantasy",
+        "stealth_state": init_stealth_state(),
+    }
+    toggle_stealth_stance(session, True, user_id=101)
+    toggle_stealth_stance(session, False, user_id=202)
+    session["stealth_state"]["detection_meter"] = 30
+
+    assert is_actor_hidden(session, 101) is True
+    assert is_actor_hidden(session, 202) is False
+
+    proj_101 = project_stealth_state_for_user(session, 101)
+    proj_202 = project_stealth_state_for_user(session, 202)
+    assert proj_101["is_hidden"] is True
+    assert proj_202["is_hidden"] is False
+    assert proj_101["detection_meter"] == 30 and proj_202["detection_meter"] == 30
+
+    chars = {
+        101: {"user_id": 101, "name": "ShadowRogue", "level": 3, "hp": 80, "max_hp": 80, "mp": 30, "max_mp": 30, "status_effects": []},
+        202: {"user_id": 202, "name": "LoudPaladin", "level": 3, "hp": 120, "max_hp": 120, "mp": 20, "max_mp": 20, "status_effects": []},
+    }
+    monkeypatch.setattr(db, "get_character", lambda uid: chars.get(uid))
+    monkeypatch.setattr(db, "current_turn_user_id", lambda s: 101)
+
+    vitals = _party_vitals_text(session)
+    lines = vitals.splitlines()
+    rogue_line = next(l for l in lines if "ShadowRogue" in l)
+    paladin_line = next(l for l in lines if "LoudPaladin" in l)
+    assert "🥷 Sneaking (30%)" in rogue_line
+    assert "Sneaking" not in paladin_line
+
+    set_actor_combat_vanished(session, True, user_id=101)
+    assert is_actor_combat_vanished(session, 101) is True
+    assert is_actor_combat_vanished(session, 202) is False
+
+
+def test_enrich_choices_with_odds_uses_opposed_stealth_math():
+    from api.deps import enrich_choices_with_odds
+
+    uid = 7101
+    db.create_character(
+        user_id=uid,
+        name="Whisper",
+        char_class="Rogue",
+        stats={"STR": 3, "PER": 6, "END": 4, "CHA": 4, "INT": 5, "AGI": 9, "LUK": 6},
+        gold=50,
+    )
+    sid = db.create_session(
+        host_user_id=uid, mode="solo", capacity=1, verbosity="normal", dialogue_mode="balanced", image_gen_enabled=False
+    )
+    session = db.get_session(sid)
+    toggle_stealth_stance(session, True, user_id=uid)
+    session["current_npcs"] = [{"name": "Eagle Watchman", "role": "Guard", "stats": {"PER": 7}}]
+
+    choices = [{"label": "Shadow Step — Slip quietly past the watchman", "stat": "AGI", "requirement": 6, "intent": "stealth_covert", "is_stealth": True}]
+    enriched_light = enrich_choices_with_odds(choices, uid, session=session)
+
+    # Now equip heavy plate armor in SQLite inventory and verify displayed stealth odds drop
+    item_id = db.add_item(
+        uid,
+        "Towering Full Plate",
+        item_type="Armor",
+        effect='[GEAR_JSON]{"slot":"Armor","weight_class":"heavy","tags":["heavy","plate"]}',
+    )
+    db.equip_item(uid, item_id, "Armor")
+    enriched_heavy = enrich_choices_with_odds(choices, uid, session=session)
+
+    assert enriched_heavy[0]["success_pct"] < enriched_light[0]["success_pct"]

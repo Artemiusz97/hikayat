@@ -72,7 +72,10 @@ def classify_campus_zone_node(zone_name: str, scen_key: str = "high_school_drama
         return None
     z = zone_name.lower().strip()
 
-    if any(k in z for k in ("abandoned", "old campus", "clock tower", "derelict", "heritage wing")):
+    if any(k in z for k in ("old campus", "clock tower", "heritage wing")) or (
+        ("abandoned" in z or "derelict" in z)
+        and not any(off in z for off in ("port", "warehouse", "dock", "pier", "factory", "industrial"))
+    ):
         return CAMPUS_NODE_ABANDONED
     if any(k in z for k in ("cultural arts", "student union", "creative arts", "arts & union", "club annex")):
         return CAMPUS_NODE_ARTS
@@ -125,6 +128,392 @@ def find_campus_travel_path(from_zone: str, to_zone: str, scen_key: str = "high_
     return [from_zone, to_zone]
 
 
+URBAN_DISTRICT_EDGES: List[Tuple[str, str, int]] = [
+    ("zone_agency_hq", "zone_city_center", 10),
+    ("zone_agency_hq", "zone_downtown", 12),
+    ("zone_agency_hq", "zone_uptown", 12),
+    ("zone_agency_hq", "zone_hospital", 10),
+    ("zone_city_center", "zone_downtown", 10),
+    ("zone_city_center", "zone_uptown", 10),
+    ("zone_city_center", "zone_low_cost_wards", 12),
+    ("zone_city_center", "zone_suburbs", 15),
+    ("zone_city_center", "zone_hospital", 10),
+    ("zone_city_center", "zone_chinatown", 10),
+    ("zone_downtown", "zone_chinatown", 8),
+    ("zone_downtown", "zone_low_cost_wards", 10),
+    ("zone_downtown", "zone_city_docks", 15),
+    ("zone_downtown", "zone_industrial", 15),
+    ("zone_downtown", "zone_theme_park", 12),
+    ("zone_chinatown", "zone_low_cost_wards", 10),
+    ("zone_chinatown", "zone_eastern_temple", 12),
+    ("zone_low_cost_wards", "zone_industrial", 10),
+    ("zone_low_cost_wards", "zone_city_docks", 15),
+    ("zone_low_cost_wards", "zone_undercity", 10),
+    ("zone_industrial", "zone_city_docks", 12),
+    ("zone_industrial", "zone_undercity", 12),
+    ("zone_industrial", "zone_airport", 15),
+    ("zone_uptown", "zone_ultra_rich", 12),
+    ("zone_uptown", "zone_suburbs", 12),
+    ("zone_uptown", "zone_school_campus", 12),
+    ("zone_uptown", "zone_university", 10),
+    ("zone_uptown", "zone_botanical_zoo", 12),
+    ("zone_uptown", "zone_hospital", 10),
+    ("zone_university", "zone_school_campus", 10),
+    ("zone_university", "zone_botanical_zoo", 10),
+    ("zone_suburbs", "zone_school_campus", 10),
+    ("zone_suburbs", "zone_theme_park", 12),
+    ("zone_suburbs", "zone_botanical_zoo", 12),
+    ("zone_suburbs", "zone_seaside_beach", 20),
+    ("zone_city_docks", "zone_seaside_beach", 20),
+    ("zone_city_docks", "zone_airport", 15),
+    ("zone_theme_park", "zone_seaside_beach", 15),
+    ("zone_suburbs", "zone_woods_reserve", 22),
+    ("zone_uptown", "zone_woods_reserve", 25),
+    ("zone_uptown", "zone_eastern_temple", 15),
+    ("zone_eastern_temple", "zone_woods_reserve", 15),
+]
+
+
+def _classify_urban_district_node(zone_name: str) -> Optional[str]:
+    if not zone_name:
+        return None
+    z = zone_name.lower().strip()
+    if any(k in z for k in ("headquarters", "operations facility", "command complex", "central spire", "citadel &", "containment", "agency_hq")):
+        return "zone_agency_hq"
+    if "city center" in z:
+        return "zone_city_center"
+    if "downtown" in z:
+        return "zone_downtown"
+    if "uptown" in z:
+        return "zone_uptown"
+    if any(k in z for k in ("sovereign hills", "sky-estates", "ultra-rich")):
+        return "zone_ultra_rich"
+    if any(k in z for k in ("lower wards", "tenements", "slums")):
+        return "zone_low_cost_wards"
+    if "industrial" in z:
+        return "zone_industrial"
+    if any(k in z for k in ("docks", "harbor")):
+        return "zone_city_docks"
+    if any(k in z for k in ("suburban", "suburb", "residential")):
+        return "zone_suburbs"
+    if any(k in z for k in ("theme park", "amusement")):
+        return "zone_theme_park"
+    if any(k in z for k in ("grand temple", "eastern temple")):
+        return "zone_eastern_temple"
+    if any(k in z for k in ("airport", "airfield")):
+        return "zone_airport"
+    if any(k in z for k in ("hospital", "medical center")):
+        return "zone_hospital"
+    if any(k in z for k in ("university", "parapsychology")):
+        return "zone_university"
+    if any(k in z for k in ("eastern quarter", "night market", "chinatown")):
+        return "zone_chinatown"
+    if any(k in z for k in ("under-city", "catacombs", "undercity")):
+        return "zone_undercity"
+    if any(k in z for k in ("botanical", "aquarium", "zoo")):
+        return "zone_botanical_zoo"
+    if any(k in z for k in ("high school", "academy", "school", "institute", "campus")):
+        return "zone_school_campus"
+    if any(k in z for k in ("seaside", "beach", "coastal")):
+        return "zone_seaside_beach"
+    if any(k in z for k in ("woods", "mountain reserve", "forest")):
+        return "zone_woods_reserve"
+    return None
+
+
+def _calculate_urban_district_travel_time(old_z: str, new_z: str) -> Optional[int]:
+    import heapq
+    from collections import defaultdict
+    u_start = _classify_urban_district_node(old_z)
+    u_end = _classify_urban_district_node(new_z)
+    if not u_start or not u_end:
+        return None
+    if u_start == u_end:
+        return 5
+    adj = defaultdict(list)
+    for a, b, w in URBAN_DISTRICT_EDGES:
+        adj[a].append((b, w))
+        adj[b].append((a, w))
+    dist = {u_start: 0}
+    pq = [(0, u_start)]
+    while pq:
+        d, u = heapq.heappop(pq)
+        if u == u_end:
+            return d
+        if d > dist.get(u, 9999):
+            continue
+        for v, w in adj[u]:
+            if d + w < dist.get(v, 9999):
+                dist[v] = d + w
+                heapq.heappush(pq, (d + w, v))
+    return 25
+
+
+def _classify_genre_zone_node(zone_name: str, scen_key: str = "") -> Optional[str]:
+    """Classifies a zone display name into a canonical genre zone_id when both match seeded zone archetypes."""
+    if not zone_name:
+        return None
+    z = zone_name.lower().strip()
+    s = str(scen_key or "").lower().strip()
+
+    if "slice_of_life" in s:
+        if any(k in z for k in ("shopping arcade", "commercial")):
+            return "zone_sol_shopping_arcade"
+        if any(k in z for k in ("residential", "apartment", "neighborhood")):
+            return "zone_sol_residential"
+        if any(k in z for k in ("nightlife", "entertainment", "alley")):
+            return "zone_sol_nightlife"
+        if any(k in z for k in ("harbor", "pier", "waterfront")):
+            return "zone_sol_harbor_pier"
+        return None
+
+    if "cyberpunk" in s:
+        if "city center" in z or "megacorp" in z:
+            return "zone_city_center"
+        if "downtown" in z:
+            return "zone_downtown"
+        if "uptown" in z:
+            return "zone_uptown_heights"
+        if any(k in z for k in ("slums", "lower wards")):
+            return "zone_slums_lower_wards"
+        if any(k in z for k in ("industrial", "docks")):
+            return "zone_industrial_docks"
+        if "outskirts" in z:
+            return "zone_city_outskirts"
+        if "rural" in z:
+            return "zone_rural_outpost"
+        if "nature reserve" in z or "biodome" in z:
+            return "zone_nature_reserve"
+        return None
+
+    if "steampunk" in s:
+        if any(k in z for k in ("airship", "zeppelin", "cruiser", "leviathan", "sovereign", "ironclad", "dreadnought", "hms", "zephyr", "aether")):
+            return "zone_airship_cruiser"
+        if "clocktower" in z:
+            return "zone_clocktower_center"
+        if "promenade" in z:
+            return "zone_upper_promenade"
+        if any(k in z for k in ("boiler", "foundries", "foundry")):
+            return "zone_boiler_foundries"
+        if "canal" in z:
+            return "zone_subterranean_canals"
+        if "rust outskirts" in z or "scrap" in z:
+            return "zone_rust_outskirts"
+        if "smog" in z or "moor" in z:
+            return "zone_smog_moors"
+        return None
+
+    if any(k in s for k in ("sci_fi", "scifi", "space")):
+        if any(k in z for k in ("starship", "vanguard")):
+            return "zone_starship_vanguard"
+        if any(k in z for k in ("orbital", "station", "gateway", "nexus")):
+            return "zone_orbital_station"
+        if "homeworld" in z or "capital" in z:
+            return "zone_homeworld_capital"
+        if "desert" in z:
+            return "zone_desert_planet"
+        if "ice" in z or "cryo" in z or "glacial" in z:
+            return "zone_ice_planet"
+        if "jungle" in z:
+            return "zone_jungle_planet"
+        if "volcanic" in z or "magma" in z:
+            return "zone_volcanic_planet"
+        if "ocean" in z or "aquatic" in z:
+            return "zone_ocean_planet"
+        if "asteroid" in z:
+            return "zone_asteroid_belt"
+        return None
+
+    if "dark_fantasy" in s or "grimdark" in s:
+        if "black citadel" in z:
+            return "zone_black_citadel"
+        if "blighted marsh" in z:
+            return "zone_blighted_marshes"
+        if "gallows" in z:
+            return "zone_gallows_settlement"
+        if "sunken catacomb" in z:
+            return "zone_sunken_catacombs"
+        if "blood-ash" in z or "blood ash" in z or "crags" in z:
+            return "zone_blood_ash_crags"
+        if "withered wood" in z:
+            return "zone_withered_woods"
+        return None
+
+    if "apocalypse" in s or "fallout" in s:
+        if "underground vault" in z or "fallout vault" in z:
+            return "zone_underground_vault"
+        if "scavenger market" in z:
+            return "zone_scavenger_market"
+        if "irradiated crater" in z:
+            return "zone_irradiated_crater"
+        if "highway badlands" in z:
+            return "zone_highway_badlands"
+        if "megacity ruins" in z:
+            return "zone_megacity_ruins"
+        if "raider fortress" in z:
+            return "zone_raider_fortress"
+        if "toxic swamp" in z:
+            return "zone_toxic_swamp"
+        return None
+
+    if "isekai" in s or "fantasy" in s:
+        sfx = "_isekai" if "isekai" in s else ""
+        if "royal capital" in z or z == "capital city":
+            return f"zone_capital_city{sfx}"
+        if "central farmland" in z or "central plains" in z:
+            return f"zone_central_plains{sfx}"
+        if "ancient wood" in z or "primeval" in z:
+            return f"zone_ancient_woods{sfx}"
+        if "woodlands" in z:
+            return f"zone_woodlands_forest{sfx}"
+        if "mountain range" in z:
+            return f"zone_mountain_range{sfx}"
+        if "desert dune" in z:
+            return f"zone_desert_dunes{sfx}"
+        if "cursed shadowland" in z:
+            return f"zone_cursed_shadowlands{sfx}"
+        if "ancient dungeon" in z:
+            return f"zone_ancient_dungeon{sfx}"
+        if not sfx:
+            if "coastal harbor" in z:
+                return "zone_coastal_harbor"
+            if "swamp" in z or "marshes" in z:
+                return "zone_swamp_marshes"
+            if "frozen" in z or "tundra" in z:
+                return "zone_frozen_tundra"
+            if "volcanic" in z or "ashland" in z:
+                return "zone_volcanic_ashlands"
+            if "underworld chasm" in z:
+                return "zone_underworld_chasm"
+            if "cave network" in z or "deep cave" in z:
+                return "zone_cave_network"
+    return None
+
+
+_GENRE_STATELESS_EDGES: List[Tuple[str, str, int]] = [
+    # Slice of Life
+    ("zone_sol_residential", "zone_sol_shopping_arcade", 15),
+    ("zone_sol_shopping_arcade", "zone_sol_nightlife", 15),
+    ("zone_sol_shopping_arcade", "zone_sol_harbor_pier", 20),
+    ("zone_sol_nightlife", "zone_sol_harbor_pier", 15),
+    ("zone_sol_residential", "zone_sol_harbor_pier", 25),
+    # Cyberpunk
+    ("zone_city_center", "zone_downtown", 15),
+    ("zone_city_center", "zone_uptown_heights", 15),
+    ("zone_downtown", "zone_slums_lower_wards", 15),
+    ("zone_downtown", "zone_industrial_docks", 20),
+    ("zone_slums_lower_wards", "zone_industrial_docks", 15),
+    ("zone_uptown_heights", "zone_nature_reserve", 25),
+    ("zone_city_center", "zone_nature_reserve", 25),
+    ("zone_slums_lower_wards", "zone_city_outskirts", 25),
+    ("zone_industrial_docks", "zone_city_outskirts", 25),
+    ("zone_city_outskirts", "zone_rural_outpost", 30),
+    # Steampunk
+    ("zone_airship_cruiser", "zone_clocktower_center", 10),
+    ("zone_airship_cruiser", "zone_upper_promenade", 12),
+    ("zone_airship_cruiser", "zone_rust_outskirts", 30),
+    ("zone_airship_cruiser", "zone_smog_moors", 35),
+    ("zone_clocktower_center", "zone_upper_promenade", 15),
+    ("zone_clocktower_center", "zone_boiler_foundries", 15),
+    ("zone_clocktower_center", "zone_subterranean_canals", 20),
+    ("zone_boiler_foundries", "zone_subterranean_canals", 15),
+    ("zone_boiler_foundries", "zone_rust_outskirts", 30),
+    ("zone_rust_outskirts", "zone_smog_moors", 40),
+    # Sci-Fi
+    ("zone_starship_vanguard", "zone_orbital_station", 10),
+    ("zone_orbital_station", "zone_homeworld_capital", 25),
+    ("zone_starship_vanguard", "zone_homeworld_capital", 25),
+    ("zone_starship_vanguard", "zone_desert_planet", 35),
+    ("zone_starship_vanguard", "zone_jungle_planet", 40),
+    ("zone_starship_vanguard", "zone_ocean_planet", 40),
+    ("zone_starship_vanguard", "zone_asteroid_belt", 45),
+    ("zone_starship_vanguard", "zone_ice_planet", 50),
+    ("zone_starship_vanguard", "zone_volcanic_planet", 55),
+    ("zone_orbital_station", "zone_desert_planet", 40),
+    ("zone_orbital_station", "zone_jungle_planet", 45),
+    ("zone_orbital_station", "zone_ocean_planet", 45),
+    ("zone_orbital_station", "zone_asteroid_belt", 50),
+    ("zone_orbital_station", "zone_ice_planet", 55),
+    ("zone_orbital_station", "zone_volcanic_planet", 60),
+    # Fantasy
+    ("zone_capital_city", "zone_central_plains", 60),
+    ("zone_capital_city", "zone_coastal_harbor", 75),
+    ("zone_capital_city", "zone_woodlands_forest", 75),
+    ("zone_central_plains", "zone_woodlands_forest", 60),
+    ("zone_central_plains", "zone_coastal_harbor", 75),
+    ("zone_central_plains", "zone_mountain_range", 90),
+    ("zone_woodlands_forest", "zone_ancient_woods", 90),
+    ("zone_woodlands_forest", "zone_swamp_marshes", 90),
+    ("zone_coastal_harbor", "zone_desert_dunes", 120),
+    ("zone_mountain_range", "zone_cave_network", 75),
+    ("zone_mountain_range", "zone_frozen_tundra", 120),
+    ("zone_mountain_range", "zone_volcanic_ashlands", 120),
+    ("zone_ancient_woods", "zone_ancient_dungeon", 90),
+    ("zone_swamp_marshes", "zone_cursed_shadowlands", 120),
+    ("zone_desert_dunes", "zone_volcanic_ashlands", 120),
+    ("zone_cave_network", "zone_underworld_chasm", 120),
+    ("zone_cursed_shadowlands", "zone_ancient_dungeon", 90),
+    ("zone_cursed_shadowlands", "zone_underworld_chasm", 150),
+    # Isekai
+    ("zone_capital_city_isekai", "zone_central_plains_isekai", 60),
+    ("zone_capital_city_isekai", "zone_woodlands_forest_isekai", 75),
+    ("zone_central_plains_isekai", "zone_woodlands_forest_isekai", 60),
+    ("zone_central_plains_isekai", "zone_mountain_range_isekai", 90),
+    ("zone_central_plains_isekai", "zone_desert_dunes_isekai", 120),
+    ("zone_woodlands_forest_isekai", "zone_ancient_woods_isekai", 90),
+    ("zone_ancient_woods_isekai", "zone_ancient_dungeon_isekai", 90),
+    ("zone_mountain_range_isekai", "zone_cursed_shadowlands_isekai", 120),
+    ("zone_cursed_shadowlands_isekai", "zone_ancient_dungeon_isekai", 90),
+    # Dark Fantasy
+    ("zone_gallows_settlement", "zone_withered_woods", 60),
+    ("zone_gallows_settlement", "zone_blighted_marshes", 75),
+    ("zone_gallows_settlement", "zone_sunken_catacombs", 60),
+    ("zone_gallows_settlement", "zone_black_citadel", 90),
+    ("zone_withered_woods", "zone_blood_ash_crags", 120),
+    ("zone_blighted_marshes", "zone_sunken_catacombs", 90),
+    ("zone_black_citadel", "zone_blood_ash_crags", 120),
+    ("zone_black_citadel", "zone_sunken_catacombs", 90),
+    # Post-Apocalypse
+    ("zone_underground_vault", "zone_scavenger_market", 60),
+    ("zone_underground_vault", "zone_highway_badlands", 75),
+    ("zone_scavenger_market", "zone_highway_badlands", 60),
+    ("zone_scavenger_market", "zone_megacity_ruins", 90),
+    ("zone_scavenger_market", "zone_toxic_swamp", 90),
+    ("zone_highway_badlands", "zone_raider_fortress", 90),
+    ("zone_highway_badlands", "zone_megacity_ruins", 90),
+    ("zone_megacity_ruins", "zone_irradiated_crater", 120),
+    ("zone_toxic_swamp", "zone_irradiated_crater", 120),
+]
+
+
+def _calculate_genre_zone_travel_time(old_z: str, new_z: str, scen_key: str) -> Optional[int]:
+    import heapq
+    from collections import defaultdict
+    g_start = _classify_genre_zone_node(old_z, scen_key)
+    g_end = _classify_genre_zone_node(new_z, scen_key)
+    if not g_start or not g_end:
+        return None
+    if g_start == g_end:
+        return 5
+    adj = defaultdict(list)
+    for a, b, w in _GENRE_STATELESS_EDGES:
+        adj[a].append((b, w))
+        adj[b].append((a, w))
+    dist = {g_start: 0}
+    pq = [(0, g_start)]
+    while pq:
+        d, u = heapq.heappop(pq)
+        if u == g_end:
+            return d
+        if d > dist.get(u, 99999):
+            continue
+        for v, w in adj[u]:
+            if d + w < dist.get(v, 99999):
+                dist[v] = d + w
+                heapq.heappush(pq, (d + w, v))
+    return None
+
+
 def calculate_route_travel_time(
     old_loc: str,
     new_loc: str,
@@ -133,11 +522,12 @@ def calculate_route_travel_time(
 ) -> int:
     """
     Calculates exact setting-aware travel time in minutes.
-    - Same room / Sub-location move: 2 minutes.
-    - Same zone, different Primary Place: 5 minutes.
+    - Same room / Sub-location move: 2 minutes (3 minutes in mega-complexes).
+    - Same zone, different Primary Place: 5 minutes (3 minutes on vessels / HQ complexes).
     - Intra-campus travel: 5 minutes per graph link (e.g. Academic ➔ Commons ➔ Athletics = 10 mins).
     - Campus to Off-Campus (or vice-versa): 5 mins per inner campus link + 25 mins from gateway = 25..35 mins.
-    - Off-Campus to Off-Campus: 25 minutes (Modern) or 120 minutes (Fantasy).
+    - Genre-weighted inter-zone transit graph when seeded or matching canonical zone archetypes.
+    - Stateless fallback: 25 minutes (Modern) or 120 minutes (Fantasy).
     """
     if not old_loc or not new_loc or old_loc == new_loc:
         return 2
@@ -162,8 +552,25 @@ def calculate_route_travel_time(
     # Same zone
     if old_z.lower() == new_z.lower():
         if old_p.lower() != new_p.lower():
+            if any(k in old_z.lower() for k in (
+                "headquarters", "operations facility", "command complex", "central spire",
+                "containment", "agency_hq", "airship", "zeppelin", "starship", "vanguard",
+            )):
+                return 3
             return 5
+        if any(k in old_p.lower() for k in (
+            "tower hq", "operations hq", "operations spire hq", "headquarters", "agency hq",
+            "theme park", "amusement", "grand temple", "eastern temple", "hospital",
+            "medical center", "botanical",
+        )):
+            return 3
         return 2
+
+    # Different zone: Multi-Tier Urban Transit Graph for Anomalous Incursions / Urban Fantasy
+    if any(k in str(scen_key or "").lower() for k in ("anomalous", "incursion", "urban_anomalies", "urban_fantasy")):
+        urban_mins = _calculate_urban_district_travel_time(old_z, new_z)
+        if urban_mins is not None:
+            return urban_mins
 
     # Different zone
     is_campus = is_campus_scenario(scen_key)
@@ -181,21 +588,27 @@ def calculate_route_travel_time(
         if node_from and not node_to:
             campus_path = find_campus_travel_path(old_z, "academic", scen_key)
             campus_hops = max(0, len(campus_path) - 1)
-            return (campus_hops * 5) + 25
+            base_off = 30 if "mountain park" in new_z.lower() else 25
+            return (campus_hops * 5) + base_off
 
         # 3. Off-Campus to Campus
         if not node_from and node_to:
             campus_path = find_campus_travel_path("academic", new_z, scen_key)
             campus_hops = max(0, len(campus_path) - 1)
-            return 25 + (campus_hops * 5)
+            base_off = 30 if "mountain park" in old_z.lower() else 25
+            return base_off + (campus_hops * 5)
 
         # 4. Off-Campus to Off-Campus
-        return 25
+        return 30 if ("mountain park" in old_z.lower() or "mountain park" in new_z.lower()) else 25
 
-    # Non-campus modern scenarios (e.g. cyberpunk)
+    genre_mins = _calculate_genre_zone_travel_time(old_z, new_z, scen_key)
+    if genre_mins is not None:
+        return genre_mins
+
+    # Non-campus modern / sci-fi / steampunk fallback
     from mechanics.system.time_engine import is_modern_setting
-    if is_modern_setting(scen_key):
-        return 25
+    if is_modern_setting(scen_key) or any(k in str(scen_key or "").lower() for k in ("steampunk", "sci_fi", "scifi", "space")):
+        return 30 if any(k in str(scen_key or "").lower() for k in ("sci_fi", "scifi", "space")) else 25
 
     # Fantasy / Wilderness interzone travel
     return 120
@@ -503,10 +916,10 @@ def is_dialogue_partner(name: str, dialogue_partners: list | str = None, session
     n_raw = name.strip().lower()
     n_clean = _norm_name(name)
     title_words = {
-        "the", "elder", "lord", "lady", "sir", "madam", "captain", "dr", "mr", "ms", "mrs",
-        "scholar", "guardian", "druid", "student", "council", "president", "vice", "secretary",
+        "the", "elder", "lord", "lady", "sir", "madam", "madame", "captain", "dr", "mr", "ms", "mrs", "miss", "mx",
+        "prof", "professor", "scholar", "guardian", "druid", "student", "council", "president", "vice", "secretary",
         "representative", "officer", "member", "guildmaster", "archivist", "warden",
-        "coach", "trainer", "instructor", "principal", "referee", "sensei", "bartender", "nurse", "clerk", "vendor",
+        "coach", "trainer", "instructor", "principal", "headmaster", "headmistress", "referee", "sensei", "chef", "bartender", "nurse", "clerk", "vendor",
         "bin", "binti", "ibn", "bint", "van", "von", "der", "den", "het", "ten", "ter", "del", "della", "degli", "das", "dos"
     }
     n_tokens = [t for t in n_clean.split() if len(t) > 2 and t not in title_words]
@@ -541,13 +954,32 @@ def is_dialogue_partner(name: str, dialogue_partners: list | str = None, session
         p_first_low = p_first.lower().strip() if p_first else ""
         p_last_low = p_last.lower().strip() if p_last else ""
 
-        # If both entities have distinct given names, they MUST match to be the same character
-        if n_first_low and p_first_low and n_first_low != p_first_low:
-            continue
+        n_first_norm = _norm_name(n_first_low)
+        n_last_norm = _norm_name(n_last_low)
+        p_first_norm = _norm_name(p_first_low)
+        p_last_norm = _norm_name(p_last_low)
 
-        # If one entity has a male title e.g. "Mr. Kobayashi" and the other has a female student given name, reject
-        if (p_words & male_titles and not p_first_low and n_first_low) or (n_words & male_titles and not n_first_low and p_first_low):
-            if n_first_low in namegen._ALL_FEMALE_NAMES or p_first_low in namegen._ALL_FEMALE_NAMES:
+        # Detect when a single-word reference (e.g. "Rootspeaker" or "Mr. Kobayashi") refers to the other side's surname/epithet
+        p_is_surname_only = (not p_first_norm and bool(p_last_norm)) or (
+            bool(p_first_norm) and not p_last_norm and bool(n_last_norm) and p_first_norm in n_last_norm.split()
+        )
+        n_is_surname_only = (not n_first_norm and bool(n_last_norm)) or (
+            bool(n_first_norm) and not n_last_norm and bool(p_last_norm) and n_first_norm in p_last_norm.split()
+        )
+
+        # If both entities have explicit given names (neither is a bare surname/epithet reference), they MUST match
+        if n_first_norm and p_first_norm and not p_is_surname_only and not n_is_surname_only:
+            if n_first_norm != p_first_norm:
+                continue
+
+        # If one entity has a gendered title + surname only (e.g. "Mr. Kobayashi") and the other has an opposite-gender given name, reject
+        if (p_words & male_titles and p_is_surname_only and n_first_low) or (n_words & male_titles and n_is_surname_only and p_first_low):
+            check_given = n_first_low if p_is_surname_only else p_first_low
+            if check_given in namegen._ALL_FEMALE_NAMES and check_given not in namegen._ALL_MALE_NAMES:
+                continue
+        if (p_words & fem_titles and p_is_surname_only and n_first_low) or (n_words & fem_titles and n_is_surname_only and p_first_low):
+            check_given = n_first_low if p_is_surname_only else p_first_low
+            if check_given in namegen._ALL_MALE_NAMES and check_given not in namegen._ALL_FEMALE_NAMES:
                 continue
 
         if re.search(rf"\b{re.escape(p_clean)}\b", n_clean) or re.search(rf"\b{re.escape(n_clean)}\b", p_clean):
@@ -693,9 +1125,13 @@ def has_narrative_continuity_bridge(npc_name: str, session: dict = None, actions
     import namegen
 
     n_low = npc_name.lower().strip()
-    n_first = n_low.split()[0] if n_low else ""
-    n_given = namegen.extract_first_and_last_name(npc_name)[0].lower().strip()
-    first_candidates = {tok for tok in (n_first, n_given) if len(tok) >= 3 and tok not in namegen.NAME_PARTICLES_AND_HONORIFICS}
+    n_given = namegen.get_given_name(npc_name).lower().strip()
+    peer_pool = (session.get("current_npcs") or []) if isinstance(session, dict) else None
+    n_disambig = namegen.get_unique_person_tokens(npc_name, peer_names=peer_pool, min_len=2)
+    first_candidates = {
+        tok for tok in ({n_given} | n_disambig)
+        if len(tok) >= 2 and tok != n_low and tok not in namegen.NAME_PARTICLES_AND_HONORIFICS
+    }
 
     old_loc = (session.get("current_location") or "") if session else ""
     old_primary = get_primary_location_name(old_loc) if old_loc else ""
@@ -705,78 +1141,97 @@ def has_narrative_continuity_bridge(npc_name: str, session: dict = None, actions
 
     is_dp = is_dialogue_partner(npc_name, session=session) if session else False
 
-    # 1. Same location (or no movement): active dialogue partner or co-located NPC retains continuity
-    if session and not is_different_primary:
-        if is_dp:
-            return True
-        # Bystanders only retain continuity if the player stayed in the exact same sub-location
-        if old_loc and new_loc and old_loc.lower() == new_loc.lower():
-            old_npcs = session.get("current_npcs") or []
-            for on in old_npcs:
-                on_name = str((on.get("name") or on.get("npc_name")) if isinstance(on, dict) else on).strip().lower()
-                if on_name and (on_name == n_low or any(on_name.startswith(fc) or f" {fc}" in f" {on_name}" for fc in first_candidates)):
-                    return True
-
-    # 2. Check actions for travel/meetup/accompanied intent
-    if actions:
-        for a in actions:
-            lbl = (
-                (str(a.get("label", "")) + " " + str(a.get("text", "")))
-                if isinstance(a, dict)
-                else str(a)
-            ).lower()
-            # Active dialogue partner with accompanied travel phrase (e.g., "Step out together", "carry her things")
-            if is_dp and (
-                any(term in lbl for term in ACCOMPANIED_TRAVEL_PHRASES)
-                or re.search(r"\b(?:carry|walk|escort|guide|lead|take|bring|help|accompany)\b.*\b(?:her|him|them)\b", lbl)
-                or (isinstance(a, dict) and str(a.get("target_npc") or "").strip().lower() in (n_low, n_first))
-            ):
+    # 1. Location changed: Strict spatial boundary.
+    # An NPC NEVER follows automatically across rooms or facilities based on dialogue continuity or prose history.
+    # They can ONLY move if in party_npcs, temporary_companions, or explicitly accompanied in current action.
+    if old_loc and new_loc and old_loc.lower() != new_loc.lower():
+        if session:
+            party = session.get("party_npcs") or []
+            temp_comps = session.get("temporary_companions") or []
+            formal_party = session.get("party") or []
+            all_party_entries = party + temp_comps + formal_party
+            party_names = set()
+            party_raw_list = []
+            for p in all_party_entries:
+                p_obj = p[0] if isinstance(p, (tuple, list)) else p
+                p_n = str(p_obj.get("name") if isinstance(p_obj, dict) else p_obj).strip()
+                if p_n:
+                    party_raw_list.append(p_n)
+            all_party_and_scene = party_raw_list + [
+                str(x.get("name") if isinstance(x, dict) else x) for x in (peer_pool or []) if x
+            ]
+            for p_n in party_raw_list:
+                party_names.add(p_n.lower())
+                party_names |= namegen.get_unique_person_tokens(p_n, peer_names=all_party_and_scene, min_len=2)
+            if n_low in party_names or any(fc in party_names for fc in first_candidates):
                 return True
-            if n_low in lbl or any(f" {fc}" in f" {lbl}" for fc in first_candidates):
-                if _has_meetup_intent_keyword(lbl) or any(
-                    k in lbl for k in ("travel to", "head to", "go to", "visit", "with", "invite", "bring", "follow", "carry", "escort")
+
+        if actions:
+            for a in actions:
+                lbl = (
+                    (str(a.get("label", "")) + " " + str(a.get("text", "")))
+                    if isinstance(a, dict)
+                    else str(a)
+                ).lower()
+                if is_dp and (
+                    any(term in lbl for term in ACCOMPANIED_TRAVEL_PHRASES)
+                    or re.search(r"\b(?:carry|walk|escort|guide|lead|take|bring|help|accompany)\b.*\b(?:her|him|them)\b", lbl)
+                    or (isinstance(a, dict) and str(a.get("target_npc") or "").strip().lower() in ({n_low} | first_candidates))
                 ):
                     return True
+                if n_low in lbl or any(f" {fc}" in f" {lbl}" for fc in first_candidates):
+                    if any(k in lbl for k in ("invite", "bring", "escort", "take with", "come with", "with me", "follow")) or re.search(
+                        rf"\b(?:with|accompany)\s+(?:{re.escape(n_low)}" + ("".join(rf"|{re.escape(fc)}" for fc in first_candidates)) + r")\b",
+                        lbl,
+                    ):
+                        return True
 
-    # 3. Check recent conversation history for date / meetup agreements
-    if session:
-        hist_raw = session.get("history") or session.get("history_json") or []
-        if isinstance(hist_raw, str):
-            try:
-                hist_list = json.loads(hist_raw)
-            except Exception:
-                hist_list = [hist_raw]
-        elif isinstance(hist_raw, list):
-            hist_list = hist_raw
-        else:
-            hist_list = []
+        # Allow cross-zone / destination arrival ONLY if the NPC was NOT an uninvited patron in old_npcs
+        # and recent history (last 3 turns) records an explicit meetup/hangout/date agreement with them.
+        if session:
+            was_in_old_npcs = any(
+                str((on.get("name") or on.get("npc_name")) if isinstance(on, dict) else on).strip().lower() == n_low
+                for on in (session.get("current_npcs") or [])
+            )
+            if not was_in_old_npcs:
+                hist_raw = session.get("history") or session.get("history_json") or []
+                if isinstance(hist_raw, str):
+                    try:
+                        hist_list = json.loads(hist_raw)
+                    except Exception:
+                        hist_list = [hist_raw]
+                elif isinstance(hist_raw, list):
+                    hist_list = hist_raw
+                else:
+                    hist_list = []
+                recent_hist = hist_list[-3:] if len(hist_list) > 3 else hist_list
+                split_patterns = (
+                    r"\b(?:split|separate|divide)\s+(?:up|the|our|tasks?|investigation)\b",
+                    r"\bgo\s+(?:our\s+)?separate\s+ways\b",
+                )
+                has_split_up = any(
+                    any(re.search(pat, _extract_history_text(h).lower()) for pat in split_patterns)
+                    for h in recent_hist
+                )
+                if not has_split_up:
+                    name_pat = r"\b" + re.escape(n_low) + r"\b"
+                    for fc in first_candidates:
+                        name_pat += r"|\b" + re.escape(fc) + r"\b"
+                    for h in recent_hist:
+                        h_text = _extract_history_text(h).lower()
+                        if h_text and re.search(name_pat, h_text) and _has_meetup_intent_keyword(h_text):
+                            return True
+        return False
 
-        recent_hist = hist_list[-3:] if len(hist_list) > 3 else hist_list
-        has_split_up = False
-        SPLIT_PATTERNS = (
-            r"\b(?:split|separate|divide)\s+(?:up|the|our|tasks?|investigation)\b",
-            r"\b(?:take|takes)\s+(?:the\s+)?archives.*(?:take|takes)\s+(?:the\s+)?locker\b",
-            r"\bmeet\s+(?:in|after|later|at\s+the\s+stairwell)\b",
-            r"\bmeet\s+(?:back\s+)?(?:in\s+\d+|later)\b",
-            r"\bdivision\s+of\s+labor\b",
-            r"\bgo\s+(?:our\s+)?separate\s+ways\b"
-        )
-        for h in recent_hist:
-            h_text = _extract_history_text(h).lower()
-            if any(re.search(pat, h_text) for pat in SPLIT_PATTERNS):
-                has_split_up = True
-                break
-
-        if not has_split_up:
-            for h in recent_hist:
-                h_text = _extract_history_text(h).lower()
-                if not h_text:
-                    continue
-                name_pattern = r"\b" + re.escape(n_low) + r"\b"
-                for fc in first_candidates:
-                    name_pattern += r"|\b" + re.escape(fc) + r"\b"
-                if re.search(name_pattern, h_text) and _has_meetup_intent_keyword(h_text):
-                    return True
+    # 2. Same location (no movement): dialogue partner or co-located bystander retains continuity
+    if session and (not old_loc or not new_loc or old_loc.lower() == new_loc.lower()):
+        if is_dp:
+            return True
+        old_npcs = session.get("current_npcs") or []
+        for on in old_npcs:
+            on_name = str((on.get("name") or on.get("npc_name")) if isinstance(on, dict) else on).strip().lower()
+            if on_name and (on_name == n_low or any(on_name.startswith(fc) or f" {fc}" in f" {on_name}" for fc in first_candidates)):
+                return True
 
     return False
 

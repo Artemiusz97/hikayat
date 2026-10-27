@@ -869,41 +869,8 @@ def build_intimate_profile_embed(contact: dict, scenario_key: str = "fantasy", u
 
 def build_world_codex_embed(session_id: int, scenario_key: str, char_name: str, page: int = 0, page_size: int = 10) -> tuple[discord.Embed, int, list[dict]]:
     """Builds an embed listing all known/discovered people in the world from lorebook and contacts."""
-    lore = db.get_lorebook(session_id) or {}
-    persons = list(lore.get("person", []) or [])
-
-    contact_scores = {}
-    try:
-        raw_c = db.get_contacts(session_id) or []
-        for c in raw_c:
-            c_n = str(c.get("name") or "").strip().lower()
-            if c_n:
-                contact_scores[c_n] = (c.get("relationship_score", 0), c.get("track", "platonic"))
-    except Exception:
-        pass
-
-    seen = {str(p.get("name") or "").strip().lower() for p in persons if str(p.get("name") or "").strip().lower() not in ("", "none")}
-    for c in (raw_c or []):
-        c_n = str(c.get("name") or "").strip()
-        if c_n and c_n.lower() not in seen and c_n.lower() != "none":
-            b_info = c.get("basic_info") or {}
-            persons.append({
-                "name": c_n,
-                "role": b_info.get("role") or b_info.get("occupation") or "Contact",
-                "race": c.get("race") or b_info.get("race") or "Unknown",
-                "gender": c.get("gender") or b_info.get("gender") or "Unknown",
-                "description": b_info.get("description") or "",
-                "entity_type": "person",
-            })
-            seen.add(c_n.lower())
-
-    unique_persons = []
-    unique_seen = set()
-    for p in persons:
-        n = str(p.get("name") or "").strip()
-        if n and n.lower() not in unique_seen and n.lower() != "none":
-            unique_seen.add(n.lower())
-            unique_persons.append(p)
+    from mechanics.social.relationships import get_discovered_world_codex_persons
+    unique_persons, contact_scores = get_discovered_world_codex_persons(session_id, scenario_key, char_name)
 
     total_pages = max(1, (len(unique_persons) + page_size - 1) // page_size)
     page = max(0, min(page, total_pages - 1))
@@ -933,7 +900,14 @@ def build_world_codex_embed(session_id: int, scenario_key: str, char_name: str, 
         tier = get_relationship_tier(score, track, scenario_key)
         bar = format_progress_bar(score, width=8)
 
-        field_name = f"👤 {name} — *{role}*"
+        anom_badge = ""
+        if p.get("anomalous_npc_tag") == "special_agent":
+            anom_badge = " `[⚡ Special Agent]`"
+        elif p.get("anomalous_npc_tag") == "civilian":
+            anom_badge = " `[👤 Civilian]`"
+        if p.get("deceased"):
+            anom_badge += " `[💀 Deceased]`"
+        field_name = f"👤 {name}{anom_badge} — *{role}*"
         field_val = (
             f"• **Race**: {format_race_display(race)} | **Gender**: {gender.capitalize()}\n"
             f"• **Affinity**: {score} [{bar}] ({tier['name']})\n"
@@ -981,7 +955,18 @@ def build_contact_list_embed(contacts: list[dict], scenario_key: str, char_name:
         if traits:
             status_line += f"\nTraits: *{', '.join(traits[:2])}*"
 
-        field_name = f"{tier.get('emoji', '👤')} {name[:60]}{grade_tag}{role_tag} ({track.capitalize()})"[:256]
+        anom_list_badge = ""
+        import scenario_data as _sd_cl
+        if _sd_cl.is_anomalous_incursions_scenario(scenario_key):
+            try:
+                from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag
+                c_tag = classify_anomalous_npc_tag(c, session_id=int(c.get("session_id") or 0), scen_key=scenario_key)
+                anom_list_badge = " [⚡ Special Agent]" if c_tag == "special_agent" else " [👤 Civilian]"
+                if (c.get("basic_info") or {}).get("deceased"):
+                    anom_list_badge += " [💀 Deceased]"
+            except Exception:
+                pass
+        field_name = f"{tier.get('emoji', '👤')} {name[:50]}{anom_list_badge}{grade_tag}{role_tag} ({track.capitalize()})"[:256]
         embed.add_field(
             name=field_name,
             value=status_line[:1024],
@@ -1117,6 +1102,48 @@ def build_contact_detail_embed(contact: dict, scenario_key: str, user_id: int = 
         value="\n".join(info_lines) if info_lines else "*Basic public information.*",
         inline=False
     )
+
+    import scenario_data as _sd_cd
+    if _sd_cd.is_anomalous_incursions_scenario(scenario_key):
+        try:
+            from mechanics.social.anomalous_npc_tags import hydrate_anomalous_npc_profile, TAG_SPECIAL_AGENT
+            from mechanics.social.factions import get_anomalous_faction_state
+            sess_id_cd = int(contact.get("session_id") or 0)
+            anom_prof = hydrate_anomalous_npc_profile(contact, session_id=sess_id_cd, scen_key=scenario_key)
+            is_dec_cd = bool(basic.get("deceased") or contact.get("deceased"))
+            if anom_prof["anomalous_npc_tag"] == TAG_SPECIAL_AGENT:
+                same_fac_cd = False
+                if sess_id_cd:
+                    p_fst = get_anomalous_faction_state(sess_id_cd, user_id=user_id)
+                    p_fid = str(p_fst.get("faction_archetype_key") or "").strip()
+                    same_fac_cd = bool(p_fid and p_fid != "freelancer" and p_fid == anom_prof.get("faction_id"))
+                dossier_lines = [
+                    "• **Classification**: ⚡ **Special Agent**" + (" *(💀 Deceased)*" if is_dec_cd else ""),
+                    f"• **Rank & Class**: Tier {anom_prof['agent_tier']} {anom_prof['rank_title']} — *{anom_prof['agent_class']}*",
+                    f"• **Combat Vitals**: ❤️ `{anom_prof['hp']}/{anom_prof['max_hp']} HP` | 💙 `{anom_prof['mp']}/{anom_prof['max_mp']} MP`",
+                ]
+                if score >= 100 or reveal_debug or same_fac_cd:
+                    ab_list = anom_prof.get("innate_ability_details") or []
+                    if ab_list:
+                        ab_fmt = "\n".join(
+                            f"  - {ab['emoji']} **{ab['name']}** (`{ab['mp_cost']} MP` • {ab['tier_name']})"
+                            for ab in ab_list
+                        )
+                        dossier_lines.append(f"• **Innate Special Abilities**:\n{ab_fmt}")
+                else:
+                    dossier_lines.append("• *🔒 Innate Special Abilities Locked (Requires Friend 100+ or Same-Faction Colleague)*")
+                embed.add_field(name="⚡ Operative Combat Dossier", value="\n".join(dossier_lines)[:1024], inline=False)
+            else:
+                civ_w = (anom_prof.get("weapon_profile") or {}).get("name", "Improvised Object")
+                civ_lines = [
+                    "• **Classification**: 👤 **Civilian**" + (" *(💀 Deceased)*" if is_dec_cd else ""),
+                    "• **Vitals**: ❤️ `100/100 HP` | 💙 `0 MP (No Mana)`",
+                    f"• **Self-Defense Fallback**: `{civ_w}` *(Weapon-only if forced to fight; no special abilities)*",
+                    "• **Party Eligibility**: *Contact-only — Civilians cannot be recruited into field combat parties.*",
+                ]
+                embed.add_field(name="👤 Civilian Classification", value="\n".join(civ_lines)[:1024], inline=False)
+        except Exception:
+            pass
 
     # Physical Appearance & Mannerisms fields
     desc_val = clean_desc if clean_desc != "None" else ""

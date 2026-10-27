@@ -815,12 +815,12 @@ def test_wave4_circuit_breaker_companions_phone_shop_and_lobbies():
     """
     # 1. Phase 11 Package Exports Check
     from game_engine import clean_choices_impl, sanitize_and_diversify_choices
-    from game_engine.npcs import process_scene_npcs, extract_speaking_npcs_from_narrative
+    from game_engine.npcs import process_scene_npcs, compute_pre_turn_stage
     from mechanics.combat.items.consumables import apply_item_to_target, parse_consumable_metadata
     assert callable(clean_choices_impl)
     assert callable(sanitize_and_diversify_choices)
     assert callable(process_scene_npcs)
-    assert callable(extract_speaking_npcs_from_narrative)
+    assert callable(compute_pre_turn_stage)
     assert callable(apply_item_to_target)
     assert callable(parse_consumable_metadata)
 
@@ -1424,3 +1424,126 @@ def test_adventure_action_applies_intimate_action_dc_modifier(web_user_and_chara
 
 
 
+
+@pytest.mark.api
+def test_action_endpoint_unmocked_resolve_turn_with_null_skip_minutes(tmp_path, monkeypatch):
+    """Regression guard: Web SPA sends skip_minutes=None and sleep_mode=None on normal choices;
+    full unmocked TurnService.prepare_and_roll_action -> game_engine.resolve_turn must not raise TypeError."""
+    import db.core
+
+    test_db = str(tmp_path / "test_null_skip.db")
+    monkeypatch.setattr(db, "DB_PATH", test_db)
+    monkeypatch.setattr(db.core, "DB_PATH", test_db)
+    db.init_db()
+
+    user_id = 99401
+    db.create_character(
+        user_id=user_id,
+        name="Artemiusz",
+        char_class="Mage",
+        stats={"STR": 1, "PER": 2, "END": 1, "CHA": 1, "INT": 4, "AGI": 2, "LUK": 1},
+        scenario="fantasy",
+    )
+    session_id = db.create_session(user_id, "solo", 1, "normal", "balanced", False, scenario="fantasy")
+    db.add_session_member(session_id, user_id)
+    db.set_session_active(session_id, [user_id])
+    choice_obj = {
+        "label": "Calibrate the scanner to sweep for deeper resonance patterns",
+        "stat": "INT",
+        "requirement": 6,
+        "mp_cost": 0,
+        "intent": "investigate_clue",
+        "sub_intent": "empty",
+        "target_npc": "",
+    }
+    db.save_session_scene(
+        session_id,
+        "Twilight of the Threshold",
+        "You stand at the threshold.",
+        [choice_obj],
+        [],
+        location="Central Atrium",
+    )
+
+    mock_llm_out = {
+        "scene_title": "Resonance Locked",
+        "outcome_narrative": "You calibrate the scanner carefully.",
+        "next_narrative": "The waveform stabilizes across the threshold.",
+        "choices": [{"label": "Step inside", "stat": "AGI", "requirement": 5, "mp_cost": 0, "intent": "general_action"}],
+    }
+
+    with patch("game_engine.call_llm_json_stream", new=AsyncMock(return_value=mock_llm_out)), \
+         patch("game_engine.call_llm_json", new=AsyncMock(return_value=mock_llm_out)):
+        res = client.post("/api/adventure/action", json={
+            "session_id": session_id,
+            "user_id": user_id,
+            "choice_index": 0,
+            "direct_choice": choice_obj,
+            "skip_minutes": None,
+            "sleep_mode": None,
+            "is_stealth": False,
+            "stance": None,
+            "action": {"choice_index": 0, "direct_choice": choice_obj},
+        })
+
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["success"] is True
+    assert data["action"]["skip_minutes"] == 0
+    assert data["action"]["sleep_mode"] == ""
+    assert data["action"]["resolved_intent"]["source"] == "choice_tag"
+
+
+@pytest.mark.api
+def test_action_endpoint_distinguishes_engine_bug_vs_models_unavailable(tmp_path, monkeypatch):
+    """Internal Python bugs must surface as HTTP 500 ('engine_error'), whereas genuine
+    upstream LLM exhaustion surfaces as HTTP 503 ('models_unavailable')."""
+    import db.core
+
+    test_db = str(tmp_path / "test_err_class.db")
+    monkeypatch.setattr(db, "DB_PATH", test_db)
+    monkeypatch.setattr(db.core, "DB_PATH", test_db)
+    db.init_db()
+
+    user_id = 99402
+    db.create_character(
+        user_id=user_id,
+        name="Tester",
+        char_class="Warrior",
+        stats={"STR": 2, "PER": 2, "END": 2, "CHA": 2, "INT": 2, "AGI": 1, "LUK": 1},
+        scenario="fantasy",
+    )
+    session_id = db.create_session(user_id, "solo", 1, "normal", "balanced", False, scenario="fantasy")
+    db.add_session_member(session_id, user_id)
+    db.set_session_active(session_id, [user_id])
+    db.save_session_scene(
+        session_id,
+        "Hall",
+        "You stand in the hall.",
+        [{"label": "Inspect the door", "stat": "PER", "requirement": 5}],
+        [],
+        location="Guild Hall",
+    )
+
+    with patch("game_engine.resolve_turn", new=AsyncMock(side_effect=TypeError("internal bug"))):
+        res_500 = client.post("/api/adventure/action", json={
+            "session_id": session_id,
+            "user_id": user_id,
+            "choice_index": 0,
+        })
+    assert res_500.status_code == 500
+    assert "internal bug" in res_500.json()["detail"]
+    assert db.get_turn_snapshot(session_id)["fallback_reason"] == "engine_error"
+
+    with patch(
+        "game_engine.resolve_turn",
+        new=AsyncMock(side_effect=RuntimeError("All LLM candidate models in fallback chain failed. Last error: 503")),
+    ):
+        res_503 = client.post("/api/adventure/action", json={
+            "session_id": session_id,
+            "user_id": user_id,
+            "choice_index": 0,
+        })
+    assert res_503.status_code == 503
+    assert "overloaded or unavailable" in res_503.json()["detail"]
+    assert db.get_turn_snapshot(session_id)["fallback_reason"] == "models_unavailable"

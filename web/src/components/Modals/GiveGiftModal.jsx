@@ -51,7 +51,7 @@ const GiveGiftModal = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150">
       <div className="fixed inset-0" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-fantasy-panel border border-fantasy-border/90 rounded-xl shadow-2xl p-4 space-y-3.5 z-10">
+      <div className="relative w-full max-w-md max-h-[calc(var(--app-height,100dvh)-1.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain custom-scrollbar bg-fantasy-panel border border-fantasy-border/90 rounded-xl shadow-2xl p-4 space-y-3.5 z-10">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-fantasy-border/60 pb-2.5">
           <div className="flex items-center gap-2">

@@ -248,6 +248,23 @@ class SocialActorAI:
         target = self.rng.choice(pool)
         target_name = target.get("name", "Unknown NPC")
 
+        # 15% chance to test flaked rendezvous or combat metaphor chat
+        prov_roll = self.rng.random()
+        if prov_roll < 0.15:
+            return SocialAction(
+                action_type="flake_rendezvous",
+                target_npc=target_name,
+                action_text=f"Flake out on scheduled rendezvous with {target_name} to test their patience.",
+                affinity_delta=-15,
+            )
+        elif prov_roll < 0.25:
+            return SocialAction(
+                action_type="combat_metaphor_chat",
+                target_npc=target_name,
+                action_text=f"Engage in verbal combat with razor-sharp retorts against {target_name}.",
+                affinity_delta=self.rng.randint(-2, 4),
+            )
+
         # 30% chance to trigger an explicit turn-off or boundary test
         if self.rng.random() < 0.30:
             turn_off_actions = [

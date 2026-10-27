@@ -317,6 +317,116 @@ class TestPartySystem(unittest.TestCase):
         labels_enemy = [c["label"].lower() for c in cleaned_enemy]
         self.assertFalse(any("join your party" in l for l in labels_enemy))
 
+    def test_scenario_specific_natural_recruitment_phrasing_and_rewrite(self):
+        """Recruitment phrasing adapts naturally to each genre and strips meta 'permanent companion' wording."""
+        from mechanics.social.relationships import (
+            get_scenario_recruitment_phrasing,
+            normalize_recruitment_choice_label,
+        )
+        from game_engine.choices_cleaner import sanitize_and_diversify_choices
+        from game_engine.turn.prompts import _build_player_actions_text
+
+        fantasy_p = get_scenario_recruitment_phrasing("fantasy", "Seraphine Quill", "Alden")
+        self.assertEqual(fantasy_p["group_noun"], "party")
+        self.assertIn("Invite Seraphine Quill to join your party", fantasy_p["choice_label"])
+        self.assertNotIn("permanent companion", fantasy_p["choice_label"].lower())
+
+        dark_p = get_scenario_recruitment_phrasing("dark_fantasy", "Vesper", "Alden")
+        self.assertEqual(dark_p["group_noun"], "retinue")
+        self.assertIn("retinue", dark_p["choice_label"].lower())
+
+        apoc_p = get_scenario_recruitment_phrasing("nuclear_post_apocalypse", "Jax", "Alden")
+        self.assertEqual(apoc_p["group_noun"], "group")
+        self.assertIn("team up and travel with your group", apoc_p["choice_label"].lower())
+
+        cyber_p = get_scenario_recruitment_phrasing("cyberpunk", "Nyx", "V")
+        self.assertEqual(cyber_p["group_noun"], "team")
+        self.assertIn("partner up and run with your team", cyber_p["choice_label"].lower())
+
+        anom_p = get_scenario_recruitment_phrasing("anomalous_incursions", "Putri Wijaya", "Rookie")
+        self.assertEqual(anom_p["group_noun"], "field team")
+        self.assertEqual(anom_p["choice_label"], "Ask Putri Wijaya to partner up and join your field team")
+
+        # Legacy LLM output with 'join your party as a permanent companion' in urban/anomalous scenario is rewritten
+        rewritten = normalize_recruitment_choice_label(
+            "Invite Putri Wijaya to join your party as a permanent companion",
+            scenario="anomalous_incursions",
+            target_npc="Putri Wijaya",
+        )
+        self.assertEqual(rewritten, "Ask Putri Wijaya to partner up and join your field team")
+
+        cleaned = sanitize_and_diversify_choices(
+            [
+                {"label": "Invite Nyx to join your party as a permanent companion", "stat": "CHA", "requirement": 8, "intent": "party_recruit", "target_npc": "Nyx"},
+                {"label": "Ask Nyx about the syndicate icebreakers", "stat": "INT", "requirement": 7},
+                {"label": "Thank Nyx and step away", "stat": "NONE", "requirement": 0},
+            ],
+            scenario="cyberpunk",
+            location="Night Market",
+            dialogue_partner="Nyx",
+            current_npcs=[{"name": "Nyx"}],
+        )
+        cleaned_labels = [c["label"] for c in cleaned]
+        self.assertTrue(any("Ask Nyx to partner up and run with your team" in l for l in cleaned_labels))
+        self.assertFalse(any("permanent companion" in l.lower() for l in cleaned_labels))
+
+        # Pre-LLM action builder rewrites legacy label and injects natural team-up directive
+        prompt_text = _build_player_actions_text(
+            session={"scenario": "anomalous_incursions"},
+            actions=[{
+                "char": {"name": "Artemiusz", "per": 6, "luk": 6},
+                "label": "Invite Putri Wijaya to join your party as a permanent companion",
+                "intent": "party_recruit",
+                "target_npc": "Putri Wijaya",
+            }],
+        )
+        self.assertIn("Ask Putri Wijaya to partner up and join your field team", prompt_text)
+        self.assertNotIn("as a permanent companion", prompt_text)
+        self.assertIn("NATURAL TEAM-UP / RECRUITMENT NARRATION DIRECTIVE", prompt_text)
+
+    def test_semantic_choice_deduplication_collapses_redundant_options(self):
+        """Near-duplicate action choices (e.g. 'Draw service pistol and aim at the breach' vs 'Aim service pistol at the breach') collapse into the higher-priority choice."""
+        from game_engine.choices_cleaner import deduplicate_redundant_choices
+
+        raw = [
+            {
+                "label": "Draw service pistol and aim at the breach",
+                "stat": "PER",
+                "requirement": 7,
+                "is_quest_action": True,
+                "is_story_quest": True,
+                "_python_verified_quest": True,
+                "quest_id": "SQ-1",
+            },
+            {
+                "label": "Aim service pistol at the breach",
+                "stat": "PER",
+                "requirement": 7,
+                "is_quest_action": False,
+                "is_story_quest": False,
+            },
+            {
+                "label": "Activate portable containment ward near the doorway",
+                "stat": "INT",
+                "requirement": 8,
+            },
+        ]
+        deduped = deduplicate_redundant_choices(raw)
+        deduped_labels = [c["label"] for c in deduped]
+        self.assertIn("Draw service pistol and aim at the breach", deduped_labels)
+        self.assertNotIn("Aim service pistol at the breach", deduped_labels)
+        winner = next(c for c in deduped if "service pistol" in c["label"].lower())
+        self.assertTrue(winner.get("is_story_quest"))
+        self.assertTrue(winner.get("is_quest_action"))
+
+        # Distinct dialogue topics with the same NPC are preserved and NOT falsely collapsed
+        dlg_choices = [
+            {"label": "Ask Seraphine Quill about the missing caravan", "stat": "CHA", "requirement": 6, "target_npc": "Seraphine Quill"},
+            {"label": "Ask Seraphine Quill about the guild records", "stat": "INT", "requirement": 6, "target_npc": "Seraphine Quill"},
+        ]
+        deduped_dlg = deduplicate_redundant_choices(dlg_choices, ignore_names=["Seraphine Quill"])
+        self.assertEqual(len(deduped_dlg), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

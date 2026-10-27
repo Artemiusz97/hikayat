@@ -16,7 +16,8 @@ from ..core import (
 )
 
 STATURE_WEIGHTS_MINIATURE = {
-    'short': 1.0,
+    'miniature': 1.0,
+    'short': 0.0,
     'below_average': 0.0,
     'average': 0.0,
     'tall': 0.0,
@@ -25,6 +26,7 @@ STATURE_WEIGHTS_MINIATURE = {
 
 # Male Stature Distributions
 STATURE_WEIGHTS_MALE_STANDARD = {
+    'miniature': 0.0,
     'short': 0.05,
     'below_average': 0.15,
     'average': 0.50,
@@ -33,6 +35,7 @@ STATURE_WEIGHTS_MALE_STANDARD = {
 }
 
 STATURE_WEIGHTS_MALE_LARGE_BEASTFOLK = {
+    'miniature': 0.0,
     'short': 0.01,
     'below_average': 0.04,
     'average': 0.25,
@@ -41,6 +44,7 @@ STATURE_WEIGHTS_MALE_LARGE_BEASTFOLK = {
 }
 
 STATURE_WEIGHTS_MALE_SMALL_BEASTFOLK = {
+    'miniature': 0.0,
     'short': 0.10,
     'below_average': 0.30,
     'average': 0.43,
@@ -49,6 +53,7 @@ STATURE_WEIGHTS_MALE_SMALL_BEASTFOLK = {
 }
 
 STATURE_WEIGHTS_MALE_TINY_BEASTFOLK = {
+    'miniature': 0.0,
     'short': 0.34,
     'below_average': 0.45,
     'average': 0.15,
@@ -58,6 +63,7 @@ STATURE_WEIGHTS_MALE_TINY_BEASTFOLK = {
 
 # Female Stature Distributions
 STATURE_WEIGHTS_FEMALE_STANDARD = {
+    'miniature': 0.0,
     'short': 0.10,
     'below_average': 0.34,
     'average': 0.45,
@@ -66,6 +72,7 @@ STATURE_WEIGHTS_FEMALE_STANDARD = {
 }
 
 STATURE_WEIGHTS_FEMALE_LARGE_BEASTFOLK = {
+    'miniature': 0.0,
     'short': 0.01,
     'below_average': 0.14,
     'average': 0.55,
@@ -74,6 +81,7 @@ STATURE_WEIGHTS_FEMALE_LARGE_BEASTFOLK = {
 }
 
 STATURE_WEIGHTS_FEMALE_SMALL_BEASTFOLK = {
+    'miniature': 0.0,
     'short': 0.15,
     'below_average': 0.45,
     'average': 0.34,
@@ -82,6 +90,7 @@ STATURE_WEIGHTS_FEMALE_SMALL_BEASTFOLK = {
 }
 
 STATURE_WEIGHTS_FEMALE_TINY_BEASTFOLK = {
+    'miniature': 0.0,
     'short': 0.55,
     'below_average': 0.35,
     'average': 0.07,
@@ -214,7 +223,7 @@ TIER_INCOMPATIBLE_TEXTURES = {
     }
 }
 
-VALID_MILESTONE_EVENTS = {'oral_receive', 'manual_receive', 'kiss', 'oral_give', 'date', 'first_kiss', 'manual_give', 'anal_give', 'anal_receive', 'anal', 'none', 'intercourse', 'confession'}
+VALID_MILESTONE_EVENTS = {'oral_receive', 'manual_receive', 'kiss', 'oral_give', 'oral_mutual', 'date', 'first_kiss', 'manual_give', 'manual_mutual', 'anal_give', 'anal_receive', 'anal_mutual', 'anal', 'affection', 'none', 'intercourse', 'confession'}
 NSFW_SCENARIOS = {'nsfw_high_school_drama'}
 INTIMATE_DEMEANOR_FEMALE_TEMPLATES = ['Playful & Bantering, teases warmly and laughs softly between kisses', 'Soft & Deeply Affectionate, tender whispers, warm lingering touch and emotional closeness', 'Poised & Articulate, calm, deliberate with a low, husky seductive tone', 'Passionate & Vocal, deeply expressive, breathless gasps and uninhibited praise', 'Blunt & Teasing, energetic directness, honest reactions and confident remarks', 'Hesitant & Flustered, flustered pauses, earnest sincerity and endearing shyness']
 INTIMATE_DEMEANOR_MALE_TEMPLATES = ['Playful & Bantering, teases warmly with lighthearted confidence', 'Soft & Deeply Affectionate, tender whispers, warm lingering touch and steady emotional closeness', 'Poised & Articulate, calm, composed with a low, steady seductive tone', 'Passionate & Vocal, deeply expressive, breathless gasps and uninhibited praise', 'Blunt & Teasing, energetic directness, honest reactions and confident remarks', 'Hesitant & Flustered, thoughtful pauses, earnest sincerity and endearing shyness']

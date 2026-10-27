@@ -1,18 +1,27 @@
 from __future__ import annotations
 """
 Autonomous Navigator AI for Hikayat World Simulation.
-Implements a goal-directed waypoint seeker with configurable chaos/deviation rates
-(backtracking, jumping directly to stage 2 destinations, exploring unlisted sub-areas, and resting).
+Implements a goal-directed waypoint seeker with configurable chaos/deviation rates,
+Dijkstra shortest-path graph routing across SQLite world_edges, obstacle barrier detection,
+and dynamic NPC schedule tracking.
 """
 import random
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Tuple
 
 import db
-from mechanics.world.waypoints.matching import check_location_matches_waypoint
+from mechanics.world.waypoints.matching import (
+    check_location_matches_waypoint,
+    get_waypoint_npc_schedule_info,
+)
 from mechanics.world.locations.movement import (
     parse_tiered_location,
     format_tiered_location_string,
+)
+from mechanics.world.locations.pathfinding import (
+    find_spatial_path,
+    evaluate_spatial_route,
+    format_node_hierarchy,
 )
 from mechanics.system.time_engine import is_sleep_time
 
@@ -21,6 +30,25 @@ def get_connected_locations(session_id: int, current_location: str, scenario_key
     """Finds navigable adjacent places and sub-areas for current_location."""
     if not session_id:
         return []
+
+    # Check SQLite world_nodes first
+    try:
+        curr_nid = db.resolve_node_id_from_location(session_id, current_location)
+        if curr_nid:
+            edges = db.get_world_edges_from(session_id, curr_nid)
+            if edges:
+                adj_locs = []
+                for e in edges:
+                    t_nid = e.get("to_node_id")
+                    if t_nid:
+                        loc_str = format_node_hierarchy(session_id, t_nid)
+                        if loc_str and loc_str.strip().lower() != current_location.strip().lower() and loc_str not in adj_locs:
+                            adj_locs.append(loc_str)
+                if adj_locs:
+                    return adj_locs
+    except Exception:
+        pass
+
     existing = db.get_session_locations(session_id)
     if not existing:
         return []
@@ -35,7 +63,7 @@ def get_connected_locations(session_id: int, current_location: str, scenario_key
         s = r.get("sub_name") or "Main Area"
         if z.lower() == curr_z.lower() and p.lower() == curr_p.lower():
             loc_str = format_tiered_location_string(z, p, s)
-            if loc_str != current_location and loc_str not in connected:
+            if loc_str.strip().lower() != current_location.strip().lower() and loc_str not in connected:
                 connected.append(loc_str)
 
     # 2. Other primary places in the same zone
@@ -48,24 +76,13 @@ def get_connected_locations(session_id: int, current_location: str, scenario_key
             if loc_str not in connected:
                 connected.append(loc_str)
 
-    # 3. Primary gateways of other zones (for cross-zone travel)
-    other_zones = set()
-    for r in existing:
-        z = r.get("zone_name") or ""
-        p = r.get("primary_name") or ""
-        s = r.get("sub_name") or "Main Area"
-        if z.lower() != curr_z.lower() and z not in other_zones:
-            other_zones.add(z)
-            connected.append(format_tiered_location_string(z, p, s))
-
     return connected
-
 
 
 @dataclass
 class NavigatorAction:
     """Represents a discrete turn action chosen by the Navigator AI."""
-    action_type: str  # "travel", "skill_check", "rest", "backtrack", "stage_jump"
+    action_type: str  # "travel", "skill_check", "rest", "backtrack", "stage_jump", "barrier_halt"
     target_location: str
     action_text: str
     is_quest_action: bool = False
@@ -73,15 +90,17 @@ class NavigatorAction:
     sub_obj_id: Optional[int] = None
     stage_index: int = 1
     reasoning: str = ""
+    blockers: List[str] = field(default_factory=list)
 
 
 class NavigatorAI:
-    """Autonomous agent that evaluates current position and waypoints to make traversal decisions."""
+    """Autonomous agent that evaluates current position, waypoints, and spatial graphs to make decisions."""
 
     def __init__(self, rng: Optional[random.Random] = None, chaos_rate: float = 0.15):
         self.rng = rng or random.Random()
         self.chaos_rate = chaos_rate
         self.location_history: List[str] = []
+        self.last_action_type: str = ""
 
     def record_location(self, loc: str):
         if loc:
@@ -96,7 +115,23 @@ class NavigatorAI:
         current_minute: int = 480,
         scenario_key: str = "fantasy",
     ) -> NavigatorAction:
-        """Determines the best next action: travel, skill check, stage jump, or rest."""
+        """Determines the best next action: Dijkstra graph travel, skill check, stage jump, or rest."""
+        act = self._decide_action(
+            session_id=session_id,
+            current_location=current_location,
+            current_minute=current_minute,
+            scenario_key=scenario_key,
+        )
+        self.last_action_type = act.action_type
+        return act
+
+    def _decide_action(
+        self,
+        session_id: int,
+        current_location: str,
+        current_minute: int = 480,
+        scenario_key: str = "fantasy",
+    ) -> NavigatorAction:
         self.record_location(current_location)
 
         # 1. Check if bedtime and rest makes sense (e.g. night time)
@@ -108,7 +143,7 @@ class NavigatorAI:
                 reasoning="Night time rest cycle",
             )
 
-        # 2. Query active quest waypoints
+        # 2. Query active quest waypoints and resolve dynamic NPC schedules
         active_wps = db.get_all_session_active_waypoints(session_id)
 
         if not active_wps:
@@ -121,6 +156,12 @@ class NavigatorAI:
                 action_text=f"I explore onward toward {dest}",
                 reasoning="Free exploration after waypoints completed",
             )
+
+        # Resolve live dynamic schedule location if waypoint tracks an NPC
+        for wp in active_wps:
+            sched_info = get_waypoint_npc_schedule_info(session_id, wp, current_minute=current_minute)
+            if sched_info.get("scheduled_location"):
+                wp["target_location"] = sched_info["scheduled_location"]
 
         # Prioritize any active waypoint that can be fulfilled at current location
         local_interactive_wps = [
@@ -168,10 +209,16 @@ class NavigatorAI:
                         reasoning="Testing direct travel bypass of Stage 1 arrival scout",
                     )
 
-            # 4b. Backtracking to previous location
-            if chaos_roll < 0.70 and len(self.location_history) >= 2:
+            # 4b. Backtracking to previous location (guard against ping-pong oscillation loops)
+            if chaos_roll < 0.70 and len(self.location_history) >= 2 and self.last_action_type != "backtrack":
                 prev_loc = self.location_history[-2]
-                if prev_loc != current_location:
+                is_oscillating = (
+                    len(self.location_history) >= 4
+                    and self.location_history[-3].strip().lower() == current_location.strip().lower()
+                    and self.location_history[-4].strip().lower() == prev_loc.strip().lower()
+                )
+                if prev_loc.strip().lower() != current_location.strip().lower() and not is_oscillating:
+                    self.last_action_type = "backtrack"
                     return NavigatorAction(
                         action_type="backtrack",
                         target_location=prev_loc,
@@ -190,8 +237,50 @@ class NavigatorAI:
                     reasoning="Chaos deviation: random local wander",
                 )
 
-        # 5. Goal-Directed Navigation: Travel toward target waypoint location
+        # 5. Goal-Directed Navigation: Use Dijkstra Shortest-Path Graph Routing
         dest_loc = wp_loc or current_location
+
+        try:
+            curr_node = db.resolve_node_id_from_location(session_id, current_location)
+            dest_node = db.resolve_node_id_from_location(session_id, dest_loc)
+            if curr_node and dest_node and curr_node != dest_node:
+                route = find_spatial_path(session_id, curr_node, dest_node)
+                if len(route) >= 2:
+                    sess_row = db.get_session(session_id) or {}
+                    target_hop_node = None
+                    target_hop_loc = None
+
+                    for idx in range(1, len(route)):
+                        cand_prev = route[idx - 1]
+                        cand_node = route[idx]
+                        eval_res = evaluate_spatial_route(session_id, [cand_prev, cand_node], session=dict(sess_row))
+                        if eval_res.get("gated"):
+                            # Obstacle barrier encountered (e.g. locked door with missing key)
+                            blockers = eval_res.get("stage_directives", [])
+                            return NavigatorAction(
+                                action_type="barrier_halt",
+                                target_location=current_location,
+                                action_text=f"I halt at {current_location} due to blocked passage: {', '.join(blockers)}",
+                                reasoning=f"Dijkstra barrier halt: {blockers}",
+                                blockers=blockers
+                            )
+                        cand_loc = format_node_hierarchy(session_id, cand_node)
+                        if cand_loc and cand_loc.strip().lower() != current_location.strip().lower():
+                            target_hop_node = cand_node
+                            target_hop_loc = cand_loc
+                            break
+
+                    if target_hop_loc:
+                        return NavigatorAction(
+                            action_type="travel",
+                            target_location=target_hop_loc,
+                            action_text=f"I follow the shortest spatial path toward {target_hop_loc}",
+                            reasoning=f"Dijkstra shortest path hop {curr_node} -> {target_hop_node} toward {dest_node}",
+                        )
+        except Exception:
+            pass
+
+        # Standard direct travel fallback
         return NavigatorAction(
             action_type="travel",
             target_location=dest_loc,

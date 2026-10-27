@@ -118,6 +118,8 @@ def calculate_social_affinity_delta(
     scene_npc_data: dict | None = None,
     is_target_npc: bool = True,
     outcome_narrative: str = "",
+    social_impression_bonus: int = 0,
+    social_impression_reason: str = "",
 ) -> Tuple[int, List[str], Dict[str, Any]]:
     """
     Deterministically calculates the social affinity delta for an action against an NPC.
@@ -210,18 +212,38 @@ def calculate_social_affinity_delta(
             base_delta = 0
             reasons.append("Neutral dialogue choice (0)")
     else:
+        rel_score = int((contact_data or {}).get("relationship_score", (contact_data or {}).get("score", 0)) or 0)
+        is_meetup = bool(action.get("is_private_meetup") or (contact_data or {}).get("is_private_meetup"))
         if tier in ("crit_success", "critical_success"):
-            base_delta = 2
-            reasons.append("Critical Success (+2)")
+            if rel_score < 50:
+                base_delta = 12
+                reasons.append("Critical Success (+12)")
+            elif rel_score < 100:
+                base_delta = 6
+                reasons.append("Critical Success (+6)")
+            else:
+                base_delta = 5
+                reasons.append("Critical Success (+5)")
         elif tier in ("success", "partial_success", "mixed_success") or succeeded:
-            base_delta = 1
-            reasons.append("Check Success (+1)")
+            if rel_score < 50:
+                base_delta = 8
+                reasons.append("Check Success (+8)")
+            elif rel_score < 100:
+                base_delta = 4
+                reasons.append("Check Success (+4)")
+            else:
+                base_delta = 3
+                reasons.append("Check Success (+3)")
         elif tier in ("crit_fail", "critical_failure"):
-            base_delta = -2
-            reasons.append("Critical Failure (-2)")
+            base_delta = -4
+            reasons.append("Critical Failure (-4)")
         else:
-            base_delta = -1
-            reasons.append("Check Failure (-1)")
+            base_delta = -2
+            reasons.append("Check Failure (-2)")
+
+        if succeeded and is_meetup and is_target_npc:
+            base_delta += 2
+            reasons.append("Private Meetup / Date chemistry (+2)")
 
         # Major Social Milestone: Romantic Confession
         is_confession = (
@@ -345,6 +367,8 @@ def calculate_social_affinity_delta(
     # -------------------------------------------------------------------------
     prefs_delta = 0
     gift_name = str(action.get("item_name") or "").strip()
+    hit_disliked_gift = False
+    disliked_gift_penalty = 0
 
     for p in prefs:
         p_clean = str(p).strip()
@@ -355,6 +379,9 @@ def calculate_social_affinity_delta(
             target_gift = gift_name or act_label
             g_delta, g_reason = _calculate_gift_affinity(target_gift, p_clean)
             if g_delta:
+                if g_delta < 0:
+                    hit_disliked_gift = True
+                    disliked_gift_penalty = min(disliked_gift_penalty, g_delta)
                 prefs_delta += g_delta
                 reasons.append(g_reason)
                 continue
@@ -550,13 +577,38 @@ def calculate_social_affinity_delta(
     # -------------------------------------------------------------------------
     # 7. TOTAL SUM, BOUNDING & CHECK CONSTRAINTS
     # -------------------------------------------------------------------------
+    impression_delta = 0
+    eff_imp_bonus = int(social_impression_bonus or action.get("social_impression_bonus") or 0)
+    eff_imp_reason = str(social_impression_reason or action.get("social_impression_reason") or "").strip()
+    if eff_imp_bonus > 0 and succeeded and not hit_turn_off:
+        is_positive_social = (
+            (base_delta + traits_delta + prefs_delta + dem_dyn_delta + to_delta + act_delta) > 0
+            or action_cat in (
+                IntentCategory.ROMANTIC_CONFESSION.value,
+                IntentCategory.SOCIAL_INVITE.value,
+                IntentCategory.AFFECTION_TOUCH.value,
+                IntentCategory.INTIMATE_ACT.value,
+                IntentCategory.GIFT_OFFER.value,
+            )
+            or interaction_tone in ("warm", "flirtatious")
+        )
+        if is_positive_social:
+            impression_delta = eff_imp_bonus
+            reasons.append(
+                f"{eff_imp_reason} (+{impression_delta})"
+                if eff_imp_reason
+                else f"Stylish outfit / venue impression (+{impression_delta})"
+            )
+    breakdown["impression_delta"] = impression_delta
+
     raw_sum = (
         base_delta +
         traits_delta +
         prefs_delta +
         dem_dyn_delta +
         to_delta +
-        act_delta
+        act_delta +
+        impression_delta
     )
 
     final_delta = raw_sum
@@ -590,15 +642,17 @@ def calculate_social_affinity_delta(
     # Rule 2: Check Success Floor
     # A successful check guarantees >= +1 affinity gain unless an explicit turn-off was triggered or disliked gift/clash occurred
     if not is_free_action and succeeded:
-        if hit_turn_off:
+        if hit_disliked_gift:
+            final_delta = min(disliked_gift_penalty, final_delta)
+        elif hit_turn_off:
             final_delta = min(0, final_delta)
         elif raw_sum <= 0 and (prefs_delta < 0 or traits_delta < 0):
             final_delta = min(0, final_delta)
         else:
             final_delta = max(1, final_delta)
 
-    # Rule 3: Single-turn clamp [-10, 10]
-    final_delta = max(-10, min(10, final_delta))
+    # Rule 3: Single-turn clamp [-10, 18]
+    final_delta = max(-10, min(18, final_delta))
     breakdown["capped_delta"] = final_delta
 
     return final_delta, reasons, breakdown

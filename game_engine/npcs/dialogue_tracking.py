@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Any
 import json
 import re
 import random
@@ -75,12 +77,11 @@ def compute_scene_beat_linger_turns(
         for p in (active_partners or ((session or {}).get("dialogue_partners") or ([session["dialogue_partner"]] if (session or {}).get("dialogue_partner") else [])))
         if p
     ]
+    import namegen
     partner_tokens = set()
     for p in partners:
         partner_tokens.add(p)
-        tokens = p.split()
-        if tokens and len(tokens[0]) >= 3:
-            partner_tokens.add(tokens[0])
+        partner_tokens |= namegen.get_unique_person_tokens(p, peer_names=partners, min_len=2)
 
     linger_turns = 0
     for h in reversed(history):
@@ -280,6 +281,14 @@ def evaluate_and_tick_scene_tension_timer(
 
     # Reset timer if the player successfully moved to a new location (without being halted at a gate)
     if is_movement and not access_gated:
+        session["scene_tension_timer"] = 0
+        return {"timer": 0, "expired": False, "spawned_patrol_npc": None, "spawned_hostile_enemy": None, "stage_direction": ""}
+
+    # Do not tick or spawn tension-timer enemies inside safe Hub locations or during peaceful 1-on-1 NPC dialogue
+    from mechanics.world.locations import is_hub_location
+    from mechanics.world.mobility import get_session_dialogue_partners
+    curr_loc_str = str(session.get("current_location") or "")
+    if not access_gated and (is_hub_location(curr_loc_str) or bool(get_session_dialogue_partners(session))):
         session["scene_tension_timer"] = 0
         return {"timer": 0, "expired": False, "spawned_patrol_npc": None, "spawned_hostile_enemy": None, "stage_direction": ""}
 
@@ -853,250 +862,6 @@ DIALOGUE_TITLE_WORDS: set[str] = {
 }
 
 
-def extract_speaking_npcs_from_narrative(
-    narrative_text: str,
-    npcs_present: list,
-    party: list | None = None,
-    player_name: str | None = None,
-) -> list[str]:
-
-    """
-
-    Scans the narrative for speech quotes and action verbs to identify ALL NPCs who
-
-    actively speak, converse, or directly participate in dialogue during the scene.
-
-    """
-
-    if not narrative_text or not npcs_present:
-
-        return []
-
-
-
-    nar_norm = game_engine._norm_dialogue_name(narrative_text)
-
-    has_quotes = any(q in narrative_text for q in ('"', '“', '”', '‘', "'"))
-
-
-
-    speech_verbs = {
-
-        "speak", "speaks", "spoke", "speaking", "say", "says", "said", "saying",
-
-        "ask", "asks", "asked", "asking", "reply", "replies", "replied", "replying",
-
-        "whisper", "whispers", "whispered", "whispering", "answer", "answers", "answered", "answering",
-
-        "inquire", "inquires", "inquired", "inquiring", "murmur", "murmurs", "murmured", "murmuring",
-
-        "state", "states", "stated", "stating", "add", "adds", "added", "adding",
-
-        "note", "notes", "noted", "noting", "argue", "argues", "argued", "arguing",
-
-        "interject", "interjects", "interjected", "interjecting",
-
-        "agree", "agrees", "agreed", "agreeing", "agreement",
-
-        "nod", "nods", "nodded", "nodding", "propose", "proposes", "proposed", "proposing",
-
-        "explain", "explains", "explained", "explaining", "demand", "demands", "demanded", "demanding",
-
-        "counter", "counters", "countered", "countering", "declare", "declares", "declared", "declaring",
-
-        "remark", "remarks", "remarked", "remarking", "sigh", "sighs", "sighed", "sighing",
-
-        "chuckle", "chuckles", "chuckled", "chuckling", "scoff", "scoffs", "scoffed", "scoffing",
-
-        "tell", "tells", "told", "telling", "suggest", "suggests", "suggested", "suggesting",
-
-        "mutter", "mutters", "muttered", "muttering", "respond", "responds", "responded", "responding",
-
-        "reassure", "reassures", "reassured", "reassuring", "insist", "insists", "insisted", "insisting",
-
-        "continue", "continues", "continued", "continuing", "concur", "concurs", "concurred", "concurring",
-
-        "question", "questions", "questioned", "questioning", "warn", "warns", "warned", "warning",
-
-        "advise", "advises", "advised", "advising", "discuss", "discusses", "discussed", "discussing",
-
-        "debate", "debates", "debated", "debating", "address", "addresses", "addressed", "addressing",
-
-        "confront", "confronts", "confronted", "confronting", "challenge", "challenges", "challenged", "challenging",
-
-        "call", "calls", "called", "calling", "greet", "greets", "greeted", "greeting",
-
-        "shout", "shouts", "shouted", "shouting", "yell", "yells", "yelled", "yelling",
-
-        "exclaim", "exclaims", "exclaimed", "exclaiming", "chime", "chimes", "chimed", "chiming",
-
-        "tease", "teases", "teased", "teasing", "laugh", "laughs", "laughed", "laughing",
-
-        "smirk", "smirks", "smirked", "smirking", "smile", "smiles", "smiled", "smiling",
-
-        "snap", "snaps", "snapped", "snapping", "wave", "waves", "waved", "waving",
-
-        "gasp", "gasps", "gasped", "gasping",
-
-        "rumble", "rumbles", "rumbled", "rumbling",
-
-        "growl", "growls", "growled", "growling",
-
-        "bark", "barks", "barked", "barking",
-
-        "drawl", "drawls", "drawled", "drawling",
-
-        "huff", "huffs", "huffed", "huffing",
-
-        "snarl", "snarls", "snarled", "snarling",
-
-        "snort", "snorts", "snorted", "snorting",
-
-        "intone", "intones", "intoned", "intoning",
-
-        "breathe", "breathes", "breathed", "breathing",
-
-        "hiss", "hisses", "hissed", "hissing",
-
-        "stammer", "stammers", "stammered", "stammering",
-
-        "stutter", "stutters", "stuttered", "stuttering",
-
-        "chide", "chides", "chided", "chiding",
-
-        "taunt", "taunts", "taunted", "taunting",
-
-        "scold", "scolds", "scolded", "scolding",
-
-        "plead", "pleads", "pleaded", "pleading",
-
-        "groan", "groans", "groaned", "groaning",
-
-        "grunt", "grunts", "grunted", "grunting",
-
-        "jeer", "jeers", "jeered", "jeering",
-
-        "mock", "mocks", "mocked", "mocking"
-
-    }
-
-
-
-    title_words = DIALOGUE_TITLE_WORDS
-
-
-
-    nar_attrib_only = nar_norm
-
-    if has_quotes:
-
-        nar_attrib_only = re.sub(r'["“][^"”]*([.!?])["”]', r'\1', nar_norm)
-
-        nar_attrib_only = re.sub(r'["“][^"”]*["”]', ' ', nar_attrib_only)
-
-        nar_attrib_only = re.sub(r"['‘][^'’]*([.!?])['’]", r'\1', nar_attrib_only)
-
-        nar_attrib_only = re.sub(r"['‘][^'’]*['’]", ' ', nar_attrib_only)
-
-
-
-    speaking_npcs = []
-
-    # Collect player and party tokens to avoid misattributing player dialogue to NPCs with overlapping names
-    party_tokens = set()
-    party_full_names = set()
-    if player_name:
-        pn_norm = game_engine._norm_dialogue_name(str(player_name))
-        party_full_names.add(pn_norm)
-        for t in pn_norm.split():
-            if len(t) > 2 and t not in title_words:
-                party_tokens.add(t)
-    if party:
-        for p_entry in party:
-            p_char = p_entry[0] if isinstance(p_entry, (list, tuple)) and p_entry else p_entry
-            if isinstance(p_char, dict) and p_char.get("name"):
-                cn_norm = game_engine._norm_dialogue_name(str(p_char["name"]))
-                party_full_names.add(cn_norm)
-                for t in cn_norm.split():
-                    if len(t) > 2 and t not in title_words:
-                        party_tokens.add(t)
-
-    for npc in npcs_present:
-
-        n_name = game_engine._get_npc_name(npc)
-
-        if not n_name or n_name.lower() == "none":
-
-            continue
-
-        n_norm = game_engine._norm_dialogue_name(n_name)
-        if n_norm in party_full_names:
-            # Skip player or party members in NPC presence list
-            continue
-
-        n_tokens = [t for t in n_norm.split() if len(t) > 2 and t not in title_words]
-
-        if not n_tokens and len(n_norm) > 2:
-
-            n_tokens = [n_norm]
-
-        # Exclude tokens shared with the player character / party to avoid false attribution
-        n_tokens_filtered = [t for t in n_tokens if t not in party_tokens]
-
-        target_text = nar_attrib_only if has_quotes else nar_norm
-
-        sentences = [s.strip() for s in re.split(r'[.!?\n]+', target_text) if s.strip()]
-
-        is_speaking = False
-        for idx, s in enumerate(sentences):
-            matches_npc = n_norm in s or (bool(n_tokens_filtered) and any(t in s for t in n_tokens_filtered))
-            if matches_npc:
-                s_words = set(re.findall(r"\b\w+\b", s))
-                if s_words & speech_verbs:
-                    is_speaking = True
-                    break
-                if has_quotes and idx + 1 < len(sentences):
-                    next_s = sentences[idx + 1]
-                    next_words = set(re.findall(r"\b\w+\b", next_s))
-                    if (next_words & {"she", "he", "they"}) and (next_words & speech_verbs):
-                        is_speaking = True
-                        break
-
-        # Action-beat dialogue attribution: if a paragraph contains quotes and this NPC is the sole character in the paragraph's action prose
-        if not is_speaking and has_quotes:
-            for para in narrative_text.split("\n"):
-                para_clean = para.strip()
-                if not para_clean:
-                    continue
-                if any(q in para_clean for q in ('"', '“', '”', "'", '‘', '’')):
-                    p_norm = game_engine._norm_dialogue_name(para_clean)
-                    p_attrib = re.sub(r'["“][^"”]*["”]', ' ', p_norm)
-                    p_attrib = re.sub(r"['‘][^'’]*['’]", ' ', p_attrib)
-                    matches_npc_para = n_norm in p_attrib or (bool(n_tokens_filtered) and any(t in p_attrib for t in n_tokens_filtered))
-                    if matches_npc_para:
-                        other_mentioned = False
-                        for other_npc in npcs_present:
-                            o_name = game_engine._get_npc_name(other_npc)
-                            if not o_name or o_name.lower() == n_name.lower():
-                                continue
-                            o_norm = game_engine._norm_dialogue_name(o_name)
-                            o_tokens = [ot for ot in o_norm.split() if len(ot) > 2 and ot not in title_words]
-                            if o_norm in p_attrib or any(ot in p_attrib for ot in o_tokens):
-                                other_mentioned = True
-                                break
-                        if not other_mentioned:
-                            is_speaking = True
-                            break
-
-        if is_speaking and n_name not in speaking_npcs:
-            speaking_npcs.append(n_name)
-
-
-
-    return speaking_npcs
-
-
-
 def is_npc_invited_in_action(npc_name: str, actions: list, session: dict = None) -> bool:
     """Checks if any player action explicitly invites or recruits an NPC to travel."""
     if not npc_name or not actions:
@@ -1105,13 +870,20 @@ def is_npc_invited_in_action(npc_name: str, actions: list, session: dict = None)
     import namegen
     import re
     n_low = npc_name.lower().strip()
-    first_token = n_low.split()[0] if n_low else ""
-    given_token = namegen.extract_first_and_last_name(npc_name)[0].lower().strip()
-    token_candidates = {t for t in (first_token, given_token) if len(t) >= 3 and t not in namegen.NAME_PARTICLES_AND_HONORIFICS}
+    given_token = namegen.get_given_name(npc_name).lower().strip()
+    peer_pool = (session.get("current_npcs") or []) + (session.get("pre_turn_stage_npcs") or []) if isinstance(session, dict) else None
+    disambig_toks = namegen.get_unique_person_tokens(npc_name, peer_names=peer_pool, min_len=2)
+    token_candidates = {
+        t for t in ({given_token} | disambig_toks)
+        if len(t) >= 2 and t != n_low and t not in namegen.NAME_PARTICLES_AND_HONORIFICS
+    }
 
-    dismissal_terms = (
-        "leave", "depart", "go home", "head home", "goodbye", "farewell",
-        "part ways", "split up", "alone", "dismiss", "step away", "excuse yourself", "see you later"
+    strict_dismissal_terms = (
+        "goodbye", "farewell", "part ways", "split up", "alone",
+        "dismiss", "see you later", "by yourself", "on your own"
+    )
+    solo_exit_terms = (
+        "leave", "depart", "go home", "head home", "step away", "excuse yourself"
     )
 
     follow_terms = (
@@ -1147,16 +919,18 @@ def is_npc_invited_in_action(npc_name: str, actions: list, session: dict = None)
         )
 
         if is_targeted or is_named_in_label or is_dp_escort:
-            # If the action explicitly dismisses or says goodbye, it is NEVER an invitation
-            if any(dt in label for dt in dismissal_terms):
+            # If the action explicitly says goodbye, parts ways, or goes alone, it is NEVER an invitation
+            if any(dt in label for dt in strict_dismissal_terms):
                 return False
-            if is_targeted or is_dp_escort:
-                return True
             if any(ft in label for ft in follow_terms):
                 return True
             if any(k in label for k in ("invite", "recruit", "hire")) and any(kw in label for kw in ("party", "companion", "journey", "adventure", "travel")):
                 return True
             if re.search(r"\b(?:carry|walk|escort|guide|lead|take|bring|help|accompany)\b", label):
+                return True
+            if any(dt in label for dt in solo_exit_terms):
+                return False
+            if is_targeted or is_dp_escort:
                 return True
 
     return False

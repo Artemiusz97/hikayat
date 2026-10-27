@@ -188,7 +188,15 @@ class MerchantMixin:
                                                       ephemeral=True)
             return
 
-        if not db.can_add_item(user_id, slot_cost=1):
+        effect_val = entry.get("effect") or entry.get("description", "")
+        slot_cost_val = entry.get("slot_cost", 1)
+        if not db.can_add_item(
+            user_id,
+            slot_cost=slot_cost_val,
+            name=entry["name"],
+            item_type=entry.get("item_type", "Item"),
+            effect=effect_val,
+        ):
             cap = inventory_capacity(char.get("str_", 1))
             used = db.used_slots(user_id)
             await interaction.response.send_message(
@@ -198,8 +206,7 @@ class MerchantMixin:
             return
 
         db.apply_hp_mp_delta(user_id, 0, 0, -price)
-        effect_val = entry.get("effect") or entry.get("description", "")
-        db.add_item(user_id, entry["name"], entry["item_type"], effect_val, entry.get("slot_cost", 1))
+        db.add_item(user_id, entry["name"], entry["item_type"], effect_val, slot_cost_val)
         entry["quantity"] -= 1
 
         active_key = merchant.get("active_store_key")
@@ -207,6 +214,7 @@ class MerchantMixin:
             merchant["catalogues"][active_key]["stock"] = stock
 
         db.save_merchant_state(session_id, merchant)
+        game_engine.evaluate_quest_state_predicates(session_id, user_id=user_id)
         await interaction.response.edit_message(
             content=f"🛒 You bought **{entry['name']}** for **{price}g**!", view=None)
 
@@ -323,60 +331,33 @@ class MerchantMixin:
         db.save_merchant_state(session_id, merchant)
 
         if check.succeeded:
-            rumor_text = rumors[idx]["text"]
-            result_text = f"*\"{rumor_text}\"*\n\n*(📜 Logged as a Clue & Bounty Hook in your Quest System!)*"
+            rumor_entry = rumors[idx] if isinstance(rumors[idx], dict) else {"text": str(rumors[idx])}
+            rumor_text = rumor_entry.get("text", "")
             new_history = game_engine.push_history(session["history"],
                                                     f"[Rumor] {char['name']} learned: {rumor_text}")
             db.save_session_scene(session_id, session["scene_title"], session["narrative"],
                                    session["choices"], new_history)
 
-            # Tie directly into Quest System & Caseboard: add as clue to active quest or spawn a side bounty!
-            cur_ch = db.get_session_chapter(session_id) or 1
-            db.add_session_clue(
-                session_id=session_id,
-                title=rumor_text[:60],
-                lead_text=rumor_text,
-                category="testimonial",
-                source_location=session.get("current_location", "Merchant Shop"),
-                linked_npc=merchant.get("name", "Merchant"),
-                chapter=cur_ch
-            )
-            active_quests = db.get_session_quests(session_id, status="Active")
-            if active_quests:
-                aq = active_quests[0]
-                existing_clues = aq.get("current_clues") or ""
-                new_clue_bullet = f"• {rumor_text[:120]}"
-                clues_combined = f"{existing_clues}\n{new_clue_bullet}".strip()
-                db.upsert_quest(
+            linked_qid = str(rumor_entry.get("linked_quest_id") or "").strip()
+            linked_nid = str(rumor_entry.get("linked_node_id") or "").strip()
+            if linked_nid:
+                from mechanics.combat.merchant import reveal_hidden_node_from_rumor
+                reveal_hidden_node_from_rumor(session_id, linked_nid)
+            if linked_qid or linked_nid:
+                cur_ch = db.get_session_chapter(session_id) or 1
+                db.add_session_clue(
                     session_id=session_id,
-                    quest_id=aq["quest_id"],
-                    quest_type=aq.get("quest_type", "Main Quest"),
-                    title=aq["title"],
-                    objective=aq["objective"],
-                    progress=aq.get("progress", ""),
-                    current_clues=clues_combined,
-                    status="Active",
-                    reward_xp=aq.get("reward_xp", 50),
-                    reward_gold=aq.get("reward_gold", 25),
-                    reward_stat_points=aq.get("reward_stat_points", 0),
-                    quest_notes=aq.get("quest_notes")
+                    title=rumor_text[:60],
+                    lead_text=rumor_text,
+                    category="testimonial",
+                    source_location=session.get("current_location", "Merchant Shop"),
+                    linked_npc=str(rumor_entry.get("linked_npc") or merchant.get("name", "Merchant")),
+                    quest_id=linked_qid,
+                    chapter=cur_ch,
                 )
+                result_text = f"*\"{rumor_text}\"*\n\n*(📜 Logged to your Clue Caseboard!)*"
             else:
-                import uuid
-                b_id = f"BNT-{uuid.uuid4().hex[:8].upper()}"
-                db.upsert_quest(
-                    session_id=session_id,
-                    quest_id=b_id,
-                    quest_type="Investigation",
-                    title=f"Rumor: {rumor_text[:40]}...",
-                    objective=rumor_text[:200],
-                    progress="0/1 Investigated",
-                    current_clues=f"• Learned from {merchant.get('flavor_name', 'merchant')}",
-                    status="Available",
-                    reward_xp=60,
-                    reward_gold=30,
-                    reward_stat_points=0
-                )
+                result_text = f"*\"{rumor_text}\"*"
         else:
             result_text = (f"**{char['name']}** can't get a clear answer — the merchant's story doesn't "
                             f"quite add up. ({check.chance}% chance — {check.tier_label})")

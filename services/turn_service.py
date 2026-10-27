@@ -1,7 +1,12 @@
+from __future__ import annotations
+
 import json
 import logging
 import asyncio
+import re
 from typing import Dict, List, Any, Optional
+import httpx
+from openai import APIError as OpenAIAPIError
 from pydantic import BaseModel, ConfigDict
 import db
 from db import adb
@@ -11,6 +16,18 @@ from mechanics.combat.merchant import apply_merchant_encounter_result
 
 log = logging.getLogger(__name__)
 logger = log
+
+
+def _is_llm_unavailable_exception(exc: BaseException) -> bool:
+    """Return True only when an exception originates from upstream LLM/network unavailability."""
+    if isinstance(exc, (OpenAIAPIError, httpx.HTTPError, TimeoutError, ConnectionError, asyncio.TimeoutError)):
+        return True
+    if isinstance(exc, RuntimeError) and "all llm candidate models in fallback chain failed" in str(exc).lower():
+        return True
+    cause = getattr(exc, "__cause__", None)
+    if cause is not None and cause is not exc:
+        return _is_llm_unavailable_exception(cause)
+    return False
 
 
 class TurnResponse(BaseModel):
@@ -53,10 +70,10 @@ class TurnService:
             if isinstance(chk, dict):
                 raw_pick = dict(raw_pick)
                 raw_pick["check"] = skill_check.CheckResult(
-                    chance=int(chk.get("chance", 100)),
-                    roll=float(chk.get("roll", 100.0)),
-                    tier=str(chk.get("tier", "success")),
-                    tier_label=str(chk.get("tier_label", "Success")),
+                    chance=int(chk.get("chance") if chk.get("chance") is not None else 100),
+                    roll=float(chk.get("roll") if chk.get("roll") is not None else 100.0),
+                    tier=str(chk.get("tier") or "success"),
+                    tier_label=str(chk.get("tier_label") or "Success"),
                     succeeded=bool(chk.get("succeeded", True)),
                     requirement=int(chk.get("requirement", raw_pick.get("requirement", 0)) or 0),
                 )
@@ -83,6 +100,8 @@ class TurnService:
         combat_target = raw_pick.get("combat_target")
         req_intent = raw_pick.get("intent")
         req_target_npc = raw_pick.get("target_npc") or raw_pick.get("target_name")
+        req_skip_minutes = raw_pick.get("skip_minutes")
+        req_sleep_mode = raw_pick.get("sleep_mode")
         is_item_action = bool(raw_pick.get("is_item_action") or raw_pick.get("stat") == "ITEM")
         is_stealth_req = bool(
             raw_pick.get("is_stealth")
@@ -100,6 +119,12 @@ class TurnService:
                 direct_choice = nested.get("direct_choice")
             if not combat_target and nested.get("combat_target"):
                 combat_target = nested.get("combat_target")
+            if not req_intent and nested.get("intent"):
+                req_intent = nested.get("intent")
+            if req_skip_minutes is None and nested.get("skip_minutes") is not None:
+                req_skip_minutes = nested.get("skip_minutes")
+            if not req_sleep_mode and nested.get("sleep_mode"):
+                req_sleep_mode = nested.get("sleep_mode")
 
         user_settings = await adb(db.get_settings, user_id) or {}
         check_mode = user_settings.get("debug_check_mode", "off")
@@ -108,7 +133,11 @@ class TurnService:
         chosen: Dict[str, Any] = {}
         classification: Dict[str, Any] = {}
         is_custom = False
+        is_standalone_direct_choice = False
         action_type = "choice"
+
+        if choices is None and isinstance(session, dict):
+            choices = session.get("choices") or []
 
         if is_item_action and not direct_choice and choice_index is None:
             chosen = {
@@ -117,18 +146,47 @@ class TurnService:
                 "mp_cost": 0,
                 "label": custom_text or f"Use {raw_pick.get('item_name', 'item')}",
                 "action_category": "item",
+                "intent": "general_action",
+                "sub_intent": "use_item",
                 "item_name": raw_pick.get("item_name", ""),
                 "item": raw_pick.get("item"),
                 "item_consumed": raw_pick.get("item_consumed", True),
             }
+        elif choice_index is not None and isinstance(choices, list) and 0 <= choice_index < len(choices):
+            chosen = dict(choices[choice_index])
         elif isinstance(direct_choice, dict) and direct_choice:
             chosen = dict(direct_choice)
+            is_standalone_direct_choice = True
+            # Strip privileged server-only spoofing keys on un-indexed client direct_choice payloads
+            for _priv_k in (
+                "quest_id",
+                "sub_obj_id",
+                "stage_index",
+                "is_quest_action",
+                "is_climax_action",
+                "is_story_quest",
+                "_python_verified_quest",
+                "triggers_loot_roll",
+                "breakthrough_leveraged",
+                "_server_stamped",
+                "clue_pair_ids",
+            ):
+                chosen.pop(_priv_k, None)
+            if chosen.get("spell_id"):
+                try:
+                    from mechanics.combat.spells.registry import get_spell
+                    sp_def = get_spell(str(chosen["spell_id"]))
+                    if isinstance(sp_def, dict) and sp_def.get("mp_cost") is not None:
+                        chosen["mp_cost"] = int(sp_def["mp_cost"])
+                except Exception:
+                    pass
+            if chosen.get("target_node_id") and session_id:
+                cand_nid = str(chosen["target_node_id"])
+                wn_row = await adb(db.get_world_node, session_id, cand_nid)
+                if not wn_row:
+                    chosen.pop("target_node_id", None)
         elif choice_index is not None:
-            if choices is None:
-                choices = session.get("choices") or []
-            if isinstance(choices, list) and 0 <= choice_index < len(choices):
-                chosen = dict(choices[choice_index])
-            elif not enforce_explicit_mp and isinstance(choices, list) and choices:
+            if not enforce_explicit_mp and isinstance(choices, list) and choices:
                 chosen = dict(choices[0])
             elif not enforce_explicit_mp:
                 chosen = {"stat": "PER", "requirement": 6, "mp_cost": 0, "label": "Proceed forward"}
@@ -137,13 +195,25 @@ class TurnService:
         elif custom_text:
             is_custom = True
             action_type = "custom"
-            inventory = await adb(db.get_inventory, user_id)
-            classification = await game_engine.classify_custom_action(session, char, inventory, custom_text)
-            if not isinstance(classification, dict):
-                classification = dict(classification) if hasattr(classification, "items") else {}
-            chosen = dict(classification)
-            chosen["label"] = custom_text
-            chosen["text"] = custom_text
+            if req_skip_minutes is not None or req_sleep_mode in ("sleep", "nap", "wait") or req_intent in ("wait_time", "rest_sleep"):
+                classification = {
+                    "stat": "NONE",
+                    "requirement": 0,
+                    "mp_cost": 0,
+                    "action_category": "rest" if req_sleep_mode in ("sleep", "nap") or req_intent == "rest_sleep" else "wait",
+                    "intent": req_intent or ("rest_sleep" if req_sleep_mode in ("sleep", "nap") else "wait_time"),
+                }
+                chosen = dict(classification)
+                chosen["label"] = custom_text
+                chosen["text"] = custom_text
+            else:
+                inventory = await adb(db.get_inventory, user_id)
+                classification = await game_engine.classify_custom_action(session, char, inventory, custom_text)
+                if not isinstance(classification, dict):
+                    classification = dict(classification) if hasattr(classification, "items") else {}
+                chosen = dict(classification)
+                chosen["label"] = custom_text
+                chosen["text"] = custom_text
         else:
             raise ValueError("Must provide choice_index, direct_choice, or custom_action_text")
 
@@ -153,7 +223,30 @@ class TurnService:
         mp_spent = mp_cost
         label_text = str(chosen.get("label") or chosen.get("text") or custom_text or "Action")
 
-        # ── MP Validation & Improvisation Rule ───────────────────────────────
+        # ── Invariant 12 (A4): Restraint Hard-Gate on Travel / Movement ──────
+        if session_id:
+            try:
+                from mechanics.world.locations.movement import is_movement_action
+                from mechanics.social.physical_state import find_player_actor_key, can_actor_travel_or_dual_wield
+                act_intent_low = str(chosen.get("intent") or req_intent or "").lower()
+                is_break_attempt = act_intent_low in ("break_free", "companion_free") or any(
+                    w in label_text.lower() for w in ("break free", "struggle", "slip out", "untie", "cut bonds", "cut my bonds")
+                )
+                if not is_break_attempt and (act_intent_low in ("movement", "travel", "fast_travel") or is_movement_action(label_text)):
+                    phys_now = await adb(db.get_session_physical_state, session_id)
+                    if phys_now and isinstance(phys_now.get("actors"), dict):
+                        pk_now = find_player_actor_key(phys_now["actors"], party=[char], session_id=session_id)
+                        p_actor_now = phys_now["actors"].get(pk_now) if pk_now else None
+                        if p_actor_now:
+                            can_move, move_reason = can_actor_travel_or_dual_wield(p_actor_now)
+                            if not can_move:
+                                raise ValueError(move_reason)
+            except ValueError:
+                raise
+            except Exception:
+                pass
+
+        # ── MP Validation & Improvisation Rule (staged for atomic commit) ─────
         if mp_cost > 0:
             if char.get("mp", 0) < mp_cost:
                 if not is_custom and enforce_explicit_mp:
@@ -163,35 +256,32 @@ class TurnService:
                 mp_spent = 0
                 if stat not in ("NONE", "FREE", "ITEM"):
                     req_val += 2
-            else:
-                await adb(db.apply_hp_mp_delta, user_id, mp_delta=-mp_cost)
-                char["mp"] = max(0, int(char.get("mp", 0)) - mp_cost)
 
-        # ── Gold Spending / Bribe Clamping Rule ──────────────────────────────
-        requested_gold = int(chosen.get("gold_spent") or classification.get("gold_spent") or 0)
+        # ── Gold Spending / Bribe Clamping Rule (staged for atomic commit) ───
+        requested_gold = int(
+            chosen.get("gold_spent")
+            or chosen.get("gold_cost")
+            or classification.get("gold_spent")
+            or 0
+        )
+        avail_gold = max(0, int(char.get("gold", 0) or 0))
         actual_gold_spent = 0
         gold_shortfall_note = ""
-        if requested_gold > 0:
-            avail_gold = max(0, int(char.get("gold", 0) or 0))
-            actual_gold_spent = min(requested_gold, avail_gold)
-            if actual_gold_spent > 0:
-                await adb(db.apply_hp_mp_delta, user_id, gold_delta=-actual_gold_spent)
-                char["gold"] = avail_gold - actual_gold_spent
-            if requested_gold > avail_gold:
-                req_val += 3
-                gold_shortfall_note = (
-                    f"[SYSTEM NOTE: Player attempted to spend/offer {requested_gold} gold, "
-                    f"but only had {avail_gold} gold available (+3 DC penalty applied).]"
-                )
+        if requested_gold > 0 and requested_gold > avail_gold:
+            req_val += 3
+            gold_shortfall_note = (
+                f"[SYSTEM NOTE: Player attempted to spend/offer {requested_gold} gold, "
+                f"but only had {avail_gold} gold available (+3 DC penalty applied).]"
+            )
 
-        # ── Item Consumption Rule ────────────────────────────────────────────
+        # ── Item Validation & Staged Consumption Rule ────────────────────────
         target_item_name = raw_pick.get("item_name") or chosen.get("item_name") or ""
         target_item_obj = raw_pick.get("item") or chosen.get("item")
         item_was_consumed = bool(chosen.get("item_consumed", False))
 
         if stat == "ITEM":
+            inventory = await adb(db.get_inventory, user_id)
             if not target_item_name and not target_item_obj:
-                inventory = await adb(db.get_inventory, user_id)
                 label_lower = label_text.lower()
                 for inv_item in (inventory or []):
                     iname = inv_item.get("name", "")
@@ -201,14 +291,16 @@ class TurnService:
                         break
             if not target_item_name and isinstance(target_item_obj, dict):
                 target_item_name = target_item_obj.get("name", "")
-            if not target_item_obj and target_item_name:
-                inventory = await adb(db.get_inventory, user_id)
-                target_item_obj = next(
+            if target_item_name:
+                verified_inv_item = next(
                     (i for i in (inventory or []) if i.get("name", "").lower() == target_item_name.lower()),
                     None,
                 )
-            if target_item_name and chosen.get("item_consumed", True):
-                await adb(db.remove_item_by_name, user_id, target_item_name)
+                if verified_inv_item is not None:
+                    target_item_obj = verified_inv_item
+                elif is_standalone_direct_choice and enforce_explicit_mp:
+                    raise PermissionError(f"Item '{target_item_name}' is not in your inventory!")
+            if target_item_name and chosen.get("item_consumed", True) and target_item_obj is not None:
                 item_was_consumed = True
 
         # ── Dialogue & Persona DC Modifiers ──────────────────────────────────
@@ -230,16 +322,30 @@ class TurnService:
             or (classification.get("target_npc") if is_custom else None)
         )
         if not explicit_target:
+            import namegen
             act_lbl = label_text.lower()
             named_dps = [
                 dp for dp in sess_dp
-                if dp and (dp.lower() in act_lbl or (len(dp.split()[0]) >= 3 and dp.split()[0].lower() in act_lbl))
+                if dp and (
+                    dp.lower() in act_lbl
+                    or any(
+                        re.search(rf"\b{re.escape(tok)}\b", act_lbl)
+                        for tok in namegen.get_unique_person_tokens(dp, peer_names=sess_dp, min_len=2)
+                    )
+                )
             ]
             if len(named_dps) == 1:
                 explicit_target = named_dps[0]
 
         target_candidates = [explicit_target] if explicit_target else list(sess_dp)
         if target_candidates and isinstance(session, dict) and session.get("id") and stat not in ("NONE", "FREE", "ITEM"):
+            is_romantic_attempt = (
+                act_cat in ("romantic_confession", "affection", "intimate_act")
+                or any(
+                    kw in label_text.lower()
+                    for kw in ("confess", "kiss", "flirt", "seduc", "intimate", "make out", "ask out", "romantic")
+                )
+            )
             for dp_name in target_candidates:
                 if dp_name:
                     c_rec = await adb(db.get_contact, session["id"], str(dp_name).lower().replace(" ", "_"), char.get("id", 0))
@@ -250,14 +356,58 @@ class TurnService:
                         app_rec = c_rec.get("appearance", {})
                         if isinstance(app_rec, dict):
                             req_val += calculate_intimate_action_dc_modifier(label_text, app_rec)
+                    if is_romantic_attempt:
+                        try:
+                            from mechanics.social import relationship_graph as rg
+                            curr_p = await adb(rg.get_current_partner, session["id"], rg.canonical_person_key(dp_name))
+                            if curr_p and not rg.is_player_person_key(curr_p.get("person_key")):
+                                req_val += 3
+                        except Exception:
+                            pass
 
         if stat not in ("NONE", "FREE", "ITEM") and req_val > 0:
             req_val = max(1, req_val)
 
+        # ── Urgent Schedule Departure Hurry & Stage 2 Custom Auto-Fail ───────
+        stage2_custom_auto_fail = False
+        if target_candidates and isinstance(session, dict):
+            from mechanics.social.conversation_choices import get_npc_departure_states, is_convince_stay_action
+            from mechanics.narrative.intent import is_conversational_exit
+            dep_states = get_npc_departure_states(session)
+            if dep_states:
+                for dp_name in target_candidates:
+                    if not dp_name:
+                        continue
+                    dp_st = dep_states.get(re.sub(r"\s+", " ", str(dp_name).strip().lower()))
+                    if not dp_st:
+                        continue
+                    stg = str(dp_st.get("stage") or "")
+                    if stg == "stage_2_ultimatum" and is_custom:
+                        stage2_custom_auto_fail = True
+                        if stat in ("NONE", "FREE", ""):
+                            stat = "CHA"
+                        req_val = max(12, req_val)
+                        break
+                    elif stg == "stage_1_warning" and is_custom and not is_conversational_exit(label_text):
+                        if is_convince_stay_action(label_text):
+                            stat = "CHA"
+                            req_val = max(6, req_val or 9)
+                        elif stat in ("NONE", "FREE", "") or req_val <= 0:
+                            stat = "CHA"
+                            req_val = 9
+                        elif stat != "ITEM":
+                            req_val = min(15, max(7, req_val + 3))
+                        break
+
         # ── Roll Skill Check ─────────────────────────────────────────────────
         stat_col = db.STAT_COLUMN.get(stat, "str_" if not is_custom else "agi_")
         hit_chance = chosen.get("hit_chance")
-        if stat == "ITEM":
+        if stage2_custom_auto_fail:
+            res = skill_check.CheckResult(
+                chance=0, roll=100.0, tier="fail", tier_label="Failed", succeeded=False, requirement=req_val
+            )
+            rate = 0
+        elif stat == "ITEM":
             res = skill_check.CheckResult(
                 chance=100, roll=100.0, tier="success", tier_label="Item Used", succeeded=True, requirement=req_val
             )
@@ -311,9 +461,10 @@ class TurnService:
 
         intent_source = "choice_tag" if (not is_custom and chosen.get("intent")) else ("utility_llm" if is_custom else "fallback")
         if not act_cat or act_cat == "custom" or not act_intent:
-            logger.warning("[TurnService] Action missing structured intent; falling back to regex classifier for '%s'", label_text)
+            if not act_intent:
+                logger.warning("[TurnService] Action missing structured intent; falling back to regex classifier for '%s'", label_text)
+                intent_source = "regex_fallback"
             parsed_i = classify_action_intent(label_text)
-            intent_source = "regex_fallback"
             if not act_cat or act_cat == "custom":
                 act_cat = classification.get("action_category") or parsed_i.category.value
             if not act_intent:
@@ -335,62 +486,152 @@ class TurnService:
         }
 
         # ── Stealth Stance & Covert Action Resolution ─────────────────────────
+        from mechanics.combat import is_in_combat as _ts_is_in_combat
         from mechanics.stealth import (
             get_session_stealth_state,
+            is_actor_hidden,
             toggle_stealth_stance,
             break_stealth,
-            apply_stealth_distraction,
             apply_stealth_decay_turn,
-            resolve_stealth_action
+            resolve_distraction_action,
+            resolve_stealth_action,
+            resolve_scene_environment_context,
         )
 
         st_state = get_session_stealth_state(session)
+        prev_stealth_state = json.loads(json.dumps(st_state, default=str)) if isinstance(st_state, dict) else {}
+        in_combat_now = bool(isinstance(session, dict) and _ts_is_in_combat(session))
         is_covert_intent = bool(act_intent == "stealth_covert" or act_cat == "stealth")
+        actor_hidden_before = is_actor_hidden(session, user_id)
         effective_stealth = bool(
             is_stealth_req
             or is_covert_intent
-            or (st_state.get("is_hidden") and raw_pick.get("stance") != "normal")
+            or (actor_hidden_before and raw_pick.get("stance") != "normal")
         )
 
         lbl_low = label_text.lower()
-        is_distraction_action = bool(
-            is_covert_intent
-            and any(k in lbl_low for k in ("distract", "throw stone", "small stone", "noise distraction", "divert attention"))
-        )
-        if is_distraction_action and isinstance(session, dict) and session.get("id"):
-            apply_stealth_distraction(session, reduction=30)
-            await adb(db.update_session, session["id"], stealth_state=session["stealth_state"])
-
         stealth_outcome = None
-        if effective_stealth and isinstance(session, dict):
-            if act_intent in ("rest_sleep", "dialogue_init"):
-                break_stealth(session, reason=act_intent)
-                effective_stealth = False
+
+        if not in_combat_now and isinstance(session, dict):
+            # Assemble party + active companions for accurate companion noise math
+            stealth_party = [(dict(char), [])]
+            for comp_list_key in ("party_npcs", "temporary_companions"):
+                for comp in (session.get(comp_list_key) or []):
+                    if isinstance(comp, dict):
+                        stealth_party.append((comp, []))
+            if session.get("id"):
+                try:
+                    co_uids = await adb(db.get_session_members, session["id"])
+                    for m_uid in (co_uids or []):
+                        if m_uid != user_id:
+                            m_char = await adb(db.get_character, m_uid)
+                            if m_char:
+                                m_inv = await adb(db.get_inventory, m_uid)
+                                stealth_party.append((dict(m_char), m_inv or []))
+                except Exception:
+                    pass
+
+            actor_inventory = await adb(db.get_inventory, user_id)
+            env_ctx = resolve_scene_environment_context(session)
+            curr_min_st = session.get("current_minute", 480)
+            base_req = int(chosen.get("requirement", req_val) or req_val) if not is_custom else int(classification.get("requirement", req_val) or req_val)
+            dc_mod_stealth = max(0, int(req_val) - base_req)
+
+            is_distraction_action = bool(
+                is_covert_intent
+                and any(k in lbl_low for k in ("distract", "diversion", "throw stone", "throw a stone", "small stone", "pebble", "noise distraction", "divert attention"))
+            )
+            is_freeze_blend_action = bool(
+                effective_stealth
+                and any(k in lbl_low for k in ("freeze & blend", "hold motionless", "hold still", "stay still in shadow"))
+            )
+
+            if is_distraction_action:
+                if not is_actor_hidden(session, user_id) and is_stealth_req:
+                    toggle_stealth_stance(session, True, user_id=user_id)
+                stealth_outcome = resolve_distraction_action(
+                    session=session,
+                    actor_char=char,
+                    equipped_items=actor_inventory,
+                    current_minute=curr_min_st,
+                    party=stealth_party,
+                    environment=env_ctx,
+                    check_mode=check_mode,
+                    user_id=user_id,
+                )
+                res = stealth_outcome["check"]
+                rate = res.chance
+                effective_stealth = is_actor_hidden(session, user_id) or bool(is_stealth_req or is_covert_intent)
                 if session.get("id"):
                     await adb(db.update_session, session["id"], stealth_state=session["stealth_state"])
-            else:
-                session.setdefault("stealth_state", {})["is_hidden"] = True
-                if is_covert_intent or stat == "AGI" or "sneak" in lbl_low:
-                    actor_inventory = await adb(db.get_inventory, user_id)
-                    stealth_outcome = resolve_stealth_action(
-                        session=session,
-                        actor_char=char,
-                        action_data={"label": label_text, "action_type": chosen.get("choice_type", "stealth"), "custom_action_text": label_text},
-                        target_entity={"name": act_target} if act_target else None,
-                        party=None,
-                        equipped_items=actor_inventory,
-                        current_minute=session.get("current_minute", 480),
-                        check_mode=check_mode
-                    )
-                    res = stealth_outcome["check"]
-                    rate = res.chance
+            elif is_freeze_blend_action:
+                toggle_stealth_stance(session, True, user_id=user_id)
+                apply_stealth_decay_turn(session, is_waiting_still=True)
+                if session.get("id"):
+                    await adb(db.update_session, session["id"], stealth_state=session["stealth_state"])
+            elif effective_stealth:
+                is_loud_magic = bool(
+                    (chosen.get("spell_id") or act_cat == "magic")
+                    and not any(k in lbl_low for k in ("silent", "shadow", "stealth", "invisib", "muffle", "veil"))
+                )
+                if act_intent in ("rest_sleep", "dialogue_init"):
+                    break_stealth(session, reason=act_intent, user_id=user_id)
+                    effective_stealth = False
+                    if session.get("id"):
+                        await adb(db.update_session, session["id"], stealth_state=session["stealth_state"])
+                elif is_loud_magic:
+                    break_stealth(session, reason="unsuppressed_magic", user_id=user_id)
+                    effective_stealth = False
                     if session.get("id"):
                         await adb(db.update_session, session["id"], stealth_state=session["stealth_state"])
                 else:
-                    apply_stealth_decay_turn(session)
+                    if not is_actor_hidden(session, user_id):
+                        toggle_stealth_stance(session, True, user_id=user_id)
+                    is_covert_check = bool(
+                        is_covert_intent
+                        or any(w in lbl_low for w in ("sneak", "creep", "infiltrate", "pickpocket", "shadow step", "silent takedown", "slip past", "lockpick", "pick the lock"))
+                        or (stat == "AGI" and not any(w in lbl_low for w in ("flee", "sprint", "dodge", "chase")))
+                    )
+                    if is_covert_check:
+                        stealth_outcome = resolve_stealth_action(
+                            session=session,
+                            actor_char=char,
+                            action_data={
+                                "label": label_text,
+                                "action_type": chosen.get("choice_type", "stealth"),
+                                "custom_action_text": label_text,
+                                "target_npc": act_target,
+                            },
+                            target_entity={"name": act_target} if act_target else None,
+                            party=stealth_party,
+                            equipped_items=actor_inventory,
+                            current_minute=curr_min_st,
+                            environment=env_ctx,
+                            check_mode=check_mode,
+                            dc_modifier=dc_mod_stealth,
+                            user_id=user_id,
+                        )
+                        res = stealth_outcome["check"]
+                        rate = res.chance
+                        effective_stealth = is_actor_hidden(session, user_id)
+                    else:
+                        apply_stealth_decay_turn(session, is_waiting_still=("wait" in lbl_low))
                     if session.get("id"):
                         await adb(db.update_session, session["id"], stealth_state=session["stealth_state"])
 
+        # D7: Deduct gold_spent only on succeeded checks OR gamble forfeitures (staged for atomic commit)
+        if requested_gold > 0:
+            should_spend_gold = bool(res.succeeded or str(act_sub_intent or "").lower() == "gamble")
+            actual_gold_spent = min(requested_gold, avail_gold) if should_spend_gold else 0
+
+        act_dismisses_npc = str(
+            chosen.get("dismisses_npc")
+            or (classification.get("dismisses_npc") if is_custom else "")
+            or ""
+        ).strip()
+        raw_skip = req_skip_minutes if req_skip_minutes is not None else (
+            chosen.get("skip_minutes") if chosen.get("skip_minutes") is not None else chosen.get("wait_minutes")
+        )
         action = dict(chosen) if not is_custom else {}
         action.update({
             "user_id": user_id,
@@ -400,8 +641,10 @@ class TurnService:
             "requirement": req_val,
             "mp_cost": mp_cost,
             "mp_spent": mp_spent,
+            "_mp_already_deducted": False,
             "gold_spent": actual_gold_spent,
-            "_gold_already_deducted": bool(actual_gold_spent > 0),
+            "_requested_gold": requested_gold,
+            "_gold_already_deducted": False,
             "_gold_shortfall_note": gold_shortfall_note,
             "rate": rate,
             "check": res,
@@ -412,36 +655,42 @@ class TurnService:
             "roll": res.roll,
             "text": label_text,
             "type": action_type,
-            "choice_type": chosen.get("choice_type", ""),
+            "choice_type": chosen.get("choice_type") or "",
             "action_category": act_cat,
             "intent": act_intent,
             "sub_intent": act_sub_intent,
             "target_npc": act_target or "",
             "ends_dialogue": act_ends_dialogue,
+            "dismisses_npc": act_dismisses_npc,
+            "_stage2_custom_auto_fail": stage2_custom_auto_fail,
             "resolved_intent": resolved_intent,
-            "spell_id": chosen.get("spell_id", ""),
+            "spell_id": chosen.get("spell_id") or "",
             "combat_target": combat_target or chosen.get("combat_target") or (classification.get("combat_target") if is_custom else None),
-            "combat_tactical_archetype": chosen.get("combat_tactical_archetype") or (classification.get("combat_tactical_archetype", "") if is_custom else ""),
-            "target_location": chosen.get("target_location") or (classification.get("target_location", "") if is_custom else ""),
-            "spawns_npc_role": chosen.get("spawns_npc_role") or (classification.get("spawns_npc_role", "") if is_custom else ""),
+            "combat_tactical_archetype": chosen.get("combat_tactical_archetype") or (classification.get("combat_tactical_archetype", "") if is_custom else "") or "",
+            "target_node_id": chosen.get("target_node_id") or "",
+            "target_location": chosen.get("target_location") or (classification.get("target_location", "") if is_custom else "") or "",
+            "spawns_npc_role": chosen.get("spawns_npc_role") or (classification.get("spawns_npc_role", "") if is_custom else "") or "",
             "triggers_loot_roll": bool(chosen.get("triggers_loot_roll") or (classification.get("triggers_loot_roll", False) if is_custom else False)),
             "is_quest_action": bool(chosen.get("is_quest_action", False)),
             "is_climax_action": bool(chosen.get("is_climax_action", False)),
-            "quest_id": chosen.get("quest_id", ""),
+            "breakthrough_leveraged": bool(chosen.get("breakthrough_leveraged", False)),
+            "clue_pair_ids": list(chosen.get("clue_pair_ids") or []),
+            "quest_id": chosen.get("quest_id") or "",
             "sub_obj_id": chosen.get("sub_obj_id"),
             "stage_index": chosen.get("stage_index"),
-            "contract_type": chosen.get("contract_type", ""),
+            "contract_type": chosen.get("contract_type") or "",
             "item_name": target_item_name,
             "item": target_item_obj,
             "item_consumed": item_was_consumed,
-            "intent": act_intent,
-            "sub_intent": chosen.get("sub_intent") or (classification.get("sub_intent", "") if is_custom else ""),
-            "target_npc": act_target,
+            "_item_already_removed": False,
             "active_recall": classification.get("_active_recall") if is_custom else chosen.get("_active_recall"),
             "is_stealth": effective_stealth,
             "stance": "stealth" if effective_stealth else "normal",
             "stealth_state": session.get("stealth_state") if isinstance(session, dict) else None,
+            "_prev_stealth_state": prev_stealth_state,
             "stealth_outcome": stealth_outcome,
+            "skip_minutes": int(raw_skip) if raw_skip not in (None, "") else 0,
+            "sleep_mode": str(req_sleep_mode or chosen.get("sleep_mode") or ""),
         })
         if not action.get("active_recall") and isinstance(session, dict) and session.get("id") and label_text:
             from game_engine.turn.generation import extract_deterministic_recall_query
@@ -480,11 +729,19 @@ class TurnService:
 
             # Everyone locked in
             actions = list(picks.values())
-            mp_already_spent = {a.get("user_id", user_id): a.get("mp_spent", 0) for a in actions}
+            mp_already_spent = {
+                a.get("user_id", user_id): a.get("mp_spent", 0)
+                for a in actions
+                if a.get("_mp_already_deducted")
+            }
             await adb(db.update_session, session_id, pending_picks_json="{}")
         else:
             actions = [action]
-            mp_already_spent = {user_id: action.get("mp_spent", 0)}
+            mp_already_spent = (
+                {user_id: action.get("mp_spent", 0)}
+                if action.get("_mp_already_deducted")
+                else {}
+            )
 
         # Serialize action helper
         def _serialize_action(a):
@@ -504,23 +761,41 @@ class TurnService:
                 "stat": a.get("stat", ""),
                 "requirement": getattr(c, "requirement", a.get("requirement", 0)),
                 "mp_spent": a.get("mp_spent", 0),
+                "gold_spent": a.get("gold_spent", 0),
                 "check": check_dict,
                 "item_name": a.get("item_name"),
+                "intent": a.get("intent"),
+                "sub_intent": a.get("sub_intent"),
+                "ends_dialogue": a.get("ends_dialogue", False),
+                "dismisses_npc": a.get("dismisses_npc", ""),
                 "target_name": a.get("target_name") or a.get("target_npc") or a.get("combat_target"),
                 "target_npc": a.get("target_npc") or a.get("target_name") or a.get("combat_target"),
                 "combat_target": a.get("combat_target") or a.get("target_npc") or a.get("target_name"),
+                "target_node_id": a.get("target_node_id") or "",
+                "target_location": a.get("target_location") or "",
                 "spell_id": a.get("spell_id"),
                 "quest_id": a.get("quest_id"),
                 "sub_obj_id": a.get("sub_obj_id"),
                 "stage_index": a.get("stage_index"),
+                "breakthrough_leveraged": bool(a.get("breakthrough_leveraged", False)),
+                "clue_pair_ids": list(a.get("clue_pair_ids") or []),
                 "active_recall": a.get("active_recall"),
                 "is_stealth": a.get("is_stealth", False),
                 "stance": a.get("stance", "normal"),
-                "stealth_state": a.get("stealth_state")
+                "stealth_state": a.get("stealth_state"),
+                "stealth_outcome": {
+                    k: (v.__dict__ if hasattr(v, "__dict__") and not isinstance(v, dict) else v)
+                    for k, v in a["stealth_outcome"].items()
+                } if isinstance(a.get("stealth_outcome"), dict) else None,
             }
 
         import uuid
         turn_id = str(uuid.uuid4())
+        prev_st_rollback = None
+        for a in actions:
+            if isinstance(a, dict) and isinstance(a.get("_prev_stealth_state"), dict):
+                prev_st_rollback = a.get("_prev_stealth_state")
+                break
         snapshot = {
             "turn_id": turn_id,
             "status": "pending",
@@ -530,10 +805,13 @@ class TurnService:
             "actions": [_serialize_action(a) for a in actions],
             "pre_turn": {
                 "location": session.get("current_location", ""),
+                "current_node_id": session.get("current_node_id", ""),
+                "focal_point": session.get("focal_point", ""),
                 "narrative": session.get("narrative", ""),
                 "scene_title": session.get("scene_title", ""),
-                "npcs": session.get("current_npcs", []),
-                "enemies": session.get("nearby_enemies", [])
+                "npcs": list(session.get("current_npcs") or []),
+                "enemies": list(session.get("nearby_enemies") or []),
+                "stealth_state": prev_st_rollback,
             },
             "applied": {}
         }
@@ -545,9 +823,19 @@ class TurnService:
             if isinstance(outcome, dict) and isinstance(session, dict) and "stealth_state" not in outcome:
                 outcome["stealth_state"] = session.get("stealth_state")
         except BaseException as e:
-            # Mark hard failure
+            if prev_st_rollback is not None:
+                try:
+                    await adb(db.update_session, session_id, stealth_state=prev_st_rollback)
+                except Exception:
+                    pass
+            if isinstance(e, Exception):
+                log.error("Hard failure during resolve_turn for session %s: %s", session_id, e, exc_info=True)
             snapshot["status"] = "failed_hard"
-            snapshot["fallback_reason"] = "models_unavailable" # Simplified for now
+            if _is_llm_unavailable_exception(e):
+                snapshot["fallback_reason"] = "models_unavailable"
+            else:
+                snapshot["fallback_reason"] = "engine_error"
+                snapshot["error"] = f"{type(e).__name__}: {e}"
             await adb(db.set_turn_snapshot, session_id, snapshot)
             raise e
 
@@ -610,6 +898,7 @@ class TurnService:
         levels_gained = []
         char = await adb(db.get_character, user_id)
 
+        deduction_xp_bonus = int(outcome.get("_deduction_xp_bonus") or 0) if isinstance(outcome, dict) else 0
         for a in actions:
             uid = a.get("user_id", user_id)
             char_for_xp = await adb(db.get_character, uid)
@@ -626,13 +915,13 @@ class TurnService:
                 check_tier = a.get("tier", "fail")
             base_xp = XP_REWARDS.get(check_tier, 0)
 
-            # Bonus XP from character outcomes (LLM narrative rewards)
-            bonus_xp = 0
+            # Bonus XP from character outcomes + deterministic clue deduction
+            bonus_xp = deduction_xp_bonus
             for co in outcome.get("character_outcomes", []):
                 co_name = co.get("name", "") if isinstance(co, dict) else getattr(co, "name", "")
                 if co_name.lower() == char_for_xp["name"].lower():
                     raw_xp = co.get("xp_change", 0) if isinstance(co, dict) else getattr(co, "xp_change", 0)
-                    bonus_xp = int(raw_xp or 0)
+                    bonus_xp += int(raw_xp or 0)
                     break
 
             total_xp = base_xp + bonus_xp
@@ -686,6 +975,7 @@ class TurnService:
             "faction_updates": outcome.get("faction_updates") or [],
             "quest_updates": outcome.get("quest_updates") or [],
             "witnessed_by": witnesses,
+            "is_fallback": bool(outcome.get("_is_fallback_narrative") or outcome.get("is_fallback")),
         }
         combat_log = outcome.get("combat_log") or outcome.get("_combat_log")
         if combat_log:
@@ -725,6 +1015,8 @@ class TurnService:
             "items_gained": items_gained,
             "xp_gained": {uid: xp_gained if uid == user_id else 0 for uid in set([a.get("user_id", user_id) for a in actions])},
             "location": outcome.get("location", ""),
+            "current_node_id": outcome.get("current_node_id") or fresh_session.get("current_node_id", ""),
+            "focal_point": outcome.get("focal_point") or fresh_session.get("focal_point", ""),
             "npcs_present": outcome.get("npcs_present", []),
             "nearby_enemies": outcome.get("nearby_enemies", []),
             "deceased_characters": outcome.get("deceased_characters", []),
@@ -735,6 +1027,7 @@ class TurnService:
             "relationship_updates": outcome.get("relationship_updates", []),
             "dialogue_partner": outcome.get("dialogue_partner"),
             "dialogue_partners": outcome.get("dialogue_partners", []),
+            "cast_state": outcome.get("_staged_cast_state") or fresh_session.get("cast_state"),
             "intimate_update": outcome.get("intimate_update"),
             "_physical_state": outcome.get("_physical_state"),
             "_refractory_recovered_notice": outcome.get("_refractory_recovered_notice"),
@@ -773,7 +1066,7 @@ class TurnService:
 
     @staticmethod
     async def retry_narration(session_id: int, user_id: int, stream_callback=None) -> TurnResponse:
-        """Runs the lightweight narration pass for a retry, updating only prose and choices."""
+        """Runs the lightweight narration pass for a retry, updating only prose and choices while freezing cast & spatial state (D13)."""
         session = await adb(db.get_session, session_id)
         if not session:
             raise ValueError(f"Session {session_id} not found")
@@ -786,10 +1079,11 @@ class TurnService:
         
         from game_engine.turn.narration import run_narration_pass
         
-        # Narration pass
+        # Narration pass (cast_events on retry output are strictly ignored per D13)
         new_outcome = await run_narration_pass(session, snapshot, attempt=attempt, stream_callback=stream_callback)
+        if isinstance(new_outcome, dict):
+            new_outcome.pop("cast_events", None)
         
-        # We need to construct a complete TurnResponse
         # 1. Update the DB history directly like resolve_action does
         raw_hist = list(session.get("history") or [])
         if raw_hist and isinstance(raw_hist[-1], dict) and raw_hist[-1].get("type") == "action":
@@ -816,8 +1110,6 @@ class TurnService:
                 last_entry.pop("is_fallback", None)
                 last_entry.pop("_is_fallback_narrative", None)
             elif is_prev_fallback:
-                # If retry did not provide a separate outcome_narrative, clear the emergency fallback text
-                # so the stale placeholder does not persist in the adventure history.
                 last_entry["outcome_narrative"] = ""
                 last_entry["narrative"] = new_next_narr or ""
                 last_entry.pop("is_fallback", None)
@@ -830,30 +1122,49 @@ class TurnService:
             raw_hist[-1] = last_entry
             await adb(db.update_session, session_id, history_json=json.dumps(raw_hist, default=str))
 
-        # 2. Re-derive soft state
-        # The choices will be sanitized by the caller usually, but we need to return them
-        
         # Update snapshot attempts
         snapshot["retry_attempts"] = attempt
-        # clear fallback_reason on manual retry
         snapshot["fallback_reason"] = None
         await adb(db.set_turn_snapshot, session_id, snapshot)
         
         fresh_session = await adb(db.get_session, session_id)
         new_char = await adb(db.get_character, user_id)
         
-        # Merge new outcome with old applied mechanics so UI can display correctly if needed
-        # Narration pass only updates prose and choices; preserve frozen mechanical state (location, NPCs, enemies, vitals)
-        merged_outcome = dict(snapshot.get("applied", {}))
+        # D13: Preserve frozen mechanical, spatial & cast state from snapshot["applied"]
+        applied_state = dict(snapshot.get("applied", {}))
+        merged_outcome = dict(applied_state)
         for k in ("outcome_narrative", "next_narrative", "scene_title", "next_choices", "choices", "_is_fallback_narrative"):
             if k in new_outcome:
                 merged_outcome[k] = new_outcome[k]
-        
-        # action is just the first action from snapshot for UI purposes
+        # Guarantee frozen cast & spatial fields cannot drift on retry
+        for frozen_k in ("location", "current_node_id", "focal_point", "npcs_present", "dialogue_partner", "dialogue_partners"):
+            if frozen_k in applied_state:
+                merged_outcome[frozen_k] = applied_state[frozen_k]
+
+        raw_retry_choices = merged_outcome.get("next_choices") or merged_outcome.get("choices") or []
+        if raw_retry_choices and hasattr(game_engine, "build_hybrid_turn_choices"):
+            try:
+                rebuilt_choices = await adb(
+                    game_engine.build_hybrid_turn_choices,
+                    raw_retry_choices,
+                    scenario=fresh_session.get("scenario", "fantasy"),
+                    location=merged_outcome.get("location") or fresh_session.get("current_location", ""),
+                    char=new_char,
+                    dialogue_partner=merged_outcome.get("dialogue_partners")
+                    if "dialogue_partners" in merged_outcome
+                    else merged_outcome.get("dialogue_partner"),
+                    current_npcs=merged_outcome.get("npcs_present") or fresh_session.get("current_npcs", []),
+                    session_id=session_id,
+                    session=fresh_session,
+                )
+                if rebuilt_choices:
+                    merged_outcome["next_choices"] = rebuilt_choices
+                    merged_outcome["choices"] = rebuilt_choices
+                    merged_outcome["_hybrid_choices_built"] = True
+            except Exception as e:
+                log.warning("build_hybrid_turn_choices during retry_narration failed (non-fatal): %s", e)
+
         action = snapshot.get("actions", [{}])[0]
-        
-        # items_gained_by_user and xp_gained are technically 0 for the *retry* itself, 
-        # but we return empty to prevent double granting in UI
         return TurnResponse(
             success=True,
             session=fresh_session,

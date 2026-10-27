@@ -171,12 +171,26 @@ def evaluate_gift_reaction(
         feedback_title = "🎁 **Gift Given!**"
         reaction_text = f"**{target_name}** warmly accepts the {badge} **{item_name}** with a smile."
 
+    worn_note = ""
     if session_id:
         db.upsert_contact(session_id, target_name.lower().replace(" ", "_"), target_name, character_id=char.get("id", 0), delta_score=score_delta)
+        try:
+            from mechanics.social.physical_state import apply_wearable_gift_to_npc
+            slot_equipped = apply_wearable_gift_to_npc(
+                session_id=session_id,
+                character_id=int(char.get("id", 0) or 0),
+                npc_name=target_name,
+                item_dict=item,
+                item_name=item_name,
+            )
+            if slot_equipped:
+                worn_note = f"\n👗 **{target_name}** gladly tries on and wears **{item_name}**!"
+        except Exception:
+            pass
     db.remove_item_by_name(user_id, item.get("name"))
 
     return True, (
-        f"{feedback_title}\n{reaction_text}\n"
+        f"{feedback_title}\n{reaction_text}{worn_note}\n"
         f"📈 Relationship with **{target_name}**: **+{score_delta} points**."
     ), score_delta
 
@@ -238,7 +252,8 @@ def apply_item_to_target(
         meta = parse_equipment_metadata(item)
         spell_id = meta.get("spell_id")
         is_spellbook = True
-    elif any(item_name.lower().startswith(p) for p in ["spellbook:", "grimoire:", "tome:", "scroll:"]):
+    elif any(item_name.lower().startswith(p) for p in ["spellbook:", "grimoire:", "tome:", "scroll:", "datapad:", "schematic:"]):
+        is_spellbook = True
         parts = item_name.split(":", 1)
         if len(parts) > 1:
             sp_name = parts[1].strip()
@@ -246,10 +261,32 @@ def apply_item_to_target(
             for sid, sp in get_all_spells().items():
                 if sp["name"].lower() == sp_name.lower():
                     spell_id = sid
-                    is_spellbook = True
                     break
 
     if is_spellbook:
+        scen_check = (session or {}).get("scenario", "")
+        if not scen_check:
+            try:
+                active_sid = db.get_active_session_id_for_user(user_id)
+                if active_sid:
+                    s_row = db.get_session(active_sid)
+                    if s_row:
+                        scen_check = s_row.get("scenario", "")
+                if not scen_check and user_id:
+                    c_row = db.get_character(user_id)
+                    if c_row:
+                        scen_check = c_row.get("scenario", "")
+            except Exception:
+                pass
+        try:
+            from scenario_data import is_anomalous_incursions_scenario
+            if is_anomalous_incursions_scenario(scen_check):
+                return (
+                    False,
+                    "🚫 **Innate Ability Restriction:** In *Anomalous Incursions*, agents possess a fixed set of 5 innate special abilities and cannot learn new spells from spellbooks or grimoires. Only equipping **Anomalous** gear with an embedded ability can grant additional active skills.",
+                )
+        except Exception:
+            pass
         if not spell_id:
             return False, "❌ This spellbook appears illegible or damaged."
         from mechanics.combat.spells import get_spell, register_spell

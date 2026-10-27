@@ -109,7 +109,8 @@ async def generate_player_chat_message(session: dict, contact: dict, player_char
             if player_msg:
                 if is_ongoing:
                     # Strip leading greeting if the model inadvertently included one
-                    first_name = contact_name.split()[0] if contact_name.split() else contact_name
+                    import namegen
+                    first_name = namegen.get_given_name(contact_name) or (contact_name.split()[0] if contact_name.split() else contact_name)
                     name_alt = rf"(?:{re.escape(contact_name)}|{re.escape(first_name)})"
                     clean_msg = re.sub(
                         rf"^(?:hey(?:a)?|hi|hello|yo)\s*(?:{name_alt}|there)?\s*[,!.:-]*\s*",

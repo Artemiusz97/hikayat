@@ -241,6 +241,9 @@ class TestSmartCampusMobilityAndArrivalTracking(unittest.TestCase):
             "npcs_present": [
                 {"name": "Sofia Anderson", "role": "Club President"}
             ],
+            "cast_events": [
+                {"type": "engage", "npc": "Sofia Anderson"}
+            ],
             "entity_audit": {
                 "speaking_characters": ["Sofia Anderson"],
                 "present_named_characters": ["Sofia Anderson"]

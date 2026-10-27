@@ -23,6 +23,7 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v2.6.0** | 2026-10-27 | Minor | Five Normalized World Models, Anomalous Incursions, Stealth Escalation, Town & Campus Rosters, Web Contacts & Theme Dock, Test Concurrency Hardening. |
 | **v2.5.0** | 2026-10-23 | Minor | Deterministic State Engine Phases 1–5, Stealth & Infiltration Package, Tactical Action Dock & Quick Belt, Graph Pathfinding & Access Gating, CI Concurrency Hardening. |
 | **v2.4.0** | 2026-10-21 | Minor | SDXL Scene Image Generation, Living Scene Stage Manager, World Schedules, Spatial Graph & Dijkstra Navigation, Commitments Engine, Intimacy Ledger & 5-Language Localization. |
 | **v2.3.0** | 2026-10-13 | Minor | Multi-Language Localization, NPC Gender & Pronoun Consistency, Combat Stance & Affinity Synergy, Sub-Facility Waypoints, Web UI Internationalization. |
@@ -44,6 +45,36 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 ---
 
 ## Release Details
+
+### [v2.6.0] - 2026-10-27
+
+#### Added & Enhanced
+- **Five Normalized World Models Cutover (`tests/test_five_normalized_models_cutover.py`)**:
+  - **Model 1: Household & Genealogy (`households` table)**: Structured household units with mother/father matrices, sibling links, maiden names, and occupation profiles.
+  - **Model 2: Intimacy Ledger (`intimate_events` table)**: Transactional intimacy history tracking timestamps, consent, and memory anchors with zero prose stat leakage.
+  - **Model 3: Social & Relationship Graph (`social_persons`, `social_ties`, `npc_ties`)**: Multi-edge relationship network resolving partners, secret affairs, rivalries, and mentorships.
+  - **Model 4: Commitments & Dynamic Schedules (`commitments` table)**: Persistent appointments, rendezvous arrival verification, and stale cleanup.
+  - **Model 5: Actor Physical State & Garments (`physical_state_json`)**: 6-slot garment layers, stamina, fatigue, excitement meters, and posture tracking.
+- **Anomalous Incursions & Reality Distortion Mechanics**:
+  - Anomalous gear, weapons, and accessories with reality distortion multipliers (`mechanics/combat/items/anomalous_gear.py`).
+  - Spatially bounded anomalous incursions, extraction gates, and story arc bounties with confiscation merchant protocols (`mechanics/world/anomalous_events.py`).
+  - Specialized anomalous tags and covert agent roster resolution (`mechanics/social/agent_roster.py`).
+- **Stealth Escalation & Infiltration System (`mechanics/stealth/escalation.py`)**:
+  - Dynamic AI awareness shifts, patrol reinforcements, search pattern expansions, and combat escalation.
+  - Deterministic Monte Carlo stealth fuzz simulator (`tests/simulators/stealth/`, `scripts/simulate_stealth.py`).
+- **Town & Campus Rosters, Part-Time Shifts & Discreet Encounters**:
+  - Comprehensive town resident schedules and facility presence (`mechanics/social/town_roster.py`).
+  - Student and worker part-time shifts with curfew cutoffs and conflict resolution.
+  - Discreet encounter mechanics resolving secret affair discovery, witness rumors, and emotional confrontations.
+- **Web SPA Omnichannel Modernization**:
+  - **Contacts Panel (`web/src/components/Sidebar/ContactsPanel.jsx`)**: Filterable directory with live search, tier badges, and phone shortcuts.
+  - **Theme Switcher (`web/src/components/Common/ThemeSwitcher.jsx`, `web/src/theme/`)**: Instant visual palette switching (dark, parchment fantasy, sci-fi).
+  - **Game Menu & Anchored Popovers (`AnchoredPopover.jsx`, `GameMenu.jsx`)**: Clean navigation and quick belt hotbars.
+  - Full 5-language localization alignment across all new components (`web/src/locales/`).
+- **Parallel Test Hardening & Concurrency Isolation**:
+  - Resolved foreign key constraint race condition in `tests/test_household_concurrency.py` by ensuring dependent contacts are unlinked before household deletions.
+  - Eliminated variable shadowing of `session_id` in `can_trigger_romantic_confession` (`mechanics/social/relationships.py`).
+  - Culture-aware East Asian surname-first extraction in `tests/test_school_social_systems_integration.py`.
 
 ### [v2.5.0] - 2026-10-23
 

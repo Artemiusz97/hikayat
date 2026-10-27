@@ -1,6 +1,6 @@
 import sys
 from .combat import equipment, items, spells, traits, enemies, merchant
-from .social import persona, relationships, genealogy, school_roster, factions, races, physical_state, attributes
+from .social import persona, relationships, genealogy, school_roster, town_roster, factions, races, physical_state, attributes
 from .world import locations, waypoints, world_forge, mobility
 from .narrative import events, event_handlers, clues, bounty, intent, choice_generator
 from .system import memory, phone, save_system, time_engine, concurrency
@@ -9,7 +9,7 @@ _MODS = [
     ("equipment", equipment), ("items", items), ("spells", spells), ("traits", traits),
     ("enemies", enemies), ("merchant", merchant),
     ("persona", persona), ("relationships", relationships), ("genealogy", genealogy),
-    ("school_roster", school_roster), ("factions", factions), ("races", races),
+    ("school_roster", school_roster), ("town_roster", town_roster), ("factions", factions), ("races", races),
     ("physical_state", physical_state), ("attributes", attributes),
     ("locations", locations), ("waypoints", waypoints), ("world_forge", world_forge),
     ("mobility", mobility),

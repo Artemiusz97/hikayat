@@ -552,31 +552,26 @@ def sanitize_absent_npc_hallucinations(
     session_id = session["id"]
     allowed_names: set[str] = set()
 
+    import namegen
+    allowed_full_list: list[str] = []
+
+    def _add_allowed_person(raw_nm: Any) -> None:
+        s = str((raw_nm.get("name") if isinstance(raw_nm, dict) else raw_nm) or "").strip()
+        if s:
+            s_low = s.lower()
+            allowed_names.add(s_low)
+            allowed_full_list.append(s)
+
     for n in (session.get("current_npcs") or []):
-        nm = str((n.get("name") if isinstance(n, dict) else n) or "").strip().lower()
-        if nm:
-            allowed_names.add(nm)
-            for tok in nm.split():
-                if len(tok) >= 3:
-                    allowed_names.add(tok)
+        _add_allowed_person(n)
 
     if result and isinstance(result, dict):
         for n in (result.get("npcs_present") or []):
-            nm = str((n.get("name") if isinstance(n, dict) else n) or "").strip().lower()
-            if nm:
-                allowed_names.add(nm)
-                for tok in nm.split():
-                    if len(tok) >= 3:
-                        allowed_names.add(tok)
+            _add_allowed_person(n)
 
         for e in (result.get("new_entities") or []):
-            if isinstance(e, dict):
-                nm = str(e.get("name") or "").strip().lower()
-                if nm:
-                    allowed_names.add(nm)
-                    for tok in nm.split():
-                        if len(tok) >= 3:
-                            allowed_names.add(tok)
+            if isinstance(e, dict) and e.get("name"):
+                _add_allowed_person(e["name"])
 
     party_npcs = session.get("party_npcs") or []
     if not party_npcs and session_id:
@@ -586,38 +581,19 @@ def sanitize_absent_npc_hallucinations(
         except Exception:
             party_npcs = []
     for p in party_npcs:
-        p_nm = str((p.get("name") if isinstance(p, dict) else p) or "").strip().lower()
-        if p_nm:
-            allowed_names.add(p_nm)
-            for tok in p_nm.split():
-                if len(tok) >= 3:
-                    allowed_names.add(tok)
+        _add_allowed_person(p)
 
     for e in (session.get("nearby_enemies") or []):
-        e_nm = str((e.get("name") if isinstance(e, dict) else e) or "").strip().lower()
-        if e_nm:
-            allowed_names.add(e_nm)
-            for tok in e_nm.split():
-                if len(tok) >= 3:
-                    allowed_names.add(tok)
+        _add_allowed_person(e)
 
     for c, _ in (party or []):
         if isinstance(c, dict) and c.get("name"):
-            c_nm = str(c["name"]).strip().lower()
-            allowed_names.add(c_nm)
-            for tok in c_nm.split():
-                if len(tok) >= 3:
-                    allowed_names.add(tok)
+            _add_allowed_person(c["name"])
 
     try:
         from mechanics.world.mobility import get_session_dialogue_partners
         for dp in get_session_dialogue_partners(session):
-            dp_nm = dp.strip().lower()
-            if dp_nm:
-                allowed_names.add(dp_nm)
-                for tok in dp_nm.split():
-                    if len(tok) >= 3:
-                        allowed_names.add(tok)
+            _add_allowed_person(dp)
     except Exception:
         pass
 
@@ -633,24 +609,37 @@ def sanitize_absent_npc_hallucinations(
     try:
         import db
         contacts = db.get_contacts(session_id)
+        all_known_peer_names = list(allowed_full_list) + [
+            str(ct.get("name") or "").strip() for ct in contacts if ct.get("name")
+        ]
+        allowed_disambig_tokens: set[str] = set(allowed_names)
+        allowed_raw_words: set[str] = set()
+        for af in allowed_full_list:
+            allowed_disambig_tokens |= namegen.get_unique_person_tokens(af, peer_names=all_known_peer_names, min_len=2)
+            for w in af.lower().replace(".", " ").split():
+                if w:
+                    allowed_raw_words.add(w)
+
         for c in contacts:
             c_name = str(c.get("name") or "").strip()
             if not c_name:
                 continue
             c_low = c_name.lower()
-            c_first = c_low.split()[0] if c_low else ""
+            c_given = namegen.get_given_name(c_name).strip()
+            c_toks = namegen.get_unique_person_tokens(c_name, peer_names=all_known_peer_names, min_len=2)
 
-            is_allowed = (c_low in allowed_names) or (len(c_first) >= 3 and c_first in allowed_names)
+            is_allowed = (c_low in allowed_names) or bool(c_toks & allowed_disambig_tokens)
             if not is_allowed:
                 invited = False
                 if actions:
                     for a in actions:
                         lbl = (a.get("label") if isinstance(a, dict) else str(a)).lower()
-                        if c_low in lbl or (len(c_first) >= 3 and c_first in lbl):
+                        if c_low in lbl or any(tok in lbl for tok in c_toks if len(tok) >= 3):
                             invited = True
                             break
                 if not invited:
-                    absent_contacts.append((c_name, c_first))
+                    safe_given = c_given if (c_given and c_given.lower() not in allowed_raw_words and c_given.lower() not in namegen.NAME_PARTICLES_AND_HONORIFICS) else ""
+                    absent_contacts.append((c_name, safe_given))
     except Exception:
         pass
 
@@ -1239,7 +1228,28 @@ def sanitize_npc_pronoun_consistency(
     # First sanitize phantom biology traits on the player character
     text = sanitize_player_physical_biology(text, session=session, party=party, actions=actions)
 
+    import namegen
     char_genders: dict[str, str] = {}
+    ambiguous_gender_tokens: set[str] = set()
+    exact_full_gender_keys: set[str] = set()
+
+    def _set_gender_token(target_dict: dict, tok: str, g_val: str, is_exact_full: bool = False) -> None:
+        t_clean = tok.strip().lower()
+        if not t_clean or t_clean.rstrip(".") in namegen.NAME_PARTICLES_AND_HONORIFICS:
+            return
+        if is_exact_full:
+            exact_full_gender_keys.add(t_clean)
+            target_dict[t_clean] = g_val
+            return
+        if t_clean in ambiguous_gender_tokens:
+            return
+        existing_g = target_dict.get(t_clean)
+        if existing_g is not None and existing_g != g_val and t_clean not in exact_full_gender_keys:
+            ambiguous_gender_tokens.add(t_clean)
+            target_dict.pop(t_clean, None)
+            return
+        if existing_g is None:
+            target_dict[t_clean] = g_val
 
     def _register_name_gender(target_dict: dict, name_str: str, gender_str: str):
         if not name_str or not gender_str:
@@ -1250,25 +1260,35 @@ def sanitize_npc_pronoun_consistency(
         target_g = "male" if is_m else ("female" if is_f else None)
         if not target_g:
             return
-        clean = name_str.strip().lower()
-        target_dict[clean] = target_g
-        honorifics = ("dr.", "dr", "mr.", "mr", "ms.", "ms", "mrs.", "mrs", "prof.", "prof", "officer", "detective", "coach", "nurse", "dean", "principal", "sensei", "captain")
-        words = clean.split()
+        raw_no_nee = re.sub(r"\s*\((?:née|nee)\s+[^)]*\)", "", name_str, flags=re.IGNORECASE).strip()
+        clean = raw_no_nee.lower()
+        if not clean:
+            return
+        _set_gender_token(target_dict, clean, target_g, is_exact_full=True)
+        if clean != name_str.strip().lower():
+            _set_gender_token(target_dict, name_str.strip().lower(), target_g, is_exact_full=True)
+        words = raw_no_nee.split()
         if not words:
             return
-        first_w = words[0]
-        rest_words = words[1:]
-        if first_w in honorifics and rest_words:
-            without_title = " ".join(rest_words)
-            target_dict[without_title] = target_g
-            target_dict[rest_words[-1]] = target_g  # surname: "satou"
-            target_dict[rest_words[0]] = target_g   # first name: "kento"
-            target_dict[f"{first_w} {rest_words[-1]}"] = target_g  # "dr. satou"
-            target_dict[f"{first_w.rstrip('.')} {rest_words[-1]}"] = target_g # "dr satou"
-        else:
-            if len(words) > 1:
-                target_dict[words[0]] = target_g  # first name
-                target_dict[words[-1]] = target_g # surname
+        first_w_low = words[0].lower().rstrip(".")
+        if len(words) >= 2 and first_w_low in namegen._HONORIFIC_PREFIXES:
+            without_title = " ".join(words[1:]).strip().lower()
+            if without_title:
+                _set_gender_token(target_dict, without_title, target_g, is_exact_full=True)
+            formal_t = namegen.format_formal_title(words[0], raw_no_nee).strip().lower()
+            if formal_t:
+                _set_gender_token(target_dict, formal_t, target_g, is_exact_full=False)
+                _set_gender_token(target_dict, formal_t.replace(".", ""), target_g, is_exact_full=False)
+
+        given_first, surname_str = namegen.extract_first_and_last_name(raw_no_nee)
+        if given_first and len(given_first.strip()) >= 2:
+            _set_gender_token(target_dict, given_first, target_g, is_exact_full=False)
+        if surname_str:
+            if len(surname_str.strip()) >= 3:
+                _set_gender_token(target_dict, surname_str, target_g, is_exact_full=False)
+            for sp in surname_str.split():
+                if len(sp.strip()) >= 3:
+                    _set_gender_token(target_dict, sp, target_g, is_exact_full=False)
 
     if party:
         for item in party:
@@ -1340,8 +1360,10 @@ def sanitize_npc_pronoun_consistency(
         if not nm_low:
             continue
         raw_g = (n.get("gender") if isinstance(n, dict) else "") or contacts_map.get(nm_low, "")
-        if not raw_g and len(nm_low.split()) > 1:
-            raw_g = contacts_map.get(nm_low.split()[0], "")
+        if not raw_g:
+            n_given_low = namegen.get_given_name(nm).strip().lower()
+            if n_given_low and n_given_low in contacts_map:
+                raw_g = contacts_map[n_given_low]
         if not raw_g and isinstance(n, dict):
             try:
                 from mechanics.social.persona.core import infer_contact_gender

@@ -5,9 +5,10 @@ Modular Relationship Engine for Hikayat.
 Handles -100 to +100 relationship score calculations, tier lookup across genres,
 platonic vs romantic track branching, progressive trait disclosure, and skill check modifiers.
 """
+import json
 import math
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Set
 
 MIN_RELATIONSHIP = -100
 MAX_RELATIONSHIP = 300
@@ -32,7 +33,7 @@ NON_PEER_HIGH_SCHOOL_ROLE_PATTERNS = [
 ]
 
 PEER_HIGH_SCHOOL_PATTERNS = [
-    r"\b(student|classmate|schoolmate|underclassman|upperclassman|peer|roommate|dorm\s+mate)\b",
+    r"\b(student|classmate|schoolmate|underclassman|upperclassman|peer|youth\s+peer|roommate|dorm\s+mate)\b",
     r"\b(freshman|sophomore|junior|senior|1st-year|2nd-year|3rd-year|first-year|second-year|third-year)\b",
     r"\b(grade\s+9|grade\s+10|grade\s+11|grade\s+12|class\s+\d-[a-z])\b",
     r"\b(student\s+council|class\s+rep|class\s+representative|club\s+president|club\s+vice\s+president|club\s+member|club\s+leader)\b",
@@ -63,10 +64,12 @@ def is_contact_eligible(
       adult authority / service workers are STORY-ONLY figures (stored in Lorebook/narrative,
       but never registered as Phone contacts or given affinity meters).
     """
+    grade = ""
     if isinstance(name, dict):
         d = name
         name = str(d.get("name", ""))
         role = role or str(d.get("role", ""))
+        grade = str(d.get("grade", ""))
         description = description or str(d.get("description", "") or d.get("notes", "") or d.get("background", ""))
         scenario = scenario if scenario != "fantasy" else str(d.get("scenario", scenario))
         disposition = disposition or str(d.get("disposition", ""))
@@ -87,8 +90,7 @@ def is_contact_eligible(
         if srt_clean in ("student_peer", "peer", "contemporary", "classmate"):
             return True
 
-        # If role and description are missing but session_id is provided, try looking up from session or lorebook
-        grade = ""
+        # Look up grade/role/social_role_type from session, contacts, or school_directory
         club = ""
         is_existing_contact = False
         if session_id:
@@ -125,7 +127,7 @@ def is_contact_eligible(
                             return False
                         if srt_low in ("student_peer", "peer", "contemporary"):
                             return True
-                if not role and not description:
+                if not grade or (not role and not description):
                     roster = db.get_school_roster(session_id)
                     for r_entry in (roster or []):
                         if str(r_entry.get("name", "")).strip().lower() == str(name).strip().lower():
@@ -140,6 +142,12 @@ def is_contact_eligible(
                         description = lore.get("description", "")
             except Exception:
                 pass
+
+        grade_clean = str(grade or "").strip().lower()
+        if grade_clean in ("faculty", "citizen"):
+            return False
+        if grade_clean in ("freshman", "sophomore", "junior", "senior", "youth peer", "grade 9", "grade 10", "grade 11", "grade 12"):
+            return True
 
         role_text = f"{name} {role} {grade} {club}".strip().lower()
         combined_text = f"{role_text} {description}".strip().lower()
@@ -470,11 +478,11 @@ def reconcile_action_affinity_delta(
             tier = str(getattr(check_obj, "tier", "") or "").lower().strip()
 
     if tier in ("crit_success", "critical_success"):
-        min_b, max_b, def_d = 3, 10, 4
+        min_b, max_b, def_d = 3, 18, 4
     elif tier in ("success",):
-        min_b, max_b, def_d = 1, 10, 2
+        min_b, max_b, def_d = 1, 18, 2
     elif tier in ("partial_success", "mixed_success"):
-        min_b, max_b, def_d = 0, 5, 1
+        min_b, max_b, def_d = 0, 8, 1
     elif not check_obj or tier in ("none", "free", ""):
         # Free / ambient conversational action without a d20 check:
         # Allows natural positive reactions (likes) and negative reactions (dislikes/offense)
@@ -490,7 +498,7 @@ def reconcile_action_affinity_delta(
     if check_obj and tier in ("crit_success", "critical_success", "success", "partial_success", "mixed_success"):
         if overall_check_success and min_b <= 0:
             min_b = 1
-            max_b = 10
+            max_b = 18
             def_d = max(def_d, 1)
 
     if val is None:
@@ -653,12 +661,12 @@ def can_trigger_romantic_confession(
     if track == "romantic":
         return False
 
-    session_id = contact.get("session_id", 0)
-    if session_id:
+    graph_session_id = contact.get("session_id") or session_id
+    if graph_session_id:
         try:
             import mechanics.social.relationship_graph as rg
             c_key = rg.canonical_person_key(contact.get("name", ""))
-            partner = rg.get_current_partner(session_id, c_key)
+            partner = rg.get_current_partner(graph_session_id, c_key)
             if partner:
                 return False
         except Exception:
@@ -705,50 +713,546 @@ def get_recruitment_cost(affinity: int, level: int = 1) -> int:
     return int(base_cost * affinity_factor)
 
 
-def is_unlocked_contact(contact: dict, party_names: set[str] = None) -> bool:
+def get_scenario_recruitment_phrasing(
+    scenario: str = "fantasy",
+    npc_name: str = "them",
+    player_name: str = "",
+) -> Dict[str, str]:
     """
-    Determines whether a contact record is eligible to be displayed in the player's
-    Contacts List (World Codex Contacts tab and Smartphone Line Messenger).
-    
-    Strict Rule: Only Friends (relationship_score >= 100), active party members,
-    or explicitly added contacts (bypassing affinity via phone contact skillcheck) are included.
-    Strangers and acquaintances remain in Lorebook / scene only.
+    Returns genre-appropriate, natural companion recruitment phrasing for choice labels
+    and narrative/dialogue directives so NPCs never use immersion-breaking RPG meta-terms
+    like 'as a permanent companion' or misinterpret 'party' as a social mixer.
     """
+    scen_low = str(scenario or "fantasy").strip().lower()
+    npc = str(npc_name or "them").strip() or "them"
+    p_poss = f"{player_name}'s" if player_name and player_name.lower() != "you" else "your"
+
+    if scen_low in ("dark_fantasy", "grimdark") or "dark_fantasy" in scen_low:
+        group_noun = "retinue"
+        alt_nouns = "retinue, warband, or sworn band"
+        choice_label = f"Ask {npc} to join forces and travel with your retinue"
+    elif "post_apoc" in scen_low or "nuclear" in scen_low or "wasteland" in scen_low:
+        group_noun = "group"
+        alt_nouns = "survivor group or wasteland crew"
+        choice_label = f"Ask {npc} to team up and travel with your group"
+    elif "cyberpunk" in scen_low:
+        group_noun = "team"
+        alt_nouns = "crew or runner team"
+        choice_label = f"Ask {npc} to partner up and run with your team"
+    elif "anomalous" in scen_low or "urban_fantasy" in scen_low or "paranormal" in scen_low:
+        group_noun = "field team"
+        alt_nouns = "field team, unit, or group"
+        choice_label = f"Ask {npc} to partner up and join your field team"
+    elif "sci_fi" in scen_low or "space" in scen_low:
+        group_noun = "crew"
+        alt_nouns = "crew or tactical squad"
+        choice_label = f"Ask {npc} to team up and join your crew"
+    elif "steampunk" in scen_low:
+        group_noun = "expedition crew"
+        alt_nouns = "expedition crew or company"
+        choice_label = f"Invite {npc} to partner up and join your expedition crew"
+    else:
+        group_noun = "party"
+        alt_nouns = "adventuring party, band, or retinue"
+        choice_label = f"Invite {npc} to join your party and travel together"
+
+    narration_guidance = (
+        f"Use natural, in-world phrasing for teaming up (such as 'team up', 'partner up', "
+        f"'watch each other's backs', or 'join {p_poss} {alt_nouns}'). "
+        f"NEVER use immersion-breaking meta-game phrases like 'permanent companion' or 'party slot', "
+        f"and NEVER interpret '{group_noun}' or 'party' as a social celebration, club, or mixer."
+    )
+    return {
+        "group_noun": group_noun,
+        "alt_nouns": alt_nouns,
+        "choice_label": choice_label,
+        "narration_guidance": narration_guidance,
+    }
+
+
+def normalize_recruitment_choice_label(
+    label: str,
+    scenario: str = "fantasy",
+    target_npc: str = "",
+) -> str:
+    """
+    Rewrites rigid/meta recruitment choice labels (e.g. 'Invite X to join your party as a permanent companion'
+    or generic 'join your party' in modern/sci-fi/apocalyptic genres) into natural genre-fitting phrasing.
+    Preserves paid hire/requisition labels that specify gold cost '(150G)'.
+    """
+    raw = str(label or "").strip()
+    if not raw:
+        return raw
+    low = raw.lower()
+    # Preserve explicit gold-cost contract/requisition buttons
+    if re.search(r"\(\d+\s*g\)", low):
+        return re.sub(r"\bas\s+a\s+permanent\s+companion\b", "", raw, flags=re.IGNORECASE).strip()
+
+    npc = str(target_npc or "").strip()
+    if not npc:
+        m = re.search(
+            r"(?:invite|ask|recruit|convince|persuade)\s+([A-Z][A-Za-z0-9_\-'\s]{1,40}?)\s+to\s+(?:join|team\s+up|partner\s+up|travel|run\s+with)",
+            raw,
+        )
+        if m:
+            npc = m.group(1).strip()
+            npc = re.sub(r"^(?:special\s+agent|agent|officer|detective|captain|sir|lady|lord)\s+", "", npc, flags=re.IGNORECASE).strip() or m.group(1).strip()
+
+    scen_low = str(scenario or "fantasy").strip().lower()
+    has_meta_suffix = "permanent companion" in low or "party member" in low
+    has_generic_party_in_non_fantasy = (
+        ("join your party" in low or "join our party" in low or "join the party" in low)
+        and scen_low not in ("fantasy", "isekai", "default", "")
+    )
+    if (has_meta_suffix or has_generic_party_in_non_fantasy) and npc:
+        return get_scenario_recruitment_phrasing(scenario=scenario, npc_name=npc)["choice_label"]
+    if has_meta_suffix:
+        cleaned = re.sub(r"\s+as\s+a\s+permanent\s+companion\b", " and travel together", raw, flags=re.IGNORECASE).strip()
+        return cleaned
+    return raw
+
+
+def _parse_contact_basic_info(contact: Optional[dict]) -> dict:
     if not contact or not isinstance(contact, dict):
-        return False
-    score = int(contact.get("relationship_score", 0) or 0)
-    if score >= 100:
-        return True
-    c_name = (contact.get("name") or "").strip().lower()
-    if party_names and c_name in party_names:
-        return True
+        return {}
     b_info = contact.get("basic_info") or {}
     if isinstance(b_info, str):
         try:
-            import json
             b_info = json.loads(b_info)
         except Exception:
             b_info = {}
+    return b_info if isinstance(b_info, dict) else {}
+
+
+def collect_met_npc_names(
+    session: Optional[dict],
+    party_npcs: Optional[list] = None,
+    player_char_name: str = "",
+) -> Set[str]:
+    """
+    Canonical set of lowercased NPC names physically encountered by the player
+    across active party companions, current scene, persistent scene history, and turn history.
+    """
+    met_names: Set[str] = set()
+    for p in (party_npcs or []):
+        if isinstance(p, dict) and p.get("name"):
+            met_names.add(str(p["name"]).strip().lower())
+        elif isinstance(p, str) and p.strip():
+            met_names.add(p.strip().lower())
+
+    if not session or not isinstance(session, dict):
+        met_names.discard("")
+        met_names.discard("none")
+        if player_char_name:
+            met_names.discard(player_char_name.strip().lower())
+        return met_names
+
+    for n in (session.get("current_npcs") or []):
+        if isinstance(n, dict) and n.get("name"):
+            met_names.add(str(n["name"]).strip().lower())
+        elif isinstance(n, str) and n.strip():
+            met_names.add(n.strip().lower())
+
+    dp = session.get("dialogue_partner")
+    if isinstance(dp, str) and dp.strip():
+        met_names.add(dp.strip().lower())
+    elif isinstance(dp, list):
+        for item in dp:
+            if item and str(item).strip():
+                met_names.add(str(item).strip().lower())
+
+    for dp_item in (session.get("dialogue_partners") or []):
+        if dp_item and str(dp_item).strip():
+            met_names.add(str(dp_item).strip().lower())
+
+    for n in (session.get("met_npc_names") or []):
+        if isinstance(n, str) and n.strip():
+            met_names.add(n.strip().lower())
+
+    extra = session.get("extra")
+    if not isinstance(extra, dict) and isinstance(session.get("extra_json"), str):
+        try:
+            extra = json.loads(session["extra_json"])
+        except Exception:
+            extra = {}
+    if isinstance(extra, dict):
+        for n in (extra.get("met_npc_names") or []):
+            if isinstance(n, str) and n.strip():
+                met_names.add(n.strip().lower())
+
+    for h in (session.get("history") or []):
+        if not isinstance(h, dict):
+            continue
+        for w in (h.get("witnessed_by") or []):
+            if isinstance(w, str) and w.strip():
+                met_names.add(w.strip().lower())
+        hist_dp = h.get("dialogue_partner")
+        if isinstance(hist_dp, str) and hist_dp.strip():
+            met_names.add(hist_dp.strip().lower())
+        elif isinstance(hist_dp, list):
+            for item in hist_dp:
+                if item and str(item).strip():
+                    met_names.add(str(item).strip().lower())
+        for ru in (h.get("relationship_updates") or []):
+            if isinstance(ru, dict) and ru.get("npc_name"):
+                met_names.add(str(ru["npc_name"]).strip().lower())
+        for n in (h.get("current_npcs") or h.get("present_npcs") or []):
+            if isinstance(n, dict) and n.get("name"):
+                met_names.add(str(n["name"]).strip().lower())
+            elif isinstance(n, str) and n.strip():
+                met_names.add(n.strip().lower())
+
+    met_names.discard("")
+    met_names.discard("none")
+    if player_char_name:
+        met_names.discard(player_char_name.strip().lower())
+    return met_names
+
+
+def _has_real_player_memories(mem_val: Any) -> bool:
+    """Returns True ONLY if a memory field contains actual shared player memories (ignoring auto-seeded Past History lore)."""
+    if not mem_val:
+        return False
+    parsed = mem_val
+    if isinstance(mem_val, str):
+        raw_s = mem_val.strip()
+        if raw_s in ("", "[]", "{}"):
+            return False
+        try:
+            import json as _json_mem
+            parsed = _json_mem.loads(raw_s)
+        except Exception:
+            return not raw_s.startswith("Past History:")
+    if isinstance(parsed, list):
+        for item in parsed:
+            s_item = str(item or "").strip()
+            if s_item and not s_item.startswith("Past History:"):
+                return True
+        return False
+    if isinstance(parsed, dict):
+        return len(parsed) > 0
+    return False
+
+
+def is_contact_blocked(contact: Optional[dict]) -> bool:
+    """Returns True if a personal Contact has reached Hostile affinity (<= -50) and blocked player DMs."""
+    if not contact or not isinstance(contact, dict):
+        return False
+    score = int(contact.get("relationship_score", 0) or 0)
+    return score <= -50
+
+
+def is_unmet_preseeded_special_agent(
+    contact: Optional[dict],
+    met_in_story_names: Optional[Set[str]] = None,
+    party_names: Optional[Set[str]] = None,
+) -> bool:
+    """
+    Detects legacy pre-seeded Anomalous Incursions faction colleague records that were
+    never actually met in-scene, messaged, or added by player action.
+    """
+    if not contact or not isinstance(contact, dict):
+        return False
+    b_info = _parse_contact_basic_info(contact)
+    is_agent = bool(
+        b_info.get("is_special_agent")
+        or contact.get("is_special_agent")
+        or b_info.get("anomalous_npc_tag") == "special_agent"
+    )
+    if not is_agent:
+        return False
+    score = int(contact.get("relationship_score", 0) or 0)
+    if score != 0:
+        return False
+    c_name = str(contact.get("name") or "").strip().lower()
+    if party_names and c_name in party_names:
+        return False
+    if met_in_story_names and c_name in met_in_story_names:
+        return False
+    if (
+        b_info.get("met_in_person")
+        or b_info.get("added_via_peerpulse")
+        or b_info.get("exchanged_contact")
+        or b_info.get("unlocked_via_friendship")
+        or contact.get("last_in_person_ts")
+        or b_info.get("last_in_person_ts")
+    ):
+        return False
+    for mem_key in ("recent_memories", "intimate_memories", "rel_history"):
+        if _has_real_player_memories(contact.get(mem_key)):
+            return False
+    return True
+
+
+def is_unlocked_contact(
+    contact: dict,
+    party_names: set[str] = None,
+    met_in_story_names: Optional[Set[str]] = None,
+) -> bool:
+    """
+    Determines whether a contact record is eligible to be displayed in the player's
+    personal Contacts List (Sidebar Contacts tab and Smartphone Messenger).
+
+    Strict 3-Way Rule:
+      1. Player succeeded an in-person phone_contact_exchange skill check (exchanged_contact: True), OR
+      2. Player succeeded a PeerPulse social media friend request (added_via_peerpulse: True), OR
+      3. Character reached Friend tier (relationship_score >= 100, or previously unlocked_via_friendship: True).
+    Note: < 100 affinity hired/requisitioned Party Companions do NOT automatically become personal Contacts,
+    and synthetic dispatch broadcast channels are excluded.
+    """
+    if not contact or not isinstance(contact, dict):
+        return False
+    b_info = _parse_contact_basic_info(contact)
+    if contact.get("is_dispatch_channel") or b_info.get("is_dispatch_channel"):
+        return False
+    score = int(contact.get("relationship_score", 0) or 0)
+    if (
+        score >= 100
+        or b_info.get("exchanged_contact")
+        or b_info.get("added_via_peerpulse")
+        or b_info.get("unlocked_via_friendship")
+    ):
+        return True
+    if b_info.get("offscreen_ripple_only") and not b_info.get("met_in_person"):
+        return False
+    if is_unmet_preseeded_special_agent(contact, met_in_story_names=met_in_story_names, party_names=party_names):
+        return False
+    is_special_agent = bool(
+        b_info.get("is_special_agent")
+        or contact.get("is_special_agent")
+        or b_info.get("anomalous_npc_tag") == "special_agent"
+    )
+    if is_special_agent:
+        # Pre-seeded Special Agents at < 100 affinity require explicit provenance (1-3 above),
+        # never bare legacy contact_added: True.
+        return False
     if b_info.get("contact_added") or b_info.get("is_contact") or contact.get("contact_added"):
         return True
     return False
+
+
+def is_npc_discovered_by_player(
+    name: str,
+    contact: Optional[dict],
+    met_in_story_names: Set[str],
+    party_names: Optional[Set[str]] = None,
+    score_override: Optional[int] = None,
+) -> bool:
+    """
+    Canonical gate for `Known Characters` / World Codex discovery:
+    Returns True ONLY if the player has met the character in the story, recruited them,
+    explicitly exchanged/accepted contacts, or built direct relationship affinity with them.
+    """
+    p_name = str(name or "").strip().lower()
+    if not p_name or p_name == "none":
+        return False
+    if p_name in met_in_story_names:
+        return True
+    if party_names and p_name in party_names:
+        return True
+
+    b_info = _parse_contact_basic_info(contact)
+    if contact is not None:
+        if b_info.get("offscreen_ripple_only") and not (
+            b_info.get("met_in_person")
+            or contact.get("last_in_person_ts")
+            or b_info.get("last_in_person_ts")
+            or is_unlocked_contact(contact, party_names, met_in_story_names=met_in_story_names)
+        ):
+            return False
+        if is_unmet_preseeded_special_agent(contact, met_in_story_names=met_in_story_names, party_names=party_names):
+            return False
+
+    score = int(contact.get("relationship_score", 0) or 0) if contact is not None else int(score_override or 0)
+    if score != 0:
+        return True
+    if contact is not None and (
+        b_info.get("met_in_person")
+        or contact.get("last_in_person_ts")
+        or b_info.get("last_in_person_ts")
+        or is_unlocked_contact(contact, party_names, met_in_story_names=met_in_story_names)
+    ):
+        return True
+    return False
+
+
+def get_discovered_world_codex_persons(
+    session_id: int,
+    scenario_key: str,
+    char_name: str = "",
+) -> tuple[List[dict], Dict[str, tuple]]:
+    """
+    Returns (unique_persons, contact_scores) for World Codex displays, strictly filtering
+    out unencountered background faction/school/special-agent seeds and off-screen ripple placeholders.
+    """
+    import db
+    import scenario_data as _sd
+
+    if _sd.is_anomalous_incursions_scenario(scenario_key):
+        try:
+            from mechanics.social.agent_roster import prune_unmet_preseeded_special_agents
+            prune_unmet_preseeded_special_agents(session_id)
+        except Exception:
+            pass
+
+    session = db.get_session(session_id) or {}
+    party_npcs = db.get_session_party_npcs(session_id) or []
+    party_names = {
+        str(p.get("name") or "").strip().lower()
+        for p in party_npcs
+        if isinstance(p, dict) and p.get("name")
+    }
+    met_in_story_names = collect_met_npc_names(session, party_npcs=party_npcs, player_char_name=char_name)
+
+    background_seeded_names: Set[str] = set()
+    try:
+        for sr in (db.get_school_roster(session_id) or []):
+            if isinstance(sr, dict) and sr.get("name"):
+                background_seeded_names.add(str(sr["name"]).strip().lower())
+    except Exception:
+        pass
+    try:
+        extra_roster = session.get("anomalous_agent_roster") or (
+            session.get("extra", {}).get("anomalous_agent_roster") if isinstance(session.get("extra"), dict) else []
+        )
+        for ag in (extra_roster or []):
+            if isinstance(ag, dict) and ag.get("name"):
+                background_seeded_names.add(str(ag["name"]).strip().lower())
+    except Exception:
+        pass
+    try:
+        for fac in (db.get_factions(session_id) or []):
+            if not isinstance(fac, dict):
+                continue
+            if fac.get("leader"):
+                background_seeded_names.add(str(fac["leader"]).strip().lower())
+            for mem in (fac.get("members") or []):
+                if mem:
+                    background_seeded_names.add(str(mem).strip().lower())
+            for lr in (fac.get("leadership_roster") or []):
+                if isinstance(lr, dict) and lr.get("name"):
+                    background_seeded_names.add(str(lr["name"]).strip().lower())
+    except Exception:
+        pass
+
+    lore = db.get_lorebook(session_id) or {}
+    raw_persons = list(lore.get("person", []) or [])
+
+    contact_scores: Dict[str, tuple] = {}
+    contact_by_name: Dict[str, dict] = {}
+    raw_c: List[dict] = []
+    try:
+        raw_c = db.get_contacts(session_id) or []
+        for c in raw_c:
+            c_n = str(c.get("name") or "").strip().lower()
+            if c_n:
+                contact_by_name[c_n] = c
+                contact_scores[c_n] = (c.get("relationship_score", 0), c.get("track", "platonic"))
+    except Exception:
+        pass
+
+    player_low = str(char_name or "").strip().lower()
+    persons: List[dict] = []
+    for p in raw_persons:
+        p_n = str(p.get("name") or "").strip()
+        p_low = p_n.lower()
+        if not p_n or p_low in ("", "none", player_low):
+            continue
+        matched_c = contact_by_name.get(p_low)
+        if p_low in background_seeded_names or matched_c is not None:
+            if not is_npc_discovered_by_player(
+                p_low,
+                matched_c,
+                met_in_story_names,
+                party_names=party_names,
+                score_override=int(p.get("relationship_score", 0) or 0),
+            ):
+                continue
+        persons.append(p)
+
+    seen = {
+        str(p.get("name") or "").strip().lower()
+        for p in persons
+        if str(p.get("name") or "").strip().lower() not in ("", "none")
+    }
+    for c in raw_c:
+        c_n = str(c.get("name") or "").strip()
+        c_low = c_n.lower()
+        if c_n and c_low not in seen and c_low not in ("none", player_low):
+            if not is_npc_discovered_by_player(c_low, c, met_in_story_names, party_names=party_names):
+                continue
+            b_info = _parse_contact_basic_info(c)
+            persons.append({
+                "name": c_n,
+                "role": b_info.get("role") or b_info.get("occupation") or "Contact",
+                "race": c.get("race") or b_info.get("race") or "Unknown",
+                "gender": c.get("gender") or b_info.get("gender") or "Unknown",
+                "description": b_info.get("description") or "",
+                "entity_type": "person",
+            })
+            seen.add(c_low)
+
+    unique_persons: List[dict] = []
+    unique_seen: Set[str] = set()
+    import scenario_data as _sd_wcp
+    is_anom_wcp = _sd_wcp.is_anomalous_incursions_scenario(scenario_key)
+    for p in persons:
+        n = str(p.get("name") or "").strip()
+        if n and n.lower() not in unique_seen and n.lower() != "none":
+            unique_seen.add(n.lower())
+            p_copy = dict(p)
+            if is_anom_wcp:
+                try:
+                    from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag
+                    t_val = classify_anomalous_npc_tag(p_copy, session_id=session_id, scen_key=scenario_key)
+                    p_copy["anomalous_npc_tag"] = t_val
+                    p_copy["anomalous_tag_label"] = "Special Agent" if t_val == "special_agent" else "Civilian"
+                    matched_c_wcp = contact_by_name.get(n.lower())
+                    if isinstance(matched_c_wcp, dict):
+                        cb_wcp = _parse_contact_basic_info(matched_c_wcp)
+                        if cb_wcp.get("deceased"):
+                            p_copy["deceased"] = True
+                except Exception:
+                    pass
+            unique_persons.append(p_copy)
+
+    return unique_persons, contact_scores
 
 
 def calculate_contact_exchange_dc(target_npc_data: dict, scenario: str = "default") -> int:
     """
     Calculates the skill check difficulty (DC) for asking a non-friend character for their
     phone number / contact info in modern scenarios with smartphone mechanics.
-    
-    Default base: 16 (very difficult check for random strangers).
+
+    Affinity-Scaled Base DC:
+    - Negative (< 0): base 18 (clamped 14..20)
+    - Cold Stranger (0..24): base 16 (clamped 11..20)
+    - Warm Stranger (25..49): base 15 (clamped 11..19)
+    - Early Acquaintance (50..74): base 10 (clamped 7..13)
+    - Close Acquaintance (75..99): base 9 (clamped 7..12)
+    - Friend+ (>= 100): base 6 (clamped 5..10)
+
     Modified by character traits and intimate openness:
-    - Shameless / Flirty / Outgoing / Bold characters are more open to giving strangers their contact (-2 to -4 DC).
+    - Shameless / Flirty / Outgoing / Bold characters are more open (-2 to -4 DC).
     - Shy / Reserved / Cautious / Tsundere / Guarded characters are more reluctant (+2 to +4 DC).
-    - Intimate openness: 'shameless' / 'high' reduces DC (-2); 'chaste' / 'low' increases DC (+2).
-    Clamped strictly between 11 and 20.
     """
     base_dc = 16
     if not target_npc_data or not isinstance(target_npc_data, dict):
         return base_dc
+
+    score = int(target_npc_data.get("relationship_score", target_npc_data.get("score", 0)) or 0)
+    if score < 0:
+        base_dc, min_dc, max_dc = 18, 14, 20
+    elif score < 25:
+        base_dc, min_dc, max_dc = 16, 11, 20
+    elif score < 50:
+        base_dc, min_dc, max_dc = 15, 11, 19
+    elif score < 75:
+        base_dc, min_dc, max_dc = 10, 7, 13
+    elif score < 100:
+        base_dc, min_dc, max_dc = 9, 7, 12
+    else:
+        base_dc, min_dc, max_dc = 6, 5, 10
 
     traits = [str(t).lower() for t in (target_npc_data.get("traits") or target_npc_data.get("unlocked_traits") or [])]
     b_inf = target_npc_data.get("basic_info") or {}
@@ -774,7 +1278,6 @@ def calculate_contact_exchange_dc(target_npc_data: dict, scenario: str = "defaul
     open_keywords = ("shameless", "flirty", "outgoing", "extrovert", "popular", "bold", "daring", "charismatic", "playful", "teasing", "free-spirited")
     if any(k in all_text for k in open_keywords):
         base_dc -= 2
-        # Strongly shameless / flirty gets extra reduction
         if any(k in all_text for k in ("shameless", "very flirty", "promiscuous", "wild")):
             base_dc -= 2
 
@@ -798,7 +1301,7 @@ def calculate_contact_exchange_dc(target_npc_data: dict, scenario: str = "defaul
     elif any(k in demeanor for k in ("tsundere", "haughty", "guarded", "defensive", "cold")):
         base_dc += 2
 
-    return max(11, min(20, base_dc))
+    return max(min_dc, min(max_dc, base_dc))
 
 
 def enrich_contact_dossier(
@@ -925,40 +1428,30 @@ def enrich_contact_dossier(
     a_exp_val = str(app.get("anal_experience") or app.get("virginity_anal") or "inexperienced").strip().lower()
 
     had_first_time = bool(app.get("had_first_time_with_player")) and (i_exp_val == "non_virgin")
-    past_history = c.get("past_intimate_history") or app.get("past_intimate_history") or app.get("past_intimate_entries")
+    past_history = c.get("past_intimate_entries") or c.get("past_intimate_history") or app.get("past_intimate_entries") or app.get("past_intimate_history")
+    if isinstance(past_history, list):
+        past_history = [str(p).replace("Past History:", "").strip() for p in past_history if str(p).strip()]
+    elif isinstance(past_history, str) and past_history.strip():
+        past_history = [s.replace("Past History:", "").strip() for s in past_history.splitlines() if s.strip()]
+    else:
+        past_history = []
+
     if not past_history and c.get("intimate_memories"):
         past_mems = [str(m).replace("Past History:", "").strip() for m in c.get("intimate_memories") if str(m).startswith("Past History:")]
         if past_mems:
             past_history = past_mems
 
-    is_virgin_shared = False
-    if isinstance(past_history, list) and past_history:
-        is_virgin_shared = any("shared first time with you" in str(p) for p in past_history)
-    elif isinstance(past_history, str):
-        is_virgin_shared = "shared first time with you" in past_history
-
-    has_oral_exp = o_exp_val in ("has_done_oral", "has_received_oral", "has_done_and_received_oral")
-    has_anal_exp = a_exp_val in ("has_done_anal", "has_received_anal", "has_done_and_received_anal")
-    past_str = " ".join(past_history) if isinstance(past_history, list) else str(past_history or "")
-    im_mems = c.get("intimate_memories") or []
-    im_str = " ".join(str(m) for m in im_mems)
-    is_out_of_sync = bool(
-        (past_history or im_mems)
-        and not had_first_time
-        and (
-            (has_oral_exp and ("oral" not in past_str.lower() or "oral" not in im_str.lower()))
-            or (has_anal_exp and ("anal" not in past_str.lower() or "anal" not in im_str.lower()))
-        )
-    )
+    is_virgin_shared = any("shared first time with you" in str(p) for p in past_history)
 
     if had_first_time:
         past_history = ["Virgin (No prior intimate history before meeting you; shared first time with you)"]
-    elif not past_history or is_out_of_sync or (is_virgin_shared and not had_first_time):
+    elif not past_history or (is_virgin_shared and not had_first_time):
         try:
             name_str = str(c.get("name") or c.get("npc_id") or "npc").strip()
             import hashlib
-            hash_val = int(hashlib.md5(f"{name_str}_past_history".encode("utf-8")).hexdigest(), 16)
-            c_race_val = str(c.get("race") or app.get("race") or "")
+            c_race_val = str(c.get("race") or app.get("race") or "human")
+            sess_seed = c.get("session_id") or session_id or 0
+            hash_val = int(hashlib.md5(f"{name_str}_{c_race_val}_{sess_seed}".encode("utf-8")).hexdigest(), 16)
             c_gender_val = str(c.get("gender") or app.get("gender") or "female")
             open_val = str(app.get("erotic_openness") or app.get("openness") or "moderate")
             pred_i = str(app.get("predetermined_intercourse") or "").strip().lower()
@@ -988,46 +1481,28 @@ def enrich_contact_dossier(
                     past_history = [str(past_data["entry"]).replace("Past History:", "").strip()]
                 else:
                     past_history = []
-
-                if past_history:
-                    try:
-                        import db as _db
-                        sess_id = c.get("session_id", 0)
-                        char_id = c.get("character_id", 0)
-                        npc_id = c.get("npc_id") or name_str
-
-                        if is_out_of_sync and c.get("id"):
-                            import json as _json
-                            with _db.get_conn() as conn:
-                                row = conn.execute("SELECT intimate_memories_json, appearance_json FROM contacts WHERE id = ?", (c.get("id"),)).fetchone()
-                                if row:
-                                    cur_mems = _json.loads(row[0] or "[]")
-                                    cur_app = _json.loads(row[1] or "{}")
-                                    clean_mems = [m for m in cur_mems if not str(m).startswith("Past History:")]
-                                    new_mems = [f"Past History: {e}" for e in past_history] + clean_mems
-                                    if "intimate_memories" in cur_app:
-                                        cur_app["intimate_memories"] = new_mems
-                                    if "shared_romantic_milestones" in cur_app:
-                                        srm = [m for m in cur_app.get("shared_romantic_milestones", []) if not str(m).startswith("Past History:")]
-                                        cur_app["shared_romantic_milestones"] = [f"Past History: {e}" for e in past_history] + srm
-                                    conn.execute(
-                                        "UPDATE contacts SET intimate_memories_json = ?, appearance_json = ? WHERE id = ?",
-                                        (_json.dumps(new_mems), _json.dumps(cur_app), c.get("id"))
-                                    )
-                        else:
-                            for ph_entry in past_history:
-                                mem_str = f"Past History: {ph_entry}"
-                                _db.upsert_contact(
-                                    session_id=sess_id,
-                                    character_id=char_id,
-                                    npc_id=npc_id,
-                                    name=name_str,
-                                    new_memory=mem_str,
-                                )
-                    except Exception:
-                        pass
         except Exception:
             past_history = []
+
+    if c.get("id") and past_history and isinstance(c.get("intimate_memories"), list):
+        existing_past = [
+            str(m).replace("Past History:", "").strip()
+            for m in c["intimate_memories"]
+            if str(m).startswith("Past History:")
+        ]
+        if existing_past != past_history:
+            try:
+                import db, json as _json
+                non_past = [m for m in c["intimate_memories"] if not str(m).startswith("Past History:")]
+                healed_mems = [f"Past History: {p}" for p in past_history] + non_past
+                c["intimate_memories"] = healed_mems
+                with db.get_conn() as _conn:
+                    _conn.execute(
+                        "UPDATE contacts SET intimate_memories_json = ? WHERE id = ?",
+                        (_json.dumps(healed_mems), c["id"]),
+                    )
+            except Exception:
+                pass
 
     # 3. Enrich appearance & Intimate Dossier for Web Codex / Phone display
     intimate_unlocked = (info_level >= 3) or debug_reveal_all or c.get("intimate_revealed", False) or c.get("all_revealed", False) or app.get("intimate_revealed", False)
@@ -1111,9 +1586,14 @@ def enrich_contact_dossier(
     if a_rev and anal_state != "unknown":
         anal_disp = anal_map.get(anal_state, "Inexperienced")
 
+    raw_penis_size = app.get("penis_size")
     if is_male:
-        p_size = str(app.get("penis_size") or "average").title()
-        p_size_disp = p_size if (intimate_unlocked or debug_reveal_all) else "Unknown"
+        p_size = str(raw_penis_size or "average").title()
+        if intimate_unlocked or debug_reveal_all:
+            p_size_disp = p_size
+        else:
+            p_size_disp = "Unknown"
+            app.pop("penis_size", None)
         app["anatomy"] = f"Penis Size: {p_size_disp} • Intercourse: {exp_disp} • Oral: {oral_disp} • Manual: {man_disp} • Anal: {anal_disp}"
     else:
         b_size = str(app.get("breast_size") or "Modest B-Cup").title()
@@ -1188,7 +1668,7 @@ def enrich_contact_dossier(
     c["skill_modifier"] = skill_modifier
     c["dislikes"] = dislikes or []
     c["debug_revealed"] = debug_reveal_all
-    history_unlocked = intimate_unlocked or (info_level >= 2) or debug_reveal_all or c.get("history_revealed", False) or app.get("history_revealed", False)
+    history_unlocked = intimate_unlocked or (info_level >= 3) or debug_reveal_all or c.get("history_revealed", False) or app.get("history_revealed", False)
     if history_unlocked:
         if isinstance(past_history, list):
             c["past_intimate_history"] = " • ".join(past_history)
@@ -1201,9 +1681,14 @@ def enrich_contact_dossier(
         c["past_intimate_entries"] = []
 
     raw_mems = list(c.get("intimate_memories") or app.get("intimate_memories") or [])
-    c["shared_romantic_milestones"] = [
+    shared_milestones = [
         m for m in raw_mems if not str(m).startswith("Past History:") and is_romantic_milestone_str(str(m))
     ]
+    for ge in (c.get("gameplay_intimate_events") or []):
+        ge_sum = str((ge or {}).get("summary") or "").strip()
+        if ge_sum and ge_sum not in shared_milestones:
+            shared_milestones.append(ge_sum)
+    c["shared_romantic_milestones"] = shared_milestones
     recent_mems = list(c.get("recent_memories") or c.get("rel_history") or app.get("recent_memories") or [])
     if not recent_mems:
         recent_mems = [
@@ -1233,6 +1718,92 @@ def enrich_contact_dossier(
         c["status_effects"] = []
 
     try:
+        import scenario_data as _sd_enr
+        if _sd_enr.is_anomalous_incursions_scenario(scen_key):
+            from mechanics.social.anomalous_npc_tags import hydrate_anomalous_npc_profile, TAG_SPECIAL_AGENT
+            from mechanics.social.factions import get_anomalous_faction_state
+            in_party_companion = False
+            comp_level = 1
+            if session_id:
+                try:
+                    for p_npc in (db.get_session_party_npcs(session_id) or []):
+                        if str(p_npc.get("name") or "").strip().lower() == str(c_name or "").strip().lower():
+                            in_party_companion = True
+                            comp_level = max(1, int(p_npc.get("level") or 1))
+                            break
+                except Exception:
+                    pass
+            anom_prof = hydrate_anomalous_npc_profile(
+                c,
+                session_id=session_id,
+                scen_key=scen_key,
+                player_level=comp_level,
+                is_party_companion=in_party_companion,
+            )
+            c_binfo_mut = dict(c.get("basic_info") or {})
+            c_binfo_mut["anomalous_npc_tag"] = anom_prof["anomalous_npc_tag"]
+            c_binfo_mut["is_special_agent"] = anom_prof["is_special_agent"]
+            is_deceased = bool(
+                c_binfo_mut.get("deceased")
+                or c.get("deceased")
+                or str(c.get("disposition") or "").lower() == "dead"
+                or "[DECEASED:" in str(c_desc or "")
+            )
+            if is_deceased:
+                c["deceased"] = True
+                c_binfo_mut["deceased"] = True
+                if "Deceased" not in c["status_effects"]:
+                    c["status_effects"].insert(0, "Deceased")
+
+            c["anomalous_npc_tag"] = anom_prof["anomalous_npc_tag"]
+            c["anomalous_tag_label"] = anom_prof["anomalous_tag_label"]
+            c["is_special_agent"] = anom_prof["is_special_agent"]
+            c["can_recruit_companion"] = bool(anom_prof["can_recruit_companion"] and not is_deceased)
+            c["combat_hp"] = anom_prof["hp"]
+            c["combat_max_hp"] = anom_prof["max_hp"]
+            c["combat_mp"] = anom_prof["mp"]
+            c["combat_max_mp"] = anom_prof["max_mp"]
+            c["weapon_profile"] = anom_prof.get("weapon_profile", {})
+
+            same_faction_colleague = False
+            if anom_prof["anomalous_npc_tag"] == TAG_SPECIAL_AGENT:
+                if session_id:
+                    try:
+                        p_fstate = get_anomalous_faction_state(session_id)
+                        p_fid = str(p_fstate.get("faction_archetype_key") or "").strip()
+                        if p_fid and p_fid != "freelancer" and p_fid == anom_prof.get("faction_id"):
+                            same_faction_colleague = True
+                    except Exception:
+                        pass
+                c["same_faction_colleague"] = same_faction_colleague
+                c["agent_tier"] = anom_prof["agent_tier"]
+                c["rank_title"] = anom_prof["rank_title"]
+                c["agent_class"] = anom_prof["agent_class"]
+                c["faction_id"] = anom_prof["faction_id"]
+                c["faction_name"] = anom_prof["faction_name"]
+                c_binfo_mut.setdefault("agent_tier", anom_prof["agent_tier"])
+                c_binfo_mut.setdefault("rank_title", anom_prof["rank_title"])
+                c_binfo_mut.setdefault("agent_class", anom_prof["agent_class"])
+                c_binfo_mut.setdefault("faction_id", anom_prof["faction_id"])
+                if anom_prof["faction_name"]:
+                    c_binfo_mut.setdefault("faction", anom_prof["faction_name"])
+                # Expose innate abilities when unlocked (score >= 100), in party, debug, or same-faction colleague
+                if score >= 100 or in_party_companion or debug_reveal_all or same_faction_colleague:
+                    c["innate_abilities"] = anom_prof["innate_abilities"]
+                    c["innate_ability_details"] = anom_prof["innate_ability_details"]
+                else:
+                    c["innate_abilities"] = []
+                    c["innate_ability_details"] = []
+                c["debug_innate_ability_details"] = anom_prof["innate_ability_details"]
+            else:
+                c["same_faction_colleague"] = False
+                c["innate_abilities"] = []
+                c["innate_ability_details"] = []
+            c["basic_info"] = c_binfo_mut
+    except Exception:
+        pass
+
+    try:
         debug_rev_flags = {k: True for k in revealed_flags}
         debug_int_sections = format_intimate_profile_sections(
             app,
@@ -1254,11 +1825,12 @@ def enrich_contact_dossier(
 
     debug_app = dict(app)
     if is_male:
-        p_sz = str(app.get("penis_size") or "average").title()
-        debug_app["anatomy"] = f"Penis Size: {p_sz} • Intercourse: {exp_disp if exp_disp != 'Unknown' else ('Virgin' if i_state == 'virgin' else 'Non-Virgin')} • Oral: {oral_map.get(oral_state, 'Inexperienced')} • Manual: {man_map.get(manual_state, 'Inexperienced')}"
+        p_sz = str(raw_penis_size or "average").title()
+        debug_app["penis_size"] = raw_penis_size or "average"
+        debug_app["anatomy"] = f"Penis Size: {p_sz} • Intercourse: {exp_disp if exp_disp != 'Unknown' else ('Virgin' if i_state == 'virgin' else 'Non-Virgin')} • Oral: {oral_map.get(oral_state, 'Inexperienced')} • Manual: {man_map.get(manual_state, 'Inexperienced')} • Anal: {anal_map.get(anal_state, 'Inexperienced')}"
     else:
         b_sz = str(app.get("breast_size") or "Modest B-Cup").title()
-        debug_app["anatomy"] = f"Breast Size: {b_sz} • Intercourse: {exp_disp if exp_disp != 'Unknown' else ('Virgin' if i_state == 'virgin' else 'Non-Virgin')} • Oral: {oral_map.get(oral_state, 'Inexperienced')} • Manual: {man_map.get(manual_state, 'Inexperienced')}"
+        debug_app["anatomy"] = f"Breast Size: {b_sz} • Intercourse: {exp_disp if exp_disp != 'Unknown' else ('Virgin' if i_state == 'virgin' else 'Non-Virgin')} • Oral: {oral_map.get(oral_state, 'Inexperienced')} • Manual: {man_map.get(manual_state, 'Inexperienced')} • Anal: {anal_map.get(anal_state, 'Inexperienced')}"
 
     c["debug_profile"] = {
         "unlocked_traits": c.get("unlocked_traits") or [],
@@ -1276,6 +1848,7 @@ def enrich_contact_dossier(
         "info_level": 3,
         "debug_revealed": True,
     }
+    c["is_blocked_contact"] = is_contact_blocked(c)
     return c
 
 

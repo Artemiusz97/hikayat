@@ -32,12 +32,10 @@ def get_zone_location_name(location_str: str) -> str:
     if loc.startswith("{"):
         z, _, _ = parse_tiered_location(loc)
         return z
-    if "➔" in loc:
-        parts = [p.strip() for p in loc.split("➔") if p.strip()]
-        return parts[0] if parts else loc
-    if "->" in loc:
-        parts = [p.strip() for p in loc.split("->") if p.strip()]
-        return parts[0] if parts else loc
+    for sep in ("➔", "->", "✖"):
+        if sep in loc:
+            parts = [p.strip() for p in loc.split(sep) if p.strip()]
+            return parts[0] if parts else loc
     return loc
 
 def get_primary_location_name(location_str: str) -> str:
@@ -48,12 +46,10 @@ def get_primary_location_name(location_str: str) -> str:
     if loc.startswith("{"):
         _, p, _ = parse_tiered_location(loc)
         return p
-    if "➔" in loc:
-        parts = [p.strip() for p in loc.split("➔") if p.strip()]
-        return parts[1] if len(parts) >= 2 else (parts[0] if parts else loc)
-    if "->" in loc:
-        parts = [p.strip() for p in loc.split("->") if p.strip()]
-        return parts[1] if len(parts) >= 2 else (parts[0] if parts else loc)
+    for sep in ("➔", "->", "✖"):
+        if sep in loc:
+            parts = [p.strip() for p in loc.split(sep) if p.strip()]
+            return parts[1] if len(parts) >= 2 else (parts[0] if parts else loc)
     return loc
 
 def get_clean_zone_short_name(zone_name: str) -> str:
@@ -87,6 +83,110 @@ def get_clean_zone_short_name(zone_name: str) -> str:
             break
 
     return z or zone_name
+
+
+def dedupe_location_stutter(text: str) -> str:
+    """Removes adjacent stuttered words caused by prefix/epithet overlap (e.g. 'Neon-Mirage Neon Shopping Arcade' -> 'Neon-Mirage Shopping Arcade')."""
+    if not text:
+        return ""
+    res = str(text)
+    res = re.sub(r"\b([A-Za-z]{3,})(-[A-Za-z0-9]+)\s+\1\b", r"\1\2", res, flags=re.IGNORECASE)
+    res = re.sub(r"\b([A-Za-z0-9]+-([A-Za-z]{3,}))\s+\2\b", r"\1", res, flags=re.IGNORECASE)
+    res = re.sub(r"\b([A-Za-z]{3,})\s+\1\b", r"\1", res, flags=re.IGNORECASE)
+    return res
+
+
+def format_clean_location_prose(
+    location_str: str,
+    include_zone: bool = False,
+    preposition: str = "in",
+) -> str:
+    """Formats a tiered location string ('Zone ➔ Facility ➔ Sub-Room') into natural English prose or concise badge display."""
+    if not location_str:
+        return "the local area"
+    loc = dedupe_location_stutter(str(location_str).strip())
+    if loc.startswith("{"):
+        try:
+            z, p, s = parse_tiered_location(loc)
+            parts = [dedupe_location_stutter(x.strip()) for x in (z, p, s) if x and x.strip()]
+        except Exception:
+            parts = [loc]
+    else:
+        parts = [dedupe_location_stutter(p.strip()) for p in re.split(r"\s*(?:➔|->|✖)\s*", loc) if p and p.strip()]
+
+    while len(parts) > 1 and parts[-1].lower() == "main area":
+        parts.pop()
+
+    if not parts:
+        return loc
+
+    if len(parts) == 1:
+        return parts[0]
+
+    if len(parts) == 2:
+        zone, facility = parts[0], parts[1]
+        if facility.lower() == zone.lower() or zone.lower() in facility.lower():
+            return facility
+        if include_zone:
+            if preposition == "paren":
+                return f"{facility} ({zone})"
+            return f"{facility} {preposition} {zone}"
+        return facility
+
+    zone, facility, sub_room = parts[0], parts[1], parts[-1]
+    if sub_room.lower() == facility.lower():
+        if include_zone:
+            return f"{facility} ({zone})" if preposition == "paren" else f"{facility} {preposition} {zone}"
+        return facility
+    if include_zone:
+        if preposition == "paren":
+            return f"{sub_room} · {facility} ({zone})"
+        return f"{sub_room} at {facility} ({zone})"
+    return f"{sub_room} at {facility}"
+
+
+def format_clean_location_badge(location_str: str, include_zone: bool = True) -> str:
+    """Formats a tiered location string with the primary facility first for UI badges (e.g. 'S.O.A.I. HQ (Sovereign-Core City Center)')."""
+    if not location_str:
+        return ""
+    return format_clean_location_prose(location_str, include_zone=include_zone, preposition="paren")
+
+
+_PROSE_LOC_SEG_RE = r"[A-Z0-9][A-Za-z0-9.\-'’:]*(?:\s+(?:(?:of|the|&)\s+)?[A-Z0-9][A-Za-z0-9.\-'’:]*){0,7}"
+_PROSE_TIERED_ARROW_RE = re.compile(
+    rf"({_PROSE_LOC_SEG_RE})\s*(?:➔|->)\s*({_PROSE_LOC_SEG_RE})(?:\s*(?:➔|->)\s*({_PROSE_LOC_SEG_RE}))?"
+)
+
+
+def clean_narrative_location_arrows(text: str, include_zone: bool = True, preposition: str = "in") -> str:
+    """Replaces raw 'Zone ➔ Facility' or 'Zone -> Facility' arrows inside narrative sentences with natural grammar and deduplicates stuttered words."""
+    if not text:
+        return ""
+    res = dedupe_location_stutter(str(text))
+    if "➔" not in res and "->" not in res:
+        return res
+
+    def _repl(m: re.Match) -> str:
+        seg1 = (m.group(1) or "").strip()
+        seg2 = (m.group(2) or "").strip()
+        seg3 = (m.group(3) or "").strip()
+
+        target_last = seg3 if seg3 else seg2
+        trailing_punct = ""
+        # Preserve trailing sentence period unless it's a dotted acronym like 'S.O.A.I.'
+        if target_last.endswith(".") and not re.search(r"\b[A-Z]\.[A-Z]\.$", target_last):
+            trailing_punct = "."
+            if seg3:
+                seg3 = seg3[:-1].rstrip()
+            else:
+                seg2 = seg2[:-1].rstrip()
+
+        combined = " ➔ ".join(x for x in (seg1, seg2, seg3) if x)
+        formatted = format_clean_location_prose(combined, include_zone=include_zone, preposition=preposition)
+        return f"{formatted}{trailing_punct}"
+
+    return _PROSE_TIERED_ARROW_RE.sub(_repl, res)
+
 
 def resolve_session_location_tokens(session_id: int = 0, template: str = "", scenario_key: str = "fantasy", char_name: str = "") -> str:
 
@@ -138,9 +238,29 @@ def resolve_session_location_tokens(session_id: int = 0, template: str = "", sce
 
         res = res.replace("{session_caves}", get_session_caves_name(session_id, scenario_key))
 
+    if "{session_swamp}" in res:
+
+        res = res.replace("{session_swamp}", get_session_swamp_name(session_id, scenario_key))
+
     if "{session_school}" in res:
 
         res = res.replace("{session_school}", get_session_school_name(session_id, scenario_key))
+
+    if "{session_athletics_complex}" in res:
+
+        res = res.replace("{session_athletics_complex}", get_session_athletics_complex_name(session_id, scenario_key))
+
+    if "{session_student_commons}" in res:
+
+        res = res.replace("{session_student_commons}", get_session_student_commons_name(session_id, scenario_key))
+
+    if "{session_cultural_arts}" in res:
+
+        res = res.replace("{session_cultural_arts}", get_session_cultural_arts_name(session_id, scenario_key))
+
+    if "{session_abandoned_campus}" in res:
+
+        res = res.replace("{session_abandoned_campus}", get_session_abandoned_campus_name(session_id, scenario_key))
 
     if "{session_classroom}" in res:
 
@@ -190,6 +310,13 @@ def resolve_session_location_tokens(session_id: int = 0, template: str = "", sce
 
         res = res.replace("{session_commercial}", get_session_commercial_district_name(session_id, scenario_key))
 
+
+    if "{session_agency_hq}" in res:
+        res = res.replace("{session_agency_hq}", get_session_agency_hq_name(session_id, scenario_key))
+
+    if "{session_agency}" in res:
+        res = res.replace("{session_agency}", get_session_agency_name(session_id, scenario_key))
+
     if "{session_residential}" in res:
 
         res = res.replace("{session_residential}", get_session_residential_neighborhood_name(session_id, scenario_key))
@@ -202,7 +329,7 @@ def resolve_session_location_tokens(session_id: int = 0, template: str = "", sce
 
         res = res.replace("{session_player_desk}", get_session_player_desk_name(session_id, char_name))
 
-    return res
+    return dedupe_location_stutter(res)
 
 def _build_session_zone_index(session_id: int = 0, scenario_key: str = "fantasy") -> dict:
 
@@ -231,21 +358,30 @@ def _build_session_zone_index(session_id: int = 0, scenario_key: str = "fantasy"
 
             z_name = residential_name
 
-        elif commercial_name and z_name in ("Commercial District", "Shopping District"):
-
+        elif commercial_name and z_name in ("Commercial District", "Shopping District", "Downtown"):
             z_name = commercial_name
+        elif is_school_scenario(scenario_key) and z_name in ("Recreational Mountain Park", "Recreational Park"):
+            z_name = get_session_recreation_park_name(session_id, scenario_key)
+        elif is_urban_anomalous_scenario(scenario_key):
+            z_name = get_session_urban_zone_name(session_id, z.get("id", ""), z_name, scenario_key)
 
             
 
         primaries = z.get("primary_locations", [])
 
         gateway_p = "Main Area"
+        gateway_s = "Main Area"
 
         if primaries:
 
             foyer = next((p for p in primaries if "gate" in p.get("name", "").lower() or "entrance" in p.get("name", "").lower() or "foyer" in p.get("name", "").lower()), None)
-
-            gateway_p = foyer.get("name") if foyer else primaries[0].get("name", "Main Area")
+            chosen_p = foyer if foyer else primaries[0]
+            gateway_p = chosen_p.get("name", "Main Area")
+            subs_list = chosen_p.get("sub_locations", [])
+            if subs_list:
+                ent_sub = next((s for s in subs_list if s.get("is_entrance") or "gate" in s.get("name", "").lower() or "entrance" in s.get("name", "").lower() or "foyer" in s.get("name", "").lower()), None)
+                if ent_sub:
+                    gateway_s = ent_sub.get("name", "Main Area")
 
         if gateway_p in ("Homeroom Classroom", "loc_homeroom"):
 
@@ -254,17 +390,17 @@ def _build_session_zone_index(session_id: int = 0, scenario_key: str = "fantasy"
         
 
         if z_name:
-            zones[z_name.strip().lower()] = (z_name, gateway_p, "Main Area")
+            zones[z_name.strip().lower()] = (z_name, gateway_p, gateway_s)
             short = get_clean_zone_short_name(z_name).lower()
             if short and short != z_name.strip().lower():
-                zones[short] = (z_name, gateway_p, "Main Area")
+                zones[short] = (z_name, gateway_p, gateway_s)
             if orig_z_name and orig_z_name.strip().lower() not in zones:
-                zones[orig_z_name.strip().lower()] = (z_name, gateway_p, "Main Area")
+                zones[orig_z_name.strip().lower()] = (z_name, gateway_p, gateway_s)
 
             if is_school_scenario(scenario_key) and (any(k in z_name.lower() for k in ("high school", "academy", "university")) or (school_name and z_name.lower() == school_name.lower())):
                 for alias in ("school", "the school", "campus", "the campus", "academy", "the academy", "high school"):
                     if alias not in zones:
-                        zones[alias] = (z_name, gateway_p, "Main Area")
+                        zones[alias] = (z_name, gateway_p, gateway_s)
 
             if is_school_scenario(scenario_key) and (any(k in z_name.lower() for k in ("residential", "quarter", "neighborhood")) or (residential_name and z_name.lower() == residential_name.lower())):
                 for alias in ("residential", "the residential area", "residential area", "residential neighborhood", "residential quarter", "neighborhood"):
@@ -337,27 +473,48 @@ def _build_session_spatial_index(session_id: int = 0, scenario_key: str = "fanta
 
             z_name = residential_name
 
-        elif commercial_name and z_name in ("Commercial District", "Shopping District"):
-
+        elif commercial_name and z_name in ("Commercial District", "Shopping District", "Downtown"):
             z_name = commercial_name
+        elif is_school_scenario(scenario_key) and z_name in ("Recreational Mountain Park", "Recreational Park"):
+            z_name = get_session_recreation_park_name(session_id, scenario_key)
+        elif is_urban_anomalous_scenario(scenario_key):
+            z_name = get_session_urban_zone_name(session_id, z.get("id", ""), z_name, scenario_key)
 
 
 
         for p in z.get("primary_locations", []):
-
-            p_name = p.get("name", "")
-
+            raw_p_name = p.get("name", "")
+            p_name = raw_p_name
+            p_id = p.get("id", "")
+            if is_school_scenario(scenario_key):
+                if p_id == "bld_school_athletics" or p_name == "School Athletics Complex":
+                    p_name = get_session_athletics_complex_name(session_id, scenario_key)
+                elif p_id == "bld_school_commons" or p_name == "Campus Promenade & Student Commons":
+                    p_name = get_session_student_commons_name(session_id, scenario_key)
+                elif p_id == "bld_school_arts" or p_name == "Creative Arts & Student Union Wing":
+                    p_name = get_session_cultural_arts_name(session_id, scenario_key)
+                elif p_id == "bld_abandoned_school" or p_name == "Old Abandoned East Wing":
+                    p_name = get_session_abandoned_campus_name(session_id, scenario_key)
+            if p_id == "loc_agency_hq" or "{session_agency_hq}" in p_name:
+                p_name = get_session_agency_hq_name(session_id, scenario_key)
+            elif raw_p_name and is_urban_anomalous_scenario(scenario_key):
+                p_name = get_session_urban_facility_name(session_id, z.get("id", ""), p_id, raw_p_name, scenario_key)
             if p_name:
-
                 primaries[p_name.strip().lower()] = (z_name, p_name)
-
+                if raw_p_name and raw_p_name.strip().lower() not in primaries and "{" not in raw_p_name:
+                    primaries[raw_p_name.strip().lower()] = (z_name, p_name)
                 for s in p.get("sub_locations", []):
-
-                    s_name = s.get("name", "")
-
+                    raw_s_name = s.get("name", "")
+                    s_name = raw_s_name
+                    s_id = s.get("id", "")
+                    if is_school_scenario(scenario_key) and (s_id == "loc_homeroom" or s_name == "Homeroom Classroom"):
+                        s_name = get_session_classroom_name(session_id, scenario_key)
+                    elif is_urban_anomalous_scenario(scenario_key) and s_id.startswith("loc_"):
+                        s_name = get_session_urban_facility_name(session_id, z.get("id", ""), s_id, raw_s_name, scenario_key)
                     if s_name:
-
                         subs[s_name.strip().lower()] = (z_name, p_name, s_name)
+                        if raw_s_name and raw_s_name.strip().lower() not in subs:
+                            subs[raw_s_name.strip().lower()] = (z_name, p_name, s_name)
 
 
 
@@ -619,7 +776,15 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
         # If Part 1 is in subs:
         if p1_low in subs:
             z_found, p_found, s_found = subs[p1_low]
-            chosen_z = p0 if p0 else z_found
+            if is_school_scenario(scenario_key):
+                p0_is_non_campus = (
+                    (residential_name and residential_name.lower() in p0_low) or
+                    (commercial_name and commercial_name.lower() in p0_low) or
+                    any(k in p0_low for k in ("residential", "commercial", "town", "quarter", "neighborhood", "suburban", "campsite", "forest", "harbor", "bay", "arcade", "shopping"))
+                )
+                chosen_z = z_found if (p0_is_non_campus or p0_low == p_found.lower()) else (p0 if p0 else z_found)
+            else:
+                chosen_z = p0 if p0 else z_found
             return (chosen_z, p_found, s_found)
 
         return None
@@ -652,7 +817,7 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
         if p0_low in zones_index and p1_low in primaries:
             z_canonical, p_canonical = primaries[p1_low]
             if z_canonical.strip().lower() == p0_low or p0_low in z_canonical.strip().lower() or z_canonical.strip().lower() in p0_low:
-                s_clean = "Main Area" if any(w in p2_low for w in ("wing", "administration", "faculty", "science", "academic", "media center")) else p2
+                s_clean = p2 if p2_low in subs else ("Main Area" if any(w in p2_low for w in ("wing", "administration", "faculty", "science", "academic", "media center")) else p2)
                 return (p0, p_canonical, s_clean)
 
         # Check if Part 0 is actually a Primary Residence / Establishment (e.g. "Anderson Residence ➔ Maya's Room ➔ Main Area" or "Artemiusz's House ➔ Bedroom ➔ Desk")
@@ -671,16 +836,21 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
 
         # If Part 1 is a known Primary Place (or academic room) inside Zone Part 0:
         if is_school_scenario(scenario_key):
-            p1_is_academic_room = any(k in p1_low for k in ("homeroom", "classroom", "class "))
+            from .constants import CAMPUS_FACILITY_KEYWORDS, RESIDENTIAL_PLACE_KEYWORDS, COMMERCIAL_PLACE_KEYWORDS
+            p1_is_academic_room = (
+                any(k in p1_low for k in ("homeroom", "classroom", "class "))
+                or any(k in p1_low for k in CAMPUS_FACILITY_KEYWORDS)
+                or (p1_low in subs and any(sk in subs[p1_low][0].lower() for sk in ("academy", "school", "campus")))
+            )
             if p1_low in primaries or p1_is_academic_room:
                 if p1_low in primaries:
                     z_found, p_found = primaries[p1_low]
+                elif p1_low in subs:
+                    z_found, p_found = subs[p1_low][0], subs[p1_low][2]
                 else:
                     z_found, p_found = school_name, p1
 
-                s_clean = "Main Area" if any(w in p2_low for w in ("wing", "administration", "faculty", "science", "academic", "media center")) else p2
-
-                from .constants import CAMPUS_FACILITY_KEYWORDS, RESIDENTIAL_PLACE_KEYWORDS, COMMERCIAL_PLACE_KEYWORDS
+                s_clean = p2 if p2_low in subs else ("Main Area" if any(w in p2_low for w in ("wing", "administration", "faculty", "science", "academic", "media center")) else p2)
 
                 p1_is_campus = any(k in p1_low for k in CAMPUS_FACILITY_KEYWORDS) or p1_is_academic_room or (
                     any(k in z_found.lower() for k in ("academy", "school", "campus", "athletics", "commons", "student commons"))
@@ -729,6 +899,11 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
         # Inversion check: if Part 2 is a known Primary Place (or matches a canonical primary place), but Part 1 is an intermediate wing/container:
         # (e.g. "Westlake Academy ➔ Administration Wing ➔ Student Council Office")
         if p2_low not in ("main area", "", "none") and not p2_low.endswith("desk"):
+            is_intermediate_wing = any(w in p1_low for w in ("wing", "media center", "administration", "faculty", "academic"))
+            if is_intermediate_wing and p2_low in subs:
+                z_sub, p_sub, s_sub = subs[p2_low]
+                return (z_sub, p_sub, s_sub)
+
             matched_primary = None
             if p2_low in primaries:
                 matched_primary = primaries[p2_low]
@@ -746,7 +921,6 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
                         matched_primary = (pz, pp)
                         break
 
-            is_intermediate_wing = any(w in p1_low for w in ("wing", "media center", "administration", "faculty", "academic"))
             if matched_primary and (p1_low not in primaries or is_intermediate_wing):
                 z_found, p_found = matched_primary
                 sub_lbl = p1 if not is_intermediate_wing else "Main Area"
@@ -940,6 +1114,10 @@ def parse_tiered_location(raw_location: Any, scenario_key: str = "fantasy", sess
     if classroom_name and (p == "Homeroom Classroom" or p == "Homeroom" or p == "loc_homeroom"):
 
         p = classroom_name
+
+    if classroom_name and (s == "Homeroom Classroom" or s == "Homeroom" or s == "loc_homeroom"):
+
+        s = classroom_name
 
     if is_school_scenario(scenario_key):
 

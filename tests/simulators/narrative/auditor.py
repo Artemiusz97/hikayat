@@ -23,7 +23,11 @@ from typing import Dict, Any, List, Optional, Set
 
 import db
 import namegen
-from game_engine.state.constants import _ITEM_GRANT_RE, _ITEM_BLOCKLIST
+from game_engine.state.constants import _ITEM_BLOCKLIST
+
+_ITEM_GRANT_RE = re.compile(
+    r'\b(?i:hand\w*\s+(?:you|them)|give\w*\s+(?:you|them)|pick\w*\s+up|find\w*|found|receiv\w*|grab\w*|collect\w*|pocket\w*)\s+(?i:a|an|the)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)'
+)
 
 def _extract_state_facts(outcome_dict: dict) -> list[str]:
     """Extract key nouns/numbers from the mechanical state to guard against deletion."""

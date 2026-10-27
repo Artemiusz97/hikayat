@@ -64,15 +64,29 @@ def test_extract_scene_fields_does_not_resurrect_partner_on_convo_exit():
     assert partner_arg is None, f"Expected partner_arg to be None on dialogue exit, got: {partner_arg}"
 
 
-def test_departed_npc_detected_on_excuse_yourself():
-    """When the player thanks and excuses themselves and the NPC waves goodbye and weaves through the crowd, they are detected as departed."""
-    narrative = (
-        "Minato Saito chuckles, tucking his notebook securely under his arm. 'I'll hold you to that! Catch you later!' "
-        "He gives a quick, energetic wave before pivoting on his heel, his mouse tail swishing briefly behind him as he weaves through the growing crowd of students heading toward the main building.\n"
-        "With the conversation concluded, Artemiusz stands alone for a moment amidst the shifting tide of the morning rush."
-    )
-    candidate_npcs = [{"name": "Minato Saito", "role": "Drama Club Lead"}]
-    action = [{"label": "Thank Minato Saito, excuse yourself, and look around the room"}]
+def test_departed_npc_detected_on_structured_depart_event():
+    """Structured depart cast_event removes the NPC from present_npcs and records departed status."""
+    from game_engine.npcs.cast_planner import plan_pre_turn, apply_cast_events
 
-    departed = game_engine.extract_departed_npcs_from_narrative(narrative, candidate_npcs, actions=action)
-    assert "Minato Saito" in departed, f"Expected Minato Saito in departed NPCs, got: {departed}"
+    session = {
+        "id": 991123,
+        "current_location": "Morning Courtyard",
+        "current_turn_index": 4,
+        "current_npcs": [{"name": "Minato Saito", "role": "Drama Club Lead"}],
+        "dialogue_partner": "Minato Saito",
+        "dialogue_partners": ["Minato Saito"],
+        "extra_json": {},
+    }
+    party = [[{"name": "Artemiusz", "user_id": 1}]]
+    action = [{"label": "Thank Minato Saito, excuse yourself, and look around the room", "ends_dialogue": True}]
+
+    plan = plan_pre_turn(session, party, action)
+    final_plan, rejections = apply_cast_events(
+        plan,
+        [{"type": "depart", "npc": "Minato Saito", "reason": "Waves goodbye and heads to class"}],
+        session,
+        party,
+    )
+    assert rejections == []
+    assert "Minato Saito" in final_plan.departing_npcs
+    assert not any(n.get("name") == "Minato Saito" for n in final_plan.present_npcs)

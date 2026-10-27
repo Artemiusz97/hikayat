@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Hikayat Stealth Mechanics Package.
 """
@@ -10,10 +11,12 @@ from mechanics.stealth.alert_tracker import (
     get_alert_stage,
     accumulate_detection,
     apply_natural_decay,
+    apply_spatial_transition_decay,
     apply_distraction,
     get_alert_badge_data,
 )
 from mechanics.stealth.formulas import (
+    filter_equipped_stealth_items,
     calculate_armor_noise,
     calculate_companion_noise_penalty,
     calculate_lighting_modifier,
@@ -22,15 +25,34 @@ from mechanics.stealth.formulas import (
     resolve_opposed_stealth_check,
 )
 from mechanics.stealth.core import (
+    VOLUNTARY_DISENGAGE_REASONS,
     init_stealth_state,
     get_session_stealth_state,
     set_session_stealth_state,
+    is_actor_hidden,
+    is_actor_combat_vanished,
+    any_actor_hidden,
+    set_actor_combat_vanished,
+    clear_all_combat_vanished,
+    project_stealth_state_for_user,
     toggle_stealth_stance,
     break_stealth,
+    consume_stealth_turn_transients,
     apply_stealth_decay_turn,
+    apply_stealth_spatial_transition,
     apply_stealth_distraction,
+    resolve_distraction_action,
+    resolve_scene_target_per,
+    resolve_scene_environment_context,
+    classify_detection_escalation,
+    compute_choice_stealth_odds,
     resolve_stealth_action,
     format_stealth_truth_directive,
+)
+from mechanics.stealth.escalation import (
+    build_confrontation_choices,
+    inject_covert_exploration_choices,
+    reduce_stealth_turn_outcome,
 )
 
 __all__ = [
@@ -39,11 +61,14 @@ __all__ = [
     "ALERT_SEARCHING",
     "ALERT_DETECTED",
     "STAGE_THRESHOLDS",
+    "VOLUNTARY_DISENGAGE_REASONS",
     "get_alert_stage",
     "accumulate_detection",
     "apply_natural_decay",
+    "apply_spatial_transition_decay",
     "apply_distraction",
     "get_alert_badge_data",
+    "filter_equipped_stealth_items",
     "calculate_armor_noise",
     "calculate_companion_noise_penalty",
     "calculate_lighting_modifier",
@@ -53,10 +78,26 @@ __all__ = [
     "init_stealth_state",
     "get_session_stealth_state",
     "set_session_stealth_state",
+    "is_actor_hidden",
+    "is_actor_combat_vanished",
+    "any_actor_hidden",
+    "set_actor_combat_vanished",
+    "clear_all_combat_vanished",
+    "project_stealth_state_for_user",
     "toggle_stealth_stance",
     "break_stealth",
+    "consume_stealth_turn_transients",
     "apply_stealth_decay_turn",
+    "apply_stealth_spatial_transition",
     "apply_stealth_distraction",
+    "resolve_distraction_action",
+    "resolve_scene_target_per",
+    "resolve_scene_environment_context",
+    "classify_detection_escalation",
+    "compute_choice_stealth_odds",
     "resolve_stealth_action",
     "format_stealth_truth_directive",
+    "build_confrontation_choices",
+    "inject_covert_exploration_choices",
+    "reduce_stealth_turn_outcome",
 ]

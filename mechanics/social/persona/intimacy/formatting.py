@@ -40,16 +40,24 @@ def format_milestone_memory(event_type: str, npc_name: str, custom_summary: str 
         return f"Provided oral intimacy to {name}"
     elif ev == "oral_receive":
         return f"Received oral intimacy from {name}"
+    elif ev == "oral_mutual":
+        return f"Shared mutual oral intimacy with {name}"
     elif ev == "manual_give":
         return f"Manually stimulated {name}"
     elif ev == "manual_receive":
         return f"Received manual stimulation from {name}"
+    elif ev == "manual_mutual":
+        return f"Shared mutual manual stimulation with {name}"
     elif ev in ("anal_give", "anal_performed"):
         return f"Performed anal intimacy on {name}"
     elif ev in ("anal_receive", "anal_received"):
         return f"Received anal intimacy from {name}"
+    elif ev == "anal_mutual":
+        return f"Shared mutual anal intimacy with {name}"
     elif ev == "anal":
         return f"Shared passionate anal intimacy with {name}"
+    elif ev == "affection":
+        return f"Shared a tender, affectionate moment with {name}"
     elif ev == "first_kiss":
         return f"Shared a passionate first kiss with {name}"
     elif ev == "kiss":
@@ -591,9 +599,15 @@ def format_stature_and_physique_narrative_directive(
         )
     elif s_tier == "short":
         behavior_lines.append(
-            f"- STATURE & SPATIAL PRESENCE (Short / Petite): {partner_name} is distinctly short and compact (or of miniature fantasy stature). "
-            f"They must crane their neck or look directly upward to meet taller companions' eyes, stand on tiptoes or use nearby steps to reach, "
-            f"and can be effortlessly lifted, gathered close, or pulled onto laps during passionate physical moments."
+            f"- STATURE & SPATIAL PRESENCE (Short / Petite): {partner_name} stands at a noticeably short and compact height. "
+            f"They tilt their chin upward to maintain eye contact with taller companions, rise onto their tiptoes to whisper or kiss, "
+            f"and can be easily drawn in close or gathered into their partner's arms."
+        )
+    elif s_tier == "miniature":
+        behavior_lines.append(
+            f"- STATURE & SPATIAL PRESENCE (Miniature / Diminutive): {partner_name} stands at a distinct miniature fantasy stature (dwarf, halfling, or gnome scale). "
+            f"Taller companions look steeply downward to meet their gaze, while {partner_name} tilts their head high with spirited poise. "
+            f"They move with grounded low-center balance or agile footwork, navigate tight quarters with natural ease, and can be effortlessly lifted, gathered onto laps, or pulled into warm, enveloping embraces."
         )
     else:  # average
         behavior_lines.append(
@@ -649,9 +663,9 @@ def format_stature_and_physique_narrative_directive(
         )
 
     # 3. Bidirectional Height Contrast Dynamic (NPC vs Player)
-    rank_map = {"short": 1, "below_average": 2, "average": 3, "tall": 4, "towering": 5}
-    npc_rank = rank_map.get(s_tier, 3)
-    pl_rank = rank_map.get(pl_tier, 3)
+    rank_map = {"miniature": 1, "short": 2, "below_average": 3, "average": 4, "tall": 5, "towering": 6}
+    npc_rank = rank_map.get(s_tier, 4)
+    pl_rank = rank_map.get(pl_tier, 4)
     diff = npc_rank - pl_rank
 
     pl_stat_disp = pl_tier.replace("_", " ").title()

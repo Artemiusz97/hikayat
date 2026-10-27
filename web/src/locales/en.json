@@ -32,7 +32,10 @@
     "party": "Party",
     "quests": "Quests",
     "codex": "Codex",
-    "outcomes": "World Log"
+    "outcomes": "World Log",
+    "menu": "Menu",
+    "journal": "Journal & tools",
+    "contacts": "Contacts"
   },
   "stats": {
     "str": "Strength",
@@ -220,7 +223,27 @@
       "neutral": "Neutral",
       "unfavorable": "Unfavorable",
       "hostile_rival": "Hostile / Rival"
-    }
+    },
+    "agenda": "Agenda",
+    "no_agenda": "No Active Obligations or Rendezvous",
+    "cancel_commitment": "Cancel",
+    "cancelled_commitment": "Cancelled \"{{title}}\".",
+    "profile_locked": "Personal Dossier Locked",
+    "profile_locked_desc": "Reach Friend standing (100+ Affinity) or recruit them into your party to view their full profile.",
+    "special_agent": "Special Agent",
+    "civilian": "Civilian",
+    "deceased": "Deceased",
+    "operative_dossier": "Operative Combat Dossier",
+    "innate_abilities": "Innate Special Abilities",
+    "abilities_locked_note": "Reach Friend standing (100+ Affinity) or recruit into your party to reveal innate abilities.",
+    "civilian_classification": "Civilian Classification",
+    "civilian_party_note": "Mundane citizen with no mana or special abilities. Eligible as a Contact, but cannot be recruited into your field party.",
+    "civilian_deceased_note": "Perished permanently during an anomalous incursion due to lacking innate mana protection.",
+    "saved_contact": "Saved Contact",
+    "open_in_contacts": "Open in Contacts",
+    "search_known_characters": "Search Known Characters...",
+    "unlock_contact_hint": "Unlock as a Contact to view personal dossier",
+    "operational_info": "Field Status"
   },
   "scene": {
     "title": "Scene & World",
@@ -278,7 +301,7 @@
   },
   "settings": {
     "title": "Game Settings",
-    "modal_title": "Chronicle Settings & Telemetry",
+    "modal_title": "Settings",
     "tab_preferences": "Preferences",
     "tab_telemetry": "Telemetry & Sandbox",
     "language": "Language",
@@ -339,7 +362,9 @@
     "new_adventure_desc": "Select realm & class to start journey",
     "hero_stats_preview": "Hero Stats Preview",
     "configure_loadout": "Configure Loadout →",
-    "logout": "Log Out"
+    "logout": "Log Out",
+    "level_short": "Lv",
+    "welcome_title": "Begin your chronicle"
   },
   "outcomes": {
     "turn_outcome": "Turn #{{turn}} Outcome",
@@ -370,7 +395,8 @@
     "shop": "SHOP",
     "browse": "Browse",
     "fallback_warning": "Fallback scene generation was used for this turn.",
-    "truncated_warning": "Scene narration appears unusually brief or truncated."
+    "truncated_warning": "Scene narration appears unusually brief or truncated.",
+    "resolving": "Resolving..."
   },
   "party": {
     "roster": "Party Roster",
@@ -406,5 +432,70 @@
     "discord_link": "Discord Link",
     "discord_placeholder": "Discord ID or Username...",
     "connect_discord": "Connect Discord"
+  },
+  "embark": {
+    "starting_faction_legend": "Starting Faction Affiliation",
+    "starting_faction_hint": "Shapes your starting HQ, uniform loadout, daily mandates, merchant perks, and agent clearance.",
+    "default_badge": "Default",
+    "faction_public_name": "Public Containment Agency",
+    "faction_public_desc": "Daily Salary (50G–300G) • 50% HQ Shop Discount • Mandatory Daily Bounty • 0G/0 Loot on Agency Bounties • Starts at Bureau HQ",
+    "faction_private_name": "Private Containment Agency #1",
+    "faction_private_desc": "Keep 100% Bounty Gold & Loot • High-Tier Armory (+35% Price) • Public Contracts Allowed • Mandatory Daily Bounty • Starts at Corporate HQ",
+    "faction_private_2_name": "Private Containment Agency #2 (Rival Syndicate)",
+    "faction_private_2_desc": "Keep 100% Bounty Gold & Loot • Rival Syndicate Armory (+35% Price) • Public Contracts Allowed • Mandatory Daily Bounty • Starts at Rival Syndicate HQ",
+    "faction_monastic_name": "Monastic Shrine Order",
+    "faction_monastic_desc": "2–3 Free Sacred Items Daily • Keep Combat Loot (0G Order Fee) • Free Temple Healing • Mandatory Daily Bounty • Starts at Grand Temple",
+    "faction_freelancer_name": "Independent Freelancer",
+    "faction_freelancer_desc": "No Mandatory Daily Quotas • Full Payouts on Public Contracts & Freelance App • Starts at Suburb Home"
+  },
+  "theme": {
+    "title": "Theme",
+    "appearance": "Appearance",
+    "appearance_desc": "Let the interface follow your scenario, or pick a look you love.",
+    "auto": "Match scenario",
+    "auto_desc": "Adapts colours to the realm you are playing",
+    "auto_active": "Following the realm · {{name}}",
+    "names": {
+      "ember": "Ember",
+      "nebula": "Nebula",
+      "neon": "Neon",
+      "brass": "Brass",
+      "crimson": "Crimson",
+      "containment": "Containment",
+      "wasteland": "Wasteland",
+      "daylight": "Daylight",
+      "aero": "Frutiger Aero",
+      "midas": "Pimped Out"
+    }
+  },
+  "stealth_dock": {
+    "stealth": "Stealth",
+    "sneaking": "Sneaking",
+    "hide": "Hide",
+    "backstab": "Backstab",
+    "vanished": "VANISHED",
+    "on": "ON",
+    "throw": "Throw",
+    "distract": "Distract",
+    "tooltip_combat_hide": "Attempt to vanish into shadows (AGI check vs Enemy PER)",
+    "tooltip_combat_backstab": "Strike from the shadows with a guaranteed flanking backstab",
+    "tooltip_drop_stealth": "Drop out of Stealth Mode",
+    "tooltip_enter_stealth": "Enter Stealth Stance (Covert Actions)",
+    "tooltip_throw": "Throw weapon/projectile at active target (AGI)",
+    "tooltip_distract": "Throw a distraction to divert attention (AGI)"
+  },
+  "contacts": {
+    "title": "Contacts",
+    "count": "{{count}} Saved",
+    "search_placeholder": "Search Contacts...",
+    "no_contacts": "No personal contacts unlocked yet.",
+    "unlock_hint": "Ask for someone's number in conversation, add them on PeerPulse, or reach Friend standing (100+).",
+    "message_btn": "Message",
+    "blocked_badge": "Blocked"
+  },
+  "phone": {
+    "alerts_dispatch": "Alerts / Dispatch",
+    "read_only_broadcast": "Automated Official Broadcast Channel — Read-Only",
+    "blocked_notice": "This contact has blocked your number due to hostility. Reconcile with them in person first."
   }
 }

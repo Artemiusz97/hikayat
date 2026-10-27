@@ -32,7 +32,10 @@
     "party": "队伍",
     "quests": "任务",
     "codex": "图鉴",
-    "outcomes": "世界日志"
+    "outcomes": "世界日志",
+    "menu": "菜单",
+    "journal": "日志与工具",
+    "contacts": "联系人"
   },
   "stats": {
     "str": "力量",
@@ -220,7 +223,27 @@
       "neutral": "中立",
       "unfavorable": "反感",
       "hostile_rival": "敌视 / 宿敌"
-    }
+    },
+    "agenda": "日程",
+    "no_agenda": "暂无生效的约定或会面",
+    "cancel_commitment": "取消",
+    "cancelled_commitment": "已取消“{{title}}”。",
+    "profile_locked": "个人档案已锁定",
+    "profile_locked_desc": "达到朋友关系（100+ 好感）或将其招募入队即可查看完整档案。",
+    "special_agent": "特勤干员",
+    "civilian": "平民",
+    "deceased": "已阵亡",
+    "operative_dossier": "特勤作战档案",
+    "innate_abilities": "固有特殊能力",
+    "abilities_locked_note": "达到朋友关系（100+ 好感）或招募入队即可解锁固有特殊能力。",
+    "civilian_classification": "平民身份归类",
+    "civilian_party_note": "无魔力与特殊能力的普通市民。可结交为联系人，但无法招募进入外勤小队。",
+    "civilian_deceased_note": "因缺乏先天魔力护盾，在异常侵蚀事件中永久遇难。",
+    "saved_contact": "已保存联系人",
+    "open_in_contacts": "在联系人中打开",
+    "search_known_characters": "搜索已知角色...",
+    "unlock_contact_hint": "解锁为联系人后即可查看完整个人档案",
+    "operational_info": "行动状态"
   },
   "scene": {
     "title": "场景与世界",
@@ -278,7 +301,7 @@
   },
   "settings": {
     "title": "游戏设置",
-    "modal_title": "编年史设置与遥测",
+    "modal_title": "设置",
     "tab_preferences": "首选项",
     "tab_telemetry": "遥测与沙盒",
     "language": "语言",
@@ -339,7 +362,9 @@
     "new_adventure_desc": "选择世界与职业开启全新征途",
     "hero_stats_preview": "角色属性预览",
     "configure_loadout": "配置初始装备 →",
-    "logout": "退出登录"
+    "logout": "退出登录",
+    "level_short": "等级",
+    "welcome_title": "开启你的编年史"
   },
   "outcomes": {
     "turn_outcome": "第 {{turn}} 回合结算",
@@ -370,7 +395,8 @@
     "shop": "商店",
     "browse": "浏览",
     "fallback_warning": "本回合使用了兜底备用场景生成。",
-    "truncated_warning": "场景叙事似乎异常简短或被截断。"
+    "truncated_warning": "场景叙事似乎异常简短或被截断。",
+    "resolving": "正在结算..."
   },
   "party": {
     "roster": "队伍名册",
@@ -406,5 +432,70 @@
     "discord_link": "Discord 绑定",
     "discord_placeholder": "Discord ID 或用户名...",
     "connect_discord": "连接 Discord"
+  },
+  "embark": {
+    "starting_faction_legend": "初始阵营归属",
+    "starting_faction_hint": "决定你的初始总部、制服装备、每日强制委派、商人特权与特工权限。",
+    "default_badge": "默认",
+    "faction_public_name": "公共异常收容局",
+    "faction_public_desc": "每日薪资 (50G–300G) • 总部商店五折 • 每日强制悬赏 • 局内任务无赏金/战利品上交 • 始于总局大厅",
+    "faction_private_name": "私营异常收容事务所 #1",
+    "faction_private_desc": "保留100%赏金与战利品 • 高品质军械库 (+35%价格) • 可接公共外包合同 • 每日强制悬赏 • 始于企业总部大厦",
+    "faction_private_2_name": "私营异常收容事务所 #2（竞争财团）",
+    "faction_private_2_desc": "保留100%赏金与战利品 • 竞争财团军械库 (+35%价格) • 可接公共外包合同 • 每日强制悬赏 • 始于竞争财团总部",
+    "faction_monastic_name": "东方驱魔神社教团",
+    "faction_monastic_desc": "每日免费领取2–3件圣物 • 保留战斗掉落 • 神社免费疗愈 • 每日强制悬赏 • 始于大神社本殿",
+    "faction_freelancer_name": "独立自由特工",
+    "faction_freelancer_desc": "无每日强制配额 • 公共外包与自由悬赏App全额结算 • 始于郊区自宅"
+  },
+  "theme": {
+    "title": "主题",
+    "appearance": "外观",
+    "appearance_desc": "让界面跟随剧本变化，或选择你喜欢的风格。",
+    "auto": "跟随剧本",
+    "auto_desc": "根据你所在的世界自动调整配色",
+    "auto_active": "跟随世界 · {{name}}",
+    "names": {
+      "ember": "余烬",
+      "nebula": "星云",
+      "neon": "霓虹",
+      "brass": "黄铜",
+      "crimson": "猩红",
+      "containment": "收容",
+      "wasteland": "废土",
+      "daylight": "白昼",
+      "aero": "Frutiger Aero",
+      "midas": "土豪金"
+    }
+  },
+  "stealth_dock": {
+    "stealth": "潜行",
+    "sneaking": "潜行中",
+    "hide": "隐匿",
+    "backstab": "背刺",
+    "vanished": "已隐身",
+    "on": "开启",
+    "throw": "投掷",
+    "distract": "声东击西",
+    "tooltip_combat_hide": "尝试隐入暗影（敏捷对抗敌人感知）",
+    "tooltip_combat_backstab": "从暗影中发动侧翼背刺突袭",
+    "tooltip_drop_stealth": "退出潜行姿态",
+    "tooltip_enter_stealth": "进入潜行姿态（隐秘行动）",
+    "tooltip_throw": "向当前目标投掷武器/投射物（敏捷）",
+    "tooltip_distract": "投掷响动诱饵分散注意力（敏捷）"
+  },
+  "contacts": {
+    "title": "联系人",
+    "count": "已保存 {{count}}",
+    "search_placeholder": "搜索联系人...",
+    "no_contacts": "尚未解锁任何个人联系人。",
+    "unlock_hint": "在对话中索要号码、在 PeerPulse 添加好友，或好感度达到朋友 (100+) 即可解锁。",
+    "message_btn": "发消息",
+    "blocked_badge": "已拉黑"
+  },
+  "phone": {
+    "alerts_dispatch": "警报 / 调度通知",
+    "read_only_broadcast": "官方自动广播频道 — 仅限阅读",
+    "blocked_notice": "由于敌对关系，该联系人已拉黑你的号码。请先当面和解。"
   }
 }

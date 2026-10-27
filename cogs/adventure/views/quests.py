@@ -211,6 +211,12 @@ class ClueDeductionView(discord.ui.View):
         from mechanics.narrative.clues import evaluate_clue_deduction
         session = db.get_session(self.session_id)
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
+        pair_key = f"{min(int(self.clue_a_id), int(self.clue_b_id))}:{max(int(self.clue_a_id), int(self.clue_b_id))}"
+        cur_turn = len((session or {}).get("history") or [])
+        attempts_map = dict((session or {}).get("deduction_attempts_turn") or {})
+        if attempts_map.get(pair_key) == cur_turn:
+            await interaction.response.send_message("⏳ You already attempted to connect this pair of leads this turn. Advance the story or try another lead!", ephemeral=True)
+            return
         is_valid, title, detail_text = evaluate_clue_deduction(clue_a, clue_b, scen_key=scen_key)
 
         if not is_valid:
@@ -218,6 +224,8 @@ class ClueDeductionView(discord.ui.View):
             return
 
         # S.P.E.C.I.A.L. Stat Check
+        attempts_map[pair_key] = cur_turn
+        db.update_session(self.session_id, extra={"deduction_attempts_turn": attempts_map})
         char_row = db.get_character(interaction.user.id) or {}
         cats = {clue_a.get("category", "physical"), clue_b.get("category", "physical")}
         if "deduction" in cats or "digital" in cats or "document" in cats:
@@ -449,7 +457,14 @@ class QuestLogView(discord.ui.View):
         if not bounty:
             await interaction.response.send_message("Bounty not found.", ephemeral=True)
             return
-        db.update_quest_status(self.session_id, self.selected_quest_id, "Abandoned")
+        q_notes = str(bounty.get("quest_notes") or "")
+        if str(self.selected_quest_id).upper().startswith("MAND-") or "mandatory_daily:1" in q_notes:
+            await interaction.response.send_message(
+                "⚠️ **Mandatory Faction Dispatch!** Daily mandatory containment directives cannot be abandoned.",
+                ephemeral=True,
+            )
+            return
+        game_engine.forfeit_side_bounty(self.session_id, self.selected_quest_id, [interaction.user.id])
         view = QuestLogView(self.session_id, current_tab="Bounties", selected_quest_id=None)
         embed = _build_quest_log_embed(self.session_id, tab="Bounties", selected_quest_id=None)
         await interaction.response.edit_message(embed=embed, view=view)
@@ -505,9 +520,23 @@ class BountySelect(discord.ui.Select):
             await interaction.response.send_message("That bounty is no longer available.", ephemeral=True)
             return
 
+        session = db.get_session(self.session_id) or {"id": self.session_id}
+        import scenario_data
+        if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
+            from mechanics.narrative.bounty import evaluate_anomalous_bounty_eligibility
+            elig = evaluate_anomalous_bounty_eligibility(self.session_id, interaction.user.id, quest)
+            if not elig.get("allowed", True):
+                await interaction.response.send_message(
+                    f"🔒 **Contract Restricted:** {elig.get('reason') or 'Your current faction affiliation prohibits accepting this contract.'}",
+                    ephemeral=True,
+                )
+                return
+
+        if not game_engine.can_accept_side_bounty(self.session_id, quest):
+            await interaction.response.send_message("⚠️ **Bounty Limit Reached (3/3)!** Complete or abandon an active side bounty first.", ephemeral=True)
+            return
         db.update_quest_status(self.session_id, quest_id, "Active")
 
-        session = db.get_session(self.session_id)
         remaining_bounties = db.get_session_quests(self.session_id, status="Available")
         embed = _build_bounty_board_embed(session, remaining_bounties)
         view = BountyBoardView(session, remaining_bounties)

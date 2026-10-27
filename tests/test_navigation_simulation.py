@@ -7,6 +7,7 @@ Tests:
 3. Deadlock and oscillation loop detection in SpatialInvariantAuditor.
 4. Deterministic seed replay consistency.
 5. School campus facility movement and gate dynamics.
+6. Dijkstra obstacle barrier halting.
 """
 import pytest
 from tests.simulators.world import (
@@ -117,3 +118,47 @@ class TestNavigationSimulation:
         assert report.total_journeys == 4
         assert report.crashes == 0
         assert report.violations_by_category.get("format_empty_location", 0) == 0
+
+    def test_dijkstra_obstacle_barrier_halting(self):
+        """Verify Dijkstra routing halts when encountering locked obstacle edge without key."""
+        import db
+        from mechanics.world.locations.pathfinding import format_node_hierarchy
+        from db.quests import save_quest_waypoints, upsert_quest
+
+        fuzzer = WaypointFuzzer()
+        sess = fuzzer.create_test_session(scenario_key="fantasy", session_id=888123)
+        session_id = sess["id"]
+
+        try:
+            office_loc = format_node_hierarchy(session_id, "room_office")
+            vault_loc = format_node_hierarchy(session_id, "room_vault")
+
+            # Place player at office and active waypoint at vault
+            db.update_session(session_id, current_location=office_loc, current_node_id="room_office")
+            upsert_quest(
+                session_id=session_id,
+                quest_id="Q-VAULT",
+                quest_type="Side Quest",
+                title="Vault Infiltration",
+                objective="Breach vault",
+                status="Active",
+            )
+            wp = [{
+                "stage_index": 1,
+                "stage_label": "Enter Vault",
+                "target_location": vault_loc,
+                "completion_trigger": "arrival",
+                "status": "active",
+            }]
+            save_quest_waypoints(session_id, "Q-VAULT", wp, sub_obj_id=1)
+
+            nav = NavigatorAI(chaos_rate=0.0)
+            action = nav.choose_action(session_id, current_location=office_loc, scenario_key="fantasy")
+
+            assert action.action_type == "barrier_halt"
+            assert any("Vault Keycard" in b for b in action.blockers)
+        finally:
+            with db.get_conn() as conn:
+                for table in ("session_locations", "quest_waypoints", "quests", "world_nodes", "world_edges"):
+                    conn.execute(f"DELETE FROM {table} WHERE session_id=?", (session_id,))
+                conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))

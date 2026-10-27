@@ -197,42 +197,20 @@ def tag_narrative_pronouns(
     if not actors:
         return clean_text
 
-    # Precompile search patterns for actor names
-    # Count occurrences of single-name tokens across all actors to prevent shared surname collisions
-    first_tok_counts: Dict[str, int] = {}
-    last_tok_counts: Dict[str, int] = {}
-    for act in actors:
-        a_low = act["name"].lower()
-        parts = a_low.split()
-        if parts:
-            f = parts[0]
-            first_tok_counts[f] = first_tok_counts.get(f, 0) + 1
-            if len(parts) > 1:
-                l = parts[-1]
-                last_tok_counts[l] = last_tok_counts.get(l, 0) + 1
-
+    # Precompile search patterns for actor names using culturally disambiguated tokens
+    # (handles East Asian surname-first order, 2-3 char given names, compound surnames, patronymics, and honorifics)
+    import namegen
+    peer_actor_names = [act["name"] for act in actors if act.get("name")]
     actor_patterns = []
+    generic_role_exclusions = {"smith", "rep", "student", "dean", "chief"}
     for act in actors:
         a_name = act["name"]
         a_low = a_name.lower()
-        parts = a_low.split()
-        first_tok = parts[0] if parts else ""
-        last_tok = parts[-1] if len(parts) > 1 else ""
-
-        # Avoid overly generic single-name tokens like honorifics or tokens shared across multiple actors
+        raw_disambig = namegen.get_unique_person_tokens(a_name, peer_names=peer_actor_names, min_len=2)
         cand_tokens = [a_low]
-        if (
-            len(first_tok) >= 3
-            and first_tok not in ("the", "and", "mr", "ms", "dr", "miss", "coach", "nurse")
-            and first_tok_counts.get(first_tok, 0) == 1
-        ):
-            cand_tokens.append(first_tok)
-        if (
-            len(last_tok) >= 4
-            and last_tok not in ("smith", "rep", "student", "dean", "chief")
-            and last_tok_counts.get(last_tok, 0) == 1
-        ):
-            cand_tokens.append(last_tok)
+        for tok in sorted(raw_disambig, key=len, reverse=True):
+            if tok != a_low and tok not in generic_role_exclusions and tok not in cand_tokens:
+                cand_tokens.append(tok)
 
         regex_pat = re.compile(rf"\b(?:{'|'.join(re.escape(t) for t in cand_tokens)})(?:'s|’s)?\b", re.IGNORECASE)
         actor_patterns.append((act, regex_pat))

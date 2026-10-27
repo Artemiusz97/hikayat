@@ -29,8 +29,11 @@ _ALL_FEMALE_NAMES = set()
 _ALL_LAST_NAMES = set()
 _ALL_EAST_ASIAN_SURNAMES = set()
 _ALL_EAST_ASIAN_GIVEN_NAMES = set()
+_NON_EA_GIVEN_NAMES = set()
 _SURNAME_TO_CULTURE: dict[str, str] = {}
 _FIRST_NAME_TO_CULTURE: dict[str, str] = {}
+
+_EAST_ASIAN_CULTURE_KEYS = ("chinese", "japanese", "korean", "vietnamese")
 
 for s_val in _DATA.values():
     if isinstance(s_val, dict) and "person" in s_val:
@@ -39,19 +42,23 @@ for s_val in _DATA.values():
             if "cultures" in p_dict and isinstance(p_dict["cultures"], dict):
                 for cult_key, cult_data in p_dict["cultures"].items():
                     if isinstance(cult_data, dict):
-                        is_ea = cult_key in ("chinese", "japanese", "korean", "vietnamese")
+                        is_ea = cult_key in _EAST_ASIAN_CULTURE_KEYS
                         for n in cult_data.get("male", []):
                             n_low = str(n).lower().strip()
                             _ALL_MALE_NAMES.add(n_low)
                             _FIRST_NAME_TO_CULTURE.setdefault(n_low, cult_key)
                             if is_ea:
                                 _ALL_EAST_ASIAN_GIVEN_NAMES.add(n_low)
+                            else:
+                                _NON_EA_GIVEN_NAMES.add(n_low)
                         for n in cult_data.get("female", []):
                             n_low = str(n).lower().strip()
                             _ALL_FEMALE_NAMES.add(n_low)
                             _FIRST_NAME_TO_CULTURE.setdefault(n_low, cult_key)
                             if is_ea:
                                 _ALL_EAST_ASIAN_GIVEN_NAMES.add(n_low)
+                            else:
+                                _NON_EA_GIVEN_NAMES.add(n_low)
                         for n in cult_data.get("last", []):
                             n_low = str(n).lower().strip()
                             _ALL_LAST_NAMES.add(n_low)
@@ -73,13 +80,18 @@ if "high_school_drama" in _DATA and "person" in _DATA["high_school_drama"]:
             break
         _ALL_EAST_ASIAN_SURNAMES.add(n_low)
         _SURNAME_TO_CULTURE.setdefault(n_low, "japanese")
-    for g_key in ("male", "female"):
-        for n in hs_p.get(g_key, []):
-            n_low = str(n).lower().strip()
-            if n_low in ("james", "mary"):
-                break
-            _ALL_EAST_ASIAN_GIVEN_NAMES.add(n_low)
-            _FIRST_NAME_TO_CULTURE.setdefault(n_low, "japanese")
+    for n in hs_p.get("male", []):
+        n_low = str(n).lower().strip()
+        if n_low in ("alex", "liam", "james"):
+            break
+        _ALL_EAST_ASIAN_GIVEN_NAMES.add(n_low)
+        _FIRST_NAME_TO_CULTURE.setdefault(n_low, "japanese")
+    for n in hs_p.get("female", []):
+        n_low = str(n).lower().strip()
+        if n_low in ("maya", "chloe", "emma", "mary"):
+            break
+        _ALL_EAST_ASIAN_GIVEN_NAMES.add(n_low)
+        _FIRST_NAME_TO_CULTURE.setdefault(n_low, "japanese")
 
 _SURNAME_TO_CULTURE.setdefault("sterling", "english")
 _SURNAME_TO_CULTURE.setdefault("yamada", "japanese")
@@ -272,15 +284,24 @@ def is_known_female_name(name: str) -> bool:
 NAME_PARTICLES_AND_HONORIFICS = {
     "bin", "binti", "ibn", "bint", "van", "von", "der", "den", "het", "ten", "ter",
     "del", "della", "degli", "das", "dos", "de", "la", "le", "el", "al", "the",
-    "mr", "ms", "mrs", "miss", "dr", "prof", "professor", "madame", "madam", "sir",
-    "lord", "lady", "captain", "officer", "coach", "nurse", "principal", "headmaster",
-    "dean", "sensei", "elder", "druid", "scholar", "guardian", "warden",
+    "mr", "ms", "mrs", "miss", "mx", "dr", "prof", "professor", "madame", "madam", "sir",
+    "dame", "lord", "lady", "captain", "officer", "constable", "detective", "inspector",
+    "agent", "director", "commander", "ranger", "chef", "coach", "nurse", "principal",
+    "headmaster", "headmistress", "dean", "sensei", "senpai", "elder", "druid", "scholar",
+    "guardian", "warden", "father", "sister", "brother",
 }
 
 _HONORIFIC_PREFIXES = {
-    "mr", "ms", "mrs", "miss", "dr", "prof", "professor", "madame", "madam",
-    "sir", "lord", "lady", "coach", "nurse", "principal", "headmaster", "dean", "sensei",
+    "mr", "ms", "mrs", "miss", "mx", "dr", "prof", "professor", "madame", "madam",
+    "sir", "dame", "lord", "lady", "captain", "officer", "constable", "detective",
+    "inspector", "agent", "director", "commander", "ranger", "chef", "coach", "nurse",
+    "principal", "headmaster", "headmistress", "dean", "sensei", "senpai", "elder",
+    "guardian", "warden", "father", "sister", "brother",
 }
+
+_INDONESIAN_NON_PATRONYMIC_SURNAMES: frozenset[str] = frozenset({
+    "saputra", "wijaya", "hidayat", "pratama", "kusuma", "santoso", "setiawan", "nasution",
+})
 
 
 def normalize_base_surname(surname: str) -> str:
@@ -310,6 +331,13 @@ def normalize_base_surname(surname: str) -> str:
     if s_low.endswith(("ova", "eva", "ina")) and len(s) > 4:
         if s[:-1].lower() in _ALL_LAST_NAMES or s_low.endswith(("ova", "eva")):
             return s[:-1]
+    if s_low.endswith(("idou", "iadou")) and len(s) > 5:
+        return s[:-2] + "is"
+    if s_low.endswith("aki") and len(s) > 4 and (
+        (s + "s").lower() in _ALL_LAST_NAMES
+        or s_low.endswith(("daki", "laki", "naki", "maki", "raki", "taki", "kaki", "haki"))
+    ):
+        return s + "s"
     if s_low.endswith("ou") and len(s) > 4:
         if (s[:-2] + "os").lower() in _ALL_LAST_NAMES or s_low.endswith("poulou"):
             return s[:-2] + "os"
@@ -324,6 +352,9 @@ def infer_surname_culture(surname: str) -> str:
     """Infers the cultural pool for a surname (after normalizing inflections)."""
     if not surname:
         return ""
+    s_raw = str(surname).lower().strip()
+    if s_raw in _SURNAME_TO_CULTURE:
+        return _SURNAME_TO_CULTURE[s_raw]
     base = normalize_base_surname(surname).lower().strip()
     if base in _SURNAME_TO_CULTURE:
         return _SURNAME_TO_CULTURE[base]
@@ -340,7 +371,7 @@ def infer_surname_culture(surname: str) -> str:
         return "ukrainian"
     if s_low.endswith(("ov", "ova", "ev", "eva", "skaya")):
         return "russian"
-    if s_low.endswith(("opoulos", "opoulou", "akis", "idis", "iadis")):
+    if s_low.endswith(("opoulos", "opoulou", "akis", "idis", "idou", "iadis", "iadou")):
         return "greek"
     return ""
 
@@ -359,14 +390,21 @@ def infer_first_name_culture(first_name: str) -> str:
 
 def extract_first_and_last_name(full_name: str) -> tuple[str, str]:
     """Extracts (first_name, surname) respecting East Asian surname-first, patronymic, and compound surname conventions."""
-    parts = str(full_name or "").strip().split()
+    cleaned_full = re.sub(r"\s*\((?:née|nee)\s+[^)]*\)", "", str(full_name or ""), flags=re.IGNORECASE).strip()
+    parts = cleaned_full.split()
     if not parts:
         return "", ""
-    if len(parts) >= 2 and parts[0].lower().rstrip(".") in _HONORIFIC_PREFIXES:
+    while len(parts) >= 2 and parts[0].lower().rstrip(".") in _HONORIFIC_PREFIXES:
         parts = parts[1:]
     if len(parts) == 1:
         p0_low = parts[0].lower()
-        if p0_low in _ALL_LAST_NAMES or p0_low in _ALL_EAST_ASIAN_SURNAMES:
+        if (
+            (p0_low in _ALL_LAST_NAMES or p0_low in _ALL_EAST_ASIAN_SURNAMES)
+            and p0_low not in _ALL_MALE_NAMES
+            and p0_low not in _ALL_FEMALE_NAMES
+        ):
+            return "", parts[0]
+        if p0_low in _ALL_LAST_NAMES and p0_low not in (_ALL_MALE_NAMES | _ALL_FEMALE_NAMES):
             return "", parts[0]
         return parts[0], ""
 
@@ -374,17 +412,167 @@ def extract_first_and_last_name(full_name: str) -> tuple[str, str]:
     if len(parts) >= 3 and parts[1].lower() in ("bin", "binti"):
         return parts[0], " ".join(parts[2:])
 
-    # Handle East Asian surname first: "Zhang Wei", "Tanaka Ren", "Kim Min-jun"
+    # Handle East Asian surname first: "Zhang Wei", "Tanaka Ren", "Kim Min-jun", "Zhang Chen"
     if len(parts) == 2 and parts[0].lower() in _ALL_EAST_ASIAN_SURNAMES:
+        p0_low = parts[0].lower()
         p1_low = parts[1].lower()
-        if p1_low in _ALL_EAST_ASIAN_GIVEN_NAMES or (
-            (p1_low in _ALL_MALE_NAMES or p1_low in _ALL_FEMALE_NAMES)
-            and p1_low not in _ALL_LAST_NAMES
-        ):
-            return parts[1], parts[0]
+        p1_base = normalize_base_surname(parts[1]).lower()
+        is_p1_non_ea_surname = (
+            (p1_low in _ALL_LAST_NAMES or p1_base in _ALL_LAST_NAMES)
+            and p1_low not in _ALL_EAST_ASIAN_SURNAMES
+            and p1_base not in _ALL_EAST_ASIAN_SURNAMES
+        )
+        if not is_p1_non_ea_surname:
+            if p1_low in _ALL_EAST_ASIAN_GIVEN_NAMES and (
+                p1_low not in _ALL_LAST_NAMES or p0_low not in _NON_EA_GIVEN_NAMES
+            ):
+                return parts[1], parts[0]
 
     # Standard Western / Compound surname: first="Elena", last="Vance Anderson" or "Smith"
     return parts[0], " ".join(parts[1:])
+
+
+def infer_name_culture(full_name: str) -> str:
+    """Infers the primary cultural pool from a full character name (handling East Asian order,
+    honorifics, compound surnames, patronymics, and feminine surname inflections)."""
+    if not full_name:
+        return ""
+    first, last = extract_first_and_last_name(full_name)
+    if last:
+        s_cult = infer_surname_culture(last)
+        if s_cult:
+            return s_cult
+    if first:
+        f_cult = infer_first_name_culture(first)
+        if f_cult:
+            return f_cult
+    return ""
+
+
+def get_given_name(full_name: str) -> str:
+    """Returns the character's personal given name, stripping honorifics, patronymics, and (née ...),
+    and respecting East Asian surname-first ordering."""
+    if not full_name or not isinstance(full_name, str):
+        return ""
+    first, _ = extract_first_and_last_name(full_name)
+    if first:
+        return first
+    cleaned = re.sub(r"\s*\((?:née|nee)\s+[^)]*\)", "", full_name, flags=re.IGNORECASE).strip()
+    parts = cleaned.split()
+    while len(parts) >= 2 and parts[0].lower().rstrip(".") in _HONORIFIC_PREFIXES:
+        parts = parts[1:]
+    return parts[0] if parts else ""
+
+
+def format_formal_title(prefix: str, full_name: str) -> str:
+    """Formats a culturally respectful formal title (e.g. 'Ms. Watanabe', 'Chef Watanabe',
+    'Ms. Kowalska', 'Ms. Siti' for Malay patronymics, 'Ms. Birgitta' for Icelandic patronymics)."""
+    p_clean = str(prefix or "").strip()
+    n_clean = str(full_name or "").strip()
+    if not p_clean:
+        return n_clean
+    if not n_clean:
+        return p_clean
+    first, last = extract_first_and_last_name(n_clean)
+    padded_low = f" {n_clean.lower()} "
+    is_malay_patronymic = (" bin " in padded_low) or (" binti " in padded_low)
+    is_icelandic_patronymic = bool(last and infer_surname_culture(last) == "icelandic")
+    if is_malay_patronymic or is_icelandic_patronymic:
+        return f"{p_clean} {first or last}".strip()
+    if last:
+        return f"{p_clean} {last}".strip()
+    return f"{p_clean} {first or n_clean}".strip()
+
+
+def get_display_short_name(full_name: str, max_len: int = 15) -> str:
+    """Returns a UI-safe compact display name that NEVER truncates to a bare honorific like 'Ms.' or 'Chef'."""
+    n_clean = re.sub(r"\s*\((?:née|nee)\s+[^)]*\)", "", str(full_name or ""), flags=re.IGNORECASE).strip()
+    if not n_clean:
+        return "NPC"
+    if len(n_clean) <= max_len:
+        return n_clean
+    parts = n_clean.split()
+    if len(parts) >= 2 and parts[0].lower().rstrip(".") in _HONORIFIC_PREFIXES:
+        formal = format_formal_title(parts[0], n_clean)
+        if len(formal) <= max_len:
+            return formal
+    given = get_given_name(n_clean)
+    if given and len(given) <= max_len:
+        return given
+    return (given or n_clean)[:max_len].strip()
+
+
+_COMMON_ENGLISH_SHORT_STOPWORDS: frozenset[str] = frozenset({
+    "in", "on", "at", "to", "an", "as", "by", "do", "go", "he", "hi", "if",
+    "is", "it", "me", "my", "no", "of", "oh", "ok", "or", "so", "up", "us", "we",
+    "and", "are", "but", "can", "did", "for", "get", "got", "had", "has", "her",
+    "him", "his", "how", "its", "let", "man", "may", "new", "not", "now", "off",
+    "old", "one", "our", "out", "own", "put", "ran", "run", "saw", "say", "see",
+    "she", "sit", "son", "the", "too", "two", "use", "was", "way", "who", "why",
+    "win", "won", "yes", "yet", "you",
+})
+
+
+def get_unique_person_tokens(full_name: str, peer_names: Any = None, min_len: int = 3) -> set[str]:
+    """Returns lowercase name/phrase identifiers for `full_name` that safely distinguish them:
+    - Never emits standalone honorifics ('ms.', 'dr.', 'coach', 'chef') or particles ('bin', 'van', 'de').
+    - Includes given name (including 2-3 letter East Asian given names like 'ren', 'mei', 'wei', 'yui' unless common English stopword),
+      surname, base full name (without honorific/née), and titled formal address ('ms. watanabe').
+    - Automatically drops any shared token (e.g. shared family surname 'tanaka') that also belongs to another person in `peer_names`.
+    """
+    if not full_name or not isinstance(full_name, str):
+        return set()
+
+    def _raw_tokens_for(nm: str) -> set[str]:
+        cleaned = re.sub(r"\s*\((?:née|nee)\s+[^)]*\)", "", str(nm or ""), flags=re.IGNORECASE).strip()
+        if not cleaned:
+            return set()
+        out: set[str] = {cleaned.lower()}
+        parts = cleaned.split()
+        lead_prefix = ""
+        if len(parts) >= 2 and parts[0].lower().rstrip(".") in _HONORIFIC_PREFIXES:
+            lead_prefix = parts[0]
+            without_hon = " ".join(parts[1:]).strip()
+            if without_hon:
+                out.add(without_hon.lower())
+        first, last = extract_first_and_last_name(cleaned)
+        if first:
+            f_low = first.strip(".,'\"()[]{}").lower()
+            eff_min = 2 if f_low in _ALL_EAST_ASIAN_GIVEN_NAMES else min_len
+            if len(f_low) >= eff_min and f_low not in NAME_PARTICLES_AND_HONORIFICS and f_low not in _COMMON_ENGLISH_SHORT_STOPWORDS:
+                out.add(f_low)
+        if last:
+            l_low = last.strip(".,'\"()[]{}").lower()
+            if len(l_low) >= min_len and l_low not in NAME_PARTICLES_AND_HONORIFICS and l_low not in _COMMON_ENGLISH_SHORT_STOPWORDS:
+                out.add(l_low)
+            for lp in l_low.split():
+                lp_c = lp.strip(".,'\"()[]{}")
+                if len(lp_c) >= max(min_len, 3) and lp_c not in NAME_PARTICLES_AND_HONORIFICS and lp_c not in _COMMON_ENGLISH_SHORT_STOPWORDS:
+                    out.add(lp_c)
+        if lead_prefix:
+            ft = format_formal_title(lead_prefix, cleaned).lower()
+            if ft:
+                out.add(ft)
+                out.add(ft.replace(".", ""))
+        return out
+
+    my_clean = re.sub(r"\s*\((?:née|nee)\s+[^)]*\)", "", full_name, flags=re.IGNORECASE).strip().lower()
+    my_tokens = _raw_tokens_for(full_name)
+    if not peer_names:
+        return my_tokens
+
+    peer_shared: set[str] = set()
+    for p in peer_names:
+        p_str = p.get("name", "") if isinstance(p, dict) else str(p or "")
+        p_clean = re.sub(r"\s*\((?:née|nee)\s+[^)]*\)", "", p_str, flags=re.IGNORECASE).strip().lower()
+        if not p_clean or p_clean == my_clean:
+            continue
+        peer_shared |= _raw_tokens_for(p_str)
+
+    # Always preserve the exact full name; drop ambiguous partial tokens shared with peers
+    disambiguated = {t for t in my_tokens if t == my_clean or t not in peer_shared}
+    disambiguated.add(full_name.strip().lower())
+    return disambiguated
 
 
 def get_substantive_name_tokens(full_name: str) -> list[str]:
@@ -420,6 +608,9 @@ def get_all_gendered_names() -> tuple[set, set]:
 TAG_TO_NAMEGEN_KEY = {
     "modern": "default",
     "general_modern": "default",
+    "anomalous_incursions": "default",
+    "urban_fantasy": "default",
+    "urban_anomalies": "default",
     "space": "sci_fi",
     "sci_fi": "sci_fi",
     "dark_fantasy": "dark_fantasy",
@@ -520,11 +711,16 @@ def format_cultural_full_name(
     if not first_name:
         return surname
 
-    g = str(gender or "").lower().strip()
-    is_female = any(w in g for w in ("female", "woman", "girl", "feminine", "she"))
-
     s_clean = normalize_base_surname(surname.strip())
     f_clean = first_name.strip()
+
+    g = str(gender or "").lower().strip()
+    is_female = any(w in g for w in ("female", "woman", "girl", "feminine", "she"))
+    is_male = any(w in g for w in ("male", "man", "boy", "masculine", "he")) and not is_female
+    if not is_female and not is_male:
+        f_low = f_clean.lower()
+        if f_low in _ALL_FEMALE_NAMES and f_low not in _ALL_MALE_NAMES:
+            is_female = True
 
     s_cult = str(surname_culture or "").lower().strip() or infer_surname_culture(s_clean)
     f_cult = str(first_culture or "").lower().strip() or infer_first_name_culture(f_clean)
@@ -547,7 +743,11 @@ def format_cultural_full_name(
             if s_clean.endswith("skyi"):
                 s_clean = s_clean[:-4] + "ska"
         elif s_cult == "greek":
-            if s_clean.endswith("os"):
+            if s_clean.endswith(("idis", "iadis")):
+                s_clean = s_clean[:-2] + "ou"
+            elif s_clean.endswith("akis"):
+                s_clean = s_clean[:-1]
+            elif s_clean.endswith("os"):
                 s_clean = s_clean[:-2] + "ou"
         elif s_cult == "icelandic":
             if s_clean.endswith("sson"):
@@ -559,6 +759,8 @@ def format_cultural_full_name(
     if s_cult == "malay":
         if use_patronymic is not None:
             include_patronymic = bool(use_patronymic)
+        elif s_clean.lower() in _INDONESIAN_NON_PATRONYMIC_SURNAMES:
+            include_patronymic = False
         elif deterministic_seed is not None:
             import hashlib
             h_val = int(hashlib.md5(str(deterministic_seed).encode("utf-8")).hexdigest(), 16)
@@ -585,6 +787,50 @@ def format_cultural_full_name(
     return f"{f_clean} {s_clean}"
 
 
+_HOMONYM_MODIFIER_TOKENS: frozenset[str] = frozenset({
+    "long", "short", "tall", "high", "low", "deep", "wide", "broad", "narrow",
+    "great", "grand", "big", "little", "small", "new", "old", "young",
+    "north", "south", "east", "west", "upper", "lower", "inner", "outer",
+    "front", "back", "central", "main", "mid", "middle", "far", "near",
+    "dark", "bright", "light", "clear", "dim", "pale", "black", "white",
+    "red", "green", "blue", "gray", "grey", "golden", "gold", "silver", "iron",
+    "stone", "rock", "wood", "wooden", "glass", "brass", "copper", "bronze",
+    "cold", "warm", "hot", "cool", "dry", "wet", "still", "silent", "quiet",
+    "hidden", "lost", "open", "closed", "free", "safe", "cross", "royal",
+})
+
+_HOMONYM_PLACE_OBJECT_TOKENS: frozenset[str] = frozenset({
+    "hall", "halls", "room", "rooms", "chamber", "chambers", "wing", "wings",
+    "gate", "gates", "door", "doors", "wall", "walls", "tower", "towers",
+    "bridge", "bridges", "court", "courts", "yard", "yards", "square",
+    "street", "lane", "road", "way", "path", "alley", "walk", "cross", "crossing",
+    "park", "garden", "gardens", "grove", "wood", "woods", "forest",
+    "hill", "hills", "ridge", "peak", "cliff", "stone", "rock",
+    "brook", "creek", "river", "lake", "pond", "well", "spring", "springs",
+    "field", "fields", "meadow", "moor", "marsh", "dale", "glen", "vale",
+    "bay", "cove", "port", "harbor", "haven", "point", "arch", "vault",
+    "keep", "spire", "ward", "house", "mill", "forge", "bell", "post",
+    "bank", "shore", "strand", "corridor", "lobby", "atrium", "plaza",
+})
+
+
+def is_spatial_or_object_homonym_name(name: str) -> bool:
+    """Returns True when a two-token person name accidentally forms an English spatial/architectural phrase (e.g. 'Long Hall', 'West Wing', 'North Gate')."""
+    if not name or not isinstance(name, str):
+        return False
+    tokens = [t.strip(".,'\"-").lower() for t in name.strip().split() if t.strip(".,'\"-")]
+    if len(tokens) != 2:
+        return False
+    first_tok, second_tok = tokens[0], tokens[1]
+    if first_tok == second_tok:
+        return True
+    if first_tok in _HOMONYM_MODIFIER_TOKENS and second_tok in _HOMONYM_PLACE_OBJECT_TOKENS:
+        return True
+    if first_tok in _HOMONYM_PLACE_OBJECT_TOKENS and second_tok in _HOMONYM_PLACE_OBJECT_TOKENS:
+        return True
+    return False
+
+
 def generate_person_name(
     scenario: str = "fantasy",
     gender: str = "",
@@ -601,7 +847,7 @@ def generate_person_name(
         def_p = _get_scenario_data("default", "person")
         if isinstance(def_p, dict) and "cultures" in def_p:
             scen_low = str(scenario or "").lower()
-            if any(k in scen_low for k in ("school", "academy", "modern", "slice_of_life", "default")):
+            if any(k in scen_low for k in ("school", "academy", "modern", "slice_of_life", "default", "anomalous", "urban_fantasy", "urban_anomalies")):
                 cultures = def_p.get("cultures")
                 if not isinstance(d, dict):
                     d = {}
@@ -671,19 +917,26 @@ def generate_person_name(
 
             if is_female:
                 pool = female_pool or ["Sarah"]
+                resolved_gender = "female"
             elif is_male:
                 pool = male_pool or ["Alex"]
+                resolved_gender = "male"
             else:
                 if male_pool and female_pool:
                     pool = rng.choice([male_pool, female_pool])
+                    resolved_gender = "female" if pool is female_pool else "male"
+                elif female_pool:
+                    pool = female_pool
+                    resolved_gender = "female"
                 else:
-                    pool = male_pool or female_pool or ["Alex"]
+                    pool = male_pool or ["Alex"]
+                    resolved_gender = "male"
 
             first = rng.choice(pool)
 
             # 4. Determine surname from base_pool
             scen_low = str(scenario or "").lower()
-            if any(k in scen_low for k in ("school", "academy", "modern", "cyberpunk", "noir")):
+            if any(k in scen_low for k in ("school", "academy", "modern", "cyberpunk", "noir", "anomalous", "urban_fantasy", "urban_anomalies")):
                 surname_chance = 1.0
             else:
                 surname_chance = float(d.get("surname_chance", 1.0))
@@ -691,15 +944,30 @@ def generate_person_name(
             last_list = base_pool.get("last") or []
             if last_list and rng.random() < surname_chance:
                 raw_surname = rng.choice(last_list)
-                return format_cultural_full_name(
+                candidate = format_cultural_full_name(
                     first_name=first,
                     surname=raw_surname,
                     first_culture=first_culture,
                     surname_culture=base_culture,
-                    gender=gender,
+                    gender=resolved_gender,
                     rng=rng,
                     deterministic_seed=str(seed) if seed is not None else None,
                 )
+                for _ in range(8):
+                    if not is_spatial_or_object_homonym_name(candidate):
+                        break
+                    first = rng.choice(pool)
+                    raw_surname = rng.choice(last_list)
+                    candidate = format_cultural_full_name(
+                        first_name=first,
+                        surname=raw_surname,
+                        first_culture=first_culture,
+                        surname_culture=base_culture,
+                        gender=resolved_gender,
+                        rng=rng,
+                        deterministic_seed=str(seed) if seed is not None else None,
+                    )
+                return candidate
             return first
 
     # Standard flat pool fallback (fantasy, dark_fantasy, sci-fi, etc.)
@@ -722,13 +990,19 @@ def generate_person_name(
 
     first = rng.choice(pool)
     scen_low = str(scenario or "").lower()
-    if any(k in scen_low for k in ("school", "academy", "modern", "cyberpunk", "noir")):
+    if any(k in scen_low for k in ("school", "academy", "modern", "cyberpunk", "noir", "anomalous", "urban_fantasy", "urban_anomalies")):
         surname_chance = 1.0
     else:
         surname_chance = d.get("surname_chance", 0.5)
     last_list = d.get("last") or []
     if last_list and rng.random() < surname_chance:
-        return f"{first} {rng.choice(last_list)}"
+        candidate = f"{first} {rng.choice(last_list)}"
+        for _ in range(8):
+            if not is_spatial_or_object_homonym_name(candidate):
+                break
+            first = rng.choice(pool)
+            candidate = f"{first} {rng.choice(last_list)}"
+        return candidate
     return first
 
 
@@ -739,6 +1013,7 @@ def generate_person_name_with_surname(
     cross_culture_chance: float | None = None,
     culture_weights: dict[str, float] | None = None,
     seed: int | str | None = None,
+    use_patronymic: bool | None = None,
 ) -> str:
     """Generates a first name matching a predetermined family surname with cultural coordination.
     - Surnames determine baseline family culture (e.g. Yamada -> Japanese, Kowalski -> Polish).
@@ -803,25 +1078,61 @@ def generate_person_name_with_surname(
 
     if is_female:
         pool = female_pool or ["Sarah"]
+        resolved_gender = "female"
     elif is_male:
         pool = male_pool or ["Alex"]
+        resolved_gender = "male"
     else:
         if male_pool and female_pool:
             pool = rng.choice([male_pool, female_pool])
+            resolved_gender = "female" if pool is female_pool else "male"
+        elif female_pool:
+            pool = female_pool
+            resolved_gender = "female"
         else:
-            pool = male_pool or female_pool or ["Alex"]
+            pool = male_pool or ["Alex"]
+            resolved_gender = "male"
 
     first = rng.choice(pool)
-
-    return format_cultural_full_name(
+    candidate = format_cultural_full_name(
         first_name=first,
         surname=surname,
         first_culture=first_culture,
         surname_culture=base_culture,
-        gender=gender,
+        gender=resolved_gender,
         rng=rng,
         deterministic_seed=str(seed) if seed is not None else None,
+        use_patronymic=use_patronymic,
     )
+    if is_spatial_or_object_homonym_name(candidate):
+        safe_pool = [
+            p for p in pool
+            if not is_spatial_or_object_homonym_name(
+                format_cultural_full_name(
+                    first_name=p,
+                    surname=surname,
+                    first_culture=first_culture,
+                    surname_culture=base_culture,
+                    gender=resolved_gender,
+                    rng=rng,
+                    deterministic_seed=str(seed) if seed is not None else None,
+                    use_patronymic=use_patronymic,
+                )
+            )
+        ]
+        if safe_pool:
+            first = rng.choice(safe_pool)
+            candidate = format_cultural_full_name(
+                first_name=first,
+                surname=surname,
+                first_culture=first_culture,
+                surname_culture=base_culture,
+                gender=resolved_gender,
+                rng=rng,
+                deterministic_seed=str(seed) if seed is not None else None,
+                use_patronymic=use_patronymic,
+            )
+    return candidate
 
 
 def generate_npc_name(scenario: str = "fantasy", role: str = "", gender: str = "", **kwargs) -> str:
@@ -1121,6 +1432,7 @@ def generate_player_residence_name(char_name: str = "", scenario: str = "high_sc
             first_name, surname = extract_first_and_last_name(clean)
             if not surname:
                 first_name, surname = parts[0], parts[-1]
+            surname = normalize_base_surname(surname) or surname
             if "cyberpunk" in scen:
                 return f"{surname} Residence" if hash_val and hash_val % 2 == 0 else f"{first_name}'s Apartment"
             if "sci_fi" in scen or "space" in scen:
@@ -1166,6 +1478,7 @@ def generate_npc_residence_name(npc_name: str, scenario: str = "high_school_dram
         first_name, surname = extract_first_and_last_name(clean)
         if not surname:
             first_name, surname = parts[0], parts[-1]
+        surname = normalize_base_surname(surname) or surname
         if "fantasy" in scen or "isekai" in scen:
             return f"{surname} Manor" if hash_val and hash_val % 2 == 0 else f"{first_name}'s Cottage"
         if "cyberpunk" in scen:
@@ -1671,9 +1984,9 @@ def generate_seaside_name(scenario: str = "high_school_drama", hash_val: int = N
 
 
 def generate_recreation_park_name(scenario: str = "high_school_drama", hash_val: int = None) -> str:
-    """Generates a recreational forest / mountain park name."""
-    prefixes = ["Mount Tsukimi", "Greenwood Forest", "Pinecrest", "Mount Asahi", "Misty Lake", "Cedar Ridge", "Komorebi Mountain"]
-    suffixes = ["Recreational Park", "Nature Reserve & Trails", "Forest & Campsite Park", "Mountain Lookout Park"]
+    """Generates a recreational woodland / lake park name without mountain references."""
+    prefixes = ["Sakura Blossom", "Greenwood", "Pinecrest", "Asahi Grove", "Misty Lake", "Cedar Woodland", "Komorebi"]
+    suffixes = ["Recreational Park", "Park & Nature Trails", "Woodland & Campsite Park", "Hilltop Recreational Park"]
     if hash_val is not None:
         p = prefixes[(hash_val * 31 + 17) % len(prefixes)]
         s = suffixes[(hash_val * 19 + 5) % len(suffixes)]
@@ -1715,14 +2028,14 @@ def generate_ripperdoc_name(scenario: str = "cyberpunk", hash_val: int = None) -
 
 
 def generate_commercial_district_name(scenario: str = "high_school_drama", hash_val: int = None) -> str:
-    """Generates an evocative commercial district / shopping promenade name."""
+    """Generates an evocative downtown / city center shopping promenade name."""
     prefixes = [
         "Sakuragaoka", "Ouka", "Minami", "Chuo", "Hanamizuki", "Tsukimi",
         "Komorebi", "Aoba", "Asahi", "Shin-Komiya", "Suzuran", "Midori"
     ]
     suffixes = [
-        "Commercial Strip", "Commercial Promenade", "Commercial District",
-        "Commercial Shopping Arcade", "Avenue Commercial Core", "Commercial Promenade & Plaza"
+        "Downtown", "Downtown Promenade", "Downtown Core",
+        "Downtown Shopping District", "Avenue Downtown", "Downtown & City Square"
     ]
     if hash_val is not None:
         p = prefixes[(hash_val * 17 + 13) % len(prefixes)]
@@ -1746,6 +2059,406 @@ def generate_residential_neighborhood_name(scenario: str = "high_school_drama", 
         s = suffixes[(hash_val * 19 + 3) % len(suffixes)]
         return f"{p} {s}"
     return f"{random.choice(prefixes)} {random.choice(suffixes)}"
+
+
+
+def format_org_acronym(name: str) -> str:
+    """Extracts uppercase initials from an organization name into a punctuated acronym (e.g. 'C.W.C.A.')."""
+    words = [w for w in str(name or "").replace("-", " ").split() if w and w.lower() not in ("of", "the", "and", "for", "&")]
+    initials = [w[0].upper() for w in words if w[0].isalnum()]
+    return ".".join(initials) + ("." if initials else "")
+
+
+def generate_agency_name(scenario: str = "urban_anomalies", hash_val: int = None) -> str:
+    """Generates a procedural paranormal investigation / containment organization name (inspired by SCP, Control, Chainsaw Man)."""
+    scopes = [
+        "Metropolitan", "Municipal", "Civic", "Central", "Federal",
+        "National", "Regional", "State", "City", "Sovereign"
+    ]
+    domains = [
+        "Ward Control", "Breach Defense", "Anomaly Mitigation", "Occult Affairs",
+        "Crisis Containment", "Aberration Response", "Threat Suppression",
+        "Reality Stabilization", "Special Containment", "Cryptid Oversight"
+    ]
+    bodies = [
+        "Bureau", "Agency", "Directorate", "Commission",
+        "Division", "Authority", "Initiative"
+    ]
+    if hash_val is not None:
+        sc = scopes[(hash_val * 31 + 7) % len(scopes)]
+        dm = domains[(hash_val * 19 + 13) % len(domains)]
+        bd = bodies[(hash_val * 23 + 17) % len(bodies)]
+    else:
+        import random
+        sc = random.choice(scopes)
+        dm = random.choice(domains)
+        bd = random.choice(bodies)
+
+    return f"{sc} {dm} {bd}"
+
+
+def generate_agency_hq_name(scenario: str = "urban_anomalies", hash_val: int = None) -> str:
+    """Generates the headquarters facility name that reflects the procedural agency name in crisp acronym format."""
+    agency = generate_agency_name(scenario, hash_val)
+    acronym = format_org_acronym(agency)
+    return f"{acronym} HQ" if acronym else f"{agency} HQ"
+
+
+def generate_exorcist_order_name(scenario: str = "anomalous_incursions", hash_val: int = None) -> str:
+    """Generates a procedural Eastern Exorcist Clan / Monastic Shrine Order name."""
+    prefixes = [
+        "Vermilion Lotus", "Mount Ryujin", "Eightfold Pagoda", "Tenryu-ji",
+        "Crimson Talisman", "Byakko Shrine", "Celestial Bell", "Kiyomizu",
+        "Amaterasu Seal", "Silent Sutra", "Jade Dragon", "Twilight Torii"
+    ]
+    suffixes = [
+        "Exorcist Order", "Onmyoji Clan", "Monastic Sealing Order",
+        "Shrine Wardens", "Spirit-Pacification Conclave", "Ascetic Brotherhood"
+    ]
+    if hash_val is not None:
+        p = prefixes[(hash_val * 29 + 11) % len(prefixes)]
+        s = suffixes[(hash_val * 19 + 7) % len(suffixes)]
+        return f"The {p} {s}"
+    return f"The {random.choice(prefixes)} {random.choice(suffixes)}"
+
+
+def generate_private_agency_name(scenario: str = "anomalous_incursions", hash_val: int = None, agency_index: int = 1) -> str:
+    """Generates a procedural Private Anomaly Hunting Agency / PMC name."""
+    prefixes = [
+        "Blackwatch", "Aegis", "Cerberus", "Apex", "Hyperion", "Vespera",
+        "Kestrel", "Ironveil", "Ouroboros", "Obsidian", "Monolith", "Paladin"
+    ]
+    domains = [
+        "Tactical", "Security", "Defense", "Contractors", "Recovery",
+        "Solutions", "Mitigation", "Containment"
+    ]
+    suffixes = [
+        "PMC", "Group", "Corp", "Syndicate", "Consultancy"
+    ]
+    idx_salt = int(agency_index or 1) * 43
+    if hash_val is not None:
+        h = int(hash_val) + idx_salt
+        p = prefixes[(h * 31 + 5) % len(prefixes)]
+        d = domains[(h * 17 + 11) % len(domains)]
+        s = suffixes[(h * 23 + 3) % len(suffixes)]
+        return f"{p} {d} {s}"
+    p = random.choice(prefixes)
+    d = random.choice(domains)
+    s = random.choice(suffixes)
+    return f"{p} {d} {s}"
+
+
+def generate_occult_cult_name(scenario: str = "anomalous_incursions", hash_val: int = None) -> str:
+    """Generates a procedural Occult Anomaly Cult faction name."""
+    adjectives = [
+        "Hollow", "Pale", "Weeping", "Inverted", "Sunken", "Crimson",
+        "Unblinking", "Seventh", "Silent", "Gilded", "Static", "Spiral"
+    ]
+    nouns = [
+        "Aperture", "Broadcast", "Eclipse", "Choir", "Threshold", "Meridian",
+        "Witnesses", "Cathedral", "Covenant", "Spiral", "Litany", "Chrysalis"
+    ]
+    titles = [
+        "Children of the", "Order of the", "Congregation of the",
+        "Disciples of the", "Church of the", "Heralds of the"
+    ]
+    if hash_val is not None:
+        h = int(hash_val)
+        t = titles[(h * 19 + 7) % len(titles)]
+        a = adjectives[(h * 29 + 13) % len(adjectives)]
+        n = nouns[(h * 37 + 5) % len(nouns)]
+        if a == n:
+            n = nouns[(h * 37 + 6) % len(nouns)]
+        return f"{t} {a} {n}"
+    t = random.choice(titles)
+    a = random.choice(adjectives)
+    n = random.choice([x for x in nouns if x != a] or nouns)
+    return f"{t} {a} {n}"
+
+
+def generate_clandestine_syndicate_name(scenario: str = "anomalous_incursions", hash_val: int = None) -> str:
+    """Generates a procedural Clandestine / 'Sus' Syndicate faction name."""
+    prefixes = [
+        "Sub-Level Zero", "Black-Ribbon", "Cipher-Nine", "Mirror-Shard",
+        "Null-Protocol", "Nightshade", "Dead-Drop", "Glass-Key",
+        "Phantom-Ledger", "Onyx-Brokerage", "Redacted-Hand", "Grey-Market"
+    ]
+    bodies = [
+        "Directorate", "Consortium", "Exchange", "Syndicate",
+        "Cabal", "Network", "Cartel", "Collective"
+    ]
+    if hash_val is not None:
+        h = int(hash_val)
+        p = prefixes[(h * 41 + 9) % len(prefixes)]
+        b = bodies[(h * 23 + 15) % len(bodies)]
+        return f"The {p} {b}"
+    return f"The {random.choice(prefixes)} {random.choice(bodies)}"
+
+
+def generate_anomalous_entity_name(archetype_or_tag: str = "", hash_val: int = None, category_tag: str = "") -> str:
+    """
+    Generates a procedural anomalous entity name fitting Anomalous Incursions
+    (no numeric threat grades).
+    """
+    descriptors = [
+        "Static-Stitched", "Non-Euclidean", "Mirrored", "Porcelain-Faced",
+        "Fluorescent", "Hollow-Eyed", "Whispering", "Subway-Born", "Inverted",
+        "Vein-Woven", "Clockwork-Spined", "Ash-Draped", "Cathode-Ray",
+        "Geometry-Warped", "Rain-Soaked", "Headless-Mannequin", "Signal-Lost"
+    ]
+    forms = [
+        "Mannequin Amalgam", "Commuter Phantom", "Broadcast Doppelganger",
+        "Corridor Stalker", "Censor-Hound", "Concrete Weaver", "Echo-Parasite",
+        "Warden-Automaton", "Flesh-Choir Vessel", "Threshold Harbinger",
+        "Mirror-Wraith", "Turnstile Mimic", "Neon Specter", "Reliquary Fiend"
+    ]
+    tag_l = str(category_tag or archetype_or_tag or "").lower()
+    if "cognitohazard" in tag_l:
+        forms = ["Broadcast Doppelganger", "Echo-Parasite", "Signal-Choir Phantasm", "Memetic Stalker"]
+    elif "spatial_warp" in tag_l:
+        forms = ["Corridor Weaver", "Turnstile Mimic", "Folding-Stairwell Entity", "Tesseract Hound"]
+    elif "bio_aberration" in tag_l:
+        forms = ["Flesh-Choir Vessel", "Vein-Stitched Amalgam", "Subway Chimera", "Carapace Husker"]
+    elif "cursed_relic" in tag_l:
+        forms = ["Mannequin Amalgam", "Porcelain Automaton", "Reliquary Idol", "Clockwork Effigy"]
+    elif "spectral_echo" in tag_l:
+        forms = ["Commuter Phantom", "Mirror-Wraith", "Midnight Platform Apparition", "Weeping Poltergeist"]
+
+    if hash_val is not None:
+        h = int(hash_val)
+        desc = descriptors[(h * 31 + 11) % len(descriptors)]
+        form = forms[(h * 19 + 7) % len(forms)]
+        return f"The {desc} {form}"
+    return f"The {random.choice(descriptors)} {random.choice(forms)}"
+
+
+def generate_world_ending_anomaly_profile(hash_val: int = None) -> dict:
+    """
+    Deterministically rolls a procedural World-Ending Anomaly Antagonist profile
+    for the 11-Chapter Anomalous Incursions story campaign.
+    """
+    profiles = [
+        {
+            "id": "cataclysm_non_euclidean_convergence",
+            "name": "The Non-Euclidean Convergence",
+            "title": "Architect of the Inverted Metropolis",
+            "classification_tags": ["aberration", "spatial_warp", "cognitohazard"],
+            "element": "dark",
+            "foreshadow_sign": "impossible 13th-floor corridors and backwards-running transit clocks",
+            "cult_goal": "collapse the city's spatial boundaries into an eternal labyrinth",
+            "syndicate_goal": "harvest dimensional fold-cores from the collapsing transit grid",
+            "harbinger_name": "The Prime Tesseract Apostle",
+        },
+        {
+            "id": "cataclysm_pale_broadcast",
+            "name": "The Pale Broadcast Singularity",
+            "title": "The Dead-Channel Sovereign",
+            "classification_tags": ["incorporeal", "cognitohazard", "spectral_echo"],
+            "element": "shock",
+            "foreshadow_sign": "unplugged televisions and smartphones whispering on dead frequencies at 03:33",
+            "cult_goal": "overwrite human consciousness across the metropolitan broadcast towers",
+            "syndicate_goal": "monopolize cognitive-override frequencies as a black-market weapon",
+            "harbinger_name": "The Dead-Frequency Conductor",
+        },
+        {
+            "id": "cataclysm_hollow_eclipse",
+            "name": "The Hollow Eclipse Sovereign",
+            "title": "Devourer of the Penumbral Veil",
+            "classification_tags": ["demon", "dark", "cursed_relic"],
+            "element": "dark",
+            "foreshadow_sign": "second shadows detaching from pedestrians beneath streetlamps",
+            "cult_goal": "extinguish the Grand Temple's ancient barrier seals to summon a permanent black sun",
+            "syndicate_goal": "smuggle unsealed eclipse relics to high-bidding shadow conglomerates",
+            "harbinger_name": "The Penumbral Herald",
+        },
+        {
+            "id": "cataclysm_flesh_signal_choir",
+            "name": "The Flesh-Signal Choir",
+            "title": "The Resonant Hive-Cathedral",
+            "classification_tags": ["aberration", "bio_aberration", "swarm"],
+            "element": "poison",
+            "foreshadow_sign": "crimson root-like veins pulsing inside the Under-City drainage tunnels",
+            "cult_goal": "merge the city's population into a single immortal biological chorus",
+            "syndicate_goal": "synthesize illicit regenerative serums from anomalous hive tissue",
+            "harbinger_name": "The Crimson Cantor",
+        },
+        {
+            "id": "cataclysm_ouroboros_meridian",
+            "name": "The Ouroboros Meridian",
+            "title": "Engine of the Fractured Hour",
+            "classification_tags": ["construct", "spatial_warp", "cursed_relic"],
+            "element": "ice",
+            "foreshadow_sign": "localized time-loops freezing entire city blocks in repeating 60-second echoes",
+            "cult_goal": "shatter linear time and trap the metropolis in an endless midnight",
+            "syndicate_goal": "exploit temporal stasis vaults to execute untraceable heists",
+            "harbinger_name": "The Chronos-Broken Warden",
+        },
+    ]
+    if hash_val is not None:
+        return dict(profiles[int(hash_val) % len(profiles)])
+    return dict(random.choice(profiles))
+
+
+_URBAN_ZONE_PREFIX_POOLS: dict[str, list[str]] = {
+    "zone_city_center": ["Kurokawa", "Veridia", "Aegis-Chuo", "Ouka", "Valenport", "Shin-Asahi", "Caelum", "Sovereign-Core", "Kagutsuchi", "Vanguard-Central", "Hakuho", "Meridian"],
+    "zone_downtown": ["Kagero", "Neon-Cross", "Mirage-Ward", "Vespera", "Shinjuku-West", "Starlight", "Pulse-Avenue", "Akatsuki", "Onyx-Square", "Nocturne", "Chuo-South", "Velvet-Mile"],
+    "zone_uptown": ["St. Jude's", "Alderwood", "Kensington", "Shirakawa", "Belvedere", "Montclair", "Ravenscroft", "Aethelgard", "Ashford", "Ginkgo-Hill", "Westminster", "Highgate"],
+    "zone_ultra_rich": ["Aurelia", "Elysium", "Celestia", "Solaria", "Crown-Crest", "Olympos", "Valhalla", "Gilded-Peak", "Seraphim", "Diamond-Ridge", "Astral-Heights", "Imperial"],
+    "zone_low_cost_wards": ["Iron-Gutter", "Cinder-Block", "Kowloon-South", "Rust-Hollow", "Ash-Row", "Rookery-Nine", "Dreg-Side", "Soot-Alley", "Grim-Basin", "Barrow-Ward", "Scrap-Gate", "Bleakwater"],
+    "zone_industrial": ["Vulcan", "Kurogane", "Promethean", "Cinder-Forge", "Smokestack-9", "Ironworks", "Brimstone", "Slag-River", "Titan-Foundry", "Anvil-Sector", "Coal-Harbor", "Heavy-Grid"],
+    "zone_city_docks": ["Blackanchor", "Tidewater", "Shiokaze", "Iron-Quay", "Foghorn-Bay", "Saltwind", "Kraken-Wharf", "Deepwater", "Breakwater-7", "Leviathan-Port", "Storm-Pier", "Bilgewater"],
+    "zone_suburbs": ["Sakura-Hill", "Miyamae", "Komorebi", "Maple-Crest", "Asahigaoka", "Hanamizuki", "Willow-Brook", "Tsukimigaoka", "Birchwood", "Hinata-Vale", "Wakaba", "Clover-Field"],
+    "zone_seaside_beach": ["Shiranui", "Minami-Cove", "Azure-Bay", "Kamome", "Coral-Sands", "Suncrest", "Crescent-Shore", "Pearl-Tide", "Sirens-Bay", "Whitecap", "Starfish-Cove", "Lagoon-Point"],
+    "zone_woods_reserve": ["Mount Tsukimi", "Pinecrest", "Komorebi-Peak", "Cedar-Ridge", "Misty-Hollow", "Blackwood-Crag", "Mount Asahi", "Silver-Fir", "Whispering-Pines", "Wolf-Crest", "Redwood-Basin", "Ravens-Peak"],
+    "zone_theme_park": ["Starlight Wonder", "Dreamland Mirage", "Fantasia Kingdom", "Luna-Carnival", "Arcadia Joy", "Wonder-Galaxy", "Carousel-Bay", "Elysian Funland", "Paradox-Pier", "Miracle-Crown", "Astro-Playland", "Joypolis-Bay"],
+    "zone_eastern_temple": ["Mount Ryujin", "Kiyomizu-Lotus", "Tenryu-zan", "Vermilion-Cloud", "Amaterasu-Peak", "Byakko-ji", "Suzaku-Crest", "Seiryu-Ridge", "Kinkaku-Heights", "Eightfold-Lotus", "Fushimi-Inari", "Cloud-Bell"],
+    "zone_airport": ["Zephyr-Prime", "Haneda-West", "Pacific-Cross", "Aegis-Skyway", "Narita-Bay", "Horizon-Sky", "Stratos-Hub", "Albatross-Field", "Pegasus-Port", "Meridian-Air", "Vanguard-Aero", "Condor-Bay"],
+    "zone_hospital": ["St. Camillus", "Mercy-Cross", "Saiseikai", "Asclepius", "Hakuho-Central", "St. Jude-Memorial", "Seraph-Care", "Providence", "Valen-Medical", "Sanctuary-Cross", "Aegis-General", "Nightingale"],
+    "zone_university": ["Teito Imperial", "Miskatonic-East", "Waseda-Caelum", "St. Ignatius", "Aethelgard", "Kurokawa-State", "Veridia-Grand", "Ravenscroft", "Minerva-Heights", "Scholomance", "Ouka-Collegiate", "Solomon-Crown"],
+    "zone_chinatown": ["Crimson-Lantern", "Longmen-Cross", "Golden-Dragon", "Kowloon-Gate", "Jade-Lotus", "Vermilion-Arch", "Tai-Ping", "Phoenix-Bazaar", "Qilin-Street", "Nine-Lantern", "Huanglong", "Silk-Pagoda"],
+    "zone_undercity": ["Abyssal-Line", "Sector-Zero", "Tartarus-Drain", "Pre-War Hollow", "Nether-Vault", "Gehenna-Depths", "Black-Cistern", "Sub-Level Omega", "Stygian-Line", "Catacomb-Nine", "Deep-Sump", "Under-Crown"],
+    "zone_botanical_zoo": ["Eden-Glass", "Verdant-Bay", "Midori-Ark", "Pelagic-Crown", "Sylvan-Dome", "Gaia-Park", "Emerald-Biosphere", "Nautilus-Bay", "Viridian-Ark", "Solaris-Dome", "Flora-Prime", "Leviathan-Reef"],
+}
+
+
+def _dedupe_stuttered_location_words(name: str) -> str:
+    """Removes adjacent stuttered words caused by prefix/epithet overlap (e.g. 'Neon-Mirage Neon Shopping Arcade' -> 'Neon-Mirage Shopping Arcade')."""
+    if not name:
+        return ""
+    res = str(name)
+    # 1. 'WordA-WordB WordA ...' -> 'WordA-WordB ...'
+    res = re.sub(r"\b([A-Za-z]{3,})(-[A-Za-z0-9]+)\s+\1\b", r"\1\2", res, flags=re.IGNORECASE)
+    # 2. 'WordA-WordB WordB ...' -> 'WordA-WordB ...'
+    res = re.sub(r"\b([A-Za-z0-9]+-([A-Za-z]{3,}))\s+\2\b", r"\1", res, flags=re.IGNORECASE)
+    # 3. 'WordA WordA ...' -> 'WordA ...'
+    res = re.sub(r"\b([A-Za-z]{3,})\s+\1\b", r"\1", res, flags=re.IGNORECASE)
+    return res
+
+
+def generate_urban_zone_name(z_id: str, raw_zone_name: str, hash_val: int = None, scenario: str = "anomalous_incursions") -> str:
+    """
+    Generates a deterministic procedural `[Proper Name] [Functional Role]` for any Tier-1 urban zone,
+    preserving the base functional zone name so substring/keyword checks remain 100% intact.
+    """
+    if z_id == "zone_agency_hq" or "{session_agency_hq}" in str(raw_zone_name):
+        return generate_agency_hq_name(scenario, hash_val=hash_val)
+    if z_id == "zone_school_campus" or "{session_school}" in str(raw_zone_name):
+        return generate_school_name(scenario, hash_val=hash_val)
+
+    pool = _URBAN_ZONE_PREFIX_POOLS.get(z_id)
+    if not pool:
+        pool = _URBAN_ZONE_PREFIX_POOLS["zone_city_center"]
+
+    z_offset = sum(ord(c) * (idx + 1) for idx, c in enumerate(str(z_id or raw_zone_name)))
+    if hash_val is not None:
+        prefix = pool[(int(hash_val) * 37 + z_offset) % len(pool)]
+    else:
+        prefix = random.choice(pool)
+
+    base = str(raw_zone_name or "").strip()
+    if base.lower().startswith("the "):
+        base_clean = base[4:].strip()
+        return _dedupe_stuttered_location_words(f"The {prefix} {base_clean}")
+    if prefix.lower() in base.lower():
+        return _dedupe_stuttered_location_words(base)
+    return _dedupe_stuttered_location_words(f"{prefix} {base}")
+
+
+_URBAN_FACILITY_EPITHET_POOLS: dict[str, list[str]] = {
+    "zone_city_center": ["Grand Metro", "Aegis-Square", "Veridia-Core", "Sovereign", "Crown-Plaza", "Centurion", "Apex-Civic", "Meridian", "Ouka-Central", "Obelisk", "Solstice", "Vanguard"],
+    "zone_downtown": ["Neon-Mirage", "Starlight", "Velvet-Note", "Cyber-Pulse", "Midnight-Sun", "Kagero-88", "Crimson-Neon", "Electric-Lotus", "Blue-Comet", "Shinjuku-Gold", "Nova-Beat", "Onyx-Dream"],
+    "zone_uptown": ["Alderwood", "Belvedere", "St. Cecilia", "Victorian-Rose", "Ginkgo-Crown", "Ravenscroft", "Kensington", "Monarch", "Montclair", "Aethelgard", "Ivory-Arch", "Obsidian-Bell"],
+    "zone_ultra_rich": ["Celestia", "Olympos-Gold", "Seraphim", "Valhalla-Crest", "Imperial-Silk", "Solaria-Prime", "Gilded-Swan", "Diamond-Vanguard", "Astral-Crown", "Versailles-Sky", "Platinum-Rose", "Sovereign-Lux"],
+    "zone_low_cost_wards": ["Iron-Dog", "Rust-Bucket", "Cinder-9", "Crossbones", "Black-Gutter", "Grim-Corner", "Scrap-Hound", "Broken-Lantern", "Soot-Lung", "Barrow-Pit", "Dead-End", "Copper-Nail"],
+    "zone_industrial": ["Hephaestus", "Kurogane-7", "Promethean", "Titan-Forge", "Slag-Works", "Brimstone-Core", "Iron-Anvil", "Molten-Crown", "Smokestack-12", "Goliath", "Cinder-Grid", "Cyclops"],
+    "zone_city_docks": ["Kraken-Bay", "Salt-Anchor", "Foghorn-9", "Barnacle-Point", "Leviathan-Quay", "Storm-Tide", "Black-Rudder", "Sirens-Reach", "Deep-Harbor", "Nautilus", "Rusted-Keel", "Maelstrom"],
+    "zone_suburbs": ["Sakura-Lane", "Maple-Leaf", "Komorebi", "Sunny-Brook", "Green-Gables", "Clover-Hill", "Bluebird", "Firefly-Way", "Pine-Needle", "Crescent-Moon", "Autumn-Breeze", "Wisteria"],
+    "zone_school_campus": ["Sakura-Wing", "Ouka-Hall", "West-Pavilion", "Clockwork-Quad", "East-Annex", "Founder's", "North-Belfry", "Varsity-Crown", "Starlight-Hall", "Silver-Bell", "Ivy-Gate", "Horizon-Wing"],
+    "zone_seaside_beach": ["Coral-Reef", "Sun-Splash", "Azure-Wave", "Seagull-Point", "Pelican-Bay", "Tidal-Crown", "Driftwood", "Mermaid-Lagoon", "Golden-Sand", "Albatross", "Riptide", "Conch-Shell"],
+    "zone_woods_reserve": ["Whispering-Cedar", "Silver-Wolf", "Misty-Pine", "Black-Bear", "Redwood-Peak", "Owl-Creek", "Stag-Horn", "Mossy-Crag", "Moonlit-Ridge", "Falcon-Roost", "Elder-Spruce", "Raven-Stone"],
+    "zone_theme_park": ["Starlight-Spin", "Cosmic-Comet", "Dream-Drop", "Wonder-Wheel", "Neon-Carnival", "Mirage-Coaster", "Galaxy-Splash", "Jester's-Crown", "Phantom-Track", "Calliope-9", "Carousel-Prime", "Sky-Scream"],
+    "zone_eastern_temple": ["Ryujin's", "Crimson-Lotus", "Eightfold", "Vermilion-Cloud", "Jade-Bell", "Tenryu", "Amaterasu", "White-Fox", "Golden-Bodhi", "Weeping-Kannon", "Mist-Pagoda", "Silent-Dharma"],
+    "zone_airport": ["Skyway-1", "Stratos-9", "Terminal-Omega", "Zephyr-Gate", "Concorde-Bay", "Pegasus-Wing", "Horizon-Deck", "Mach-3", "Jetstream", "Albatross-Hangar", "Valkyrie-Runway", "Icarus-Point"],
+    "zone_hospital": ["St. Luke's", "Asclepius-3", "Mercy-Wing", "Nightingale", "Lazarus-Ward", "Hippocrates", "White-Cross", "Seraph-Triage", "Caduceus", "Panacea-Hall", "Sanctuary-7", "Bio-Ward"],
+    "zone_university": ["Minerva-Hall", "Euler-Wing", "Miskatonic", "Galileo-Dome", "Paracelsus", "Newton-Quad", "Copernicus", "Hypatia-Stacks", "Solomon-Arch", "Kepler-Spire", "Ptolemy", "Hermes-Lab"],
+    "zone_chinatown": ["Golden-Wok", "Red-Dragon", "Jade-Phoenix", "Hundred-Herbs", "Silk-Lantern", "White-Tiger", "Emperor's", "Celestial-Pearl", "Five-Venoms", "Lotus-Tile", "Crimson-Peony", "Vermilion-Moon"],
+    "zone_undercity": ["Tartarus-9", "Stygian", "Sub-Zero", "Gorgon-Drain", "Catacomb-7", "Black-Sump", "Nether-Pipe", "Charon's", "Rust-Vault", "Abyssal-Shaft", "Morlock-Row", "Deep-Fissure"],
+    "zone_botanical_zoo": ["Eden-Dome", "Amazonia", "Mariana-Trench", "Goliath-Reef", "Orchid-Crown", "Panthera", "Nautilus-9", "Verdant-Canopy", "Chrysalis", "Kraken-Tank", "Biolume", "Rafflesia"],
+}
+
+
+def generate_urban_facility_name(
+    z_id: str,
+    p_id: str,
+    raw_primary_name: str,
+    hash_val: int = None,
+    char_name: str = "",
+    scenario: str = "anomalous_incursions",
+) -> str:
+    """
+    Generates a deterministic per-session procedural name for any Tier-2 Primary Facility in
+    Anomalous Incursions while preserving the full functional title for substring/keyword matching.
+    """
+    base = str(raw_primary_name or "").strip()
+    if not base or p_id in ("loc_player_house", "loc_homeroom", "loc_private_hq_1", "loc_private_hq_2", "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq"):
+        return base
+    if p_id == "loc_agency_hq" or "{session_agency_hq}" in base:
+        if "{session_agency_hq}" in base or base.lower() == "organization headquarters":
+            return generate_agency_hq_name(scenario, hash_val=hash_val)
+        return base
+    if p_id == "loc_theme_park":
+        return generate_urban_zone_name("zone_theme_park", base, hash_val=hash_val, scenario=scenario)
+    if p_id == "loc_eastern_temple":
+        return generate_urban_zone_name("zone_eastern_temple", base, hash_val=hash_val, scenario=scenario)
+    if p_id == "loc_general_hospital":
+        return generate_urban_zone_name("zone_hospital", base, hash_val=hash_val, scenario=scenario)
+    if p_id == "loc_botanical_zoo":
+        return generate_urban_zone_name("zone_botanical_zoo", base, hash_val=hash_val, scenario=scenario)
+
+    p_offset = sum(ord(c) * (idx + 3) for idx, c in enumerate(str(p_id or base)))
+    h = int(hash_val if hash_val is not None else 1)
+
+    # 1. Organization HQ & Corporate AgencyHQ Wings: Procedural Sector / Wing / Floor / Sub-Level Designation (A5)
+    if z_id == "zone_agency_hq" or p_id.startswith("loc_hq_"):
+        wing_letters = ["A", "B", "C", "D", "E", "F", "G", "H"]
+        w_let = wing_letters[(h * 17 + p_offset) % len(wing_letters)]
+        w_num = ((h * 23 + p_offset) % 9) + 1
+        if p_id == "loc_hq_main_lobby":
+            lobby_prefixes = [f"Concourse {w_let}-1", f"Central Atrium 0{w_num}", f"Gatehouse Sector {w_let}", f"Rotunda Tier {w_num}"]
+            desig = lobby_prefixes[(h * 13 + p_offset) % len(lobby_prefixes)]
+        elif p_id == "loc_hq_containment_sector":
+            sub_num = ((h * 31 + p_offset) % 12) + 4
+            vault_prefixes = [f"Sub-Level {sub_num}", f"Deep Vault {w_let}-{sub_num}", f"Quarantine Trench 0{w_num}", f"Abyssal Deck {sub_num}"]
+            desig = vault_prefixes[(h * 19 + p_offset) % len(vault_prefixes)]
+        else:
+            wing_types = [f"Wing {w_let}-{w_num}", f"Sector {w_let}-{w_num}", f"Operations Deck {w_num}", f"Division Bay {w_let}-{w_num}"]
+            desig = wing_types[(h * 29 + p_offset) % len(wing_types)]
+        if ":" in base:
+            return base
+        return f"{desig}: {base}"
+
+    if p_id.startswith(("sub_priv1_", "sub_priv2_")):
+        if ":" in base:
+            return base
+        if p_id.endswith("_entrance"):
+            desig = "Ground Concourse"
+        elif p_id.endswith("_vault"):
+            b_lvl = ((h * 19 + p_offset) % 5) + 2
+            desig = f"Sub-Level B{b_lvl}"
+        else:
+            flr = ((h * 11 + p_offset) % 38) + 12
+            desig = f"Floor {flr}"
+        return f"{desig}: {base}"
+
+    # 2. City & Outskirts Facilities: Prepend thematic proper epithet while keeping base functional name intact
+    pool = _URBAN_FACILITY_EPITHET_POOLS.get(z_id) or _URBAN_FACILITY_EPITHET_POOLS["zone_city_center"]
+    epithet = pool[(h * 41 + p_offset) % len(pool)].strip()
+
+    if epithet.lower() in base.lower():
+        return _dedupe_stuttered_location_words(base)
+    if base.lower().startswith("the "):
+        return _dedupe_stuttered_location_words(f"The {epithet} {base[4:].strip()}")
+    return _dedupe_stuttered_location_words(f"{epithet} {base}")
 
 
 def generate_place_name(scenario: str = "fantasy") -> str:
@@ -1879,7 +2592,7 @@ def generate_faction_name(scenario: str, category: str = "") -> str:
     return f"The {category.capitalize() or 'Regional'} Syndicate"
 
 
-def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False) -> list[dict]:
+def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val: int = None) -> list[dict]:
     """
     Returns the list of pre-discovered starter factions for a scenario with
     fixed anchors for institutional factions and dynamic procedural names for gangs,
@@ -1929,24 +2642,154 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False) -> list[
             "hq_location_id": "Behind Gym Storage Sheds",
             "notes": "A streetwise group of rebellious students and brawlers who operate outside campus rules."
         })
+        factions.append({
+            "name": "Varsity Athletic Directorate",
+            "hierarchy_template": "council",
+            "category": "sports",
+            "hq_location_id": "Main Gymnasium",
+            "notes": "The competitive varsity athletics committee coordinating inter-school tournaments, team training regimens, and sports facility access."
+        })
         if is_nsfw or scenario_data.is_nsfw_scenario(scen_key):
             nsfw_name = _unique_name("nsfw", "high_school_drama")
             factions.append({
                 "name": nsfw_name,
                 "hierarchy_template": "club",
-                "category": "club",
-                "hq_location_id": "Old East Wing Music Room",
-                "notes": "An underground campus circle sharing private romantic rumors, intimate secrets, and after-hours rendezvous."
-            })
-        else:
-            factions.append({
-                "name": "Varsity Athletic Directorate",
-                "hierarchy_template": "council",
-                "category": "sports",
-                "hq_location_id": "Main Gymnasium",
-                "notes": "The competitive varsity athletics committee coordinating inter-school tournaments, team training regimens, and sports facility access."
+                "category": "nsfw_club",
+                "hq_location_id": "Velvet Basement Salon",
+                "notes": "An underground campus circle gathering inside the Velvet Basement Salon beneath the Abandoned Old Campus Building for decadent secret rites and intimate trysts."
             })
 
+    # 1.5A Anomalous Incursions (6 Fixed Archetype Factions with Procedural Names)
+    elif scenario_data.is_anomalous_incursions_scenario(scen_key):
+        agency_name = generate_agency_name(scen_key, hash_val=hash_val)
+        priv_1_name = generate_private_agency_name(scen_key, hash_val=hash_val, agency_index=1)
+        priv_2_name = generate_private_agency_name(scen_key, hash_val=hash_val, agency_index=2)
+        if priv_2_name == priv_1_name:
+            priv_2_name = generate_private_agency_name(scen_key, hash_val=(int(hash_val or 7) + 99), agency_index=3)
+        exorcist_order = generate_exorcist_order_name(scen_key, hash_val=hash_val)
+        cult_name = generate_occult_cult_name(scen_key, hash_val=hash_val)
+        syndicate_name = generate_clandestine_syndicate_name(scen_key, hash_val=hash_val)
+
+        # Deterministic zone selection for Private Agency #1 and #2 among City Center, Downtown, Uptown
+        urban_core_zones = ["zone_city_center", "zone_downtown", "zone_uptown"]
+        h_int = int(hash_val if hash_val is not None else 1)
+        p1_zone = urban_core_zones[h_int % 3]
+        p2_zone = urban_core_zones[(h_int + 1) % 3]
+        cult_zone = "zone_woods_reserve" if (h_int % 2 == 0) else "zone_undercity"
+        synd_zone = "zone_undercity" if cult_zone == "zone_woods_reserve" else "zone_industrial"
+
+        priv_1_acr = format_org_acronym(priv_1_name)
+        priv_1_hq = f"{priv_1_acr} Tower HQ" if priv_1_acr else f"{priv_1_name} HQ"
+        priv_2_acr = format_org_acronym(priv_2_name)
+        priv_2_hq = f"{priv_2_acr} Operations HQ" if priv_2_acr else f"{priv_2_name} HQ"
+
+        factions.extend([
+            {
+                "name": agency_name,
+                "archetype_key": "public_agency",
+                "hierarchy_template": "corpo",
+                "category": "public_agency",
+                "joinable": True,
+                "diplomatic_stance": "friendly",
+                "hq_zone_id": "zone_city_center",
+                "hq_node_id": "loc_agency_hq",
+                "hq_location_id": "loc_hq_executive_dispatch",
+                "notes": "The primary state-sanctioned paranormal investigation and containment organization. Agents receive a daily taxpayer-funded salary and a 50% HQ requisition discount, but must surrender all official bounty payouts and anomaly loot to the Bureau.",
+            },
+            {
+                "name": priv_1_name,
+                "archetype_key": "private_agency_1",
+                "hierarchy_template": "corpo",
+                "category": "private_agency",
+                "joinable": True,
+                "diplomatic_stance": "friendly",
+                "hq_zone_id": p1_zone,
+                "hq_node_id": "loc_private_hq_1",
+                "hq_location_id": priv_1_hq,
+                "notes": "A premier corporate anomaly-hunting agency and licensed containment contractor. Operatives receive no salary, but keep 100% of bounty fees and anomaly loot, and enjoy access to high-tier anomalous gear at their private armory.",
+            },
+            {
+                "name": priv_2_name,
+                "archetype_key": "private_agency_2",
+                "hierarchy_template": "corpo",
+                "category": "private_agency",
+                "joinable": True,
+                "diplomatic_stance": "friendly",
+                "hq_zone_id": p2_zone,
+                "hq_node_id": "loc_private_hq_2",
+                "hq_location_id": priv_2_hq,
+                "notes": "A rival private anomaly-eradication conglomerate competing for high-value corporate and municipal containment contracts. Operatives keep all bounty rewards and salvaged anomalous relics.",
+            },
+            {
+                "name": exorcist_order,
+                "archetype_key": "monastic_order",
+                "hierarchy_template": "order",
+                "category": "monastic_order",
+                "joinable": True,
+                "diplomatic_stance": "friendly",
+                "hq_zone_id": "zone_woods_reserve",
+                "hq_node_id": "loc_et_main_sanctuary",
+                "hq_location_id": "loc_et_main_sanctuary",
+                "notes": "An ancient Eastern monastic exorcist clan and shrine order maintaining sacred seals at the Grand Temple. Initiates receive no salary or order bounty fees, but keep combat spoils and receive 2-3 sacred items completely free each day.",
+            },
+            {
+                "name": cult_name,
+                "archetype_key": "cult_faction",
+                "hierarchy_template": "order",
+                "category": "cult_faction",
+                "joinable": False,
+                "diplomatic_stance": "distrusted",
+                "hq_zone_id": cult_zone,
+                "hq_node_id": "loc_cult_sanctum_hq",
+                "hq_location_id": f"{cult_name} Hidden Sanctum",
+                "notes": "A secretive, distrusted occult congregation that worships reality fractures and seeks to usher in the World-Ending Anomaly. Viewed with deep suspicion or outright hostility by all licensed containment organizations.",
+            },
+            {
+                "name": syndicate_name,
+                "archetype_key": "clandestine_faction",
+                "hierarchy_template": "syndicate",
+                "category": "clandestine_faction",
+                "joinable": False,
+                "diplomatic_stance": "distrusted",
+                "hq_zone_id": synd_zone,
+                "hq_node_id": "loc_clandestine_syndicate_hq",
+                "hq_location_id": f"{syndicate_name} Shadow Exchange HQ",
+                "notes": "A shadowy, distrusted clandestine syndicate trafficking uncatalogued anomalous relics, weaponized cognitohazards, and black-budget research behind the scenes.",
+            },
+        ])
+
+    # 1.5B Generic Urban Fantasy (Non-Anomalous Incursions)
+    elif scenario_data.has_tag(scen_key, "urban_fantasy"):
+        agency_name = generate_agency_name(scen_key)
+        exorcist_order = generate_exorcist_order_name(scen_key)
+        factions.append({
+            "name": agency_name,
+            "hierarchy_template": "corpo",
+            "category": "agency",
+            "hq_location_id": "loc_hq_executive_dispatch",
+            "notes": "The state-sanctioned paranormal investigation and containment organization responsible for responding to anomalous manifestations."
+        })
+        factions.append({
+            "name": exorcist_order,
+            "hierarchy_template": "order",
+            "category": "order",
+            "hq_location_id": "loc_et_main_sanctuary",
+            "notes": "An ancient Eastern monastic exorcist clan and shrine order maintaining sacred seals, protective talismans, and spirit pacification rites at the Grand Temple."
+        })
+        factions.append({
+            "name": "Underground Occult Exchange",
+            "hierarchy_template": "syndicate",
+            "category": "syndicate",
+            "hq_location_id": "loc_occult_curio_shop",
+            "notes": "A clandestine black-market network trafficking uncatalogued anomalous relics, forbidden talismans, and unauthorized containment bypasses."
+        })
+        factions.append({
+            "name": "Metropolitan Civil Defense League",
+            "hierarchy_template": "guild",
+            "category": "guild",
+            "hq_location_id": "loc_metro_transit_terminal",
+            "notes": "A citywide coalition of licensed anomaly contractors, private wardens, and auxiliary volunteer dispatchers assisting during breaches."
+        })
 
     # 2. Cyberpunk
     elif scenario_data.has_tag(scen_key, "cyberpunk"):

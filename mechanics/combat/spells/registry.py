@@ -673,6 +673,89 @@ SPELL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "target_type": "summon", "mp_cost": 30, "summon_template": "hydra",
         "summon_count": 1, "summon_duration": 5, "summon_archetype": "Brute",
         "description": "Unleashes a primordial multi-headed apex hydra tearing through all hostiles for 5 turns."
+    },
+
+    # -------------------------------------------------------------------------
+    # ANOMALOUS INCURSIONS INNATE ABILITIES (4 Tactical + 1 Signature Ultimate)
+    # -------------------------------------------------------------------------
+    "spatial_vector_dart_t3_st": {
+        "id": "spatial_vector_dart_t3_st", "name": "Spatial Vector Spike", "emoji": "🌀",
+        "school": "Evocation", "discipline": "attack", "damage_type": "magical", "tier": 3, "tier_name": "Basic",
+        "target_type": "single", "mp_cost": 6, "power_mult": 1.3,
+        "description": "Compresses local spatial coordinates into a high-velocity vector spike that pierces anomalous wards."
+    },
+    "reality_anchor_ward_t3_st": {
+        "id": "reality_anchor_ward_t3_st", "name": "Reality Anchor Field", "emoji": "🛡️",
+        "school": "Abjuration", "discipline": "support", "damage_type": "magical", "tier": 3, "tier_name": "Basic",
+        "target_type": "support", "mp_cost": 7, "buff_pct": 0.20, "stat_target": "DEF", "duration": 3,
+        "description": "Projects a localized Hume-stabilizing containment barrier (+20% DEF & MDEF for 3 turns)."
+    },
+    "cognito_suppress_t3_st": {
+        "id": "cognito_suppress_t3_st", "name": "Cognitohazard Dampener", "emoji": "🧠",
+        "school": "Enchantment", "discipline": "curse", "damage_type": "magical", "tier": 3, "tier_name": "Basic",
+        "target_type": "single", "mp_cost": 7, "debuff_pct": 0.20, "stat_target": "ATK", "duration": 3,
+        "description": "Disrupts an entity's memetic frequency, suppressing its offensive manifestation (-20% ATK for 3 turns)."
+    },
+    "sacred_ofuda_purge_t3_st": {
+        "id": "sacred_ofuda_purge_t3_st", "name": "Sacred Ofuda Seal", "emoji": "✨",
+        "school": "Evocation", "discipline": "attack", "damage_type": "holy", "tier": 3, "tier_name": "Basic",
+        "target_type": "single", "mp_cost": 6, "power_mult": 1.3,
+        "description": "Hurls consecrated shrine talismans that ignite on contact with paranormal entities."
+    },
+    "cellular_resuscitate_t3_st": {
+        "id": "cellular_resuscitate_t3_st", "name": "Bio-Resonance Mend", "emoji": "💚",
+        "school": "Abjuration", "discipline": "support", "damage_type": "holy", "tier": 3, "tier_name": "Basic",
+        "target_type": "support", "mp_cost": 8, "heal_amount": 28,
+        "description": "Accelerates cellular regeneration via resonant bio-frequencies, restoring +28 HP."
+    },
+    "telekinetic_crush_t2_st": {
+        "id": "telekinetic_crush_t2_st", "name": "Telekinetic Graviton Press", "emoji": "🌌",
+        "school": "Transmutation", "discipline": "attack", "damage_type": "earth", "tier": 2, "tier_name": "Advanced",
+        "target_type": "single", "mp_cost": 14, "power_mult": 2.1, "status_ailment": "Stunned",
+        "description": "Multiplies local gravity tenfold around a target, crushing it into the pavement."
+    },
+    "resonance_cascade_t2_aoe": {
+        "id": "resonance_cascade_t2_aoe", "name": "Psychokinetic Shockwave", "emoji": "⚡",
+        "school": "Evocation", "discipline": "attack", "damage_type": "shock", "tier": 2, "tier_name": "Advanced",
+        "target_type": "aoe", "mp_cost": 18, "power_mult": 1.6, "status_ailment": "Shocked", "dot_damage": 12,
+        "description": "Unleashes an expanding electromagnetic and psychokinetic pulse across all hostiles."
+    },
+    "summon_shikigami_hounds_t2_st": {
+        "id": "summon_shikigami_hounds_t2_st", "name": "Invoke Shikigami Hounds", "emoji": "🐺",
+        "school": "Conjuration", "discipline": "summon", "damage_type": "holy", "tier": 2, "tier_name": "Advanced",
+        "target_type": "summon", "mp_cost": 16, "summon_template": "shikigami_hound",
+        "summon_count": 2, "summon_duration": 3, "summon_archetype": "Stalker",
+        "description": "Breathes spiritual life into twin paper-talisman Shikigami hounds to hunt down anomalies."
+    },
+    "entropy_siphon_t2_st": {
+        "id": "entropy_siphon_t2_st", "name": "Abyssal Entropy Drain", "emoji": "🌑",
+        "school": "Necromancy", "discipline": "attack", "damage_type": "dark", "tier": 2, "tier_name": "Advanced",
+        "target_type": "single", "mp_cost": 14, "power_mult": 2.0, "affixes": ["vampiric"],
+        "description": "Draws out the target's anomalous vitality through a dark rift, leeching 25% of damage dealt as HP."
+    },
+    "singularity_collapse_t1_aoe": {
+        "id": "singularity_collapse_t1_aoe", "name": "Ultimate: Non-Euclidean Singularity", "emoji": "🕳️",
+        "school": "Evocation", "discipline": "attack", "damage_type": "dark", "tier": 1, "tier_name": "Master",
+        "target_type": "aoe", "mp_cost": 34, "power_mult": 2.6, "affixes": ["sundering"],
+        "description": "SIGNATURE ULTIMATE: Collapses local three-dimensional space into a temporary event horizon, devastating all enemies and ignoring 35% of defense."
+    },
+    "heavenly_seal_exorcism_t1_st": {
+        "id": "heavenly_seal_exorcism_t1_st", "name": "Ultimate: Grand Shrine Sovereign Seal", "emoji": "⛩️",
+        "school": "Evocation", "discipline": "attack", "damage_type": "holy", "tier": 1, "tier_name": "Master",
+        "target_type": "single", "mp_cost": 28, "power_mult": 3.4, "affixes": ["sundering", "cleansing"],
+        "description": "SIGNATURE ULTIMATE: Manifests an ancient eight-fold Torii gate of purifying light to obliterate a single anomaly and cleanse caster status ailments."
+    },
+    "zero_point_rupture_t1_st": {
+        "id": "zero_point_rupture_t1_st", "name": "Ultimate: Zero-Point Vector Severance", "emoji": "⚡",
+        "school": "Evocation", "discipline": "attack", "damage_type": "shock", "tier": 1, "tier_name": "Master",
+        "target_type": "single", "mp_cost": 28, "power_mult": 3.4, "crit_bonus": 0.25, "affixes": ["sundering"],
+        "description": "SIGNATURE ULTIMATE: Overclocks anomalous weapon resonance to slice directly through dimensional seams (+25% Crit, ignores 35% defense)."
+    },
+    "ouroboros_event_horizon_t1_aoe": {
+        "id": "ouroboros_event_horizon_t1_aoe", "name": "Ultimate: Crimson Eclipse Convergence", "emoji": "🩸",
+        "school": "Necromancy", "discipline": "attack", "damage_type": "fire", "tier": 1, "tier_name": "Master",
+        "target_type": "aoe", "mp_cost": 34, "power_mult": 2.5, "status_ailment": "Burned", "dot_damage": 24, "affixes": ["vampiric"],
+        "description": "SIGNATURE ULTIMATE: Unleashes a cataclysmic crimson flare across the entire zone, incinerating foes and siphoning their essence."
     }
 }
 

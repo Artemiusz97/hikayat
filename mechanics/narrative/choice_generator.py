@@ -521,9 +521,10 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
             })
 
     # Flanking Backstab from Shadows
+    from mechanics.stealth import is_actor_combat_vanished
     is_vanished = bool(
         char.get("combat_vanished")
-        or (isinstance(session, dict) and session.get("stealth_state", {}).get("combat_vanished"))
+        or (isinstance(session, dict) and is_actor_combat_vanished(session, char.get("user_id")))
         or any("Hidden in Shadows" in str(s) for s in char.get("status_effects", []))
     )
     if is_vanished:
@@ -661,6 +662,43 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
             "action_category": "tactics",
             "label_detail": "Slip into shadows: sheds enemy aggro onto companions and primes Flanking Backstab (+50% dmg)"
         })
+
+    # Non-Hostile Agitated Entity Containment Tactics (Persuade/Calm at any HP + Subdue at <= 35% HP)
+    if monster.get("requires_non_lethal_subdue"):
+        m_cur_hp = int(monster.get("hp", 10) or 10)
+        m_max_hp = max(1, int(monster.get("max_hp", 40) or 40))
+        sub_pct = float(monster.get("subdue_threshold_pct") or 0.35)
+        persuade_dc = 6 if m_cur_hp <= max(1, int(m_max_hp * 0.50)) else 8
+        persuade_pct = _dc_to_pct(persuade_dc)
+        tactics.insert(0, {
+            "label": f"🗣️ Persuade / Calm {monster_name} (De-escalate)",
+            "stat": "CHA",
+            "requirement": persuade_dc,
+            "hit_chance": persuade_pct,
+            "mp_cost": 0,
+            "choice_type": "DIPLOMACY_TAUNT",
+            "action_category": "tactics",
+            "intent": "anomalous_incursion_action",
+            "incursion_action": "combat_persuade",
+            "incursion_id": monster.get("incursion_id", ""),
+            "quest_id": monster.get("linked_quest_id", ""),
+            "label_detail": "Non-lethally calm and contain the agitated entity alive without dealing lethal damage",
+        })
+        if 0 < m_cur_hp <= max(1, int(m_max_hp * sub_pct)):
+            tactics.insert(0, {
+                "label": f"🛡️ Subdue & Contain {monster_name}",
+                "stat": "FREE",
+                "requirement": 0,
+                "hit_chance": 100,
+                "mp_cost": 0,
+                "choice_type": "DEFENSIVE_GUARD",
+                "action_category": "tactics",
+                "intent": "anomalous_incursion_action",
+                "incursion_action": "subdue",
+                "incursion_id": monster.get("incursion_id", ""),
+                "quest_id": monster.get("linked_quest_id", ""),
+                "label_detail": "Safely capture and seal the weakened entity (<= 35% HP) alive",
+            })
 
     # 4. FLEE CATEGORY
     p_agi = _get_stat_val(char, "AGI")
@@ -808,46 +846,92 @@ def get_scenario_dialogue_fallbacks(
     present_bystanders: list = None,
     location: str = "",
     char: dict = None,
+    affinity_score: int = 0,
+    relationship_track: str = "platonic",
+    is_private_meetup: bool = False,
 ) -> list[dict]:
     """Generates rich, scenario-appropriate conversational and social interaction fallback choices
     addressing the active dialogue partner, present room bystanders, and immediate setting."""
     partner = str(partner_name or "your companion").strip()
     scen_key = str(scenario or "fantasy").lower().replace("-", "_")
+    warm_social = bool(is_private_meetup or affinity_score >= 50 or str(relationship_track).lower() == "romantic")
 
-    # 1. Partner-focused conversational templates per scenario genre
+    # 1. Partner-focused conversational templates per scenario genre (Stranger-safe by default)
     TEMPLATES = {
         "highschool": [
-            ("CHA", f"Playfully comment on {partner}'s reaction and joke about the situation", 6),
+            (
+                "CHA",
+                f"Playfully comment on {partner}'s reaction and joke about the situation"
+                if warm_social
+                else f"Ask {partner} directly about their role on campus and current activities",
+                6,
+            ),
             ("INT", f"Ask {partner} about upcoming classes, homeroom duties, or campus rumors", 6),
             ("PER", f"Notice {partner}'s expression and ask what is on their mind", 5),
         ],
         "slice_of_life": [
-            ("CHA", f"Share a lighthearted observation and tease {partner} casually", 5),
+            (
+                "CHA",
+                f"Share a lighthearted observation and tease {partner} casually"
+                if warm_social
+                else f"Ask {partner} politely about their routine around the neighborhood",
+                5,
+            ),
             ("INT", f"Ask {partner} about their schedule, plans, and what they are working on", 5),
             ("PER", f"Pay close attention to {partner}'s mood and ask how their day is going", 5),
         ],
         "cyberpunk": [
-            ("CHA", f"Exchange street-smart banter and probe {partner} with casual swagger", 6),
+            (
+                "CHA",
+                f"Exchange street-smart banter and probe {partner} with casual swagger"
+                if warm_social
+                else f"Question {partner} directly about local crew activity and sector conditions",
+                6,
+            ),
             ("INT", f"Inquire into local network rumors, fixer jobs, and street alerts with {partner}", 6),
             ("PER", f"Read {partner}'s body language and gauge their nervous cyber-ticks", 5),
         ],
         "scifi": [
-            ("CHA", f"Exchange casual banter over comms and compare notes with {partner}", 5),
+            (
+                "CHA",
+                f"Exchange casual banter over comms and compare notes with {partner}"
+                if warm_social
+                else f"Ask {partner} for a status update on their current assignment",
+                5,
+            ),
             ("INT", f"Query {partner} regarding sensor logs, sector news, and station diagnostics", 6),
             ("PER", f"Monitor {partner}'s vital telemetry and ask how they are holding up", 5),
         ],
         "steampunk": [
-            ("CHA", f"Share a wry observation and converse casually with {partner}", 5),
+            (
+                "CHA",
+                f"Share a wry observation and converse casually with {partner}"
+                if warm_social
+                else f"Ask {partner} about their craft and current work in the district",
+                5,
+            ),
             ("INT", f"Inquire with {partner} about local inventor guilds, patents, and aetheric currents", 6),
             ("PER", f"Assess {partner}'s demeanor amidst the steam pressure and machinery hum", 5),
         ],
         "postapoc": [
-            ("CHA", f"Share a brief bit of dry wasteland humor with {partner}", 5),
+            (
+                "CHA",
+                f"Share a brief bit of dry wasteland humor with {partner}"
+                if warm_social
+                else f"Ask {partner} directly about settlement conditions and patrol status",
+                5,
+            ),
             ("INT", f"Inquire into supply routes, safe havens, and local scav reports with {partner}", 6),
             ("PER", f"Gauge {partner}'s fatigue and check if they have spotted any threats", 5),
         ],
         "fantasy": [
-            ("CHA", f"Share friendly banter and discuss the journey with {partner}", 5),
+            (
+                "CHA",
+                f"Share friendly banter and discuss the journey with {partner}"
+                if warm_social
+                else f"Ask {partner} about recent bounties, travelers, and trouble along the road",
+                5,
+            ),
             ("INT", f"Inquire into local lore, guild contracts, and background details with {partner}", 6),
             ("PER", f"Observe {partner}'s demeanor and assess their readiness for what lies ahead", 5),
         ],
@@ -878,7 +962,8 @@ def get_scenario_dialogue_fallbacks(
             "intent": "dialogue_init",
             "sub_intent": "",
             "target_npc": partner,
-            "is_fallback": True,
+            "is_fallback": False,
+            "_deterministic_supplement": True,
         })
 
     # 2. Add lightweight engagement options with other present room bystanders if available
@@ -922,7 +1007,8 @@ def get_scenario_dialogue_fallbacks(
                 "intent": "dialogue_init",
                 "sub_intent": "",
                 "target_npc": b_name,
-                "is_fallback": True,
+                "is_fallback": False,
+                "_deterministic_supplement": True,
             })
             added_bystanders += 1
             if added_bystanders >= 2:
@@ -940,7 +1026,8 @@ def get_scenario_dialogue_fallbacks(
                 "intent": "general_action",
                 "sub_intent": "",
                 "target_npc": "",
-                "is_fallback": True,
+                "is_fallback": False,
+                "_deterministic_supplement": True,
             })
 
     return choices

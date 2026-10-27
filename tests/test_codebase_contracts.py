@@ -244,7 +244,7 @@ def test_wave6_targeted_module_decomposition_and_exports():
         "DIALOGUE_INSTRUCTIONS",
         "SCENE_SCHEMA",
         "OUTCOME_SCHEMA",
-        "STATE_ARBITER_SCHEMA",
+        "CLASSIFY_SCHEMA",
         "CUSTOM_STARTER_GEAR_SYSTEM_PROMPT",
         "sanitize_comparative_cliches",
         "INTERCOURSE_KEYWORDS",

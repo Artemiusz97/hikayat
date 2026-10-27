@@ -4,6 +4,7 @@ Interactive Discord Cog for Inventory & Gear Management.
 Provides a live, interactive UI dashboard with in-place embed updates,
 direct item equipping, slot unequipping, item dropping, and out-of-combat consumable usage.
 """
+import math
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -29,7 +30,7 @@ def build_inventory_embed(user_id: int, feedback_notice: str = "") -> discord.Em
 
     inv = db.get_inventory(user_id)
     cap = inventory_capacity(char["str_"])
-    used_slots = sum(i.get("slot_cost", 1) for i in inv)
+    used_slots = db.used_slots(user_id)
 
     embed = discord.Embed(
         title=f"🎒 {char['name']}'s Inventory ({used_slots}/{cap} slots used)",
@@ -123,7 +124,8 @@ def build_inventory_embed(user_id: int, feedback_notice: str = "") -> discord.Em
             slot_emoji = EQUIPMENT_SLOT_EMOJI.get(slot, "🛡️")
             equipped_lines.append(f"{slot_emoji} **{slot}:** {icon} **{name}**{count_str}{effect_str}")
         else:
-            total_cost = item.get("slot_cost", 1) * count
+            raw_cost = int(item["slot_cost"]) if item.get("slot_cost") is not None else 1
+            total_cost = (math.ceil(count / 5) * raw_cost) if (str(item_type or "").strip().lower() in db.STACKABLE_CONSUMABLE_TYPES and raw_cost > 0) else (raw_cost * count)
             from mechanics.combat.items import is_digital_item
             if is_digital_item(item) or total_cost == 0:
                 cost_str = " `[Digital]`"
@@ -246,7 +248,9 @@ class EquipItemSelectDropdown(discord.ui.Select):
         self.user_id = user_id
         options = []
         seen = set()
-        for item in items[:25]:
+        for item in items:
+            if len(options) >= 25:
+                break
             name = item["name"]
             if name in seen:
                 continue
@@ -254,7 +258,7 @@ class EquipItemSelectDropdown(discord.ui.Select):
             icon = get_item_icon(name, item.get("item_type", ""), item.get("effect", ""))
             default_slot = DEFAULT_EQUIP_SLOT_FOR_ITEM_TYPE.get(item.get("item_type", ""), "Weapon")
             options.append(discord.SelectOption(
-                label=f"{name}"[:100],
+                label=(f"{name} (x{sum(1 for it in items if it.get('name') == name)})" if sum(1 for it in items if it.get("name") == name) > 1 else f"{name}")[:100],
                 value=str(item["id"]),
                 description=f"Type: {item.get('item_type', 'Gear')} | Auto-Slot: {default_slot}"[:100],
                 emoji=icon
@@ -465,7 +469,9 @@ class UseItemSelectDropdown(discord.ui.Select):
         self.user_id = user_id
         options = []
         seen = set()
-        for item in items[:25]:
+        for item in items:
+            if len(options) >= 25:
+                break
             name = item["name"]
             if name in seen:
                 continue
@@ -474,7 +480,7 @@ class UseItemSelectDropdown(discord.ui.Select):
             icon = get_item_icon(name, item.get("item_type", ""), item.get("effect", ""))
             desc = item.get("effect") or f"Category: {parsed['category'].capitalize()}"
             options.append(discord.SelectOption(
-                label=f"{name}"[:100],
+                label=(f"{name} (x{sum(1 for it in items if it.get('name') == name)})" if sum(1 for it in items if it.get("name") == name) > 1 else f"{name}")[:100],
                 value=str(item["id"]),
                 description=desc[:100],
                 emoji=icon
@@ -606,14 +612,16 @@ class DropItemSelectDropdown(discord.ui.Select):
         self.user_id = user_id
         options = []
         seen = set()
-        for item in items[:25]:
+        for item in items:
+            if len(options) >= 25:
+                break
             name = item["name"]
             if name in seen:
                 continue
             seen.add(name)
             icon = get_item_icon(name, item.get("item_type", ""), item.get("effect", ""))
             options.append(discord.SelectOption(
-                label=f"{name}"[:100],
+                label=(f"{name} (x{sum(1 for it in items if it.get('name') == name)})" if sum(1 for it in items if it.get("name") == name) > 1 else f"{name}")[:100],
                 value=name,
                 description=f"Type: {item.get('item_type', 'Item')} | Cost: {item.get('slot_cost', 1)} slot"[:100],
                 emoji=icon
@@ -631,7 +639,9 @@ class DropItemSelectDropdown(discord.ui.Select):
 
         removed = await adb(db.remove_item_by_name, self.user_id, item_name)
         if removed:
-            await interaction.response.edit_message(content=f"🗑️ Discarded **{item_name}** from your inventory.", view=None)
+            if match:
+                await adb(db.drop_item_to_session_floor, self.user_id, match)
+            await interaction.response.edit_message(content=f"🗑️ Dropped **{item_name}** onto the floor.", view=None)
         else:
             await interaction.response.edit_message(content=f"❌ Could not find **{item_name}** to discard.", view=None)
 
@@ -993,14 +1003,16 @@ class InspectItemSelectDropdown(discord.ui.Select):
         self.user_id = user_id
         options = []
         seen = set()
-        for item in items[:25]:
+        for item in items:
+            if len(options) >= 25:
+                break
             name = item["name"]
             if name in seen:
                 continue
             seen.add(name)
             icon = get_item_icon(name, item.get("item_type", ""), item.get("effect", ""), item.get("slot", ""))
             options.append(discord.SelectOption(
-                label=f"{name}"[:100],
+                label=(f"{name} (x{sum(1 for it in items if it.get('name') == name)})" if sum(1 for it in items if it.get("name") == name) > 1 else f"{name}")[:100],
                 value=str(item["id"]),
                 description=f"Type: {item.get('item_type', 'Item')} | Slots: {item.get('slot_cost', 1)}"[:100],
                 emoji=icon
@@ -1137,9 +1149,17 @@ class InventoryCog(commands.Cog):
     @inventory_group.command(name="drop", description="Drop/discard an item by name")
     @app_commands.describe(item_name="The item to drop")
     async def drop(self, interaction: discord.Interaction, item_name: str):
+        from mechanics.combat.items import is_key_item
+        inv = await adb(db.get_inventory, interaction.user.id)
+        match = next((i for i in inv if str(i.get("name") or "").lower() == item_name.strip().lower()), None)
+        if match and is_key_item(match):
+            await interaction.response.send_message(f"🚫 **{match['name']}** is a Key Item and cannot be dropped!", ephemeral=True)
+            return
         removed = await adb(db.remove_item_by_name, interaction.user.id, item_name)
         if removed:
-            await interaction.response.send_message(f"🗑️ Dropped **{item_name}**.")
+            if match:
+                await adb(db.drop_item_to_session_floor, interaction.user.id, match)
+            await interaction.response.send_message(f"🗑️ Dropped **{match['name'] if match else item_name}** onto the floor.")
         else:
             await interaction.response.send_message(f"❌ You don't have an item called '{item_name}'.", ephemeral=True)
 

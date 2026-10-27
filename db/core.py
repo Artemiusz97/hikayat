@@ -146,7 +146,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     language            TEXT DEFAULT 'en',
     narration_language  TEXT DEFAULT 'en',
     temporary_companions_json TEXT DEFAULT '[]',
-    scene_image_url     TEXT DEFAULT NULL
+    scene_image_url     TEXT DEFAULT NULL,
+    character_id        INTEGER DEFAULT NULL,
+    slot                INTEGER DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS session_members (
@@ -229,7 +231,8 @@ CREATE TABLE IF NOT EXISTS contacts (
     intimate_profile_json TEXT DEFAULT '{}',
     emotional_tone      TEXT DEFAULT '',
     open_thread         TEXT DEFAULT '',
-    household_id        INTEGER REFERENCES households(id),
+    household_id        INTEGER REFERENCES households(id) ON DELETE SET NULL,
+    household_role      TEXT DEFAULT 'child',
     created_at          REAL,
     updated_at          REAL,
     UNIQUE(session_id, character_id, npc_id)
@@ -430,6 +433,7 @@ CREATE TABLE IF NOT EXISTS session_clues (
     source_location         TEXT DEFAULT '',
     linked_npc              TEXT DEFAULT '',
     is_verified             INTEGER DEFAULT 0,
+    is_consumed             INTEGER DEFAULT 0,
     deduction_parents_json  TEXT DEFAULT '[]',
     created_at              REAL,
     updated_at              REAL
@@ -535,6 +539,7 @@ CREATE TABLE IF NOT EXISTS commitments_ledger (
     target_location     TEXT DEFAULT '',  -- room/location name
     target_node_id      TEXT DEFAULT '',  -- world graph node_id
     scheduled_day       INTEGER DEFAULT 1,
+    end_day             INTEGER DEFAULT NULL,
     start_minute        INTEGER DEFAULT 0,
     end_minute          INTEGER DEFAULT 1439,
     deadline_turn       INTEGER DEFAULT NULL,
@@ -548,6 +553,7 @@ CREATE TABLE IF NOT EXISTS commitments_ledger (
     created_at          REAL DEFAULT 0,
     updated_at          REAL NOT NULL DEFAULT 0
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_commitments_session_key ON commitments_ledger(session_id, commitment_key) WHERE commitment_key != '';
 
 CREATE TABLE IF NOT EXISTS actor_physical_states (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -571,8 +577,7 @@ CREATE TABLE IF NOT EXISTS actor_physical_states (
     canonical_outfit_json TEXT DEFAULT '{}',
     created_at          REAL NOT NULL,
     updated_at          REAL NOT NULL,
-    UNIQUE(session_id, canonical_key),
-    FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    UNIQUE(session_id, canonical_key)
 );
 
 CREATE TABLE IF NOT EXISTS actor_garments (
@@ -584,8 +589,7 @@ CREATE TABLE IF NOT EXISTS actor_garments (
     item_name           TEXT DEFAULT '',
     layer_depth         INTEGER DEFAULT 2,
     updated_at          REAL NOT NULL,
-    UNIQUE(session_id, actor_key, slot),
-    FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    UNIQUE(session_id, actor_key, slot)
 );
 
 CREATE TABLE IF NOT EXISTS session_digests (
@@ -666,6 +670,7 @@ _POOL_LOCK = threading.Lock()
 MAX_CONNECTIONS = 15
 
 _uow_conn_var = contextvars.ContextVar("_uow_conn_var", default=None)
+_uow_db_path_var = contextvars.ContextVar("_uow_db_path_var", default=None)
 
 def close_all_connections():
     """Drains all connection pools. Vital for test teardown on Windows."""
@@ -692,14 +697,40 @@ def _create_new_connection(db_path: str):
     return conn
 
 @contextmanager
+def _get_independent_conn(db_path: str = None):
+    """Acquires an independent pooled connection that commits immediately, bypassing active contextvars."""
+    if db_path is None:
+        db_path = __import__('db').DB_PATH
+    with _POOL_LOCK:
+        if db_path not in _POOL:
+            _POOL[db_path] = queue.Queue(maxsize=MAX_CONNECTIONS)
+        pool = _POOL[db_path]
+    try:
+        conn = pool.get_nowait()
+    except queue.Empty:
+        conn = _create_new_connection(db_path)
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        try:
+            pool.put_nowait(conn)
+        except queue.Full:
+            conn.close()
+
+@contextmanager
 def UnitOfWork(db_path: str = None):
     """Context manager that begins a transaction and yields the connection."""
     if db_path is None:
         db_path = __import__('db').DB_PATH
 
-    # If we are already in a transaction, just yield the existing connection
-    if _uow_conn_var.get() is not None:
-        yield _uow_conn_var.get()
+    # If we are already in a transaction on the same DB, just yield the existing connection
+    existing_conn = _uow_conn_var.get()
+    if existing_conn is not None and _uow_db_path_var.get() == db_path:
+        yield existing_conn
         return
 
     with _POOL_LOCK:
@@ -713,9 +744,11 @@ def UnitOfWork(db_path: str = None):
         conn = _create_new_connection(db_path)
 
     # Begin the transaction explicitly
-    conn.execute("BEGIN IMMEDIATE")
-    
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+
     token = _uow_conn_var.set(conn)
+    path_token = _uow_db_path_var.set(db_path)
     try:
         yield conn
         conn.commit()
@@ -723,6 +756,7 @@ def UnitOfWork(db_path: str = None):
         conn.rollback()
         raise
     finally:
+        _uow_db_path_var.reset(path_token)
         _uow_conn_var.reset(token)
         try:
             pool.put_nowait(conn)
@@ -731,23 +765,24 @@ def UnitOfWork(db_path: str = None):
 
 @contextmanager
 def get_conn():
-    """Returns the UoW connection if inside one, else creates an auto-commit one."""
+    """Returns the active context connection if inside one, else acquires a pooled connection and binds it to context."""
+    db_path = __import__('db').DB_PATH
     existing_conn = _uow_conn_var.get()
-    if existing_conn is not None:
+    if existing_conn is not None and _uow_db_path_var.get() == db_path:
         yield existing_conn
     else:
-        db_path = __import__('db').DB_PATH
-        
         with _POOL_LOCK:
             if db_path not in _POOL:
                 _POOL[db_path] = queue.Queue(maxsize=MAX_CONNECTIONS)
             pool = _POOL[db_path]
-            
+
         try:
             conn = pool.get_nowait()
         except queue.Empty:
             conn = _create_new_connection(db_path)
-            
+
+        token = _uow_conn_var.set(conn)
+        path_token = _uow_db_path_var.set(db_path)
         try:
             yield conn
             conn.commit()
@@ -755,6 +790,8 @@ def get_conn():
             conn.rollback()
             raise
         finally:
+            _uow_db_path_var.reset(path_token)
+            _uow_conn_var.reset(token)
             try:
                 pool.put_nowait(conn)
             except queue.Full:
@@ -773,10 +810,26 @@ async def adb(fn, /, *args, **kwargs):
     """
     return await asyncio.to_thread(fn, *args, **kwargs)
 
+def _delete_session_child_records_only(conn, session_id: int):
+    """Deletes all child records belonging to a session without deleting the sessions row itself (useful for Turn 0 retry)."""
+    try:
+        conn.execute("UPDATE contacts SET household_id=NULL WHERE session_id=?", (session_id,))
+    except sqlite3.OperationalError:
+        pass
+    for opt_tbl in ("session_digest_vectors", "session_digests_fts"):
+        try:
+            conn.execute(f"DELETE FROM {opt_tbl} WHERE session_id=?", (session_id,))
+        except sqlite3.OperationalError:
+            pass
+    for tbl in SESSION_CHILD_TABLES:
+        try:
+            conn.execute(f"DELETE FROM {tbl} WHERE session_id=?", (session_id,))
+        except sqlite3.OperationalError:
+            pass
+
 def _delete_session_records(conn, session_id: int):
     """Deletes a session and all its related child records on an existing connection."""
-    for tbl in SESSION_CHILD_TABLES:
-        conn.execute(f"DELETE FROM {tbl} WHERE session_id=?", (session_id,))
+    _delete_session_child_records_only(conn, session_id)
     conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
 
 CREATE_SESSION_LOCKS_TABLE = '''
@@ -1142,8 +1195,7 @@ SCHEMA_MIGRATIONS: list[tuple[int, str, list[str]]] = [
                 canonical_outfit_json TEXT DEFAULT '{}',
                 created_at          REAL NOT NULL,
                 updated_at          REAL NOT NULL,
-                UNIQUE(session_id, canonical_key),
-                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                UNIQUE(session_id, canonical_key)
             )""",
             "CREATE INDEX IF NOT EXISTS idx_actor_phys_lookup ON actor_physical_states(session_id, canonical_key)",
             """CREATE TABLE IF NOT EXISTS actor_garments (
@@ -1155,10 +1207,33 @@ SCHEMA_MIGRATIONS: list[tuple[int, str, list[str]]] = [
                 item_name           TEXT DEFAULT '',
                 layer_depth         INTEGER DEFAULT 2,
                 updated_at          REAL NOT NULL,
-                UNIQUE(session_id, actor_key, slot),
-                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                UNIQUE(session_id, actor_key, slot)
             )""",
             "CREATE INDEX IF NOT EXISTS idx_actor_garments_actor ON actor_garments(session_id, actor_key)",
+        ],
+    ),
+    (
+        29,
+        "add_sessions_character_id_and_slot",
+        [
+            "ALTER TABLE sessions ADD COLUMN character_id INTEGER DEFAULT NULL",
+            "ALTER TABLE sessions ADD COLUMN slot INTEGER DEFAULT 1",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_char_slot ON sessions(character_id, slot, status)",
+        ],
+    ),
+    (
+        30,
+        "clean_cutover_normalized_models_v30",
+        [
+            "ALTER TABLE contacts ADD COLUMN household_role TEXT DEFAULT 'child'",
+            "ALTER TABLE commitments_ledger ADD COLUMN end_day INTEGER DEFAULT NULL",
+        ],
+    ),
+    (
+        31,
+        "add_session_clues_is_consumed",
+        [
+            "ALTER TABLE session_clues ADD COLUMN is_consumed INTEGER DEFAULT 0",
         ],
     ),
 ]
@@ -1208,26 +1283,342 @@ def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
         except Exception as e:
             print(f"[migration 27] Warning: commitments backfill encountered: {e}")
 
-    # Ensure backfill is run if social_ties is empty but contacts exist
-    try:
-        ties_cnt = conn.execute("SELECT COUNT(*) FROM social_ties").fetchone()[0]
-        contacts_cnt = conn.execute("SELECT COUNT(*) FROM contacts").fetchone()[0]
-        if ties_cnt == 0 and contacts_cnt > 0:
-            from mechanics.social.relationship_graph import migrate_legacy_relations
-            migrate_legacy_relations(conn)
-    except Exception as e:
-        pass
+    if 30 in newly_applied:
+        try:
+            _migrate_clean_cutover_v30(conn)
+        except Exception as e:
+            print(f"[migration 30] Warning: clean cutover v30 migration encountered: {e}")
 
-    # Ensure commitments backfill is run if appointments exist but no rendezvous in ledger
     try:
-        appts_cnt = conn.execute("SELECT COUNT(*) FROM phone_appointments").fetchone()[0]
-        rendezvous_cnt = conn.execute("SELECT COUNT(*) FROM commitments_ledger WHERE commitment_type='rendezvous'").fetchone()[0]
-        if appts_cnt > 0 and rendezvous_cnt == 0:
-            _migrate_phone_appointments_to_commitments(conn)
+        _strip_legacy_session_fk_constraints(conn)
     except Exception as e:
-        pass
+        print(f"[schema] Warning: session FK cleanup encountered: {e}")
 
     return newly_applied
+
+
+def _strip_legacy_session_fk_constraints(conn: sqlite3.Connection) -> None:
+    """Removes legacy FOREIGN KEY(session_id) REFERENCES sessions(id) from normalized child tables
+    so synthetic session_ids in unit tests and simulations match all other SESSION_CHILD_TABLES."""
+    target_ddls = {
+        "households": (
+            """CREATE TABLE households__new (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id          INTEGER NOT NULL,
+                household_key       TEXT NOT NULL,
+                surname             TEXT NOT NULL,
+                father_json         TEXT NOT NULL DEFAULT '{}',
+                mother_json         TEXT NOT NULL DEFAULT '{}',
+                narrative_siblings_json TEXT NOT NULL DEFAULT '[]',
+                residence_location  TEXT DEFAULT '',
+                created_at          REAL,
+                updated_at          REAL,
+                UNIQUE(session_id, household_key)
+            )""",
+            ["CREATE INDEX IF NOT EXISTS idx_households_session_surname ON households(session_id, surname)"],
+        ),
+        "intimate_events": (
+            """CREATE TABLE intimate_events__new (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id          INTEGER NOT NULL,
+                character_id        TEXT NOT NULL,
+                partner_id          TEXT,
+                partner_name        TEXT NOT NULL,
+                partner_role        TEXT,
+                turn_number         INTEGER DEFAULT 0,
+                event_origin        TEXT DEFAULT 'past_history',
+                act_type            TEXT NOT NULL,
+                direction           TEXT NOT NULL,
+                is_physical         BOOLEAN DEFAULT 1,
+                count               INTEGER DEFAULT 1,
+                climax_count        INTEGER DEFAULT 0,
+                is_secret_affair    BOOLEAN DEFAULT 0,
+                narrative_summary   TEXT,
+                created_at          REAL
+            )""",
+            [
+                "CREATE INDEX IF NOT EXISTS idx_intimate_events_char ON intimate_events(session_id, character_id, is_physical)",
+                "CREATE INDEX IF NOT EXISTS idx_intimate_events_session_turn ON intimate_events(session_id, turn_number)",
+            ],
+        ),
+        "commitments_ledger": (
+            """CREATE TABLE commitments_ledger__new (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id          INTEGER NOT NULL,
+                commitment_key      TEXT NOT NULL DEFAULT '',
+                commitment_type     TEXT NOT NULL,
+                source_entity       TEXT NOT NULL,
+                target_entity       TEXT NOT NULL,
+                participants_json   TEXT NOT NULL DEFAULT '[]',
+                target_location     TEXT DEFAULT '',
+                target_node_id      TEXT DEFAULT '',
+                scheduled_day       INTEGER DEFAULT 1,
+                end_day             INTEGER DEFAULT NULL,
+                start_minute        INTEGER DEFAULT 0,
+                end_minute          INTEGER DEFAULT 1439,
+                deadline_turn       INTEGER DEFAULT NULL,
+                status              TEXT DEFAULT 'active',
+                origin              TEXT DEFAULT 'in_person',
+                is_confidential     INTEGER DEFAULT 0,
+                title               TEXT DEFAULT '',
+                description         TEXT NOT NULL,
+                metadata_json       TEXT DEFAULT '{}',
+                turn_created        INTEGER NOT NULL DEFAULT 0,
+                created_at          REAL DEFAULT 0,
+                updated_at          REAL NOT NULL DEFAULT 0
+            )""",
+            [
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_commitments_session_key ON commitments_ledger(session_id, commitment_key) WHERE commitment_key != ''",
+                "CREATE INDEX IF NOT EXISTS idx_commitments_session ON commitments_ledger(session_id, status)",
+                "CREATE INDEX IF NOT EXISTS idx_commitments_time ON commitments_ledger(session_id, scheduled_day, start_minute, end_minute)",
+                "CREATE INDEX IF NOT EXISTS idx_commitments_node ON commitments_ledger(session_id, target_node_id, status)",
+            ],
+        ),
+        "actor_physical_states": (
+            """CREATE TABLE actor_physical_states__new (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id          INTEGER NOT NULL,
+                actor_name          TEXT NOT NULL,
+                canonical_key       TEXT NOT NULL,
+                actor_type          TEXT DEFAULT 'npc',
+                posture             TEXT DEFAULT 'standing',
+                posture_qualifier   TEXT DEFAULT '',
+                relative_target     TEXT DEFAULT '',
+                relative_relation   TEXT DEFAULT '',
+                holding             TEXT DEFAULT 'Empty hands',
+                stance              TEXT DEFAULT 'Neutral',
+                tether_type         TEXT DEFAULT 'none',
+                tether_partner      TEXT DEFAULT '',
+                composure           TEXT DEFAULT 'composed',
+                is_wet              INTEGER DEFAULT 0,
+                is_bloodied         INTEGER DEFAULT 0,
+                climax_count        INTEGER DEFAULT 0,
+                in_refractory       INTEGER DEFAULT 0,
+                canonical_outfit_json TEXT DEFAULT '{}',
+                created_at          REAL NOT NULL,
+                updated_at          REAL NOT NULL,
+                UNIQUE(session_id, canonical_key)
+            )""",
+            ["CREATE INDEX IF NOT EXISTS idx_actor_phys_lookup ON actor_physical_states(session_id, canonical_key)"],
+        ),
+        "actor_garments": (
+            """CREATE TABLE actor_garments__new (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id          INTEGER NOT NULL,
+                actor_key           TEXT NOT NULL,
+                slot                TEXT NOT NULL,
+                state               TEXT DEFAULT 'worn',
+                item_name           TEXT DEFAULT '',
+                layer_depth         INTEGER DEFAULT 2,
+                updated_at          REAL NOT NULL,
+                UNIQUE(session_id, actor_key, slot)
+            )""",
+            ["CREATE INDEX IF NOT EXISTS idx_actor_garments_actor ON actor_garments(session_id, actor_key)"],
+        ),
+    }
+    rows = conn.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type='table' AND name IN ('households', 'intimate_events', 'commitments_ledger', 'actor_physical_states', 'actor_garments')"
+    ).fetchall()
+    to_rebuild = [r["name"] for r in rows if r["sql"] and "references sessions" in r["sql"].lower()]
+    if not to_rebuild:
+        return
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        for tbl in to_rebuild:
+            ddl, idx_sqls = target_ddls[tbl]
+            conn.execute(f"DROP TABLE IF EXISTS {tbl}__new")
+            conn.execute(ddl)
+            old_cols = {r[1] for r in conn.execute(f"PRAGMA table_info({tbl})").fetchall()}
+            new_cols = [r[1] for r in conn.execute(f"PRAGMA table_info({tbl}__new)").fetchall() if r[1] in old_cols]
+            col_list = ", ".join(new_cols)
+            conn.execute(f"INSERT INTO {tbl}__new ({col_list}) SELECT {col_list} FROM {tbl}")
+            conn.execute(f"DROP TABLE {tbl}")
+            conn.execute(f"ALTER TABLE {tbl}__new RENAME TO {tbl}")
+            for idx_sql in idx_sqls:
+                conn.execute(idx_sql)
+        conn.commit()
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _is_legacy_player_key_val(val: str) -> bool:
+    v = str(val or "").strip().lower()
+    return v in ("player", "you") or v.startswith("player:") or v.startswith("player_")
+
+
+def _migrate_clean_cutover_v30(conn: sqlite3.Connection) -> None:
+    """One-time startup normalization retiring runtime legacy shims and key aliases."""
+    import json
+    import re
+    import time
+
+    # 1. Backfill any remaining phone_appointments into commitments_ledger
+    _migrate_phone_appointments_to_commitments(conn)
+
+    # 2. Backfill commitments_ledger.end_day & deduplicate commitment_key before unique index
+    conn.execute(
+        """UPDATE commitments_ledger
+           SET end_day = CASE WHEN end_minute < start_minute THEN scheduled_day + 1 ELSE scheduled_day END
+           WHERE end_day IS NULL"""
+    )
+    conn.execute(
+        """DELETE FROM commitments_ledger
+           WHERE commitment_key != ''
+             AND id NOT IN (
+                 SELECT MAX(id) FROM commitments_ledger
+                 WHERE commitment_key != ''
+                 GROUP BY session_id, commitment_key
+             )"""
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_commitments_session_key "
+        "ON commitments_ledger(session_id, commitment_key) WHERE commitment_key != ''"
+    )
+
+    # 3. Canonicalize player keys in commitments_ledger
+    conn.execute(
+        "UPDATE commitments_ledger SET source_entity = 'player' "
+        "WHERE LOWER(source_entity) IN ('you') OR LOWER(source_entity) LIKE 'player:%' OR LOWER(source_entity) LIKE 'player_%'"
+    )
+    conn.execute(
+        "UPDATE commitments_ledger SET target_entity = 'player' "
+        "WHERE LOWER(target_entity) IN ('you') OR LOWER(target_entity) LIKE 'player:%' OR LOWER(target_entity) LIKE 'player_%'"
+    )
+
+    # 4. Canonicalize player keys in social_persons (merge player:* / player_* into 'player')
+    sp_rows = conn.execute(
+        "SELECT id, session_id, person_key, display_name FROM social_persons "
+        "WHERE LOWER(person_key) IN ('player', 'you') OR LOWER(person_key) LIKE 'player:%' OR LOWER(person_key) LIKE 'player_%'"
+    ).fetchall()
+    by_sess: dict[int, list[dict]] = {}
+    for r in sp_rows:
+        by_sess.setdefault(int(r["session_id"]), []).append(dict(r))
+    now = time.time()
+    for sid, plist in by_sess.items():
+        best_display = "Player"
+        for item in plist:
+            dn = str(item.get("display_name") or "").strip()
+            if dn and not _is_legacy_player_key_val(dn):
+                best_display = dn
+                break
+        if best_display == "Player":
+            char_row = conn.execute(
+                "SELECT c.name FROM characters c JOIN sessions s ON (s.character_id = c.id OR c.active_session_id = s.id) WHERE s.id = ? LIMIT 1",
+                (sid,),
+            ).fetchone()
+            if char_row and char_row["name"]:
+                best_display = str(char_row["name"]).strip()
+        conn.execute(
+            "DELETE FROM social_persons WHERE session_id = ? AND person_key != 'player' "
+            "AND (LOWER(person_key) IN ('you') OR LOWER(person_key) LIKE 'player:%' OR LOWER(person_key) LIKE 'player_%')",
+            (sid,),
+        )
+        conn.execute(
+            """INSERT INTO social_persons (session_id, person_key, display_name, origin, created_at, updated_at)
+               VALUES (?, 'player', ?, 'player', ?, ?)
+               ON CONFLICT(session_id, person_key) DO UPDATE SET display_name = excluded.display_name, updated_at = excluded.updated_at""",
+            (sid, best_display, now, now),
+        )
+
+    # 5. Canonicalize player keys in social_ties (rewrite & deduplicate active ties)
+    tie_rows = conn.execute(
+        "SELECT * FROM social_ties "
+        "WHERE LOWER(person_a_key) IN ('you') OR LOWER(person_a_key) LIKE 'player:%' OR LOWER(person_a_key) LIKE 'player_%' "
+        "   OR LOWER(person_b_key) IN ('you') OR LOWER(person_b_key) LIKE 'player:%' OR LOWER(person_b_key) LIKE 'player_%'"
+    ).fetchall()
+    for tr in tie_rows:
+        td = dict(tr)
+        tid = td["id"]
+        sid = td["session_id"]
+        ak = "player" if _is_legacy_player_key_val(td["person_a_key"]) else td["person_a_key"]
+        bk = "player" if _is_legacy_player_key_val(td["person_b_key"]) else td["person_b_key"]
+        if ak == bk:
+            conn.execute("DELETE FROM social_ties WHERE id = ?", (tid,))
+            continue
+        if not td.get("is_directed") and ak > bk:
+            ak, bk = bk, ak
+        if td.get("status") == "active":
+            dup = conn.execute(
+                "SELECT id FROM social_ties WHERE session_id = ? AND person_a_key = ? AND person_b_key = ? AND tie_type = ? AND status = 'active' AND id != ?",
+                (sid, ak, bk, td["tie_type"], tid),
+            ).fetchone()
+            if dup:
+                conn.execute("DELETE FROM social_ties WHERE id = ?", (tid,))
+                continue
+        conn.execute(
+            "UPDATE social_ties SET person_a_key = ?, person_b_key = ? WHERE id = ?",
+            (ak, bk, tid),
+        )
+
+    # 6. Canonicalize intimate_events player & numeric contact IDs
+    conn.execute(
+        "UPDATE intimate_events SET partner_id = 'player' "
+        "WHERE partner_id IN ('0', 'you') OR LOWER(partner_id) LIKE 'player:%' OR LOWER(partner_id) LIKE 'player_%'"
+    )
+    ie_rows = conn.execute("SELECT id, session_id, character_id, partner_id FROM intimate_events").fetchall()
+    for ier in ie_rows:
+        cid_str = str(ier["character_id"] or "")
+        pid_str = str(ier["partner_id"] or "")
+        new_cid = cid_str
+        new_pid = pid_str
+        if cid_str.isdigit():
+            crow = conn.execute("SELECT npc_id FROM contacts WHERE session_id = ? AND id = ?", (ier["session_id"], int(cid_str))).fetchone()
+            if crow and crow["npc_id"]:
+                new_cid = crow["npc_id"]
+        if pid_str.isdigit() and pid_str != "0":
+            prow = conn.execute("SELECT npc_id FROM contacts WHERE session_id = ? AND id = ?", (ier["session_id"], int(pid_str))).fetchone()
+            if prow and prow["npc_id"]:
+                new_pid = prow["npc_id"]
+        if new_cid != cid_str or new_pid != pid_str:
+            conn.execute("UPDATE intimate_events SET character_id = ?, partner_id = ? WHERE id = ?", (new_cid, new_pid, ier["id"]))
+
+    # 7. Populate contacts.household_role accurately using full name matching
+    hh_contacts = conn.execute(
+        "SELECT c.id, c.name, h.father_json, h.mother_json FROM contacts c JOIN households h ON c.household_id = h.id"
+    ).fetchall()
+    for hc in hh_contacts:
+        cname = re.sub(r"\s*\(née\s+[^)]+\)", "", str(hc["name"] or ""), flags=re.IGNORECASE).strip().lower()
+        role_val = "child"
+        try:
+            f_obj = json.loads(hc["father_json"] or "{}")
+            m_obj = json.loads(hc["mother_json"] or "{}")
+            fname = re.sub(r"\s*\(née\s+[^)]+\)", "", str(f_obj.get("name") or ""), flags=re.IGNORECASE).strip().lower()
+            mname = re.sub(r"\s*\(née\s+[^)]+\)", "", str(m_obj.get("name") or ""), flags=re.IGNORECASE).strip().lower()
+            if fname and cname == fname:
+                role_val = "father"
+            elif mname and cname == mname:
+                role_val = "mother"
+        except Exception:
+            pass
+        conn.execute("UPDATE contacts SET household_role = ? WHERE id = ?", (role_val, hc["id"]))
+
+    # 8. Migrate any remaining actor state from sessions.physical_state_json into actor_physical_states/actor_garments
+    # and strip legacy "actors" key from sessions.physical_state_json (keeping only room-level scene metadata)
+    try:
+        import mechanics.social.physical_state as ps
+        sess_rows = conn.execute(
+            "SELECT id, physical_state_json FROM sessions WHERE physical_state_json IS NOT NULL AND physical_state_json != '' AND physical_state_json != '{}'"
+        ).fetchall()
+        for sr in sess_rows:
+            sid = int(sr["id"])
+            try:
+                p_data = json.loads(sr["physical_state_json"])
+            except Exception:
+                continue
+            if not isinstance(p_data, dict):
+                continue
+            if p_data.get("actors"):
+                cnt_r = conn.execute("SELECT COUNT(*) FROM actor_physical_states WHERE session_id = ?", (sid,)).fetchone()
+                if not cnt_r or cnt_r[0] == 0:
+                    ps.sync_state_dict_to_db(sid, p_data, conn=conn)
+                scene_meta = {k: v for k, v in p_data.items() if k != "actors"}
+                conn.execute(
+                    "UPDATE sessions SET physical_state_json = ? WHERE id = ?",
+                    (json.dumps(scene_meta), sid),
+                )
+    except Exception:
+        pass
 
 
 def _migrate_phone_appointments_to_commitments(conn: sqlite3.Connection) -> int:
@@ -1238,6 +1629,8 @@ def _migrate_phone_appointments_to_commitments(conn: sqlite3.Connection) -> int:
     tbl = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='phone_appointments'").fetchone()
     if not tbl:
         return 0
+    cols = {r[1] for r in cursor.execute("PRAGMA table_info(commitments_ledger)").fetchall()}
+    has_end_day = "end_day" in cols
     rows = cursor.execute("SELECT * FROM phone_appointments").fetchall()
     migrated = 0
     now = time.time()
@@ -1252,7 +1645,7 @@ def _migrate_phone_appointments_to_commitments(conn: sqlite3.Connection) -> int:
         expiry_min = d.get("expiry_minute", 0) or (created_min + 45 if created_min else 1439)
         created_at = d.get("created_at") or now
         status = d.get("status", "pending")
-        if status == "stood_up":
+        if status in ("stood_up", "missed"):
             status = "flaked"
 
         c_key = f"rendezvous_{sess_id}_{npc_id}_{int(created_at)}"
@@ -1272,26 +1665,46 @@ def _migrate_phone_appointments_to_commitments(conn: sqlite3.Connection) -> int:
             "legacy_phone_appt_id": d.get("id"),
         }
         day = (created_min // 1440) + 1 if created_min > 0 else 1
+        end_day = (expiry_min // 1440) + 1 if expiry_min > 0 else day
         start_m = created_min % 1440 if created_min > 0 else 0
         end_m = expiry_min % 1440 if expiry_min > 0 else 1439
+        if end_m < start_m and end_day <= day:
+            end_day = day + 1
         title = f"Meetup with {npc_name}"
         desc = d.get("topic") or f"Rendezvous at {loc}"
 
-        cursor.execute(
-            """INSERT INTO commitments_ledger (
-                session_id, commitment_key, commitment_type, source_entity, target_entity,
-                participants_json, target_location, target_node_id, scheduled_day,
-                start_minute, end_minute, deadline_turn, status, origin,
-                is_confidential, title, description, metadata_json, turn_created,
-                created_at, updated_at
-            ) VALUES (?, ?, 'rendezvous', 'player', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
-            (
-                sess_id, c_key, npc_id, json.dumps(participants), loc, node_id,
-                day, start_m, end_m, status, d.get("origin") or "phone_dm",
-                d.get("is_confidential", 0), title, desc, json.dumps(meta),
-                created_at, created_at
+        if has_end_day:
+            cursor.execute(
+                """INSERT INTO commitments_ledger (
+                    session_id, commitment_key, commitment_type, source_entity, target_entity,
+                    participants_json, target_location, target_node_id, scheduled_day, end_day,
+                    start_minute, end_minute, deadline_turn, status, origin,
+                    is_confidential, title, description, metadata_json, turn_created,
+                    created_at, updated_at
+                ) VALUES (?, ?, 'rendezvous', 'player', ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+                (
+                    sess_id, c_key, npc_id, json.dumps(participants), loc, node_id,
+                    day, end_day, start_m, end_m, status, d.get("origin") or "phone_dm",
+                    d.get("is_confidential", 0), title, desc, json.dumps(meta),
+                    created_at, created_at
+                )
             )
-        )
+        else:
+            cursor.execute(
+                """INSERT INTO commitments_ledger (
+                    session_id, commitment_key, commitment_type, source_entity, target_entity,
+                    participants_json, target_location, target_node_id, scheduled_day,
+                    start_minute, end_minute, deadline_turn, status, origin,
+                    is_confidential, title, description, metadata_json, turn_created,
+                    created_at, updated_at
+                ) VALUES (?, ?, 'rendezvous', 'player', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+                (
+                    sess_id, c_key, npc_id, json.dumps(participants), loc, node_id,
+                    day, start_m, end_m, status, d.get("origin") or "phone_dm",
+                    d.get("is_confidential", 0), title, desc, json.dumps(meta),
+                    created_at, created_at
+                )
+            )
         migrated += 1
     return migrated
 
@@ -1678,7 +2091,7 @@ def _sanitize_npcs_list(session_id: int, npcs: list) -> list:
 
 SESSION_CHILD_TABLES = (
     "session_locations", "world_nodes", "world_edges", "lorebook", "school_directory", "contacts", "factions",
-    "quests", "quest_waypoints", "session_clues", "phone_messages",
+    "quests", "quest_waypoints", "session_clues", "phone_messages", "phone_daily_interactions",
     "phone_appointments", "phone_gossip_feed", "commitments_ledger", "session_digests",
     "session_chronicles", "npc_memories", "session_members", "households", "intimate_events",
     "social_persons", "social_ties", "actor_physical_states", "actor_garments"
@@ -1694,7 +2107,7 @@ def acquire_distributed_lock(lock_key: str, owner_id: str, timeout_seconds: int 
     """
     import time
     now = time.time()
-    with get_conn() as conn:
+    with _get_independent_conn() as conn:
         # Clear expired locks safely inside the transaction
         conn.execute("DELETE FROM session_locks WHERE locked_at < ?", (now - timeout_seconds,))
         
@@ -1715,7 +2128,7 @@ def acquire_distributed_lock(lock_key: str, owner_id: str, timeout_seconds: int 
 
 def release_distributed_lock(lock_key: str, owner_id: str):
     """Releases a database-backed distributed lock if we own it."""
-    with get_conn() as conn:
+    with _get_independent_conn() as conn:
         conn.execute("DELETE FROM session_locks WHERE lock_key=? AND locked_by=?", (lock_key, owner_id))
 
 

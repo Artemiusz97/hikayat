@@ -77,14 +77,14 @@ ROMANTIC_CONFESSION_FRAMES = (
     # Relationship Initiation
     re.compile(r'\b(?:pursue|start|begin|enter|build|want|form)\s+(?:a\s+)?(?:romantic\s+|committed\s+|official\s+)?(?:relationship|future|bond|thing|partnership)\b', re.I),
     # Status Shift / Title
-    re.compile(r'\b(?:be|become|make us|ask (?:her|him|them) to be)\s+(?:my|your|his|her|an?\s+)?(?:girlfriend|boyfriend|partner|couple|lovers|more than friends|exclusive|together)\b', re.I),
+    re.compile(r'\b(?:be|become|make us|ask (?:her|him|them) to be)\s+(?:(?:my|your|his|her|an?)\s+)?(?:girlfriend|boyfriend|partner|couple|lovers|more than friends|exclusive|together)\b', re.I),
     # Affection Commitment & Dating
-    re.compile(r'\b(?:take\s+(?:our|things|this|us)\s+to\s+the\s+next\s+level|give\s+(?:us|this)\s+a\s+chance|date\s+(?:each other|officially|exclusively|her|him|you|together)|confess\s+(?:my|his|her)?\s*(?:feelings|love|attraction))\b', re.I),
+    re.compile(r'\b(?:take\s+(?:our|things|this|us)\s+to\s+the\s+next\s+level|give\s+(?:us|this)\s+a\s+chance|date\s+(?:each other|officially|exclusively|her|him|you|me|together)|go\s+out\s+with\s+me|confess\s+(?:my|his|her)?\s*(?:feelings|love|attraction))\b', re.I),
     # Dating Initiation / Official Dating
     re.compile(r'\b(?:start|begin|started|want(?:s)?\s+to\s+start)\s+dating\b', re.I),
     re.compile(r'\b(?:start\s+dating\s+officially|officially\s+start\s+dating|date\s+officially|officially\s+dating|started\s+dating\s+romantically)\b', re.I),
-    # Direct confession of romantic love
-    re.compile(r'\b(?:confess(?:ed|ing)?\s+(?:her|his|my|your|mutual|their)?\s*(?:romantic\s+)?(?:feelings|love)|admit(?:ted|ting)?\s+(?:her|his|my|your|their)?\s*(?:romantic\s+)?(?:feelings|love)|tell\s+(?:her|him|them|you)\s+(?:how\s+(?:i|he|she)\s+feels?|that\s+(?:i|he|she)\s+love\s+(?:her|him|you)))\b', re.I),
+    # Direct confession of romantic love (3rd/2nd person & 1st-person direct speech/DM)
+    re.compile(r'\b(?:confess(?:ed|ing)?\s+(?:her|his|my|your|mutual|their)?\s*(?:romantic\s+)?(?:feelings|love)|admit(?:ted|ting)?\s+(?:her|his|my|your|their)?\s*(?:romantic\s+)?(?:feelings|love)|tell\s+(?:her|him|them|you)\s+(?:how\s+(?:i|he|she)\s+feels?|that\s+(?:i|he|she)\s+love\s+(?:her|him|you))|i\s+(?:really\s+|truly\s+)?love\s+you|i(?:\'m|\s+am)\s+in\s+love\s+with\s+you|i\s+have\s+(?:romantic\s+)?feelings\s+for\s+you)\b', re.I),
     # Romance agreement / official couple
     re.compile(r'\b(?:agreed\s+to\s+date|became\s+a\s+couple|become\s+romantically\s+involved|romantically\s+involved)\b', re.I),
 )
@@ -110,9 +110,11 @@ INTIMATE_INTERCOURSE_RE = re.compile(
     r'have\s+(?:passionate\s+|sweet\s+|gentle\s+|rough\s+|intimate\s+)?(?:sex|intercourse)|'
     r'had\s+(?:passionate\s+|sweet\s+|gentle\s+|rough\s+|intimate\s+)?(?:sex|intercourse)|'
     r'having\s+(?:passionate\s+|sweet\s+|gentle\s+|rough\s+|intimate\s+)?(?:sex|intercourse)|'
-    r'sleep\s+together|slept\s+together|intercourse|sexual\s+intercourse|full\s+intercourse|'
+    r'sleep\s+together|slept\s+together|spend\s+the\s+night\s+together|spent\s+the\s+night\s+together|'
+    r'intercourse|sexual\s+intercourse|full\s+intercourse|'
     r'penetrate\s+(?:her|him)|penetrating\s+(?:her|him)|slide\s+(?:(?:your|his|it)\s+)?(?:inside|into)|'
-    r'thrust\s+(?:inside|into)|thrusting\s+intimately|ride\s+(?:him|his|her)|straddle\s+and\s+ride|'
+    r'thrust(?:ing)?\s+(?:(?:deeply|slowly|hard|gently|firmly)\s+)?(?:inside|into)|thrusting\s+intimately|'
+    r'ride\s+(?:him|his|her)|straddle\s+and\s+ride|'
     r'take\s+(?:her|his)\s+virginity|took\s+(?:her|his)\s+virginity|lose\s+(?:her|his)\s+virginity|'
     r'lost\s+(?:her|his)\s+virginity|fuck\s+(?:her|him)|breed\s+(?:her|him)|creampie|'
     r'enter\s+(?:her|his)\s+(?:warmth|body|pussy))\b',
@@ -126,6 +128,7 @@ ORAL_RECEIVE_RE = re.compile(
     r'taste\s+(?:her|his|their)(?:\s+(?:folds|center|clit|entrance|nectar|body))?|tasting\s+(?:her|his|their)|'
     r'lick\s+(?:her|his|their)\s+(?:center|clit|folds|entrance)|'
     r'licking\s+(?:her|his|their)\s+(?:center|clit|folds|entrance)|'
+    r'tongue\b[^.!?]*\b(?:clitoris|clit|pussy|folds|slit|center|entrance)|'
     r'oral\s+(?:sex\s+)?on\s+(?:her|him|them)|(?:give|giving|gave)\s+head\s+to\s+(?:her|him|them))\b',
     re.I
 )
@@ -133,6 +136,7 @@ ORAL_RECEIVE_RE = re.compile(
 ORAL_GIVE_RE = re.compile(
     r'\b(?:blowjob|blow\s+job|bj|fellatio|take\s+(?:your|his)\s+release|taking\s+(?:your|his)\s+release|'
     r'suck\s+(?:your|his)\s+(?:cock|dick|shaft)|sucking\s+(?:your|his)|mouth\s+suction|'
+    r'(?:cum|release)\b[^.!?]*\b(?:inside\s+her\s+mouth|in\s+her\s+mouth|on\s+her\s+face)|'
     r'swallow\s+(?:his|your)\s+release|swallowing\s+(?:his|your))\b',
     re.I
 )
@@ -283,9 +287,9 @@ from localization import (
 
 DIALOGUE_EXIT_PHRASES = (
     "say goodbye", "take your leave", "part ways", "excuse your", "excuse yourself",
-    "leave the conversation", "end the conversation", "wrap up the chat", "step away",
-    "bid farewell", "head back to class", "return to what you were doing",
-    "walk away", "exit conversation", "farewell"
+    "leave conversation", "leave the conversation", "end conversation", "end the conversation",
+    "wrap up the chat", "step away", "bid farewell", "head back to class",
+    "return to what you were doing", "walk away", "exit conversation", "farewell"
 ) + get_all_dialogue_exit_phrases()
 
 PARTING_REQUEST_RE = re.compile(
@@ -377,11 +381,16 @@ RECRUIT_KEYWORDS = (
     "join your party", "join party", "recruit to party", "recruit into party", "recruit companion",
     "recruit as companion", "join our party", "permanent companion", "recruit",
     "travel with us as companion", "travel with us as a companion", "party member", "join the party",
-    "invite into party", "invite to party"
+    "invite into party", "invite to party",
+    "join your field team", "join your field party", "join your field squad", "onto your field squad", "onto your field team",
+    "join your retinue", "travel with your retinue", "join your band", "travel with your group",
+    "join your group", "run with your team", "join your team", "join your crew", "join your expedition crew",
+    "partner up and join", "team up and join", "team up and travel", "partner up and run", "join forces and travel",
 )
 RECRUIT_DISAMBIGUATION_GUARDS = (
     "club", "committee", "council", "school", "literature", "volunteer", "volunteers",
-    "staff", "employee", "employees", "militia", "army", "cult", "organization"
+    "staff", "employee", "employees", "militia", "army", "cult", "organization",
+    "project", "study group", "homework", "festival"
 )
 
 BOARD_INSPECT_RE = re.compile(
@@ -1284,13 +1293,22 @@ def _extract_target_npc(action_text: str, context: IntentContext) -> str:
 
     # 3. Extract named entities following dialogue verbs (e.g. "Ask Arthur for a quick briefing" -> "Arthur", "Ask Eldrin the Wise" -> "Eldrin the Wise")
     diag_match = re.search(
-        r"(?i:\b(?:ask|speak with|speak to|talk with|talk to|consult with|consult|address|converse with|greet|question|chat with|inquire with|inquire of|say hello to|say hi to|wave to|wave at|wave towards|wave toward)\s+(?:the\s+)?)(?!(?:if|about|for|to|whether|how|why|what|where|when|her|him|them|someone|anyone|everyone)\b)([A-Z][a-zA-Z0-9_\-]+(?:\s+(?:the\s+)?[A-Z][a-zA-Z0-9_\-]+)*)",
+        r"(?i:\b(?:ask|speak with|speak to|talk with|talk to|consult with|consult|address|converse with|greet|question|chat with|inquire with|inquire of|say hello to|say hi to|wave to|wave at|wave towards|wave toward)\s+(?:the\s+)?)(?!(?:if|about|for|to|whether|how|why|what|where|when|her|him|them|someone|anyone|everyone|we|i|you|he|she|they|it)\b)([A-Z][a-zA-Z0-9_\-]+(?:\s+(?:the\s+)?(?!(?:We|I|You|He|She|They|It)\b)[A-Z][a-zA-Z0-9_\-]+)*)",
         action_text
     )
     if diag_match:
         cand = diag_match.group(1).strip()
         from namegen import is_collective_entity_name, is_generic_role_name, is_valid_entity_name
-        if cand and cand.lower() not in _NON_CHARACTER_NOUNS and not is_collective_entity_name(cand) and not is_generic_role_name(cand) and is_valid_entity_name(cand):
+        first_tok = cand.split()[0] if cand else ""
+        if (
+            cand
+            and cand.lower() not in _NON_CHARACTER_NOUNS
+            and first_tok.lower() not in _NON_CHARACTER_NOUNS
+            and not is_collective_entity_name(cand)
+            and not is_collective_entity_name(first_tok)
+            and not is_generic_role_name(cand)
+            and is_valid_entity_name(cand)
+        ):
             return cand
 
     # Extract target from approach + greeting pattern (e.g. "Approach Maya Vance and say hello")
@@ -1306,14 +1324,23 @@ def _extract_target_npc(action_text: str, context: IntentContext) -> str:
 
     # Lowercase regex fallback for user custom actions: "ask arthur for a quick briefing"
     diag_match_lower = re.search(
-        r"(?i:\b(?:ask|speak with|speak to|talk with|talk to|consult with|consult|address|converse with|greet|question|chat with|inquire with|inquire of|say hello to|say hi to|wave to|wave at|wave towards|wave toward)\s+(?:the\s+)?)(?!(?:if|about|for|to|whether|how|why|what|where|when|her|him|them|someone|anyone|everyone)\b)([a-z0-9_\-]+(?:\s+(?:the\s+)?[a-z0-9_\-]+)*?)(?=\s+(?:about|for|regarding|to|if|how|why|what|where|when|whether|on|concerning|with|and|near|while|by|in|at|from|as|before|after|beside|behind)\b|[,\.\?!]|$)",
+        r"(?i:\b(?:ask|speak with|speak to|talk with|talk to|consult with|consult|address|converse with|greet|question|chat with|inquire with|inquire of|say hello to|say hi to|wave to|wave at|wave towards|wave toward)\s+(?:the\s+)?)(?!(?:if|about|for|to|whether|how|why|what|where|when|her|him|them|someone|anyone|everyone|we|i|you|he|she|they|it)\b)([a-z0-9_\-]+(?:\s+(?:the\s+)?(?!(?:we|i|you|he|she|they|it)\b)[a-z0-9_\-]+){0,2}?)(?=\s+(?:about|for|regarding|to|if|how|why|what|where|when|whether|on|concerning|with|and|near|while|by|in|at|from|as|before|after|beside|behind|we|i|you|he|she|they|it|there|here|then|now|who|which|that)\b|[,\.\?!]|$)",
         action_text,
         re.I
     )
     if diag_match_lower:
         cand = diag_match_lower.group(1).strip()
         from namegen import is_collective_entity_name, is_generic_role_name, is_valid_entity_name
-        if cand and cand.lower() not in _NON_CHARACTER_NOUNS and not is_collective_entity_name(cand) and not is_generic_role_name(cand) and is_valid_entity_name(cand):
+        first_tok = cand.split()[0] if cand else ""
+        if (
+            cand
+            and cand.lower() not in _NON_CHARACTER_NOUNS
+            and first_tok.lower() not in _NON_CHARACTER_NOUNS
+            and not is_collective_entity_name(cand)
+            and not is_collective_entity_name(first_tok)
+            and not is_generic_role_name(cand)
+            and is_valid_entity_name(cand)
+        ):
             return cand
 
     # 4. Default to active dialogue partner if set

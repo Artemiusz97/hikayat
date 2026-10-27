@@ -90,17 +90,42 @@ def apply_adventure_loadout(
     from mechanics.combat.items.envelope import serialize_item
     from mechanics.combat.items.weapons import generate_random_equipment as gen_weapon
 
-    from scenario_data import is_non_combat_scenario
+    from scenario_data import is_non_combat_scenario, is_anomalous_incursions_scenario
     is_non_combat = is_non_combat_scenario(scenario)
+    is_anomalous = is_anomalous_incursions_scenario(scenario)
+
+    # 0. Seed 5 Fixed Innate Special Abilities for Anomalous Incursions before equipping gear
+    if is_anomalous:
+        try:
+            from mechanics.combat.spells.kits import get_anomalous_starting_innate_abilities
+            innate_spells = list(get_anomalous_starting_innate_abilities(char_class, scenario, class_description))
+            fresh_char = db.get_character(user_id) or char
+            progress = db.get_skill_progress(fresh_char)
+            progress["innate_spells"] = list(innate_spells)
+            progress["equipped_granted_spells"] = []
+            progress["empowered_granted_spells"] = []
+            db.set_skill_progress(user_id, progress)
+            db.set_learned_spells(user_id, list(innate_spells))
+        except Exception as e:
+            log.warning(f"Failed seeding innate anomalous spells for user {user_id}: {e}")
 
     # 1. Starting items / carried items
     if starting_items:
-        for item_name, item_type, effect, slot_cost in starting_items:
-            if item_type in ("Weapon", "Armor", "Shield"):
+        for raw_entry in starting_items:
+            if isinstance(raw_entry, dict):
+                item_name = str(raw_entry.get("name") or "").strip()
+                item_type = str(raw_entry.get("item_type") or "Potion").strip()
+                effect = str(raw_entry.get("effect") or raw_entry.get("description") or "")
+                slot_cost = int(raw_entry.get("slot_cost", 1) or 1)
+            elif isinstance(raw_entry, (tuple, list)) and len(raw_entry) >= 4:
+                item_name, item_type, effect, slot_cost = raw_entry[0], raw_entry[1], raw_entry[2], int(raw_entry[3])
+            else:
+                continue
+            if not item_name or item_type in ("Weapon", "Armor", "Shield"):
                 continue
             item_id = db.add_item(user_id, item_name, item_type, effect, slot_cost)
             default_slot = cd.DEFAULT_EQUIP_SLOT_FOR_ITEM_TYPE.get(item_type)
-            if default_slot:
+            if default_slot and item_id:
                 db.equip_item(user_id, item_id, default_slot)
 
     # 2. Starting armor / clothing / accessories from gear_map
@@ -114,8 +139,13 @@ def apply_adventure_loadout(
             if is_non_combat and slot in ("Weapon", "Shield", "Armor"):
                 continue
 
-            # If weapon_name was explicitly chosen by the player, let weapon_name take priority
-            if slot == "Weapon" and weapon_name:
+            # Preserve serialized procedural Weapon from preview if present; otherwise let weapon_name take priority
+            has_serialized_weapon = (
+                slot == "Weapon"
+                and isinstance(entry, dict)
+                and str(entry.get("effect") or "").startswith(("[GEAR_JSON]", "[ITEM_JSON]"))
+            )
+            if slot == "Weapon" and weapon_name and not has_serialized_weapon:
                 continue
 
             if isinstance(entry, dict):
@@ -175,11 +205,19 @@ def apply_adventure_loadout(
 
 
     # 3. Starting weapon (utilizing new weapon generation system)
-    if not is_non_combat and (weapon_name or not equipped_weapon):
+    if not is_non_combat and not equipped_weapon and (weapon_name or not equipped_weapon):
         target_w_name = weapon_name or f"{char_class or 'Adventurer'} Starter Weapon"
         w_item = gen_weapon(scenario=scenario, slot="Weapon", tier=3, name=target_w_name)
         weapon_id = db.add_item(user_id, w_item["name"], "Weapon", w_item["effect"], w_item.get("slot_cost", 1))
-        db.equip_item(user_id, weapon_id, "Weapon")
+        if weapon_id:
+            db.equip_item(user_id, weapon_id, "Weapon")
+
+    if is_anomalous:
+        try:
+            from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
+            sync_equipped_anomalous_spells(user_id)
+        except Exception as e:
+            log.warning(f"Failed syncing anomalous spells after loadout for user {user_id}: {e}")
 
     return db.get_character(user_id)
 
@@ -386,11 +424,7 @@ def apply_hp_mp_delta(user_id: int, hp_delta: int = 0, mp_delta: int = 0, gold_d
     # Apply explicit temp HP buffs/drains
     if temp_hp_delta != 0:
         if temp_hp_delta > 0:
-            import config
-            if getattr(config, 'DETERMINISTIC_ECONOMY', True):
-                new_temp_hp = max(current_temp_hp, temp_hp_delta)
-            else:
-                new_temp_hp = max(0, new_temp_hp + temp_hp_delta)
+            new_temp_hp = max(current_temp_hp, temp_hp_delta)
         else:
             new_temp_hp = max(0, new_temp_hp + temp_hp_delta)
         

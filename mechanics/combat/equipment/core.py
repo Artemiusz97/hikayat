@@ -13,7 +13,10 @@ from .metadata import *
 def generate_random_equipment(
     scenario: str = "fantasy",
     slot: str = "Weapon",
-    tier: Optional[int] = None
+    tier: Optional[int] = None,
+    private_agency_bonus: bool = False,
+    force_anomalous: Optional[bool] = None,
+    force_granted_spell: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Generates a procedurally generated item with balanced stats, tags,
@@ -22,7 +25,13 @@ def generate_random_equipment(
     purely cosmetic items with 0 combat stats.
     """
     from scenario_data import is_non_combat_scenario
-    is_non_combat = is_non_combat_scenario(scenario)
+    from mechanics.combat.items.anomalous_gear import (
+        is_anomalous_scenario,
+        choose_anomalous_weapon_archetype,
+        apply_anomalous_incursions_gear_rules,
+    )
+    is_anom_scen = is_anomalous_scenario(scenario)
+    is_non_combat = is_non_combat_scenario(scenario) and not is_anom_scen
     item_tier = tier if tier in (1, 2, 3) else roll_tier()
 
     if is_non_combat:
@@ -103,7 +112,7 @@ def generate_random_equipment(
     scen_affixes = SCENARIO_AFFIXES.get(scen_key, SCENARIO_AFFIXES["fantasy"])
 
     if slot == "Weapon":
-        archetype = random.choice(list(WEAPON_ARCHETYPES.keys()))
+        archetype = choose_anomalous_weapon_archetype() if is_anom_scen else random.choice(list(WEAPON_ARCHETYPES.keys()))
         base_data = WEAPON_ARCHETYPES[archetype]
         item_type = "Weapon"
     elif slot == "Shield":
@@ -347,7 +356,7 @@ def generate_random_equipment(
         metadata["type_dt"] = type_dt
         metadata["tags"].append("Accessory")
 
-    return {
+    res_item = {
         "name": name,
         "item_type": item_type,
         "slot": slot,
@@ -355,6 +364,17 @@ def generate_random_equipment(
         "metadata": metadata,
         "slot_cost": 1
     }
+    if is_anom_scen:
+        res_item = apply_anomalous_incursions_gear_rules(
+            res_item,
+            scenario=scenario,
+            slot=slot,
+            tier=item_tier,
+            private_agency_bonus=private_agency_bonus,
+            force_anomalous=force_anomalous,
+            force_granted_spell=force_granted_spell,
+        )
+    return res_item
 
 
 def format_equipment_card(metadata: Dict[str, Any]) -> str:
@@ -515,12 +535,19 @@ def format_equipment_card(metadata: Dict[str, Any]) -> str:
         lines.append("⚠️ *Two-Handed: Cannot be used with a shield.*")
     elif metadata.get("handedness") == "Versatile":
         lines.append("🔄 *Versatile: +15% Damage Multiplier & +4% Crit when two-handed (no shield).*")
+    granted_sp = metadata.get("granted_spell")
+    if isinstance(granted_sp, dict) and granted_sp.get("name"):
+        lines.append(f"✨ **Grants Ability (While Equipped):** {granted_sp['name']} ({granted_sp.get('mp_cost', 10)} MP)")
 
     return "\n".join(lines)
 
 
 def generate_spellbook_item(spell_id: Optional[str] = None, scenario: str = "fantasy", tier: int = 3) -> dict:
     """Generates a consumable spellbook / grimoire item that teaches a specific or procedurally generated spell."""
+    import scenario_data
+    if scenario_data.is_anomalous_incursions_scenario(scenario):
+        from mechanics.combat.items.consumables.generators import generate_procedural_potion
+        return generate_procedural_potion(tier=tier, genre="anomalous_incursions")
     from mechanics.combat.spells import get_spell, register_spell
     if not spell_id:
         from mechanics.combat.spells import generate_procedural_spellbook_item

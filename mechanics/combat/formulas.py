@@ -385,6 +385,12 @@ def calculate_tactical_damage(
 
         base_dmg = max(6.0, net_after_dt * 0.75 + (attacker_level * 2.2))
 
+        # Modern Combat Stances (Offensive, Defensive, 2H, Dual-Wield, Stealth)
+        if stance in ("offensive", "aggressive"):
+            base_dmg *= 1.20
+        elif stance in ("defensive", "cautious"):
+            base_dmg *= 0.85
+
         # Versatile 2H Stance strike bonus (+15% damage)
         is_versatile_2h = (stance == "2H")
         if is_versatile_2h:

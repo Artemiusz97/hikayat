@@ -33,6 +33,52 @@ def generate_potion_name(genre: str, tier: int, effect_tags: List[str], purpose_
     """Dynamically generates evocative potion names based on genre, tier, and effect combinations."""
     scen = normalize_consumable_scenario(genre)
 
+    # 0. Anomalous Incursions / Urban Paranormal Containment naming
+    if scen == "anomalous_incursions":
+        t3_prefixes = ["Field-Issue", "Standard", "Containment-Grade", "Shrine-Blessed", "Emergency"]
+        t2_prefixes = ["Reinforced", "High-Potency", "Resonance-Tuned", "Consecrated", "Tactical"]
+        t1_prefixes = ["Sovereign-Class", "Zero-Point", "Grand Shrine", "Directorate Prototype", "Apex"]
+        prefix = random.choice(t3_prefixes if tier == 3 else (t2_prefixes if tier == 2 else t1_prefixes))
+
+        if "explosive_fire" in effect_tags or "throwable" in purpose_tags:
+            return f"{prefix} Thermokinetic Ofuda Grenade" if tier <= 2 else f"{prefix} Containment Incendiary Canister"
+        if "corrosive_acid" in effect_tags:
+            return f"{prefix} Bio-Aberration Solvent Ampoule"
+        if "toxic_cloud" in effect_tags:
+            return f"{prefix} Sedative Suppression Aerosol"
+        if "cleanse_all" in effect_tags or "cure_poison" in effect_tags:
+            if tier == 1:
+                return f"{prefix} Class-A Amnestic Purge & Sacred Salt Kit"
+            return f"{prefix} Class-A Amnestic Purge" if random.random() < 0.5 else f"{prefix} Sacred Purging Salt"
+
+        if "healing" in effect_tags and "attack_buff" in effect_tags:
+            return f"{prefix} Combat Adrenaline Autoinjector"
+        if "healing" in effect_tags and "defense_buff" in effect_tags:
+            return f"{prefix} Trauma Medkit & Reality-Anchor Patch"
+        if "healing" in effect_tags and "evasion_buff" in effect_tags:
+            return f"{prefix} Reflex-Overdrive Autoinjector"
+        if "healing" in effect_tags:
+            if tier == 1:
+                return f"{prefix} Trauma Medkit"
+            return f"{prefix} Trauma Medkit" if random.random() < 0.55 else f"{prefix} Adrenaline Autoinjector"
+        if "mana_restore" in effect_tags:
+            return (
+                f"{prefix} Cognitive Stabilizer Ampoule"
+                if random.random() < 0.55
+                else f"{prefix} Spirit-Calming Shrine Incense"
+            )
+        if "attack_buff" in effect_tags:
+            return f"{prefix} Adrenaline Autoinjector"
+        if "defense_buff" in effect_tags:
+            return f"{prefix} Hume-Stabilizer Dermal Patch"
+        if "resistance_buff" in effect_tags:
+            return f"{prefix} Cognitohazard Warding Salts"
+        if "evasion_buff" in effect_tags:
+            return f"{prefix} Phase-Step Stimulant Inhaler"
+        if "charisma_buff" in effect_tags:
+            return f"{prefix} Memetic Composure Spray"
+        return f"{prefix} Cognitive Stabilizer Ampoule"
+
     # 1. Steampunk / Victorian Clockwork naming
     if scen == "steampunk":
         t3_prefixes = ["Standard", "Brass-Capped", "Copper", "Apothecary's", "Diluted", "Aetheric"]
@@ -1194,7 +1240,7 @@ def classify_and_enrich_ad_hoc_item(item_name: str, scenario_key: str = "fantasy
             meta = make_narrative_metadata(meta)
 
         effect_str = build_equipment_effect_str(meta)
-        return {
+        enriched_item = {
             "name": raw_name,
             "item_type": item_type,
             "effect": effect_str,
@@ -1204,6 +1250,19 @@ def classify_and_enrich_ad_hoc_item(item_name: str, scenario_key: str = "fantasy
             "metadata": meta,
             "is_narrative": meta.get("is_narrative", False),
         }
+        try:
+            from mechanics.combat.items.anomalous_gear import is_anomalous_scenario, apply_anomalous_incursions_gear_rules
+            if is_anomalous_scenario(scenario_key):
+                enriched_item = apply_anomalous_incursions_gear_rules(
+                    enriched_item,
+                    scenario=scenario_key,
+                    slot=slot,
+                    tier=tier,
+                    force_anomalous=True if "[anomalous]" in raw_name.lower() else None,
+                )
+        except Exception:
+            pass
+        return enriched_item
 
     # Fallback to general Item
     return {

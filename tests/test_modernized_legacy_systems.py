@@ -130,36 +130,48 @@ class TestModernizedLegacySystems(unittest.TestCase):
         self.assertTrue(any(lb.get("name") == "Classmate Bystander" for lb in left_behind))
 
     def test_06_campaign_goal_pacing(self):
-        # 1. Chapter 1: ceiling is 10%
+        from game_engine.quests import sync_deterministic_campaign_goals
+
         db.set_session_chapter(self.test_session_id, 1)
         test_goals = [{"id": "G_MAIN", "title": "Main Mystery", "progress_pct": 0, "status": "Active"}]
         db.update_session_campaign_goals(self.test_session_id, test_goals)
 
+        # D11: Unverified LLM goal_progress_updates must be ignored
         game_engine.apply_quest_update(
             session_id=self.test_session_id,
             quest_update={"goal_progress_updates": {"G_MAIN": 85}},
             party_user_ids=[self.user_id]
         )
+        self.assertEqual(db.get_session_campaign_goals(self.test_session_id)[0]["progress_pct"], 0)
+
+        db.upsert_quest(
+            session_id=self.test_session_id,
+            quest_id="SQ-CH1",
+            title="Chapter Story Quest",
+            quest_type="Story Quest",
+            objective="Solve the chapter mystery",
+            status="Active",
+            is_story_quest=1,
+            sub_objectives=[
+                {"id": 1, "text": "Lead 1", "completed": True},
+                {"id": 2, "text": "Lead 2", "completed": True},
+            ],
+        )
+
+        # 1. Chapter 1 with 100% chapter sub-objectives: deterministic progress is 10%
+        sync_deterministic_campaign_goals(self.test_session_id)
         updated = db.get_session_campaign_goals(self.test_session_id)
         self.assertEqual(updated[0]["progress_pct"], 10, "Chapter 1 must clamp to 10%")
 
-        # 2. Chapter 5 (Midpoint): ceiling is 50%
+        # 2. Chapter 5 (Midpoint): deterministic progress is 50%
         db.set_session_chapter(self.test_session_id, 5)
-        game_engine.apply_quest_update(
-            session_id=self.test_session_id,
-            quest_update={"goal_progress_updates": {"G_MAIN": 90}},
-            party_user_ids=[self.user_id]
-        )
+        sync_deterministic_campaign_goals(self.test_session_id)
         updated5 = db.get_session_campaign_goals(self.test_session_id)
         self.assertEqual(updated5[0]["progress_pct"], 50, "Chapter 5 must clamp to 50%")
 
-        # 3. Chapter 10 (Grand Finale): allows 100% and completion
+        # 3. Chapter 10 (Grand Finale): reaches 100% and marks Completed
         db.set_session_chapter(self.test_session_id, 10)
-        game_engine.apply_quest_update(
-            session_id=self.test_session_id,
-            quest_update={"goal_progress_updates": {"G_MAIN": 100}},
-            party_user_ids=[self.user_id]
-        )
+        sync_deterministic_campaign_goals(self.test_session_id)
         updated10 = db.get_session_campaign_goals(self.test_session_id)
         self.assertEqual(updated10[0]["progress_pct"], 100, "Chapter 10 must reach 100%")
         self.assertEqual(updated10[0]["status"], "Completed")

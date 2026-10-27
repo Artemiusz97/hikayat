@@ -61,7 +61,13 @@ def safe_print(msg: str = "") -> None:
 
 SUPPORTED_SCENARIOS = [
     "fantasy", "scifi", "cyberpunk", "steampunk",
-    "dark_fantasy", "isekai_fantasy", "highschool", "postapoc"
+    "dark_fantasy", "isekai_fantasy", "high_school_drama", "postapoc",
+    "slice_of_life", "highschool", "nuclear_post_apocalypse", "sci_fi",
+    "anomalous_incursions", "urban_anomalies", "urban_fantasy",
+]
+
+COMBAT_ARCHETYPES = [
+    "balanced", "berserker", "defender", "infiltrator", "chaos_fuzzer"
 ]
 
 
@@ -70,6 +76,7 @@ class SimulationResult:
     """Outcome and telemetry for a single simulated combat encounter."""
     battle_id: int
     scenario: str
+    archetype: str
     level: int
     seed: int
     outcome: str  # "victory", "defeat", "fled", "stalemate", "crash"
@@ -103,6 +110,7 @@ class SimulationReport:
     violations_by_type: Dict[str, int] = field(default_factory=dict)
     failing_seeds: List[Dict[str, Any]] = field(default_factory=list)
     scenario_stats: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    archetype_stats: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     @property
     def win_rate(self) -> float:
@@ -130,6 +138,20 @@ class SimulationReport:
             self.stalemates += 1
         elif res.outcome == "crash":
             self.crashes += 1
+
+        # Track archetype specific stats
+        arch = res.archetype or "balanced"
+        if arch not in self.archetype_stats:
+            self.archetype_stats[arch] = {"total": 0, "wins": 0, "losses": 0, "turns": 0, "crashes": 0}
+        a_stat = self.archetype_stats[arch]
+        a_stat["total"] += 1
+        a_stat["turns"] += res.turns_taken
+        if res.outcome == "victory":
+            a_stat["wins"] += 1
+        elif res.outcome == "defeat":
+            a_stat["losses"] += 1
+        elif res.outcome == "crash":
+            a_stat["crashes"] += 1
 
         # Track scenario specific stats
         scen = res.scenario
@@ -452,7 +474,7 @@ class CombatFuzzer:
 
 
 class CombatantAI:
-    """Heuristic goal-oriented combat decision maker for players and simulated parties."""
+    """Heuristic goal-oriented combat decision maker supporting modern stances & archetypes."""
 
     @staticmethod
     def choose_action(
@@ -462,15 +484,26 @@ class CombatantAI:
         inventory: List[Dict[str, Any]],
         learned_spells: List[str],
         scenario: str,
-        combat_turn: int
+        combat_turn: int,
+        archetype: str = "balanced"
     ) -> Dict[str, Any]:
         """Selects the most tactical, goal-oriented action based on survival and enemy vulnerability."""
         living_enemies = [e for e in enemies if e.get("hp", 0) > 0]
         if not living_enemies:
             return {"char": acting_char, "label": "Stand Guard", "stat": "END", "requirement": 2, "choice_type": "DEFENSIVE_GUARD"}
 
-        # Target selection: prioritize wounded enemies to reduce enemy action economy, or elite/boss
-        target_enemy = min(living_enemies, key=lambda e: (e.get("hp", 100), -e.get("tier_rank", 1)))
+        # Target selection based on combat archetype
+        if archetype == "berserker":
+            target_enemy = min(living_enemies, key=lambda e: (e.get("hp", 100), -e.get("tier_rank", 1)))
+        elif archetype == "defender":
+            target_enemy = max(living_enemies, key=lambda e: (e.get("tier_rank", 1), e.get("hp", 100)))
+        elif archetype == "infiltrator":
+            target_enemy = min(living_enemies, key=lambda e: (e.get("max_hp", 100), e.get("hp", 100)))
+        elif archetype == "chaos_fuzzer":
+            target_enemy = random.choice(living_enemies)
+        else:
+            target_enemy = min(living_enemies, key=lambda e: (e.get("hp", 100), -e.get("tier_rank", 1)))
+
         target_name = target_enemy.get("name", "Enemy")
         target_arch = target_enemy.get("archetype", "Brute")
 
@@ -479,8 +512,26 @@ class CombatantAI:
         curr_mp = acting_char.get("mp", 20)
         hp_ratio = curr_hp / max(1, max_hp)
 
-        # 1. EMERGENCY HEALING: If HP <= 35%, prioritize healing potions or healing spells
-        if hp_ratio <= 0.35:
+        # 0. INFILTRATOR STEALTH AMBUSH STRIKE (Turn 1 or Vanished)
+        if archetype == "infiltrator" and (combat_turn == 1 or acting_char.get("combat_vanished")):
+            return {
+                "char": acting_char,
+                "label": f"Ambush Backstab strike from shadows on {target_name}",
+                "stat": "AGI",
+                "requirement": 5,
+                "mp_cost": 0,
+                "choice_type": "MELEE_SLASHING_PIERCING",
+                "attack_type": "thrust",
+                "stance": "stealth",
+                "is_stealth": True,
+                "is_backstab": True,
+                "target_enemy": target_name,
+                "action_category": "attack"
+            }
+
+        # 1. EMERGENCY HEALING: Archetype-calibrated HP thresholds
+        heal_threshold = 0.20 if archetype == "berserker" else (0.50 if archetype == "defender" else 0.35)
+        if hp_ratio <= heal_threshold:
             # Check consumables for HP restore
             for idx, item in enumerate(inventory):
                 if not item.get("equipped") and (item.get("hp_restore", 0) > 0 or "heal" in item.get("name", "").lower()):
@@ -513,16 +564,18 @@ class CombatantAI:
                             "action_category": "magic"
                         }
 
-        # 2. TELEGRAPHED ATTACK DEFENSE: If enemy is winding up a heavy strike, Guard or Brace
+        # 2. TELEGRAPHED ATTACK DEFENSE: Guard or Brace
         enemy_intent = str(target_enemy.get("intent") or "").lower()
         if any(kw in enemy_intent for kw in ("heavy", "crush", "overcharge", "burst", "massive")):
-            if random.random() < 0.65:
+            guard_chance = 0.0 if archetype == "berserker" else (1.0 if archetype == "defender" else 0.65)
+            if random.random() < guard_chance:
                 return {
                     "char": acting_char,
-                    "label": f"Brace & Guard against {target_name}",
+                    "label": f"Brace & Guard in defensive stance against {target_name}",
                     "stat": "END",
                     "requirement": 5,
                     "mp_cost": 0,
+                    "stance": "defensive",
                     "choice_type": "DEFENSIVE_GUARD",
                     "action_category": "guard"
                 }
@@ -603,30 +656,50 @@ class CombatantAI:
         )
         is_versatile = (w_meta.get("handedness") == "Versatile" and not offhand_item)
 
+        # Resolve combat stance based on archetype and equipment
+        if archetype == "berserker":
+            assigned_stance = "2H" if is_versatile else "offensive"
+        elif archetype == "defender":
+            assigned_stance = "defensive"
+        elif archetype == "infiltrator":
+            assigned_stance = "stealth"
+        elif archetype == "chaos_fuzzer":
+            assigned_stance = random.choice(["offensive", "defensive", "balanced", "stealth", "dual_wield", "2H"])
+        elif is_dual_wield:
+            assigned_stance = "dual_wield"
+        elif is_versatile:
+            assigned_stance = "2H"
+        else:
+            assigned_stance = "balanced"
+
+        req_val = 5
+        if archetype == "chaos_fuzzer" and random.random() < 0.15:
+            req_val = random.choice([0, 1, 99])
+
         if is_dual_wield:
             return {
                 "char": acting_char,
-                "label": f"Dual Flurry strike on {target_name}",
+                "label": f"Dual Flurry strike on {target_name} [{assigned_stance.upper()}]",
                 "stat": "AGI",
-                "requirement": 5,
+                "requirement": req_val,
                 "mp_cost": 0,
                 "choice_type": "MELEE_SLASHING_PIERCING",
                 "attack_type": (w_meta.get("attack_types") or ["slash"])[0],
-                "stance": "dual_wield",
+                "stance": assigned_stance,
                 "dual_wield": True,
                 "target_enemy": target_name,
                 "action_category": "attack"
             }
-        elif is_versatile:
+        elif is_versatile and assigned_stance in ("2H", "offensive"):
             return {
                 "char": acting_char,
-                "label": f"Two-Handed Heavy Cleave on {target_name}",
+                "label": f"Two-Handed Heavy Cleave on {target_name} [{assigned_stance.upper()}]",
                 "stat": "STR",
-                "requirement": 5,
+                "requirement": req_val,
                 "mp_cost": 0,
                 "choice_type": "MELEE_SLASHING_PIERCING",
                 "attack_type": (w_meta.get("attack_types") or ["slash"])[0],
-                "stance": "2H",
+                "stance": assigned_stance,
                 "target_enemy": target_name,
                 "action_category": "attack"
             }
@@ -635,12 +708,13 @@ class CombatantAI:
             stat_used = "PER" if atk_type == "ranged" else ("AGI" if atk_type == "thrust" else "STR")
             return {
                 "char": acting_char,
-                "label": f"Attack {target_name} with {weapon_item.get('name', 'Fists') if weapon_item else 'Bare Fists'}",
+                "label": f"Attack {target_name} with {weapon_item.get('name', 'Fists') if weapon_item else 'Bare Fists'} [{assigned_stance.upper()}]",
                 "stat": stat_used,
-                "requirement": 5,
+                "requirement": req_val,
                 "mp_cost": 0,
                 "choice_type": "MELEE_SLASHING_PIERCING" if atk_type != "blunt" else "MELEE_BLUNT",
                 "attack_type": atk_type,
+                "stance": assigned_stance,
                 "target_enemy": target_name,
                 "action_category": "attack"
             }
@@ -796,7 +870,8 @@ class CombatSimulator:
         party_size: int = 1,
         seed: Optional[int] = None,
         verbose: bool = False,
-        max_turns: int = 40
+        max_turns: int = 40,
+        archetype: str = "balanced"
     ) -> SimulationResult:
         """Executes a single end-to-end combat encounter."""
         if seed is None:
@@ -865,7 +940,8 @@ class CombatSimulator:
                     inventory=inventory,
                     learned_spells=learned_spells,
                     scenario=scenario,
-                    combat_turn=current_turn
+                    combat_turn=current_turn,
+                    archetype=archetype
                 )
 
                 # Skill check resolution
@@ -960,6 +1036,7 @@ class CombatSimulator:
         return SimulationResult(
             battle_id=battle_id,
             scenario=scenario,
+            archetype=archetype,
             level=level,
             seed=seed,
             outcome=outcome,
@@ -986,13 +1063,15 @@ class CombatSimulator:
         party_range: Tuple[int, int] = (1, 4),
         fail_fast: bool = False,
         verbose: bool = False,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
+        archetypes: Optional[List[str]] = None
     ) -> SimulationReport:
         """Executes a batch of randomized simulations across requested scenarios and level ranges."""
         report = SimulationReport()
         if not scenarios:
             scenarios = list(SUPPORTED_SCENARIOS)
 
+        archetype_pool = archetypes or COMBAT_ARCHETYPES
         min_lvl, max_lvl = level_range
         min_party, max_party = party_range
         base_seed = seed if seed is not None else random.randint(100000, 9999999)
@@ -1000,6 +1079,7 @@ class CombatSimulator:
 
         for b_id in range(1, count + 1):
             scen = batch_rng.choice(scenarios)
+            arch = archetype_pool[(b_id - 1) % len(archetype_pool)]
             lvl = batch_rng.randint(min_lvl, max_lvl)
             p_size = batch_rng.randint(min_party, max_party)
             b_seed = batch_rng.randint(100000, 9999999)
@@ -1010,7 +1090,8 @@ class CombatSimulator:
                 level=lvl,
                 party_size=p_size,
                 seed=b_seed,
-                verbose=verbose
+                verbose=verbose,
+                archetype=arch
             )
             report.add_result(res)
 

@@ -32,8 +32,11 @@ from .dm_grounding import (
     is_meetup_reschedule_request,
     is_meetup_confirmation_message,
     resolve_rendezvous_location,
+    evaluate_dm_in_person_gate,
+    build_meetup_candidates_and_hint,
 )
 from .player_dm import generate_player_chat_message
+from .dm_outcomes import handle_dm_over_limit, persist_dm_media_item_and_milestone
 
 from .media_captions import (
     generate_npc_photo_caption,
@@ -108,6 +111,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             return "spicy"
         if intnt in ("intel_rumor", "intel", "rumor"):
             return "rumor"
+        if intnt in ("chat", "custom"):
+            return "chat"
         return None
 
     intent_category = _get_intent_category(intent)
@@ -115,7 +120,11 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
 
     # Check daily limits for capped intents
     is_over_limit = False
-    if intent_category == "flirt":
+    if intent_category == "chat":
+        chat_lim = daily_limits.get("chat") or {"used": 0, "max": 5 if score >= 100 else 3}
+        if int(chat_lim.get("used", 0)) >= int(chat_lim.get("max", 5 if score >= 100 else 3)):
+            is_over_limit = True
+    elif intent_category == "flirt":
         if daily_limits["flirt"]["used"] >= 3:
             is_over_limit = True
     elif intent_category == "meetup":
@@ -138,134 +147,24 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
 
     # Handle Over-Limit Attempts: In-character refusal with escalating badgering penalty
     if is_over_limit:
-        over_count = daily_limits[intent_category].get("over_limit_count", 0) + 1
-        if over_count == 1:
-            affinity_delta = -1 if intent in ("spicy_send", "send_spicy", "nsfw_send") else 0
-        elif over_count == 2:
-            affinity_delta = -2
-        elif over_count == 3:
-            affinity_delta = -4
-        else:
-            affinity_delta = -6
-
-        system_prompt = (
-            f"You are {contact_name}, an NPC contact in a {scen_key} story.\n"
-            f"Role: {role}. Traits: {traits}. Relationship Affinity: {score} ({track.capitalize()} track).\n"
-            f"SITUATION: The player is repeatedly attempting an action ({intent_category}) that has exceeded today's daily limit.\n"
-            f"This is over-limit attempt #{over_count} from the player today.\n"
-            f"Guidelines for Attempt #{over_count}:\n"
-        )
-        if over_count == 1:
-            system_prompt += (
-                "- ATTEMPT #1 (Boundary / Friendly Refusal): Respond in-character by politely or casually declining for today.\n"
-                "- Mention you've shared enough for today, have errands/classes to get to, or let's pick it up tomorrow.\n"
-            )
-        elif over_count == 2:
-            system_prompt += (
-                "- ATTEMPT #2 (Irritated / Annoyed): Express clear annoyance that they are asking or sending again after being declined.\n"
-                "- Remind them firmly to stop pushing it.\n"
-            )
-        else:
-            system_prompt += (
-                f"- ATTEMPT #{over_count} (Severe Badgering / Harassment): Express strong irritation, disgust, or cold disapproval.\n"
-                "- Call them out for relentlessly badgering you and crossing boundaries.\n"
-            )
-        system_prompt += (
-            "Write a short, realistic mobile text reply (1-2 sentences) in natural messaging style.\n"
-            "Respond with ONLY a single valid JSON object matching:\n"
-            '{"reply_text": "string"}'
-        )
-        user_prompt = f"Player ({player_char.get('name', 'Hero')}): {user_message}\nGenerate {contact_name}'s refusal text reply:"
-
-        reply_text = None
-        _is_llm_mocked = hasattr(mechanics.system.phone.call_llm_json, "_mock_name")
-        if _is_llm_mocked:
-            try:
-                res_json = await mechanics.system.phone.call_llm_json(
-                    system_prompt, user_prompt, temperature=0.7,
-                    is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True
-                )
-                reply_text = (res_json.get("reply_text") or "").strip()
-            except Exception as e:
-                log.warning(f"[phone] Failed to generate LLM over-limit refusal: {e}")
-
-        if not reply_text:
-            if intent_category == "flirt":
-                if over_count == 1:
-                    reply_text = "Haha, you're sweet, but let's give the charm a break for today! Let's talk about something else 😊"
-                elif over_count == 2:
-                    reply_text = "Okay, I told you to take it easy on the flirting. It's getting a bit much right now."
-                else:
-                    reply_text = "Are you listening to me at all? Stop trying to flirt with me, I'm seriously getting annoyed."
-            elif intent_category == "meetup":
-                if over_count == 1:
-                    if existing_appointment:
-                        reply_text = f"We already settled our plans for today at {existing_appointment.get('rendezvous_location')}! Let's stick with that for now."
-                    else:
-                        reply_text = "I already told you I can't meet up today! Let's catch up another time."
-                elif over_count == 2:
-                    reply_text = "I told you, I can't keep rearranging or meeting up again today. Stop bugging me about it."
-                else:
-                    reply_text = "Enough already. I'm not changing plans or meeting with you today, drop it."
-            elif intent_category == "photo":
-                if over_count == 1:
-                    reply_text = "That's enough photos for today! My camera is going away before my battery dies haha 📸"
-                elif over_count == 2:
-                    reply_text = "I already told you no more photos today. Please stop asking."
-                else:
-                    reply_text = "Seriously? Stop badgering me for photos. It's really obnoxious."
-            elif intent_category == "spicy":
-                if over_count == 1:
-                    reply_text = "Definitely not sending anything like that anymore today. Let's change the subject."
-                elif over_count == 2:
-                    reply_text = "I said no more spicy stuff today. Stop pushing it, seriously."
-                else:
-                    reply_text = "What is wrong with you? Stop sending or asking for that. You're being genuinely creepy now."
-            elif intent_category == "rumor":
-                if over_count == 1:
-                    reply_text = "That's all the gossip I've got for today! I'm not a 24/7 bulletin board haha 🤫"
-                elif over_count == 2:
-                    reply_text = "I told you I don't have any more rumors. Stop digging."
-                else:
-                    reply_text = "I'm not helping you spread or dig up any more gossip today. Drop it."
-            else:
-                reply_text = "Let's take a break for today."
-
-        db.save_phone_message(session_id, npc_id, sender="player", message=user_message, intent=intent)
-        db.save_phone_message(session_id, npc_id, sender="npc", message=reply_text, intent=intent)
-
-        if affinity_delta != 0:
-            if is_contact_eligible(name=contact_name, role=role, scenario=scen_key):
-                new_score = clamp_score(score + affinity_delta)
-                db.update_contact_score(session_id, npc_id, new_score, character_id=player_char.get("id", 0))
-
-        updated_limits = db.record_phone_daily_interaction(
+        return await handle_dm_over_limit(
             session_id=session_id,
             npc_id=npc_id,
+            contact_name=contact_name,
+            role=role,
+            traits=traits,
+            score=score,
+            track=track,
+            is_romantic=is_romantic,
+            scen_key=scen_key,
+            intent=intent,
+            intent_category=intent_category,
+            daily_limits=daily_limits,
+            existing_appointment=existing_appointment,
+            player_char=player_char,
+            user_message=user_message,
             current_day=current_day,
-            intent=intent_category,
-            outcome="over_limit",
-            is_over_limit=True
         )
-
-        return {
-            "reply_text": reply_text,
-            "affinity_delta": affinity_delta,
-            "rendezvous_location": "",
-            "is_romantic": is_romantic,
-            "intent": intent,
-            "new_score": clamp_score(score + affinity_delta),
-            "digital_item_id": None,
-            "media_type_created": None,
-            "daily_limits": updated_limits,
-            "check_result": {
-                "stat": "CHA",
-                "chance": 0,
-                "tier": "fail",
-                "tier_label": "Over Limit",
-                "succeeded": False
-            }
-        }
 
     # Determine stat to check
     cha_val = player_char.get("cha", 5)
@@ -411,102 +310,19 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
                 f"- You MUST set rendezvous_location to EXACTLY: '{existing_loc}'.\n"
             )
         else:
-            all_locs = db.get_session_locations(session_id)
-            # Filter to public/semi-public places (exclude bedrooms, private rooms, storage etc.)
-            _PRIVATE_KEYWORDS = {"bedroom", "bathroom", "shower", "your room", "storage", "closet", "staff only", "breakroom", "locker room"}
-
-            # Query active quest and bounty waypoints to exclude locations occupied by active objectives
-            active_wps = db.get_all_session_active_waypoints(session_id)
-            from mechanics.world.waypoints import check_location_matches_waypoint
-            quest_occupied_locs = [wp.get("target_location", "") for wp in active_wps if wp.get("target_location")]
-
-            from mechanics.world.world_schedule import (
-                evaluate_world_schedule_node_access,
-                is_campus_node_or_location,
-                is_high_school_setting,
-                is_weekend,
+            known_locations, meetup_location_hint = build_meetup_candidates_and_hint(
+                session_id=session_id,
+                session=session,
+                scen_key=scen_key,
+                curr_day_val=curr_day_val,
+                curr_min_val=curr_min_val,
+                contact=contact,
+                openness=erotic_open,
+                traits=traits_list,
+                is_romantic=is_romantic,
+                is_reschedule_request=is_reschedule_request,
+                existing_appointment=existing_appointment,
             )
-            player_curr_loc = (session.get("current_location") if isinstance(session, dict) else "") or ""
-            safe_min_val = int(curr_min_val or 0) % 1440
-
-            def _is_loc_schedule_accessible(loc_row: dict) -> bool:
-                z_str = str(loc_row.get("zone_name") or "")
-                p_str = str(loc_row.get("primary_name") or "")
-                s_str = str(loc_row.get("sub_name") or "")
-                full_str = f"{z_str} ➔ {p_str} ➔ {s_str}"
-                comb = f"{z_str} {p_str} {s_str}".lower()
-                cat = "academic" if any(k in comb for k in ("campus", "school", "academy", "classroom", "gym", "club", "courtyard", "auditorium", "library", "cafeteria")) else (
-                    "commercial" if any(k in comb for k in ("commercial", "cafe", "café", "arcade", "store", "mall", "shop", "karaoke", "ramen", "restaurant", "bookstore", "boutique")) else "public"
-                )
-                synth_node = {"node_id": s_str or p_str, "name": s_str or p_str, "node_type": "ROOM", "category": cat}
-                synth_parent = {"node_id": p_str, "name": f"{z_str} {p_str}", "node_type": "FACILITY", "category": cat}
-                access = evaluate_world_schedule_node_access(
-                    synth_node, synth_parent, scen_key=scen_key, current_day=curr_day_val, current_minute=curr_min_val
-                )
-                if access.get("schedule_locked"):
-                    return False
-                if is_high_school_setting(scen_key) and not is_weekend(curr_day_val) and (480 <= safe_min_val < 900) and player_curr_loc:
-                    p_on_campus = is_campus_node_or_location(location_str=player_curr_loc, session_id=session_id, scen_key=scen_key)
-                    t_on_campus = is_campus_node_or_location(synth_node, synth_parent, location_str=full_str, session_id=session_id, scen_key=scen_key)
-                    if p_on_campus and not t_on_campus:
-                        return False
-                return True
-
-            public_locs = []
-            for loc in all_locs:
-                loc_label = " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])).lower()
-                if any(pk in loc_label for pk in _PRIVATE_KEYWORDS):
-                    continue
-                if not _is_loc_schedule_accessible(loc):
-                    continue
-                full_loc = f"{loc.get('zone_name', '')} ➔ {loc.get('primary_name', '')} ➔ {loc.get('sub_name', '')}"
-                prim_loc = f"{loc.get('zone_name', '')} -> {loc.get('primary_name', '')}"
-                is_quest_loc = any(
-                    check_location_matches_waypoint(full_loc, ql) or check_location_matches_waypoint(prim_loc, ql) or check_location_matches_waypoint(ql, full_loc)
-                    for ql in quest_occupied_locs
-                )
-                if not is_quest_loc:
-                    public_locs.append(loc)
-
-            # Fallback: if all accessible public locations happen to be occupied by quests, allow any non-private accessible location
-            if not public_locs:
-                public_locs = [
-                    loc for loc in all_locs
-                    if not any(pk in " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])).lower() for pk in _PRIVATE_KEYWORDS)
-                    and _is_loc_schedule_accessible(loc)
-                ]
-            if not public_locs:
-                public_locs = [
-                    loc for loc in all_locs
-                    if not any(pk in " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])).lower() for pk in _PRIVATE_KEYWORDS)
-                ]
-            known_locations = public_locs
-            if public_locs:
-                # Build a compact readable list (primary + sub_name, deduplicated)
-                seen = set()
-                loc_lines = []
-                for loc in public_locs:
-                    primary = loc.get("primary_name", "")
-                    sub = loc.get("sub_name", "")
-                    label = f"{primary}" + (f" ({sub})" if sub else "")
-                    if label not in seen:
-                        seen.add(label)
-                        loc_lines.append(label)
-                meet_term = "Date" if is_romantic else "Meetup"
-                reschedule_header = ""
-                if is_reschedule_request and existing_appointment:
-                    old_loc = existing_appointment.get("rendezvous_location", "previous spot")
-                    reschedule_header = (
-                        f"- RESCHEDULING / LOCATION CHANGE REQUEST: The player is asking to change or relocate the meeting place (previously: '{old_loc}'). "
-                        f"Agree to change the location and pick a suitable new spot (e.g. private, quiet, or requested) from the list below!\n"
-                    )
-                meetup_location_hint = (
-                    reschedule_header
-                    + f"- IMPORTANT — {meet_term} Location: You MUST suggest one of these REAL known locations from the world map. "
-                    f"Do NOT invent fictional place names. Choose one that fits your personality and relationship:\n"
-                    + "\n".join(f"  • {l}" for l in loc_lines[:30])
-                    + "\n- Set rendezvous_location to the EXACT primary name (or 'Primary (Sub)') from the list above.\n"
-                )
 
     p_gender = str(player_char.get("gender") or player_char.get("sex") or "male").strip().lower()
     n_gender = str(basic.get("gender") or basic.get("sex") or "female").strip().lower()
@@ -749,6 +565,16 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             + "- DIRECTIVE: You remember these real shared experiences from your time together in person with the player. If natural or relevant to the conversation topic, you may casually reminisce, reference, or tease them about these moments in your texts!\n"
         )
 
+    dm_gate = evaluate_dm_in_person_gate(
+        session_id=session_id,
+        contact_name=contact_name,
+        track=track,
+        user_message=user_message,
+        intent=intent,
+    )
+    if dm_gate.get("directive"):
+        intent_guidelines += dm_gate["directive"]
+
     system_prompt = (
         f"You are roleplaying as {contact_name}, an NPC contact in a {scen_key} story.\n"
         f"Your Role: {role}. Personality Traits: {traits}. Relationship Affinity: {score} ({track.capitalize()} track).\n"
@@ -839,6 +665,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             affinity_delta = max(3, min(4, int(result.get("affinity_delta", 3))))
         elif intent in ("photo_send", "send_photo"):
             affinity_delta = 2
+        elif intent in ("chat", "custom"):
+            affinity_delta = 5 if score < 50 else 3
         else:
             affinity_delta = max(3, min(5, int(result.get("affinity_delta", 3))))
         rendezvous = result.get("rendezvous_location", "") if intent == "meetup" else ""
@@ -849,6 +677,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             affinity_delta = 2
         elif intent in ("photo_send", "send_photo"):
             affinity_delta = 1
+        elif intent in ("chat", "custom"):
+            affinity_delta = 4 if score < 50 else 2
         else:
             affinity_delta = max(1, min(3, int(result.get("affinity_delta", 1))))
         rendezvous = result.get("rendezvous_location", "") if intent == "meetup" else ""
@@ -876,6 +706,9 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             affinity_delta = min(-1, max(-3, raw_delta if raw_delta < 0 else -2))
         rendezvous = ""
 
+    if dm_gate.get("max_affinity_delta") is not None and affinity_delta > int(dm_gate["max_affinity_delta"]):
+        affinity_delta = int(dm_gate["max_affinity_delta"])
+
     resolved_rendezvous, intent = resolve_rendezvous_location(
         session_id=session_id,
         contact_name=contact_name,
@@ -888,7 +721,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         intent=intent,
         check_succeeded=check_result.succeeded,
         user_message=user_message,
-        history_rows=history_rows
+        history_rows=history_rows,
+        scenario=scen_key,
     )
 
     # Save messages to SQLite
@@ -927,6 +761,25 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             track=track,
             new_memory=flirt_mem
         )
+        try:
+            from mechanics.social.persona.intimacy.ledger import record_intimate_turn_encounter
+            turn_dm = max(1, len((session or {}).get("history") or []))
+            record_intimate_turn_encounter(
+                session_id=session_id,
+                character_id=npc_id,
+                character_name=contact_name,
+                character_gender=str(contact.get("gender") or ""),
+                partner_id="player",
+                partner_name=str(player_char.get("name") or "Player"),
+                milestone_event="dm_flirt",
+                turn_number=turn_dm,
+                day_number=current_day,
+                location="Phone DM",
+                custom_summary=flirt_mem,
+                is_physical_override=False,
+            )
+        except Exception as _dm_led_err:
+            log.warning(f"[phone] Failed to record DM flirt milestone: {_dm_led_err}")
 
     # Update affinity score — guard against ineligible NPCs (teachers, parents, store clerks) slipping through
     if affinity_delta != 0:
@@ -941,68 +794,18 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     digital_item_id = None
     media_type_created = None
     if check_result.succeeded:
-        from mechanics.combat.items import create_digital_media_item
-        media_type = None
-        media_caption = None
-
-        if "[Attached Intimate Video:" in reply_text:
-            media_type = "nsfw_video"
-            media_caption = reply_text.partition("[Attached Intimate Video:")[2].partition("]")[0].strip()
-        elif "[Attached Video:" in reply_text:
-            media_type = "video"
-            media_caption = reply_text.partition("[Attached Video:")[2].partition("]")[0].strip()
-        elif "[Attached Intimate Photo:" in reply_text:
-            media_type = "nsfw_photo"
-            media_caption = reply_text.partition("[Attached Intimate Photo:")[2].partition("]")[0].strip()
-        elif "[Attached Photo:" in reply_text:
-            media_type = "photo"
-            media_caption = reply_text.partition("[Attached Photo:")[2].partition("]")[0].strip()
-        elif intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy"):
-            media_type = "nsfw_video" if "video" in intent else "nsfw_photo"
-            media_caption = reply_text
-        elif intent in ("photo", "video", "photo_ask", "ask_photo"):
-            media_type = "video" if "video" in intent else "photo"
-            media_caption = reply_text
-
-        if media_type and media_caption:
-            p_uid = player_char.get("user_id") or session.get("user_id") or session.get("owner_id")
-            if p_uid:
-                digital_item_id = create_digital_media_item(
-                    user_id=p_uid,
-                    contact_name=contact_name,
-                    media_type=media_type,
-                    caption=media_caption,
-                    tags=["misc", "digital"]
-                )
-                media_type_created = media_type
-
-            # Record caption-aware persistent milestone memory
-            clean_cap = media_caption.strip().lstrip("[").rstrip("]").strip()
-            for prefix in [
-                "Attached Intimate Video:", "Attached Video:",
-                "Attached Intimate Photo:", "Attached Photo:",
-                "Intimate Video:", "Video:", "Intimate Photo:", "Photo:"
-            ]:
-                if clean_cap.startswith(prefix):
-                    clean_cap = clean_cap[len(prefix):].strip()
-
-            if media_type in ("nsfw_video", "intimate_video"):
-                media_mem = f"Exchanged intimate video via DM: {contact_name} ({clean_cap})"
-            elif media_type in ("nsfw_photo", "intimate_photo"):
-                media_mem = f"Exchanged intimate photo via DM: {contact_name} ({clean_cap})"
-            elif media_type == "video":
-                media_mem = f"Exchanged video clip via DM: {contact_name} ({clean_cap})"
-            else:
-                media_mem = f"Exchanged casual photo via DM: {contact_name} ({clean_cap})"
-
-            db.upsert_contact(
-                session_id=session_id,
-                character_id=player_char.get("id", 0),
-                npc_id=npc_id,
-                name=contact_name,
-                track=track,
-                new_memory=media_mem
-            )
+        digital_item_id, media_type_created = persist_dm_media_item_and_milestone(
+            session=session,
+            session_id=session_id,
+            npc_id=npc_id,
+            contact=contact,
+            contact_name=contact_name,
+            track=track,
+            player_char=player_char,
+            reply_text=reply_text,
+            intent=intent,
+            current_day=current_day,
+        )
 
     if intent_category:
         meta = {}

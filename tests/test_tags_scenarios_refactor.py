@@ -38,10 +38,12 @@ class TestTagsScenariosRefactor(unittest.TestCase):
             "slice_of_life",
             "high_school",
             "post_apocalypse",
+            "urban_fantasy",
             "nsfw",
             "furry",
             "non_combat",
             "gore",
+            "horror",
         }
         self.assertEqual(set(genres.keys()), expected_tags)
         
@@ -54,9 +56,10 @@ class TestTagsScenariosRefactor(unittest.TestCase):
         # Verify category separation
         expected_genres = {
             "fantasy", "space", "cyberpunk", "steampunk",
-            "isekai", "slice_of_life", "high_school", "post_apocalypse"
+            "isekai", "slice_of_life", "high_school", "post_apocalypse",
+            "urban_fantasy",
         }
-        expected_modifiers = {"grimdark", "furry", "nsfw", "non_combat", "gore"}
+        expected_modifiers = {"grimdark", "furry", "nsfw", "non_combat", "gore", "horror"}
 
         for k, v in genres.items():
             self.assertIn("category", v, f"Genre {k} missing category")
@@ -69,11 +72,12 @@ class TestTagsScenariosRefactor(unittest.TestCase):
 
         # Verify all genre keys appear before all modifier keys
         ordered_keys = list(genres.keys())
-        self.assertEqual(ordered_keys[:8], [
+        self.assertEqual(ordered_keys[:9], [
             "fantasy", "space", "cyberpunk", "steampunk",
-            "isekai", "slice_of_life", "high_school", "post_apocalypse"
+            "isekai", "slice_of_life", "high_school", "post_apocalypse",
+            "urban_fantasy",
         ])
-        self.assertEqual(set(ordered_keys[8:]), expected_modifiers)
+        self.assertEqual(set(ordered_keys[9:]), expected_modifiers)
 
         self.assertEqual(set(PRIMARY_SETTING_TAGS), expected_genres)
         self.assertEqual(set(MODIFIER_TAGS), expected_modifiers)
@@ -173,13 +177,19 @@ class TestTagsScenariosRefactor(unittest.TestCase):
         from mechanics.combat.items.shields import generate_random_equipment as gen_shield
         from mechanics.combat.enemies import generate_scenario_enemy
 
-        # 1. dark_fantasy retains its 3 gothic hooks while grimdark modifier does not override fantasy hooks
+        # 1. dark_fantasy retains its 6 gothic hooks while grimdark modifier does not override fantasy hooks
         df_hook = get_dynamic_starting_hook("dark_fantasy")
-        self.assertTrue(any(k in df_hook["hook_text"] for k in ("fortified enclave", "brutal ambush", "desecrated crypt")))
+        self.assertTrue(any(k in df_hook["hook_text"] for k in (
+            "fortified enclave", "plague-shadowed cathedral town", "brutal ambush",
+            "belfry of a half-collapsed cathedral", "desecrated crypt", "stagnant black bog",
+        )))
 
         # 2. slice_of_life has its own starting hooks, locations, combat + non-combat support
         sol_hook = get_dynamic_starting_hook("slice_of_life")
-        self.assertTrue(any(k in sol_hook["hook_text"] for k in ("coffee roastery", "jazz bar", "harbor warehouse pier")))
+        self.assertTrue(any(k in sol_hook["hook_text"] for k in (
+            "coffee roastery", "river greenway", "jazz bar",
+            "train station platform", "harbor warehouse pier", "antique curiosity shop",
+        )))
         self.assertFalse(is_non_combat_scenario("slice_of_life"))
         self.assertTrue(is_non_combat_scenario("custom_combinator_slice_of_life_non_combat"))
 

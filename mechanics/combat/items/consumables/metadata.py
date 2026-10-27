@@ -188,7 +188,15 @@ def create_digital_media_item(
 
 def normalize_consumable_scenario(genre: str) -> str:
     """Normalizes genre/scenario string to canonical consumable genre key."""
+    try:
+        from scenario_data import is_anomalous_incursions_scenario
+        if is_anomalous_incursions_scenario(genre):
+            return "anomalous_incursions"
+    except Exception:
+        pass
     scen = str(genre or "fantasy").lower().strip()
+    if any(w in scen for w in ("anomalous_incursions", "urban_anomalies")):
+        return "anomalous_incursions"
     if any(w in scen for w in ("steampunk", "clockwork", "victorian", "aether", "boiler")):
         return "steampunk"
     if any(w in scen for w in ("apocalypse", "apocalyptic", "wasteland", "fallout", "rad", "nuclear")):
@@ -264,13 +272,17 @@ def is_giftable_item(item: Dict[str, Any]) -> bool:
     item_type = (item.get("item_type") or "").lower()
     name = (item.get("name") or "").lower()
 
-    if item_type in ("gift", "food", "drink", "consumable", "accessory", "clothing", "top", "bottom", "shoes", "gloves", "item", "novelty"):
+    if item_type in (
+        "gift", "food", "drink", "consumable", "accessory", "clothing",
+        "top", "bottom", "outerwear", "lingerie", "shoes", "gloves", "head", "headwear", "item", "novelty"
+    ):
         return True
     gift_keywords = [
         "parfait", "latte", "coffee", "tea", "boba", "cider", "ale", "wine", "soda", "ramune", "smoothie",
         "cake", "bento", "stew", "roast", "apple", "bread",
-        "plushie", "charm", "keychain", "music box", "scarf", "ribbon", "perfume", "lingerie",
-        "chocolate", "snack", "candy", "flower", "bouquet", "gift", "pendant", "ring", "amulet"
+        "plushie", "charm", "keychain", "music box", "scarf", "ribbon", "perfume", "lingerie", "corset",
+        "chocolate", "snack", "candy", "flower", "bouquet", "gift", "pendant", "ring", "amulet",
+        "locket", "bracelet", "necklace", "watch", "hairpin", "blouse", "sweater", "cardigan", "dress", "skirt"
     ]
     return any(k in name for k in gift_keywords)
 

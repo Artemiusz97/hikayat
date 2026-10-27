@@ -82,10 +82,11 @@ def _create_mock_session(session_id: int = 100, current_minute: int = 480, curre
 
 def test_migration_21_and_state_json_crud():
     sess = _create_mock_session(101)
-    # Check default state_json
+    # Check default state_json (plain facility empty dict; homeroom carries grade_exclusive tag)
+    assert db.get_world_node_state(101, "loc_library") == {}
     st = db.get_world_node_state(101, "loc_homeroom")
     assert isinstance(st, dict)
-    assert st == {}
+    assert st == {"grade_exclusive": "Junior_Homeroom"}
 
     # Update state_json
     upd = db.update_world_node_state(101, "loc_homeroom", {"custom_prop": "chalkboard", "unlocked_until_day": 2})
@@ -212,14 +213,15 @@ def test_edge_case_2_role_authority_and_illicit_rendezvous():
     assert auth_res["unlocked_by"] == "companion_authority"
 
     # 2. Confirmed appointment at locked rooftop triggers Illicit Rendezvous
-    with db.get_conn() as conn:
-        conn.execute(
-            """INSERT INTO phone_appointments (
-                   session_id, npc_id, npc_name, rendezvous_location, target_node_id,
-                   topic, status, created_minute, expiry_minute, created_at
-               ) VALUES (?, 'npc_hana', 'Hana', 'School Rooftop', 'loc_rooftop', 'Meetup', 'pending', 600, 660, ?)""",
-            (105, time.time())
-        )
+    db.save_phone_appointment(
+        105,
+        "npc_hana",
+        "Hana",
+        "School Rooftop",
+        target_node_id="loc_rooftop",
+        topic="Meetup",
+        expiry_minutes=60,
+    )
     rend_res = evaluate_node_access_gate(
         105, "loc_rooftop", sess,
         actions=[{"label": "Head to the rooftop to meet Hana"}]
@@ -341,17 +343,22 @@ def test_world_map_payload_enrichment():
     payload = _build_locations_payload(111, "high_school_drama", sess["current_location"], "Alex")
     assert "zones" in payload
 
-    # Find arts zone and fine arts studio primary location
-    arts_zone = next((z for z in payload["zones"] if "Arts" in z.get("zone_name", "")), None)
-    assert arts_zone is not None
-    arts_studio = next((p for p in arts_zone.get("primary_locations", []) if "Fine Arts" in p.get("name", "")), None)
-    assert arts_studio is not None
+    # Find unified campus zone and cultural arts wing / fine arts studio room
+    arts_wing = next(
+        (p for z in payload["zones"] for p in z.get("primary_locations", []) if "Arts" in p.get("name", "")),
+        None
+    )
+    assert arts_wing is not None
 
-    # Verify access badge, memory line, and occupancy
-    assert arts_studio.get("access_badge") in ("Open", "Curfew (22:00–06:00)", "Unlocked", "Restricted")
-    assert "portrait sketch" in arts_studio.get("scene_residue", "")
-    assert "known_npcs_here" in arts_studio
-    assert "unmet_activity_count" in arts_studio
+    # Verify access badge, memory line, and occupancy on wing and room detail
+    assert arts_wing.get("access_badge") in ("Open", "Curfew (22:00–06:00)", "Unlocked", "Restricted")
+    assert "portrait sketch" in arts_wing.get("scene_residue", "")
+    assert "known_npcs_here" in arts_wing
+    assert "unmet_activity_count" in arts_wing
+    arts_studio_room = next((r for r in arts_wing.get("sub_location_details", []) if "Art" in r.get("name", "")), None)
+    assert arts_studio_room is not None
+    assert "portrait sketch" in arts_studio_room.get("scene_residue", "")
+    assert len(arts_studio_room.get("props", [])) >= 2
 
 
 def test_phase2_choices_compatibility():
@@ -386,11 +393,12 @@ def test_multi_turn_threshold_lifecycle_and_turn_back():
     sess["current_location"] = "Main Academy Campus ➔ Central Courtyard ➔ Courtyard Fountain"
     sess["current_node_id"] = "loc_courtyard"
 
-    # Turn 1: Travel to locked staff room halts at threshold outside
+    # Turn 1: Travel to locked staff room halts at canonical parent node with threshold focal_point
     actions_t1 = [{"label": "Walk into the Teachers' Staff Room"}]
     stage_t1 = compute_pre_turn_stage(sess, actions_t1)
     assert stage_t1["access_gate"]["gated"] is True
-    assert "Outside the Locked Entrance" in stage_t1["effective_location"]
+    assert "Teachers' Staff Room" not in stage_t1["effective_location"]
+    assert "Outside the Locked Entrance" in (stage_t1.get("focal_point") or "")
 
     # Turn 2: Breach attempt while outside locked entrance evaluates access gate
     sess["current_location"] = stage_t1["effective_location"]
@@ -399,7 +407,7 @@ def test_multi_turn_threshold_lifecycle_and_turn_back():
     stage_t2 = compute_pre_turn_stage(sess, success_action)
     # Gate unlocks, effective location transitions inside!
     assert stage_t2["access_gate"]["gated"] is False
-    assert "Outside the Locked Entrance" not in stage_t2["effective_location"]
+    assert "Teachers' Staff Room" in stage_t2["effective_location"]
 
     # Turn back from locked location routes to parent corridor/hall
     dest = extract_movement_destination("Turn back from Teachers' Staff Room", 120, current_zone="Main Academy Campus", scen_key="high_school_drama")

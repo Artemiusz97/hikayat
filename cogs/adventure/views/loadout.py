@@ -557,6 +557,20 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
             scenario=cfg["scenario"],
             result_display=cfg["result_display"]
         )
+        import scenario_data
+        if scenario_data.is_anomalous_incursions_scenario(cfg.get("scenario", "")):
+            try:
+                from mechanics.world.anomalous_events import bootstrap_anomalous_session
+                char_row = db.get_character(self.user_id) or {}
+                bootstrap_anomalous_session(
+                    session_id=session_id,
+                    scenario_key=cfg["scenario"],
+                    user_id=self.user_id,
+                    starting_faction=cfg.get("starting_faction", "public_agency"),
+                    char_name=char_row.get("name", ""),
+                )
+            except Exception:
+                pass
         session = db.get_session(session_id)
         await self.cog.launch_opening_scene(interaction, session, use_followup=True)
 

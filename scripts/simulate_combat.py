@@ -22,7 +22,7 @@ from tests.simulators.combat import CombatSimulator, safe_print, SUPPORTED_SCENA
 
 def main():
     parser = argparse.ArgumentParser(description="Hikayat Tactical Combat Simulator & Fuzzing Harness")
-    parser.add_argument("--battles", "-n", type=int, default=100, help="Number of battles to simulate (default: 100)")
+    parser.add_argument("--battles", "--count", "--simulations", "-n", type=int, default=100, dest="battles", help="Number of battles to simulate (default: 100)")
     parser.add_argument("--scenario", "-s", type=str, default="all", help=f"Scenario to test (default: 'all' or one of {', '.join(SUPPORTED_SCENARIOS)})")
     parser.add_argument("--level-range", type=int, nargs=2, default=[1, 15], metavar=("MIN", "MAX"), help="Character level range (default: 1 15)")
     parser.add_argument("--party-range", type=int, nargs=2, default=[1, 4], metavar=("MIN", "MAX"), help="Party size range (default: 1 4)")
@@ -113,6 +113,14 @@ def main():
         )
 
         safe_print("\n" + report.format_summary())
+
+        if report.failing_seeds:
+            os.makedirs("reports/failures", exist_ok=True)
+            for fs in report.failing_seeds[:10]:
+                failure_path = f"reports/failures/combat_seed_{fs['seed']}.json"
+                with open(failure_path, "w", encoding="utf-8") as f:
+                    json.dump(fs, f, indent=2, default=str)
+            safe_print(f"\nSaved {min(10, len(report.failing_seeds))} failure reproduction payloads to reports/failures/")
 
         if args.json_report:
             with open(args.json_report, "w", encoding="utf-8") as f:

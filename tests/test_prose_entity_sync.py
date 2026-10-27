@@ -1,34 +1,56 @@
-import unittest
+from __future__ import annotations
+from typing import Any
+import asyncio
 import json
+import os
+import tempfile
+import unittest
+from unittest.mock import AsyncMock, patch
+
 import db
+import db.core
 import game_engine
 
 
 class TestProseEntitySync(unittest.TestCase):
     def setUp(self):
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self._isolated_db = os.path.join(self._tmp_dir.name, "test_prose_sync.db")
+        self._orig_db_path = db.DB_PATH
+        self._orig_core_db_path = db.core.DB_PATH
+        db.DB_PATH = self._isolated_db
+        db.core.DB_PATH = self._isolated_db
+        db.init_db()
+
         self.session_id = 99899
         self.user_id = 99899
-        with db.get_conn() as conn:
-            conn.execute("DELETE FROM sessions WHERE id = ?", (self.session_id,))
-            conn.execute("DELETE FROM characters WHERE user_id = ?", (self.user_id,))
-            conn.execute("DELETE FROM factions WHERE session_id = ?", (self.session_id,))
-            conn.execute("DELETE FROM contacts WHERE session_id = ?", (self.session_id,))
 
-        db.create_character(self.user_id, "Artemiusz", char_class="Student", stats={"STR": 5, "PER": 7, "END": 5, "CHA": 8, "INT": 9, "AGI": 6, "LUK": 5})
+        db.create_character(
+            self.user_id,
+            "Artemiusz",
+            char_class="Student",
+            stats={"STR": 5, "PER": 7, "END": 5, "CHA": 8, "INT": 9, "AGI": 6, "LUK": 5},
+        )
 
-        # Create session at Student Council Office
         with db.get_conn() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO sessions (id, channel_id, host_user_id, status, mode, capacity, scenario, current_location, turn_order, current_npcs_json)
                 VALUES (?, 100, ?, 'active', 'solo', 1, 'high_school_drama', 'Westlake Academy ➔ Student Council Office ➔ Main Office Area', ?, ?)
-            """, (self.session_id, self.user_id, json.dumps([self.user_id]), json.dumps([{"name": "Zihan Moon", "hp": 100, "max_hp": 100}])))
+                """,
+                (
+                    self.session_id,
+                    self.user_id,
+                    json.dumps([self.user_id]),
+                    json.dumps([{"name": "Zihan Moon", "hp": 100, "max_hp": 100}]),
+                ),
+            )
 
-        # Create Velvet Rose Pact faction with leadership roster in DB
         roster = [
             {"rank": 4, "title": "Club President", "name": "Sofia Anderson", "is_player": False},
             {"rank": 3, "title": "Vice President", "name": "Manon Sokolov", "is_player": False},
             {"rank": 2, "title": "Club Secretary", "name": "So-hee Mendoza", "is_player": False},
-            {"rank": 1, "title": "Club Treasurer", "name": "Mila Kuznetsov", "is_player": False}
+            {"rank": 1, "title": "Club Treasurer", "name": "Mila Kuznetsov", "is_player": False},
         ]
         db.upsert_faction(
             session_id=self.session_id,
@@ -36,41 +58,38 @@ class TestProseEntitySync(unittest.TestCase):
             delta_score=0,
             hierarchy_template="club",
             leadership_roster=roster,
-            hq_location_id="Student Council Office"
+            hq_location_id="Student Council Office",
         )
 
     def tearDown(self):
-        with db.get_conn() as conn:
-            conn.execute("DELETE FROM sessions WHERE id = ?", (self.session_id,))
-            conn.execute("DELETE FROM characters WHERE user_id = ?", (self.user_id,))
-            conn.execute("DELETE FROM factions WHERE session_id = ?", (self.session_id,))
-            conn.execute("DELETE FROM contacts WHERE session_id = ?", (self.session_id,))
+        if hasattr(db, "close_all_connections"):
+            db.close_all_connections()
+        db.DB_PATH = self._orig_db_path
+        db.core.DB_PATH = self._orig_core_db_path
+        self._tmp_dir.cleanup()
 
-    def test_prose_scanner_recovers_omitted_faction_members(self):
-        """Verify that when prose mentions Mila, So-hee, and Manon but JSON only has Sofia, all 4 are recovered."""
+    def test_deterministic_cast_stays_strictly_structured_without_prose_scraping(self):
+        """Verify process_scene_npcs stays strictly structured and never scrapes un-staged faction members from prose."""
         session = db.get_session(self.session_id)
         loc = "Westlake Academy ➔ Student Council Office ➔ Main Office Area"
 
-        # Simulated LLM output where JSON npcs_present dropped Mila, So-hee, and Manon
         raw_llm_result = {
             "scene_title": "The Seat of Authority",
             "outcome_narrative": "Artemiusz steps forward and presents the incident report to the council.",
             "next_narrative": "Behind the massive mahogany desk sits Sofia Anderson. Beside her, the other council members—Mila, So-hee, and Manon—watch with varying degrees of curiosity.",
-            "npcs_present": [{"name": "Sofia Anderson"}]
+            "npcs_present": [{"name": "Sofia Anderson"}],
         }
 
-        final_npcs = game_engine.process_scene_npcs(raw_llm_result, session, loc, loc)
-        npc_names = [n.get("name") if isinstance(n, dict) else n for n in final_npcs]
-
-        # All 4 council members and traveling companion Zihan Moon must be present
-        self.assertIn("Zihan Moon", npc_names)
-        self.assertIn("Sofia Anderson", npc_names)
-        self.assertIn("Manon Sokolov", npc_names)
-        self.assertIn("So-hee Mendoza", npc_names)
-        self.assertIn("Mila Kuznetsov", npc_names)
+        det_npcs = game_engine.process_scene_npcs(raw_llm_result, session, loc, loc)
+        det_names = [n.get("name") if isinstance(n, dict) else n for n in det_npcs]
+        self.assertIn("Zihan Moon", det_names)
+        self.assertIn("Sofia Anderson", det_names)
+        self.assertNotIn("Manon Sokolov", det_names)
+        self.assertNotIn("So-hee Mendoza", det_names)
+        self.assertNotIn("Mila Kuznetsov", det_names)
 
     def test_entity_audit_parsing(self):
-        """Verify that characters listed in entity_audit are automatically parsed and included."""
+        """Verify that characters listed in entity_audit are parsed and included when grounded."""
         session = db.get_session(self.session_id)
         loc = "Westlake Academy ➔ Student Council Office ➔ Main Office Area"
 
@@ -78,11 +97,10 @@ class TestProseEntitySync(unittest.TestCase):
             "scene_title": "Meeting",
             "entity_audit": {
                 "present_named_characters": ["Sofia Anderson", "Yea-ji Kang"],
-                "speaking_characters": ["Sofia Anderson"]
             },
-            "outcome_narrative": "Discussions begin.",
+            "outcome_narrative": "Discussions begin with Sofia Anderson and Yea-ji Kang.",
             "next_narrative": "The council reviews the papers.",
-            "npcs_present": []
+            "npcs_present": [],
         }
 
         final_npcs = game_engine.process_scene_npcs(raw_llm_result, session, loc, loc)
@@ -96,17 +114,19 @@ class TestProseEntitySync(unittest.TestCase):
         session = db.get_session(self.session_id)
         loc = "Westlake Academy ➔ Student Council Office ➔ Main Office Area"
 
-        # Create a contact in a different zone (e.g. Downtown)
         db.upsert_contact(
-            self.session_id, character_id=0, npc_id="downtown_detective",
-            name="Detective Vance", basic_info={"location": "Downtown District ➔ Police Station"}
+            self.session_id,
+            character_id=0,
+            npc_id="downtown_detective",
+            name="Detective Vance",
+            basic_info={"location": "Downtown District ➔ Police Station"},
         )
 
         raw_llm_result = {
             "scene_title": "Memories",
             "outcome_narrative": "Artemiusz recalled what Detective Vance told him earlier in the downtown district.",
             "next_narrative": "Sofia waits for your answer.",
-            "npcs_present": [{"name": "Sofia Anderson"}]
+            "npcs_present": [{"name": "Sofia Anderson"}],
         }
 
         final_npcs = game_engine.process_scene_npcs(raw_llm_result, session, loc, loc)
@@ -124,24 +144,20 @@ class TestProseEntitySync(unittest.TestCase):
             "scene_title": "Assembly",
             "entity_audit": {
                 "present_named_characters": ["Artemiusz", "Sofia Anderson", "Zihan Moon"],
-                "speaking_characters": ["Sofia Anderson"]
             },
             "outcome_narrative": "Artemiusz speaks.",
             "next_narrative": "Sofia answers Artemiusz.",
-            "npcs_present": [{"name": "Artemiusz"}, {"name": "Sofia Anderson"}]
+            "npcs_present": [{"name": "Artemiusz"}, {"name": "Sofia Anderson"}],
         }
 
         final_npcs = game_engine.process_scene_npcs(raw_llm_result, session, loc, loc)
         npc_names = [n.get("name") if isinstance(n, dict) else n for n in final_npcs]
 
-        # Player character Artemiusz MUST NOT be in npcs_present
         self.assertNotIn("Artemiusz", npc_names)
         self.assertIn("Sofia Anderson", npc_names)
 
-    def test_generate_opening_scene_recovers_prose_mentioned_characters_into_npcs_present(self):
-        """Verify that generate_opening_scene recovers characters mentioned in narrative even if npcs_present is empty."""
-        import asyncio
-        from unittest.mock import patch, AsyncMock
+    def test_generate_opening_scene_uses_structured_npcs_and_locks_spatial_node(self):
+        """Verify Turn 0 OpeningScene uses structured npcs_present only (never prose scraping) and locks current_node_id."""
         from game_engine.turn.generation import generate_opening_scene
 
         session = db.get_session(self.session_id)
@@ -153,14 +169,18 @@ class TestProseEntitySync(unittest.TestCase):
             "narrative": "Under the tree stands Sofia Anderson, scanning the crowd. Beside her, Manon Sokolov clutches a stack of brochures.",
             "choices": [{"label": "Observe surroundings", "stat": "PER", "requirement": 5}],
             "location": "Westlake Academy ➔ Student Council Office ➔ Main Office Area",
-            "npcs_present": []  # LLM omitted npcs_present
+            "npcs_present": [],
         }
 
-        with patch("game_engine.turn.generation.game_engine.call_llm_json", new=AsyncMock(return_value=raw_llm_result)):
-            scene = asyncio.run(generate_opening_scene(session, party))
-            npc_names = [n.get("name") if isinstance(n, dict) else n for n in scene.get("npcs_present", [])]
-            self.assertIn("Sofia Anderson", npc_names)
-            self.assertIn("Manon Sokolov", npc_names)
+        with patch(
+            "game_engine.turn.generation.game_engine.call_llm_json",
+            new=AsyncMock(return_value=dict(raw_llm_result)),
+        ):
+            det_scene = asyncio.run(generate_opening_scene(dict(session), party))
+            det_names = [n.get("name") if isinstance(n, dict) else n for n in det_scene.get("npcs_present", [])]
+            self.assertNotIn("Sofia Anderson", det_names)
+            self.assertNotIn("Manon Sokolov", det_names)
+            self.assertTrue(bool(det_scene.get("current_node_id") or db.get_session_world_nodes(self.session_id)))
 
 
 if __name__ == "__main__":

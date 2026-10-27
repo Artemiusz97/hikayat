@@ -17,6 +17,9 @@ from mechanics.world.locations.movement import (
     parse_tiered_location,
     format_tiered_location_string,
 )
+from mechanics.world.locations.pathfinding import (
+    format_node_hierarchy,
+)
 from mechanics.world.waypoints.matching import (
     try_advance_on_arrival,
     try_complete_on_skill_check,
@@ -194,6 +197,13 @@ class WorldNavigationSimulator:
                     if not new_loc:
                         result.fuzz_fallbacks += 1
                         new_loc = current_loc
+                    else:
+                        # Normalize to canonical node hierarchy format if node resolves
+                        resolved_nid = db.resolve_node_id_from_location(session_id, new_loc)
+                        if resolved_nid:
+                            canonical_fmt = format_node_hierarchy(session_id, resolved_nid)
+                            if canonical_fmt:
+                                new_loc = canonical_fmt
 
                     # Calculate travel time & advance time
                     time_action = {"label": action.action_text, "stat": "AGI"}
@@ -240,6 +250,10 @@ class WorldNavigationSimulator:
                 elif action.action_type == "rest":
                     # Execute sleep rest cycle (wakes at 07:30 AM)
                     apply_sleep_rest(session_id, party_uids=[])
+
+                elif action.action_type == "barrier_halt":
+                    # Encountered locked obstacle barrier - halt at pre-barrier node
+                    advance_time(session_id, 3)
 
                 # D. Refresh state post-action and audit
                 active_wps = db.get_all_session_active_waypoints(session_id)
@@ -324,6 +338,10 @@ class WorldNavigationSimulator:
             "steampunk",
             "dark_fantasy",
             "isekai_fantasy",
+            "slice_of_life",
+            "anomalous_incursions",
+            "urban_anomalies",
+            "urban_fantasy",
         ]
 
         if scenario != "all":

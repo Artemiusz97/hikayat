@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 import db
+import scenario_data
 from .seeds import *
 from .seeds import _load_seeds, _slugify, _SEED_PATH
 
@@ -24,15 +25,32 @@ def build_node_sensory_and_memory_block(session_id: int, curr_node: dict, curren
         scen_key = "high_school_drama"
 
     is_hs = is_high_school_setting(scen_key)
+    is_anomalous_scen = scenario_data.is_anomalous_incursions_scenario(scen_key)
     safe_min = int(current_minute or 0) % 1440
     time_block = get_time_block_key(current_minute)
     is_enc = int(curr_node.get("is_enclosed", 1))
     is_academic = curr_node.get("category") == "academic"
     is_after_hours_campus = is_hs and is_academic and not is_abandoned_school_node(curr_node) and (safe_min >= 1200 or safe_min < 420)
     is_weekend_day = is_weekend(current_day)
+    node_probe = f"{curr_node.get('node_id', '')} {curr_node.get('name', '')} {curr_node.get('parent_id', '')}".lower()
+    is_theme_park = is_anomalous_scen and any(
+        k in node_probe for k in ("zone_theme_park", "loc_theme_park", "theme park", "amusement resort", "loc_tp_")
+    )
+    is_tp_anomalous_shift = is_theme_park and (safe_min >= 1320 or safe_min < 480)
 
-    # Time-of-day sensory profiles (respecting 20:00-07:00 campus lockdown & weekend quiet)
-    if is_after_hours_campus:
+    # Time-of-day sensory profiles (respecting 20:00-07:00 campus lockdown, weekend quiet, & 22:00 Theme Park Anomalous Shift)
+    if is_tp_anomalous_shift:
+        lighting = (
+            "Warped violet-magenta carnival neon and impossible mirror reflections pulsing through stagnant mist"
+            if is_enc
+            else "Flickering midway bulbs bleeding unnatural violet static into coastal night fog"
+        )
+        acoustics = (
+            "Distorted, backward-looping calliope melodies and glass-chime echoes with zero civilian chatter"
+            if is_enc
+            else "Creaking phantom roller-coaster tracks, reversed carousel organ notes, and ozone hum"
+        )
+    elif is_after_hours_campus:
         lighting = "Darkened interior illuminated only by pale moonlight or dim dawn light through glass and security fixtures" if is_enc else "Quiet campus grounds under dim twilight or pale early-dawn sky"
         acoustics = "Hushed, empty after-hours stillness where every whisper and footstep reverberates" if is_enc else "Still, deserted campus air and distant town hum"
     elif time_block == "morning":
@@ -75,6 +93,19 @@ def build_node_sensory_and_memory_block(session_id: int, curr_node: dict, curren
             "All students and teachers have returned home, main corridor lights are dark, exterior doors are locked from the outside (exit remains unobstructed), "
             "and security footsteps echo down distant halls. Staying on campus during these hours is considered trespassing; maintain a hushed, illicit after-hours atmosphere."
         )
+    elif is_tp_anomalous_shift:
+        lines.append(
+            "- [THEME PARK ANOMALOUS SHIFT (22:00–08:00) — ACTIVE NIGHTTIME MANIFESTATION]: "
+            "The Theme Park & Amusement Resort has closed to the public at 10:00 PM and entered its nightly Anomalous Shift! "
+            "All mundane tourists and park staff are gone; rides turn on by themselves with reversed calliope music, mirror reflections move independently, "
+            "and hostile spatial/cognitohazard entities prowl the fog-drenched midway until 08:00 AM."
+        )
+    elif is_theme_park and 1290 <= safe_min < 1320:
+        lines.append(
+            "- [THEME PARK CLOSING WARNING (21:30–22:00) — PRE-SHIFT EVACUATION]: "
+            "Park loudspeakers broadcast final closing chimes urging families toward the exits before 10:00 PM, "
+            "while faint ozone static and flickering ride lights foreshadow the impending 22:00 Anomalous Shift."
+        )
 
     # Room memory / scene residue check
     access_info = get_node_effective_access_info(session_id, curr_node["node_id"], current_day=current_day, current_minute=current_minute, scen_key=scen_key)
@@ -89,6 +120,10 @@ def build_node_sensory_and_memory_block(session_id: int, curr_node: dict, curren
 
     if access_info.get("is_unlocked") and access_info.get("access_tier") in ("restricted", "private"):
         lines.append("- ACCESS PERMISSION: Door unlocked (access granted for this session/day).")
+
+    room_props = get_node_props(curr_node.get("node_id", ""), curr_node.get("name", ""), scenario_key=scen_key)
+    if room_props:
+        lines.append(f"- Room Props & Micro-Anchors (for `focal_point` positioning): {', '.join(room_props)}.")
 
     return "\n".join(lines)
 
@@ -220,9 +255,9 @@ def format_llm_location_context(session_id: int, current_location_raw: str, scen
 
         campus_rules = (
 
-            f"- CAMPUS ZONE TOPOGRAPHY: The school campus is divided into 5 distinct zones: '{campus_name}' (Academic & Main Gate), '{athletics_name}' (Athletics), '{commons_name}' (Social & Dining), '{arts_name}' (Cultural Arts & Clubs), and '{abandoned_name}' (Old Campus & Mystery). When characters move to a clubroom, student council, or auditorium, use '{arts_name}'. When eating lunch or gathering in the plaza/courtyard, use '{commons_name}'. When doing sports or physical training, use '{athletics_name}'.\n"
+            f"- CAMPUS ZONE & BUILDING TOPOGRAPHY: The school campus is unified under the Zone '{campus_name}', which contains 5 primary building complexes (Tier 2): 'Main Campus Building' (Academic rooms, Homeroom, Library, Staff Room, Main Gates), '{athletics_name}' (Gymnasium, Track, Pool, Dojo), '{commons_name}' (Central Courtyard, Cafeteria, Botanical Glasshouse), '{arts_name}' (Student Council, Auditorium, Music/Art Studios, Clubrooms), and '{abandoned_name}' (Old Campus & Mystery rooms). Place specific rooms/facilities in Tier 3, and use `focal_point` for room furniture/micro-spots.\n"
 
-            f"- CHARACTER'S DESK RULE: A student character's personal desk (e.g. 'Player's Desk' / '<Name>'s Desk') ONLY exists in their designated homeroom classroom (e.g. '{campus_name} ➔ Classroom 2-B (Homeroom) ➔ <Name>'s Desk'). In the Student Council Office, use 'President's Desk', 'Meeting Table', or 'Archive Files & Safe'—NEVER place or generate a student's personal homeroom desk in the council office or other rooms.\n"
+            f"- CHARACTER'S DESK RULE: A student character's personal desk (e.g. 'Player's Desk' / '<Name>'s Desk') ONLY exists in their designated homeroom classroom. In the Student Council Office, use 'President's Desk', 'Meeting Table', or 'Archive Files & Safe'—NEVER place or generate a student's personal homeroom desk in the council office or other rooms.\n"
 
         )
 
@@ -424,7 +459,11 @@ def get_discovered_location_tree(session_id: int, scenario_key: str = "high_scho
 
         s = r.get("sub_name") or "Focal Spot"
 
-
+        if "{" in z or "{" in p or "{" in s:
+            from .hierarchy import resolve_session_location_tokens
+            z = resolve_session_location_tokens(session_id, z, scenario_key)
+            p = resolve_session_location_tokens(session_id, p, scenario_key)
+            s = resolve_session_location_tokens(session_id, s, scenario_key)
 
         if z not in tree:
 
@@ -462,6 +501,26 @@ def get_discovered_primary_locations(session_id: int, scenario_key: str = "high_
 
     return result
 
+def format_travel_eta_tag(minutes: int, is_same_zone: bool = False, scen_key: str = "fantasy", is_here: bool = False) -> str:
+    """Formats a human-readable ETA badge string (e.g. 'Here', '~3m walk', '~12m transit', '~45m trek')."""
+    if is_here or int(minutes or 0) <= 0:
+        return "Here"
+    mins = max(1, int(minutes))
+    if mins < 60:
+        dur = f"~{mins}m"
+    else:
+        hrs, rem = divmod(mins, 60)
+        dur = f"~{hrs}h {rem}m" if rem else f"~{hrs}h"
+
+    if is_same_zone or mins <= 6:
+        return f"{dur} walk"
+
+    sk = str(scen_key or "").lower()
+    if any(k in sk for k in ("anomalous", "urban", "school", "slice_of_life", "cyberpunk", "sci_fi", "space", "steampunk")):
+        return f"{dur} transit"
+    return f"{dur} trek"
+
+
 def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_loc: str = "", char_name: str = "") -> list[dict]:
 
     """
@@ -477,12 +536,17 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
     tree = get_discovered_location_tree(session_id, scen_key)
 
     from mechanics.world.waypoints import get_location_waypoint_markers
+    from mechanics.world.mobility import calculate_route_travel_time
 
     waypoint_markers = get_location_waypoint_markers(session_id)
 
+    sess_row = db.get_session(session_id) if session_id else None
+    eff_curr_loc = current_loc or (sess_row.get("current_location") if sess_row else "") or ""
 
-
-    curr_z, _, _ = parse_tiered_location(current_loc, scen_key, session_id=session_id, char_name=char_name) if current_loc else ("", "", "")
+    curr_z, curr_p, curr_sub = (
+        parse_tiered_location(eff_curr_loc, scen_key, session_id=session_id, char_name=char_name)
+        if eff_curr_loc else ("", "", "")
+    )
 
 
 
@@ -534,6 +598,14 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                         break
             if not wp_tags:
                 wp_tags = waypoint_markers.get(primary_name) or []
+            if not wp_tags:
+                sub_tag_acc = []
+                for sub_loc_nm in primaries_dict.get(primary_name, []):
+                    for cand_k in (f"{zone_name} ➔ {sub_loc_nm}", sub_loc_nm):
+                        for t_item in (waypoint_markers.get(cand_k) or []):
+                            if t_item not in sub_tag_acc:
+                                sub_tag_acc.append(t_item)
+                wp_tags = sub_tag_acc
 
             desc_parts = []
             if wp_tags:
@@ -708,12 +780,92 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                     if fac_id:
                         _get_occ(fac_id)["unmet_count"] += 1
 
+            # Single-source Dijkstra from current node across world_edges + room/facility links
+            import heapq
+            from collections import defaultdict
+            all_edges = db.get_session_world_edges(session_id) or []
+            curr_node_id = None
+            if current_loc:
+                curr_node_id = db.resolve_node_id_from_location(session_id, eff_curr_loc)
+            if not curr_node_id and sess_row:
+                curr_node_id = sess_row.get("current_node_id")
+            if not curr_node_id and eff_curr_loc:
+                curr_node_id = db.resolve_node_id_from_location(session_id, eff_curr_loc)
+
+            node_by_id = {n["node_id"]: n for n in all_nodes}
+            if curr_node_id and curr_node_id not in node_by_id and hasattr(db.world, "_LEGACY_NODE_ID_ALIASES"):
+                curr_node_id = db.world._LEGACY_NODE_ID_ALIASES.get(curr_node_id, curr_node_id)
+
+            dist_map: dict[str, int] = {}
+            if curr_node_id and all_nodes:
+                adj = defaultdict(list)
+                for e in all_edges:
+                    u, v = e.get("from_node_id"), e.get("to_node_id")
+                    w = max(1, int(e.get("travel_minutes") or 2))
+                    if u and v:
+                        adj[u].append((v, w))
+                        if e.get("is_bidirectional", 1):
+                            adj[v].append((u, w))
+                mega_ids = {
+                    "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
+                    "loc_general_hospital", "loc_theme_park", "loc_eastern_temple",
+                    "loc_botanical_zoo", "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
+                }
+                for n in all_nodes:
+                    pid, nid = n.get("parent_id"), n.get("node_id")
+                    if pid and nid and ((n.get("node_type") == "ROOM" and pid not in mega_ids) or pid == curr_node_id):
+                        adj[pid].append((nid, 1))
+                        adj[nid].append((pid, 1))
+                dist_map[curr_node_id] = 0
+                pq = [(0, curr_node_id)]
+                while pq:
+                    d_u, u_id = heapq.heappop(pq)
+                    if d_u > dist_map.get(u_id, 10**9):
+                        continue
+                    for v_id, w_uv in adj.get(u_id, []):
+                        nd = d_u + w_uv
+                        if nd < dist_map.get(v_id, 10**9):
+                            dist_map[v_id] = nd
+                            heapq.heappush(pq, (nd, v_id))
+
+            curr_node_obj = node_by_id.get(curr_node_id) if curr_node_id else None
+            curr_fac_id = (
+                curr_node_obj.get("parent_id")
+                if (curr_node_obj and curr_node_obj.get("node_type") == "ROOM")
+                else curr_node_id
+            )
+
             for z_item in summary_list:
                 z_nm = z_item["zone_name"]
+                is_same_z = bool(z_item.get("is_current"))
+                zone_min_candidates = []
                 for p_item in z_item.get("primary_locations", []):
                     p_nm = p_item["name"]
                     val_str = f"{z_nm} ➔ {p_nm}"
                     pnid = db.resolve_node_id_from_location(session_id, val_str, prefer_facility=True)
+                    is_here_place = bool(
+                        (pnid and pnid == curr_fac_id)
+                        or (is_same_z and curr_p and curr_p.strip().lower() == p_nm.strip().lower())
+                    )
+                    p_item["is_current_place"] = is_here_place
+                    child_rooms = [n for n in all_nodes if n.get("node_type") == "ROOM" and n.get("parent_id") == pnid] if pnid else []
+
+                    if is_here_place:
+                        p_mins = 0
+                    elif pnid and pnid in dist_map:
+                        p_mins = max(1, dist_map[pnid])
+                    elif child_rooms and any(cr["node_id"] in dist_map for cr in child_rooms):
+                        p_mins = max(1, min(dist_map[cr["node_id"]] for cr in child_rooms if cr["node_id"] in dist_map))
+                    elif eff_curr_loc:
+                        p_mins = calculate_route_travel_time(eff_curr_loc, val_str, scen_key=scen_key, session_id=0)
+                    else:
+                        p_mins = 4 if is_same_z else 15
+
+                    p_item["travel_minutes"] = p_mins
+                    p_item["travel_tag"] = format_travel_eta_tag(p_mins, is_same_zone=is_same_z, scen_key=scen_key, is_here=is_here_place)
+                    if not is_here_place:
+                        zone_min_candidates.append(p_mins)
+
                     if pnid:
                         acc = get_node_effective_access_info(session_id, pnid, current_day=curr_day, current_minute=curr_min, scen_key=scen_key)
                         p_occ = occ_by_node.get(pnid, {"known_npcs": [], "unmet_count": 0})
@@ -727,8 +879,73 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                         p_item["scene_residue"] = acc.get("scene_residue")
                         p_item["known_npcs_here"] = p_occ["known_npcs"][:3]
                         p_item["unmet_activity_count"] = p_occ["unmet_count"]
+
+                        sub_details = []
+                        for cr in child_rooms:
+                            cr_id = cr["node_id"]
+                            cr_name = cr.get("name", "")
+                            cr_is_here = bool(
+                                cr_id == curr_node_id
+                                or (is_here_place and curr_sub and curr_sub.strip().lower() == cr_name.strip().lower())
+                            )
+                            if cr_is_here:
+                                cr_mins = 0
+                            elif cr_id in dist_map:
+                                cr_mins = max(1, dist_map[cr_id])
+                            elif is_here_place:
+                                cr_mins = 3 if pnid in {
+                                    "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
+                                    "loc_general_hospital", "loc_theme_park", "loc_eastern_temple",
+                                    "loc_botanical_zoo", "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
+                                } else 1
+                            else:
+                                cr_mins = max(1, p_mins + 1)
+
+                            cr_acc = get_node_effective_access_info(session_id, cr_id, current_day=curr_day, current_minute=curr_min, scen_key=scen_key)
+                            cr_occ = occ_by_node.get(cr_id, {"known_npcs": [], "unmet_count": 0})
+                            if not p_item.get("scene_residue") and cr_acc.get("scene_residue"):
+                                p_item["scene_residue"] = cr_acc.get("scene_residue")
+                            sub_details.append({
+                                "node_id": cr_id,
+                                "name": cr_name,
+                                "is_current_room": cr_is_here,
+                                "travel_minutes": cr_mins,
+                                "travel_tag": format_travel_eta_tag(cr_mins, is_same_zone=is_same_z, scen_key=scen_key, is_here=cr_is_here),
+                                "props": get_node_props(cr_id, cr_name, scenario_key=scen_key),
+                                "access_tier": cr_acc.get("access_tier", "open"),
+                                "access_badge": cr_acc.get("status_badge", "Open"),
+                                "is_unlocked": cr_acc.get("is_unlocked", False),
+                                "scene_residue": cr_acc.get("scene_residue") or "",
+                                "known_npcs_here": cr_occ["known_npcs"][:3],
+                                "unmet_activity_count": cr_occ["unmet_count"],
+                            })
+                        p_item["sub_location_details"] = sub_details
+
+                if is_same_z:
+                    z_item["travel_minutes"] = 0
+                    z_item["travel_tag"] = "Here"
+                else:
+                    z_mins = min(zone_min_candidates) if zone_min_candidates else (
+                        calculate_route_travel_time(eff_curr_loc, z_nm, scen_key=scen_key, session_id=0) if eff_curr_loc else 15
+                    )
+                    z_item["travel_minutes"] = z_mins
+                    z_item["travel_tag"] = format_travel_eta_tag(z_mins, is_same_zone=False, scen_key=scen_key, is_here=False)
         except Exception:
             pass
+
+    for z_item in summary_list:
+        is_same_z = bool(z_item.get("is_current"))
+        if "travel_tag" not in z_item:
+            z_mins = 0 if is_same_z else (calculate_route_travel_time(eff_curr_loc, z_item["zone_name"], scen_key=scen_key, session_id=0) if eff_curr_loc else 15)
+            z_item["travel_minutes"] = z_mins
+            z_item["travel_tag"] = format_travel_eta_tag(z_mins, is_same_zone=False, scen_key=scen_key, is_here=is_same_z)
+        for p_item in z_item.get("primary_locations", []):
+            if "travel_tag" not in p_item:
+                is_here_p = bool(is_same_z and curr_p and curr_p.strip().lower() == p_item["name"].strip().lower())
+                p_mins = 0 if is_here_p else (calculate_route_travel_time(eff_curr_loc, p_item["value"], scen_key=scen_key, session_id=0) if eff_curr_loc else (4 if is_same_z else 15))
+                p_item["is_current_place"] = is_here_p
+                p_item["travel_minutes"] = p_mins
+                p_item["travel_tag"] = format_travel_eta_tag(p_mins, is_same_zone=is_same_z, scen_key=scen_key, is_here=is_here_p)
 
     return summary_list
 

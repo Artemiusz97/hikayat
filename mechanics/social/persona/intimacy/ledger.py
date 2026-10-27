@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 # Valid act types and directions
 PHYSICAL_ACT_TYPES = {"intercourse", "oral", "manual", "anal", "kiss"}
-MILESTONE_ACT_TYPES = {"confession", "date", "media", "first_kiss"}
+MILESTONE_ACT_TYPES = {"confession", "date", "media", "first_kiss", "affection"}
 ALL_VALID_ACT_TYPES = PHYSICAL_ACT_TYPES | MILESTONE_ACT_TYPES
 
 VALID_DIRECTIONS = {"give", "receive", "mutual"}
@@ -114,6 +114,32 @@ def compute_intimate_tracks_from_ledger(events: List[Dict[str, Any]]) -> Dict[st
     }
 
 
+def _invert_reciprocal_summary(act_type: str, recip_dir: str, other_name: str, orig_summary: str) -> str:
+    """Produces perspective-accurate narrative summary for reciprocal NPC-to-NPC event rows."""
+    act = str(act_type or "").lower()
+    if act == "oral":
+        if recip_dir == "give":
+            return f"Performed oral intimacy on {other_name}."
+        if recip_dir == "receive":
+            return f"Received oral intimacy from {other_name}."
+        return f"Shared mutual oral intimacy with {other_name}."
+    if act == "manual":
+        if recip_dir == "give":
+            return f"Manually stimulated {other_name}."
+        if recip_dir == "receive":
+            return f"Received manual stimulation from {other_name}."
+        return f"Shared mutual manual intimacy with {other_name}."
+    if act == "anal":
+        if recip_dir == "give":
+            return f"Performed anal intimacy with {other_name}."
+        return f"Received anal intimacy from {other_name}."
+    if act == "intercourse":
+        return f"Shared intercourse with {other_name}."
+    if act in ("kiss", "first_kiss"):
+        return f"Shared a kiss with {other_name}."
+    return orig_summary or ""
+
+
 def record_intimate_event(
     session_id: int,
     character_id: str,
@@ -133,59 +159,135 @@ def record_intimate_event(
     partner_gender: str = "",
     is_reciprocal: bool = False,
     character_name: str = "",
+    day_number: Optional[int] = None,
+    location: str = "",
     conn: Optional[sqlite3.Connection] = None
 ) -> int:
     """
     Records an intimate act event into the 'intimate_events' table.
-    Enforces biological invariants on direction.
-    If partner_id is an active NPC and is_reciprocal is False, automatically records
-    the symmetric reciprocal row for partner_id with inverted direction.
+    Enforces canonical entity keys, biological invariants, idempotency on gameplay turns,
+    and single-connection transaction safety (no nested pool self-deadlocks).
     """
     from db.core import get_conn
-
-    sanitized_direction = enforce_biological_invariants(
-        gender=character_gender,
-        act_type=act_type,
-        direction=direction,
-        partner_gender=partner_gender
-    )
+    import mechanics.social.relationship_graph as rg
 
     now = time.time()
 
-    # Dynamic secret affair detection with interpersonal social graph
-    effective_secret_affair = is_secret_affair
-    if session_id and event_origin == "gameplay" and is_physical:
-        try:
-            import mechanics.social.relationship_graph as rg
-            # Resolve a_key
-            p_a = rg.get_person_by_contact_id(session_id, str(character_id))
-            a_key = p_a["person_key"] if p_a else rg.canonical_person_key(str(character_id))
+    def _execute_insert(c: sqlite3.Connection) -> int:
+        # 1. Resolve canonical character_id (npc_id preferred over numeric id), gender, name, and role
+        canon_char_id = str(character_id or "").strip()
+        eff_char_gender = character_gender
+        eff_char_name = character_name.strip()
+        eff_char_role = ""
 
-            if str(partner_id or "").lower() in ("player", "0", ""):
-                # Find character_id for player in this session
-                from db.core import get_conn
-                char_id_val = partner_id or "0"
+        if session_id and canon_char_id:
+            if canon_char_id.isdigit():
+                c_row = c.execute(
+                    "SELECT id, npc_id, name, gender, basic_info_json FROM contacts WHERE session_id = ? AND id = ?",
+                    (session_id, int(canon_char_id)),
+                ).fetchone()
+            else:
+                c_row = c.execute(
+                    "SELECT id, npc_id, name, gender, basic_info_json FROM contacts WHERE session_id = ? AND (npc_id = ? OR lower(name) = ?)",
+                    (session_id, canon_char_id, canon_char_id.lower()),
+                ).fetchone()
+            if c_row:
+                if c_row["npc_id"]:
+                    canon_char_id = str(c_row["npc_id"])
+                if not eff_char_gender and c_row["gender"]:
+                    eff_char_gender = str(c_row["gender"])
+                if not eff_char_name and c_row["name"]:
+                    eff_char_name = str(c_row["name"])
                 try:
-                    with get_conn() as conn_check:
-                        c_row = conn_check.execute("SELECT character_id FROM contacts WHERE session_id = ? AND character_id IS NOT NULL LIMIT 1", (session_id,)).fetchone()
-                        if c_row and c_row["character_id"]:
-                            char_id_val = c_row["character_id"]
+                    binfo = json.loads(c_row["basic_info_json"] or "{}")
+                    eff_char_role = str(binfo.get("role") or "")
                 except Exception:
                     pass
-                b_key = rg.player_person_key(char_id_val)
-            else:
-                p_b = rg.get_person_by_contact_id(session_id, str(partner_id))
-                b_key = p_b["person_key"] if p_b else rg.canonical_person_key(str(partner_id or partner_name))
 
-            part_a = rg.get_current_partner(session_id, a_key)
-            part_b = rg.get_current_partner(session_id, b_key)
-            if (part_a and part_a.get("person_key") != b_key) or (part_b and part_b.get("person_key") != a_key):
-                effective_secret_affair = True
-                rg.form_tie(session_id, a_key, b_key, rg.TIETYPE_AFFAIR, visibility="secret", turn=turn_number, origin="gameplay")
-        except Exception:
-            pass
+        # 2. Canonicalize partner_id and infer partner_gender if missing
+        raw_pid = str(partner_id or "").strip()
+        eff_part_gender = partner_gender
+        if raw_pid in ("0", "") and event_origin == "gameplay":
+            canon_partner_id: Optional[str] = "player"
+        elif rg.is_player_person_key(raw_pid) or raw_pid == "0":
+            canon_partner_id = "player"
+        elif raw_pid:
+            canon_partner_id = raw_pid
+            if session_id:
+                if raw_pid.isdigit():
+                    p_row = c.execute(
+                        "SELECT npc_id, gender FROM contacts WHERE session_id = ? AND id = ?",
+                        (session_id, int(raw_pid)),
+                    ).fetchone()
+                else:
+                    p_row = c.execute(
+                        "SELECT npc_id, gender FROM contacts WHERE session_id = ? AND (npc_id = ? OR lower(name) = ?)",
+                        (session_id, raw_pid, raw_pid.lower()),
+                    ).fetchone()
+                if p_row:
+                    if p_row["npc_id"]:
+                        canon_partner_id = str(p_row["npc_id"])
+                    if not eff_part_gender and p_row["gender"]:
+                        eff_part_gender = str(p_row["gender"])
+        else:
+            canon_partner_id = None
 
-    def _execute_insert(c: sqlite3.Connection) -> int:
+        if canon_partner_id == "player" and not eff_part_gender and session_id:
+            try:
+                ch_row = c.execute(
+                    """SELECT ch.gender FROM characters ch
+                       JOIN sessions s ON (s.character_id = ch.id OR ch.active_session_id = s.id)
+                       WHERE s.id = ? LIMIT 1""",
+                    (session_id,),
+                ).fetchone()
+                if ch_row and ch_row["gender"]:
+                    eff_part_gender = str(ch_row["gender"])
+            except Exception:
+                pass
+
+        sanitized_direction = enforce_biological_invariants(
+            gender=eff_char_gender,
+            act_type=act_type,
+            direction=direction,
+            partner_gender=eff_part_gender,
+        )
+
+        # 3. Gameplay idempotency guard: prevent duplicate act rows on the same turn
+        if session_id and event_origin == "gameplay" and turn_number > 0:
+            dup_row = c.execute(
+                """SELECT id FROM intimate_events
+                   WHERE session_id = ? AND character_id = ? AND COALESCE(partner_id, '') = ?
+                     AND turn_number = ? AND act_type = ? AND direction = ? AND event_origin = 'gameplay'
+                   LIMIT 1""",
+                (session_id, canon_char_id, canon_partner_id or "", turn_number, act_type, sanitized_direction),
+            ).fetchone()
+            if dup_row:
+                return int(dup_row["id"])
+
+        # 4. Dynamic secret affair detection on the SAME connection 'c'
+        effective_secret_affair = is_secret_affair
+        if session_id and event_origin == "gameplay" and is_physical:
+            try:
+                p_a = rg.get_person_by_contact_id(session_id, canon_char_id, conn=c)
+                a_key = p_a["person_key"] if p_a else rg.canonical_person_key(eff_char_name or canon_char_id)
+
+                if canon_partner_id == "player":
+                    b_key = "player"
+                else:
+                    p_b = rg.get_person_by_contact_id(session_id, str(canon_partner_id or ""), conn=c) if canon_partner_id else None
+                    b_key = p_b["person_key"] if p_b else rg.canonical_person_key(str(canon_partner_id or partner_name))
+
+                part_a = rg.get_current_partner(session_id, a_key, conn=c)
+                part_b = rg.get_current_partner(session_id, b_key, conn=c)
+                if (part_a and part_a.get("person_key") != b_key) or (part_b and part_b.get("person_key") != a_key):
+                    effective_secret_affair = True
+                    rg.form_tie(
+                        session_id, a_key, b_key, rg.TIETYPE_AFFAIR,
+                        visibility="secret", turn=turn_number, origin="gameplay", conn=c
+                    )
+            except Exception as e:
+                logger.debug("Secret affair sync skipped: %s", e)
+
         cur = c.execute(
             """INSERT INTO intimate_events (
                 session_id, character_id, partner_id, partner_name, partner_role,
@@ -194,8 +296,8 @@ def record_intimate_event(
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id,
-                str(character_id),
-                str(partner_id) if partner_id is not None else None,
+                canon_char_id,
+                canon_partner_id,
                 partner_name,
                 partner_role,
                 turn_number,
@@ -212,31 +314,18 @@ def record_intimate_event(
         )
         primary_id = cur.lastrowid
 
-        # Write symmetric reciprocal row for partner if partner_id is a tracked NPC
-        if partner_id and str(partner_id).lower() not in ("player", "0", "") and not is_reciprocal:
+        # 5. Write symmetric reciprocal row for partner if partner_id is a tracked NPC
+        if canon_partner_id and canon_partner_id != "player" and not is_reciprocal:
             try:
-                # Invert direction for reciprocal partner
                 recip_dir = invert_direction(sanitized_direction)
                 recip_sanitized = enforce_biological_invariants(
-                    gender=partner_gender,
+                    gender=eff_part_gender,
                     act_type=act_type,
                     direction=recip_dir,
-                    partner_gender=character_gender
+                    partner_gender=eff_char_gender,
                 )
-
-                # Resolve human-readable name for reciprocal row's partner_name
-                resolved_char_name = character_name.strip()
-                if not resolved_char_name:
-                    if str(character_id).isdigit():
-                        r_row = c.execute("SELECT name FROM contacts WHERE id = ?", (int(character_id),)).fetchone()
-                        if r_row:
-                            resolved_char_name = r_row["name"] if isinstance(r_row, dict) or hasattr(r_row, "keys") else r_row[0]
-                    else:
-                        r_row = c.execute("SELECT name FROM contacts WHERE session_id = ? AND npc_id = ?", (session_id, str(character_id))).fetchone()
-                        if r_row:
-                            resolved_char_name = r_row["name"] if isinstance(r_row, dict) or hasattr(r_row, "keys") else r_row[0]
-                if not resolved_char_name:
-                    resolved_char_name = str(character_id).replace("_", " ").title()
+                resolved_char_name = eff_char_name or canon_char_id.replace("_", " ").title()
+                recip_summary = _invert_reciprocal_summary(act_type, recip_sanitized, resolved_char_name, narrative_summary)
 
                 c.execute(
                     """INSERT INTO intimate_events (
@@ -246,22 +335,23 @@ def record_intimate_event(
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         session_id,
-                        str(partner_id),
-                        str(character_id),
-                        resolved_char_name,  # human-readable partner_name for reciprocal row
-                        partner_role,
+                        canon_partner_id,
+                        canon_char_id,
+                        resolved_char_name,
+                        eff_char_role,
                         turn_number,
                         event_origin,
                         act_type,
                         recip_sanitized,
                         1 if is_physical else 0,
                         max(1, count),
-                        0,  # partner's own climax count can be updated separately if recorded
-                        1 if is_secret_affair else 0,
-                        narrative_summary or "",
+                        0,
+                        1 if effective_secret_affair else 0,
+                        recip_summary,
                         now
                     )
                 )
+                recompute_and_cache_character_intimacy(session_id, canon_partner_id, conn=c)
             except Exception as e:
                 logger.warning("Failed to record reciprocal intimate event: %s", e)
 
@@ -371,6 +461,9 @@ def record_intimate_turn_encounter(
     character_gender: str = "",
     partner_gender: str = "",
     character_name: str = "",
+    day_number: Optional[int] = None,
+    location: str = "",
+    is_physical_override: Optional[bool] = None,
     conn: Optional[sqlite3.Connection] = None
 ) -> Tuple[Optional[str], Dict[str, str]]:
     """
@@ -402,7 +495,7 @@ def record_intimate_turn_encounter(
     elif ev_low == "oral_receive":
         act_type = "oral"
         direction = "receive"
-    elif ev_low == "oral":
+    elif ev_low in ("oral", "oral_mutual"):
         act_type = "oral"
         direction = "mutual"
     elif ev_low == "manual_give":
@@ -411,7 +504,7 @@ def record_intimate_turn_encounter(
     elif ev_low == "manual_receive":
         act_type = "manual"
         direction = "receive"
-    elif ev_low == "manual":
+    elif ev_low in ("manual", "manual_mutual"):
         act_type = "manual"
         direction = "mutual"
     elif ev_low == "anal_give":
@@ -420,6 +513,9 @@ def record_intimate_turn_encounter(
     elif ev_low in ("anal_receive", "anal"):
         act_type = "anal"
         direction = "receive"
+    elif ev_low == "anal_mutual":
+        act_type = "anal"
+        direction = "mutual"
     elif ev_low in ("first_kiss", "kiss"):
         act_type = "kiss"
         direction = "mutual"
@@ -431,10 +527,19 @@ def record_intimate_turn_encounter(
         act_type = "date"
         direction = "mutual"
         is_physical = False
-    elif "dm_" in ev_low:
+    elif ev_low in ("affection", "tender", "hug", "cuddle", "hand_holding"):
+        act_type = "affection"
+        direction = "mutual"
+        is_physical = False
+    elif "dm_" in ev_low or ev_low == "media":
         act_type = "media"
         direction = "mutual"
         is_physical = False
+    else:
+        return None, {}
+
+    if is_physical_override is not None:
+        is_physical = bool(is_physical_override)
 
     # Format narrative memory string
     new_mem = format_milestone_memory(ev_low, partner_name, custom_summary)
@@ -449,6 +554,8 @@ def record_intimate_turn_encounter(
         partner_id=partner_id,
         partner_role="Player" if partner_id == "player" else "",
         turn_number=max(1, turn_number),
+        day_number=day_number,
+        location=location,
         event_origin="gameplay",
         is_physical=is_physical,
         count=1,
@@ -480,7 +587,8 @@ def record_intimate_turn_encounter(
             prof["tracks"] = tracks
 
             disc = prof.get("disclosure_flags", {})
-            disc["intimate_revealed"] = True
+            if is_physical or act_type == "confession" or "nsfw" in ev_low or "intimate" in ev_low:
+                disc["intimate_revealed"] = True
             if act_type == "intercourse":
                 disc["intercourse_revealed"] = True
                 prof["had_first_time_with_player"] = True
@@ -519,17 +627,24 @@ def delete_intimate_events_after_turn(
 ) -> int:
     """
     Rollback helper: Prunes events with turn_number > turn_number
-    and refreshes cached tracks for all affected characters.
+    and refreshes cached tracks, disclosure flags, had_first_time_with_player,
+    and intimate_memories_json for all affected characters.
     """
     from db.core import get_conn
 
     def _prune(c: sqlite3.Connection) -> int:
-        # 1. Identify affected characters
+        # 1. Identify affected characters and pruned summaries
         rows = c.execute(
-            "SELECT DISTINCT character_id FROM intimate_events WHERE session_id = ? AND turn_number > ?",
+            "SELECT character_id, narrative_summary FROM intimate_events WHERE session_id = ? AND turn_number > ?",
             (session_id, turn_number)
         ).fetchall()
-        affected_chars = [r["character_id"] if isinstance(r, sqlite3.Row) else r[0] for r in rows]
+        affected_chars = list({r["character_id"] if isinstance(r, sqlite3.Row) else r[0] for r in rows})
+        pruned_summaries_by_char: Dict[str, set[str]] = {}
+        for r in rows:
+            cid_val = str(r["character_id"] if isinstance(r, sqlite3.Row) else r[0])
+            ns_val = str((r["narrative_summary"] if isinstance(r, sqlite3.Row) else r[1]) or "").strip()
+            if ns_val:
+                pruned_summaries_by_char.setdefault(cid_val, set()).add(ns_val)
 
         # 2. Delete future events
         cur = c.execute(
@@ -538,9 +653,70 @@ def delete_intimate_events_after_turn(
         )
         deleted_count = cur.rowcount
 
-        # 3. Refresh cached tracks for all affected characters
+        # 3. Refresh cached tracks, disclosure flags, had_first_time_with_player, and milestone memories
         for char_id in affected_chars:
-            recompute_and_cache_character_intimacy(session_id, char_id, conn=c)
+            all_remaining = get_intimate_events(session_id, char_id, physical_only=False, conn=c)
+            phys_remaining = [e for e in all_remaining if bool(e.get("is_physical", True))]
+            game_remaining = [e for e in all_remaining if e.get("event_origin") == "gameplay" or int(e.get("turn_number") or 0) > 0]
+            tracks = compute_intimate_tracks_from_ledger(phys_remaining)
+
+            row = c.execute(
+                "SELECT id, intimate_profile_json, intimate_memories_json FROM contacts WHERE session_id = ? AND (id = ? OR npc_id = ? OR lower(name) = ?)",
+                (session_id, str(char_id), str(char_id), str(char_id).lower())
+            ).fetchone()
+            if not row:
+                continue
+
+            try:
+                prof = json.loads(row["intimate_profile_json"] or "{}")
+            except Exception:
+                prof = {}
+
+            prof["tracks"] = tracks
+            had_first_time = any(
+                e.get("act_type") == "intercourse" and str(e.get("partner_id") or "").lower() in ("player", "0")
+                for e in game_remaining
+            )
+            prof["had_first_time_with_player"] = had_first_time
+
+            new_disc: Dict[str, bool] = {}
+            if game_remaining:
+                new_disc["intimate_revealed"] = True
+            if any(e.get("act_type") == "intercourse" for e in game_remaining):
+                new_disc["intercourse_revealed"] = True
+            if any(e.get("act_type") == "oral" for e in game_remaining):
+                new_disc["oral_revealed"] = True
+            if any(e.get("act_type") == "manual" for e in game_remaining):
+                new_disc["manual_revealed"] = True
+            if any(e.get("act_type") == "anal" for e in game_remaining):
+                new_disc["anal_revealed"] = True
+            if any(e.get("act_type") == "confession" for e in game_remaining):
+                new_disc["demeanor_revealed"] = True
+
+            prof["disclosure_flags"] = new_disc
+            for flag_key in (
+                "intimate_revealed", "intercourse_revealed", "oral_revealed",
+                "manual_revealed", "anal_revealed", "demeanor_revealed"
+            ):
+                if flag_key in new_disc:
+                    prof[flag_key] = True
+                else:
+                    prof.pop(flag_key, None)
+
+            pruned_set = pruned_summaries_by_char.get(str(char_id), set())
+            try:
+                mems = json.loads(row["intimate_memories_json"] or "[]")
+                if not isinstance(mems, list):
+                    mems = []
+            except Exception:
+                mems = []
+            if pruned_set:
+                mems = [m for m in mems if str(m).strip() not in pruned_set]
+
+            c.execute(
+                "UPDATE contacts SET intimate_profile_json = ?, intimate_memories_json = ? WHERE id = ?",
+                (json.dumps(prof), json.dumps(mems), row["id"])
+            )
 
         return deleted_count
 

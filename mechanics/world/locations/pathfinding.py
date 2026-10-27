@@ -22,7 +22,6 @@ from collections import defaultdict, deque
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import db
-from config import DETERMINISTIC_MOVEMENT
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +227,7 @@ def evaluate_spatial_route(
     party: list = None,
     actions: list = None,
     traveling_companions: list = None,
+    persist_db: bool = True,
 ) -> dict[str, Any]:
     """
     Evaluates a planned multi-node route:
@@ -245,6 +245,7 @@ def evaluate_spatial_route(
             "success": True,
             "effective_node_id": curr_nid,
             "effective_location": curr_loc,
+            "focal_point": None,
             "traversed_nodes": [curr_nid] if curr_nid else [],
             "travel_minutes": 0,
             "gated": False,
@@ -253,6 +254,8 @@ def evaluate_spatial_route(
             "waiting_outside_companions": [],
             "traveling_companions": traveling_companions or [],
             "unlocked_edges": [],
+            "unlocked_nodes": [],
+            "consumed_key_items": [],
         }
 
     effective_node_id = route_node_ids[0]
@@ -260,8 +263,11 @@ def evaluate_spatial_route(
     accumulated_minutes = 0
     gated = False
     barrier_node_id = None
+    halt_focal_point: Optional[str] = None
     stage_directives: List[str] = []
     unlocked_edges: List[Tuple[str, str]] = []
+    unlocked_nodes: List[str] = []
+    consumed_key_items: List[dict] = []
     last_gate_res: Optional[dict] = None
 
     # Gather party inventory
@@ -282,14 +288,15 @@ def evaluate_spatial_route(
             inventory_items.append(it_name)
             inv_objs.append((c_obj, it, inv_list))
 
-    # Evaluate action check tier if player attempted breach
-    action_check_tier = "success"
-    if actions and isinstance(actions[0], dict) and actions[0].get("check"):
-        chk = actions[0]["check"]
-        if isinstance(chk, dict):
-            action_check_tier = str(chk.get("tier", "success")).lower()
-        else:
-            action_check_tier = str(getattr(chk, "tier", "success")).lower()
+    # Evaluate action check tier if player attempted breach across any party action
+    action_check_tier = None
+    for act_cand in (actions or []):
+        if isinstance(act_cand, dict) and act_cand.get("check"):
+            chk = act_cand["check"]
+            cand_tier = str(chk.get("tier", "success") if isinstance(chk, dict) else getattr(chk, "tier", "success")).lower()
+            action_check_tier = cand_tier
+            if cand_tier in ("critical_success", "crit_success", "success", "partial_success"):
+                break
 
     # Step through each hop
     for i in range(len(route_node_ids) - 1):
@@ -315,18 +322,19 @@ def evaluate_spatial_route(
             # Check if unlocked by key
             if has_key and matching_it_obj:
                 c_obj, it, inv_list = matching_it_obj
-                # Permanent unlock for session
-                try:
-                    from mechanics.world.locations.access_gate import record_node_unlock
-                    record_node_unlock(session_id, v)
-                except Exception:
-                    pass
-                with db.get_conn() as conn:
-                    conn.execute(
-                        "UPDATE world_edges SET is_locked = 0 WHERE session_id = ? AND ((from_node_id = ? AND to_node_id = ?) OR (from_node_id = ? AND to_node_id = ? AND is_bidirectional = 1))",
-                        (session_id, u, v, v, u)
-                    )
+                unlocked_nodes.append(v)
                 unlocked_edges.append((u, v))
+                if persist_db:
+                    try:
+                        from mechanics.world.locations.access_gate import record_node_unlock
+                        record_node_unlock(session_id, v)
+                    except Exception:
+                        pass
+                    with db.get_conn() as conn:
+                        conn.execute(
+                            "UPDATE world_edges SET is_locked = 0 WHERE session_id = ? AND ((from_node_id = ? AND to_node_id = ?) OR (from_node_id = ? AND to_node_id = ? AND is_bidirectional = 1))",
+                            (session_id, u, v, v, u)
+                        )
 
                 # Standard keys remain in inventory; single-use keys are consumed (A3)
                 is_single_use = (
@@ -343,24 +351,31 @@ def evaluate_spatial_route(
                     except Exception:
                         pass
                     if isinstance(c_obj, dict) and c_obj.get("user_id"):
-                        try:
-                            if it.get("id"):
-                                db.remove_item(c_obj["user_id"], it["id"])
-                            else:
-                                db.remove_item_by_name(c_obj["user_id"], it.get("name", ""))
-                        except Exception:
-                            pass
+                        consumed_key_items.append({
+                            "user_id": c_obj["user_id"],
+                            "item_id": it.get("id"),
+                            "name": it.get("name", ""),
+                        })
+                        if persist_db:
+                            try:
+                                if it.get("id"):
+                                    db.remove_item(c_obj["user_id"], it["id"])
+                                else:
+                                    db.remove_item_by_name(c_obj["user_id"], it.get("name", ""))
+                            except Exception:
+                                pass
             else:
                 # Check skill check lockpick/force (A4)
                 skill_req = str(edge.get("skill_check_type") or "").strip().upper()
-                is_skill_success = action_check_tier in ("critical_success", "crit_success", "success", "partial_success")
+                is_skill_success = bool(action_check_tier) and action_check_tier in ("critical_success", "crit_success", "success", "partial_success")
                 if skill_req and is_skill_success:
-                    with db.get_conn() as conn:
-                        conn.execute(
-                            "UPDATE world_edges SET is_locked = 0 WHERE session_id = ? AND ((from_node_id = ? AND to_node_id = ?) OR (from_node_id = ? AND to_node_id = ? AND is_bidirectional = 1))",
-                            (session_id, u, v, v, u)
-                        )
                     unlocked_edges.append((u, v))
+                    if persist_db:
+                        with db.get_conn() as conn:
+                            conn.execute(
+                                "UPDATE world_edges SET is_locked = 0 WHERE session_id = ? AND ((from_node_id = ? AND to_node_id = ?) OR (from_node_id = ? AND to_node_id = ? AND is_bidirectional = 1))",
+                                (session_id, u, v, v, u)
+                            )
                 else:
                     # Halt at preceding accessible node u (Q3, A1)
                     gated = True
@@ -422,8 +437,9 @@ def evaluate_spatial_route(
                 break
 
             # Covert threshold halting (Blueprint 9B)
-            st_state = session.get("stealth_state") or {}
-            if st_state.get("is_hidden") and (v_state.get("has_sentries") or v_state.get("hostile_patrol") or v_state.get("alert_level") in ("suspicious", "searching")):
+            from mechanics.stealth import any_actor_hidden, get_session_stealth_state
+            st_state = get_session_stealth_state(session)
+            if any_actor_hidden(session) and (v_state.get("has_sentries") or v_state.get("hostile_patrol") or v_state.get("alert_level") in ("suspicious", "searching")):
                 alert_stage = st_state.get("alert_level", "unaware")
                 if alert_stage in ("suspicious", "searching", "detected"):
                     accumulated_minutes += travel_cost
@@ -432,7 +448,9 @@ def evaluate_spatial_route(
                     v_node = db.get_world_node(session_id, v)
                     v_name = (v_node.get("name") if v_node else v) or v
                     stage_directives.append(
-                        f"[STAGE DIRECTION — STEALTH CHECKPOINT HALT]: Covert movement halted at {v_name}. Sentries are alert ({alert_stage.upper()} {st_state.get('detection_meter', 0)}%) — pausing for player tactical command."
+                        f"[STAGE DIRECTION — STEALTH CHECKPOINT HALT]: Covert movement halted at {v_name}. "
+                        f"Sentries are alert ({alert_stage.upper()} {st_state.get('detection_meter', 0)}%) — pausing for player tactical command "
+                        f"(do NOT print raw percentages or stage names in narrative prose)."
                     )
                     break
 
@@ -442,16 +460,29 @@ def evaluate_spatial_route(
         traversed_nodes.append(v)
 
     if gated and barrier_node_id:
+        b_node = db.get_world_node(session_id, barrier_node_id)
+        v_name = (b_node.get("name") if b_node else barrier_node_id) or barrier_node_id
         if last_gate_res and last_gate_res.get("halt_location_override"):
             effective_location = last_gate_res["halt_location_override"]
+            override_nid = str(last_gate_res.get("node_id") or "").strip()
+            if override_nid and db.get_world_node(session_id, override_nid):
+                effective_node_id = override_nid
+            halt_focal_point = last_gate_res.get("focal_point") or f"Outside the Locked Entrance ({v_name})"
         else:
-            barrier_loc = format_node_hierarchy(session_id, barrier_node_id)
-            sep = "➔" if "➔" in barrier_loc else "->"
-            parts = [p.strip() for p in barrier_loc.split(sep) if p.strip()]
-            if len(parts) >= 2:
-                effective_location = f"{parts[0]} ➔ {parts[1]} ➔ Outside the Locked Entrance"
+            u_node = db.get_world_node(session_id, effective_node_id)
+            u_loc = format_node_hierarchy(session_id, effective_node_id)
+            gate_reason = str((last_gate_res or {}).get("reason_code") or "")
+            if gate_reason in ("locked_edge", "transit_fare") or (u_node and u_node.get("node_type") == "ROOM"):
+                effective_location = u_loc
+                halt_focal_point = (last_gate_res or {}).get("focal_point") or f"Outside the Locked Entrance ({v_name})"
             else:
-                effective_location = f"{barrier_loc} ➔ Outside the Locked Entrance"
+                sep = "➔" if "➔" in u_loc else "->"
+                parts = [p.strip() for p in u_loc.split(sep) if p.strip()]
+                if len(parts) >= 2:
+                    effective_location = f"{parts[0]} ➔ {parts[1]} ➔ Outside the Locked Entrance ({v_name})"
+                else:
+                    effective_location = f"{u_loc} ➔ Outside the Locked Entrance ({v_name})"
+                halt_focal_point = (last_gate_res or {}).get("focal_point") or f"Outside the Locked Entrance ({v_name})"
     else:
         effective_location = format_node_hierarchy(session_id, effective_node_id)
 
@@ -506,6 +537,7 @@ def evaluate_spatial_route(
         "success": not gated,
         "effective_node_id": effective_node_id,
         "effective_location": effective_location,
+        "focal_point": halt_focal_point,
         "traversed_nodes": traversed_nodes,
         "travel_minutes": accumulated_minutes,
         "gated": gated,
@@ -515,6 +547,8 @@ def evaluate_spatial_route(
         "waiting_outside_companions": waiting_outside,
         "traveling_companions": traveling_companions or [],
         "unlocked_edges": unlocked_edges,
+        "unlocked_nodes": unlocked_nodes,
+        "consumed_key_items": consumed_key_items,
     }
 
 
@@ -568,9 +602,12 @@ def match_freeform_spatial_destination(
     session_id: int,
     current_node_id: str,
     action_text: str,
+    intent: Optional[str] = None,
 ) -> Optional[str]:
     """
-    Fuzzy matches freeform player text against reachable nodes in SQLite world_nodes (A10).
+    Fuzzy matches freeform player movement text against reachable nodes in SQLite world_nodes (A10).
+    Strictly requires movement intent (either structured intent or movement phrasing) and whole-word
+    boundaries so local actions like 'Look at the library book' never teleport the party.
     Ignores tactical micro-features (bleachers, desk, altar) per rule A8.
     Returns candidate target_node_id if matched, else None.
     """
@@ -589,12 +626,33 @@ def match_freeform_spatial_destination(
         if re.search(pat, clean):
             return None
 
+    norm_intent = str(intent or "").strip().lower()
+    if norm_intent not in ("movement", "travel", "fast_travel", "move"):
+        from mechanics.world.locations.movement import is_movement_action
+        if not is_movement_action(action_text):
+            return None
+
     nodes = db.get_session_world_nodes(session_id)
     if not nodes:
         return None
 
     best_match: Optional[str] = None
     longest_match_len = 0
+
+    _generic_loc_words = {
+        "the", "and", "for", "main", "area", "room", "hall", "hallway", "hallways",
+        "building", "first", "second", "third", "floor", "north", "south", "east",
+        "west", "central", "upper", "lower", "outer", "inner", "wing", "district",
+        "street", "avenue", "school", "academy", "campus", "grounds", "classroom",
+        "office", "corridor", "spot", "path", "bench", "benches", "desk", "desks",
+    }
+    token_to_nids: Dict[str, List[str]] = {}
+    for _n in nodes:
+        _nid = _n["node_id"]
+        _nm = str(_n.get("name") or "").strip().lower()
+        for _w in set(re.findall(r"[a-z0-9']+", _nm)):
+            if len(_w) >= 5 and _w not in _generic_loc_words:
+                token_to_nids.setdefault(_w, []).append(_nid)
 
     for n in nodes:
         nid = n["node_id"]
@@ -604,13 +662,183 @@ def match_freeform_spatial_destination(
         if not n_name or len(n_name) < 3:
             continue
 
-        # Check exact or substring containment
-        if n_name in clean or clean in n_name:
-            if len(n_name) > longest_match_len:
-                # Ensure a path exists
-                path = find_spatial_path(session_id, current_node_id, nid)
-                if path:
-                    best_match = nid
-                    longest_match_len = len(n_name)
+        # Enforce whole-word boundaries so substrings inside other words never false-trigger
+        matched_len = 0
+        if re.search(r"(?<!\w)" + re.escape(n_name) + r"(?!\w)", clean):
+            matched_len = len(n_name)
+        else:
+            # Allow multi-word or distinctive facility stem match when player drops room suffix (e.g. 'Grand Library' -> 'library' >= 5 chars,
+            # or unique parenthetical/distinctive token like 'homeroom' -> 'Classroom 2-B (Homeroom)')
+            name_words = [w for w in re.findall(r"[a-z0-9']+", n_name) if w not in ("the", "main", "area", "room", "hall", "building", "first", "second", "floor")]
+            if len(name_words) == 1 and len(name_words[0]) >= 5:
+                stem = name_words[0]
+                if re.search(r"(?<!\w)" + re.escape(stem) + r"(?!\w)", clean):
+                    matched_len = len(stem)
+            if matched_len == 0:
+                for w in name_words:
+                    if len(w) >= 5 and w not in _generic_loc_words and len(token_to_nids.get(w, [])) == 1:
+                        if re.search(r"(?<!\w)" + re.escape(w) + r"(?!\w)", clean):
+                            matched_len = max(matched_len, len(w))
+
+        if matched_len > longest_match_len:
+            path = find_spatial_path(session_id, current_node_id, nid)
+            if path:
+                best_match = nid
+                longest_match_len = matched_len
 
     return best_match
+
+
+def get_adjacent_reachable_exits(session_id: int, current_node_id: str, limit: int = 6) -> List[str]:
+    """Returns human-readable names of valid adjacent/reachable world_nodes from current_node_id."""
+    if not session_id or not current_node_id:
+        return []
+    nodes = db.get_session_world_nodes(session_id)
+    node_map = {n["node_id"]: n for n in nodes}
+    edges = db.get_session_world_edges(session_id)
+    cand_ids: List[str] = []
+    seen: Set[str] = {current_node_id}
+
+    for e in edges:
+        u = e.get("from_node_id")
+        v = e.get("to_node_id")
+        if u == current_node_id and v and v not in seen:
+            seen.add(v)
+            cand_ids.append(v)
+        elif v == current_node_id and e.get("is_bidirectional", 1) and u and u not in seen:
+            seen.add(u)
+            cand_ids.append(u)
+
+    curr_node = node_map.get(current_node_id)
+    if curr_node:
+        pid = curr_node.get("parent_id")
+        if pid and pid not in seen:
+            seen.add(pid)
+            cand_ids.append(pid)
+        for n in nodes:
+            nid = n["node_id"]
+            if nid not in seen and (n.get("parent_id") == current_node_id or (pid and n.get("parent_id") == pid)):
+                seen.add(nid)
+                cand_ids.append(nid)
+
+    names: List[str] = []
+    for nid in cand_ids:
+        n_obj = node_map.get(nid)
+        if not n_obj or is_node_hidden(n_obj):
+            continue
+        nm = str(n_obj.get("name") or "").strip()
+        if nm and nm not in names:
+            names.append(nm)
+        if len(names) >= limit:
+            break
+    return names
+
+
+def resolve_unmatched_movement_destination(
+    session_id: int,
+    current_node_id: str,
+    target_location_str: str = "",
+    action_text: str = "",
+    scen_key: str = "fantasy",
+) -> dict[str, Any]:
+    """
+    Resolves freeform movement to a destination not yet matched in world_nodes (D10):
+    - Campus / Slice-of-Life: blocks unseeded destinations (0m elapsed, stays at current_node_id,
+      returns [STAGE DIRECTION — INVALID EXIT] with valid exits).
+    - Open-World scenarios: deterministically spawns & stitches a 3-minute bidirectional child
+      ROOM/FACILITY node in world_nodes + world_edges so Dijkstra routes into it cleanly.
+    """
+    raw_dest = str(target_location_str or "").strip()
+    if not raw_dest and action_text:
+        m = re.search(
+            r"\b(?:travel|head|walk|go|move|journey|enter|visit|venture)\s+(?:over\s+|straight\s+|back\s+|out\s+)?(?:to|into|toward|towards)\s+(?:the\s+|a\s+|an\s+)?([a-zA-Z0-9' \-]{3,45})",
+            str(action_text).strip(),
+            re.IGNORECASE,
+        )
+        if m:
+            raw_dest = re.split(r"\b(?:to\s+(?:ask|talk|speak|find|search|look|buy|check|meet|rest)|and\s+|where\s+|for\s+)\b", m.group(1), maxsplit=1, flags=re.IGNORECASE)[0].strip(" .,!?;:")
+
+    if not raw_dest or raw_dest.lower() in ("here", "outside", "inside", "around", "away", "back"):
+        return {"spawned_node_id": None, "blocked": False, "directive": ""}
+
+    if "➔" in raw_dest or "->" in raw_dest:
+        sep = "➔" if "➔" in raw_dest else "->"
+        parts = [p.strip() for p in raw_dest.split(sep) if p.strip()]
+        leaf_name = parts[-1] if parts else raw_dest
+    else:
+        leaf_name = raw_dest.strip()
+
+    if len(leaf_name) < 3:
+        return {"spawned_node_id": None, "blocked": False, "directive": ""}
+
+    import scenario_data
+    from mechanics.world.mobility import is_campus_scenario
+    is_closed_campus = bool(is_campus_scenario(scen_key) or scenario_data.is_non_combat_scenario(scen_key))
+
+    if is_closed_campus:
+        valid_exits = get_adjacent_reachable_exits(session_id, current_node_id)
+        exits_str = ", ".join(valid_exits) if valid_exits else "seeded campus facilities"
+        curr_node = db.get_world_node(session_id, current_node_id) if (session_id and current_node_id) else None
+        curr_nm = (curr_node.get("name") if curr_node else "current area") or "current area"
+        return {
+            "spawned_node_id": None,
+            "blocked": True,
+            "directive": (
+                f"[STAGE DIRECTION — INVALID EXIT]: '{leaf_name}' is not a valid reachable destination from {curr_nm}. "
+                f"Do NOT change location (0 minutes elapsed). Valid reachable exits: {exits_str}."
+            ),
+        }
+
+    if not session_id or not current_node_id:
+        return {"spawned_node_id": None, "blocked": False, "directive": ""}
+
+    curr_node = db.get_world_node(session_id, current_node_id)
+    if not curr_node:
+        return {"spawned_node_id": None, "blocked": False, "directive": ""}
+
+    display_name = leaf_name if leaf_name[0].isupper() else leaf_name.title()
+    slug = re.sub(r"[^a-z0-9]+", "_", display_name.lower()).strip("_")[:36]
+    if not slug:
+        return {"spawned_node_id": None, "blocked": False, "directive": ""}
+    new_node_id = f"dyn_{slug}"
+
+    existing = db.get_world_node(session_id, new_node_id)
+    if existing:
+        return {"spawned_node_id": new_node_id, "blocked": False, "directive": ""}
+
+    curr_type = str(curr_node.get("node_type") or "FACILITY").upper()
+    if curr_type == "ZONE":
+        parent_id = current_node_id
+        new_type = "FACILITY"
+    elif curr_type == "FACILITY":
+        parent_id = current_node_id
+        new_type = "ROOM"
+    else:
+        parent_id = curr_node.get("parent_id") or current_node_id
+        new_type = "ROOM"
+
+    db.save_world_node(
+        session_id=session_id,
+        node_id=new_node_id,
+        parent_id=parent_id,
+        name=display_name,
+        node_type=new_type,
+        category=str(curr_node.get("category") or "exploration"),
+        privacy_level="public",
+        is_enclosed=1,
+        access_tier="open",
+        is_dynamic=1,
+    )
+    db.save_world_edge(
+        session_id=session_id,
+        from_node_id=current_node_id,
+        to_node_id=new_node_id,
+        travel_minutes=3,
+        edge_type="pathway",
+        is_bidirectional=1,
+    )
+    return {
+        "spawned_node_id": new_node_id,
+        "blocked": False,
+        "directive": f"[STAGE DIRECTION — EXPLORATION DISCOVERY]: Discovered and entered '{display_name}' (3m travel).",
+    }

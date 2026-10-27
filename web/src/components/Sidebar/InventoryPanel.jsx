@@ -368,6 +368,11 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                               x{item.count}
                             </span>
                           )}
+                          {item.count > 1 && ['potion', 'food', 'drink', 'consumable'].includes((item.item_type || item.type || '').toLowerCase()) && (item.slot_cost ?? 1) > 0 && (
+                            <span className="text-[9px] font-mono px-1 py-0.2 bg-emerald-950/70 text-emerald-300 rounded border border-emerald-800/60" title="Consumables stack up to 5 per slot">
+                              {Math.ceil(item.count / 5) * (item.slot_cost ?? 1)} slot{Math.ceil(item.count / 5) * (item.slot_cost ?? 1) > 1 ? 's' : ''}
+                            </span>
+                          )}
                           {isKeyItem && (
                             <span className="text-[9px] px-1.5 py-0.2 bg-amber-950/80 text-amber-300 rounded border border-amber-700/60 font-bold flex items-center gap-0.5">
                               🔒 {t('inventory.key_item')}

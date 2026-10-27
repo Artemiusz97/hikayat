@@ -32,7 +32,10 @@
     "party": "Kumpulan",
     "quests": "Misi",
     "codex": "Kodeks",
-    "outcomes": "Log Dunia"
+    "outcomes": "Log Dunia",
+    "menu": "Menu",
+    "journal": "Jurnal & alatan",
+    "contacts": "Kenalan"
   },
   "stats": {
     "str": "Kekuatan",
@@ -220,7 +223,27 @@
       "neutral": "Berkecuali",
       "unfavorable": "Kurang Menyenangkan",
       "hostile_rival": "Musuh / Pesaing"
-    }
+    },
+    "agenda": "Agenda",
+    "no_agenda": "Tiada Kewajipan atau Pertemuan Aktif",
+    "cancel_commitment": "Batal",
+    "cancelled_commitment": "Membatalkan \"{{title}}\".",
+    "profile_locked": "Fail Peribadi Dikunci",
+    "profile_locked_desc": "Capai tahap Rakan (100+ Afiniti) atau rekrut mereka ke dalam kumpulan anda untuk melihat profil penuh.",
+    "special_agent": "Ejen Khas",
+    "civilian": "Orang Awam",
+    "deceased": "Terkorban",
+    "operative_dossier": "Fail Tempur Operatif",
+    "innate_abilities": "Kebolehan Khas Semula Jadi",
+    "abilities_locked_note": "Capai tahap Rakan (100+ Afiniti) atau rekrut ke dalam kumpulan anda untuk mendedahkan kebolehan khas.",
+    "civilian_classification": "Klasifikasi Orang Awam",
+    "civilian_party_note": "Warga biasa tanpa mana atau kebolehan khas. Boleh dijadikan Kenalan, tetapi tidak boleh direkrut ke dalam kumpulan tempur.",
+    "civilian_deceased_note": "Terkorban secara kekal semasa pencerobohan anomali kerana tiada perlindungan mana semula jadi.",
+    "saved_contact": "Kenalan Disimpan",
+    "open_in_contacts": "Buka dalam Kenalan",
+    "search_known_characters": "Cari Watak Dikenali...",
+    "unlock_contact_hint": "Buka kunci sebagai Kenalan untuk melihat profil peribadi",
+    "operational_info": "Status Lapangan"
   },
   "scene": {
     "title": "Babak & Dunia",
@@ -278,7 +301,7 @@
   },
   "settings": {
     "title": "Tetapan Permainan",
-    "modal_title": "Tetapan Hikayat & Telemetri",
+    "modal_title": "Tetapan",
     "tab_preferences": "Pilihan",
     "tab_telemetry": "Telemetri & Kotak Pasir",
     "language": "Bahasa",
@@ -339,7 +362,9 @@
     "new_adventure_desc": "Pilih alam & kelas untuk memulakan perjalanan",
     "hero_stats_preview": "Pratonton Statistik Wira",
     "configure_loadout": "Konfigurasikan Kelengkapan →",
-    "logout": "Log Keluar"
+    "logout": "Log Keluar",
+    "level_short": "Tahap",
+    "welcome_title": "Mulakan kronik anda"
   },
   "outcomes": {
     "turn_outcome": "Hasil Giliran #{{turn}}",
@@ -370,7 +395,8 @@
     "shop": "KEDAI",
     "browse": "Lihat-lihat",
     "fallback_warning": "Penjanaan adegan sandaran digunakan untuk giliran ini.",
-    "truncated_warning": "Penceritaan adegan kelihatan sangat singkat atau terputus."
+    "truncated_warning": "Penceritaan adegan kelihatan sangat singkat atau terputus.",
+    "resolving": "Menyelesaikan..."
   },
   "party": {
     "roster": "Senarai Kumpulan",
@@ -406,5 +432,70 @@
     "discord_link": "Pautan Discord",
     "discord_placeholder": "ID Discord atau Nama Pengguna...",
     "connect_discord": "Sambung Discord"
+  },
+  "embark": {
+    "starting_faction_legend": "Gabungan Fraksi Permulaan",
+    "starting_faction_hint": "Menentukan HQ permulaan, pakaian seragam, tugasan harian, diskaun pedagang, dan akses ejen.",
+    "default_badge": "Lalai",
+    "faction_public_name": "Agensi Pembendungan Awam",
+    "faction_public_desc": "Gaji Harian (50G–300G) • Diskaun Kedai HQ 50% • Tugasan Wajib Harian • 0G/0 Rampasan Tugasan Agensi • Mula di HQ Biro",
+    "faction_private_name": "Agensi Pembendungan Swasta #1",
+    "faction_private_desc": "Simpan 100% Emas & Rampasan • Persenjataan Kualiti Tinggi (+35% Harga) • Kontrak Awam Dibenarkan • Tugasan Wajib Harian • Mula di HQ Korporat",
+    "faction_private_2_name": "Agensi Pembendungan Swasta #2 (Sindiket Saingan)",
+    "faction_private_2_desc": "Simpan 100% Emas & Rampasan • Persenjataan Sindiket (+35% Harga) • Kontrak Awam Dibenarkan • Tugasan Wajib Harian • Mula di HQ Sindiket",
+    "faction_monastic_name": "Ordo Kuil Eksorsis Timur",
+    "faction_monastic_desc": "2–3 Barang Suci Percuma Sehari • Simpan Rampasan Tempur • Rawatan Kuil Percuma • Tugasan Wajib Harian • Mula di Kuil Agung",
+    "faction_freelancer_name": "Ejen Bebas (Freelancer)",
+    "faction_freelancer_desc": "Tiada Kuota Harian Wajib • Bayaran Penuh Kontrak Awam & Aplikasi Bebas • Mula di Rumah Pinggir Bandar"
+  },
+  "theme": {
+    "title": "Tema",
+    "appearance": "Penampilan",
+    "appearance_desc": "Biarkan antara muka mengikut senario anda, atau pilih gaya kegemaran.",
+    "auto": "Ikut senario",
+    "auto_desc": "Warna menyesuaikan dengan alam yang anda mainkan",
+    "auto_active": "Mengikut alam · {{name}}",
+    "names": {
+      "ember": "Bara",
+      "nebula": "Nebula",
+      "neon": "Neon",
+      "brass": "Loyang",
+      "crimson": "Merah Darah",
+      "containment": "Kurungan",
+      "wasteland": "Tanah Gersang",
+      "daylight": "Siang",
+      "aero": "Frutiger Aero",
+      "midas": "Mewah Gila"
+    }
+  },
+  "stealth_dock": {
+    "stealth": "Menyelinap",
+    "sneaking": "Senyap",
+    "hide": "Sembunyi",
+    "backstab": "Tikam Belakang",
+    "vanished": "LENYAP",
+    "on": "AKTIF",
+    "throw": "Baling",
+    "distract": "Alih Perhatian",
+    "tooltip_combat_hide": "Cuba lenyap ke dalam bayang-bayang (ujian AGI lwn PER musuh)",
+    "tooltip_combat_backstab": "Serang dari bayang-bayang dengan tikaman rusuk",
+    "tooltip_drop_stealth": "Keluar dari Mod Menyelinap",
+    "tooltip_enter_stealth": "Masuk Sikap Menyelinap (Tindakan Rahsia)",
+    "tooltip_throw": "Baling senjata/projektil ke sasaran aktif (AGI)",
+    "tooltip_distract": "Baling umpan bunyi untuk mengalih perhatian (AGI)"
+  },
+  "contacts": {
+    "title": "Kenalan",
+    "count": "{{count}} Disimpan",
+    "search_placeholder": "Cari Kenalan...",
+    "no_contacts": "Tiada kenalan peribadi dibuka kunci lagi.",
+    "unlock_hint": "Minta nombor telefon dalam perbualan, tambah di PeerPulse, atau capai tahap Rakan (100+).",
+    "message_btn": "Mesej",
+    "blocked_badge": "Disekat"
+  },
+  "phone": {
+    "alerts_dispatch": "Amaran / Siaran",
+    "read_only_broadcast": "Saluran Siaran Rasmi Automatik — Baca Sahaja",
+    "blocked_notice": "Kenalan ini telah menyekat nombor anda kerana permusuhan. Berdamai secara bersemuka dahulu."
   }
 }

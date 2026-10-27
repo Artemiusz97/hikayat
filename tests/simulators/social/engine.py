@@ -352,6 +352,65 @@ class SocialDynamicsSimulator:
                     else:
                         outcome_label = f"Photo Request Declined (Score {score}, Roll {roll} < DC {req})"
 
+                elif fuzzed_action.action_type == "schedule_rendezvous":
+                    from mechanics.system.commitments_engine import create_rendezvous
+                    create_rendezvous(
+                        session_id=session_id,
+                        organizer=char_dict["name"],
+                        participants=[target_name],
+                        location="Greenwood Academy ➔ Library ➔ Study Carrels",
+                        day=1,
+                        start_minute=600,
+                        end_minute=660,
+                        title=f"Study Session with {target_name}",
+                        origin="in_person"
+                    )
+                    outcome_label = f"Scheduled Rendezvous with {target_name} at Library"
+
+                elif fuzzed_action.action_type == "fulfill_rendezvous":
+                    from mechanics.system.commitments_engine import create_rendezvous, advance_rendezvous_to_arrived, fulfill_commitment
+                    r_res = create_rendezvous(
+                        session_id=session_id,
+                        organizer=char_dict["name"],
+                        participants=[target_name],
+                        location="Greenwood Academy ➔ Library ➔ Study Carrels",
+                        day=1,
+                        start_minute=600,
+                        end_minute=660,
+                        title=f"Study Session with {target_name}",
+                        origin="in_person"
+                    )
+                    c_id = r_res.get("id") or r_res.get("commitment_key")
+                    if c_id:
+                        advance_rendezvous_to_arrived(session_id, c_id)
+                        fulfill_commitment(session_id, c_id)
+                    db.update_relationship_score(session_id, target_name, 10, character_id=char_id)
+                    outcome_label = f"Fulfilled Punctual Rendezvous with {target_name} (+10)"
+
+                elif fuzzed_action.action_type == "flake_rendezvous":
+                    from mechanics.system.commitments_engine import create_rendezvous, flake_commitment
+                    r_res = create_rendezvous(
+                        session_id=session_id,
+                        organizer=char_dict["name"],
+                        participants=[target_name],
+                        location="Greenwood Academy ➔ Cafeteria ➔ Lunch Tables",
+                        day=1,
+                        start_minute=540,
+                        end_minute=600,
+                        title=f"Lunch with {target_name}",
+                        origin="in_person"
+                    )
+                    c_id = r_res.get("id") or r_res.get("commitment_key")
+                    if c_id:
+                        flake_commitment(session_id, c_id)
+                    db.update_relationship_score(session_id, target_name, -15, character_id=char_id)
+                    outcome_label = f"Flaked on Rendezvous with {target_name} (-15 Penalty)"
+
+                elif fuzzed_action.action_type == "combat_metaphor_chat":
+                    delta = 3
+                    db.update_relationship_score(session_id, target_name, delta, character_id=char_id)
+                    outcome_label = f"Friendly Banter: We engaged in verbal combat with razor-sharp retorts (+{delta})"
+
                 elif fuzzed_action.action_type == "ask_about_family":
                     sib_name = None
                     if directory:
@@ -654,6 +713,8 @@ class SocialDynamicsSimulator:
             "steampunk",
             "dark_fantasy",
             "isekai_fantasy",
+            "slice_of_life",
+            "anomalous_incursions",
         ] if scenario == "all" else [scenario]
 
         archetypes_to_test = [

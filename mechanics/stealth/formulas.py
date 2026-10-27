@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Deterministic Stealth Formulas.
 
@@ -6,6 +7,7 @@ armor noise penalties, companion interference, environmental lighting concealmen
 and sensory separation for optical invisibility.
 """
 from typing import Dict, Any, List, Optional, Tuple
+import json
 import random
 
 import skill_check
@@ -14,39 +16,82 @@ import character_data as cd
 from mechanics.stealth.alert_tracker import ALERT_UNAWARE, ALERT_SUSPICIOUS, ALERT_SEARCHING, ALERT_DETECTED
 
 
+def filter_equipped_stealth_items(items: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """
+    Filters an inventory/gear list down to equipped items only.
+    Items coming from SQLite inventory rows include an explicit 'equipped' flag (0/1 or bool);
+    synthetic item dicts without an 'equipped' key (e.g. db.get_equipment values or unit fixtures)
+    are treated as equipped.
+    """
+    if not items:
+        return []
+    equipped: List[Dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if "equipped" in item and not bool(item.get("equipped")):
+            continue
+        equipped.append(item)
+    return equipped
+
+
+def _extract_item_flat_tags(item: Dict[str, Any]) -> Tuple[List[str], str, str]:
+    """Extracts normalized lowercase tags, slot, and item_type from an item and its [GEAR_JSON] metadata."""
+    meta: Dict[str, Any] = {}
+    try:
+        from mechanics.combat.equipment.metadata import parse_equipment_metadata
+        meta = parse_equipment_metadata(item) or {}
+    except Exception:
+        meta = {}
+
+    slot = str(item.get("slot") or meta.get("slot") or "").lower()
+    item_type = str(item.get("item_type") or meta.get("item_type") or meta.get("category") or "").lower()
+
+    flat_tags: List[str] = []
+    for raw_tags in (item.get("tags"), meta.get("tags")):
+        if isinstance(raw_tags, str) and raw_tags.strip().startswith(("{", "[")):
+            try:
+                raw_tags = json.loads(raw_tags)
+            except Exception:
+                pass
+        if isinstance(raw_tags, dict):
+            for v in raw_tags.values():
+                if isinstance(v, list):
+                    flat_tags.extend([str(x).lower() for x in v])
+                elif isinstance(v, str):
+                    flat_tags.append(v.lower())
+        elif isinstance(raw_tags, list):
+            flat_tags.extend([str(x).lower() for x in raw_tags])
+        elif isinstance(raw_tags, str) and raw_tags.strip():
+            flat_tags.append(raw_tags.strip().lower())
+
+    for meta_key in ("armor_class", "weight_class", "weight", "archetype"):
+        val = meta.get(meta_key) or item.get(meta_key)
+        if isinstance(val, str) and val.strip():
+            flat_tags.append(val.strip().lower())
+
+    return flat_tags, slot, item_type
+
+
 def calculate_armor_noise(equipped_items: Optional[List[Dict[str, Any]]] = None) -> Tuple[int, int]:
     """
     Computes acoustic noise penalty and stealth bonus from equipped items.
+    Unequipped backpack items (equipped=0/False) are ignored.
     Returns:
         (noise_penalty, stealth_bonus)
         - noise_penalty is a positive number subtracting from Stealth Rating.
         - stealth_bonus is a positive number adding to Stealth Rating.
     """
-    if not equipped_items:
+    active_items = filter_equipped_stealth_items(equipped_items)
+    if not active_items:
         return 0, 0
 
     noise_penalty = 0
     stealth_bonus = 0
 
-    for item in equipped_items:
-        if not isinstance(item, dict):
-            continue
-
-        slot = str(item.get("slot") or "").lower()
-        item_type = str(item.get("item_type") or "").lower()
+    for item in active_items:
         name = str(item.get("name") or "").lower()
-        tags = item.get("tags") or {}
-
-        # Flatten tags
-        flat_tags = []
-        if isinstance(tags, dict):
-            for v in tags.values():
-                if isinstance(v, list):
-                    flat_tags.extend([str(x).lower() for x in v])
-                elif isinstance(v, str):
-                    flat_tags.append(v.lower())
-        elif isinstance(tags, list):
-            flat_tags = [str(x).lower() for x in tags]
+        flat_tags, slot, item_type = _extract_item_flat_tags(item)
 
         # Check armor class & weight
         is_heavy = (
@@ -64,9 +109,9 @@ def calculate_armor_noise(equipped_items: Optional[List[Dict[str, Any]]] = None)
             or any(kw in name for kw in ("shadow silk", "muffled", "silent", "stalker", "camo", "wraith-hide", "rogue"))
         )
 
-        if is_heavy and (slot in ("armor", "top", "bottom", "shield", "shoes", "head") or "armor" in item_type):
+        if is_heavy and (slot in ("armor", "top", "bottom", "outerwear", "shield", "shoes", "footwear", "head") or "armor" in item_type or not slot):
             noise_penalty += 25
-        elif is_medium and (slot in ("armor", "top", "bottom") or "armor" in item_type):
+        elif is_medium and (slot in ("armor", "top", "bottom", "outerwear") or "armor" in item_type):
             noise_penalty += 10
 
         if is_stealthy:
@@ -92,18 +137,23 @@ def calculate_companion_noise_penalty(party: Optional[List[Any]] = None) -> int:
         comp_char = comp[0] if isinstance(comp, (list, tuple)) and comp else comp
         if not isinstance(comp_char, dict):
             continue
-        
-        # Check companion's gear or tags
+
+        # Check companion's equipped gear or tags
         c_inv = comp[1] if isinstance(comp, (list, tuple)) and len(comp) > 1 and isinstance(comp[1], list) else []
         c_penalty, _ = calculate_armor_noise(c_inv)
         if c_penalty >= 20:
             has_heavy_companion = True
             break
-        
-        # Check companion's archetype
-        c_desc = str(comp_char.get("description", "")).lower()
-        c_class = str(comp_char.get("class", "")).lower()
-        if any(kw in c_desc or kw in c_class for kw in ("paladin", "knight", "tank", "heavy", "golem", "iron")):
+
+        # Check companion's archetype across SQLite and NPC dict schemas
+        c_desc = str(comp_char.get("description") or comp_char.get("class_description") or "").lower()
+        c_class = str(
+            comp_char.get("char_class")
+            or comp_char.get("class")
+            or comp_char.get("role")
+            or ""
+        ).lower()
+        if any(kw in c_desc or kw in c_class for kw in ("paladin", "knight", "tank", "heavy", "golem", "iron", "juggernaut")):
             has_heavy_companion = True
             break
 
@@ -157,6 +207,20 @@ def calculate_action_noise(action_type: str = "creep", custom_text: str = "") ->
     return 0
 
 
+def _extract_actor_stat(actor_stats: Dict[str, Any], upper_key: str, lower_key: str, db_col: str, default: int) -> int:
+    if not isinstance(actor_stats, dict):
+        return default
+    nested = actor_stats.get("stats") if isinstance(actor_stats.get("stats"), dict) else {}
+    for src in (actor_stats, nested):
+        for k in (upper_key, lower_key, db_col):
+            if k in src and src[k] is not None:
+                try:
+                    return int(src[k])
+                except (TypeError, ValueError):
+                    pass
+    return default
+
+
 def calculate_opposed_stealth_odds(
     actor_stats: Dict[str, Any],
     target_per: int = 3,
@@ -166,7 +230,8 @@ def calculate_opposed_stealth_odds(
     alert_stage: str = ALERT_UNAWARE,
     is_invisible: bool = False,
     environment: str = "",
-    action_noise: int = 0
+    action_noise: int = 0,
+    dc_modifier: int = 0,
 ) -> Dict[str, Any]:
     """
     Computes deterministic success chance for an opposed stealth contest.
@@ -174,8 +239,8 @@ def calculate_opposed_stealth_odds(
     Returns:
         dict with odds, stealth_rating, perception_rating, dc_equivalent, modifiers
     """
-    agi = int(actor_stats.get("AGI", actor_stats.get("agi", cd.BASE_STAT_VALUE)) or cd.BASE_STAT_VALUE)
-    luk = int(actor_stats.get("LUK", actor_stats.get("luk", cd.BASE_STAT_VALUE)) or cd.BASE_STAT_VALUE)
+    agi = _extract_actor_stat(actor_stats, "AGI", "agi", "agi_", cd.BASE_STAT_VALUE)
+    luk = _extract_actor_stat(actor_stats, "LUK", "luk", "luk", cd.BASE_STAT_VALUE)
     sentry_per = max(1, int(target_per or 3))
 
     armor_noise, gear_stealth_bonus = calculate_armor_noise(equipped_items)
@@ -199,8 +264,19 @@ def calculate_opposed_stealth_odds(
     elif alert_stage == ALERT_DETECTED:
         alert_vigilance = 50
 
+    dc_mod_penalty = int(dc_modifier or 0) * 5
+
     # Net ratings
-    stealth_rating = (agi * 10) + (luk * 2) + gear_stealth_bonus - armor_noise + optical_concealment - companion_penalty - action_noise
+    stealth_rating = (
+        (agi * 10)
+        + (luk * 2)
+        + gear_stealth_bonus
+        - armor_noise
+        + optical_concealment
+        - companion_penalty
+        - action_noise
+        - dc_mod_penalty
+    )
     perception_rating = (sentry_per * 10) + alert_vigilance
 
     diff = stealth_rating - perception_rating
@@ -219,11 +295,13 @@ def calculate_opposed_stealth_odds(
         "armor_noise": armor_noise,
         "gear_stealth_bonus": gear_stealth_bonus,
         "companion_penalty": companion_penalty,
+        "companion_noise_penalty": companion_penalty,
         "lighting_mod": lighting_mod,
         "is_invisible": is_invisible,
         "optical_concealment": optical_concealment,
         "alert_vigilance": alert_vigilance,
-        "diff": diff
+        "dc_modifier": int(dc_modifier or 0),
+        "diff": diff,
     }
 
 
@@ -238,7 +316,8 @@ def resolve_opposed_stealth_check(
     environment: str = "",
     action_noise: int = 0,
     luck: int = 3,
-    check_mode: str = "off"
+    check_mode: str = "off",
+    dc_modifier: int = 0,
 ) -> Tuple[CheckResult, Dict[str, Any]]:
     """
     Executes an opposed stealth roll and returns the canonical (CheckResult, odds_meta).
@@ -252,7 +331,8 @@ def resolve_opposed_stealth_check(
         alert_stage=alert_stage,
         is_invisible=is_invisible,
         environment=environment,
-        action_noise=action_noise
+        action_noise=action_noise,
+        dc_modifier=dc_modifier,
     )
 
     chance = odds["success_chance"]
