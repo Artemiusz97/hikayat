@@ -23,6 +23,7 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v2.7.0** | 2026-10-28 | Minor | Cast Contract Authority, Dynamic Scenery & Lighting, Investigatory Spatial Immunity, Romance Choice Auto-Injection, Clean Headless Pruning & Production Release. |
 | **v2.6.0** | 2026-10-27 | Minor | Five Normalized World Models, Anomalous Incursions, Stealth Escalation, Town & Campus Rosters, Web Contacts & Theme Dock, Test Concurrency Hardening. |
 | **v2.5.0** | 2026-10-23 | Minor | Deterministic State Engine Phases 1–5, Stealth & Infiltration Package, Tactical Action Dock & Quick Belt, Graph Pathfinding & Access Gating, CI Concurrency Hardening. |
 | **v2.4.0** | 2026-10-21 | Minor | SDXL Scene Image Generation, Living Scene Stage Manager, World Schedules, Spatial Graph & Dijkstra Navigation, Commitments Engine, Intimacy Ledger & 5-Language Localization. |
@@ -45,6 +46,27 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 ---
 
 ## Release Details
+
+### [v2.7.0] - 2026-10-28
+
+#### Added & Enhanced
+- **Cast Contract Authority & Protagonist Title Guardrails**:
+  - Enforced rigid cast presence validation across `TurnService` and `CastPlanner`.
+  - Guaranteed zero collision between protagonist titles/epithets and NPC presence in narrative dialogue.
+- **Dynamic Scenery, Weather & Atmospheric Lighting Injection**:
+  - Dynamic daylight, weather, and ambient light rendering injected into narrative generation and UI.
+  - Pacing-safe ambient anchoring connecting scene generation with physical world state.
+- **Investigatory Action Spatial Immunity**:
+  - Examination and search actions maintain complete spatial continuity without triggering waypoint transitions or travel penalties.
+- **Romance Intent Dedicated Choice Auto-Injection**:
+  - Automatic injection of critical romantic milestone choices at high affinity thresholds without overriding player agency.
+- **Culture-Aware Genealogy & Directory Sibling Extraction**:
+  - Culture-specific surname inheritance and family tree consistency across Japanese, Canid, Felid, and standard rosters.
+- **Household Concurrency & Foreign Key Resilience**:
+  - Race-condition resilience during concurrent household table creation and cascade deletion.
+- **Clean Headless Release & Zero Privacy Leaks**:
+  - Test suites, test runners, and dev configurations untracked from git for lean production release.
+  - Zero personal path tokens, local directory references, or machine usernames across the repository.
 
 ### [v2.6.0] - 2026-10-27
 
