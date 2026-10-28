@@ -48,6 +48,10 @@ from mechanics.stealth.core import (
     compute_choice_stealth_odds,
     resolve_stealth_action,
     format_stealth_truth_directive,
+    is_stealth_context_warranted,
+    is_strict_trespass_or_restricted_stealth_zone,
+    record_failed_stealth_lockout,
+    is_stealth_choice_locked_out,
 )
 from mechanics.stealth.escalation import (
     build_confrontation_choices,
@@ -97,6 +101,10 @@ __all__ = [
     "compute_choice_stealth_odds",
     "resolve_stealth_action",
     "format_stealth_truth_directive",
+    "is_stealth_context_warranted",
+    "is_strict_trespass_or_restricted_stealth_zone",
+    "record_failed_stealth_lockout",
+    "is_stealth_choice_locked_out",
     "build_confrontation_choices",
     "inject_covert_exploration_choices",
     "reduce_stealth_turn_outcome",

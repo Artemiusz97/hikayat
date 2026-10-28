@@ -58,6 +58,12 @@ const TacticalActionDock = ({
   const stealthState = session?.stealth_state || {};
   const detectionMeter = typeof stealthState.detection_meter === 'number' ? stealthState.detection_meter : 0;
   const alertLevel = String(stealthState.alert_level || 'unaware').toLowerCase();
+  const stealthAvailable = Boolean(
+    inCombat ||
+    isStealthActive ||
+    stealthState.is_hidden ||
+    session?.stealth_available !== false
+  );
 
   const handleStealthClick = async () => {
     if (processing) return;
@@ -186,7 +192,9 @@ const TacticalActionDock = ({
       label: inCombat
         ? (stealthState.combat_vanished ? t('stealth_dock.backstab', 'Backstab') : t('stealth_dock.hide', 'Hide'))
         : (isStealthActive ? t('stealth_dock.sneaking', 'Sneaking') : t('stealth_dock.stealth', 'Stealth')),
-      title: inCombat
+      title: !stealthAvailable
+        ? t('stealth_dock.tooltip_stealth_unwarranted', 'Stealth is not warranted in this safe open public area')
+        : inCombat
         ? (stealthState.combat_vanished
             ? t('stealth_dock.tooltip_combat_backstab', 'Strike from the shadows with a guaranteed flanking backstab')
             : t('stealth_dock.tooltip_combat_hide', 'Attempt to vanish into shadows (AGI check vs Enemy PER)'))
@@ -194,7 +202,7 @@ const TacticalActionDock = ({
         ? t('stealth_dock.tooltip_drop_stealth', 'Drop out of Stealth Mode')
         : t('stealth_dock.tooltip_enter_stealth', 'Enter Stealth Stance (Covert Actions)'),
       onClick: handleStealthClick,
-      disabled: processing,
+      disabled: processing || !stealthAvailable,
       badge: stealthBadge,
       tone: stealthTone,
       pressed: isStealthActive || Boolean(inCombat && stealthState.combat_vanished),
@@ -203,11 +211,13 @@ const TacticalActionDock = ({
       id: 'throw',
       emoji: '🎯',
       label: inCombat ? t('stealth_dock.throw', 'Throw') : t('stealth_dock.distract', 'Distract'),
-      title: inCombat
+      title: !stealthAvailable && !inCombat
+        ? t('stealth_dock.tooltip_distract_unwarranted', 'Covert distraction is not warranted in this safe open public area')
+        : inCombat
         ? t('stealth_dock.tooltip_throw', 'Throw weapon/projectile at active target (AGI)')
         : t('stealth_dock.tooltip_distract', 'Throw a distraction to divert attention (AGI)'),
       onClick: handleThrow,
-      disabled: processing,
+      disabled: processing || (!inCombat && !stealthAvailable),
     },
     {
       id: 'quick',

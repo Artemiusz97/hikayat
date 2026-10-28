@@ -24,6 +24,7 @@ class Phase2Choice(str):
         val.requirement = requirement
         val.mp_cost = mp_cost
         val.is_phase2_choice = True
+        val._extra_kwargs = dict(kwargs)
         for k, v in kwargs.items():
             setattr(val, k, v)
         return val
@@ -42,13 +43,16 @@ class Phase2Choice(str):
         return super().__getitem__(key)
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "label": self.label,
             "stat": self.stat,
             "requirement": self.requirement,
             "mp_cost": self.mp_cost,
-            "is_phase2_choice": True
+            "is_phase2_choice": True,
         }
+        for k, v in (getattr(self, "_extra_kwargs", None) or {}).items():
+            d[k] = v
+        return d
 
 
 def is_curfew_active(
@@ -923,17 +927,36 @@ def evaluate_node_access_gate(
             record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="skill_check")
             return {"gated": False, "unlocked_by": "skill_check"}
         else:
-            # Action Failed: escalate complication
+            # Action Failed: lock out for this time block and evict to nearest open public node
             db.update_world_node_state(session_id, target_node_id, {"failed_block": failed_block_tag})
-            patrol_confrontation = is_crit_fail_tier or curfew_active or is_trespassing
+            from .pathfinding import resolve_safe_open_eviction_destination
+            evict_nid, evict_loc = resolve_safe_open_eviction_destination(
+                session_id,
+                target_node_id,
+                current_day=curr_day,
+                current_minute=curr_min,
+                scen_key=scen_key,
+            )
+            is_covert_sneak_attempt = any(
+                k in current_action_label for k in ("sneak", "infiltrate", "slip", "creep", "climb", "scale")
+            )
+            patrol_confrontation = bool(is_crit_fail_tier or curfew_active or is_trespassing or is_covert_sneak_attempt)
+            if isinstance(session, dict):
+                try:
+                    from mechanics.stealth import break_stealth, get_session_stealth_state, set_session_stealth_state
+                    break_stealth(session, reason="caught_at_restricted_gate", break_all=True)
+                    st_gate = get_session_stealth_state(session)
+                    lockouts = st_gate.setdefault("failed_stealth_lockouts", {})
+                    lockouts[f"{target_node_id}:{failed_block_tag}"] = {
+                        "node_id": target_node_id,
+                        "time_block": failed_block_tag,
+                        "day": curr_day,
+                    }
+                    set_session_stealth_state(session, st_gate)
+                except Exception:
+                    pass
             patrol_npc = None
             if patrol_confrontation:
-                if isinstance(session, dict):
-                    try:
-                        from mechanics.stealth import break_stealth
-                        break_stealth(session, reason="caught_at_restricted_gate", break_all=True)
-                    except Exception:
-                        pass
                 # Try pulling an existing authority figure from contacts / school roster (User Decision #1)
                 roster = db.get_school_roster(session_id) or []
                 contacts = db.get_contacts(session_id) or []
@@ -968,9 +991,14 @@ def evaluate_node_access_gate(
                         "attention_ring": "ring_1_primary",
                         "status_effects": ["Alerted"]
                     }
+            evict_note = f" You are forced back to {evict_loc}." if evict_loc else ""
             return {
                 "gated": True,
-                "node_id": target_node_id,
+                "node_id": evict_nid or target_node_id,
+                "locked_out_node_id": target_node_id,
+                "evicted_to_node_id": evict_nid,
+                "evicted_to_location": evict_loc,
+                "halt_location_override": evict_loc or None,
                 "node_name": display_name,
                 "reason_code": "breach_failed",
                 "reason_label": "Lock Jammed / Caught Trespassing" if is_trespassing else "Lock Jammed / Caught Sneaking",
@@ -978,17 +1006,17 @@ def evaluate_node_access_gate(
                 "patrol_confrontation": patrol_confrontation,
                 "patrol_npc": patrol_npc,
                 "prompt_directive": (
-                    f"[SYSTEM: BREACH FAILED - PATROL CONFRONTATION]\n"
+                    f"[SYSTEM: BREACH FAILED - PATROL CONFRONTATION & EVICTION]\n"
                     f"The attempt to enter {display_name} failed! "
-                    + (f"A patrolling authority figure ({patrol_npc['name']}) has spotted the player and demands an explanation." if patrol_npc else "The door mechanism jammed shut, preventing further forced entry for now.")
+                    + (f"A patrolling authority figure ({patrol_npc['name']}) has spotted the player, demands an explanation, and forces them back to {evict_loc or 'the open hallway'}." if patrol_npc else f"The door mechanism jammed shut, preventing further forced entry during this time block.{evict_note}")
                 ),
                 "barrier_choices": [
                     Phase2Choice(f"[CHA] Make up a believable excuse to defuse suspicion", stat="CHA", requirement=11),
                     Phase2Choice(f"[AGI] Slip away into the corridor shadows before you are detained", stat="AGI", requirement=12),
-                    Phase2Choice(f"Step away from {display_name}", stat="NONE", requirement=0)
+                    Phase2Choice(f"Step away from {display_name}", stat="NONE", requirement=0, target_node_id=evict_nid, target_location=evict_loc, intent="movement")
                 ] if patrol_confrontation else [
                     Phase2Choice(f"[CHA] Seek out someone with a key or permission for {display_name}", stat="CHA", requirement=10),
-                    Phase2Choice(f"Turn back from {display_name}", stat="NONE", requirement=0)
+                    Phase2Choice(f"Turn back from {display_name}", stat="NONE", requirement=0, target_node_id=evict_nid, target_location=evict_loc, intent="movement")
                 ]
             }
 
@@ -1012,20 +1040,82 @@ def evaluate_node_access_gate(
         reason_code = "restricted"
         reason_label = sched_reason_label or "Restricted Access"
 
+    from .pathfinding import resolve_safe_open_eviction_destination
+    retreat_nid, retreat_loc = resolve_safe_open_eviction_destination(
+        session_id,
+        target_node_id,
+        current_day=curr_day,
+        current_minute=curr_min,
+        scen_key=scen_key,
+    )
+
     barrier_choices = []
     if low_id == "loc_nsfw_faction_hq" or "velvet basement" in display_name.lower():
         if not is_lock_jammed:
-            barrier_choices.append(Phase2Choice(f"[AGI] Slip quietly through the cellar service grate into {display_name}", stat="AGI", requirement=12))
-        barrier_choices.append(Phase2Choice(f"[CHA] Audition or charm the doorkeeper to gain entry to {display_name}", stat="CHA", requirement=12))
-        barrier_choices.append(Phase2Choice(f"Step away from {display_name}", stat="NONE", requirement=0))
+            barrier_choices.append(Phase2Choice(
+                f"[AGI] Slip quietly through the cellar service grate into {display_name}",
+                stat="AGI",
+                requirement=12,
+                target_node_id=target_node_id,
+                target_location=display_name,
+                intent="movement",
+                is_stealth=True,
+                stance="stealth",
+            ))
+        barrier_choices.append(Phase2Choice(
+            f"[CHA] Audition or charm the doorkeeper to gain entry to {display_name}",
+            stat="CHA",
+            requirement=12,
+            target_node_id=target_node_id,
+            target_location=display_name,
+            intent="movement",
+        ))
+        barrier_choices.append(Phase2Choice(
+            f"Step away from {display_name}",
+            stat="NONE",
+            requirement=0,
+            target_node_id=retreat_nid,
+            target_location=retreat_loc,
+            intent="movement",
+        ))
     else:
         if not is_lock_jammed:
-            barrier_choices.append(Phase2Choice(f"[AGI] Sneak in or pick the lock to enter {display_name}", stat="AGI", requirement=12))
+            barrier_choices.append(Phase2Choice(
+                f"[AGI] Sneak in or pick the lock to enter {display_name}",
+                stat="AGI",
+                requirement=12,
+                target_node_id=target_node_id,
+                target_location=display_name,
+                intent="movement",
+                is_stealth=True,
+                stance="stealth",
+            ))
         if tier == "private":
-            barrier_choices.append(Phase2Choice(f"[CHA] Ring the intercom and ask to be let into {display_name}", stat="CHA", requirement=10))
+            barrier_choices.append(Phase2Choice(
+                f"[CHA] Ring the intercom and ask to be let into {display_name}",
+                stat="CHA",
+                requirement=10,
+                target_node_id=target_node_id,
+                target_location=display_name,
+                intent="movement",
+            ))
         else:
-            barrier_choices.append(Phase2Choice(f"[CHA] Talk your way past authority or seek permission for {display_name}", stat="CHA", requirement=11))
-        barrier_choices.append(Phase2Choice(f"Turn back from {display_name}", stat="NONE", requirement=0))
+            barrier_choices.append(Phase2Choice(
+                f"[CHA] Talk your way past authority or seek permission for {display_name}",
+                stat="CHA",
+                requirement=11,
+                target_node_id=target_node_id,
+                target_location=display_name,
+                intent="movement",
+            ))
+        barrier_choices.append(Phase2Choice(
+            f"Turn back from {display_name}",
+            stat="NONE",
+            requirement=0,
+            target_node_id=retreat_nid,
+            target_location=retreat_loc,
+            intent="movement",
+        ))
 
     trespass_note = (
         "\n- TRESPASSING WARNING: It is between 20:00 and 07:00. All students and teachers have gone home, "

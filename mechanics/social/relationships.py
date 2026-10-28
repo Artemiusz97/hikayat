@@ -812,6 +812,87 @@ def normalize_recruitment_choice_label(
     return raw
 
 
+_STUDENT_META_TROPE_ROLES = frozenset({
+    "class clown & slacker",
+    "class clown",
+    "slacker",
+    "rebellious delinquent",
+    "delinquent",
+    "introverted bookworm",
+    "bookworm",
+    "multi-club volunteer",
+    "gamer & tech tinkerer",
+    "social media trendsetter",
+    "quiet sketch artist",
+    "daydreaming indie musician",
+    "courtyard gossip informant",
+    "cafeteria gamer",
+    "honor student & tutor",
+    "coffee connoisseur",
+    "amateur astronomer",
+    "acoustic guitarist",
+    "manga illustrator",
+    "robotics programmer",
+    "transfer athlete & skateboarder",
+    "freshman fine arts prodigy",
+    "freshman tennis & badminton rookie",
+})
+
+
+def format_public_character_role(
+    role: str,
+    grade: str = "",
+    club: str = "",
+    scen_key: str = "",
+) -> str:
+    """
+    Normalizes meta-trope student archetype labels (e.g. 'Class Clown & Slacker',
+    'Rebellious Delinquent', 'Introverted Bookworm') and meta personality prefixes
+    (e.g. 'Strict Math Teacher') into grounded in-world standings ('Homeroom Classmate',
+    'Literature & Book Circle Member', 'Student', 'Math Teacher') for UI cards and dialogue.
+    """
+    raw = str(role or "").strip()
+    if not raw:
+        return "Student" if str(grade or "").strip().lower() in ("freshman", "sophomore", "junior", "senior", "student") else ""
+
+    low = raw.lower()
+    clean_club = str(club or "").strip()
+    has_real_club = clean_club.lower() not in ("", "none", "unaffiliated", "general", "faculty", "town")
+    clean_grade = str(grade or "").strip()
+
+    # Strip leading personality/meta adjectives from adult/faculty roles ("Strict Math Teacher" -> "Math Teacher")
+    stripped = re.sub(
+        r"^(?:strict|grumpy|aloof|eccentric|shy|booming|cynical|gentle|flamboyant|rebellious|introverted|quiet|daydreaming|lazy|cheerful|nerdy)\s+",
+        "",
+        raw,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    if low in _STUDENT_META_TROPE_ROLES or any(
+        t in low
+        for t in (
+            "class clown",
+            "slacker",
+            "delinquent",
+            "bookworm",
+            "gossip informant",
+            "cafeteria gamer",
+            "trendsetter",
+            "tech tinkerer",
+            "coffee connoisseur",
+            "indie musician",
+            "sketch artist",
+        )
+    ):
+        if has_real_club:
+            return f"{clean_club} Member"
+        if clean_grade and clean_grade.lower() in ("freshman", "sophomore", "junior", "senior"):
+            return f"{clean_grade} Student"
+        return "Homeroom Classmate" if "high_school" in str(scen_key or "").lower() else "Student"
+
+    return stripped or raw
+
+
 def _parse_contact_basic_info(contact: Optional[dict]) -> dict:
     if not contact or not isinstance(contact, dict):
         return {}
@@ -1192,6 +1273,34 @@ def get_discovered_world_codex_persons(
             })
             seen.add(c_low)
 
+    # Also synthesize any NPCs in met_in_story_names / current_npcs not yet in lorebook or contacts
+    school_dir_map: Dict[str, dict] = {}
+    try:
+        for sr in (db.get_school_roster(session_id) or []):
+            if isinstance(sr, dict) and sr.get("name"):
+                school_dir_map[str(sr["name"]).strip().lower()] = sr
+    except Exception:
+        pass
+    curr_npcs_list = session.get("current_npcs") or []
+    for met_low in met_in_story_names:
+        if met_low in seen or met_low in ("", "none", player_low):
+            continue
+        sr_entry = school_dir_map.get(met_low)
+        curr_entry = next(
+            (n for n in curr_npcs_list if isinstance(n, dict) and str(n.get("name") or "").strip().lower() == met_low),
+            None,
+        )
+        disp_name = (sr_entry.get("name") if sr_entry else None) or (curr_entry.get("name") if curr_entry else met_low.title())
+        persons.append({
+            "name": disp_name,
+            "role": (sr_entry.get("role") if sr_entry else None) or (curr_entry.get("role") if curr_entry else "Acquaintance"),
+            "race": (sr_entry.get("race") if sr_entry else None) or (curr_entry.get("race") if curr_entry else "human"),
+            "gender": (sr_entry.get("gender") if sr_entry else None) or (curr_entry.get("gender") if curr_entry else "female"),
+            "description": (sr_entry.get("personality_summary") if sr_entry else None) or (curr_entry.get("description") if curr_entry else ""),
+            "entity_type": "person",
+        })
+        seen.add(met_low)
+
     unique_persons: List[dict] = []
     unique_seen: Set[str] = set()
     import scenario_data as _sd_wcp
@@ -1341,6 +1450,15 @@ def enrich_contact_dossier(
         c_desc = " ".join(str(v) for v in c_desc.values() if v)
     c_traits = list(c.get("unlocked_traits", [])) or list(c.get("traits", []))
     c_role = str(c_basic.get("role") or c_basic.get("occupation") or c.get("role") or "")
+    c_grade = str(c_basic.get("grade") or c.get("grade") or "")
+    c_club = str(c_basic.get("club") or c_basic.get("faction") or c.get("club") or "")
+    public_role = format_public_character_role(c_role, grade=c_grade, club=c_club, scen_key=scen_key)
+    c["public_role"] = public_role or c_role
+    if c_role and public_role and public_role != c_role:
+        c["archetype_trope"] = c_role
+        if isinstance(c_basic, dict):
+            c_basic["archetype_trope"] = c_role
+            c_basic["public_role"] = public_role
 
     raw_prefs = c.get("preferences") or []
     if not c_traits or not raw_prefs:

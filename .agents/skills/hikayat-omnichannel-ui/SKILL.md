@@ -40,7 +40,7 @@ Do **not** send turn actions over WebSockets. Hikayat separates HTTP command sub
 - **Serialization Rule**: Always convert `CheckResult` objects via `server._serializable_action()` before returning JSON or calling `ws.send_json()`.
 
 ### Discord Parity (`cogs/`)
-- `cogs/adventure/cog.py` (< 60 KB cap!) composes `game_loop_mixin.py`, `merchant_mixin.py`, `faction_mixin.py`, `embeds.py`, and interactive `discord.ui.View` classes in `cogs/adventure/views/` (`loadout.py`, `locations.py`, `quests.py`, etc.), alongside `cogs/{character,contacts,factions,inventory,settings,debug}.py`.
+- `cogs/adventure/cog.py` composes `game_loop_mixin.py`, `merchant_mixin.py`, `faction_mixin.py`, `embeds.py`, and interactive `discord.ui.View` classes in `cogs/adventure/views/` (`loadout.py`, `locations.py`, `quests.py`, etc.), alongside `cogs/{character,contacts,factions,inventory,settings,debug}.py`.
 - When adding a new player-facing capability (e.g., bounty action, faction HQ perk, stealth toggle, phone feature), expose it cleanly through `TurnService` / `mechanics/` so both `api/` + `web/` and `cogs/` stay synchronized.
 
 ---

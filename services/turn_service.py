@@ -877,7 +877,24 @@ class TurnService:
                 )
                 if enriched_c:
                     free_actions = [c for c in raw_c if isinstance(c, dict) and c.get("stat") == "FREE"]
-                    final_c = enriched_c[:5]
+                    filler_budget = 3
+                    filler_used = 0
+                    final_c = []
+                    for ec in enriched_c:
+                        if not isinstance(ec, dict):
+                            continue
+                        is_ess = bool(
+                            ec.get("is_quest_action")
+                            or ec.get("is_climax_action")
+                            or ec.get("_priority_slot")
+                            or ec.get("_npc_speak_choice")
+                            or str(ec.get("label") or "").lower().startswith(("speak with ", "talk to ", "talk with "))
+                        )
+                        if is_ess:
+                            final_c.append(ec)
+                        elif filler_used < filler_budget:
+                            filler_used += 1
+                            final_c.append(ec)
                     for fa in free_actions:
                         if not any(fc.get("label") == fa.get("label") for fc in final_c if isinstance(fc, dict)):
                             final_c.append(fa)

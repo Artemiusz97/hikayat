@@ -851,14 +851,17 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
 
 
-    movement_dest_str = ''
+    movement_dest_str = stage_info.get("movement_dest_str") or ""
     # --- TRAVEL & TRANSIT DIRECTIVE ---
 
     if not is_in_combat(session):
 
         for a in actions:
+            a_int = str(a.get("intent") or "").strip().lower() if isinstance(a, dict) else ""
+            if a_int and a_int not in ("general_action", "movement", "travel", "fast_travel", "move"):
+                continue
 
-            label = a.get("label", "")
+            label = a.get("label", "") if isinstance(a, dict) else str(a)
 
             raw_curr = session.get("current_location", "")
 
@@ -1893,6 +1896,26 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                 new_loc = effective_location or old_loc
             elif has_graph:
                 new_loc = old_loc
+                # Allow valid post-LLM reachable node transitions when triggered by a movement, quest, or accompanied action
+                cand_post_nid = result.get("destination_node_id") or (
+                    db.resolve_node_id_from_location(session["id"], result.get("location"))
+                    if session.get("id") and result.get("location") and result.get("location") != old_loc
+                    else None
+                )
+                if cand_post_nid and cand_post_nid != curr_nid and session.get("id"):
+                    try:
+                        from mechanics.world.locations.pathfinding import find_spatial_path
+                        from mechanics.world.locations.movement import is_movement_action
+                        has_move_or_quest_trigger = any(
+                            (isinstance(a, dict) and (a.get("is_quest_action") or a.get("quest_id") or a.get("target_location") or a.get("target_node_id") or a.get("intent") in ("movement", "travel", "fast_travel", "move", "social_invite", "accompanied_travel")))
+                            or is_movement_action(a.get("label", "") if isinstance(a, dict) else str(a))
+                            for a in (actions or [])
+                        )
+                        if has_move_or_quest_trigger and find_spatial_path(session["id"], curr_nid, cand_post_nid):
+                            new_loc = db.format_node_tiered_location(session["id"], cand_post_nid) or result.get("location") or old_loc
+                            stage_info["effective_node_id"] = cand_post_nid
+                    except Exception:
+                        pass
             else:
                 new_loc = result.get("location") or old_loc
             new_node_id = stage_info.get("effective_node_id") or (db.resolve_node_id_from_location(session["id"], new_loc) if session.get("id") and new_loc else None) or session.get("current_node_id")
@@ -1903,11 +1926,15 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
         if focal_point is not None:
             result["focal_point"] = focal_point
         if new_loc != old_loc:
-            staged_seed = (
-                [dict(n) if isinstance(n, dict) else {"name": str(n)} for n in (pre_turn_stage_npcs or [])]
-                if effective_location == new_loc
-                else []
-            )
+            if effective_location == new_loc:
+                staged_seed = [dict(n) if isinstance(n, dict) else {"name": str(n)} for n in (pre_turn_stage_npcs or [])]
+            else:
+                # Filter old room bystanders out when location changed post-stage
+                try:
+                    t_comps, _ = game_engine.classify_scene_npcs(session, actions, old_primary=old_loc, dest_primary=new_loc)
+                    staged_seed = [dict(n) if isinstance(n, dict) else {"name": str(n)} for n in (t_comps or [])]
+                except Exception:
+                    staged_seed = []
         else:
             staged_seed = [dict(n) if isinstance(n, dict) else {"name": str(n)} for n in (pre_turn_stage_npcs or result.get("npcs_present") or [])]
         try:
@@ -1970,6 +1997,20 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                 for np_nm in new_partners:
                     if np_nm and np_nm not in cast_plan.dialogue_partners:
                         cast_plan.dialogue_partners.append(np_nm)
+            # Stage-plan cast contract: register on-screen people the narrator depicted without
+            # an arrive event (one bounded utility repair call; never spawns from prose alone).
+            if not is_in_combat(session):
+                try:
+                    from game_engine.npcs.cast_contract import repair_cast_contract_violations
+                    await repair_cast_contract_violations(
+                        result,
+                        present_npcs=cast_plan.present_npcs,
+                        party=party,
+                        session=session,
+                        scenario_label=str(session.get("scenario") or ""),
+                    )
+                except Exception as _cc_err:
+                    log.warning("Cast contract check failed: %s", _cc_err)
             raw_cast_events = result.get("cast_events") or []
             final_plan, cast_rejections = apply_cast_events(
                 cast_plan,
@@ -1978,6 +2019,7 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                 party=party,
                 stage_info=stage_info,
                 persist_db=False,
+                narrative_text=f"{result.get('outcome_narrative') or ''}\n\n{result.get('next_narrative') or ''}",
             )
             new_partners = final_plan.dialogue_partners
             result["_cast_rejections"] = cast_rejections
@@ -2053,6 +2095,11 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
     if isinstance(result, dict):
         result["_llm_system_prompt_list"] = final_system_prompt_list
         result["_llm_user_prompt"] = user_prompt
+        result = game_engine.reconcile_implied_hostile_encounter(
+            result,
+            session,
+            actions=actions,
+        )
         result, appended_encounter_text = ensure_enemy_encounter_narrative(
             result,
             session,

@@ -70,6 +70,7 @@ const GameView = ({
   const [selectedCombatTarget, setSelectedCombatTarget] = useState(null);
   const [headerCopied, setHeaderCopied] = useState(false);
   const [targetContactName, setTargetContactName] = useState(null);
+  const [targetContactPulse, setTargetContactPulse] = useState(0);
   const [phoneInitialNpc, setPhoneInitialNpc] = useState(null);
   const [isStealthActive, setIsStealthActive] = useState(false);
   const [timeSkipModalOpen, setTimeSkipModalOpen] = useState(false);
@@ -81,6 +82,7 @@ const GameView = ({
 
   const handleSelectContact = (name) => {
     setTargetContactName(name);
+    setTargetContactPulse(Date.now());
     const needle = String(name ?? '').trim().toLowerCase();
     const isPersonalContact = needle && (codex.contacts || []).some(c =>
       !c.is_dispatch_channel && (
@@ -216,6 +218,8 @@ const GameView = ({
     if (!destination || processingTurn) return;
     await handleAction({
       custom_action_text: `I travel to ${destination}.`,
+      target_location: destination,
+      intent: 'fast_travel',
     });
   };
 
@@ -298,9 +302,11 @@ const GameView = ({
             onMessageContact={handleMessageContact}
             onJumpToCharacterInCodex={(npcName) => {
               setTargetContactName(npcName);
+              setTargetContactPulse(Date.now());
               setActiveSidebarTab('codex');
             }}
             targetContactName={targetContactName}
+            targetContactPulse={targetContactPulse}
           />
         );
       case 'quests':
@@ -327,8 +333,10 @@ const GameView = ({
             onOpenMerchant={() => setMerchantModalOpen(true)}
             onTriggerAction={handleAction}
             targetContactName={targetContactName}
+            targetContactPulse={targetContactPulse}
             onJumpToSavedContact={(npcName) => {
               setTargetContactName(npcName);
+              setTargetContactPulse(Date.now());
               setActiveSidebarTab('contacts');
             }}
           />

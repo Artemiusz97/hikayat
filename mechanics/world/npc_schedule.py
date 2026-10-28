@@ -324,12 +324,17 @@ def _resolve_school_extracurricular_node(
     seed_val: int,
     primary_fac: str = "",
     clique: str = "",
+    current_day: int = 1,
 ) -> Tuple[str, str]:
     """
     Resolves (node_id, fallback_tiered_path) for a High School NPC's club or sport
     during the 15:00–20:00 Extracurricular Period (and weekend club/sport sessions).
     """
     sport_probe = f"{club} {role} {primary_fac}".lower()
+    if "coach" in role.lower():
+        if int(current_day or 1) % 2 == 0:
+            return "loc_gymnasium", "Main Academy Campus ➔ School Grounds & Athletics ➔ Main Gymnasium"
+        return "loc_sports_field", "Main Academy Campus ➔ School Grounds & Athletics ➔ Athletic Field"
     if clique.lower() == "hedonists" or "velvet basement salon" in sport_probe or role.startswith("salon "):
         return "loc_nsfw_faction_hq", "Main Academy Campus ➔ Abandoned Old Campus Building ➔ Velvet Basement Salon"
     if "nurse" in role or ("infirmary" in sport_probe and "boarded" not in sport_probe):
@@ -764,7 +769,7 @@ def get_npc_schedule_node_ids(
         gender_low = str(npc.get("gender") or basic.get("gender") or "").strip().lower()
         safe_min = (int(current_minute) % 1440) if current_minute is not None else None
         club_node, _ = _resolve_school_extracurricular_node(
-            role, club, trait_names, seed_val, primary_fac=primary_fac, clique=clique_low
+            role, club, trait_names, seed_val, primary_fac=primary_fac, clique=clique_low, current_day=current_day
         )
         grade_low = str(npc.get("grade") or basic.get("grade") or "").strip().lower()
         is_faculty = grade_low == "faculty" or any(
@@ -809,6 +814,8 @@ def get_npc_schedule_node_ids(
                     schedule_nodes["commute"] = "loc_cafeteria"
                 elif "custodian" in role or "groundskeeper" in role:
                     schedule_nodes["commute"] = "loc_courtyard"
+                elif "coach" in role:
+                    schedule_nodes["commute"] = "loc_gymnasium"
                 else:
                     schedule_nodes["commute"] = "loc_staff_room"
             elif is_athlete and safe_min is not None and 435 <= safe_min < 470 and ("swim" in f"{role} {club}" or seed_val % 2 == 0):
@@ -884,15 +891,27 @@ def get_npc_schedule_node_ids(
 
             has_club_sport = _has_active_club_or_sport(role, club, trait_names) and not is_faculty
             trains_on_weekend = has_club_sport and ((seed_val + current_day) % 2 == 0) and not is_nsfw_member
+            is_sunday = (max(1, int(current_day or 1)) % 7 == 0)
 
-            schedule_nodes["commute"] = house_nid if (seed_val % 2 == 0) else roam_morning[seed_val % len(roam_morning)]
-            if is_athlete and trains_on_weekend and safe_min is not None and 660 <= safe_min < 710:
+            schedule_nodes["commute"] = house_nid if (is_faculty or seed_val % 2 == 0) else roam_morning[seed_val % len(roam_morning)]
+            if is_faculty:
+                if "coach" in role and not is_sunday:
+                    schedule_nodes["morning"] = "loc_gymnasium" if (int(current_day or 1) % 2 == 0) else "loc_sports_field"
+                else:
+                    schedule_nodes["morning"] = house_nid if is_sunday else roam_morning[seed_val % len(roam_morning)]
+            elif is_athlete and trains_on_weekend and safe_min is not None and 660 <= safe_min < 710:
                 schedule_nodes["morning"] = shower_nid
             else:
                 schedule_nodes["morning"] = club_node if trains_on_weekend else roam_morning[seed_val % len(roam_morning)]
             schedule_nodes["lunch"] = roam_lunch[(seed_val >> 1) % len(roam_lunch)]
 
-            if is_nsfw_member or is_nsfw_guest:
+            if is_faculty:
+                schedule_nodes["class_afternoon"] = house_nid if is_sunday else roam_afternoon[(seed_val >> 2) % len(roam_afternoon)]
+                schedule_nodes["extracurricular"] = schedule_nodes["class_afternoon"]
+                schedule_nodes["afternoon"] = schedule_nodes["class_afternoon"]
+                schedule_nodes["evening"] = house_nid
+                schedule_nodes["night"] = house_nid
+            elif is_nsfw_member or is_nsfw_guest:
                 # Weekend Velvet Basement Salon gathering: 15:00–21:00 (900..1259)
                 in_wknd_aft = (safe_min is None) or (safe_min >= 900)
                 in_wknd_night = bool(safe_min is not None and 1200 <= safe_min < 1260)

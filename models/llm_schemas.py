@@ -402,6 +402,17 @@ class CastEvent(BaseModel):
     type: Literal["arrive", "depart", "engage"] = Field(..., description="arrive (walk into scene), depart (walk out of scene), or engage (walk up to player to initiate conversation)")
     npc: str = Field(..., description="Exact NPC name")
     reason: Optional[str] = Field(default="", description="Narrative rationale for the event")
+    gender: Optional[str] = Field(default=None, description="male or female (arrive only)")
+    descriptor: Optional[str] = Field(default=None, description="Short physical descriptor matching the prose (arrive only)")
+    role: Optional[str] = Field(default=None, description="Role or occupation (arrive only)")
+
+    @field_validator("gender", "descriptor", "role", mode="before")
+    @classmethod
+    def coerce_optional_cast_meta(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
 
     @field_validator("type", mode="before")
     @classmethod

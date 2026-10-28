@@ -530,7 +530,7 @@ def _enrich_contact_basic_info(
     # 1. Cross-reference school_directory
     try:
         sd_row = conn.execute(
-            """SELECT role, grade, club, clique, primary_facility, secondary_facility, personality_summary, race
+            """SELECT role, grade, club, clique, primary_facility, secondary_facility, personality_summary, race, gender
                FROM school_directory
                WHERE session_id=? AND (lower(name)=? OR npc_id=?)
                LIMIT 1""",
@@ -538,7 +538,7 @@ def _enrich_contact_basic_info(
         ).fetchone()
         if not sd_row and " " not in name_clean:
             cand_rows = conn.execute(
-                """SELECT role, grade, club, clique, primary_facility, secondary_facility, personality_summary, race
+                """SELECT role, grade, club, clique, primary_facility, secondary_facility, personality_summary, race, gender
                    FROM school_directory
                    WHERE session_id=? AND (lower(name) LIKE ? OR lower(name) LIKE ? OR npc_id LIKE ? OR npc_id LIKE ?)
                    LIMIT 2""",
@@ -565,8 +565,35 @@ def _enrich_contact_basic_info(
                 info["secondary_facility"] = sd_row["secondary_facility"].strip()
             if _is_empty_info_val(info.get("description")) and not _is_empty_info_val(sd_row["personality_summary"]):
                 info["description"] = sd_row["personality_summary"].strip()
-            if _is_empty_info_val(info.get("race")) and not _is_empty_info_val(sd_row["race"]):
+            if not _is_empty_info_val(sd_row["race"]):
                 info["race"] = sd_row["race"].strip()
+                info["_canonical_race"] = sd_row["race"].strip()
+            if not _is_empty_info_val(sd_row["gender"]):
+                info["gender"] = sd_row["gender"].strip().lower()
+                info["_canonical_gender"] = sd_row["gender"].strip().lower()
+    except Exception:
+        pass
+
+    # 1b. Cross-reference anomalous_agent_roster
+    try:
+        ar_row = conn.execute(
+            """SELECT gender, race, rank_title, agent_class, faction_name
+               FROM anomalous_agent_roster
+               WHERE session_id=? AND (lower(name)=? OR npc_id=?)
+               LIMIT 1""",
+            (session_id, name_low, npc_slug)
+        ).fetchone()
+        if ar_row:
+            if not _is_empty_info_val(ar_row["race"]):
+                info["race"] = ar_row["race"].strip()
+                info["_canonical_race"] = ar_row["race"].strip()
+            if not _is_empty_info_val(ar_row["gender"]):
+                info["gender"] = ar_row["gender"].strip().lower()
+                info["_canonical_gender"] = ar_row["gender"].strip().lower()
+            if _is_empty_info_val(info.get("role")) and not _is_empty_info_val(ar_row["agent_class"]):
+                info["role"] = ar_row["agent_class"].strip()
+            if _is_empty_info_val(info.get("faction")) and not _is_empty_info_val(ar_row["faction_name"]):
+                info["faction"] = ar_row["faction_name"].strip()
     except Exception:
         pass
 
@@ -913,14 +940,21 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 conn, session_id, final_name, cur_info,
                 scenario=scen, narrative_text=narrative_text
             )
+            canonical_gender = cur_info.pop("_canonical_gender", "")
+            canonical_race = cur_info.pop("_canonical_race", "")
+            if canonical_gender:
+                cur_gender = canonical_gender
+                cur_info["gender"] = canonical_gender
 
             existing_dict = dict(existing)
-            existing_race = existing_dict.get("race")
+            existing_race = canonical_race or existing_dict.get("race")
             from mechanics.social.races import extract_race_from_text, normalize_race
-            inferred_race = race or cur_info.get("race") or extract_race_from_text(narrative_text, scen_key=scen, name=final_name)
+            inferred_race = canonical_race or race or cur_info.get("race") or extract_race_from_text(narrative_text, scen_key=scen, name=final_name)
             
-            # 1. Prefer explicitly known non-empty, non-human existing race
-            if existing_race and str(existing_race).strip().lower() not in ("", "unknown", "human"):
+            # 1. Prefer canonical roster race or explicitly known non-empty, non-human existing race
+            if canonical_race:
+                cur_race = normalize_race(canonical_race, scen_key=scen, seed=final_name)
+            elif existing_race and str(existing_race).strip().lower() not in ("", "unknown", "human"):
                 cur_race = existing_race
             # 2. Next, prefer inferred/passed specific non-human race (upgrading if existing was placeholder human)
             elif inferred_race and str(inferred_race).strip().lower() not in ("", "unknown", "human"):
@@ -935,6 +969,8 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
             else:
                 fallback_race = normalize_race("", scen_key=scen, seed=final_name)
                 cur_race = fallback_race if fallback_race != "human" else ""
+            if cur_race:
+                cur_info["race"] = cur_race
 
             cur_raw_traits = json.loads(existing_dict.get("unlocked_traits_json") or "[]")
             cur_raw_prefs = json.loads(existing_dict.get("preferences_json") or "[]")
@@ -1281,14 +1317,18 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 conn, session_id, name, info,
                 scenario=scen, narrative_text=narrative_text
             )
+            canonical_gender = info.pop("_canonical_gender", "")
+            canonical_race = info.pop("_canonical_race", "")
             from mechanics.social.races import extract_race_from_text, normalize_race
-            inferred_race = race or info.get("race") or extract_race_from_text(narrative_text, scen_key=scen, name=name)
+            inferred_race = canonical_race or race or info.get("race") or extract_race_from_text(narrative_text, scen_key=scen, name=name)
             
             if inferred_race and str(inferred_race).strip().lower() not in ("", "unknown"):
                 cur_race = normalize_race(inferred_race, scen_key=scen, seed=name)
             else:
                 fallback_race = normalize_race("", scen_key=scen, seed=name)
                 cur_race = fallback_race if fallback_race != "human" else ""
+            if cur_race:
+                info["race"] = cur_race
             clean_traits, clean_prefs = persona.split_traits_and_preferences(
                 new_traits or [],
                 new_preferences or [],
@@ -1297,7 +1337,9 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 seed_str=f"{name}_{info.get('description', '')}"
             )
             cur_track = track if (track and str(track).strip()) else "platonic"
-            cur_gender = gender or ""
+            cur_gender = canonical_gender or info.get("gender") or gender or ""
+            if cur_gender:
+                info["gender"] = cur_gender
             app_dict = dict(appearance) if isinstance(appearance, dict) else {}
             cur_memories = []
             cur_recent_memories = []
@@ -3468,14 +3510,13 @@ def get_school_characters_by_facility(session_id: int, location_str: str, limit:
             return [dict(r) for r in rows]
 
     cand_places = []
-    if parsed:
-        if parsed[1] and parsed[1] not in ("Main Area", ""):
-            cand_places.append(parsed[1])
-        if parsed[2] and parsed[2] not in ("Main Area", ""):
-            cand_places.append(parsed[2])
+    if parsed and parsed[2] and parsed[2] not in ("Main Area", ""):
+        cand_places.append(parsed[2])
     cand_places.append(leaf)
-    if primary_place != leaf:
+    if primary_place != leaf and "athletics" not in primary_place.lower() and "commons" not in primary_place.lower() and "student union" not in primary_place.lower():
         cand_places.append(primary_place)
+    if parsed and parsed[1] and parsed[1] not in ("Main Area", "") and "athletics" not in parsed[1].lower() and "commons" not in parsed[1].lower() and "student union" not in parsed[1].lower():
+        cand_places.append(parsed[1])
 
     if any(k in leaf.lower() for k in ("classroom", "homeroom", "class ")) and "empty" not in leaf.lower():
         try:

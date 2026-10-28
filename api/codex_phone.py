@@ -486,8 +486,14 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
                         it_dict["grade"] = it_dict.get("grade") or dir_entry.get("grade") or ""
                         it_dict["club"] = it_dict.get("club") or dir_entry.get("club") or ""
                         it_dict["mannerisms"] = it_dict.get("mannerisms") or dir_entry.get("mannerisms") or ""
-                        it_dict["race"] = it_dict.get("race") or dir_entry.get("race") or "human"
-                        it_dict["gender"] = it_dict.get("gender") or dir_entry.get("gender") or ""
+                        if dir_entry.get("race"):
+                            it_dict["race"] = dir_entry["race"]
+                        else:
+                            it_dict["race"] = it_dict.get("race") or "human"
+                        if dir_entry.get("gender"):
+                            it_dict["gender"] = dir_entry["gender"]
+                        else:
+                            it_dict["gender"] = it_dict.get("gender") or ""
                         it_dict["role"] = it_dict.get("role") or dir_entry.get("role") or ""
 
                     # Ensure valid gender
@@ -585,8 +591,9 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
                 except Exception:
                     b_info = {}
 
-            c_gender = c.get("gender") or b_info.get("gender") or infer_contact_gender({"name": c_name, "basic_info": b_info}) or "female"
-            c_race = c.get("race") or b_info.get("race") or "human"
+            dir_entry_c = dir_by_name.get(c_name_lower)
+            c_gender = (dir_entry_c.get("gender") if dir_entry_c else None) or c.get("gender") or b_info.get("gender") or infer_contact_gender({"name": c_name, "basic_info": b_info}) or "female"
+            c_race = (dir_entry_c.get("race") if dir_entry_c else None) or c.get("race") or b_info.get("race") or "human"
             c_app = c.get("appearance")
             if isinstance(c_app, str):
                 try:
@@ -598,13 +605,13 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
 
             p_dict = dict(c)
             p_dict["name"] = c_name
-            p_dict["role"] = b_info.get("role") or b_info.get("occupation") or "Contact"
+            p_dict["role"] = b_info.get("role") or b_info.get("occupation") or (dir_entry_c.get("role") if dir_entry_c else None) or "Contact"
             p_dict["race"] = c_race
             p_dict["gender"] = c_gender
-            p_dict["grade"] = b_info.get("grade") or ""
-            p_dict["club"] = b_info.get("club") or ""
-            p_dict["mannerisms"] = b_info.get("mannerisms") or ""
-            p_dict["description"] = b_info.get("description") or ""
+            p_dict["grade"] = b_info.get("grade") or (dir_entry_c.get("grade") if dir_entry_c else "") or ""
+            p_dict["club"] = b_info.get("club") or (dir_entry_c.get("club") if dir_entry_c else "") or ""
+            p_dict["mannerisms"] = b_info.get("mannerisms") or (dir_entry_c.get("mannerisms") if dir_entry_c else "") or ""
+            p_dict["description"] = b_info.get("description") or (dir_entry_c.get("personality_summary") if dir_entry_c else "") or ""
             p_dict["appearance"] = c_app
             p_dict["appearance_json"] = json.dumps(c_app)
             p_dict["entity_type"] = "person"
@@ -631,20 +638,47 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
                     break
 
             display_name = (r_entry.get("name") if r_entry else None) or (matched_curr_npc.get("name") if matched_curr_npc else met_name_lower.title())
+            synth_gender = (r_entry.get("gender") if r_entry else None) or (matched_curr_npc.get("gender") if matched_curr_npc else None) or infer_contact_gender({"name": display_name, "basic_info": matched_curr_npc or {}}) or "female"
+            synth_race = (r_entry.get("race") if r_entry else None) or (matched_curr_npc.get("race") if matched_curr_npc else None) or "human"
+            synth_role = (r_entry.get("role") if r_entry else None) or (matched_curr_npc.get("role") if matched_curr_npc else "Acquaintance")
+            synth_grade = (r_entry.get("grade") if r_entry else None) or (matched_curr_npc.get("grade") if matched_curr_npc else "") or ""
+            synth_club = (r_entry.get("club") if r_entry else None) or (matched_curr_npc.get("club") if matched_curr_npc else "") or ""
+            synth_desc = (r_entry.get("personality_summary") if r_entry else None) or (matched_curr_npc.get("description") if matched_curr_npc else "") or ""
+            synth_app = normalize_appearance(
+                (matched_curr_npc.get("appearance") if isinstance(matched_curr_npc, dict) and isinstance(matched_curr_npc.get("appearance"), dict) else {}),
+                gender=synth_gender,
+                race=synth_race,
+                scen_key=scen_key,
+                desc=synth_desc,
+                name=display_name,
+            )
             p_dict = {
                 "name": display_name,
                 "formal_title": (r_entry.get("formal_title") if r_entry else "") or "",
-                "role": (r_entry.get("role") if r_entry else None) or (matched_curr_npc.get("role") if matched_curr_npc else "Acquaintance"),
-                "grade": (r_entry.get("grade") if r_entry else "") or "",
-                "club": (r_entry.get("club") if r_entry else "") or "",
-                "race": (r_entry.get("race") if r_entry else "") or "human",
-                "gender": (r_entry.get("gender") if r_entry else "") or "female",
+                "role": synth_role,
+                "grade": synth_grade,
+                "club": synth_club,
+                "race": synth_race,
+                "gender": synth_gender,
+                "description": synth_desc,
+                "appearance": synth_app,
+                "appearance_json": json.dumps(synth_app),
+                "basic_info": {
+                    "role": synth_role,
+                    "grade": synth_grade,
+                    "club": synth_club,
+                    "race": synth_race,
+                    "gender": synth_gender,
+                    "description": synth_desc,
+                },
                 "entity_type": "person",
                 "relationship_score": 0,
                 "is_contact": False,
+                "is_discovered": True,
             }
             enriched_p = _enrich_contact_record(p_dict, session_id, scen_key, debug_reveal_all, phys_st=phys_st)
             p_dict.update(enriched_p)
+            p_dict["is_discovered"] = True
             grouped.setdefault("person", []).append(p_dict)
             all_entities.append(p_dict)
             discovered_people_names.add(met_name_lower)

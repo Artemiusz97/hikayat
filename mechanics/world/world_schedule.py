@@ -290,7 +290,7 @@ def is_campus_node_or_location(
     # Explicitly exclude residential & commercial off-campus markers
     if any(off in combined for off in (
         "zone_commercial", "zone_downtown", "zone_residential", "zone_seaside_bay",
-        "zone_mountain_park", "zone_recreational_park",
+        "zone_mountain_park", "zone_recreational_park", "zone_university", "loc_university", "university",
         "loc_player_house", "sub_player_bedroom", "loc_cafe", "loc_arcade",
         "loc_convenience_store", "loc_bookstore", "loc_fashion_boutique",
         "loc_karaoke_box", "loc_ramen_shop", "loc_local_park", "loc_city_square",

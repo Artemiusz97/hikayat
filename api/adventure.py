@@ -139,6 +139,11 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
     day = int(session.get("current_day", 1) or 1)
     minute = int(session.get("current_minute", 480) or 480)
     session["formatted_time"] = f"Day {day} • {(minute // 60) % 24:02d}:{minute % 60:02d}"
+    try:
+        from mechanics.stealth import is_stealth_context_warranted
+        session["stealth_available"] = bool(is_stealth_context_warranted(session))
+    except Exception:
+        session["stealth_available"] = True
 
     narr_lower = str(session.get("narrative") or "").lower()
 
@@ -1705,7 +1710,7 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
             )
             can_travel = bool(
                 p_copy["is_current_place"]
-                or (not player_restrained and (is_adjacent or (player_at_transit_hub and is_transit_hub) or not all_nodes))
+                or (not player_restrained and (bool(p_node_id) or is_adjacent or (player_at_transit_hub and is_transit_hub) or not all_nodes))
             )
 
             if p_copy["is_current_place"]:

@@ -71,6 +71,7 @@ def init_stealth_state(is_hidden: bool = True, user_id: Optional[int] = None) ->
         "anchor_node_id": None,
         "anchor_facility_id": None,
         "free_distraction_used": False,
+        "failed_stealth_lockouts": {},
     }
 
 
@@ -89,6 +90,8 @@ def _normalize_stealth_state(st: Dict[str, Any]) -> Dict[str, Any]:
     st.setdefault("anchor_node_id", None)
     st.setdefault("anchor_facility_id", None)
     st.setdefault("free_distraction_used", False)
+    if not isinstance(st.get("failed_stealth_lockouts"), dict):
+        st["failed_stealth_lockouts"] = {}
     return st
 
 
@@ -391,7 +394,322 @@ def apply_stealth_spatial_transition(
     st["alert_level"] = new_stage
     st["free_distraction_used"] = False
     st["unpatrolled_turns"] = 0
-    return set_session_stealth_state(session, st)
+    set_session_stealth_state(session, st)
+
+    # Auto-exit stealth when arriving at a safe, open public room where stealth is not warranted
+    if isinstance(session, dict) and any_actor_hidden(session):
+        probe_sess = dict(session)
+        if new_node_id:
+            probe_sess["current_node_id"] = new_node_id
+        if new_location:
+            probe_sess["current_location"] = new_location
+        if new_location != prev_location or new_node_id != prev_node_id:
+            probe_sess["focal_point"] = ""
+        if not is_stealth_context_warranted(probe_sess):
+            toggle_stealth_stance(session, False)
+            st = get_session_stealth_state(session)
+            st["detection_meter"] = 0
+            st["alert_level"] = ALERT_UNAWARE
+            st["free_distraction_used"] = False
+            set_session_stealth_state(session, st)
+
+    return get_session_stealth_state(session)
+
+
+def _get_session_time_block_tag(session: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(session, dict):
+        return "1_morning"
+    day = int(session.get("current_day", 1) or 1)
+    minute = int(session.get("current_minute", 480) or 480)
+    try:
+        from mechanics.world.schedules import get_time_block_key
+        block = str(session.get("time_slot") or get_time_block_key(minute) or "morning")
+    except Exception:
+        block = str(session.get("time_slot") or "morning")
+    return f"{day}_{block}"
+
+
+def record_failed_stealth_lockout(
+    session: Optional[Dict[str, Any]],
+    node_id: str = "",
+    label: str = "",
+) -> None:
+    """Records a time-block lockout for a failed stealth/covert action so it cannot be spammed."""
+    if not isinstance(session, dict):
+        return
+    st = get_session_stealth_state(session)
+    lockouts = st.setdefault("failed_stealth_lockouts", {})
+    tb_tag = _get_session_time_block_tag(session)
+    eff_nid = str(node_id or session.get("current_node_id") or "").strip().lower()
+    lbl_sig = str(label or "").strip().lower()[:80]
+    key = f"{eff_nid or 'loc'}:{tb_tag}"
+    lockouts[key] = {
+        "node_id": eff_nid,
+        "label_sig": lbl_sig,
+        "time_block": tb_tag,
+    }
+    if lbl_sig:
+        lockouts[f"lbl:{lbl_sig}:{tb_tag}"] = {
+            "node_id": eff_nid,
+            "label_sig": lbl_sig,
+            "time_block": tb_tag,
+        }
+    set_session_stealth_state(session, st)
+    sid = session.get("id")
+    if sid and eff_nid:
+        try:
+            import db
+            db.update_world_node_state(int(sid), eff_nid, {"failed_block": tb_tag})
+        except Exception:
+            pass
+
+
+def is_stealth_choice_locked_out(
+    session: Optional[Dict[str, Any]],
+    label: str = "",
+    node_id: str = "",
+) -> bool:
+    """Returns True if the given stealth choice or node is locked out for the current time block."""
+    if not isinstance(session, dict):
+        return False
+    st = get_session_stealth_state(session)
+    lockouts = st.get("failed_stealth_lockouts")
+    if not isinstance(lockouts, dict) or not lockouts:
+        return False
+    tb_tag = _get_session_time_block_tag(session)
+    eff_nid = str(node_id or session.get("current_node_id") or "").strip().lower()
+    lbl_sig = str(label or "").strip().lower()[:80]
+    if lbl_sig and f"lbl:{lbl_sig}:{tb_tag}" in lockouts:
+        return True
+    if eff_nid and f"{eff_nid}:{tb_tag}" in lockouts:
+        if not lbl_sig or any(
+            k in lbl_sig
+            for k in ("sneak", "stealth", "infiltrate", "lockpick", "pick the lock", "slip past", "creep", "shadow step", "careful bypass", "diversion")
+        ):
+            return True
+    return False
+
+
+def is_stealth_context_warranted(
+    session: Optional[Dict[str, Any]],
+    node: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """
+    Determines whether stealth actions and the manual Stealth/Distract dock buttons
+    are contextually warranted in the current scene (Issue 1):
+    - Warranted during combat, near living hostiles, or during an active anomaly incursion.
+    - Warranted inside or at the locked threshold of a `restricted` or `private` area (excluding player's home),
+      or during active curfew / after-hours trespassing (`20:00–07:00`).
+    - Warranted when an active local quest waypoint explicitly calls for covert/infiltration tactics.
+    - Warranted when in an active compromised/intimate physical state in a public/semi-private venue.
+    - Never warranted in open daytime school classrooms, hallways, cafeterias, gyms, shops, or the player's own home.
+    """
+    if not isinstance(session, dict):
+        return False
+
+    # 1. Active combat or living hostiles
+    try:
+        from mechanics.combat import is_in_combat
+        if is_in_combat(session):
+            return True
+    except Exception:
+        pass
+    enemies = [
+        e for e in (session.get("nearby_enemies") or session.get("monsters") or [])
+        if isinstance(e, dict) and int(e.get("hp", 1) or 0) > 0
+    ]
+    if enemies:
+        return True
+
+    sid = session.get("id")
+    scen = str(session.get("scenario") or "fantasy").strip().lower()
+    curr_loc = str(session.get("current_location") or "").strip()
+    curr_nid = str(session.get("current_node_id") or "").strip()
+    focal_str = str(session.get("focal_point") or "").strip()
+    loc_low = curr_loc.lower()
+    focal_low = focal_str.lower()
+    combined_loc = f"{loc_low} {focal_low} {curr_nid.lower()}".strip()
+
+    # 2. Active anomalous incursion at current location
+    if sid and (curr_loc or curr_nid):
+        try:
+            from mechanics.world.anomalous_events import get_active_incursion_at_location
+            inc = get_active_incursion_at_location(int(sid), location_str=curr_loc, node_id=curr_nid)
+            if inc and not inc.get("resolved"):
+                return True
+        except Exception:
+            pass
+
+    # 3. Compromised / discreet physical state
+    phys = session.get("_physical_state") or session.get("physical_state") or {}
+    if isinstance(phys, dict):
+        ic = str(phys.get("intimate_contact") or "").strip().lower()
+        if ic and ic not in ("none", "false", "0"):
+            return True
+
+    # 4. Locked threshold barrier in focal_point / current_location
+    if any(
+        k in combined_loc
+        for k in (
+            "outside the locked entrance",
+            "locked threshold",
+            "restricted threshold",
+            "caught trespassing",
+            "after-hours trespassing",
+        )
+    ):
+        return True
+
+    # 5. Active local quest waypoint explicitly requiring stealth / infiltration / eavesdropping
+    if sid and curr_loc:
+        try:
+            from mechanics.world.waypoints.core import get_active_local_quest_hooks
+            hooks = get_active_local_quest_hooks(int(sid), curr_loc) or []
+            covert_quest_kws = (
+                "sneak", "infiltrate", "eavesdrop", "steal", "lockpick", "bypass",
+                "trespass", "undisclosed", "covert", "heist", "spy", "tail", "smuggle",
+            )
+            for h in hooks:
+                if not isinstance(h, dict):
+                    continue
+                if str(h.get("blueprint_id") or "").upper() == "HEIST_INFILTRATION":
+                    return True
+                h_txt = " ".join(
+                    str(h.get(k) or "") for k in ("stage_label", "objective", "quest_notes", "title")
+                ).lower()
+                if any(kw in h_txt for kw in covert_quest_kws):
+                    return True
+        except Exception:
+            pass
+
+    # Player's own home / bedroom is never a stealth zone unless enemies/incursions are present
+    if curr_nid.lower() in ("loc_player_house", "sub_player_bedroom") or "player's house" in loc_low or "player's bedroom" in loc_low:
+        return False
+
+    curr_day = int(session.get("current_day", 1) or 1)
+    curr_min = int(session.get("current_minute", 480) or 480)
+    safe_min = curr_min % 1440
+
+    # 6. Check current node access tier, curfew, and schedule lock
+    w_node = node if isinstance(node, dict) else (session.get("current_world_node") if isinstance(session.get("current_world_node"), dict) else None)
+    if sid and (curr_nid or curr_loc):
+        try:
+            import db
+            from mechanics.world.locations.access_gate import get_node_effective_access_info
+            eff_nid = curr_nid or db.resolve_node_id_from_location(int(sid), curr_loc) or ""
+            if eff_nid:
+                if eff_nid.lower() in ("loc_player_house", "sub_player_bedroom"):
+                    return False
+                acc = get_node_effective_access_info(
+                    int(sid), eff_nid, current_day=curr_day, current_minute=curr_min, scen_key=scen
+                )
+                if (
+                    acc.get("access_tier") in ("restricted", "private", "locked")
+                    or acc.get("curfew_active")
+                    or acc.get("is_trespassing")
+                    or acc.get("schedule_locked")
+                ):
+                    return True
+        except Exception:
+            pass
+
+    if isinstance(w_node, dict):
+        if str(w_node.get("access_tier") or "").lower() in ("restricted", "private", "locked"):
+            return True
+
+    # Explicit restricted/hostile/curfew keywords in location string
+    if any(
+        k in combined_loc
+        for k in _HOSTILE_RESTRICTED_KEYWORDS + (
+            "staff room", "faculty lounge", "principal", "rooftop", "council archive",
+            "chemical storage", "old storage", "velvet basement", "containment",
+            "classified", "after-hours", "curfew", "trespass", "cult", "syndicate",
+        )
+    ):
+        return True
+
+    # High School Night Curfew (20:00–07:00) on campus
+    try:
+        from mechanics.world.world_schedule import is_high_school_setting, is_campus_node_or_location
+        if is_high_school_setting(scen) and (safe_min >= 1200 or safe_min < 420):
+            if is_campus_node_or_location(w_node, location_str=curr_loc, session_id=int(sid or 0), scen_key=scen):
+                return True
+    except Exception:
+        pass
+
+    # In High School, Slice of Life, and Anomalous Incursions, open civilian/campus/agency rooms never warrant stealth
+    try:
+        from scenario_data import is_anomalous_incursions_scenario
+        from mechanics.world.world_schedule import is_high_school_setting
+        if is_high_school_setting(scen) or "slice_of_life" in scen or is_anomalous_incursions_scenario(scen):
+            return False
+    except Exception:
+        if any(k in scen for k in ("high_school", "highschool", "school", "academy", "slice_of_life", "anomalous", "urban_anomalies")):
+            return False
+
+    # Classic dungeon/fantasy/cyberpunk scenarios allow stealth unless in an explicitly mundane classroom/home
+    if any(k in combined_loc for k in ("homeroom", "classroom", "cafeteria", "swimming pool", "main gymnasium")):
+        return False
+    return True
+
+
+def is_strict_trespass_or_restricted_stealth_zone(
+    session: Optional[Dict[str, Any]],
+    action_data: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """
+    Returns True when a failed stealth check must immediately escalate to 100% detection,
+    evict the player to the nearest open public location, and lock out the failed stealth option
+    for the current time block (Issue 11).
+    """
+    if not isinstance(session, dict):
+        return False
+    scen = str(session.get("scenario") or "fantasy").strip().lower()
+    try:
+        from scenario_data import is_anomalous_incursions_scenario, is_non_combat_scenario
+        from mechanics.world.world_schedule import is_high_school_setting
+        if is_high_school_setting(scen) or is_non_combat_scenario(scen) or is_anomalous_incursions_scenario(scen) or "slice_of_life" in scen:
+            return True
+    except Exception:
+        if any(k in scen for k in ("high_school", "highschool", "school", "academy", "slice_of_life", "anomalous")):
+            return True
+
+    sid = session.get("id")
+    curr_nid = str(session.get("current_node_id") or "").strip()
+    curr_loc = str(session.get("current_location") or "").strip()
+    act_lbl = str((action_data or {}).get("label") or (action_data or {}).get("custom_action_text") or "").lower()
+    target_nid = str((action_data or {}).get("target_node_id") or "").strip()
+
+    if sid:
+        try:
+            from mechanics.world.locations.access_gate import get_node_effective_access_info
+            curr_day = int(session.get("current_day", 1) or 1)
+            curr_min = int(session.get("current_minute", 480) or 480)
+            for check_nid in (target_nid, curr_nid):
+                if check_nid:
+                    acc = get_node_effective_access_info(
+                        int(sid), check_nid, current_day=curr_day, current_minute=curr_min, scen_key=scen
+                    )
+                    if (
+                        acc.get("access_tier") in ("restricted", "private", "locked")
+                        or acc.get("curfew_active")
+                        or acc.get("is_trespassing")
+                        or acc.get("schedule_locked")
+                    ):
+                        return True
+        except Exception:
+            pass
+
+    combined = f"{curr_loc.lower()} {str(session.get('focal_point') or '').lower()} {act_lbl}"
+    if any(
+        k in combined
+        for k in (
+            "restricted", "private", "locked", "curfew", "trespass", "staff room", "faculty",
+            "principal", "rooftop", "archive", "chemical", "lockpick", "pick the lock", "sneak in", "break in",
+        )
+    ):
+        return True
+    return False
 
 
 def apply_stealth_distraction(session: Dict[str, Any], reduction: int = 30) -> Dict[str, Any]:
@@ -745,6 +1063,15 @@ def resolve_stealth_action(
         action_noise=action_noise,
     )
 
+    if not check_res.succeeded and is_strict_trespass_or_restricted_stealth_zone(session, action_data):
+        new_meter = 100
+        new_stage = ALERT_DETECTED
+        record_failed_stealth_lockout(
+            session,
+            node_id=str(action_data.get("target_node_id") or session.get("current_node_id") or ""),
+            label=action_label,
+        )
+
     st["detection_meter"] = new_meter
     st["alert_level"] = new_stage
     st["noise_level"] = action_noise
@@ -753,6 +1080,7 @@ def resolve_stealth_action(
     else:
         st["unpatrolled_turns"] = 0
         st["alert_event"] = "suspicion_raised"
+    set_session_stealth_state(session, st)
 
     trigger_combat = False
     trigger_confrontation = False
@@ -761,8 +1089,6 @@ def resolve_stealth_action(
         break_stealth(session, reason="detected_at_100_percent", user_id=eff_uid)
         st = get_session_stealth_state(session)
         trigger_combat, trigger_confrontation = classify_detection_escalation(session)
-    else:
-        set_session_stealth_state(session, st)
 
     hidden_for_actor = is_actor_hidden(session, eff_uid)
     badge = get_alert_badge_data(new_meter, is_hidden=hidden_for_actor)

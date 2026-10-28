@@ -50,11 +50,12 @@ def get_default_tiered_location(scenario_key: str = "fantasy", session_id: int =
                 p_name = get_session_urban_facility_name(session_id, zones[0].get("id", ""), p_id, p_name, scenario_key, char_name)
 
             subs = primaries[0].get("sub_locations") or []
+            from .hierarchy import resolve_session_location_tokens, resolve_default_sublocation
 
             if subs:
 
                 s_id = subs[0].get("id", "")
-                s_name = subs[0].get("name", "Main Area")
+                s_name = subs[0].get("name") or resolve_default_sublocation(p_name, z_name, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
 
                 if s_name == "Homeroom Classroom" or s_id == "loc_homeroom":
                     s_name = get_session_classroom_name(session_id, scenario_key)
@@ -66,23 +67,23 @@ def get_default_tiered_location(scenario_key: str = "fantasy", session_id: int =
 
             else:
 
-                s_name = "Main Area"
+                s_name = resolve_default_sublocation(p_name, z_name, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
 
-            from .hierarchy import resolve_session_location_tokens
             return (
                 resolve_session_location_tokens(session_id, z_name, scenario_key, char_name),
                 resolve_session_location_tokens(session_id, p_name, scenario_key, char_name),
                 resolve_session_location_tokens(session_id, s_name, scenario_key, char_name)
             )
 
-        from .hierarchy import resolve_session_location_tokens
+        from .hierarchy import resolve_session_location_tokens, resolve_default_sublocation
+        z_res = resolve_session_location_tokens(session_id, z_name, scenario_key, char_name)
         return (
-            resolve_session_location_tokens(session_id, z_name, scenario_key, char_name),
-            "Main Area",
-            "Main Area"
+            z_res,
+            z_res,
+            resolve_default_sublocation(z_res, z_res, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
         )
 
-    return ("World Region", "Main Area", "Main Area")
+    return ("World Region", "Central District", "Central Concourse")
 
 def get_archetype_starting_location(
 
@@ -214,13 +215,14 @@ def get_archetype_starting_location(
                     p_name = get_session_park_name(session_id, scenario_key)
 
                 subs = p.get("sub_locations", [])
+                from .hierarchy import resolve_default_sublocation
 
                 if subs:
 
                     for s in subs:
 
                         s_id = s.get("id", "")
-                        s_name = s.get("name", "Main Area")
+                        s_name = s.get("name") or resolve_default_sublocation(p_name, z_name, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
 
                         if s_name == "Homeroom Classroom" or s_id == "loc_homeroom":
                             s_name = get_session_classroom_name(session_id, scenario_key) if session_id else "Homeroom Classroom"
@@ -232,7 +234,7 @@ def get_archetype_starting_location(
 
                 else:
 
-                    seeded_triples.append((z_name, p_name, "Main Area", z_hub))
+                    seeded_triples.append((z_name, p_name, resolve_default_sublocation(p_name, z_name, session_id=session_id, scenario_key=scenario_key, char_name=char_name), z_hub))
 
 
 
@@ -446,10 +448,15 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
     existing = db.get_session_locations(session_id)
 
-    from .hierarchy import resolve_session_location_tokens
+    from .hierarchy import resolve_session_location_tokens, resolve_default_sublocation, format_tiered_location_string
 
-    # Retroactive self-healing: fix any existing unrendered session tokens in SQLite
-    if existing and any('{' in (r.get('zone_name') or '') or '{' in (r.get('primary_name') or '') for r in existing):
+    # Retroactive self-healing: fix any existing unrendered session tokens OR legacy "Main Area" sublocations in SQLite
+    if existing and any(
+        '{' in (r.get('zone_name') or '')
+        or '{' in (r.get('primary_name') or '')
+        or (r.get('sub_name') or '').strip().lower() == 'main area'
+        for r in existing
+    ):
         with db.get_conn() as conn:
             for r in existing:
                 z_cur = r.get('zone_name') or ''
@@ -458,12 +465,46 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
                 z_fixed = resolve_session_location_tokens(session_id, z_cur, scenario_key, char_name)
                 p_fixed = resolve_session_location_tokens(session_id, p_cur, scenario_key, char_name)
                 s_fixed = resolve_session_location_tokens(session_id, s_cur, scenario_key, char_name)
+                if s_fixed.strip().lower() == 'main area':
+                    s_fixed = resolve_default_sublocation(p_fixed, z_fixed, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
                 if z_fixed != z_cur or p_fixed != p_cur or s_fixed != s_cur:
                     conn.execute(
-                        'UPDATE session_locations SET zone_name=?, primary_name=?, sub_name=? WHERE location_id=?',
-                        (z_fixed, p_fixed, s_fixed, r['location_id'])
+                        'UPDATE session_locations SET zone_name=?, primary_name=?, sub_name=? WHERE session_id=? AND location_id=?',
+                        (z_fixed, p_fixed, s_fixed, session_id, r['location_id'])
                     )
         existing = db.get_session_locations(session_id)
+
+    # Also self-heal any world_nodes ROOM rows named "Main Area" and current_location on the session
+    try:
+        wnodes = db.get_session_world_nodes(session_id)
+        if wnodes:
+            node_map = {n["node_id"]: n for n in wnodes}
+            dirty_nodes = [n for n in wnodes if (n.get("name") or "").strip().lower() == "main area"]
+            if dirty_nodes:
+                with db.get_conn() as conn:
+                    for dn in dirty_nodes:
+                        parent = node_map.get(dn.get("parent_id")) if dn.get("parent_id") else None
+                        gparent = node_map.get(parent.get("parent_id")) if (parent and parent.get("parent_id")) else None
+                        p_lbl = parent["name"] if parent else dn["name"]
+                        z_lbl = gparent["name"] if gparent else (parent["name"] if parent else "")
+                        healed_sub = resolve_default_sublocation(p_lbl, z_lbl, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
+                        if healed_sub and healed_sub.lower() != "main area":
+                            conn.execute(
+                                "UPDATE world_nodes SET name=? WHERE session_id=? AND node_id=?",
+                                (healed_sub, session_id, dn["node_id"])
+                            )
+        sess_cur = db.get_session(session_id)
+        if sess_cur:
+            cur_loc_str = str(sess_cur.get("current_location") or "")
+            if "main area" in cur_loc_str.lower():
+                cz, cp, cs = parse_tiered_location(cur_loc_str, scenario_key=scenario_key, session_id=session_id, char_name=char_name)
+                if cs.strip().lower() == "main area":
+                    cs = resolve_default_sublocation(cp, cz, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
+                healed_loc = format_tiered_location_string(cz, cp, cs)
+                if healed_loc != cur_loc_str:
+                    db.update_session(session_id, current_location=healed_loc)
+    except Exception:
+        pass
 
     school_name = get_session_school_name(session_id, scenario_key) if is_school_scenario(scenario_key) else None
 
@@ -791,7 +832,7 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
                 s_id = sub.get("id", "")
 
-                sub_name = sub.get("name", "Main Area")
+                sub_name = sub.get("name") or resolve_default_sublocation(primary_name, zone_name, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
 
                 if classroom_name and (sub_name == "Homeroom Classroom" or s_id == "loc_homeroom"):
                     sub_name = classroom_name

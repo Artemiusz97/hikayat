@@ -1236,6 +1236,13 @@ SCHEMA_MIGRATIONS: list[tuple[int, str, list[str]]] = [
             "ALTER TABLE session_clues ADD COLUMN is_consumed INTEGER DEFAULT 0",
         ],
     ),
+    (
+        32,
+        "self_heal_main_area_and_roster_npc_drift",
+        [
+            "SELECT 1",
+        ],
+    ),
 ]
 
 
@@ -1288,6 +1295,12 @@ def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
             _migrate_clean_cutover_v30(conn)
         except Exception as e:
             print(f"[migration 30] Warning: clean cutover v30 migration encountered: {e}")
+
+    if 32 in newly_applied:
+        try:
+            _migrate_self_heal_main_area_and_roster_drift_v32(conn)
+        except Exception as e:
+            print(f"[migration 32] Warning: self-heal migration encountered: {e}")
 
     try:
         _strip_legacy_session_fk_constraints(conn)
@@ -1616,6 +1629,104 @@ def _migrate_clean_cutover_v30(conn: sqlite3.Connection) -> None:
                 conn.execute(
                     "UPDATE sessions SET physical_state_json = ? WHERE id = ?",
                     (json.dumps(scene_meta), sid),
+                )
+    except Exception:
+        pass
+
+
+def _migrate_self_heal_main_area_and_roster_drift_v32(conn: sqlite3.Connection) -> None:
+    """Self-heals legacy 'Main Area' location strings and drifted roster NPC gender/race across existing campaigns."""
+    from mechanics.world.locations.hierarchy import (
+        format_tiered_location_string,
+        parse_tiered_location,
+        resolve_default_sublocation,
+    )
+
+    # 1. Self-heal "Main Area" in sessions.current_location
+    try:
+        sess_rows = conn.execute("SELECT id, current_location FROM sessions WHERE current_location LIKE '%Main Area%'").fetchall()
+        for sr in sess_rows:
+            t1, t2, t3 = parse_tiered_location(sr["current_location"], session_id=sr["id"])
+            new_loc = format_tiered_location_string(t1, t2, t3)
+            if new_loc and new_loc != sr["current_location"]:
+                conn.execute("UPDATE sessions SET current_location = ? WHERE id = ?", (new_loc, sr["id"]))
+    except Exception:
+        pass
+
+    # 2. Self-heal "Main Area" in session_locations
+    try:
+        loc_rows = conn.execute(
+            "SELECT id, session_id, zone_name, primary_name, sub_name FROM session_locations WHERE lower(sub_name) = 'main area'"
+        ).fetchall()
+        for lr in loc_rows:
+            new_sub = resolve_default_sublocation(lr["primary_name"] or "", lr["zone_name"] or "", session_id=lr["session_id"])
+            if new_sub and new_sub.strip().lower() != "main area":
+                conn.execute(
+                    "UPDATE session_locations SET sub_name = ? WHERE id = ?",
+                    (new_sub, lr["id"]),
+                )
+    except Exception:
+        pass
+
+    # 3. Self-heal "Main Area" in world_nodes
+    try:
+        wn_rows = conn.execute(
+            "SELECT id, session_id, parent_id, name FROM world_nodes WHERE lower(name) = 'main area'"
+        ).fetchall()
+        for wn in wn_rows:
+            parent_name = ""
+            if wn["parent_id"]:
+                pr = conn.execute(
+                    "SELECT name FROM world_nodes WHERE session_id = ? AND node_id = ?",
+                    (wn["session_id"], wn["parent_id"]),
+                ).fetchone()
+                if pr:
+                    parent_name = pr["name"] or ""
+            new_name = resolve_default_sublocation(parent_name or "Facility", session_id=wn["session_id"])
+            if new_name and new_name.strip().lower() != "main area":
+                conn.execute("UPDATE world_nodes SET name = ? WHERE id = ?", (new_name, wn["id"]))
+    except Exception:
+        pass
+
+    # 4. Self-heal drifted contacts & lorebook gender/race against canonical school_directory & anomalous_agent_roster
+    try:
+        sd_rows = conn.execute("SELECT session_id, name, gender, race FROM school_directory").fetchall()
+        for sd in sd_rows:
+            if not sd["name"]:
+                continue
+            sid = sd["session_id"]
+            n_low = str(sd["name"]).strip().lower()
+            c_gen = str(sd["gender"] or "").strip().lower()
+            c_race = str(sd["race"] or "").strip()
+            if c_gen and c_race:
+                conn.execute(
+                    "UPDATE contacts SET gender = ?, race = ? WHERE session_id = ? AND lower(name) = ?",
+                    (c_gen, c_race, sid, n_low),
+                )
+                conn.execute(
+                    "UPDATE lorebook SET gender = ?, race = ? WHERE session_id = ? AND lower(name) = ? AND lower(entity_type) = 'person'",
+                    (c_gen, c_race, sid, n_low),
+                )
+    except Exception:
+        pass
+
+    try:
+        ar_rows = conn.execute("SELECT session_id, name, gender, race FROM anomalous_agent_roster").fetchall()
+        for ar in ar_rows:
+            if not ar["name"]:
+                continue
+            sid = ar["session_id"]
+            n_low = str(ar["name"]).strip().lower()
+            c_gen = str(ar["gender"] or "").strip().lower()
+            c_race = str(ar["race"] or "").strip()
+            if c_gen and c_race:
+                conn.execute(
+                    "UPDATE contacts SET gender = ?, race = ? WHERE session_id = ? AND lower(name) = ?",
+                    (c_gen, c_race, sid, n_low),
+                )
+                conn.execute(
+                    "UPDATE lorebook SET gender = ?, race = ? WHERE session_id = ? AND lower(name) = ? AND lower(entity_type) = 'person'",
+                    (c_gen, c_race, sid, n_low),
                 )
     except Exception:
         pass
@@ -2048,9 +2159,13 @@ def _sanitize_npcs_list(session_id: int, npcs: list) -> list:
                 clean_entry["mood"] = str(npc["mood"]).strip()[:40]
             if isinstance(npc.get("micro_blocking"), dict):
                 clean_entry["micro_blocking"] = dict(npc["micro_blocking"])
-            for k in ("composure_state", "stage_role", "attention_ring"):
+            for k in ("composure_state", "stage_role", "attention_ring", "gender", "race", "club", "grade", "clique", "faction", "activity", "public_role"):
                 if npc.get(k):
-                    clean_entry[k] = str(npc[k]).strip()[:40]
+                    clean_entry[k] = str(npc[k]).strip()[:80]
+            if npc.get("description"):
+                clean_entry["description"] = str(npc["description"]).strip()[:300]
+            if isinstance(npc.get("appearance"), dict) and npc["appearance"]:
+                clean_entry["appearance"] = dict(npc["appearance"])
             if npc.get("composure_ttl") is not None:
                 clean_entry["composure_ttl"] = _safe_int_db(npc.get("composure_ttl"), 0)
             clean_list.append(clean_entry)
@@ -2074,8 +2189,13 @@ def _sanitize_npcs_list(session_id: int, npcs: list) -> list:
         if key in seen:
             existing = deduped[seen[key]]
             # Merge: prefer non-None values from the later entry for stat fields
-            for field in ("level", "hp", "max_hp", "mp", "max_mp", "mood", "micro_blocking", "composure_state", "composure_ttl", "stage_role", "attention_ring"):
-                if existing.get(field) is None and entry.get(field) is not None:
+            for field in (
+                "level", "hp", "max_hp", "mp", "max_mp", "mood", "micro_blocking",
+                "composure_state", "composure_ttl", "stage_role", "attention_ring",
+                "gender", "race", "club", "grade", "clique", "faction", "activity",
+                "public_role", "description", "appearance",
+            ):
+                if existing.get(field) in (None, "") and entry.get(field) not in (None, ""):
                     existing[field] = entry[field]
 
             # Merge status_effects: union without duplicates

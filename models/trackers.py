@@ -53,6 +53,15 @@ class TrackerEntity(BaseModel):
     mp: Optional[int] = Field(default=None)
     status_effects: List[str] = Field(default_factory=list, description="Short condition or mood tags (e.g. Bleeding, Stunned, Flustered, Angry, Scared, Aroused, Calm)")
     mood: Optional[str] = Field(default=None, description="Current emotional mood or state (e.g. Angry, Confused, Scared, Flustered, Aroused, Calm, Neutral)")
+    descriptor: Optional[str] = Field(default=None, description="Short physical descriptor matching how the prose first describes this person (e.g. 'man in a disheveled investigator's coat')")
+
+    @field_validator("descriptor", mode="before")
+    @classmethod
+    def coerce_descriptor(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
 
     @field_validator("social_role_type", mode="before")
     @classmethod
@@ -141,6 +150,15 @@ class NewEntity(BaseModel):
     preferences: List[str] = Field(default_factory=list)
     motivation: Optional[str] = None
     mannerisms: Optional[str] = None
+    descriptor: Optional[str] = Field(default=None, description="Short physical descriptor matching how the prose first describes this person (e.g. 'man in a disheveled investigator's coat')")
+
+    @field_validator("descriptor", mode="before")
+    @classmethod
+    def coerce_descriptor(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
 
     @field_validator("social_role_type", mode="before")
     @classmethod

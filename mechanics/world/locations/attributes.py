@@ -608,7 +608,27 @@ def get_location_archetype(primary_name: str, zone_name: str = "", scen_key: str
 
         return ("Campus Area", "🏫")
 
-
+    from scenario_data import is_anomalous_incursions_scenario
+    if is_anomalous_incursions_scenario(scen_key):
+        z_lower_anom = str(zone_name or "").strip().lower()
+        combo_anom = f"{z_lower_anom} {p_lower}"
+        if any(k in p_lower for k in ("rift", "anomaly", "anomalies", "containment", "quarantine", "breach", "incursion", "distortion")):
+            return ("Anomaly & Containment Site", "🌀")
+        if any(k in combo_anom for k in ("agency", "headquarters", "operations hq", "tower hq", "spire hq", "precinct", "command", "briefing", "armory", "syndicate", "warden", "enclave", "dispatch")):
+            return ("Agency & Faction Facility", "🛡️")
+        if any(k in p_lower for k in ("hospital", "medical", "clinic", "triage", "trauma", "ward", "pharmacy", "dispensary", "temple", "shrine", "sanctuary", "chapel")):
+            return ("Medical & Sanctuary", "🏥")
+        if any(k in combo_anom for k in ("university", "campus", "lecture", "research", "lab", "laboratory", "archive", "library", "institute", "observatory")):
+            return ("Campus & Research", "🎓")
+        if any(k in p_lower for k in ("station", "subway", "platform", "turnstile", "terminal", "airport", "harbor", "dock", "pier", "bridge", "overpass", "underpass", "highway", "tunnel")):
+            return ("Transit & Infrastructure", "🚆")
+        if any(k in p_lower for k in ("cafe", "café", "diner", "restaurant", "ramen", "izakaya", "bar", "nightclub", "arcade", "mall", "shop", "store", "boutique", "market", "bazaar", "roastery", "bakery", "theme park", "amusement", "midway", "karaoke", "hotel")):
+            return ("Urban Commercial & Leisure", "🏙️")
+        if any(k in p_lower for k in ("residence", "apartment", "house", "penthouse", "safehouse", "dorm", "quarters", "home")) and "lighthouse" not in p_lower:
+            return ("Residential & Safehouse", "🏠")
+        if any(k in p_lower for k in ("park", "garden", "plaza", "square", "promenade", "courtyard", "beach", "boardwalk", "lookout", "forest", "woods")):
+            return ("Civic Grounds & Parks", "🌳")
+        return ("Urban Sector", "🏙️")
 
     # 1. Monster Lairs / Dens / Hideouts / Smuggler Nests (Word-boundary matching prevents "student" matching "den")
 
@@ -779,6 +799,23 @@ def location_has_bounty_board(location_str: str, scen_key: str = None) -> bool:
         return False
 
     loc_lower = location_str.lower()
+    from scenario_data import is_anomalous_incursions_scenario
+
+    if scen_key and is_school_scenario(scen_key):
+        school_board_keywords = (
+            "student council", "council office", "notice board", "bulletin board",
+            "school gate", "main gate", "front gate", "entrance foyer", "main foyer",
+            "central courtyard", "main courtyard",
+        )
+        return any(k in loc_lower for k in school_board_keywords)
+
+    if scen_key and is_anomalous_incursions_scenario(scen_key):
+        anom_board_keywords = (
+            "agency hq", "headquarters", "operations hq", "tower hq", "spire hq",
+            "command center", "briefing", "dispatch", "precinct", "bounty board",
+            "notice board", "bulletin", "mission board", "contract terminal",
+        )
+        return any(k in loc_lower for k in anom_board_keywords)
 
     keywords = [
 
@@ -794,7 +831,7 @@ def location_has_bounty_board(location_str: str, scen_key: str = None) -> bool:
 
     ]
 
-    return any(k in loc_lower for k in keywords)
+    return any(re.search(rf"\b{re.escape(k)}\b", loc_lower) for k in keywords)
 
 def get_available_merchant_types_for_location(location_str: str, scen_key: str = None) -> list[dict]:
 
@@ -868,10 +905,10 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
         if any(k in loc_lower for k in ["co-op", "bookstore", "school store", "stationery", "campus kiosk"]):
             stores.append({"type": "school_merchant", **MERCHANT_ARCHETYPES["school_merchant"]})
 
-        if any(k in loc_lower for k in ["hallway", "lockers", "rooftop", "behind the gym", "storage shed", "quiet alley", "underpass", "courtyard"]):
+        if any(k in loc_lower for k in ["quiet alley", "underpass"]) and location_has_merchant_shop(location_str, scen_key):
             stores.append({"type": "student_merchant", **MERCHANT_ARCHETYPES["student_merchant"]})
 
-        if any(k in loc_lower for k in ["club room", "gang", "hideout", "hangout", "clubhouse"]):
+        if any(k in loc_lower for k in ["club room", "gang", "hideout", "hangout", "clubhouse"]) and location_has_merchant_shop(location_str, scen_key):
             stores.append({"type": "club_merchant", **MERCHANT_ARCHETYPES["club_merchant"]})
 
         # Specific matched shop venues take precedence before generic Downtown/City Square hub fallback
@@ -981,20 +1018,20 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
                 found.append({"type": "armor_merchant", **MERCHANT_ARCHETYPES["armor_merchant"]})
             if not any(s["type"] == "clothes_merchant" for s in found):
                 found.append({"type": "clothes_merchant", **MERCHANT_ARCHETYPES["clothes_merchant"]})
-        if any(k in target_lower for k in ["apothecary", "alchemist", "herbalist", "potion", "pharmacy", "cleansing bay", "psychic detox", "dispensary", "medical", "clinic", "emergency trauma", "ambulance triage"]):
+        if any(k in target_lower for k in ["apothecary", "alchemist", "herbalist", "potion", "pharmacy", "cleansing bay", "psychic detox", "dispensary"]):
             if not any(s["type"] == "potion_merchant" for s in found):
                 found.append({"type": "potion_merchant", **MERCHANT_ARCHETYPES["potion_merchant"]})
-        if any(k in target_lower for k in ["arcane", "magic", "mystic", "enchanter", "sorcery", "grimoire", "scribe", "library", "antiquities", "licensed wards", "curio", "omikuji", "talisman stand", "alchemical apothecary", "campus bookstore"]):
+        if not is_anom_scen and any(k in target_lower for k in ["arcane", "magic", "mystic", "enchanter", "sorcery", "grimoire", "scribe", "antiquities", "licensed wards", "alchemical apothecary"]):
             if not any(s["type"] == "magic_merchant" for s in found):
                 found.append({"type": "magic_merchant", **MERCHANT_ARCHETYPES["magic_merchant"]})
-            if not is_anom_scen and not any(s["type"] == "spellbook_merchant" for s in found):
+            if not any(s["type"] == "spellbook_merchant" for s in found):
                 found.append({"type": "spellbook_merchant", **MERCHANT_ARCHETYPES["spellbook_merchant"]})
-            if is_anom_scen and any(k in target_lower for k in ["omikuji", "talisman stand"]):
-                if not any(s["type"] == "potion_merchant" for s in found):
-                    found.append({"type": "potion_merchant", **MERCHANT_ARCHETYPES["potion_merchant"]})
-                if not any(s["type"] == "weapon_merchant" for s in found):
-                    found.append({"type": "weapon_merchant", **MERCHANT_ARCHETYPES["weapon_merchant"]})
-        if any(k in target_lower for k in ["omikuji", "talisman stand", "carnival midway", "gift emporium", "duty-free"]):
+        elif is_anom_scen and any(k in target_lower for k in ["antiquities", "licensed wards", "occult shop", "relic shop"]):
+            if not any(s["type"] == "magic_merchant" for s in found):
+                found.append({"type": "magic_merchant", **MERCHANT_ARCHETYPES["magic_merchant"]})
+            if not any(s["type"] == "potion_merchant" for s in found):
+                found.append({"type": "potion_merchant", **MERCHANT_ARCHETYPES["potion_merchant"]})
+        if any(k in target_lower for k in ["omikuji", "talisman stand", "carnival midway", "gift emporium", "duty-free", "campus bookstore", "bookstore", "curio"]):
             if not any(s["type"] == "gift_merchant" for s in found):
                 found.append({"type": "gift_merchant", **MERCHANT_ARCHETYPES["gift_merchant"]})
         if any(k in target_lower for k in ["bakery", "tavern", "inn", "saloon", "canteen", "mess hall", "food stall", "diner", "espresso", "roastery", "ramen", "izakaya", "cafe", "café", "konbini", "convenience", "fish market", "carnival midway", "night market", "street food", "tea house", "garden terrace", "duty-free", "black bazaar"]):
@@ -1099,6 +1136,40 @@ def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
 
 
     # General Scenarios (Fantasy, Cyberpunk, Sci-Fi, etc.)
+    from scenario_data import is_anomalous_incursions_scenario
+    is_anom_scen = is_anomalous_incursions_scenario(scen_key) if scen_key else False
+
+    raw_parts = [
+        pt.strip()
+        for pt in re.split(r"➔|->", str(location_str))
+        if pt.strip()
+    ]
+    leaf_lower = raw_parts[-1].lower() if raw_parts else p_lower
+
+    if is_anom_scen:
+        non_shop_anom_rooms = (
+            "classroom", "lecture", "library", "study", "office", "hallway", "corridor",
+            "foyer", "lobby", "courtyard", "quad", "roof", "rooftop", "parking",
+            "platform", "turnstile", "gate", "ward", "triage", "trauma", "operating",
+            "morgue", "icu", "sanctuary", "altar", "shrine", "prayer", "pagoda",
+            "coaster", "ferris", "haunted house", "carousel", "dock", "pier", "beach",
+            "trail", "forest", "lookout", "bedroom", "living room", "kitchen",
+            "briefing", "command", "interrogation", "containment", "cell", "training",
+            "firing range", "helipad", "garage", "archive", "server",
+        )
+        explicit_shop_nouns = (
+            "shop", "store", "market", "bazaar", "emporium", "café", "cafe", "pharmacy",
+            "armory", "ordnance", "requisition", "quartermaster", "outfitter", "tailoring",
+            "cleansing bay", "psychic detox", "dispensary", "convenience", "konbini",
+            "boutique", "bakery", "stall", "canteen", "diner", "roastery", "izakaya",
+            "ramen", "espresso", "tea house", "bookstore", "duty-free", "midway",
+            "omikuji", "talisman stand", "pawn", "black market", "auction house",
+        )
+        if any(re.search(rf"\b{re.escape(k)}\b", leaf_lower) for k in explicit_shop_nouns):
+            return True
+        if any(re.search(rf"\b{re.escape(ns)}\b", leaf_lower) for ns in non_shop_anom_rooms):
+            return False
+        return any(re.search(rf"\b{re.escape(k)}\b", p_lower) for k in explicit_shop_nouns)
 
     shop_keywords = (
 
@@ -1116,25 +1187,19 @@ def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
 
     )
 
-    raw_parts = [
-        pt.strip()
-        for pt in re.split(r"➔|->", str(location_str))
-        if pt.strip()
-    ]
     if len(raw_parts) >= 2 and any(
         hq_k in " ".join(raw_parts[:-1]).lower()
         for hq_k in ("tower hq", "operations hq", "operations spire hq", "headquarters", "agency hq")
     ):
-        leaf_lower = raw_parts[-1].lower()
         hq_shop_wing_keywords = (
             "armory", "ordnance", "requisition", "outfitter", "tailoring",
             "cleansing bay", "psychic detox", "dispensary", "clinic", "medical",
             "canteen", "espresso", "cafe", "café", "shop", "store",
         )
-        return any(k in leaf_lower for k in hq_shop_wing_keywords)
+        return any(re.search(rf"\b{re.escape(k)}\b", leaf_lower) for k in hq_shop_wing_keywords)
 
     full_lower = str(location_str).lower()
-    return any(k in p_lower or k in full_lower for k in shop_keywords)
+    return any(re.search(rf"\b{re.escape(k)}\b", p_lower) or re.search(rf"\b{re.escape(k)}\b", full_lower) for k in shop_keywords)
 
 def location_has_faction_hq(location_str: str, session_id: int = None) -> bool:
 
