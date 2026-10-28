@@ -15,6 +15,14 @@ env/
 ENV/
 
 # Testing & Coverage
+tests/
+icon/
+pytest.ini
+run_tests.bat
+requirements-dev.txt
+scripts/run_tests.py
+scripts/simulate_*.py
+.github/
 .pytest_cache/
 .coverage
 htmlcov/
