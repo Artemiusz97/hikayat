@@ -512,6 +512,7 @@ def build_stage_contrasting_approaches(
     reward_gold: int = 30,
     player_gold: int = 0,
     is_story_quest: bool = False,
+    stealth_warranted: bool = True,
 ) -> list[dict]:
     """
     Returns contrasting approach descriptor dicts for active resolution stages (Stage >= 2 or single-stage action).
@@ -557,14 +558,24 @@ def build_stage_contrasting_approaches(
                 "intent": "general_action",
             })
         if bp in ("HEIST_INFILTRATION", "ACQUISITION"):
-            approaches.append({
-                "approach": "stealth_guile",
-                "label": f"[Stealth & Infiltration] Slip past the sentries and secure {obj_disp} unnoticed",
-                "stat": "AGI",
-                "requirement_offset": 0,
-                "gold_cost": 0,
-                "intent": "investigate_clue",
-            })
+            if stealth_warranted or bp == "HEIST_INFILTRATION":
+                approaches.append({
+                    "approach": "stealth_guile",
+                    "label": f"[Stealth & Infiltration] Slip past the sentries and secure {obj_disp} unnoticed",
+                    "stat": "AGI",
+                    "requirement_offset": 0,
+                    "gold_cost": 0,
+                    "intent": "investigate_clue",
+                })
+            else:
+                approaches.append({
+                    "approach": "direct",
+                    "label": f"[Careful Inquiry] Check local records and ask around discreetly to secure {obj_disp}",
+                    "stat": "PER",
+                    "requirement_offset": 0,
+                    "gold_cost": 0,
+                    "intent": "investigate_clue",
+                })
         elif bp == "SOCIAL_MANIPULATION":
             approaches.append({
                 "approach": "spare_deceive",
@@ -587,7 +598,7 @@ def build_stage_contrasting_approaches(
                 "gold_cost": buyout_cost,
                 "intent": "general_action",
             })
-        else:
+        elif stealth_warranted:
             approaches.append({
                 "approach": "stealth_guile",
                 "label": "[Diversion & Stealth] Create a distraction to slip past the perimeter unnoticed",
@@ -596,17 +607,36 @@ def build_stage_contrasting_approaches(
                 "gold_cost": 0,
                 "intent": "investigate_clue",
             })
+        else:
+            approaches.append({
+                "approach": "direct",
+                "label": "[Calm Guidance] Guide them calmly through a clear route and talk past any obstacles",
+                "stat": "CHA",
+                "requirement_offset": 0,
+                "gold_cost": 0,
+                "intent": "general_action",
+            })
 
     # 4. EXPLORATION_HAZARD or generic fallback
     else:
-        approaches.append({
-            "approach": "stealth_guile",
-            "label": "[Careful Bypass] Navigate the hazards using stealth and careful footing",
-            "stat": "AGI",
-            "requirement_offset": 0,
-            "gold_cost": 0,
-            "intent": "investigate_clue",
-        })
+        if stealth_warranted:
+            approaches.append({
+                "approach": "stealth_guile",
+                "label": "[Careful Bypass] Navigate the hazards using stealth and careful footing",
+                "stat": "AGI",
+                "requirement_offset": 0,
+                "gold_cost": 0,
+                "intent": "investigate_clue",
+            })
+        else:
+            approaches.append({
+                "approach": "direct",
+                "label": "[Methodical Survey] Carefully examine the surroundings and proceed step by step",
+                "stat": "PER",
+                "requirement_offset": 0,
+                "gold_cost": 0,
+                "intent": "investigate_clue",
+            })
 
     return approaches
 

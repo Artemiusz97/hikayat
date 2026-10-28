@@ -1020,7 +1020,13 @@ def generate_band1_quest_and_rumor_fallbacks(
             ("CHA", f"Check with {partner} on who has been moving heavy chrome through this block", 6),
         ]
     else:
-        role_hint = f" as {role}" if role and len(role) < 28 else ""
+        from mechanics.social.relationships import format_public_character_role
+        pub_role = format_public_character_role(role, scen_key=scen_key)
+        is_student_r = any(
+            k in role.lower()
+            for k in ("student", "classmate", "freshman", "sophomore", "junior", "senior", "clown", "slacker", "delinquent", "bookworm", "president", "captain", "member")
+        )
+        role_hint = f" as {pub_role}" if (pub_role and not is_student_r and len(pub_role) < 28) else ""
         rumor_specs = [
             ("CHA", f"Ask {partner} about recent local rumors, bounties, or trouble in the area", 6),
             ("INT", f"Question {partner} for practical intel they have noticed{role_hint}", 6),
@@ -1043,6 +1049,205 @@ def generate_band1_quest_and_rumor_fallbacks(
         })
 
     return [c for c in candidates if not _is_similar_to_recent(c["label"], recent)]
+
+
+def _build_contextual_role_and_leisure_phrases(
+    profile: Dict[str, Any],
+    session: Optional[Dict[str, Any]],
+    venue_leaf: str,
+) -> Dict[str, str]:
+    """
+    Computes context-aware role/activity, leisure, and duration phrases for Band 2 social choices
+    so students/peers never receive immersion-breaking 'Ask about their work/job as Class Clown'
+    or 'when they are off duty' options (Issue 9).
+    """
+    from mechanics.social.relationships import format_public_character_role
+
+    sess = session if isinstance(session, dict) else {}
+    scen_key = str(sess.get("scenario") or "fantasy").lower()
+    partner = str(profile.get("name") or "them").strip()
+    raw_role = str(profile.get("role") or "").strip()
+    faction = str(profile.get("faction") or "").strip()
+    contact = profile.get("contact") if isinstance(profile.get("contact"), dict) else {}
+    b_info = (contact.get("basic_info") or {}) if isinstance(contact.get("basic_info"), dict) else {}
+    scene_npc = profile.get("scene_npc") if isinstance(profile.get("scene_npc"), dict) else {}
+
+    grade = str(b_info.get("grade") or contact.get("grade") or scene_npc.get("grade") or "").strip()
+    club = str(b_info.get("club") or contact.get("club") or scene_npc.get("club") or faction or "").strip()
+    activity = str(scene_npc.get("activity") or b_info.get("initial_activity") or "").strip()
+
+    role_low = raw_role.lower()
+    grade_low = grade.lower()
+    club_low = club.lower()
+    has_real_club = club_low not in ("", "none", "unaffiliated", "general", "faculty", "town", "staff", "administration")
+
+    is_faculty_or_adult = bool(
+        grade_low in ("faculty", "citizen", "staff")
+        or b_info.get("is_faculty")
+        or b_info.get("social_role_type") in ("faculty_staff", "adult_service")
+        or any(
+            w in role_low
+            for w in (
+                "teacher", "professor", "principal", "vice-principal", "dean", "counselor",
+                "nurse", "librarian", "coach", "chef", "custodian", "groundskeeper", "janitor",
+                "officer", "detective", "doctor", "barista", "clerk", "owner", "merchant",
+                "shopkeeper", "guard", "captain", "agent", "commander", "director", "broker",
+            )
+        )
+        and "student" not in role_low
+        and "varsity" not in role_low
+        and "club" not in role_low
+        and "team" not in role_low
+        and "class " not in role_low
+    )
+
+    is_student_or_peer = (not is_faculty_or_adult) and bool(
+        grade_low in ("freshman", "sophomore", "junior", "senior", "student", "youth peer")
+        or b_info.get("social_role_type") == "student_peer"
+        or any(k in scen_key for k in ("high_school", "academy", "school"))
+        or any(
+            w in role_low
+            for w in (
+                "student", "classmate", "freshman", "sophomore", "junior", "senior",
+                "clown", "slacker", "delinquent", "bookworm", "informant", "gamer",
+                "tinkerer", "trendsetter", "sketch artist", "musician", "volunteer",
+                "tutor", "skateboarder", "representative", "council", "varsity",
+                "sprinter", "runner", "swimmer", "prodigy", "rookie", "columnist",
+            )
+        )
+    )
+
+    public_role = format_public_character_role(raw_role, grade=grade, club=club, scen_key=scen_key)
+    v_clean = venue_leaf if venue_leaf not in ("", "here", "this spot") else ""
+
+    if is_student_or_peer:
+        if has_real_club:
+            role_phrase = f"their activities with the {club}"
+            handle_phrase = f"everything with the {club} and classes"
+            inspire_phrase = f"what first got them into the {club}"
+        elif activity and len(activity) <= 48:
+            role_phrase = f"what they are up to right now ({activity.lower()})"
+            handle_phrase = "keeping up with classes and campus life"
+            inspire_phrase = "what they enjoy most about life at the academy"
+        elif v_clean:
+            role_phrase = f"what brings them to the {v_clean} today"
+            handle_phrase = "keeping up with classes and campus life"
+            inspire_phrase = "what they enjoy most about life at the academy"
+        else:
+            role_phrase = "how their classes and semester are going"
+            handle_phrase = "keeping up with classes and campus life"
+            inspire_phrase = "what they want to pursue after graduation"
+
+        return {
+            "is_student_or_peer": "1",
+            "public_role": public_role,
+            "role_phrase": role_phrase,
+            "handle_phrase": handle_phrase,
+            "inspire_phrase": inspire_phrase,
+            "unwind_outside_phrase": "after class and on weekends",
+            "off_duty_phrase": "after school and on weekends",
+            "outside_work_phrase": "outside of class",
+            "duration_question": f"Ask {partner} which classes, clubs, or campus hangouts they like best",
+        }
+
+    # Adult / Faculty / Fantasy / Sci-Fi / Anomaly Operative
+    clean_r = public_role or raw_role
+    if clean_r:
+        if any(k in scen_key for k in ("high_school", "academy", "school")) and is_faculty_or_adult:
+            role_phrase = f"their role on campus as {clean_r}"
+            handle_phrase = f"their responsibilities as {clean_r}"
+            inspire_phrase = f"what inspired them to become a {clean_r}"
+            unwind_outside = "outside of school hours"
+            off_duty = "outside of school hours"
+            outside_work = "outside of campus life"
+            duration_q = f"Ask {partner} how long they have been with the academy"
+        else:
+            role_phrase = f"their work as {clean_r}"
+            handle_phrase = f"their responsibilities as {clean_r}"
+            inspire_phrase = f"what originally inspired them to pursue being a {clean_r}"
+            unwind_outside = f"outside of their duties as {clean_r}"
+            off_duty = "in their free time off duty"
+            outside_work = "outside of work"
+            duration_q = f"Ask {partner} how long they have been around {v_clean or 'here'}"
+    elif faction:
+        role_phrase = f"their involvement with {faction}"
+        handle_phrase = f"their role in {faction}"
+        inspire_phrase = f"how they first got involved with {faction}"
+        unwind_outside = "in their free time"
+        off_duty = "in their free time"
+        outside_work = "from their personal life"
+        duration_q = f"Ask {partner} how long they have been around {v_clean or 'here'}"
+    else:
+        role_phrase = f"what brings them to {v_clean}" if v_clean else "their background and daily routine"
+        handle_phrase = "their daily routine"
+        inspire_phrase = "their background and what drives them"
+        unwind_outside = "in their free time"
+        off_duty = "in their free time"
+        outside_work = "from their personal life"
+        duration_q = f"Ask {partner} how long they have been around {v_clean or 'here'}"
+
+    return {
+        "is_student_or_peer": "",
+        "public_role": clean_r,
+        "role_phrase": role_phrase,
+        "handle_phrase": handle_phrase,
+        "inspire_phrase": inspire_phrase,
+        "unwind_outside_phrase": unwind_outside,
+        "off_duty_phrase": off_duty,
+        "outside_work_phrase": outside_work,
+        "duration_question": duration_q,
+    }
+
+
+def sanitize_contextual_dialogue_label(
+    label: str,
+    profile: Optional[Dict[str, Any]],
+    session: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Rewrites immersion-breaking LLM/fallback dialogue labels that treat student archetypes
+    or meta-tropes as literal paid jobs ('work as Class Clown & Slacker', 'job as Rebellious Delinquent',
+    'off duty' for high school students).
+    """
+    raw = str(label or "").strip()
+    if not raw or not isinstance(profile, dict):
+        return raw
+    sess = session if isinstance(session, dict) else {}
+    curr_loc = str(sess.get("current_location") or "").strip()
+    venue_leaf = curr_loc.split("➔")[-1].strip() if curr_loc else "here"
+    ctx_phrases = _build_contextual_role_and_leisure_phrases(profile, sess, venue_leaf)
+    is_student = bool(ctx_phrases.get("is_student_or_peer"))
+    low = raw.lower()
+
+    if is_student or any(
+        t in low
+        for t in (
+            "class clown", "slacker", "rebellious delinquent", "introverted bookworm",
+            "gossip informant", "cafeteria gamer", "tech tinkerer", "trendsetter",
+        )
+    ):
+        if re.search(r"\b(?:their\s+)?(?:work|job|career|profession|duties)\s+as\b", low):
+            raw = re.sub(
+                r"\b(?:their\s+)?(?:work|job|career|profession|duties)\s+as\s+[^,.?!]+",
+                ctx_phrases["role_phrase"],
+                raw,
+                flags=re.IGNORECASE,
+            )
+        if "when they are off duty" in low or "when off duty" in low:
+            raw = re.sub(
+                r"\bwhen\s+(?:they\s+are\s+)?off\s+duty\b",
+                ctx_phrases["off_duty_phrase"],
+                raw,
+                flags=re.IGNORECASE,
+            )
+        if "outside of work" in low or "outside work" in low:
+            raw = re.sub(
+                r"\boutside\s+(?:of\s+)?work\b",
+                ctx_phrases["outside_work_phrase"],
+                raw,
+                flags=re.IGNORECASE,
+            )
+    return raw
 
 
 def generate_band2_social_choices(
@@ -1072,7 +1277,14 @@ def generate_band2_social_choices(
     asked_sigs = set(budget_state.get("asked_topic_signatures") or [])
     recent = _recent_action_labels_lower(sess, actions=actions, partner_name=partner)
 
-    role_phrase = f"their work as {role}" if role else ("their role in " + faction if faction else "their background and daily routine")
+    ctx_phrases = _build_contextual_role_and_leisure_phrases(profile, sess, venue_leaf)
+    role_phrase = ctx_phrases["role_phrase"]
+    handle_phrase = ctx_phrases["handle_phrase"]
+    inspire_phrase = ctx_phrases["inspire_phrase"]
+    unwind_outside_phrase = ctx_phrases["unwind_outside_phrase"]
+    off_duty_phrase = ctx_phrases["off_duty_phrase"]
+    outside_work_phrase = ctx_phrases["outside_work_phrase"]
+    duration_question = ctx_phrases["duration_question"]
     eff_score = score + (50 if (is_meetup and score >= 0) else 0)
     options: List[Dict[str, Any]] = []
 
@@ -1110,7 +1322,7 @@ def generate_band2_social_choices(
             if likes:
                 options.append(_social_check(f"Ask {partner} more about their fondness for {likes[0]}", stat="INT", req=5, sig="hobbies_offduty"))
             else:
-                options.append(_social_check(f"Ask {partner} what they love doing most to unwind outside of {role or 'work'}", stat="CHA", req=5, sig="hobbies_offduty"))
+                options.append(_social_check(f"Ask {partner} what they love doing most to unwind {unwind_outside_phrase}", stat="CHA", req=5, sig="hobbies_offduty"))
             options.append(_social_check(f"Share a lighthearted joke with {partner} over your meetup", stat="CHA", req=5, sig="joke_banter"))
             options.append(_social_check(f"Offer {partner} a warm, sincere compliment on their style today", stat="CHA", req=5, sig="compliment"))
             if eff_score >= 100 or track == "romantic":
@@ -1121,10 +1333,7 @@ def generate_band2_social_choices(
         # Tier 1: Stranger (0-49) — Polite icebreakers, role/work, venue small talk, day check-in
         if eff_score < 50 and track != "romantic":
             options.append(_social_check(f"Ask {partner} about {role_phrase}", stat="INT", req=5, sig="work_role"))
-            if any(k in scen_key for k in ("high_school", "academy", "school")):
-                options.append(_social_check(f"Ask {partner} which classes or club activities keep them busiest", stat="CHA", req=5, sig="stationed_duration"))
-            else:
-                options.append(_social_check(f"Ask {partner} how long they have been stationed around here", stat="CHA", req=5, sig="stationed_duration"))
+            options.append(_social_check(duration_question, stat="CHA", req=5, sig="stationed_duration"))
             options.append(_social_check(f"Make polite small talk with {partner} about the pace around {venue_leaf} today", stat="CHA", req=5, sig="venue_atmosphere"))
             options.append(_social_check(f"Gauge {partner}'s mood and ask politely how their day is going", stat="PER", req=5, sig="day_checkin"))
             options.append(_social_check(f"Ask {partner} what local spot nearby they would recommend for a break", stat="INT", req=5, sig="favorite_spot_food"))
@@ -1134,11 +1343,11 @@ def generate_band2_social_choices(
             if likes:
                 options.append(_social_check(f"Ask {partner} how they first got into {likes[0]}", stat="INT", req=5, sig="hobbies_offduty"))
             else:
-                options.append(_social_check(f"Ask {partner} what they usually enjoy doing when they are off duty", stat="CHA", req=5, sig="hobbies_offduty"))
-            options.append(_social_check(f"Offer {partner} a polite compliment on how capably they handle {role_phrase}", stat="CHA", req=6, sig="compliment"))
+                options.append(_social_check(f"Ask {partner} what they usually enjoy doing {off_duty_phrase}", stat="CHA", req=5, sig="hobbies_offduty"))
+            options.append(_social_check(f"Offer {partner} a polite compliment on how capably they handle {handle_phrase}", stat="CHA", req=6, sig="compliment"))
             options.append(_social_check(f"Crack a lighthearted joke with {partner} about the day's routine", stat="CHA", req=5, sig="joke_banter"))
             options.append(_social_check(f"Ask {partner} about their favorite spot in town to grab food or unwind", stat="INT", req=5, sig="favorite_spot_food"))
-            options.append(_social_check(f"Ask {partner} what originally inspired them to pursue {role or 'their path'}", stat="PER", req=5, sig="personal_story"))
+            options.append(_social_check(f"Ask {partner} about {inspire_phrase}", stat="PER", req=5, sig="personal_story"))
 
         # Tier 3 & 4: Friend (100-149) & Close / Romantic (150+ or Romantic Track)
         else:
@@ -1148,7 +1357,7 @@ def generate_band2_social_choices(
                 options.append(_social_check(f"Ask {partner} softly about a personal dream or secret they rarely share", stat="PER", req=6, sig="personal_story"))
             else:
                 options.append(_social_check(f"Compliment {partner} warmly and ask how they have really been holding up", stat="CHA", req=5, sig="compliment"))
-                options.append(_social_check(f"Ask {partner} to share a favorite personal story or memory from outside work", stat="INT", req=5, sig="personal_story"))
+                options.append(_social_check(f"Ask {partner} to share a favorite personal story or memory from {outside_work_phrase}", stat="INT", req=5, sig="personal_story"))
             if likes:
                 options.append(_social_check(f"Trade lively opinions with {partner} about {likes[0]}", stat="INT", req=5, sig="hobbies_offduty"))
             elif traits:
@@ -1160,7 +1369,11 @@ def generate_band2_social_choices(
                     and s not in str(sess.get("current_location") or "").lower()
                 ]
                 walk_dest = valid_spots[0].title() if valid_spots else "a nearby spot in the area"
-                options.append(_social_check(f"Walk with {partner} toward {walk_dest}", stat="CHA", req=5, intent="social_invite", sig="walk_together"))
+                walk_opt = _social_check(f"Walk with {partner} toward {walk_dest}", stat="CHA", req=5, intent="movement", sig="walk_together")
+                walk_opt["target_npc"] = partner
+                if valid_spots:
+                    walk_opt["target_location"] = walk_dest
+                options.append(walk_opt)
 
     filtered: List[Dict[str, Any]] = []
     seen_sigs_local: Set[str] = set()
@@ -1360,7 +1573,9 @@ def enforce_conversation_choice_bands(
     for src in list(priority_buttons or []) + list(cleaned_choices or []):
         if not isinstance(src, dict):
             continue
-        lbl = str(src.get("label") or "").strip()
+        lbl = sanitize_contextual_dialogue_label(str(src.get("label") or "").strip(), lead_profile, session=sess)
+        src = dict(src)
+        src["label"] = lbl
         lbl_k = lbl.lower()
         if not lbl_k or lbl_k in seen_lbls:
             continue
@@ -2068,7 +2283,8 @@ def build_conversation_prompt_directive(
     else:
         social_rule = (
             f"{partner} is '{tier_name}' ({score}): "
-            f"generate 1-2 polite, neutral skill-check (`stat='INT'`, `'PER'`, or `'CHA'`, `requirement=5-7`) background/role questions ONLY (e.g., their work, duties, or immediate situation). "
+            f"generate 1-2 polite, neutral skill-check (`stat='INT'`, `'PER'`, or `'CHA'`, `requirement=5-7`) contextual questions ONLY (e.g., their current activity, club, classes, duties, or immediate situation). "
+            f"NEVER treat student/personality tropes (e.g. 'Class Clown', 'Delinquent', 'Bookworm') as a literal job or say 'work/job as...'. "
             f"STRICTLY FORBIDDEN for Strangers: DO NOT generate compliments, flattery, 'offer a witty observation', jokes, banter, teasing, or 'Walk with {partner}'!"
         )
 

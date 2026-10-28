@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { 
   BookOpen, Users, Flag, Globe, Heart, Shield, 
@@ -210,6 +210,13 @@ const getReputationTier = (score, t = null) => {
   return { label, color, bg };
 };
 
+const DEBUG_DOSSIER_TABS = [
+  { id: 'persona', icon: '👤', shortLabel: 'Persona', fullLabel: 'Persona & Appearance' },
+  { id: 'history', icon: '📜', shortLabel: 'History', fullLabel: 'History & Schedule' },
+  { id: 'relations', icon: '🌳', shortLabel: 'Relations', fullLabel: 'Relations & Family' },
+  { id: 'intimate', icon: '🔥', shortLabel: 'Intimacy', fullLabel: 'Intimate Dossier' },
+];
+
 const CodexPanel = ({
   codexHook,
   session,
@@ -219,6 +226,7 @@ const CodexPanel = ({
   onOpenMerchant,
   onTriggerAction,
   targetContactName,
+  targetContactPulse,
   onJumpToSavedContact,
 }) => {
   const { t } = useTranslation();
@@ -226,12 +234,15 @@ const CodexPanel = ({
   const [subTab, setSubTab] = useState('contacts'); // 'contacts' | 'factions' | 'lore'
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedNpc, setExpandedNpc] = useState(null);
+  const [highlightedNpcKey, setHighlightedNpcKey] = useState(null);
+  const [debugDossierTab, setDebugDossierTab] = useState('persona');
   const [expandedFaction, setExpandedFaction] = useState(null);
   const [loreFilter, setLoreFilter] = useState('all'); // 'all' | 'commitments'
   const [companionBusy, setCompanionBusy] = useState(null);
   const [factionBusy, setFactionBusy] = useState(null);
   const [cancellingCommitmentId, setCancellingCommitmentId] = useState(null);
   const [companionFeedback, setCompanionFeedback] = useState(null);
+  const cardRefs = useRef({});
 
   const partyNpcNames = new Set(
     (session?.party_npcs || []).map(p => (p.name || '').toLowerCase())
@@ -344,19 +355,28 @@ const CodexPanel = ({
     if (targetContactName) {
       setSubTab('contacts');
       setSearchQuery('');
-      const targetLow = String(targetContactName ?? '').toLowerCase();
+      const targetLow = String(targetContactName ?? '').trim().toLowerCase();
       const matched = knownCharacters.find(c =>
-        String(c.name ?? '').toLowerCase() === targetLow ||
-        String(c.id ?? '').toLowerCase() === targetLow ||
-        String(c.npc_id ?? '').toLowerCase() === targetLow
+        String(c.name ?? '').trim().toLowerCase() === targetLow ||
+        String(c.id ?? '').trim().toLowerCase() === targetLow ||
+        String(c.npc_id ?? '').trim().toLowerCase() === targetLow
       );
-      if (matched) {
-        setExpandedNpc(matched.id || matched.name);
-      } else {
-        setExpandedNpc(targetContactName);
-      }
+      const key = matched ? (matched.id || matched.name) : targetContactName;
+      setExpandedNpc(key);
+      setHighlightedNpcKey(key);
+      const timer = setTimeout(() => {
+        const el = cardRefs.current[key] || (matched?.name && cardRefs.current[String(matched.name).toLowerCase()]) || cardRefs.current[targetLow];
+        if (el && typeof el.scrollIntoView === 'function') {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 80);
+      const clearTimer = setTimeout(() => setHighlightedNpcKey(null), 2400);
+      return () => {
+        clearTimeout(timer);
+        clearTimeout(clearTimer);
+      };
     }
-  }, [targetContactName, knownCharacters]);
+  }, [targetContactName, targetContactPulse, knownCharacters]);
 
   // Filter known characters
   const filteredContacts = knownCharacters.filter(c => {
@@ -662,7 +682,15 @@ const CodexPanel = ({
                 return (
                   <div 
                     key={npc.id || npc.name}
-                    className="bg-black/50 border border-fantasy-border/60 hover:border-fantasy-border rounded-lg p-2.5 space-y-1.5 transition-all"
+                    ref={(el) => {
+                      cardRefs.current[npcToggleKey] = el;
+                      if (npc.name) cardRefs.current[String(npc.name).toLowerCase()] = el;
+                    }}
+                    className={`bg-black/50 border rounded-lg p-2.5 space-y-1.5 transition-all ${
+                      highlightedNpcKey === npcToggleKey
+                        ? 'border-fantasy-accent ring-2 ring-fantasy-accent/60 shadow-lg shadow-fantasy-accent/20'
+                        : 'border-fantasy-border/60 hover:border-fantasy-border'
+                    }`}
                   >
                     {/* Surface Encounter Directory Header */}
                     <div className="flex items-start justify-between gap-2 select-none">
@@ -723,7 +751,7 @@ const CodexPanel = ({
                             )}
                           </div>
                           <span className="text-[11px] text-gray-400 font-medium block truncate max-w-56">
-                            {basic.role || basic.occupation || (basic.faction ? `${basic.faction} Member` : 'Encountered')}
+                            {npc.public_role || basic.public_role || basic.role || basic.occupation || (basic.faction ? `${basic.faction} Member` : 'Encountered')}
                           </span>
                         </div>
                       </div>
@@ -769,9 +797,9 @@ const CodexPanel = ({
                     <div className="pt-1.5 space-y-1.5 text-[11px]">
                       {/* Basic Info Badges */}
                       <div className="flex flex-wrap items-center gap-1">
-                        {(basic.role || basic.occupation || npc.role) && (
+                        {(npc.public_role || basic.public_role || basic.role || basic.occupation || npc.role) && (
                           <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-200 border border-fantasy-border/50 text-[10.5px]">
-                            Role: <strong className="text-gray-100">{basic.role || basic.occupation || npc.role}</strong>
+                            Role: <strong className="text-gray-100">{npc.public_role || basic.public_role || basic.role || basic.occupation || npc.role}</strong>
                           </span>
                         )}
                         {(basic.grade || npc.grade) && (
@@ -853,6 +881,19 @@ const CodexPanel = ({
                             <span>{t('codex.open_in_contacts', 'Open in Contacts')}</span>
                             <ChevronRight size={12} />
                           </button>
+                        ) : isDebugRevealed ? (
+                          <button
+                            type="button"
+                            aria-expanded={isExpanded}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedNpc(isExpanded ? null : npcToggleKey);
+                            }}
+                            className="flex items-center gap-1.5 py-1 px-2.5 rounded text-[11px] font-bold border bg-purple-950/50 hover:bg-purple-900/60 border-purple-700/60 text-purple-200 transition-all cursor-pointer select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-400"
+                          >
+                            {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            <span>{t('codex.full_debug_dossier', 'Full Debug Dossier')}</span>
+                          </button>
                         ) : (
                           <span className="text-[10px] text-gray-500 italic flex items-center gap-1">
                             <Lock size={10} className="text-amber-400/70 shrink-0" />
@@ -877,7 +918,7 @@ const CodexPanel = ({
                               className="flex items-center gap-1 py-1 px-2 rounded text-[10.5px] font-semibold border bg-black/50 hover:bg-black/70 border-fantasy-border/60 text-gray-300 transition-all cursor-pointer select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fantasy-accent"
                             >
                               {isExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-                              <span>{t('codex.operational_info', 'Field Status')}</span>
+                              <span>{isDebugRevealed ? t('codex.full_debug_dossier', 'Full Debug Dossier') : t('codex.operational_info', 'Field Status')}</span>
                             </button>
                           )}
                         </div>
@@ -1022,28 +1063,285 @@ const CodexPanel = ({
                         )}
 
                         {isDebugRevealed && (
-                          <div className="p-2.5 rounded-lg border border-purple-700/50 bg-purple-950/20 space-y-1.5 text-[11px]">
-                            <span className="font-bold text-purple-300 uppercase tracking-wider block">
-                              🛠️ Developer Sandbox Snapshot
-                            </span>
-                            {(basic.description || appearance.summary || npc.description) && (
-                              <p className="text-gray-300 leading-relaxed">{basic.description || appearance.summary || npc.description}</p>
-                            )}
-                            {traits.length > 0 && (
-                              <div className="text-gray-300">
-                                <strong className="text-gray-100">Traits:</strong> {traits.map(tr => typeof tr === 'string' ? tr : (tr.trait || tr.name)).join(', ')}
-                              </div>
-                            )}
-                            {preferences.length > 0 && (
-                              <div className="text-cyan-300">
-                                <strong className="text-cyan-200">Likes:</strong> {preferences.join(', ')}
-                              </div>
-                            )}
-                            {dislikes.length > 0 && (
-                              <div className="text-red-300">
-                                <strong className="text-red-200">Dislikes:</strong> {dislikes.join(', ')}
-                              </div>
-                            )}
+                          <div className="space-y-2.5 pt-1">
+                            {/* 4-Tab Debug Dossier Header */}
+                            <div
+                              role="tablist"
+                              aria-label={`${npc.name} debug dossier sections`}
+                              className="grid grid-cols-4 border-b border-purple-700/60 pt-1.5 px-1 bg-purple-950/30 rounded-t-lg gap-1 items-end select-none"
+                            >
+                              {DEBUG_DOSSIER_TABS.map(tb => {
+                                const isActive = debugDossierTab === tb.id;
+                                return (
+                                  <button
+                                    key={tb.id}
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={isActive}
+                                    title={tb.fullLabel}
+                                    onClick={(e) => { e.stopPropagation(); setDebugDossierTab(tb.id); }}
+                                    className={`min-w-0 py-1.5 px-1 text-xs font-bold transition-all flex items-center justify-center gap-1 rounded-t-md relative cursor-pointer ${
+                                      isActive
+                                        ? 'bg-black/60 text-purple-200 border-t-2 border-t-purple-400 border-x border-purple-700/60 border-b-black/60 -mb-px z-10'
+                                        : 'bg-black/25 text-gray-400 hover:text-gray-200 hover:bg-black/40 border-t border-x border-transparent border-b border-b-purple-700/60'
+                                    }`}
+                                  >
+                                    <span className="text-xs shrink-0">{tb.icon}</span>
+                                    <span className="truncate text-[10.5px] font-semibold">{tb.shortLabel}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            {/* 4-Tab Debug Dossier Body */}
+                            <div role="tabpanel" className="bg-black/50 border-x border-b border-purple-700/60 rounded-b-lg p-3 text-xs -mt-2.5 space-y-3">
+                              {debugDossierTab === 'persona' && (
+                                <div className="space-y-2.5">
+                                  {(npc.archetype_trope || basic.archetype_trope) && (
+                                    <div className="text-[11px] text-purple-300">
+                                      <strong className="text-purple-200">Archetype / Trope:</strong> {npc.archetype_trope || basic.archetype_trope}
+                                    </div>
+                                  )}
+                                  {(basic.description || appearance.summary || npc.description) && (
+                                    <div className="bg-black/40 p-2 rounded border border-fantasy-border/40 text-gray-300 leading-relaxed">
+                                      <span className="text-[10.5px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
+                                        📖 Background & Notes
+                                      </span>
+                                      {basic.description || appearance.summary || npc.description}
+                                    </div>
+                                  )}
+                                  {(basic.mannerisms || appearance.mannerisms || npc.mannerisms) && (
+                                    <div className="bg-black/40 p-2 rounded border border-fantasy-border/40 text-gray-300 leading-relaxed">
+                                      <span className="text-[10.5px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
+                                        🎭 Mannerisms
+                                      </span>
+                                      {basic.mannerisms || appearance.mannerisms || npc.mannerisms}
+                                    </div>
+                                  )}
+                                  {traits.length > 0 && (
+                                    <div>
+                                      <span className="text-[10.5px] font-bold text-gray-400 uppercase tracking-wider block mb-1">
+                                        Known Traits
+                                      </span>
+                                      <div className="flex flex-wrap gap-1">
+                                        {traits.map((tr, idx) => (
+                                          <span key={idx} className="text-[11px] px-2 py-0.5 rounded bg-black/60 text-gray-200 border border-fantasy-border">
+                                            {typeof tr === 'string' ? tr : (tr.trait || tr.name)}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {preferences.length > 0 && (
+                                    <div>
+                                      <span className="text-[10.5px] font-bold text-gray-400 uppercase tracking-wider block mb-1">
+                                        Likes & Preferences
+                                      </span>
+                                      <div className="flex flex-wrap gap-1">
+                                        {preferences.map((p, idx) => (
+                                          <span key={idx} className="text-[11px] px-2 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40">
+                                            {p}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {dislikes.length > 0 && (
+                                    <div>
+                                      <span className="text-[10.5px] font-bold text-gray-400 uppercase tracking-wider block mb-1">
+                                        Dislikes & Pet Peeves
+                                      </span>
+                                      <div className="flex flex-wrap gap-1">
+                                        {dislikes.map((d, idx) => (
+                                          <span key={idx} className="text-[11px] px-2 py-0.5 rounded bg-red-950/40 text-red-300 border border-red-800/40">
+                                            {d}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {debugDossierTab === 'history' && (() => {
+                                const recentMemories = Array.isArray(npc.recent_memories)
+                                  ? npc.recent_memories
+                                  : (Array.isArray(npc.rel_history) ? npc.rel_history : []);
+                                return (
+                                  <div className="space-y-2.5">
+                                    {(basic.primary_facility || basic.secondary_facility || basic.location || npc.location) && (
+                                      <div className="bg-black/40 p-2 rounded border border-fantasy-border/40 space-y-1 text-[11px]">
+                                        <span className="font-bold text-amber-400 uppercase tracking-wider block">
+                                          📍 Schedule & Haunts
+                                        </span>
+                                        {basic.primary_facility && <div>• <strong>Primary Facility:</strong> {basic.primary_facility}</div>}
+                                        {basic.secondary_facility && <div>• <strong>Secondary Hangout:</strong> {basic.secondary_facility}</div>}
+                                        {(basic.location || npc.location) && <div>• <strong>Current / Last Seen:</strong> {formatCleanLocation(basic.location || npc.location)}</div>}
+                                      </div>
+                                    )}
+                                    <div className="space-y-1.5">
+                                      <span className="text-[10.5px] font-bold text-amber-400 uppercase tracking-wider block">
+                                        📜 Shared Interactions ({recentMemories.length})
+                                      </span>
+                                      {recentMemories.length === 0 ? (
+                                        <p className="text-gray-500 italic text-[11px]">No shared interactions recorded yet.</p>
+                                      ) : (
+                                        recentMemories.map((mem, idx) => {
+                                          const text = typeof mem === 'string' ? mem : (mem.memory_fact || mem.summary || JSON.stringify(mem));
+                                          return (
+                                            <div key={idx} className="p-2 rounded bg-black/50 border border-fantasy-border/30 text-gray-200 text-[11px]">
+                                              • {text}
+                                            </div>
+                                          );
+                                        })
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+
+                              {debugDossierTab === 'relations' && (() => {
+                                const disRel = npc.disclosed_relations || {};
+                                const romData = disRel.romance || relations.romance || {};
+                                const famData = disRel.family || {};
+                                const friendsList = disRel.friends?.members || relations.friends || [];
+                                const rivalsList = disRel.rivals?.members || relations.rivals || [];
+                                return (
+                                  <div className="space-y-2.5 text-[11px]">
+                                    <div>
+                                      <span className="font-bold text-fantasy-accent uppercase tracking-wider block mb-1">
+                                        👨‍👩‍👧‍👦 Immediate Family Tree
+                                      </span>
+                                      {famData.members && famData.members.length > 0 ? (
+                                        <div className="space-y-1">
+                                          {famData.members.map((mem, i) => (
+                                            <div key={i} className="text-gray-300">
+                                              • <strong>{mem.relation || 'Relative'}:</strong> {renderLinkedPerson(mem)} {mem.race ? `(${formatRace(mem.race)})` : ''}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : Array.isArray(familyTree) && familyTree.length > 0 ? (
+                                        <div className="space-y-1">
+                                          {familyTree.map((mem, i) => (
+                                            <div key={i} className="text-gray-300">
+                                              • <strong>{mem.relation || 'Relative'}:</strong> {renderLinkedPerson(mem.name || mem)}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <p className="text-gray-500 italic">No family records recorded.</p>
+                                      )}
+                                    </div>
+                                    <div className="pt-2 border-t border-fantasy-border/30 space-y-1">
+                                      <span className="font-bold text-pink-400 uppercase tracking-wider block">
+                                        💖 Romantic Standing
+                                      </span>
+                                      <div>
+                                        • <strong>Current Status:</strong>{' '}
+                                        {romData.current_partner
+                                          ? renderLinkedPerson(romData.current_partner, 'text-pink-300 font-semibold')
+                                          : (romData.status || 'Single')}
+                                      </div>
+                                      {romData.ex_partners && romData.ex_partners.length > 0 && (
+                                        <div>
+                                          • <strong>Past Ex-Partner(s):</strong>{' '}
+                                          {romData.ex_partners.map((p, idx) => (
+                                            <React.Fragment key={idx}>
+                                              {idx > 0 ? ', ' : ''}
+                                              {renderLinkedPerson(p)}
+                                            </React.Fragment>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="pt-2 border-t border-fantasy-border/30 space-y-1">
+                                      <span className="font-bold text-cyan-400 uppercase tracking-wider block">🤝 Friends</span>
+                                      {friendsList.length > 0 ? (
+                                        friendsList.map((f, i) => <div key={i} className="text-cyan-300">• {renderLinkedPerson(f)}</div>)
+                                      ) : (
+                                        <p className="text-gray-500 italic">No close friends recorded.</p>
+                                      )}
+                                    </div>
+                                    <div className="pt-2 border-t border-fantasy-border/30 space-y-1">
+                                      <span className="font-bold text-amber-400 uppercase tracking-wider block">⚔️ Rivals</span>
+                                      {rivalsList.length > 0 ? (
+                                        rivalsList.map((r, i) => <div key={i} className="text-amber-300">• {renderLinkedPerson(r)}</div>)
+                                      ) : (
+                                        <p className="text-gray-500 italic">No known rivals recorded.</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+
+                              {debugDossierTab === 'intimate' && (() => {
+                                const intSec = npc.intimate_sections || {};
+                                const hasSections = Boolean(intSec.anatomy && intSec.dynamic);
+                                const bSize = appearance.breast_size || 'Modest B-Cup';
+                                const pSize = appearance.penis_size || 'Average';
+                                const sizeDisplay = isMale ? formatTitle(pSize) : formatTitle(bSize);
+                                return (
+                                  <div className="space-y-2.5 text-[11px]">
+                                    <div>
+                                      <span className="font-bold text-pink-400 uppercase tracking-wider block mb-1">
+                                        🔞 Anatomy & Experience
+                                      </span>
+                                      {hasSections && intSec.anatomy ? (
+                                        renderBulletPoints(intSec.anatomy)
+                                      ) : (
+                                        <div className="space-y-1 text-gray-300">
+                                          <div>• <strong>{isMale ? 'Penis Size' : 'Breast Size'}:</strong> {sizeDisplay}</div>
+                                          <div>• <strong>Intercourse:</strong> {appearance.experience || (appearance.intercourse_experience === 'virgin' ? 'Virgin' : 'Non-Virgin')}</div>
+                                          <div>• <strong>Oral:</strong> {appearance.oral_experience || 'Inexperienced'}</div>
+                                          <div>• <strong>Manual:</strong> {appearance.manual_experience || 'Inexperienced'}</div>
+                                          <div>• <strong>Anal:</strong> {appearance.anal_experience || 'Inexperienced'}</div>
+                                        </div>
+                                      )}
+                                    </div>
+                                    {hasSections && intSec.dynamic && (
+                                      <div className="pt-2 border-t border-fantasy-border/30">
+                                        <span className="font-bold text-purple-400 uppercase tracking-wider block mb-1">🎭 Demeanor & Dynamic</span>
+                                        {renderBulletPoints(intSec.dynamic)}
+                                      </div>
+                                    )}
+                                    {hasSections && intSec.undergarments && (
+                                      <div className="pt-2 border-t border-fantasy-border/30">
+                                        <span className="font-bold text-indigo-400 uppercase tracking-wider block mb-1">🩲 Undergarments</span>
+                                        {renderBulletPoints(intSec.undergarments)}
+                                      </div>
+                                    )}
+                                    {hasSections && (intSec.sensitive_spots || intSec.sensitivities) && (
+                                      <div className="pt-2 border-t border-fantasy-border/30">
+                                        <span className="font-bold text-pink-400 uppercase tracking-wider block mb-1">🌸 Sensitive Spots & Desires</span>
+                                        {renderBulletPoints(intSec.sensitive_spots || intSec.sensitivities)}
+                                      </div>
+                                    )}
+                                    {hasSections && intSec.desires_and_turn_offs && (
+                                      <div className="pt-2 border-t border-fantasy-border/30">
+                                        <span className="font-bold text-amber-400 uppercase tracking-wider block mb-1">🔥 Desires & Turn-Offs</span>
+                                        {renderBulletPoints(intSec.desires_and_turn_offs)}
+                                      </div>
+                                    )}
+                                    {hasSections && intSec.act_preferences && (
+                                      <div className="pt-2 border-t border-fantasy-border/30">
+                                        <span className="font-bold text-rose-400 uppercase tracking-wider block mb-1">❤️ Act Preferences</span>
+                                        {renderBulletPoints(intSec.act_preferences)}
+                                      </div>
+                                    )}
+                                    <div className="pt-2 border-t border-fantasy-border/30">
+                                      <span className="font-bold text-gray-300 uppercase tracking-wider block mb-1">Past Intimate History</span>
+                                      {npc.past_intimate_entries && npc.past_intimate_entries.length > 0 ? (
+                                        npc.past_intimate_entries.map((h, i) => <p key={i} className="text-gray-300 italic">• {h}</p>)
+                                      ) : npc.past_intimate_history ? (
+                                        <p className="text-gray-300 italic">• {npc.past_intimate_history}</p>
+                                      ) : (
+                                        <p className="text-gray-400 italic">• Virgin (No prior intimate history before meeting you)</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </div>
                           </div>
                         )}
 

@@ -88,7 +88,9 @@ def infer_node_category(z_id: str, p_id: str, name: str, parent_category: str = 
         return "commercial"
     if any(k in low for k in ("residential", "house", "apartment", "neighborhood", "home")) and not any(k in low for k in ("glasshouse", "greenhouse", "boathouse", "treehouse", "powerhouse", "lighthouse", "clubhouse", "courthouse", "homeroom", "coffeehouse", "teahouse", "bakehouse", "steakhouse")):
         return "residential"
-    if any(k in low for k in ("seaside", "beach", "coast", "mountain", "recreational_park", "sakura", "hilltop", "lookout", "picnic", "park", "forest", "woods", "lake", "swamp", "desert", "cave", "dungeon", "summit", "ruins", "tundra", "campsite")):
+    if any(k in low for k in ("theme_park", "theme park", "amusement", "carnival", "midway", "boardwalk", "pier", "civic", "park", "beach", "sakura", "picnic")) and not any(k in low for k in ("dungeon", "tundra", "swamp", "desert", "cave", "ruins", "wilds", "frontier")):
+        return "civic"
+    if any(k in low for k in ("seaside", "coast", "mountain", "recreational_park", "hilltop", "lookout", "forest", "woods", "lake", "swamp", "desert", "cave", "dungeon", "summit", "ruins", "tundra", "campsite")):
         return "wilderness"
     return parent_category or "civic"
 
@@ -180,8 +182,9 @@ def infer_curfew_window(node_type: str, z_id: str, node_id: str, name: str, cate
         "overgrown hallway", "dark_equipment_room"
     )):
         return None, None
-    # Academic facilities have after-hours lockdown/curfew 20:00 (1200) to 07:00 (420), except exterior main gates
-    if category == "academic" and not any(k in low for k in ("school_gate", "front gate", "entrance path", "notice board", "bike racks")):
+    # Academic facilities (High School campus) have after-hours lockdown/curfew 20:00 (1200) to 07:00 (420),
+    # except exterior main gates and open University campuses in urban anomalous scenarios.
+    if category == "academic" and not any(k in low for k in ("school_gate", "front gate", "entrance path", "notice board", "bike racks", "zone_university", "university")):
         return 1200, 420
     return None, None
 

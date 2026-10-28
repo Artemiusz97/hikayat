@@ -331,6 +331,150 @@ def resolve_session_location_tokens(session_id: int = 0, template: str = "", sce
 
     return dedupe_location_stutter(res)
 
+
+def resolve_default_sublocation(
+    primary_name: str,
+    zone_name: str = "",
+    session_id: int = 0,
+    scenario_key: str = "fantasy",
+    char_name: str = "",
+) -> str:
+    """
+    Deterministically resolves a grounded, context-appropriate Tier-3 sub-location
+    for a Tier-2 facility/primary place so generic 'Main Area' never appears.
+    """
+    p_clean = str(primary_name or "").strip()
+    z_clean = str(zone_name or "").strip()
+    p_low = p_clean.lower()
+    z_low = z_clean.lower()
+
+    # 1. Check seeded world_nodes for this session first
+    if session_id and p_clean:
+        try:
+            nodes = db.get_session_world_nodes(session_id)
+            if nodes:
+                fac_node = next(
+                    (
+                        n for n in nodes
+                        if n.get("node_type") == "FACILITY"
+                        and str(n.get("name") or "").strip().lower() == p_low
+                    ),
+                    None,
+                )
+                if fac_node:
+                    child_rooms = [
+                        n for n in nodes
+                        if n.get("node_type") == "ROOM"
+                        and n.get("parent_id") == fac_node.get("node_id")
+                        and str(n.get("name") or "").strip().lower() not in ("", "main area")
+                    ]
+                    if child_rooms:
+                        seeded_rooms = [r for r in child_rooms if not r.get("is_dynamic")] or child_rooms
+                        ent_room = next(
+                            (
+                                r for r in seeded_rooms
+                                if any(
+                                    k in str(r.get("name") or "").lower()
+                                    for k in ("entrance", "foyer", "lobby", "gate", "courtyard", "living room", "counter", "floor", "hall")
+                                )
+                            ),
+                            seeded_rooms[0],
+                        )
+                        return str(ent_room.get("name") or "").strip()
+        except Exception:
+            pass
+
+    # 2. Check scenario seed data for this primary place
+    try:
+        scen_data = get_scenario_seed_data(scenario_key)
+        for z in scen_data.get("zones", []):
+            for p in z.get("primary_locations", []):
+                cand_p = str(p.get("name") or "").strip()
+                cand_id = str(p.get("id") or "").strip()
+                resolved_cand_p = resolve_session_location_tokens(session_id, cand_p, scenario_key, char_name) if session_id else cand_p
+                if p_low and (p_low == cand_p.lower() or p_low == resolved_cand_p.lower() or p_low == cand_id.lower()):
+                    subs_list = p.get("sub_locations") or []
+                    for s_item in subs_list:
+                        s_nm = str(s_item.get("name") or "").strip()
+                        if s_nm and s_nm.lower() != "main area":
+                            if s_nm in ("Homeroom Classroom", "loc_homeroom"):
+                                return get_session_classroom_name(session_id, scenario_key)
+                            if s_nm in ("Player's Desk", "sub_player_desk") and ("homeroom" in p_low or cand_id == "loc_homeroom"):
+                                return get_session_player_desk_name(session_id, char_name)
+                            return resolve_session_location_tokens(session_id, s_nm, scenario_key, char_name)
+    except Exception:
+        pass
+
+    # 3. Contextual semantic inference by facility/building type
+    if any(k in p_low for k in ("homeroom", "classroom", "class ", "lecture")):
+        if "homeroom" in p_low:
+            return get_session_player_desk_name(session_id, char_name) if session_id or char_name else "Classroom Desks"
+        return "Lecture Desks & Podium"
+    if any(k in p_low for k in ("library", "archive", "bookstore")):
+        return "Reading Tables & Book Aisles"
+    if any(k in p_low for k in ("infirmary", "clinic", "hospital", "medical", "triage", "nurse", "pharmacy", "apothecary")):
+        return "Consultation Desk & Triage"
+    if any(k in p_low for k in ("staff room", "teachers' staff", "faculty", "principal", "administration")):
+        return "Faculty Workstations"
+    if "council" in p_low:
+        return "Council Conference Table"
+    if any(k in p_low for k in ("gymnasium", "gym")):
+        return "Main Bleachers & Court"
+    if any(k in p_low for k in ("swimming pool", "pool", "aquatic")):
+        return "Lap Lanes & Poolside Deck"
+    if any(k in p_low for k in ("dojo", "martial arts")):
+        return "Tatami Training Mat"
+    if any(k in p_low for k in ("athletic field", "sports field", "running track", "track", "stadium", "athletics")):
+        return "Running Track & Sidelines"
+    if "shed" in p_low:
+        return "Shaded Corner Behind Sheds"
+    if any(k in p_low for k in ("storage", "vault", "equipment", "armory", "depot", "warehouse")):
+        return "Equipment Racks & Shelving"
+    if any(k in p_low for k in ("cafeteria", "dining", "canteen", "mess hall", "food court")):
+        return "Main Dining Tables"
+    if any(k in p_low for k in ("courtyard", "commons", "promenade", "plaza", "square", "quad")):
+        return "Courtyard Fountain & Walkways" if "courtyard" in p_low or "commons" in p_low else "Central Plaza Walkway"
+    if any(k in p_low for k in ("rooftop", "roof", "lookout", "overlook", "terrace", "balcony")):
+        return "Railing Overlook"
+    if any(k in p_low for k in ("hallway", "corridor", "walkway", "passage", "skywalk")):
+        return "Main Corridor"
+    if any(k in p_low for k in ("foyer", "shoe lockers", "front gate", "school gate", "gate", "entrance", "lobby", "atrium", "rotunda")):
+        return "Entrance Doors & Foyer"
+    if any(k in p_low for k in ("auditorium", "theater", "theatre", "stage", "concert")):
+        return "Auditorium Stage & Seating"
+    if any(k in p_low for k in ("music room", "orchestra", "choir", "band")):
+        return "Practice Instruments & Alcove"
+    if any(k in p_low for k in ("art studio", "fine arts", "studio", "clubroom", "club room", "student union", "arts")):
+        return "Club Activity Table"
+    if any(k in p_low for k in ("lab", "laboratory", "chemistry", "science", "robotics", "research")):
+        return "Lab Workbenches"
+    if any(k in p_low for k in ("glasshouse", "greenhouse", "botanical", "garden")):
+        return "Interior Greenery Path"
+    if any(k in p_low for k in ("clock tower", "abandoned", "derelict", "ruin", "crypt", "catacomb", "bunker", "dungeon", "cavern", "cave")):
+        return "Inner Chamber"
+    if any(k in p_low for k in ("residence", "house", "apartment", "penthouse", "home", "dorm", "quarters", "villa", "manor", "cottage", "safehouse")) or (
+        "residential" in z_low and not any(k in p_low for k in ("park", "street", "station", "gate"))
+    ):
+        return "Living Room"
+    if any(k in p_low for k in ("café", "cafe", "coffee", "roastery", "tea", "bakery", "diner", "restaurant", "ramen", "izakaya", "bistro", "boba")):
+        return "Counter & Window Booths"
+    if any(k in p_low for k in ("arcade", "game center", "karaoke", "bowling", "carnival", "midway", "theme park", "amusement")):
+        return "Main Arcade & Concourse"
+    if any(k in p_low for k in ("shop", "store", "boutique", "market", "bazaar", "mall", "shopping", "emporium", "outfitter", "konbini", "convenience")):
+        return "Main Shop Floor"
+    if any(k in p_low for k in ("tavern", "inn", "pub", "bar", "saloon", "lounge", "nightclub", "club", "parlor")):
+        return "Main Lounge & Bar"
+    if any(k in p_low for k in ("station", "terminal", "airport", "platform", "harbor", "port", "pier", "dock", "hangar", "rail", "yard")):
+        return "Main Concourse & Platform"
+    if any(k in p_low for k in ("shrine", "temple", "sanctuary", "cathedral", "chapel", "pagoda")):
+        return "Main Sanctuary Courtyard"
+    if any(k in p_low for k in ("agency", "headquarters", "tower hq", "operations", "precinct", "command", "guild", "office", "bureau", "garrison", "fort", "stronghold", "citadel")):
+        return "Main Operations Hall"
+    if any(k in p_low for k in ("park", "beach", "coast", "bay", "forest", "woods", "grove", "mountain", "trail", "lake", "camp")):
+        return "Scenic Footpath"
+    return "Central Concourse"
+
+
 def _build_session_zone_index(session_id: int = 0, scenario_key: str = "fantasy") -> dict:
 
     zones = {}
@@ -369,23 +513,29 @@ def _build_session_zone_index(session_id: int = 0, scenario_key: str = "fantasy"
 
         primaries = z.get("primary_locations", [])
 
-        gateway_p = "Main Area"
-        gateway_s = "Main Area"
+        gateway_p = "Central Plaza"
+        gateway_s = "Central Concourse"
 
         if primaries:
 
             foyer = next((p for p in primaries if "gate" in p.get("name", "").lower() or "entrance" in p.get("name", "").lower() or "foyer" in p.get("name", "").lower()), None)
             chosen_p = foyer if foyer else primaries[0]
-            gateway_p = chosen_p.get("name", "Main Area")
+            gateway_p = chosen_p.get("name") or "Central Plaza"
             subs_list = chosen_p.get("sub_locations", [])
             if subs_list:
-                ent_sub = next((s for s in subs_list if s.get("is_entrance") or "gate" in s.get("name", "").lower() or "entrance" in s.get("name", "").lower() or "foyer" in s.get("name", "").lower()), None)
-                if ent_sub:
-                    gateway_s = ent_sub.get("name", "Main Area")
+                ent_sub = next((s for s in subs_list if s.get("is_entrance") or "gate" in s.get("name", "").lower() or "entrance" in s.get("name", "").lower() or "foyer" in s.get("name", "").lower()), subs_list[0])
+                if ent_sub and ent_sub.get("name"):
+                    gateway_s = ent_sub.get("name")
+                else:
+                    gateway_s = resolve_default_sublocation(gateway_p, z_name, session_id=session_id, scenario_key=scenario_key)
+            else:
+                gateway_s = resolve_default_sublocation(gateway_p, z_name, session_id=session_id, scenario_key=scenario_key)
 
         if gateway_p in ("Homeroom Classroom", "loc_homeroom"):
 
             gateway_p = get_session_classroom_name(session_id, scenario_key)
+        if gateway_s in ("Homeroom Classroom", "loc_homeroom"):
+            gateway_s = get_session_classroom_name(session_id, scenario_key)
 
         
 
@@ -405,12 +555,12 @@ def _build_session_zone_index(session_id: int = 0, scenario_key: str = "fantasy"
             if is_school_scenario(scenario_key) and (any(k in z_name.lower() for k in ("residential", "quarter", "neighborhood")) or (residential_name and z_name.lower() == residential_name.lower())):
                 for alias in ("residential", "the residential area", "residential area", "residential neighborhood", "residential quarter", "neighborhood"):
                     if alias not in zones:
-                        zones[alias] = (z_name, gateway_p, "Main Area")
+                        zones[alias] = (z_name, gateway_p, gateway_s)
                 from namegen import generate_residential_neighborhood_name
                 for h in range(15):
                     gen_res = generate_residential_neighborhood_name(scenario_key, hash_val=h).strip().lower()
                     if gen_res not in zones:
-                        zones[gen_res] = (z_name, gateway_p, "Main Area")
+                        zones[gen_res] = (z_name, gateway_p, gateway_s)
 
     # Also incorporate registered zones from SQLite session_locations
     if session_id:
@@ -419,15 +569,18 @@ def _build_session_zone_index(session_id: int = 0, scenario_key: str = "fantasy"
             for r in existing:
                 z = r.get("zone_name", "").strip()
                 p = r.get("primary_name", "").strip()
+                s = r.get("sub_name", "").strip()
                 if z:
                     z_low = z.lower()
                     if any(k in z_low for k in ("board", "desk", "table", "chair", "bed", "closet", "shelf", "counter")):
                         continue
                     if z_low not in zones:
-                        zones[z_low] = (z, p or "Main Area", "Main Area")
+                        eff_p = p if p and p.lower() != "main area" else "Central Plaza"
+                        eff_s = s if s and s.lower() != "main area" else resolve_default_sublocation(eff_p, z, session_id=session_id, scenario_key=scenario_key)
+                        zones[z_low] = (z, eff_p, eff_s)
                         short = get_clean_zone_short_name(z).lower()
                         if short and short not in zones:
-                            zones[short] = (z, p or "Main Area", "Main Area")
+                            zones[short] = (z, eff_p, eff_s)
         except Exception:
             pass
 
@@ -645,7 +798,7 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
 
             z_found, p_found = primaries[raw_low]
 
-            return (z_found, p_found, "Main Area")
+            return (z_found, p_found, resolve_default_sublocation(p_found, z_found, session_id=session_id, scenario_key=scenario_key, char_name=char_name))
 
 
 
@@ -705,7 +858,8 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
 
         if p0_low in primaries and p1_low in primaries:
 
-            return (primaries[p1_low][0], primaries[p1_low][1], "Main Area")
+            z_p1, p_p1 = primaries[p1_low][0], primaries[p1_low][1]
+            return (z_p1, p_p1, resolve_default_sublocation(p_p1, z_p1, session_id=session_id, scenario_key=scenario_key, char_name=char_name))
 
 
 
@@ -717,7 +871,7 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
 
             z_found, p_found = primaries[p0_low]
 
-            return (z_found, p_found, p1)
+            return (z_found, p_found, p1 if p1.strip().lower() != "main area" else resolve_default_sublocation(p_found, z_found, session_id=session_id, scenario_key=scenario_key, char_name=char_name))
 
 
 
@@ -766,12 +920,12 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
                 else:
                     chosen_z = p0 if p0 else z_found
 
-                return (chosen_z, p_found, "Main Area")
+                return (chosen_z, p_found, resolve_default_sublocation(p_found, chosen_z, session_id=session_id, scenario_key=scenario_key, char_name=char_name))
         else:
             if p1_low in primaries:
                 z_found, p_found = primaries[p1_low]
                 chosen_z = p0 if p0 else z_found
-                return (chosen_z, p_found, "Main Area")
+                return (chosen_z, p_found, resolve_default_sublocation(p_found, chosen_z, session_id=session_id, scenario_key=scenario_key, char_name=char_name))
 
         # If Part 1 is in subs:
         if p1_low in subs:
@@ -806,18 +960,24 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
         if p2_low in zones_index:
             z_name = zones_index[p2_low][0]
             if p1_low in primaries:
-                return (z_name, primaries[p1_low][1], p0 if p0 else "Main Area")
+                p_val = primaries[p1_low][1]
+                s_val = p0 if (p0 and p0.lower() != "main area") else resolve_default_sublocation(p_val, z_name, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
+                return (z_name, p_val, s_val)
             elif p0_low in primaries:
-                return (z_name, primaries[p0_low][1], p1 if p1 else "Main Area")
+                p_val = primaries[p0_low][1]
+                s_val = p1 if (p1 and p1.lower() != "main area") else resolve_default_sublocation(p_val, z_name, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
+                return (z_name, p_val, s_val)
             return zones_index[p2_low]
         if p0_low not in zones_index and p1_low in primaries and p2_low in primaries:
-            return (primaries[p2_low][0], primaries[p2_low][1], "Main Area")
+            z_p2, p_p2 = primaries[p2_low][0], primaries[p2_low][1]
+            return (z_p2, p_p2, resolve_default_sublocation(p_p2, z_p2, session_id=session_id, scenario_key=scenario_key, char_name=char_name))
 
         # Direct Zone + Canonical Primary match: if Part 0 is a known Zone and Part 1 is a known Primary in Part 0
         if p0_low in zones_index and p1_low in primaries:
             z_canonical, p_canonical = primaries[p1_low]
             if z_canonical.strip().lower() == p0_low or p0_low in z_canonical.strip().lower() or z_canonical.strip().lower() in p0_low:
-                s_clean = p2 if p2_low in subs else ("Main Area" if any(w in p2_low for w in ("wing", "administration", "faculty", "science", "academic", "media center")) else p2)
+                default_s = resolve_default_sublocation(p_canonical, p0, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
+                s_clean = p2 if (p2_low in subs and p2_low != "main area") else (default_s if (p2_low == "main area" or any(w in p2_low for w in ("wing", "administration", "faculty", "science", "academic", "media center"))) else p2)
                 return (p0, p_canonical, s_clean)
 
         # Check if Part 0 is actually a Primary Residence / Establishment (e.g. "Anderson Residence ➔ Maya's Room ➔ Main Area" or "Artemiusz's House ➔ Bedroom ➔ Desk")
@@ -828,6 +988,8 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
             z_found = primaries.get(p0_low, (residential_name, p0))[0] if p0_low in primaries else residential_name
             p_found = primaries.get(p0_low, (residential_name, p0))[1] if p0_low in primaries else p0
             sub_lbl = p1 if p2_low in ("main area", "") else (p2 if p1_low in ("main area", "") else p1)
+            if not sub_lbl or sub_lbl.strip().lower() == "main area":
+                sub_lbl = resolve_default_sublocation(p_found, z_found, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
             return (z_found, p_found, sub_lbl)
 
         # Domestic room check for 3-part string (e.g. "Westlake Academy -> Artemiusz's House -> Bedroom")
@@ -850,7 +1012,8 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
                 else:
                     z_found, p_found = school_name, p1
 
-                s_clean = p2 if p2_low in subs else ("Main Area" if any(w in p2_low for w in ("wing", "administration", "faculty", "science", "academic", "media center")) else p2)
+                default_s = resolve_default_sublocation(p_found, z_found, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
+                s_clean = p2 if (p2_low in subs and p2_low != "main area") else (default_s if (p2_low == "main area" or any(w in p2_low for w in ("wing", "administration", "faculty", "science", "academic", "media center"))) else p2)
 
                 p1_is_campus = any(k in p1_low for k in CAMPUS_FACILITY_KEYWORDS) or p1_is_academic_room or (
                     any(k in z_found.lower() for k in ("academy", "school", "campus", "athletics", "commons", "student commons"))
@@ -892,8 +1055,8 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
         else:
             if p1_low in primaries:
                 z_found, p_found = primaries[p1_low]
-                s_clean = p2
                 chosen_z = p0 if p0 else z_found
+                s_clean = p2 if (p2 and p2.strip().lower() != "main area") else resolve_default_sublocation(p_found, chosen_z, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
                 return (chosen_z, p_found, s_clean)
 
         # Inversion check: if Part 2 is a known Primary Place (or matches a canonical primary place), but Part 1 is an intermediate wing/container:
@@ -923,7 +1086,7 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
 
             if matched_primary and (p1_low not in primaries or is_intermediate_wing):
                 z_found, p_found = matched_primary
-                sub_lbl = p1 if not is_intermediate_wing else "Main Area"
+                sub_lbl = p1 if (not is_intermediate_wing and p1.strip().lower() != "main area") else resolve_default_sublocation(p_found, z_found, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
                 if is_school_scenario(scenario_key):
                     from .constants import CAMPUS_FACILITY_KEYWORDS, RESIDENTIAL_PLACE_KEYWORDS, COMMERCIAL_PLACE_KEYWORDS
                     p_found_low = p_found.lower()
@@ -965,9 +1128,9 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
                 return (chosen_z, p_found, sub_lbl)
 
             if is_intermediate_wing and p0_low in (school_name.lower(), "westlake academy", "main academy campus"):
-                return (p0, p2, "Main Area")
+                return (p0, p2, resolve_default_sublocation(p2, p0, session_id=session_id, scenario_key=scenario_key, char_name=char_name))
 
-def parse_structured_location_dict(data: dict) -> Optional[Tuple[str, str, str]]:
+def parse_structured_location_dict(data: dict, session_id: int = 0, scenario_key: str = "fantasy", char_name: str = "") -> Optional[Tuple[str, str, str]]:
     """Extracts (zone, primary, sub) from a structured dictionary or LLM tiered location json."""
     if not isinstance(data, dict):
         return None
@@ -990,7 +1153,10 @@ def parse_structured_location_dict(data: dict) -> Optional[Tuple[str, str, str]]
             sub = _unwrap_val(v)
 
     if zone or primary:
-        return (zone or "Unknown Zone", primary or "Main Area", sub or "Main Area")
+        z_out = zone or "Unknown Zone"
+        p_out = primary if (primary and primary.strip().lower() != "main area") else (z_out if z_out != "Unknown Zone" else "Central Hub")
+        s_out = sub if (sub and sub.strip().lower() != "main area") else resolve_default_sublocation(p_out, z_out, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
+        return (z_out, p_out, s_out)
     return None
 
 def parse_tiered_location(raw_location: Any, scenario_key: str = "fantasy", session_id: int = 0, char_name: str = "") -> Tuple[str, str, str]:
@@ -999,7 +1165,7 @@ def parse_tiered_location(raw_location: Any, scenario_key: str = "fantasy", sess
     Accepts formats separated by '➔', '>', '->', or '|', or structured JSON/dicts.
     """
     if isinstance(raw_location, dict):
-        struct = parse_structured_location_dict(raw_location)
+        struct = parse_structured_location_dict(raw_location, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
         if struct:
             return struct
 
@@ -1008,7 +1174,7 @@ def parse_tiered_location(raw_location: Any, scenario_key: str = "fantasy", sess
         try:
             d = json.loads(raw_str)
             if isinstance(d, dict):
-                struct = parse_structured_location_dict(d)
+                struct = parse_structured_location_dict(d, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
                 if struct:
                     return struct
         except Exception:
@@ -1050,12 +1216,15 @@ def parse_tiered_location(raw_location: Any, scenario_key: str = "fantasy", sess
     elif len(parts) >= 3:
 
         z, p, s = parts[0], parts[1], parts[2]
+        if s.strip().lower() == "main area":
+            s = resolve_default_sublocation(p, z, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
 
     elif len(parts) == 2:
 
         # In a 2-part string (e.g., Zone ➔ Primary Location), part 0 is Zone, part 1 is Primary.
 
-        z, p, s = parts[0], parts[1], "Main Area"
+        z, p = parts[0], parts[1]
+        s = resolve_default_sublocation(p, z, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
 
     else:
 
@@ -1063,7 +1232,8 @@ def parse_tiered_location(raw_location: Any, scenario_key: str = "fantasy", sess
 
         z_default, _, _ = get_default_tiered_location(scenario_key, session_id=session_id, char_name=char_name)
 
-        z, p, s = z_default, parts[0], "Main Area"
+        z, p = z_default, parts[0]
+        s = resolve_default_sublocation(p, z, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
 
 
 
@@ -1202,7 +1372,7 @@ def parse_tiered_location(raw_location: Any, scenario_key: str = "fantasy", sess
 
         else:
 
-            s = "Main Area"
+            s = resolve_default_sublocation(p, z, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
 
 
 
@@ -1488,3 +1658,6 @@ def infer_zone_theme_fallback(zone_name: str, scen_key: str = "fantasy") -> str:
 from .movement import auto_heal_incongruous_location, is_incongruous_container
 from .seeding import get_default_tiered_location
 from .attributes import get_regional_guild_name
+
+default_tier3_sublocation = resolve_default_sublocation
+parse_location_string_to_tiers = parse_tiered_location

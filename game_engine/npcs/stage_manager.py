@@ -396,6 +396,11 @@ def compute_pre_turn_stage(
     if not is_movement and not is_in_combat(session) and actions:
         from mechanics.world.locations.movement import is_movement_action, resolve_hybrid_sublocation_or_focal_point
 
+        _ALLOWED_FREEFORM_MOVE_INTENTS = (
+            "", "general_action", "movement", "travel", "fast_travel", "move",
+            "social_invite", "accompanied_travel", "dialogue_init", "investigate_clue",
+        )
+
         # Multiplayer Co-op Local-First Priority (D15):
         # Only execute party movement when no teammate is performing a non-movement local room action.
         if len(actions) > 1:
@@ -406,8 +411,7 @@ def compute_pre_turn_stage(
                 a_int_chk = str(a_chk.get("intent") or "").strip().lower() if isinstance(a_chk, dict) else ""
                 is_a_move = bool(
                     (isinstance(a_chk, dict) and (a_chk.get("target_node_id") or a_chk.get("target_location")))
-                    or a_int_chk in ("movement", "travel", "fast_travel", "move")
-                    or is_movement_action(a_lbl_chk)
+                    or (a_int_chk in _ALLOWED_FREEFORM_MOVE_INTENTS and is_movement_action(a_lbl_chk))
                 )
                 if is_a_move:
                     move_reqs += 1
@@ -443,7 +447,7 @@ def compute_pre_turn_stage(
                     move_action_lbl = a_lbl
                     move_action_intent = a_int or "movement"
                     break
-                if (a_int in ("movement", "travel", "fast_travel", "move") or is_movement_action(a_lbl)) and not move_action_lbl:
+                if a_int in _ALLOWED_FREEFORM_MOVE_INTENTS and is_movement_action(a_lbl) and not move_action_lbl:
                     move_action_lbl = a_lbl
                     move_action_intent = a_int
 
@@ -461,10 +465,65 @@ def compute_pre_turn_stage(
             for a in actions:
                 lbl = a.get("label", "") if isinstance(a, dict) else str(a)
                 a_int = str(a.get("intent") or "").strip().lower() if isinstance(a, dict) else ""
+                if a_int not in _ALLOWED_FREEFORM_MOVE_INTENTS:
+                    continue
                 matched_nid = match_freeform_spatial_destination(sess_id, curr_nid, lbl, intent=a_int)
                 if matched_nid:
                     target_nid = matched_nid
                     break
+
+            # If still not matched and action is "Follow <NPC>" / "Go with <NPC>" / quest action, check NPC's relocated/rendezvous/scheduled node or quest waypoint
+            if not target_nid:
+                for a in actions:
+                    lbl = a.get("label", "") if isinstance(a, dict) else str(a)
+                    lbl_low = lbl.lower()
+                    # 1. Quest waypoint target_location fallback if moving for a quest
+                    if isinstance(a, dict) and (a.get("is_quest_action") or a.get("quest_id")) and is_movement_action(lbl):
+                        try:
+                            from mechanics.world.waypoints.matching import resolve_effective_waypoint_location
+                            for wp in db.get_all_session_active_waypoints(sess_id):
+                                if wp.get("quest_id") == a.get("quest_id") and (a.get("sub_obj_id") is None or wp.get("sub_obj_id") == a.get("sub_obj_id")):
+                                    wp_loc = resolve_effective_waypoint_location(sess_id, wp) or wp.get("target_location", "")
+                                    if wp_loc:
+                                        wp_nid = db.resolve_node_id_from_location(sess_id, wp_loc)
+                                        if wp_nid and wp_nid != curr_nid:
+                                            target_nid = wp_nid
+                                            break
+                        except Exception:
+                            pass
+                    if target_nid:
+                        break
+                    # 2. Accompanied "Follow <NPC>" / "Go with <NPC>" destination lookup
+                    if any(k in lbl_low for k in ("follow ", "go with ", "walk with ", "accompany ", "join ")):
+                        cand_npc = (a.get("target_npc") if isinstance(a, dict) else "") or session.get("dialogue_partner") or ""
+                        if not cand_npc:
+                            m_f = re.search(r"\b(?:follow|go with|walk with|accompany|join)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", lbl)
+                            if m_f:
+                                cand_npc = m_f.group(1).strip()
+                        if cand_npc:
+                            reloc_map = (session.get("extra") or {}).get("npc_relocated_overrides") or {}
+                            for rk, rv in reloc_map.items():
+                                if cand_npc.lower() in rk.lower() or rk.lower() in cand_npc.lower():
+                                    r_loc = rv.get("location") if isinstance(rv, dict) else str(rv)
+                                    r_nid = db.resolve_node_id_from_location(sess_id, r_loc) if r_loc else None
+                                    if r_nid and r_nid != curr_nid:
+                                        target_nid = r_nid
+                                        break
+                            if not target_nid:
+                                try:
+                                    from mechanics.world.npc_schedule import get_npc_scheduled_node_id
+                                    s_nid = get_npc_scheduled_node_id(
+                                        sess_id, cand_npc,
+                                        current_day=int(session.get("current_day") or 1),
+                                        current_minute=int(session.get("current_minute") or 480),
+                                        scen_key=scen_key,
+                                    )
+                                    if s_nid and s_nid != curr_nid:
+                                        target_nid = s_nid
+                                except Exception:
+                                    pass
+                    if target_nid:
+                        break
 
             # Open-World vs. Campus Freeform Unmatched Destination Resolution (D10)
             if not target_nid and (target_loc_candidate or move_action_lbl):
@@ -611,7 +670,8 @@ def compute_pre_turn_stage(
                             except Exception:
                                 pass
 
-                        loc_prompt_target = target_station_sub or "Main Area"
+                        from mechanics.world.locations.hierarchy import resolve_default_sublocation
+                        loc_prompt_target = target_station_sub or resolve_default_sublocation(dest_p, dest_z, session_id=sess_id, scenario_key=scen_key)
                         effective_location = f"{dest_z} ➔ {dest_p} ➔ {loc_prompt_target}"
                     break
 
@@ -634,6 +694,88 @@ def compute_pre_turn_stage(
                     traveling_companions = t_comps or []
                     left_behind_patrons = l_patrons or []
                     stage_directives.append(f"[STAGE DIRECTION — ARCHITECTURAL EXPLORATION]: Entered inner chamber {effective_location}.")
+
+        # Immediate Forced Eviction when ANY stealth/covert check fails inside a restricted, private, or curfew-locked area (Issue 11)
+        if not party_cohesion_deferred and sess_id and actions and not is_movement:
+            try:
+                from mechanics.stealth import (
+                    break_stealth,
+                    is_strict_trespass_or_restricted_stealth_zone,
+                    record_failed_stealth_lockout,
+                )
+                from mechanics.world.locations.access_gate import get_node_effective_access_info
+                from mechanics.world.locations.pathfinding import resolve_safe_open_eviction_destination
+
+                lead_act = actions[0] if isinstance(actions[0], dict) else {}
+                chk_obj = lead_act.get("check")
+                chk_tier = str(
+                    (chk_obj.get("tier") if isinstance(chk_obj, dict) else getattr(chk_obj, "tier", ""))
+                    if chk_obj is not None
+                    else lead_act.get("tier", "")
+                ).lower()
+                chk_failed = chk_tier in ("fail", "failure", "crit_fail", "critical_failure") or (
+                    chk_obj is not None
+                    and not bool(chk_obj.get("succeeded", True) if isinstance(chk_obj, dict) else getattr(chk_obj, "succeeded", True))
+                )
+                act_lbl_low = str(lead_act.get("label") or lead_act.get("text") or "").lower()
+                is_covert_attempt = bool(
+                    lead_act.get("is_stealth")
+                    or lead_act.get("stance") == "stealth"
+                    or str(lead_act.get("intent") or "").lower() in ("stealth_covert", "stealth")
+                    or str(lead_act.get("action_category") or "").lower() == "stealth"
+                    or str(lead_act.get("approach") or "").lower() == "stealth_guile"
+                    or any(
+                        w in act_lbl_low
+                        for w in (
+                            "sneak", "infiltrate", "lockpick", "pick the lock", "slip past",
+                            "creep", "[stealth", "[diversion", "shadow step", "careful bypass",
+                        )
+                    )
+                )
+                if chk_failed and is_covert_attempt:
+                    c_nid = str(session.get("current_node_id") or db.resolve_node_id_from_location(sess_id, raw_curr) or "").strip()
+                    c_day = int(session.get("current_day", 1) or 1)
+                    c_min = int(session.get("current_minute", 480) or 480)
+                    record_failed_stealth_lockout(session, node_id=c_nid, label=str(lead_act.get("label") or ""))
+                    acc_here = (
+                        get_node_effective_access_info(sess_id, c_nid, current_day=c_day, current_minute=c_min, scen_key=scen_key)
+                        if c_nid
+                        else {}
+                    )
+                    in_restricted_or_curfew = bool(
+                        acc_here.get("access_tier") in ("restricted", "private", "locked")
+                        or acc_here.get("curfew_active")
+                        or acc_here.get("is_trespassing")
+                        or acc_here.get("schedule_locked")
+                        or is_strict_trespass_or_restricted_stealth_zone(session, lead_act)
+                    )
+                    if in_restricted_or_curfew:
+                        evict_nid, evict_loc = resolve_safe_open_eviction_destination(
+                            sess_id,
+                            c_nid,
+                            current_day=c_day,
+                            current_minute=c_min,
+                            scen_key=scen_key,
+                            current_location=raw_curr,
+                            previous_node_id=session.get("previous_node_id"),
+                        )
+                        if evict_loc and evict_loc != raw_curr:
+                            is_movement = True
+                            effective_location = evict_loc
+                            effective_node_id = evict_nid or c_nid
+                            movement_dest_str = evict_loc
+                            session["current_node_id"] = effective_node_id
+                            session["current_location"] = evict_loc
+                            session["travel_minutes_elapsed"] = int(session.get("travel_minutes_elapsed") or 0) + 10
+                            break_stealth(session, reason="evicted_from_restricted_area", break_all=True)
+                            stage_directives.append(
+                                f"[MANDATORY OUTCOME — STEALTH FAILURE & IMMEDIATE EVICTION]: "
+                                f"The player failed their stealth check ('{lead_act.get('label', 'stealth attempt')}') inside {raw_curr}. "
+                                f"They were immediately spotted by security/authority and forcibly escorted out to '{evict_loc}'. "
+                                f"Place the end of the turn at '{evict_loc}'."
+                            )
+            except Exception:
+                pass
 
     # Advance staged clock AFTER Phase 4 Spatial/Dijkstra so schedule checks use post-travel clock (D3)
     if callable(stage_clock_cb):
@@ -814,8 +956,12 @@ def compute_pre_turn_stage(
                     sched_node = get_npc_scheduled_node_id(cand, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
                     is_match = False
                     if sched_node and effective_node_id:
-                        is_match = db.is_descendant_of(sess_id, effective_node_id, sched_node) or db.is_descendant_of(sess_id, sched_node, effective_node_id)
-                    if not is_match:
+                        is_match = (
+                            sched_node == effective_node_id
+                            or db.is_descendant_of(sess_id, effective_node_id, sched_node)
+                            or db.is_descendant_of(sess_id, sched_node, effective_node_id)
+                        )
+                    elif not sched_node or not effective_node_id:
                         sched_loc = get_npc_scheduled_location(cand, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
                         if sched_loc:
                             is_match = check_location_matches_waypoint(

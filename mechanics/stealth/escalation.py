@@ -17,6 +17,11 @@ from mechanics.stealth.core import (
     get_session_stealth_state,
     apply_stealth_spatial_transition,
     set_session_stealth_state,
+    toggle_stealth_stance,
+    is_stealth_context_warranted,
+    is_strict_trespass_or_restricted_stealth_zone,
+    record_failed_stealth_lockout,
+    is_stealth_choice_locked_out,
 )
 
 
@@ -193,6 +198,9 @@ def inject_covert_exploration_choices(
     if is_in_combat(session):
         return choices
 
+    if not is_stealth_context_warranted(session):
+        return choices
+
     st = get_session_stealth_state(session)
     if st.get("detection_meter", 0) >= 100 or st.get("alert_level") == "detected":
         return choices
@@ -201,9 +209,10 @@ def inject_covert_exploration_choices(
     existing_low = " ".join(str(c.get("label") or "").lower() for c in base)
 
     covert_additions: List[Dict[str, Any]] = []
-    if not any(k in existing_low for k in ("shadow step", "sneak", "slip past", "creep")):
+    shadow_lbl = "Shadow Step — Slip quietly through cover past nearby sightlines"
+    if not any(k in existing_low for k in ("shadow step", "sneak", "slip past", "creep")) and not is_stealth_choice_locked_out(session, label=shadow_lbl):
         covert_additions.append({
-            "label": "Shadow Step — Slip quietly through cover past nearby sightlines",
+            "label": shadow_lbl,
             "stat": "AGI",
             "requirement": 6,
             "mp_cost": 0,
@@ -306,13 +315,46 @@ def reduce_stealth_turn_outcome(
     # 2. Evaluate 100% detection escalation flags first so spatial transitions never erase blown cover
     trigger_combat = False
     trigger_confrontation = False
+    failed_covert_action = False
     for a in (actions or []):
-        if isinstance(a, dict) and isinstance(a.get("stealth_outcome"), dict):
+        if not isinstance(a, dict):
+            continue
+        if isinstance(a.get("stealth_outcome"), dict):
             so = a["stealth_outcome"]
             if so.get("trigger_combat"):
                 trigger_combat = True
             if so.get("trigger_confrontation"):
                 trigger_confrontation = True
+        chk = a.get("check")
+        chk_tier = str(
+            (chk.get("tier") if isinstance(chk, dict) else getattr(chk, "tier", "")) if chk is not None else a.get("tier", "")
+        ).lower()
+        chk_failed = chk_tier in ("fail", "failure", "crit_fail", "critical_failure") or (
+            chk is not None and not bool(chk.get("succeeded", True) if isinstance(chk, dict) else getattr(chk, "succeeded", True))
+        )
+        lbl_a = str(a.get("label") or a.get("text") or "").lower()
+        is_covert_a = bool(
+            a.get("is_stealth")
+            or a.get("stance") == "stealth"
+            or str(a.get("intent") or "").lower() in ("stealth_covert", "stealth")
+            or str(a.get("action_category") or "").lower() == "stealth"
+            or str(a.get("approach") or "").lower() == "stealth_guile"
+            or any(
+                w in lbl_a
+                for w in ("sneak", "infiltrate", "lockpick", "pick the lock", "slip past", "creep", "[stealth", "[diversion", "shadow step", "careful bypass")
+            )
+        )
+        if chk_failed and is_covert_a:
+            failed_covert_action = True
+            record_failed_stealth_lockout(
+                session,
+                node_id=str(a.get("target_node_id") or outcome.get("current_node_id") or session.get("current_node_id") or ""),
+                label=str(a.get("label") or a.get("text") or ""),
+            )
+            if is_strict_trespass_or_restricted_stealth_zone(session, a):
+                st["detection_meter"] = 100
+                st["alert_level"] = "detected"
+                set_session_stealth_state(session, st)
 
     if not (trigger_combat or trigger_confrontation) and (st.get("detection_meter", 0) >= 100 or st.get("alert_level") == "detected"):
         trigger_combat, trigger_confrontation = classify_detection_escalation(session)
@@ -395,6 +437,43 @@ def reduce_stealth_turn_outcome(
 
         elif trigger_confrontation:
             auth_npc = _resolve_confrontation_authority_npc(session, outcome, scen_key)
+            evict_nid = ""
+            evict_loc = ""
+            eff_sid = int(session_id or session.get("id") or 0)
+            if eff_sid and is_strict_trespass_or_restricted_stealth_zone(session, (actions or [None])[0] if actions else None):
+                try:
+                    from mechanics.world.locations.pathfinding import resolve_safe_open_eviction_destination
+                    curr_d = int(session.get("current_day", 1) or 1)
+                    curr_m = int(session.get("current_minute", 480) or 480)
+                    cand_nid = str(outcome.get("current_node_id") or session.get("current_node_id") or "")
+                    cand_loc = str(outcome.get("location") or session.get("current_location") or "")
+                    evict_nid, evict_loc = resolve_safe_open_eviction_destination(
+                        eff_sid,
+                        cand_nid,
+                        current_day=curr_d,
+                        current_minute=curr_m,
+                        scen_key=scen_key,
+                        current_location=cand_loc,
+                        previous_node_id=session.get("previous_node_id"),
+                    )
+                    if evict_loc and evict_loc != cand_loc:
+                        outcome["location"] = evict_loc
+                        session["current_location"] = evict_loc
+                    if evict_nid and evict_nid != cand_nid:
+                        outcome["current_node_id"] = evict_nid
+                        session["current_node_id"] = evict_nid
+                    # Apply +10 minute detention/escort time penalty
+                    new_min = curr_m + 10
+                    session["current_minute"] = new_min
+                    db.update_session(
+                        eff_sid,
+                        current_location=session.get("current_location", ""),
+                        current_node_id=session.get("current_node_id", ""),
+                        current_minute=new_min,
+                    )
+                except Exception:
+                    pass
+
             npcs_list = [dict(n) for n in (outcome.get("npcs_present") or session.get("current_npcs") or []) if isinstance(n, dict)]
             auth_low = auth_npc["name"].strip().lower()
             replaced = False
@@ -412,9 +491,15 @@ def reduce_stealth_turn_outcome(
             outcome["choices"] = conf_choices
             outcome["next_choices"] = conf_choices
             outcome["_hybrid_choices_built"] = True
-            alert_callout = f"⚠️ **Spotted!** **{auth_npc['name']}** steps into your path and demands an explanation."
+            if evict_loc:
+                alert_callout = (
+                    f"⚠️ **Spotted & Escorted Out!** **{auth_npc['name']}** catches you red-handed, "
+                    f"reprimands you, and escorts you back out to **{evict_loc.split('➔')[-1].strip()}**."
+                )
+            else:
+                alert_callout = f"⚠️ **Spotted!** **{auth_npc['name']}** steps into your path and demands an explanation."
             curr_next = str(outcome.get("next_narrative") or outcome.get("narrative") or "").strip()
-            if "Spotted!" not in curr_next and auth_npc["name"].lower() not in curr_next.lower():
+            if "Spotted" not in curr_next and auth_npc["name"].lower() not in curr_next.lower():
                 outcome["next_narrative"] = f"{curr_next}\n\n{alert_callout}".strip() if curr_next else alert_callout
 
     # 5. Inject covert exploration choices when Stealth remains active outside combat

@@ -90,15 +90,18 @@ const ContactsPanel = ({
   onMessageContact,
   onJumpToCharacterInCodex,
   targetContactName,
+  targetContactPulse,
 }) => {
   const { t } = useTranslation();
   const { contacts = [], lorebook = {}, loading } = codexHook || {};
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedNpc, setExpandedNpc] = useState(null);
+  const [highlightedNpcKey, setHighlightedNpcKey] = useState(null);
   const [contactTab, setContactTab] = useState('persona');
   const [companionBusy, setCompanionBusy] = useState(null);
   const [companionFeedback, setCompanionFeedback] = useState(null);
   const tabRefs = useRef({});
+  const cardRefs = useRef({});
 
   const personalContacts = useMemo(
     () => (contacts || []).filter(c => !c.is_dispatch_channel),
@@ -108,17 +111,30 @@ const ContactsPanel = ({
   useEffect(() => {
     if (targetContactName) {
       setSearchQuery('');
-      const targetLow = String(targetContactName ?? '').toLowerCase();
+      const targetLow = String(targetContactName ?? '').trim().toLowerCase();
       const matched = personalContacts.find(c =>
-        String(c.name ?? '').toLowerCase() === targetLow ||
-        String(c.id ?? '').toLowerCase() === targetLow ||
-        String(c.npc_id ?? '').toLowerCase() === targetLow
+        String(c.name ?? '').trim().toLowerCase() === targetLow ||
+        String(c.id ?? '').trim().toLowerCase() === targetLow ||
+        String(c.npc_id ?? '').trim().toLowerCase() === targetLow
       );
       if (matched) {
-        setExpandedNpc(matched.id || matched.name);
+        const key = matched.id || matched.name;
+        setExpandedNpc(key);
+        setHighlightedNpcKey(key);
+        const timer = setTimeout(() => {
+          const el = cardRefs.current[key] || cardRefs.current[String(matched.name ?? '').toLowerCase()];
+          if (el && typeof el.scrollIntoView === 'function') {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 80);
+        const clearTimer = setTimeout(() => setHighlightedNpcKey(null), 2400);
+        return () => {
+          clearTimeout(timer);
+          clearTimeout(clearTimer);
+        };
       }
     }
-  }, [targetContactName, personalContacts]);
+  }, [targetContactName, targetContactPulse, personalContacts]);
 
   const partyNpcNames = useMemo(
     () => new Set((session?.party_npcs || []).map(p => (p.name || '').toLowerCase())),
@@ -384,10 +400,16 @@ const ContactsPanel = ({
             return (
               <div
                 key={npcToggleKey}
+                ref={(el) => {
+                  cardRefs.current[npcToggleKey] = el;
+                  if (npc.name) cardRefs.current[String(npc.name).toLowerCase()] = el;
+                }}
                 className={`bg-black/50 border rounded-lg p-2.5 space-y-1.5 transition-all ${
-                  isBlocked
-                    ? 'border-red-900/60 hover:border-red-700/70'
-                    : 'border-fantasy-border/60 hover:border-fantasy-border'
+                  highlightedNpcKey === npcToggleKey
+                    ? 'border-fantasy-accent ring-2 ring-fantasy-accent/60 shadow-lg shadow-fantasy-accent/20'
+                    : isBlocked
+                      ? 'border-red-900/60 hover:border-red-700/70'
+                      : 'border-fantasy-border/60 hover:border-fantasy-border'
                 }`}
               >
                 {/* Header Toggle Button */}
@@ -449,7 +471,7 @@ const ContactsPanel = ({
                         )}
                       </div>
                       <span className="text-[11px] text-gray-400 font-medium block truncate max-w-56">
-                        {basic.role || basic.occupation || (basic.faction ? `${basic.faction} Member` : 'Contact')}
+                        {npc.public_role || basic.public_role || basic.role || basic.occupation || (basic.faction ? `${basic.faction} Member` : 'Contact')}
                       </span>
                     </div>
                   </div>
@@ -495,9 +517,9 @@ const ContactsPanel = ({
                 {/* Summary Badges + Actions */}
                 <div className="pt-1.5 space-y-1.5 text-[11px]">
                   <div className="flex flex-wrap items-center gap-1">
-                    {(basic.role || basic.occupation || npc.role) && (
+                    {(npc.public_role || basic.public_role || basic.role || basic.occupation || npc.role) && (
                       <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-200 border border-fantasy-border/50 text-[10.5px]">
-                        Role: <strong className="text-gray-100">{basic.role || basic.occupation || npc.role}</strong>
+                        Role: <strong className="text-gray-100">{npc.public_role || basic.public_role || basic.role || basic.occupation || npc.role}</strong>
                       </span>
                     )}
                     {(basic.grade || npc.grade) && (

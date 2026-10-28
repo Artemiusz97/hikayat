@@ -665,32 +665,46 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                 "sub_locations": primaries_dict[primary_name]
             })
 
-        # Check hazard and frontier tags based on zone name / theme
-        z_lower = zone_name.lower()
-        if any(k in z_lower for k in (
-            "frontier", "chasm", "crag", "crags", "badlands", "waste", "wasteland", "cursed", "dungeon", "crater", "ruins",
-            "swamp", "marsh", "planet", "world)", "asteroid", "tundra", "ashland", "moors", "catacombs",
-            "caldera", "lava", "magma", "cinder", "pyre", "volcanic", "volcano", "abyss", "fissure", "trench", "rift", "crypt",
-            "vault", "labyrinth", "mire", "bog", "fen", "permafrost", "dreadfall", "shadowveil", "void"
-        )):
-            if not is_hub_location(zone_name):
-                zone_tags_set.add("🧭 Frontier")
-
-        if any(k in z_lower for k in ("volcanic", "ashland", "caldera", "foundry", "desert", "dunes", "sands", "magma", "lava", "cinder", "infernal", "pyre", "sunscorched")):
-            zone_tags_set.add("🌋 Extreme Heat")
-        elif any(k in z_lower for k in ("ice", "tundra", "frost", "snow", "glacial", "cryo", "everwinter", "permafrost", "blizzard", "rimewind")):
-            zone_tags_set.add("❄️ Freezing Tundra")
-        elif any(k in z_lower for k in ("irradiated", "toxic", "radiation", "fallout")):
-            zone_tags_set.add("☢️ Radiation Hazard")
-        elif any(k in z_lower for k in ("seaside", "coastal", "beach", "harbor", "ocean", "bay", "port", "quay", "pier", "tidehaven")):
-            zone_tags_set.add("🌊 Coastal")
-        elif any(k in z_lower for k in ("airship", "zeppelin", "leviathan", "sovereign", "ironclad", "kraken", "dreadnought", "titan", "swallow", "hms", "zephyr", "aether", "celestial", "gargantuan")):
-            zone_tags_set.add("🎈 Airship")
-
-        from scenario_data import is_mechanic_enabled
+        # Safe Hub / Frontier / Environmental Hazard tags only apply to wilderness/expedition genres.
+        # Grounded modern, slice-of-life, high school, and anomalous incursion scenarios omit them.
+        from scenario_data import is_mechanic_enabled, is_anomalous_incursions_scenario
+        scen_low = str(scen_key or "").lower()
+        is_modern_grounded_scen = (
+            is_school_scenario(scen_key)
+            or is_anomalous_incursions_scenario(scen_key)
+            or any(k in scen_low for k in ("slice_of_life", "modern", "urban", "romance", "drama"))
+        )
         combat_enabled = is_mechanic_enabled(scen_key, "tactical_combat")
+        is_quest_only_hostility = is_anomalous_incursions_scenario(scen_key)
+        show_danger_zone_tags = combat_enabled and not is_quest_only_hostility and not is_modern_grounded_scen
 
-        if is_hub_location(zone_name) and combat_enabled:
+        # Check hazard and frontier tags based on zone name / theme (only in wilderness/expedition genres)
+        z_lower = zone_name.lower()
+        if not is_modern_grounded_scen:
+            if not is_quest_only_hostility and any(
+                re.search(rf"\b{re.escape(k)}\b", z_lower)
+                for k in (
+                    "frontier", "chasm", "crag", "crags", "badlands", "waste", "wasteland", "cursed", "dungeon", "crater", "ruins",
+                    "swamp", "marsh", "planet", "asteroid", "tundra", "ashland", "moors", "catacombs",
+                    "caldera", "lava", "magma", "cinder", "pyre", "volcanic", "volcano", "abyss", "fissure", "trench", "rift", "crypt",
+                    "vault", "labyrinth", "mire", "bog", "fen", "permafrost", "dreadfall", "shadowveil", "void"
+                )
+            ):
+                if not is_hub_location(zone_name):
+                    zone_tags_set.add("🧭 Frontier")
+
+            if any(re.search(rf"\b{re.escape(k)}\b", z_lower) for k in ("volcanic", "ashland", "caldera", "foundry", "desert", "dunes", "sands", "magma", "lava", "cinder", "infernal", "pyre", "sunscorched")):
+                zone_tags_set.add("🌋 Extreme Heat")
+            elif any(re.search(rf"\b{re.escape(k)}\b", z_lower) for k in ("ice", "tundra", "frost", "snow", "glacial", "cryo", "everwinter", "permafrost", "blizzard", "rimewind")):
+                zone_tags_set.add("❄️ Freezing Tundra")
+            elif any(re.search(rf"\b{re.escape(k)}\b", z_lower) for k in ("irradiated", "toxic", "radiation", "fallout")):
+                zone_tags_set.add("☢️ Radiation Hazard")
+            elif any(re.search(rf"\b{re.escape(k)}\b", z_lower) for k in ("seaside", "coastal", "beach", "harbor", "ocean", "bay", "port", "quay", "pier", "tidehaven")):
+                zone_tags_set.add("🌊 Coastal")
+            elif any(re.search(rf"\b{re.escape(k)}\b", z_lower) for k in ("airship", "zeppelin", "leviathan", "sovereign", "ironclad", "kraken", "dreadnought", "titan", "swallow", "hms", "zephyr", "aether", "celestial", "gargantuan")):
+                zone_tags_set.add("🎈 Airship")
+
+        if is_hub_location(zone_name) and show_danger_zone_tags:
             zone_tags_set.add("🛡️ Safe Hub")
 
         is_curr = bool(curr_z and zone_name.strip().lower() == curr_z.strip().lower())
@@ -716,7 +730,7 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
             "theme": theme_tagline,
             "atmosphere": env_data.get("sensory") or atm_raw,
             "is_current": is_curr,
-            "is_hub": is_hub_location(zone_name) if combat_enabled else False,
+            "is_hub": is_hub_location(zone_name) if show_danger_zone_tags else False,
             "places_count": len(primary_items),
             "primary_locations": primary_items,
             "active_tags": sorted(list(zone_tags_set)),

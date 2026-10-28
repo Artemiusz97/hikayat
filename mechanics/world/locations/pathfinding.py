@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 def format_node_hierarchy(session_id: int, node_id: str) -> str:
     """
     Deterministically formats a node_id into a canonical 3-tier location string:
-    'Zone ➔ Facility ➔ Room' or 'Zone ➔ Facility ➔ Main Area'.
+    'Zone ➔ Facility ➔ Room'.
     """
     if not session_id or not node_id:
         return ""
@@ -38,22 +38,30 @@ def format_node_hierarchy(session_id: int, node_id: str) -> str:
         return str(node_id)
     ntype = node.get("node_type", "ROOM")
     ancestors = db.get_node_ancestors(session_id, node_id)
+    from .hierarchy import resolve_default_sublocation
 
     if ntype == "ROOM":
         fac_node = ancestors[0] if ancestors else None
         zone_node = ancestors[1] if len(ancestors) > 1 else (fac_node if fac_node and fac_node.get("node_type") == "ZONE" else None)
         z_name = zone_node.get("name") if zone_node else "Main Academy Campus"
         f_name = fac_node.get("name") if fac_node else "Main Facility"
-        r_name = node.get("name") or "Main Area"
+        r_name = node.get("name") or ""
+        if not r_name or r_name.strip().lower() == "main area":
+            r_name = resolve_default_sublocation(f_name, z_name, session_id=session_id)
         return f"{z_name} ➔ {f_name} ➔ {r_name}"
     elif ntype == "FACILITY":
         zone_node = ancestors[0] if ancestors else None
         z_name = zone_node.get("name") if zone_node else "Main Academy Campus"
         f_name = node.get("name") or "Main Facility"
-        return f"{z_name} ➔ {f_name} ➔ Main Area"
+        r_name = resolve_default_sublocation(f_name, z_name, session_id=session_id)
+        return f"{z_name} ➔ {f_name} ➔ {r_name}"
     elif ntype == "ZONE":
         z_name = node.get("name") or "Main Academy Campus"
-        return f"{z_name} ➔ Main Area ➔ Main Area"
+        all_nodes = db.get_session_world_nodes(session_id)
+        fac = next((n for n in all_nodes if n.get("node_type") == "FACILITY" and n.get("parent_id") == node_id), None)
+        f_name = fac["name"] if fac else z_name
+        r_name = resolve_default_sublocation(f_name, z_name, session_id=session_id)
+        return f"{z_name} ➔ {f_name} ➔ {r_name}"
     return node.get("name") or str(node_id)
 
 
@@ -598,6 +606,175 @@ def resolve_flee_destination(
     return (current_node_id, format_node_hierarchy(session_id, current_node_id))
 
 
+def resolve_safe_open_eviction_destination(
+    session_id: int,
+    current_node_id: Optional[str] = None,
+    current_day: int = 1,
+    current_minute: int = 480,
+    scen_key: str = "high_school_drama",
+    current_location: str = "",
+    previous_node_id: Optional[str] = None,
+) -> Tuple[str, str]:
+    """
+    Deterministically resolves the nearest currently-open, non-curfewed public node
+    when a player is evicted from a restricted, private, or curfew-locked area.
+    - Daytime campus trespass (07:00–20:00) evicts to the nearest open school hallway/foyer/courtyard.
+    - Night campus curfew (20:00–07:00) evicts outside to the School Main Gates exterior / public street
+      rather than leaving the player inside a curfewed hallway.
+    """
+    if not session_id:
+        return ("", "")
+
+    start_nid = str(current_node_id or "").strip()
+    if not start_nid and current_location:
+        try:
+            start_nid = db.resolve_node_id_from_location(session_id, current_location) or ""
+        except Exception:
+            start_nid = ""
+
+    safe_min = int(current_minute or 480) % 1440
+    from mechanics.world.world_schedule import (
+        is_abandoned_school_node,
+        is_campus_node_or_location,
+        is_high_school_setting,
+    )
+    from .access_gate import get_node_effective_access_info
+
+    start_node = db.get_world_node(session_id, start_nid) if start_nid else None
+    start_parent = (
+        db.get_world_node(session_id, start_node["parent_id"])
+        if (start_node and start_node.get("parent_id"))
+        else None
+    )
+
+    # 1. High School Night Curfew (20:00–07:00): Campus buildings are all under curfew lockdown,
+    # so security escorts the player outside to the School Main Gates exterior or public street.
+    if is_high_school_setting(scen_key) and (safe_min >= 1200 or safe_min < 420):
+        on_campus = is_campus_node_or_location(
+            start_node, start_parent, location_str=current_location, session_id=session_id, scen_key=scen_key
+        )
+        if on_campus and not is_abandoned_school_node(start_node, start_parent, location_str=current_location):
+            from .seeds import get_session_school_name
+            school_zone = get_session_school_name(session_id, scen_key) or "Main Academy Campus"
+            if start_nid != "loc_school_gate" and db.get_world_node(session_id, "loc_school_gate"):
+                return ("loc_school_gate", f"{school_zone} ➔ School Main Gates ➔ Outside the Locked Entrance")
+            for street_nid in ("loc_city_square", "loc_local_park", "loc_convenience_store"):
+                if db.get_world_node(session_id, street_nid):
+                    return (street_nid, format_node_hierarchy(session_id, street_nid))
+            return ("loc_school_gate", f"{school_zone} ➔ School Main Gates ➔ Outside the Locked Entrance")
+
+    def _is_safe_open_public(nid: str) -> bool:
+        if not nid or nid == start_nid:
+            return False
+        n_obj = db.get_world_node(session_id, nid)
+        if not n_obj or n_obj.get("is_hidden"):
+            return False
+        if str(n_obj.get("node_type") or "").upper() == "ZONE":
+            return False
+        if str(n_obj.get("privacy_level") or "public").lower() == "private":
+            return False
+        info = get_node_effective_access_info(
+            session_id, nid, current_day=current_day, current_minute=current_minute, scen_key=scen_key
+        )
+        return bool(
+            info.get("access_tier") == "open"
+            and not info.get("curfew_active")
+            and not info.get("is_trespassing")
+            and not info.get("schedule_locked")
+        )
+
+    def _is_hallway_or_lobby(nid: str) -> bool:
+        n_obj = db.get_world_node(session_id, nid) or {}
+        nm = f"{nid} {n_obj.get('name', '')}".lower()
+        return any(
+            k in nm
+            for k in ("foyer", "hallway", "corridor", "lobby", "entrance", "courtyard", "commons", "gate", "plaza", "square", "street")
+        )
+
+    # 2. Check previous_node_id if it is currently safe and open
+    if previous_node_id and _is_safe_open_public(previous_node_id):
+        return (previous_node_id, format_node_hierarchy(session_id, previous_node_id))
+
+    all_nodes = db.get_session_world_nodes(session_id) or []
+
+    # 3. Check sibling open hallway/foyer/entrance/courtyard rooms under the same parent facility
+    if start_node and start_node.get("parent_id"):
+        pid = start_node["parent_id"]
+        siblings = [n["node_id"] for n in all_nodes if n.get("parent_id") == pid and n.get("node_id") != start_nid]
+        for sib_id in siblings:
+            if _is_hallway_or_lobby(sib_id) and _is_safe_open_public(sib_id):
+                return (sib_id, format_node_hierarchy(session_id, sib_id))
+        for sib_id in siblings:
+            if _is_safe_open_public(sib_id):
+                return (sib_id, format_node_hierarchy(session_id, sib_id))
+        if _is_safe_open_public(pid):
+            return (pid, format_node_hierarchy(session_id, pid))
+
+    # 4. Walk outward via BFS over world_edges and parent/child relationships
+    if start_nid:
+        adj: Dict[str, List[str]] = {}
+        try:
+            with db.get_conn() as conn:
+                edges = conn.execute(
+                    "SELECT from_node_id, to_node_id, is_bidirectional FROM world_edges WHERE session_id=?",
+                    (session_id,),
+                ).fetchall()
+            for r in edges:
+                u, v = r["from_node_id"], r["to_node_id"]
+                adj.setdefault(u, []).append(v)
+                if r["is_bidirectional"] != 0:
+                    adj.setdefault(v, []).append(u)
+        except Exception:
+            pass
+        for n in all_nodes:
+            nid = n.get("node_id")
+            pid = n.get("parent_id")
+            if nid and pid:
+                adj.setdefault(nid, []).append(pid)
+                adj.setdefault(pid, []).append(nid)
+
+        visited = {start_nid}
+        frontier = [start_nid]
+        for _ in range(6):
+            if not frontier:
+                break
+            next_frontier: List[str] = []
+            for curr in frontier:
+                for nb in adj.get(curr, []):
+                    if nb not in visited:
+                        visited.add(nb)
+                        next_frontier.append(nb)
+            for cand in next_frontier:
+                if _is_hallway_or_lobby(cand) and _is_safe_open_public(cand):
+                    return (cand, format_node_hierarchy(session_id, cand))
+            for cand in next_frontier:
+                if _is_safe_open_public(cand):
+                    return (cand, format_node_hierarchy(session_id, cand))
+            frontier = next_frontier
+
+    # 5. Deterministic canonical public fallbacks
+    for fallback_nid in (
+        "loc_entrance_foyer",
+        "loc_courtyard",
+        "loc_school_gate",
+        "loc_hq_main_lobby",
+        "loc_city_square",
+        "loc_local_park",
+        "loc_convenience_store",
+    ):
+        if _is_safe_open_public(fallback_nid):
+            return (fallback_nid, format_node_hierarchy(session_id, fallback_nid))
+
+    for n in all_nodes:
+        nid = n.get("node_id") or ""
+        if _is_safe_open_public(nid):
+            return (nid, format_node_hierarchy(session_id, nid))
+
+    if start_nid:
+        return (start_nid, format_node_hierarchy(session_id, start_nid))
+    return ("", current_location)
+
+
 def match_freeform_spatial_destination(
     session_id: int,
     current_node_id: str,
@@ -627,32 +804,64 @@ def match_freeform_spatial_destination(
             return None
 
     norm_intent = str(intent or "").strip().lower()
-    if norm_intent not in ("movement", "travel", "fast_travel", "move"):
-        from mechanics.world.locations.movement import is_movement_action
-        if not is_movement_action(action_text):
-            return None
+    if norm_intent and norm_intent not in (
+        "movement", "travel", "fast_travel", "move", "general_action",
+        "social_invite", "accompanied_travel", "dialogue_init", "investigate_clue",
+    ):
+        return None
+    from mechanics.world.locations.movement import is_movement_action
+    if not is_movement_action(action_text):
+        return None
 
     nodes = db.get_session_world_nodes(session_id)
     if not nodes:
         return None
 
+    node_map = {n["node_id"]: n for n in nodes}
+
+    def _get_root_zone_id(nid: str) -> str:
+        curr = nid
+        seen: Set[str] = set()
+        while curr and curr in node_map and curr not in seen:
+            seen.add(curr)
+            pid = node_map[curr].get("parent_id")
+            if not pid:
+                return curr
+            curr = pid
+        return curr
+
+    curr_root_zone = _get_root_zone_id(current_node_id) if current_node_id else ""
+
     best_match: Optional[str] = None
     longest_match_len = 0
+    best_path_len = 999
 
     _generic_loc_words = {
         "the", "and", "for", "main", "area", "room", "hall", "hallway", "hallways",
         "building", "first", "second", "third", "floor", "north", "south", "east",
         "west", "central", "upper", "lower", "outer", "inner", "wing", "district",
-        "street", "avenue", "school", "academy", "campus", "grounds", "classroom",
-        "office", "corridor", "spot", "path", "bench", "benches", "desk", "desks",
+        "street", "avenue", "school", "academy", "campus", "grounds",
+        "corridor", "spot", "path", "bench", "benches", "desk", "desks",
+        "running", "outdoor", "indoor", "quiet",
+        "student", "service", "security",
+        "store", "center", "centre", "place", "site", "front", "back",
+        "side", "zone", "academic", "athletic", "commercial", "residential",
+        "founder", "founders", "founder's", "varsity", "crown",
+        "study", "case", "old", "new", "high", "private", "public",
     }
     token_to_nids: Dict[str, List[str]] = {}
+    local_token_to_nids: Dict[str, List[str]] = {}
     for _n in nodes:
         _nid = _n["node_id"]
         _nm = str(_n.get("name") or "").strip().lower()
+        _same_zone = bool(curr_root_zone and _get_root_zone_id(_nid) == curr_root_zone)
         for _w in set(re.findall(r"[a-z0-9']+", _nm)):
             if len(_w) >= 5 and _w not in _generic_loc_words:
                 token_to_nids.setdefault(_w, []).append(_nid)
+                if _same_zone:
+                    local_token_to_nids.setdefault(_w, []).append(_nid)
+
+    _stop_words = {"the", "and", "for", "of", "in", "at", "to", "a", "an", "main", "area", "room", "hall", "building", "first", "second", "third", "floor"}
 
     for n in nodes:
         nid = n["node_id"]
@@ -662,29 +871,53 @@ def match_freeform_spatial_destination(
         if not n_name or len(n_name) < 3:
             continue
 
+        same_root_zone = bool(curr_root_zone and _get_root_zone_id(nid) == curr_root_zone)
+
         # Enforce whole-word boundaries so substrings inside other words never false-trigger
         matched_len = 0
+        is_exact_full_name = False
         if re.search(r"(?<!\w)" + re.escape(n_name) + r"(?!\w)", clean):
             matched_len = len(n_name)
+            is_exact_full_name = True
         else:
-            # Allow multi-word or distinctive facility stem match when player drops room suffix (e.g. 'Grand Library' -> 'library' >= 5 chars,
-            # or unique parenthetical/distinctive token like 'homeroom' -> 'Classroom 2-B (Homeroom)')
-            name_words = [w for w in re.findall(r"[a-z0-9']+", n_name) if w not in ("the", "main", "area", "room", "hall", "building", "first", "second", "floor")]
+            name_words = [w for w in re.findall(r"[a-z0-9']+", n_name) if w not in _stop_words]
             if len(name_words) == 1 and len(name_words[0]) >= 5:
                 stem = name_words[0]
                 if re.search(r"(?<!\w)" + re.escape(stem) + r"(?!\w)", clean):
                     matched_len = len(stem)
             if matched_len == 0:
+                # Multi-word phrase match from node name (e.g. 'running track', 'basketball court', 'library stacks')
+                tokens_in_clean = [
+                    w for w in name_words
+                    if len(w) >= 4 and re.search(r"(?<!\w)" + re.escape(w) + r"(?!\w)", clean)
+                ]
+                if len(tokens_in_clean) >= 2 and any(w not in _generic_loc_words or w in ("track", "court", "stacks", "gate", "foyer") for w in tokens_in_clean):
+                    matched_len = sum(len(w) for w in tokens_in_clean)
+            if matched_len == 0:
+                # Single distinctive facility noun match (e.g. 'cafeteria', 'library', 'gymnasium', 'rooftop', 'homeroom')
                 for w in name_words:
-                    if len(w) >= 5 and w not in _generic_loc_words and len(token_to_nids.get(w, [])) == 1:
-                        if re.search(r"(?<!\w)" + re.escape(w) + r"(?!\w)", clean):
+                    if len(w) >= 5 and w not in _generic_loc_words:
+                        is_unique_locally = same_root_zone and 1 <= len(local_token_to_nids.get(w, [])) <= 2
+                        is_unique_globally = len(token_to_nids.get(w, [])) == 1
+                        if (is_unique_locally or is_unique_globally) and re.search(r"(?<!\w)" + re.escape(w) + r"(?!\w)", clean):
                             matched_len = max(matched_len, len(w))
 
-        if matched_len > longest_match_len:
+        if matched_len > 0 and (matched_len > longest_match_len or (matched_len == longest_match_len and best_match is not None)):
             path = find_spatial_path(session_id, current_node_id, nid)
-            if path:
+            if not path:
+                continue
+            # Partial/token matches must stay within a reasonable multi-hop path
+            if not is_exact_full_name:
+                if not same_root_zone and len(path) > 8:
+                    continue
+                if len(path) > 10:
+                    continue
+            elif len(path) > 16:
+                continue
+            if matched_len > longest_match_len or len(path) < best_path_len:
                 best_match = nid
                 longest_match_len = matched_len
+                best_path_len = len(path)
 
     return best_match
 
@@ -770,6 +1003,12 @@ def resolve_unmatched_movement_destination(
 
     if len(leaf_name) < 3:
         return {"spawned_node_id": None, "blocked": False, "directive": ""}
+
+    # Before blocking or spawning, check if raw_dest or leaf_name resolves to an existing node in world_nodes
+    if session_id:
+        resolved_existing = db.resolve_node_id_from_location(session_id, raw_dest) or db.resolve_node_id_from_location(session_id, leaf_name)
+        if resolved_existing:
+            return {"spawned_node_id": resolved_existing, "blocked": False, "directive": ""}
 
     import scenario_data
     from mechanics.world.mobility import is_campus_scenario

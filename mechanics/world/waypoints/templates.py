@@ -424,7 +424,13 @@ def parse_zone_primary(location_str: str) -> tuple[str, str]:
         p2 = parts[2].lower().strip()
         is_multi_room_building = (
             p1 == "main campus building"
-            or any(k in p1 for k in ("wing", "complex", "commons", "promenade", "agency hq", "headquarters", "administration", "campus building"))
+            or any(k in p1 for k in (
+                "wing", "complex", "commons", "promenade", "agency hq", "headquarters",
+                "administration", "campus building", "athletics", "school grounds",
+                "annex", "arts", "student union", "old campus", "abandoned",
+                "hospital", "medical center", "theme park", "amusement",
+                "grand temple", "eastern temple", "university",
+            ))
         )
         is_prop_or_main = (
             p2 in ("main area", "area", "main", "")

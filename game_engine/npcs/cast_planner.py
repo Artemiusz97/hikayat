@@ -428,7 +428,10 @@ def render_stage_plan(plan: CastPlan) -> str:
         "CRITICAL CAST DIRECTIVES:",
         "- SILENT ROOM BYSTANDERS MUST NOT initiate conversation, interrogate, or speak aloud with the player this turn.",
         "- If Active Dialogue Partners is 'None', EVERY character present in the scene MUST STOP talking with the player.",
-        "- You may suggest dynamic scene entries, exits, or conversation initiations via the `cast_events` JSON array."
+        "- You may suggest dynamic scene entries, exits, or conversation initiations via the `cast_events` JSON array.",
+        "- CAST CONTINUITY: Characters from RECENT HISTORY who are NOT listed in PRESENT CHARACTERS are NOT in the scene. "
+        "Do NOT narrate them acting or speaking. If a person must (re)enter or is newly on-screen, emit a `cast_events` "
+        "`arrive` with a personal name (invent one for an unnamed person), `gender`, and `descriptor`, and use that name in the prose."
     ]
     if plan.stealth_active:
         lines.append(
@@ -479,9 +482,14 @@ def apply_cast_events(
     party: list,
     stage_info: Optional[dict] = None,
     persist_db: bool = True,
+    narrative_text: Optional[str] = None,
 ) -> Tuple[CastPlan, List[Dict[str, Any]]]:
     """
     Arbitrates narrative-suggested cast_events against deterministic rules (D4 & D16).
+
+    When ``narrative_text`` is provided, brand-new open-world arrivals must be grounded in the
+    narration (named outside quoted dialogue, or matched by descriptor as physically acting),
+    or be pre-confirmed by the stage-plan contract check (``_contract_confirmed``).
     
     Returns (final_plan, rejected_events_list).
     """
@@ -549,6 +557,20 @@ def apply_cast_events(
                     mn = str(mem.get("name") or "").strip()
                     if mn and not mem.get("is_player") and mn.lower() not in known_npcs_by_low:
                         known_npcs_by_low[mn.lower()] = mem
+        except Exception:
+            pass
+        try:
+            for sr in (db.get_school_roster(sess_id) or []):
+                sn = str(sr.get("name") or "").strip()
+                if sn and sn.lower() not in known_npcs_by_low:
+                    known_npcs_by_low[sn.lower()] = sr
+        except Exception:
+            pass
+        try:
+            for ar in (db.get_anomalous_agent_roster(sess_id) or []):
+                an = str(ar.get("name") or "").strip()
+                if an and an.lower() not in known_npcs_by_low:
+                    known_npcs_by_low[an.lower()] = ar
         except Exception:
             pass
 
@@ -642,10 +664,58 @@ def apply_cast_events(
             )
 
             if is_ambient_role or is_scheduled_here or allow_new_open_world_arrival:
+                arrival_meta: Dict[str, Any] = {}
+                for meta_key in ("gender", "descriptor", "role"):
+                    meta_val = ev.get(meta_key)
+                    if isinstance(meta_val, str) and meta_val.strip():
+                        arrival_meta[meta_key] = meta_val.strip()
+
                 if allow_new_open_world_arrival:
+                    # Grounding guard: a brand-new person must actually be on-screen in narration
+                    if narrative_text is not None and not ev.get("_contract_confirmed"):
+                        from game_engine.npcs.descriptor_presence import (
+                            has_descriptor_physical_presence,
+                            protagonist_role_tokens,
+                            strip_quoted_dialogue,
+                        )
+                        narr_only = strip_quoted_dialogue(narrative_text).lower()
+                        named_in_prose = bool(re.search(rf"\b{re.escape(npc_low)}\b", narr_only)) or any(
+                            len(tok) >= 3 and re.search(rf"\b{re.escape(tok)}\b", narr_only)
+                            for tok in npc_low.split()[:1]
+                        )
+                        grounded = named_in_prose or has_descriptor_physical_presence(
+                            {"name": npc_name, **arrival_meta},
+                            narrative_text,
+                            exclude_tokens=protagonist_role_tokens(party, session),
+                        )
+                        if not grounded:
+                            rej = {
+                                "type": "arrive",
+                                "npc": npc_name,
+                                "reason": f"New NPC '{npc_name}' is not physically present in the narration.",
+                            }
+                            rejections.append(rej)
+                            logger.warning("[CastPlanner] Rejected ungrounded cast event arrive: %s", rej)
+                            continue
+
+                    # Never register a role title ("Investigator", "Field Agent") as a personal name
+                    import namegen
+                    from game_engine.npcs.descriptor_presence import NEUTRAL_PERSON_NOUNS
+                    _name_toks = npc_low.split()
+                    _is_role_phrase = bool(_name_toks) and len(_name_toks) <= 3 and (
+                        _name_toks[-1] in NEUTRAL_PERSON_NOUNS
+                        or _name_toks[-1] in ("man", "woman", "boy", "girl", "lady", "gentleman")
+                    )
+                    if _is_role_phrase or namegen.is_generic_role_name(npc_name) or not namegen.is_valid_entity_name(npc_name):
+                        arrival_meta.setdefault("descriptor", npc_name)
+                        arrival_meta.setdefault("role", npc_name.title())
+                        npc_name = namegen.generate_person_name(
+                            scenario=scen_key, gender=arrival_meta.get("gender", "")
+                        )
+                        npc_low = npc_name.lower()
                     unscheduled_named_arrivals += 1
                 if not any(game_engine._get_npc_name(n).strip().lower() == npc_low for n in updated_present):
-                    updated_present.append({"name": npc_name, "stage_role": "room_bystander"})
+                    updated_present.append({"name": npc_name, "stage_role": "room_bystander", **arrival_meta})
                     logger.info("[CastPlanner] Approved cast event arrive: '%s' (%s)", npc_name, reason)
             else:
                 rej = {

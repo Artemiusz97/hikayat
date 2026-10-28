@@ -62,14 +62,12 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
             if any(term in label_low for term in ACCOMPANIED_TRAVEL_PHRASES) or any(k in label_low for k in ("propose moving", "suggest moving", "quieter spot", "secluded spot", "private meeting", "speak in private", "talk in private")):
                 is_acc = True
             elif current_partners and not is_solo_travel_intent(actions):
-                if any(v in label_low for v in ("discuss", "talk", "speak", "chat", "convene", "confer", "meet", "continue", "carry", "walk", "escort", "guide", "lead", "help")):
-                    is_acc = True
-                elif re.search(r"\b(?:carry|walk|escort|guide|lead|take|bring|help|accompany)\b.*\b(?:her|him|them)\b", label_low):
+                if re.search(r"\b(?:carry|walk|escort|guide|lead|take|bring|help|accompany|follow)\b.*\b(?:her|him|them|together|with)\b", label_low):
                     is_acc = True
                 elif isinstance(a, dict) and any(dp.lower() == str(a.get("target_npc") or "").strip().lower() for dp in current_partners):
                     is_acc = True
             for dp in current_partners:
-                if dp.lower() in label_low or (len(dp.split()[0]) >= 3 and dp.split()[0].lower() in label_low):
+                if dp.lower() in label_low or (len(dp.split()[0]) >= 3 and re.search(rf"\b{re.escape(dp.split()[0].lower())}\b", label_low)):
                     is_acc = True
                     break
 
@@ -81,12 +79,18 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
             if action_dest:
                 dest_z, dest_p = action_dest
                 curr_p = get_primary_location_name(curr_loc)
-                if curr_p and dest_p and curr_p.lower() != dest_p.lower():
-                    if not is_acc:
-                        is_departing_venue = True
+                curr_s = get_clean_leaf_location(curr_loc)
+                is_diff_room = (
+                    (curr_p and dest_p and curr_p.lower() != dest_p.lower())
+                    or (curr_s and dest_p and curr_s.lower() != dest_p.lower())
+                )
+                if is_diff_room and not is_acc:
+                    is_departing_venue = True
             elif parsed_action.metadata.get("is_room_exit"):
                 if not is_acc:
                     is_departing_venue = True
+            elif isinstance(a, dict) and (a.get("target_node_id") or a.get("target_location")) and not is_acc:
+                is_departing_venue = True
 
         # Check for conversational exit: unified intent engine + explicit server-stamped flags
         is_let_single_depart = isinstance(a, dict) and a.get("departure_action") == "let_npc_depart"

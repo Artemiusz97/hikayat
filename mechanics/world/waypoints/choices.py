@@ -190,8 +190,8 @@ def generate_quest_action_choices(
         static_loc = wp.get("static_target_location") or target_loc
         can_npc_match = can_waypoint_match_via_npc_presence(target_npc, wp.get("stage_key", ""), current_location, wp)
         loc_matched = (
-            (eff_loc and check_location_matches_waypoint(current_location, eff_loc))
-            or (static_loc and check_location_matches_waypoint(current_location, static_loc))
+            (eff_loc and check_location_matches_waypoint(current_location, eff_loc, session_id=session_id))
+            or (static_loc and check_location_matches_waypoint(current_location, static_loc, session_id=session_id))
             or (bool(target_npc) and can_npc_match and is_waypoint_npc_present_in_scene(session_id, target_npc))
         )
         if not loc_matched:
@@ -479,6 +479,12 @@ def generate_quest_action_choices(
         if len(quest_choices) < 3 and (stage_idx >= 2 or total_stages == 1):
             try:
                 from mechanics.narrative.blueprints import build_stage_contrasting_approaches
+                from mechanics.stealth import is_stealth_context_warranted, is_stealth_choice_locked_out
+                sess_wp = db.get_session(session_id) if session_id else {"scenario": scen_key, "current_location": current_location}
+                if isinstance(sess_wp, dict) and current_location:
+                    sess_wp = dict(sess_wp)
+                    sess_wp["current_location"] = current_location
+                st_warranted = is_stealth_context_warranted(sess_wp)
                 contrasting = build_stage_contrasting_approaches(
                     blueprint_id=bp_id,
                     stage_index=stage_index if "stage_index" in locals() else stage_idx,
@@ -489,17 +495,20 @@ def generate_quest_action_choices(
                     reward_gold=reward_gold,
                     player_gold=player_gold,
                     is_story_quest=is_story,
+                    stealth_warranted=st_warranted,
                 )
                 for ca in contrasting:
                     if len(quest_choices) >= 3:
                         break
+                    ca_lbl = f"{icon} [{prefix}] {ca['label']}"
+                    if ca.get("approach") == "stealth_guile" and is_stealth_choice_locked_out(sess_wp, label=ca_lbl):
+                        continue
                     ca_stat = ca.get("stat", "AGI")
                     ca_req = 0
                     if ca_stat not in ("NONE", "FREE", None, ""):
                         ca_req = req if ca_stat == stat else max(2, min(8, int((char or {}).get("stats", {}).get(ca_stat, 5)) - 1))
                         if out_of_window_dc_penalty > 0:
                             ca_req = min(12, ca_req + out_of_window_dc_penalty)
-                    ca_lbl = f"{icon} [{prefix}] {ca['label']}"
                     quest_choices.append({
                         "label": ca_lbl,
                         "stat": ca_stat,
@@ -704,7 +713,7 @@ def tag_and_enrich_quest_choices(
 
     active_wps = db.get_all_session_active_waypoints(session_id)
     story_quest, climax_loc = get_story_quest_climax_location(session_id)
-    climax_ready_at_loc = bool(story_quest and climax_loc and check_location_matches_waypoint(current_location, climax_loc))
+    climax_ready_at_loc = bool(story_quest and climax_loc and check_location_matches_waypoint(current_location, climax_loc, session_id=session_id))
 
     # Detect if characters are in active 1-on-1 or group dialogue
     from mechanics.world.mobility import get_session_dialogue_partners
@@ -727,7 +736,7 @@ def tag_and_enrich_quest_choices(
         appts = get_active_commitments(session_id, commitment_type="rendezvous", limit=20)
         for appt in appts:
             appt_loc = appt.get("target_location") or appt.get("rendezvous_location") or ""
-            if appt_loc and check_location_matches_waypoint(current_location, appt_loc):
+            if appt_loc and check_location_matches_waypoint(current_location, appt_loc, session_id=session_id):
                 appts_at_loc.append(appt)
     except Exception:
         pass
@@ -747,7 +756,7 @@ def tag_and_enrich_quest_choices(
         eff_loc = resolve_effective_waypoint_location(session_id, wp) if session_id else wp.get("target_location", "")
         t_npc = resolve_waypoint_target_npc(session_id, wp) or wp.get("target_npc", "")
         can_npc_match = can_waypoint_match_via_npc_presence(t_npc, wp.get("stage_key", ""), current_location, wp)
-        if (eff_loc and check_location_matches_waypoint(current_location, eff_loc)) or (
+        if (eff_loc and check_location_matches_waypoint(current_location, eff_loc, session_id=session_id)) or (
             bool(t_npc) and can_npc_match and is_waypoint_npc_present_in_scene(session_id, t_npc)
         ):
             matching_wps.append(wp)
@@ -1198,7 +1207,7 @@ def tag_and_enrich_quest_choices(
             elif "_" in npc_name:
                 npc_name = known_contacts_map.get(npc_name.strip().lower()) or npc_name.replace("_", " ").title()
 
-            if not (appt_loc and npc_name and check_location_matches_waypoint(current_location, appt_loc)):
+            if not (appt_loc and npc_name and check_location_matches_waypoint(current_location, appt_loc, session_id=session_id)):
                 continue
 
             s_day = max(1, int(appt.get("scheduled_day") or 1))

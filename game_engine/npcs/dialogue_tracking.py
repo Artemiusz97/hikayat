@@ -274,6 +274,7 @@ def evaluate_and_tick_scene_tension_timer(
 
     scen_key = session.get("scenario") or "fantasy"
     is_non_combat = scenario_data.is_non_combat_scenario(scen_key)
+    is_anom = scenario_data.is_anomalous_incursions_scenario(scen_key)
     phys_st = session.get("physical_state") or {}
     if is_erotic_intimate_contact(str(phys_st.get("intimate_contact", ""))):
         session["scene_tension_timer"] = 0
@@ -281,6 +282,12 @@ def evaluate_and_tick_scene_tension_timer(
 
     # Reset timer if the player successfully moved to a new location (without being halted at a gate)
     if is_movement and not access_gated:
+        session["scene_tension_timer"] = 0
+        return {"timer": 0, "expired": False, "spawned_patrol_npc": None, "spawned_hostile_enemy": None, "stage_direction": ""}
+
+    # In anomalous_incursions, hostile encounters only occur via quests/bounties or daily incursions;
+    # only tick the tension timer when trespassing at a restricted gate (access_gated=True).
+    if is_anom and not access_gated:
         session["scene_tension_timer"] = 0
         return {"timer": 0, "expired": False, "spawned_patrol_npc": None, "spawned_hostile_enemy": None, "stage_direction": ""}
 
@@ -338,7 +345,7 @@ def evaluate_and_tick_scene_tension_timer(
     spawned_enemy = None
     stage_dir = ""
 
-    if is_non_combat:
+    if is_non_combat or is_anom:
         # Check if a patrol / disciplinary / authority NPC is already on stage
         has_authority = any(
             any(k in str((n.get("role") if isinstance(n, dict) else "") or "").lower() for k in ("guard", "monitor", "prefect", "teacher", "security", "patrol", "faculty"))
@@ -433,8 +440,10 @@ def build_scene_escalation_and_consequence_directives(
     history = session.get("history") or []
     is_intimate_scene = is_erotic_intimate_contact(str(phys_st.get("intimate_contact", "")))
     is_non_combat = scenario_data.is_non_combat_scenario(scen_key)
+    is_anom = scenario_data.is_anomalous_incursions_scenario(scen_key)
+    has_active_enemies = bool(session.get("nearby_enemies")) if isinstance(session, dict) else False
 
-    if not is_intimate_scene and not is_non_combat:
+    if not is_intimate_scene and not is_non_combat and (not is_anom or has_active_enemies):
 
         tension_keywords = (
             "hammer", "hammering", "patrol", "patrols", "sentry", "sentries",

@@ -1724,17 +1724,42 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 elif isinstance(n, str) and n.strip():
                     active_npcs.append((n.strip(), ""))
 
-            existing_labels = " | ".join(c.get("label", "").lower() for c in cleaned)
+            import namegen
+            all_active_npc_names = [nm for nm, _ in active_npcs]
             missing_npc_choices = []
             for n_name, n_role in active_npcs:
                 n_low = n_name.lower()
-                n_tokens = [t for t in n_low.split() if len(t) > 2 and t not in ("the", "elder", "lord", "lady", "sir", "madam", "captain", "dr", "mr", "ms", "mrs", "scholar", "guardian", "druid")]
+                unique_tokens = [
+                    t.lower()
+                    for t in namegen.get_unique_person_tokens(n_name, peer_names=all_active_npc_names)
+                    if len(t) >= 3 and t.lower() not in ("the", "elder", "lord", "lady", "sir", "madam", "captain", "dr", "mr", "ms", "mrs", "scholar", "guardian", "druid", "coach", "officer")
+                ]
                 is_in_dialogue = _is_dialogue_partner(n_name, partners_list)
-                already_represented = (
-                    n_low in existing_labels
-                    or any(t in existing_labels for t in n_tokens)
-                    or is_in_dialogue
-                )
+                already_represented = is_in_dialogue
+                if not already_represented:
+                    for c_existing in cleaned:
+                        if not isinstance(c_existing, dict):
+                            continue
+                        c_lbl_low = str(c_existing.get("label") or "").lower()
+                        c_t_npc = str(c_existing.get("target_npc") or "").strip().lower()
+                        c_intent = str(c_existing.get("intent") or "").lower()
+                        name_matched = bool(
+                            c_t_npc == n_low
+                            or re.search(rf"\b{re.escape(n_low)}\b", c_lbl_low)
+                            or any(re.search(rf"\b{re.escape(tok)}\b", c_lbl_low) for tok in unique_tokens)
+                        )
+                        if not name_matched:
+                            continue
+                        has_social_verb = c_intent in ("dialogue_init", "dialogue_turn") or any(
+                            v in c_lbl_low
+                            for v in ("speak", "talk", "ask", "greet", "approach", "chat", "confront", "join", "call out", "introduce", "check on", "sit with", "wave to", "listen to")
+                        )
+                        if has_social_verb or c_t_npc == n_low:
+                            c_existing["_npc_speak_choice"] = True
+                            if not c_existing.get("target_npc"):
+                                c_existing["target_npc"] = n_name
+                            already_represented = True
+                            break
                 if not already_represented:
                     role_suffix = f" ({n_role})" if n_role and len(n_name) + len(n_role) < 32 else ""
                     missing_npc_choices.append({
@@ -1742,6 +1767,9 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                         "stat": "NONE",
                         "requirement": 0,
                         "mp_cost": 0,
+                        "intent": "dialogue_init",
+                        "target_npc": n_name,
+                        "_npc_speak_choice": True,
                         "is_fallback": not bool(cleaned),
                     })
 
@@ -2246,6 +2274,81 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
         except Exception:
             pass
 
+    # Prune unwarranted stealth choices and locked-out failed stealth choices (Issues 1 & 11)
+    try:
+        from mechanics.stealth import is_stealth_context_warranted, is_stealth_choice_locked_out
+        sess_st_check = db.get_session(session_id) if session_id else {"scenario": scenario, "current_location": location}
+        if isinstance(sess_st_check, dict):
+            sess_st_check = dict(sess_st_check)
+            if location:
+                sess_st_check["current_location"] = location
+            if scenario:
+                sess_st_check["scenario"] = scenario
+        st_warranted = is_stealth_context_warranted(sess_st_check)
+        filtered_st: list[dict] = []
+        for c in cleaned:
+            if not isinstance(c, dict):
+                continue
+            c_lbl = str(c.get("label") or "")
+            c_lbl_low = c_lbl.lower()
+            if is_stealth_choice_locked_out(sess_st_check, label=c_lbl):
+                continue
+            is_barrier_c = bool(
+                c.get("_priority_slot")
+                or c.get("is_phase2_choice")
+                or "outside the locked entrance" in str(location or "").lower()
+            )
+            if not st_warranted and not is_barrier_c:
+                if c.get("is_quest_action"):
+                    if any(tag in c_lbl_low for tag in ("[stealth & infiltration]", "[diversion & stealth]", "[careful bypass]")):
+                        new_lbl = re.sub(
+                            r"\[(stealth & infiltration|diversion & stealth|careful bypass)\]",
+                            "[Methodical Survey]",
+                            c_lbl,
+                            flags=re.IGNORECASE,
+                        )
+                        new_lbl = re.sub(r"\bslip past the sentries and\b", "carefully inspect the area to", new_lbl, flags=re.IGNORECASE)
+                        new_lbl = re.sub(r"\busing stealth and careful footing\b", "with careful observation", new_lbl, flags=re.IGNORECASE)
+                        c["label"] = new_lbl
+                        c["stat"] = "PER"
+                        c["approach"] = "direct"
+                        c["is_stealth"] = False
+                        c.pop("stance", None)
+                else:
+                    is_unwarranted_stealth_c = bool(
+                        str(c.get("intent") or "").lower() in ("stealth_covert", "stealth")
+                        or str(c.get("action_category") or "").lower() == "stealth"
+                        or bool(c.get("is_stealth"))
+                        or c.get("stance") == "stealth"
+                        or any(
+                            kw in c_lbl_low
+                            for kw in (
+                                "shadow step",
+                                "[stealth",
+                                "[diversion & stealth]",
+                                "sneak past",
+                                "sneak into",
+                                "sneak through",
+                                "creep past",
+                                "creep through",
+                                "infiltrate ",
+                                "pickpocket ",
+                                "silent takedown",
+                                "lockpick ",
+                                "pick the lock",
+                                "slip past the sentr",
+                                "slip past the guard",
+                            )
+                        )
+                    )
+                    if is_unwarranted_stealth_c:
+                        continue
+            filtered_st.append(c)
+        if filtered_st or not cleaned:
+            cleaned = filtered_st
+    except Exception:
+        pass
+
     return cleaned
 
 
@@ -2683,8 +2786,40 @@ def build_hybrid_turn_choices(
             merged_choices,
             ignore_names=list(new_partners or []) + [game_engine._get_npc_name(n) for n in (eff_npcs or []) if n],
         )
-        # Cap core choices to 5 before appending utility free actions (Redress / Carrying / Observe)
-        merged_choices = merged_choices[:5]
+        # Issue 3: Never truncate priority slots, quest actions, or present-NPC "Speak with <NPC>" choices;
+        # only cap generic untagged filler exploration choices to 3–4 (up to Discord's 22-choice ceiling).
+        present_npc_lowers = {
+            game_engine._get_npc_name(n).strip().lower()
+            for n in (eff_npcs or [])
+            if n and game_engine._get_npc_name(n)
+        }
+        def _is_essential_open_choice(ch: dict) -> bool:
+            if not isinstance(ch, dict):
+                return False
+            if ch.get("_priority_slot") or ch.get("is_quest_action") or ch.get("is_climax_action") or ch.get("_npc_speak_choice"):
+                return True
+            t_npc_low = str(ch.get("target_npc") or "").strip().lower()
+            ch_lbl_low = str(ch.get("label") or "").strip().lower()
+            if t_npc_low and t_npc_low in present_npc_lowers:
+                return True
+            if ch_lbl_low.startswith(("speak with ", "talk to ", "talk with ", "approach ", "greet ")):
+                if any(p_nm in ch_lbl_low for p_nm in present_npc_lowers if p_nm):
+                    return True
+            return False
+
+        essential_count = sum(1 for ch in merged_choices if _is_essential_open_choice(ch))
+        max_filler = 3 if essential_count >= 3 else max(2, 5 - essential_count)
+        filler_kept = 0
+        scaled_choices: list[dict] = []
+        for ch in merged_choices:
+            if len(scaled_choices) >= 22:
+                break
+            if _is_essential_open_choice(ch):
+                scaled_choices.append(ch)
+            elif filler_kept < max_filler:
+                filler_kept += 1
+                scaled_choices.append(ch)
+        merged_choices = scaled_choices
 
     # 5. Utility Free Actions (Redress, Put Down Burden, Open Exploration Observe)
     for entry in (party or []):

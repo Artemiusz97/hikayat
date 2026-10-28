@@ -24,6 +24,8 @@ from .dialogue_tracking import (
 )
 from .presence import (
     sync_hostile_entities,
+    has_implied_hostile_combat_prose,
+    reconcile_implied_hostile_encounter,
     classify_scene_npcs,
     is_mentioned_only_in_absence_or_memory,
     reset_departed_guest_locations,
@@ -62,6 +64,8 @@ __all__ = [
     "can_chime_in_to_dialogue",
     "evaluate_scene_attention_transition",
     "sync_hostile_entities",
+    "has_implied_hostile_combat_prose",
+    "reconcile_implied_hostile_encounter",
     "classify_scene_npcs",
     "is_mentioned_only_in_absence_or_memory",
     "reset_departed_guest_locations",

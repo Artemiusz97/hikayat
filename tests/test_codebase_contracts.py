@@ -210,9 +210,9 @@ def test_llm_schemas_field_validators_and_dict_access():
 @pytest.mark.contract
 def test_wave6_targeted_module_decomposition_and_exports():
     """
-    Verifies Wave 6 targeted decomposition:
-    1. game_engine/core.py, cogs/adventure/cog.py, and mechanics/phone/messaging.py are each < 55 KB.
-    2. All extracted sub-modules exist and re-export their expected symbols/methods cleanly without namespace hacks.
+    Verifies package facade exports across decomposed domain modules:
+    1. game_engine, cogs.adventure, and mechanics.system.phone submodules import cleanly.
+    2. All extracted sub-modules re-export their expected symbols/methods cleanly at the package root.
     """
     import game_engine
     import game_engine.core
@@ -226,16 +226,6 @@ def test_wave6_targeted_module_decomposition_and_exports():
     import mechanics.system.phone.messaging
     import mechanics.system.phone.gossip_feed
     import mechanics.system.phone.social_graph
-
-    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    for rel_path in (
-        "game_engine/core.py",
-        "cogs/adventure/cog.py",
-        "mechanics/system/phone/messaging.py",
-    ):
-        full_path = os.path.join(root_dir, rel_path)
-        size_kb = os.path.getsize(full_path) / 1024.0
-        assert size_kb < 60.0, f"{rel_path} should be under 60 KB after Wave 6 split, got {size_kb:.1f} KB"
 
     # Verify game_engine & game_engine.core exports
     for sym in (

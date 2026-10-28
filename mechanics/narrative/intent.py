@@ -822,6 +822,24 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
 
         if SOCIAL_INVITE_RE.search(act_lower):
             target = _extract_target_npc(raw_text, ctx)
+            dest = _extract_movement_target(raw_text) or ""
+            is_immediate_walk = bool(
+                any(act_lower.startswith(p) for p in ("walk with ", "stroll with ", "head with ", "go with ", "follow "))
+                and any(prep in act_lower for prep in (" to ", " toward ", " towards ", " into "))
+            )
+            if is_immediate_walk:
+                return ActionIntent(
+                    category=IntentCategory.MOVEMENT,
+                    target_entity=target,
+                    sub_target="accompanied_travel",
+                    raw_text=raw_text,
+                    metadata={
+                        "is_accompanied": True,
+                        "accompanying_npc": target,
+                        "target_location": dest,
+                        "is_room_exit": True,
+                    },
+                )
             if "walk home" in act_lower:
                 sub_t = "walk_home"
             elif "study" in act_lower:
@@ -839,7 +857,7 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
                 target_entity=target,
                 sub_target=sub_t,
                 raw_text=raw_text,
-                metadata={"invite_type": sub_t, "is_social": True, "is_accompany": True}
+                metadata={"invite_type": sub_t, "is_social": True, "is_accompany": True, "target_location": dest}
             )
 
         # ----------------------------------------------------------------------
@@ -952,7 +970,15 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
         # ----------------------------------------------------------------------
         # Check accompanied movement (e.g. "Follow Rachel out of the office", "Go with Maya to the garden")
         acc_match = ACCOMPANIED_MOVEMENT_RE.search(act_lower)
-        if acc_match:
+        _NON_PERSON_FOLLOW_WORDS = {
+            "instructions", "instruction", "orders", "order", "protocol", "protocols",
+            "signal", "signals", "resonance", "pattern", "patterns", "rules", "rule",
+            "advice", "clues", "clue", "data", "frequency", "instinct", "instincts",
+            "gut", "plan", "procedure", "procedures", "steps", "directions", "map",
+            "wire", "wires", "cable", "cables", "conversation", "topic", "thought",
+            "thoughts", "gaze", "eyes", "sound", "noise", "voice", "scent", "smell",
+        }
+        if acc_match and not any(w in _NON_PERSON_FOLLOW_WORDS for w in re.findall(r"[a-z]+", acc_match.group(1).lower())):
             cand_npc = acc_match.group(1).strip()
             cand_clean = cand_npc.title() if len(cand_npc) <= 30 else cand_npc
             if cand_npc.lower() in ("her", "him", "them", "someone", "the npc"):

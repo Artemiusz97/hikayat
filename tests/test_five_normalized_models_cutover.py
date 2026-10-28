@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 End-to-end clean-cutover regression suite for Hikayat's five normalized models:
 1. Normalized Household Entity Model
@@ -7,8 +8,11 @@ End-to-end clean-cutover regression suite for Hikayat's five normalized models:
 5. Normalized Actor Physical State & Garment Layer Model
 """
 import json
+import os
 import unittest
+from typing import Any
 
+import config
 import db
 from db.core import _migrate_clean_cutover_v30
 from db.inventory import equip_item
@@ -26,7 +30,23 @@ from mechanics.system.phone.social_graph import evaluate_pre_turn_witness_detect
 
 class TestFiveNormalizedModelsCutover(unittest.TestCase):
     def setUp(self):
-        db.init_db()
+        # 1. Snapshot ambient paths prior to redirection
+        self._orig_db_path = db.DB_PATH
+        self._orig_core_db_path = getattr(db.core, "DB_PATH", db.DB_PATH)
+        self._orig_config_db_path = getattr(config, "DB_PATH", db.DB_PATH)
+        self._test_db_path: str | None = None
+        self._is_temp: bool = False
+        self._cleaned_up: bool = False
+
+        # 2. Register cleanup FIRST: guarantees restoration even if isolate_simulation_db raises
+        self.addCleanup(self._restore_and_cleanup_db)
+
+        # 3. Strictly isolate to an ephemeral SQLite database on local fast disk
+        self._test_db_path, self._is_temp = db.isolate_simulation_db(prefix="hikayat_cutover_test_")
+
+        # 4. Strict regression invariant: prove db.DB_PATH is isolated from repository live DB
+        self._assert_db_is_isolated()
+
         self.user_id = 945001
         self.session_id = 945001
         with db.get_conn() as conn:
@@ -57,13 +77,119 @@ class TestFiveNormalizedModelsCutover(unittest.TestCase):
             _delete_session_child_records_only(conn, self.session_id)
 
     def tearDown(self):
-        with db.get_conn() as conn:
-            from db.core import _delete_session_child_records_only
-            _delete_session_child_records_only(conn, self.session_id)
-            conn.execute("DELETE FROM sessions WHERE id = ?", (self.session_id,))
-            conn.execute("DELETE FROM adventure_saves WHERE user_id = ?", (self.user_id,))
-            conn.execute("DELETE FROM inventory WHERE user_id = ?", (self.user_id,))
-            conn.execute("DELETE FROM characters WHERE user_id = ?", (self.user_id,))
+        """Ensure database handles are closed and isolated state is restored cleanly on teardown."""
+        self._restore_and_cleanup_db()
+        super().tearDown()
+
+    def _restore_and_cleanup_db(self):
+        """Idempotently close all SQLite handles, restore global paths, and unlink temp DB file."""
+        if getattr(self, "_cleaned_up", False):
+            return
+        self._cleaned_up = True
+
+        # Step 1: Drain connection pools to release Windows file locks
+        try:
+            db.close_all_connections()
+        except Exception:
+            pass
+
+        # Step 2: Safely close and clear any lingering contextvar connection (prevents [WinError 32])
+        try:
+            if hasattr(db.core, "_uow_conn_var"):
+                active_conn = db.core._uow_conn_var.get()
+                if active_conn is not None:
+                    try:
+                        active_conn.close()
+                    except Exception:
+                        pass
+                db.core._uow_conn_var.set(None)
+            if hasattr(db.core, "_uow_db_path_var"):
+                db.core._uow_db_path_var.set(None)
+        except Exception:
+            pass
+
+        # Step 3: Restore global DB path pointers across db, db.core, and config
+        try:
+            if hasattr(self, "_orig_db_path"):
+                db.set_db_path(self._orig_db_path)
+        except Exception:
+            if hasattr(self, "_orig_db_path"):
+                db.DB_PATH = self._orig_db_path
+            if hasattr(self, "_orig_core_db_path"):
+                db.core.DB_PATH = self._orig_core_db_path
+            if hasattr(self, "_orig_config_db_path"):
+                config.DB_PATH = self._orig_config_db_path
+        finally:
+            # Step 4: Safely delete the temporary simulation database file from disk
+            test_path = getattr(self, "_test_db_path", None)
+            if test_path:
+                db.cleanup_simulation_db(
+                    test_path,
+                    keep=False,
+                    is_temp=getattr(self, "_is_temp", True),
+                )
+
+    def _assert_db_is_isolated(self):
+        """Regression invariant: prove db.DB_PATH and db.core.DB_PATH are strictly isolated from repository live DB."""
+        self.assertIsInstance(db.DB_PATH, str, "db.DB_PATH must be a valid path string")
+        self.assertIsInstance(db.core.DB_PATH, str, "db.core.DB_PATH must be a valid path string")
+        self.assertTrue(len(db.DB_PATH) > 0, "db.DB_PATH must not be empty")
+
+        self.assertEqual(
+            db.DB_PATH,
+            db.core.DB_PATH,
+            f"db.DB_PATH ({db.DB_PATH}) and db.core.DB_PATH ({db.core.DB_PATH}) must be strictly synchronized",
+        )
+        self.assertEqual(
+            db.DB_PATH,
+            config.DB_PATH,
+            f"db.DB_PATH ({db.DB_PATH}) and config.DB_PATH ({config.DB_PATH}) must be strictly synchronized",
+        )
+
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        forbidden_live_paths = {
+            os.path.normcase(os.path.abspath("hikayat.db")),
+            os.path.normcase(os.path.abspath(os.path.join("data", "hikayat.db"))),
+            os.path.normcase(os.path.abspath(os.path.join(repo_root, "hikayat.db"))),
+            os.path.normcase(os.path.abspath(os.path.join(repo_root, "data", "hikayat.db"))),
+        }
+        current_norm = os.path.normcase(os.path.abspath(db.DB_PATH))
+
+        self.assertNotIn(
+            current_norm,
+            forbidden_live_paths,
+            f"CRITICAL: db.DB_PATH ({db.DB_PATH}) is pointing to repository live database!",
+        )
+
+        for candidate in (
+            os.path.join(repo_root, "hikayat.db"),
+            os.path.join(repo_root, "data", "hikayat.db"),
+            os.path.abspath("hikayat.db"),
+        ):
+            if os.path.exists(candidate) and os.path.exists(db.DB_PATH):
+                try:
+                    self.assertFalse(
+                        os.path.samefile(db.DB_PATH, candidate),
+                        f"Regression violation: db.DB_PATH points to the same file on disk as {candidate}",
+                    )
+                except (OSError, ValueError):
+                    pass
+
+        self.assertTrue(
+            os.path.exists(db.DB_PATH),
+            f"Isolated temporary database does not exist on disk: {db.DB_PATH}",
+        )
+
+    def test_00_database_isolation_contract(self):
+        """Regression assertion proving db.DB_PATH and db.core.DB_PATH never point to live hikayat.db."""
+        self._assert_db_is_isolated()
+        self.assertEqual(db.DB_PATH, self._test_db_path)
+        self.assertEqual(db.core.DB_PATH, self._test_db_path)
+        self.assertTrue(
+            "hikayat_cutover_test_" in os.path.basename(self._test_db_path)
+            or "hikayat_sim_" in os.path.basename(self._test_db_path),
+            f"Expected temporary database prefix in file name, got: {self._test_db_path}",
+        )
 
     def test_01_migration_30_clean_cutover_player_keys_appointments_and_actors(self):
         """Migration 30 canonicalizes legacy player keys, migrates phone_appointments, backfills household_role, and strips actors JSON."""

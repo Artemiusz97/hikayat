@@ -115,10 +115,15 @@ def build_actor_registry(
         n_nm = ""
         n_gender = ""
         n_role = ""
+        n_desc_meta: Dict[str, Any] = {}
         if isinstance(npc, dict):
             n_nm = str(npc.get("name") or npc.get("npc_name") or "").strip()
             n_gender = str(npc.get("gender") or "").strip().lower()
             n_role = str(npc.get("role") or "").strip()
+            for meta_key in ("descriptor", "occupation", "description"):
+                meta_val = npc.get(meta_key)
+                if isinstance(meta_val, str) and meta_val.strip():
+                    n_desc_meta[meta_key] = meta_val.strip()
         elif isinstance(npc, str):
             n_nm = npc.strip()
 
@@ -134,6 +139,8 @@ def build_actor_registry(
                         ex["role"] = n_role
                     if not ex.get("gender") and n_gender:
                         ex["gender"] = n_gender
+                    for meta_key, meta_val in n_desc_meta.items():
+                        ex.setdefault(meta_key, meta_val)
             continue
 
         seen_names.add(n_low)
@@ -153,6 +160,7 @@ def build_actor_registry(
             "gender": n_gender,
             "role": n_role,
             "is_npc": True,
+            **n_desc_meta,
         })
 
     # Pick default female and male focal actors
@@ -218,9 +226,38 @@ def tag_narrative_pronouns(
     paragraphs = clean_text.split("\n\n")
     resolved_paragraphs = []
 
+    from game_engine.npcs.descriptor_presence import (
+        find_unnamed_person_mentions,
+        match_actor_by_descriptor,
+        strip_quoted_dialogue,
+    )
+
+    # The protagonist's own role words ("investigator") never identify an NPC
+    player_role_tokens = set()
+    for _act in actors:
+        if _act.get("is_player") and _act.get("role"):
+            player_role_tokens |= {
+                t for t in re.findall(r"[a-z]{4,}", str(_act["role"]).lower())
+            }
+
+    # Second-person scenes address the protagonist as "you", so third-person pronouns
+    # can never default to the player (explicit name mentions still re-focus normally).
+    second_person_scene = bool(
+        re.search(r"\b(?:you|your|yours|yourself)\b", strip_quoted_dialogue(clean_text), re.I)
+    )
+
+    def _non_player_default(default_actor: Optional[dict], gender: str) -> Optional[dict]:
+        if default_actor and default_actor.get("is_player") and second_person_scene:
+            return next((a for a in actors if a.get("gender") == gender and not a.get("is_player")), None)
+        return default_actor
+
+    # Sentinel focus for unnamed/undeclared people ("a man in a coat"): pronouns resolve to
+    # them, which renders as untagged text instead of misattributing to the player.
+    unnamed_focus: Dict[str, Any] = {"name": "", "is_unnamed": True}
+
     # Maintain discourse focal entities across paragraphs in the scene
-    current_female = default_female
-    current_male = default_male
+    current_female = _non_player_default(default_female, "female")
+    current_male = _non_player_default(default_male, "male")
 
     for para in paragraphs:
         if not para.strip():
@@ -252,6 +289,10 @@ def tag_narrative_pronouns(
                 if not _in_quotes(m.start()):
                     events.append((m.start(), m.end(), "pronoun", None, m.group(0)))
 
+            for u_start, u_end, u_gender, u_indef, u_text in find_unnamed_person_mentions(sentence):
+                if not _in_quotes(u_start):
+                    events.append((u_start, u_end, "unnamed", {"gender": u_gender, "indef": u_indef}, u_text))
+
             events.sort(key=lambda x: x[0])
 
             # Left-to-right sequential discourse attribution:
@@ -271,6 +312,35 @@ def tag_narrative_pronouns(
                         current_female = data
                     elif data.get("gender") == "male":
                         current_male = data
+                    out_parts.append(tok_text)
+                elif ev_type == "unnamed":
+                    u_gender = data.get("gender") or ""
+                    u_indef = bool(data.get("indef"))
+                    # Link to a declared present NPC when the description matches (e.g. descriptor
+                    # "man in an investigator's coat"); otherwise focus an unnamed sentinel.
+                    matched_actor = match_actor_by_descriptor(
+                        sentence, actors, gender=u_gender, require_descriptor=u_indef,
+                        exclude_tokens=player_role_tokens,
+                    )
+                    new_focus = matched_actor or unnamed_focus
+
+                    def _should_refocus(cur: Optional[dict]) -> bool:
+                        if cur is None or cur.get("is_player") or cur.get("is_unnamed"):
+                            return True
+                        if not u_gender:
+                            # Neutral nouns ("a guard") never steal focus from a named NPC
+                            return matched_actor is not None
+                        # Definite "the man" is usually anaphoric to the current named NPC
+                        return u_indef or matched_actor is not None
+
+                    target_genders = [u_gender] if u_gender else ["male", "female"]
+                    for g_key in target_genders:
+                        if new_focus is not unnamed_focus and new_focus.get("gender") and new_focus.get("gender") != g_key:
+                            continue
+                        if g_key == "male" and _should_refocus(current_male):
+                            current_male = new_focus
+                        elif g_key == "female" and _should_refocus(current_female):
+                            current_female = new_focus
                     out_parts.append(tok_text)
                 elif ev_type == "pronoun":
                     w_low = tok_text.lower()

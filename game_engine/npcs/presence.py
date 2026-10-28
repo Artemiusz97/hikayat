@@ -213,6 +213,290 @@ def sync_hostile_entities(result: dict, session: dict) -> dict:
     return result
 
 
+_IMPLIED_COMBAT_ATTACK_RE = re.compile(
+    r"\b(?:"
+    r"lunges?\s+(?:at|toward|towards|from|out|forward)"
+    r"|lashes?\s+out\s+(?:at|toward|with)"
+    r"|slashes?\s+(?:at|toward|across)"
+    r"|strikes?\s+(?:at\s+you|toward\s+you)"
+    r"|charges?\s+(?:at|toward|towards)\s+(?:you|the\s+party)"
+    r"|pounces?\s+(?:on|at|toward)"
+    r"|ambush(?:es)?\s+(?:you|the\s+party)"
+    r"|springs?\s+an\s+ambush"
+    r"|attacks?\s+(?:you|the\s+party)"
+    r"|opens?\s+fire\s+(?:on|at)"
+    r"|swings?\s+(?:a|its|his|her|their)\s+(?:blade|weapon|claw|claws|tendril|tendrils|fist|club|baton)\s+at"
+    r"|forces?\s+entry\s+into\s+the\s+scene"
+    r"|combat\s+erupts"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_NEGATED_COMBAT_CONTEXT_RE = re.compile(
+    r"\b(?:does\s+not|doesn't|do\s+not|don't|never|without|before\s+(?:it|he|she|they)\s+can|refuses?\s+to|poised\s+to\s+(?:scatter|slip|flee|vanish)|will\s+lash\s+out\s+in\s+combat\s+if\s+provoked)\b",
+    re.IGNORECASE,
+)
+
+
+def has_implied_hostile_combat_prose(narrative_text: str, entity_name: str = "") -> bool:
+    """
+    Returns True when unquoted narrative prose depicts an active physical attack or
+    ambush against the player/party (excluding hypothetical warnings or negated phrases).
+    """
+    if not narrative_text or not str(narrative_text).strip():
+        return False
+    # Strip spoken dialogue quotes and system callout banners
+    unquoted = re.sub(r'["\u201c][^\n"\u201d]*["\u201d]', " ", str(narrative_text))
+    unquoted = re.sub(r"🌀\s*\*\*\[ACTIVE ANOMALOUS INCURSION.*$", "", unquoted, flags=re.MULTILINE)
+    unquoted = re.sub(r"🕊️\s*\*\*\[NON-HOSTILE ENTITY ENCOUNTER\].*$", "", unquoted, flags=re.MULTILINE)
+
+    for m in _IMPLIED_COMBAT_ATTACK_RE.finditer(unquoted):
+        start_ctx = max(0, m.start() - 45)
+        end_ctx = min(len(unquoted), m.end() + 45)
+        window = unquoted[start_ctx:end_ctx]
+        if _NEGATED_COMBAT_CONTEXT_RE.search(window):
+            continue
+        return True
+
+    if entity_name and len(entity_name.strip()) >= 3:
+        ent_esc = re.escape(entity_name.strip())
+        ent_attack_re = re.compile(
+            rf"\b{ent_esc}\b[^.!?]{{0,60}}\b(?:lunges?|attacks?|strikes?|slashes?|charges?|pounces?|lashes?\s+out|ambushes?)\b",
+            re.IGNORECASE,
+        )
+        for m in ent_attack_re.finditer(unquoted):
+            start_ctx = max(0, m.start() - 35)
+            end_ctx = min(len(unquoted), m.end() + 35)
+            if not _NEGATED_COMBAT_CONTEXT_RE.search(unquoted[start_ctx:end_ctx]):
+                return True
+    return False
+
+
+def _is_explicit_player_attack_action(actions: list | None) -> bool:
+    """Returns True if the player's action explicitly initiates a physical/combat attack."""
+    if not actions or not isinstance(actions, list):
+        return False
+    peaceful_markers = ("persuade", "calm", "outwit", "use environment", "pacify", "subdue", "analyze", "de-escalate")
+    attack_verbs = ("attack", "strike", "slash", "shoot", "open fire", "engage anomalous breach", "ambush", "assault")
+    for a in actions:
+        if not isinstance(a, dict):
+            continue
+        intent = str(a.get("intent") or "").strip().lower()
+        inc_act = str(a.get("incursion_action") or "").strip().lower()
+        lbl = str(a.get("label") or a.get("action") or a.get("text") or "").strip().lower()
+        if any(pm in lbl for pm in peaceful_markers) or inc_act in ("persuade", "calm", "outwit", "environment", "pacify", "subdue", "combat_persuade", "analyze", "seal_ability"):
+            continue
+        if intent in ("attack", "combat_attack") or inc_act == "attack":
+            return True
+        if any( re.search(rf"\b{re.escape(av)}\b", lbl) for av in attack_verbs ):
+            return True
+    return False
+
+
+def reconcile_implied_hostile_encounter(
+    result: dict,
+    session: dict,
+    actions: list | None = None,
+) -> dict:
+    """
+    Post-turn reconciliation when `nearby_enemies` is empty but the narrative depicts
+    an active physical attack:
+    - Auto-spawns an unresolved `hostile_breach` incursion or hostile `defeat_target`
+      quest/bounty target at the current location into `nearby_enemies`.
+    - Only spawns a `non_hostile_entity` containment target into combat if the player's
+      action was an explicit attack or the strike limit (>= max_strikes) was reached.
+    - Never spawns ungrounded random enemies when no incursion or quest/bounty target exists
+      at the current location.
+    """
+    if not isinstance(result, dict) or not isinstance(session, dict):
+        return result
+    if result.get("_combat_resolved_notice"):
+        return result
+
+    import scenario_data
+    scen_key = str(session.get("scenario") or "fantasy")
+    if scenario_data.is_non_combat_scenario(scen_key):
+        return result
+
+    existing_enemies = result.get("nearby_enemies") if result.get("nearby_enemies") is not None else session.get("nearby_enemies")
+    if any(isinstance(e, dict) and int(e.get("hp", 1) or 0) > 0 for e in (existing_enemies or [])):
+        return result
+
+    outcome_nar = str(result.get("outcome_narrative") or "").strip()
+    next_nar = str(result.get("next_narrative") or result.get("narrative") or "").strip()
+    combined_nar = f"{outcome_nar}\n{next_nar}".strip()
+
+    player_attacked = _is_explicit_player_attack_action(actions)
+    prose_has_attack = has_implied_hostile_combat_prose(combined_nar)
+    if not prose_has_attack and not player_attacked:
+        return result
+
+    raw_sid = session.get("id")
+    sid_int = int(raw_sid) if (isinstance(raw_sid, int) or (isinstance(raw_sid, str) and raw_sid.isdigit())) else 0
+    eff_loc = str(result.get("location") or session.get("current_location") or "").strip()
+    eff_nid = str(result.get("current_node_id") or session.get("current_node_id") or "").strip()
+
+    from mechanics.combat.enemies import generate_scenario_enemy
+
+    # 1. Check for an unresolved Daily Anomalous Incursion at the current location
+    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        from mechanics.world.anomalous_events import (
+            get_active_incursion_at_location,
+            spawn_agitated_non_hostile_entity,
+        )
+        active_inc = None
+        if sid_int:
+            active_inc = get_active_incursion_at_location(sid_int, location_str=eff_loc, node_id=eff_nid)
+        if not active_inc:
+            loc_low = eff_loc.lower()
+            nid_low = eff_nid.lower()
+            for inc in (session.get("daily_incursions") or []):
+                if not isinstance(inc, dict) or inc.get("resolved"):
+                    continue
+                inc_nid = str(inc.get("node_id") or "").strip().lower()
+                inc_fac = str(inc.get("facility_name") or "").strip().lower()
+                inc_loc = str(inc.get("location") or "").strip().lower()
+                if (inc_nid and inc_nid == nid_low) or (inc_fac and inc_fac in loc_low) or (inc_loc and inc_loc == loc_low):
+                    active_inc = dict(inc)
+                    break
+
+        if active_inc and not active_inc.get("resolved"):
+            inc_id = str(active_inc.get("incursion_id") or "")
+            ent_name = str(active_inc.get("entity_name") or "Anomalous Entity")
+            subtype = str(active_inc.get("subtype") or "hostile_breach")
+            cat_tag = str(active_inc.get("category_tag") or "spatial_warp")
+
+            if subtype == "hostile_breach" and (prose_has_attack or player_attacked or has_implied_hostile_combat_prose(combined_nar, ent_name)):
+                enemy_obj = generate_scenario_enemy(
+                    scenario=scen_key,
+                    location=eff_loc or active_inc.get("location", "City"),
+                    chapter=int(session.get("current_chapter", session.get("chapter", 1)) or 1),
+                    custom_name=ent_name,
+                    custom_archetype="Spatial Stalker" if cat_tag == "spatial_warp" else "Cognitohazard Caster",
+                    exact_tier=3,
+                )
+                enemy_obj["incursion_id"] = inc_id
+                enemies = [enemy_obj]
+                session["nearby_enemies"] = enemies
+                result["nearby_enemies"] = enemies
+                for inc in (session.get("daily_incursions") or []):
+                    if isinstance(inc, dict) and inc.get("incursion_id") == inc_id:
+                        inc["agitated"] = True
+                if sid_int:
+                    try:
+                        db.update_session(sid_int, nearby_enemies=enemies, extra={"daily_incursions": session.get("daily_incursions") or []})
+                    except Exception:
+                        pass
+                return result
+
+            if subtype == "non_hostile_entity":
+                strikes = int(active_inc.get("strikes", 0) or 0)
+                max_strikes = int(active_inc.get("max_strikes", 2) or 2)
+                if player_attacked or strikes >= max_strikes:
+                    spawn_agitated_non_hostile_entity(
+                        session_id=sid_int,
+                        entity_name=ent_name,
+                        location=eff_loc or active_inc.get("location", "City"),
+                        category_tag=cat_tag,
+                        incursion_id=inc_id,
+                        session=session,
+                    )
+                    result["nearby_enemies"] = list(session.get("nearby_enemies") or [])
+                    for inc in (session.get("daily_incursions") or []):
+                        if isinstance(inc, dict) and inc.get("incursion_id") == inc_id:
+                            inc["agitated"] = True
+                    return result
+
+    # 2. Check for an active Quest / Bounty target at the current location
+    if sid_int:
+        try:
+            from mechanics.world.waypoints.matching import check_location_matches_waypoint, is_hostile_or_lair_waypoint
+            from mechanics.world.anomalous_events import (
+                is_non_hostile_entity_containment_waypoint,
+                extract_non_hostile_entity_name,
+                spawn_agitated_non_hostile_entity,
+            )
+            active_quests = db.get_session_quests(sid_int, status="Active") or []
+            for q in active_quests:
+                if not isinstance(q, dict):
+                    continue
+                qid = str(q.get("quest_id") or "")
+                if not qid:
+                    continue
+                candidate_wps: list[tuple[dict, dict | None]] = []
+                main_wp = db.get_active_waypoint(sid_int, qid, None)
+                if isinstance(main_wp, dict):
+                    candidate_wps.append((main_wp, None))
+                for so in (q.get("sub_objectives") or []):
+                    if isinstance(so, dict) and not so.get("completed") and so.get("id") is not None:
+                        so_wp = db.get_active_waypoint(sid_int, qid, so.get("id"))
+                        if isinstance(so_wp, dict):
+                            candidate_wps.append((so_wp, so))
+
+                for wp, so_dict in candidate_wps:
+                    so_id = so_dict.get("id") if isinstance(so_dict, dict) else wp.get("sub_obj_id")
+                    tgt_loc = str(wp.get("target_location") or q.get("location") or "").strip()
+                    if not tgt_loc or not check_location_matches_waypoint(
+                        eff_loc,
+                        tgt_loc,
+                        session_id=sid_int,
+                        current_node_id=eff_nid or None,
+                        target_node_id=wp.get("target_node_id"),
+                    ):
+                        continue
+
+                    all_wps = db.get_quest_waypoints(sid_int, qid, so_id) or []
+                    if is_non_hostile_entity_containment_waypoint(wp, all_wps=all_wps, sub_obj=so_dict, quest=q):
+                        q_strikes = int(q.get("strikes", 0) or 0)
+                        if player_attacked or q_strikes >= 2:
+                            ent_nm_q = extract_non_hostile_entity_name(wp, sub_obj=so_dict)
+                            spawn_agitated_non_hostile_entity(
+                                session_id=sid_int,
+                                entity_name=ent_nm_q,
+                                location=eff_loc,
+                                quest_id=qid,
+                                sub_obj_id=so_id,
+                                is_story_quest=bool(q.get("is_story_quest") or q.get("quest_type") == "story"),
+                                session=session,
+                            )
+                            result["nearby_enemies"] = list(session.get("nearby_enemies") or [])
+                            return result
+                        continue
+
+                    trig = str(wp.get("completion_trigger") or "").strip().lower()
+                    if trig in ("defeat_target", "combat_victory") or is_hostile_or_lair_waypoint(wp):
+                        target_name = str(wp.get("target_npc") or "").strip()
+                        if not target_name or target_name.lower() == str(q.get("client_npc") or "").strip().lower():
+                            target_name = extract_non_hostile_entity_name(wp, sub_obj=so_dict)
+                        if not target_name or target_name == "the Anomalous Entity":
+                            target_name = str(wp.get("stage_label") or q.get("title") or "Hostile Target").strip()
+                            target_name = re.sub(r"^(?:Defeat|Confront|Eliminate|Neutralize|Capture|Slay)\s+", "", target_name, flags=re.IGNORECASE).strip()
+
+                        if prose_has_attack or player_attacked or has_implied_hostile_combat_prose(combined_nar, target_name):
+                            enemy_obj = generate_scenario_enemy(
+                                scenario=scen_key,
+                                location=eff_loc or tgt_loc,
+                                chapter=int(session.get("current_chapter", session.get("chapter", 1)) or 1),
+                                custom_name=target_name,
+                            )
+                            enemy_obj["linked_quest_id"] = qid
+                            if so_id is not None:
+                                enemy_obj["linked_sub_obj_id"] = so_id
+                            enemies = [enemy_obj]
+                            session["nearby_enemies"] = enemies
+                            result["nearby_enemies"] = enemies
+                            try:
+                                db.update_session(sid_int, nearby_enemies=enemies)
+                            except Exception:
+                                pass
+                            return result
+        except Exception:
+            pass
+
+    return result
+
+
+
 
 
 def classify_scene_npcs(

@@ -158,7 +158,7 @@ def test_hq_merchant_stores_and_multi_tier_transit():
     # Eastern Grand Temple Talisman Stand & Theme Park Midway
     assert location_has_merchant_shop("Mount Ryujin Eastern Grand Temple & Sanctuary ➔ Grand Torii Gate & Omikuji Talisman Stand", "anomalous_incursions")
     temple_types = [m["type"] for m in get_available_merchant_types_for_location("Grand Torii Gate & Omikuji Talisman Stand", "anomalous_incursions")]
-    assert "magic_merchant" in temple_types and "gift_merchant" in temple_types
+    assert temple_types == ["gift_merchant"]
 
     assert location_has_merchant_shop("Starlight Wonder Theme Park & Amusement Resort ➔ Main Gate & Starlight Carnival Midway", "anomalous_incursions")
     tp_types = [m["type"] for m in get_available_merchant_types_for_location("Main Gate & Starlight Carnival Midway", "anomalous_incursions")]
@@ -2341,6 +2341,137 @@ async def test_anomalous_combat_abilities_forced_civilians_and_permadeath():
     finally:
         db.delete_session(sid)
         db.delete_character(test_uid, char["id"])
+
+
+def test_anomalous_tension_timer_never_spawns_random_enemies_and_handles_gated_patrol():
+    from game_engine.npcs.dialogue_tracking import (
+        evaluate_and_tick_scene_tension_timer,
+        build_scene_escalation_and_consequence_directives,
+    )
+
+    session = {
+        "scenario": "anomalous_incursions",
+        "current_location": "Rustwater Docks ➔ Old Rail Yard ➔ Signal Box",
+        "scene_tension_timer": 2,
+        "current_npcs": [],
+        "nearby_enemies": [],
+        "history": [
+            {"outcome_narrative": "Alarms blare across the breach perimeter as ward-lines hum."},
+            {"outcome_narrative": "The spatial breach intensifies near the signal box."},
+        ],
+    }
+
+    # 1. Open exploration in anomalous_incursions: never ticks or spawns a random hostile enemy
+    res_open = evaluate_and_tick_scene_tension_timer(session, actions=[], is_movement=False, access_gated=False)
+    assert res_open["expired"] is False
+    assert res_open["spawned_hostile_enemy"] is None
+    assert res_open["spawned_patrol_npc"] is None
+    assert session["scene_tension_timer"] == 0
+
+    # 2. Ticking-clock directive is suppressed when nearby_enemies is empty in anomalous_incursions
+    esc_dir = build_scene_escalation_and_consequence_directives(session, party=[], actions=[])
+    assert "MANDATORY SCENE ESCALATION & TICKING CLOCK DIRECTIVE" not in esc_dir
+
+    # 3. Restricted gate trespassing (access_gated=True) spawns a non-combat Security Guard NPC, never a monster
+    session["scene_tension_timer"] = 1
+    res_gated = evaluate_and_tick_scene_tension_timer(
+        session,
+        actions=[{"label": "Force the locked security gate", "success": False}],
+        is_movement=False,
+        access_gated=True,
+    )
+    assert res_gated["expired"] is True
+    assert res_gated["spawned_hostile_enemy"] is None
+    assert res_gated["spawned_patrol_npc"] is not None
+    assert res_gated["spawned_patrol_npc"]["role"] == "Security Guard"
+
+
+def test_reconcile_implied_hostile_encounter_for_incursions_and_phantom_guard():
+    from game_engine.npcs.presence import reconcile_implied_hostile_encounter
+
+    # 1. No active incursion or quest at location -> never spawns a phantom enemy even if prose mentions an attack
+    empty_sess = {
+        "scenario": "anomalous_incursions",
+        "current_location": "Sovereign-Core City Center ➔ Obelisk Central Transit Terminal ➔ Main Area",
+        "current_node_id": "loc_metro_transit_terminal",
+        "nearby_enemies": [],
+        "daily_incursions": [],
+    }
+    res_phantom = {
+        "outcome_narrative": "A shadowy distortion lunges at you from the turnstiles!",
+        "next_narrative": "The air crackles with static.",
+        "nearby_enemies": [],
+    }
+    reconcile_implied_hostile_encounter(res_phantom, empty_sess, actions=[{"label": "Inspect the turnstiles"}])
+    assert empty_sess["nearby_enemies"] == []
+    assert res_phantom["nearby_enemies"] == []
+
+    # 2. Active hostile_breach incursion at location + attack prose -> auto-spawns the hostile breach target
+    hostile_sess = {
+        "scenario": "anomalous_incursions",
+        "current_location": "Sovereign-Core City Center ➔ Obelisk Central Transit Terminal ➔ Main Area",
+        "current_node_id": "loc_metro_transit_terminal",
+        "nearby_enemies": [],
+        "daily_incursions": [
+            {
+                "incursion_id": "inc_test_hostile",
+                "subtype": "hostile_breach",
+                "entity_name": "Rift-Bound Hound",
+                "category_tag": "spatial_warp",
+                "node_id": "loc_metro_transit_terminal",
+                "facility_name": "Obelisk Central Transit Terminal",
+                "location": "Sovereign-Core City Center ➔ Obelisk Central Transit Terminal ➔ Main Area",
+                "resolved": False,
+            }
+        ],
+    }
+    res_hostile = {
+        "outcome_narrative": "The Rift-Bound Hound lunges at you from the spatial tear!",
+        "next_narrative": "It bares crystalline fangs on the platform.",
+        "nearby_enemies": [],
+    }
+    reconcile_implied_hostile_encounter(res_hostile, hostile_sess, actions=[{"label": "Approach the distortion"}])
+    assert len(hostile_sess["nearby_enemies"]) == 1
+    assert "Rift-Bound Hound" in hostile_sess["nearby_enemies"][0]["name"]
+    assert hostile_sess["nearby_enemies"][0]["incursion_id"] == "inc_test_hostile"
+    assert hostile_sess["daily_incursions"][0]["agitated"] is True
+
+    # 3. Active non_hostile_entity incursion at location + non-attack action -> preserves peaceful containment (no auto-spawn)
+    nh_sess = {
+        "scenario": "anomalous_incursions",
+        "current_location": "Sovereign-Core City Center ➔ Obelisk Central Transit Terminal ➔ Main Area",
+        "current_node_id": "loc_metro_transit_terminal",
+        "nearby_enemies": [],
+        "daily_incursions": [
+            {
+                "incursion_id": "inc_test_nh",
+                "subtype": "non_hostile_entity",
+                "temperament": "volatile",
+                "strikes": 0,
+                "max_strikes": 2,
+                "entity_name": "Mirror-Glass Stray Hound",
+                "category_tag": "spatial_warp",
+                "node_id": "loc_metro_transit_terminal",
+                "facility_name": "Obelisk Central Transit Terminal",
+                "location": "Sovereign-Core City Center ➔ Obelisk Central Transit Terminal ➔ Main Area",
+                "resolved": False,
+            }
+        ],
+    }
+    res_nh_peaceful = {
+        "outcome_narrative": "The Mirror-Glass Stray Hound lunges toward the reflection in panic.",
+        "next_narrative": "It whines softly near the glass.",
+        "nearby_enemies": [],
+    }
+    reconcile_implied_hostile_encounter(res_nh_peaceful, nh_sess, actions=[{"label": "Observe the hound carefully"}])
+    assert nh_sess["nearby_enemies"] == []
+
+    # 4. Active non_hostile_entity incursion + explicit player attack action -> spawns agitated non-lethal subdue entity
+    reconcile_implied_hostile_encounter(res_nh_peaceful, nh_sess, actions=[{"label": "Attack the Mirror-Glass Stray Hound", "intent": "attack"}])
+    assert len(nh_sess["nearby_enemies"]) == 1
+    assert nh_sess["nearby_enemies"][0]["name"] == "Mirror-Glass Stray Hound"
+    assert nh_sess["nearby_enemies"][0]["requires_non_lethal_subdue"] is True
+
 
 
 

@@ -612,7 +612,7 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
         "race", "gender", "age", "traits", "preferences",
 
-        "mannerisms", "motivation", "appearance"
+        "mannerisms", "motivation", "appearance", "descriptor"
 
     )
 
@@ -734,7 +734,16 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
                     or any(f" {fc} " in f" {narr_check} " or f" {fc}" in f" {narr_check} " or f"—{fc}" in narr_check or f"-{fc}" in narr_check for fc in first_cands)
                 )
                 if not in_prose and not has_active_physical_presence(name_clean, result, narrative_text=full_narr):
-                    continue
+                    # Confirm-only fallback: a DECLARED entity introduced by physical description
+                    # ("a man in an investigator's coat bolts upright") rather than by name.
+                    from game_engine.npcs.descriptor_presence import (
+                        has_descriptor_physical_presence,
+                        protagonist_role_tokens,
+                    )
+                    if not has_descriptor_physical_presence(
+                        n, full_narr, exclude_tokens=protagonist_role_tokens(party, session)
+                    ):
+                        continue
 
             if name_clean not in seen_names:
 
@@ -1689,6 +1698,11 @@ def _sanitize_outcome_person_names(outcome: dict, session_id: int, scen_key: str
 
                 entity["name"] = new_name
 
+                # Preserve the generic alias (e.g. "Investigator") as a physical descriptor so
+                # descriptor-based presence confirmation can still ground the renamed NPC in prose.
+                if not str(entity.get("descriptor") or "").strip():
+                    entity["descriptor"] = ent_name
+
                 desc = entity.get("description", "")
 
                 if ent_name.lower() not in desc.lower():
@@ -1718,6 +1732,9 @@ def _sanitize_outcome_person_names(outcome: dict, session_id: int, scen_key: str
                         replacements[npc_name] = new_name
 
                         npc["name"] = new_name
+
+                        if not str(npc.get("descriptor") or "").strip():
+                            npc["descriptor"] = npc_name
 
             elif isinstance(npc, str) and npc.strip():
 

@@ -79,6 +79,43 @@ def upsert_lorebook_entity(session_id: int, entity_type: str, name: str,
             (session_id, name)).fetchone()
         if existing:
             existing_race = existing["race"]
+            canonical_gender = ""
+            canonical_race = ""
+            if entity_type.lower() == "person" and name:
+                name_low = str(name).strip().lower()
+                npc_slug = name_low.replace(" ", "_")
+                try:
+                    sd_row = conn.execute(
+                        "SELECT gender, race FROM school_directory WHERE session_id=? AND (lower(name)=? OR npc_id=?) LIMIT 1",
+                        (session_id, name_low, npc_slug)
+                    ).fetchone()
+                    if sd_row:
+                        if sd_row["gender"] and str(sd_row["gender"]).strip().lower() not in ("", "unknown", "none"):
+                            canonical_gender = str(sd_row["gender"]).strip().lower()
+                        if sd_row["race"] and str(sd_row["race"]).strip().lower() not in ("", "unknown", "none"):
+                            canonical_race = str(sd_row["race"]).strip()
+                except Exception:
+                    pass
+                if not canonical_gender or not canonical_race:
+                    try:
+                        ar_row = conn.execute(
+                            "SELECT gender, race FROM anomalous_agent_roster WHERE session_id=? AND (lower(name)=? OR npc_id=?) LIMIT 1",
+                            (session_id, name_low, npc_slug)
+                        ).fetchone()
+                        if ar_row:
+                            if not canonical_gender and ar_row["gender"] and str(ar_row["gender"]).strip().lower() not in ("", "unknown", "none"):
+                                canonical_gender = str(ar_row["gender"]).strip().lower()
+                            if not canonical_race and ar_row["race"] and str(ar_row["race"]).strip().lower() not in ("", "unknown", "none"):
+                                canonical_race = str(ar_row["race"]).strip()
+                    except Exception:
+                        pass
+            if canonical_race:
+                existing_race = canonical_race
+            existing_gender = str(existing["gender"] or "").strip()
+            if canonical_gender:
+                gender = canonical_gender
+            elif existing_gender and existing_gender.lower() not in ("", "unknown", "none"):
+                gender = existing_gender
             if existing_race and str(existing_race).strip().lower() not in ("", "unknown", "human"):
                 final_race = existing_race
             elif race and str(race).strip().lower() not in ("", "unknown", "human"):
@@ -290,19 +327,30 @@ def format_node_tiered_location(session_id: int, node_id: str, fallback_zone: st
     target = node_map.get(node_id)
     if not target:
         return ""
+    from mechanics.world.locations.hierarchy import resolve_default_sublocation
     n_type = target.get("node_type", "ROOM")
     if n_type == "ZONE":
-        return f"{target['name']} ➔ Main Area ➔ Main Area"
+        z_name = target["name"]
+        fac = next((n for n in nodes if n.get("node_type") == "FACILITY" and n.get("parent_id") == node_id), None)
+        p_name = fac["name"] if fac else z_name
+        child_room = next((n for n in nodes if n.get("node_type") == "ROOM" and n.get("parent_id") == (fac["node_id"] if fac else node_id) and (n.get("name") or "").strip().lower() != "main area"), None)
+        s_name = child_room["name"] if child_room else resolve_default_sublocation(p_name, z_name, session_id=session_id)
+        return f"{z_name} ➔ {p_name} ➔ {s_name}"
     if n_type == "FACILITY":
         parent = node_map.get(target.get("parent_id")) if target.get("parent_id") else None
         z_name = parent["name"] if parent else fallback_zone
-        return f"{z_name} ➔ {target['name']} ➔ Main Area"
+        p_name = target["name"]
+        child_room = next((n for n in nodes if n.get("node_type") == "ROOM" and n.get("parent_id") == node_id and (n.get("name") or "").strip().lower() != "main area"), None)
+        s_name = child_room["name"] if child_room else resolve_default_sublocation(p_name, z_name, session_id=session_id)
+        return f"{z_name} ➔ {p_name} ➔ {s_name}"
     # ROOM node
     fac = node_map.get(target.get("parent_id")) if target.get("parent_id") else None
     zone = node_map.get(fac.get("parent_id")) if (fac and fac.get("parent_id")) else fac
     z_name = zone["name"] if zone else fallback_zone
     p_name = fac["name"] if fac else target["name"]
     s_name = target["name"]
+    if not s_name or s_name.strip().lower() == "main area":
+        s_name = resolve_default_sublocation(p_name, z_name, session_id=session_id)
     return f"{z_name} ➔ {p_name} ➔ {s_name}"
 
 
@@ -609,7 +657,10 @@ def _sync_location_to_spatial_graph(
             if any_hub and any_hub != p_id:
                 save_world_edge(session_id, p_id, any_hub, travel_minutes=15, edge_type="Cross-Zone", is_bidirectional=1)
 
-    s_clean = (sub_name or "Main Area").strip()
+    from mechanics.world.locations.hierarchy import resolve_default_sublocation
+    s_clean = (sub_name or "").strip()
+    if not s_clean or s_clean.lower() == "main area":
+        s_clean = resolve_default_sublocation(primary_name, zone_name, session_id=session_id)
     r_id = next((n["node_id"] for n in existing_nodes if n["node_type"] == "ROOM" and n.get("parent_id") == p_id and n["name"].lower() == s_clean.lower()), None)
     if not r_id:
         r_id = location_id if str(location_id).startswith("sub_") else f"sub_dyn_{_slugify(primary_name)}_{_slugify(s_clean)}"

@@ -206,7 +206,9 @@ class PrimarySelectView(discord.ui.View):
             ))
 
         if not options:
-            options.append(discord.SelectOption(label=f"{zone_name} Main Area", value=f"{zone_name} ➔ Main Area", emoji="📍"))
+            from mechanics.world.locations.hierarchy import resolve_default_sublocation
+            def_sub = resolve_default_sublocation(zone_name, zone_name, session_id=session_id, scenario_key=scen_key, char_name=char_name)
+            options.append(discord.SelectOption(label=f"{zone_name} ({def_sub})"[:100], value=f"{zone_name} ➔ {def_sub}"[:100], emoji="📍"))
 
         self.add_item(PrimarySelectDropdown(cog, session_id, options, sync=sync, parent_view=self))
 

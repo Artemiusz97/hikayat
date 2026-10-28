@@ -593,5 +593,209 @@ class TestScheduleAndAgentRosterIntegration:
         assert tp_gate["gated"] is False
         assert tp_gate.get("anomalous_shift_active") is True
 
+    def test_high_school_twelve_issues_regression_suite(self):
+        from game_engine.choices_cleaner import clean_choices_impl
+        from game_engine.npcs.stage_manager import compute_pre_turn_stage
+        from mechanics.social.conversation_choices import (
+            generate_band2_social_choices,
+            sanitize_contextual_dialogue_label,
+        )
+        from mechanics.social.relationships import format_public_character_role
+        from mechanics.social.school_roster import (
+            ensure_school_directory_exists,
+            get_facility_ambient_characters,
+        )
+        from mechanics.stealth.core import (
+            is_stealth_choice_locked_out,
+            is_stealth_context_warranted,
+            record_failed_stealth_lockout,
+        )
+        from mechanics.world.locations import (
+            ensure_session_locations_seeded,
+            get_zone_summary_tree,
+            parse_tiered_location,
+            resolve_default_sublocation,
+            resolve_safe_open_eviction_destination,
+        )
+
+        sess_init = _create_hs_session(580, current_day=1, current_minute=540)
+        sid = 580
+        ensure_session_locations_seeded(sid, "high_school_drama", char_name="Kazuki")
+        ensure_school_directory_exists(sess_init)
+        roster = db.get_school_roster(sid)
+        assert len(roster) > 0
+
+        # Issue 12: Location tags in High School & Anomaly Incursion never show fantasy/hazard tags
+        zone_tree = get_zone_summary_tree(sid, current_loc=sess_init["current_location"], scen_key="high_school_drama")
+        for z_item in zone_tree:
+            tags_str = " ".join(z_item.get("tags") or [])
+            for banned_tag in ("🌊 Coastal", "🌋 Extreme Heat", "❄️ Freezing Tundra", "☢️ Radiation Hazard", "🎈 Airship", "🧭 Frontier", "🛡️ Safe Hub"):
+                assert banned_tag not in tags_str
+
+        # Issue 4: "Main Area" never survives parsing or default Tier-3 resolution
+        t1, t2, t3 = parse_tiered_location(
+            "Main Academy Campus ➔ School Library ➔ Main Area",
+            scenario_key="high_school_drama",
+            session_id=sid,
+        )
+        assert t3.lower() != "main area"
+        assert resolve_default_sublocation("Main Gymnasium", "Main Academy Campus", session_id=sid, scenario_key="high_school_drama").lower() != "main area"
+
+        # Issue 1: Unwarranted stealth choices are stripped in safe daytime public school locations
+        db.update_session(
+            sid,
+            current_day=1,
+            current_minute=540,  # 09:00 AM
+            current_location="Main Academy Campus ➔ Main Campus Building ➔ Homeroom Classroom",
+            current_node_id="loc_homeroom",
+        )
+        sess_day = db.get_session(sid)
+        assert is_stealth_context_warranted(sess_day) is False
+
+        # Issue 3: Multi-NPC scenes preserve all "Speak with <NPC>" buttons without truncating at 7 choices
+        present_five = [
+            {"name": "Aoi Sato", "role": "Class Representative"},
+            {"name": "Ren Sato", "role": "Track Sprinter"},
+            {"name": "Maya Lin", "role": "Art Club Member"},
+            {"name": "Kaito Vance", "role": "Basketball Captain"},
+            {"name": "Yuki Tanaka", "role": "Library Assistant"},
+        ]
+        raw_choices = [
+            {"label": "Check the chalkboard schedule", "category": "INVESTIGATE"},
+            {"label": "Organize your desk drawer", "category": "INTERACT"},
+            {"label": "Sneak through the classroom shadows [DEX]", "category": "STEALTH", "stat_check": "DEX"},
+        ]
+        cleaned = clean_choices_impl(
+            None,
+            raw_choices,
+            scenario="high_school_drama",
+            location=sess_day["current_location"],
+            current_npcs=present_five,
+            session_id=sid,
+        )
+        labels = [c["label"] for c in cleaned]
+        # Stealth choice stripped in safe daytime homeroom
+        assert not any("sneak" in lbl.lower() for lbl in labels)
+        # Every single one of the 5 present NPCs gets a "Speak with" choice (even with shared surname "Sato")
+        for npc_item in present_five:
+            assert any(npc_item["name"] in lbl for lbl in labels), f"Missing talk button for {npc_item['name']}"
+
+        # Issue 2: Coach is only in 1 facility at a time, never omnipresent across Pool/Dojo/Field during class
+        coach_rows = [r for r in roster if "coach" in str(r.get("role") or "").lower()]
+        assert len(coach_rows) == 1
+        coach = coach_rows[0]
+        assert get_npc_scheduled_node_id(coach, current_minute=600, scen_key="high_school_drama", current_day=1) == "loc_gymnasium"
+        assert get_npc_scheduled_node_id(coach, current_minute=740, scen_key="high_school_drama", current_day=1) == "loc_staff_room"
+        pool_class_amb = get_facility_ambient_characters(
+            sid,
+            "Main Academy Campus ➔ School Grounds & Athletics ➔ Swimming Pool Facility",
+            limit=4,
+            current_day=1,
+            current_minute=600,
+        )
+        assert all("coach" not in str(a.get("role") or "").lower() for a in pool_class_amb)
+
+        # Issue 8: Roster NPC gender & race are locked against arbitrary LLM drift
+        sample_student = next(r for r in roster if str(r.get("grade") or "").lower() not in ("faculty", "citizen"))
+        orig_gender = sample_student["gender"]
+        orig_race = sample_student["race"]
+        flipped_gender = "male" if orig_gender == "female" else "female"
+        db.upsert_contact(
+            session_id=sid,
+            character_id=0,
+            npc_id=sample_student["npc_id"],
+            name=sample_student["name"],
+            delta_score=1,
+            gender=flipped_gender,
+            race="wolf beastfolk",
+        )
+        saved_contact = db.get_contact(sid, sample_student["npc_id"], character_id=0)
+        assert saved_contact["gender"].lower() == orig_gender.lower()
+        assert saved_contact["race"].lower() == orig_race.lower()
+
+        # Issue 9: Student dialogue choices are contextual and meta-trope roles format cleanly
+        assert format_public_character_role(
+            "Class Clown & Slacker",
+            grade="Sophomore",
+            scen_key="high_school_drama",
+        ) == "Sophomore Student"
+        miki_profile = {
+            "name": "Miki",
+            "role": "Class Clown & Slacker",
+            "faction": "Drama Club",
+            "scene_npc": {"grade": "Sophomore", "club": "Drama Club"},
+        }
+        assert "work as" not in sanitize_contextual_dialogue_label(
+            "Ask about her work as Class Clown & Slacker",
+            profile=miki_profile,
+            session=sess_day,
+        ).lower()
+        conv_choices = generate_band2_social_choices(
+            profile=miki_profile,
+            session=sess_day,
+        )
+        for cc in conv_choices:
+            lbl_low = cc["label"].lower()
+            assert "work as" not in lbl_low
+            assert "job as" not in lbl_low
+            assert "off duty" not in lbl_low
+
+        # Issue 10: Accompanied dialogue travel moves location AND keeps companion in active dialogue
+        db.update_session(
+            sid,
+            dialogue_partner=sample_student["name"],
+            current_npcs=[sample_student, present_five[0]],
+        )
+        sess_conv = db.get_session(sid)
+        stage_walk = compute_pre_turn_stage(
+            sess_conv,
+            [
+                {
+                    "label": f"Walk with {sample_student['name']} to the School Library",
+                    "target_location": "Main Academy Campus ➔ Main Campus Building ➔ School Library",
+                    "target_node_id": "loc_library",
+                    "accompanied_by_npc": sample_student["name"],
+                    "intent": "movement",
+                }
+            ],
+        )
+        assert stage_walk["is_movement"] is True
+        assert "Library" in stage_walk["effective_location"]
+        assert sample_student["name"] in stage_walk["new_partners"]
+        assert any(n.get("name") == sample_student["name"] for n in stage_walk["stage_npcs"])
+
+        # Issue 11: Failed stealth in a restricted or curfewed zone evicts player to an open public node & locks out stealth
+        evict_day_nid, _ = resolve_safe_open_eviction_destination(
+            sid,
+            current_node_id="loc_staff_room",
+            current_location="Main Academy Campus ➔ Main Campus Building ➔ Teachers' Staff Room",
+            current_day=1,
+            current_minute=600,
+            scen_key="high_school_drama",
+        )
+        assert evict_day_nid != "loc_staff_room"
+
+        evict_night_nid, _ = resolve_safe_open_eviction_destination(
+            sid,
+            current_node_id="loc_staff_room",
+            current_location="Main Academy Campus ➔ Main Campus Building ➔ Teachers' Staff Room",
+            current_day=1,
+            current_minute=1320,  # 22:00 curfew
+            scen_key="high_school_drama",
+        )
+        assert evict_night_nid not in ("loc_staff_room", "loc_school_hallway")
+
+        record_failed_stealth_lockout(
+            sess_day,
+            node_id="loc_staff_room",
+            label="Sneak into the Teachers' Staff Room [DEX]",
+        )
+        assert is_stealth_choice_locked_out(
+            sess_day,
+            label="Sneak into the Teachers' Staff Room [DEX]",
+            node_id="loc_staff_room",
+        ) is True
+
+
 
 

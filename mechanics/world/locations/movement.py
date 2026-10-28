@@ -213,7 +213,7 @@ def process_llm_location_update(session_id: int, raw_location: str, scenario_key
     primary = re.sub(r"[*_`]", "", str(primary)).strip()
     sub = re.sub(r"[*_`]", "", str(sub)).strip()
 
-    from .hierarchy import _build_session_zone_index, _build_session_spatial_index
+    from .hierarchy import _build_session_zone_index, _build_session_spatial_index, resolve_default_sublocation
     zones_index = _build_session_zone_index(session_id, scenario_key)
     primaries, subs_idx = _build_session_spatial_index(session_id, scenario_key)
 
@@ -229,8 +229,8 @@ def process_llm_location_update(session_id: int, raw_location: str, scenario_key
             if m_idx != -1:
                 sub = sub[:m_idx].strip()
                 break
-        if not sub or is_invalid_location_string(sub):
-            sub = "Main Area"
+        if not sub or is_invalid_location_string(sub) or sub.strip().lower() == "main area":
+            sub = resolve_default_sublocation(primary, zone, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
 
     if is_incongruous_container(primary, sub, session_id=session_id, scenario_key=scenario_key):
         zone, primary, sub = auto_heal_incongruous_location(zone, primary, sub, session_id=session_id, scenario_key=scenario_key)
@@ -257,15 +257,18 @@ def process_llm_location_update(session_id: int, raw_location: str, scenario_key
 
             if s_low in zones_index:
 
-                zone, primary, sub = zones_index[s_low][0], zones_index[s_low][1], "Main Area"
+                zone, primary = zones_index[s_low][0], zones_index[s_low][1]
+                sub = resolve_default_sublocation(primary, zone, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
 
             elif s_low in primaries:
 
-                zone, primary, sub = primaries[s_low][0], primaries[s_low][1], "Main Area"
+                zone, primary = primaries[s_low][0], primaries[s_low][1]
+                sub = resolve_default_sublocation(primary, zone, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
 
             elif p_low in zones_index:
 
-                zone, primary, sub = zones_index[p_low][0], zones_index[p_low][1], "Main Area"
+                zone, primary = zones_index[p_low][0], zones_index[p_low][1]
+                sub = resolve_default_sublocation(primary, zone, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
 
         # Re-run incongruous check after normalization
 
@@ -438,7 +441,7 @@ def process_llm_location_update(session_id: int, raw_location: str, scenario_key
 
     return formatted
 
-def discover_poi_chamber(session_id: int, zone_name: str, primary_name: str, sub_name: str = "Main Area", scenario_key: str = "fantasy", atmosphere: str = "") -> str:
+def discover_poi_chamber(session_id: int, zone_name: str, primary_name: str, sub_name: str = "", scenario_key: str = "fantasy", atmosphere: str = "") -> str:
 
     """
 
@@ -449,8 +452,9 @@ def discover_poi_chamber(session_id: int, zone_name: str, primary_name: str, sub
     Returns the formatted 3-tiered location string.
 
     """
-
-    formatted = format_tiered_location_string(zone_name, primary_name, sub_name)
+    from .hierarchy import resolve_default_sublocation
+    clean_sub = sub_name if (sub_name and sub_name.strip().lower() != "main area") else resolve_default_sublocation(primary_name, zone_name, session_id=session_id, scenario_key=scenario_key)
+    formatted = format_tiered_location_string(zone_name, primary_name, clean_sub)
 
     return process_llm_location_update(session_id, formatted, scenario_key=scenario_key)
 
@@ -684,13 +688,14 @@ def auto_heal_incongruous_location(zone: str, primary: str, sub: str, session_id
 
         # 1. Terrace / Overlook match
 
+        from .hierarchy import resolve_default_sublocation
         if any(k in s_low for k in ("terrace", "overlook", "balcony", "veranda")):
 
             for r in existing:
 
                 if r.get("zone_name") in candidate_zones and any(k in (r.get("primary_name") or "").lower() for k in ("terrace", "overlook", "balcony")):
 
-                    target_sub = "Observation Point" if "terrace" in (r.get("primary_name") or "").lower() else "Main Area"
+                    target_sub = "Observation Point" if "terrace" in (r.get("primary_name") or "").lower() else resolve_default_sublocation(r.get("primary_name"), r.get("zone_name"), session_id=session_id, scenario_key=scenario_key)
 
                     return (r.get("zone_name"), r.get("primary_name"), target_sub)
 
@@ -704,7 +709,7 @@ def auto_heal_incongruous_location(zone: str, primary: str, sub: str, session_id
 
                 if r.get("zone_name") in candidate_zones and any(k in (r.get("primary_name") or "").lower() for k in ("glasshouse", "garden", "courtyard")):
 
-                    target_sub = "Interior Greenery Path" if "glasshouse" in (r.get("primary_name") or "").lower() else "Main Area"
+                    target_sub = "Interior Greenery Path" if "glasshouse" in (r.get("primary_name") or "").lower() else resolve_default_sublocation(r.get("primary_name"), r.get("zone_name"), session_id=session_id, scenario_key=scenario_key)
 
                     return (r.get("zone_name"), r.get("primary_name"), target_sub)
 
@@ -718,7 +723,7 @@ def auto_heal_incongruous_location(zone: str, primary: str, sub: str, session_id
 
                 if r.get("zone_name") in candidate_zones and any(k in (r.get("primary_name") or "").lower() for k in ("courtyard", "plaza")):
 
-                    return (r.get("zone_name"), r.get("primary_name"), "Courtyard Fountain" if "fountain" in s_low else "Main Area")
+                    return (r.get("zone_name"), r.get("primary_name"), "Courtyard Fountain" if "fountain" in s_low else resolve_default_sublocation(r.get("primary_name"), r.get("zone_name"), session_id=session_id, scenario_key=scenario_key))
 
 
 
@@ -740,7 +745,7 @@ def auto_heal_incongruous_location(zone: str, primary: str, sub: str, session_id
 
     if session_id:
 
-        from .hierarchy import _build_session_zone_index, _build_session_spatial_index
+        from .hierarchy import _build_session_zone_index, _build_session_spatial_index, resolve_default_sublocation
         zones_index = _build_session_zone_index(session_id, scenario_key)
 
         primaries_idx, _ = _build_session_spatial_index(session_id, scenario_key)
@@ -756,13 +761,13 @@ def auto_heal_incongruous_location(zone: str, primary: str, sub: str, session_id
         if s_low in primaries_idx and s_low != primary.strip().lower():
 
             # sub is a Tier 2 Primary — resolve to its canonical zone
-
-            return (primaries_idx[s_low][0], primaries_idx[s_low][1], "Main Area")
+            z_p, p_p = primaries_idx[s_low][0], primaries_idx[s_low][1]
+            return (z_p, p_p, resolve_default_sublocation(p_p, z_p, session_id=session_id, scenario_key=scenario_key))
 
 
 
     # Fallback: Promote the sub-spot to an independent Tier 2 Primary Place in the zone
-
+    from .hierarchy import resolve_default_sublocation
     promoted_p = sub
 
     if "terrace" in s_low:
@@ -773,7 +778,7 @@ def auto_heal_incongruous_location(zone: str, primary: str, sub: str, session_id
 
         promoted_p = f"{zone} Gardens" if "wing" in zone.lower() else sub
 
-    return (zone, promoted_p, "Stone Railing" if "terrace" in s_low else "Main Area")
+    return (zone, promoted_p, "Stone Railing" if "terrace" in s_low else resolve_default_sublocation(promoted_p, zone, session_id=session_id, scenario_key=scenario_key))
 
 def is_movement_action(action_text: str) -> bool:
     """Detects whether an action represents physical travel or movement."""
@@ -820,14 +825,47 @@ def is_movement_action(action_text: str) -> bool:
         "take her to", "take him to", "bring her to", "bring him to",
         "slip to", "slip into", "slip away to", "go into", "depart to", "depart for",
         "turn back from", "step away from", "turn back", "walk away", "step back",
+        "run for cover", "head for cover", "dive for cover", "sprint for cover", "scramble for cover", "make for ",
         "quieter spot", "quiet spot", "secluded spot", "private spot"
+    )
+
+    _INFINITIVE_VERBS_AFTER_TO = (
+        r"(?:recalibrate|prepare|open|close|seal|block|stop|prevent|avoid|ensure|filter|secure|"
+        r"analyze|inspect|examine|scan|test|check|use|draw|take|make|get|keep|hold|protect|defend|"
+        r"attack|strike|cast|unlock|pick|disarm|stabilize|contain|subdue|calm|persuade|convince|"
+        r"interrogate|question|read|decipher|decode|translate|fix|repair|heal|treat|save|rescue|"
+        r"carry|lift|push|pull|pry|force|break|run|follow|see|find|confirm|verify|determine|assess)\b"
     )
 
     has_movement_directive = (
         any(k in act_lower for k in override_movement_phrases)
-        or bool(re.search(r'\b(?:move|moving|travel|traveling|head|heading|walk|walking|go|going|step|stepping|lead|leading|slip|slipping|bring|bringing|take|taking)\b.*?\b(?:to|into|toward|towards|for)\b', act_lower))
+        or bool(
+            re.search(
+                r'\b(?:move|moving|travel|traveling|head|heading|walk|walking|go|going|step|stepping|slip|slipping)'
+                r'(?:\s+(?:over|out|back|straight|down|up|quietly|quickly|briskly|together|away|forward|ahead))?'
+                r'\s+(?:to|into|toward|towards|for)\s+(?!' + _INFINITIVE_VERBS_AFTER_TO + r')',
+                act_lower,
+            )
+        )
+        or bool(
+            re.search(
+                r'\b(?:lead|leading|bring|bringing|take|taking|guide|guiding|steer|steering|usher|ushering|escort|escorting)'
+                r'\s+(?:[a-z]+\s+){1,3}(?:to|into|toward|towards)\s+(?!' + _INFINITIVE_VERBS_AFTER_TO + r')',
+                act_lower,
+            )
+        )
         or bool(re.search(r'\b(?:quieter|secluded|quiet|private)\s+spot\b', act_lower))
     )
+
+    # Analytical and perceptual actions (inspecting, scanning, analyzing objects) are NOT movement actions
+    analytical_non_movement = (
+        "analyze ", "analyzing ", "inspect ", "inspecting ", "examine ", "examining ",
+        "scan ", "scanning ", "check ", "checking ", "peer at ", "peering at ",
+        "observe ", "observing ", "gauge ", "gauging ", "measure ", "measuring ",
+        "read ", "reading ", "test ", "testing ", "diagnose ", "diagnosing "
+    )
+    if any(act_lower.startswith(anm) for anm in analytical_non_movement) and not has_movement_directive:
+        return False
 
     # Conversational blacklist only applies when no imperative movement verb/prefix was detected.
     conversational_non_movement = (
@@ -912,8 +950,6 @@ def is_movement_action(action_text: str) -> bool:
 
         "escort", "escorts", "escorted", "escorting",
 
-        "take", "takes", "took", "taking",
-
         "seek", "seeks", "sought", "seeking",
 
         "guide", "guides", "guided", "guiding",
@@ -934,31 +970,63 @@ def is_movement_action(action_text: str) -> bool:
 
     )
 
-    direction_terms = (
-
-        "to ", "toward", "towards", "into ", "for ", "through ", "across ", "outside", "out into", "out of", "way out", "the way out",
-
-        "the trail", "the road", "the street", "the alley", "the hall", "the hallway", "the market", "the gate",
-
-        "the exit", "the door", "the bedroom", "the room", "the kitchen", "the porch", "the corridor", "the roof",
-
+    directional_preps = (
+        "toward", "towards", "into ", "through ", "across ", "outside", "out into", "out of", "way out", "the way out",
         "home", "home together"
-
+    )
+    place_noun_terms = (
+        "the trail", "the road", "the street", "the alley", "the hall", "the hallway", "the market", "the gate",
+        "the exit", "the door", "the bedroom", "the room", "the kitchen", "the porch", "the corridor", "the roof",
     )
 
     valid_movement_roots = []
+    earliest_root_end: int | None = None
     for root in movement_roots:
-        if re.search(r'\b' + re.escape(root) + r'\b', act_lower):
+        for m_root in re.finditer(r'(?<![-a-z0-9])' + re.escape(root) + r'\b', act_lower):
+            r_start, r_end = m_root.start(), m_root.end()
+            prefix_before = act_lower[:r_start]
+            suffix_after = act_lower[r_end:]
+            # Ignore infinitive 'to <verb>' when preceded by non-movement auxiliary (e.g. 'attempt to run', 'try to follow', 'strength to carry')
+            if re.search(r'\bto\s+$', prefix_before) and not re.search(r'\b(?:excuse\s+(?:myself|yourself|ourselves)|decide|decided|time|ready|prepare)\s+to\s+$', prefix_before):
+                continue
             # Reaching for a physical item, body part, or gesture is not spatial movement to a location
-            if root.startswith("reach") and re.search(r'\breach(?:es|ed|ing)?\s+(?:under|for|into|between|down|around|behind|out\s+to\s+touch)\b', act_lower):
+            if root.startswith("reach") and re.search(r'^\s+(?:under|for|into|between|down|around|behind|out\s+to\s+touch)\b', suffix_after):
+                continue
+            # Non-spatial idioms for 'run', 'step', 'follow', 'leave', 'move'
+            if root.startswith("run") and (
+                re.search(r'^\s+(?:a\s+|an\s+|the\s+|some\s+)?(?:scan|diagnostic|diagnostics|test|tests|check|analysis|simulation|calculation|program|clock|water|engine|motor|generator|bath|shower|fever|tab|risk|errand)\b', suffix_after)
+                or re.search(r'\b(?:keep|kept|leaves?|left)\s+(?:the\s+|a\s+|an\s+)?[a-z0-9_\-]+\s+$', prefix_before)
+            ):
+                continue
+            if root.startswith("step") and re.search(r'^\s+up\s+(?:your|my|our|their|his|her|the)\b', suffix_after):
+                continue
+            if root.startswith("follow") and re.search(r'^\s+(?:the\s+|your\s+|her\s+|his\s+|their\s+)?(?:instructions|orders|protocol|signal|resonance|pattern|patterns|rules|advice|clues|data|frequency)\b', suffix_after):
+                continue
+            if root.startswith("leave") and re.search(r'^\s+(?:the\s+|a\s+|an\s+|your\s+|her\s+|his\s+)?[a-z0-9_\-\s]{1,25}\b(?:alone|sealed|closed|open|locked|unlocked|behind|intact|untouched)\b', suffix_after):
+                continue
+            if root.startswith("move") and re.search(r'^\s+(?:the\s+|a\s+|your\s+|her\s+|his\s+)?(?:pick|dial|lever|switch|slider|cursor|scanner|lens|hand|hands|fingers|arm|arms|weapon|blade|pistol|gun|shield)\b', suffix_after):
                 continue
             valid_movement_roots.append(root)
+            if earliest_root_end is None or r_end < earliest_root_end:
+                earliest_root_end = r_end
 
     has_root = bool(valid_movement_roots)
-
-    has_dir = any(dir_t in act_lower for dir_t in direction_terms)
-
-
+    has_dir = False
+    if has_root and earliest_root_end is not None:
+        tail_after_root = act_lower[earliest_root_end:]
+        if any(dp in tail_after_root for dp in directional_preps):
+            has_dir = True
+        elif re.search(r'\bto\s+(?!' + _INFINITIVE_VERBS_AFTER_TO + r')[a-z0-9]', tail_after_root):
+            has_dir = True
+        else:
+            for p_term in place_noun_terms:
+                for m_p in re.finditer(re.escape(p_term), tail_after_root):
+                    before_p = tail_after_root[:m_p.start()]
+                    if not re.search(r'\b(?:in|inside|at|near|by|within|seal|lock|block|bar|watch|guard|reinforce|secure)\s+$', before_p):
+                        has_dir = True
+                        break
+                if has_dir:
+                    break
 
     if has_movement_directive or (has_root and (
         has_dir
@@ -971,8 +1039,6 @@ def is_movement_action(action_text: str) -> bool:
         or act_lower.startswith("i walk")
     )):
         return True
-
-
 
     return False
 
@@ -1268,8 +1334,8 @@ def extract_movement_destination(action_text: str, session_id: int, current_zone
     aliases = {
         "student lounge": ("Student Plaza & Dining Pavilion", "Central Courtyard"),
         "student commons": ("Student Plaza & Dining Pavilion", "Central Courtyard"),
-        "campus dining": ("Campus Dining Hall & Cafeteria", "Main Area"),
-        "cafeteria": ("Campus Dining Hall & Cafeteria", "Main Area"),
+        "campus dining": ("Campus Dining Hall & Cafeteria", "Cafeteria Tables"),
+        "cafeteria": ("Campus Dining Hall & Cafeteria", "Cafeteria Tables"),
     }
     for alias, (alias_z, alias_p) in aliases.items():
         if alias in act_lower:
@@ -1637,8 +1703,8 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
 
         if is_poetic_drift_title(res_s):
-
-            res_s = curr_s or "Main Area"
+            from .hierarchy import resolve_default_sublocation
+            res_s = curr_s if (curr_s and curr_s.strip().lower() != "main area") else resolve_default_sublocation(res_p or curr_p, res_z or curr_z, session_id=session_id, scenario_key=scen_key, char_name=char_name)
 
 
 
@@ -2034,11 +2100,14 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
 
 
+        from .hierarchy import resolve_default_sublocation
         final_z = res_z or curr_z
 
         final_p = res_p or curr_p
 
-        final_s = res_s or curr_s or "Main Area"
+        final_s = res_s or curr_s
+        if not final_s or final_s.strip().lower() == "main area":
+            final_s = resolve_default_sublocation(final_p, final_z, session_id=session_id, scenario_key=scen_key, char_name=char_name)
 
         if is_incongruous_container(final_p, final_s, session_id=session_id, scenario_key=scen_key):
 
@@ -2053,7 +2122,7 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
     # Step 3: If LLM output was empty and the player took a movement action, check narrative for arrival
 
     if is_move and narr_prose:
-
+        from .hierarchy import resolve_default_sublocation
         existing = db.get_session_locations(session_id)
 
         target_zone = curr_z or (existing[0].get("zone_name") if existing else "")
@@ -2085,7 +2154,7 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
                     gate_p = next((r["primary_name"] for r in existing if r.get("zone_name") == s_name and ("gate" in r.get("primary_name", "").lower() or "entrance" in r.get("primary_name", "").lower())), "School Main Gates")
 
-                    sub_area = "Entrance Path & Archway" if "path" in narr_prose else ("Gate Checkpoint" if ("checkpoint" in narr_prose or "delinquent" in narr_prose) else "Main Area")
+                    sub_area = "Entrance Path & Archway" if "path" in narr_prose else ("Gate Checkpoint" if ("checkpoint" in narr_prose or "delinquent" in narr_prose) else resolve_default_sublocation(gate_p, s_name, session_id=session_id, scenario_key=scen_key, char_name=char_name))
 
                     formatted = format_tiered_location_string(s_name, gate_p, sub_area)
 
@@ -2103,7 +2172,7 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
                 if kp_lower in narr_prose or (kp_words and all(kw in narr_prose or kw.rstrip("s") in narr_prose for kw in kp_words)):
 
-                    formatted = format_tiered_location_string(target_zone, kp, "Main Area")
+                    formatted = format_tiered_location_string(target_zone, kp, resolve_default_sublocation(kp, target_zone, session_id=session_id, scenario_key=scen_key, char_name=char_name))
 
                     return process_llm_location_update(session_id, formatted, scen_key, char_name=char_name)
 

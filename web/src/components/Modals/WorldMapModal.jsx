@@ -382,7 +382,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                         </p>
                         <button
                           disabled={traveling}
-                          onClick={() => handleTravel(`${activeZoneObj.zone_name} ➔ Main Area`)}
+                          onClick={() => handleTravel(activeZoneObj.zone_name)}
                           className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-fantasy-accent/20 hover:bg-fantasy-accent/30 text-fantasy-accent border border-fantasy-accent/50 text-xs font-bold transition-all ${
                             traveling ? 'opacity-50 cursor-not-allowed' : ''
                           }`}

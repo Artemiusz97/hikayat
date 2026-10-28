@@ -799,13 +799,42 @@ def _inflect_verb_to_singular(verb: str) -> str:
     return verb + "s"
 
 
-def _replace_pronouns_to_masculine(segment: str) -> str:
+_OBJECT_PLURAL_ANTECEDENT_RE = re.compile(
+    r"\b(?:the|these|those|its|two|three|four|several|many|all|both)\s+(?:[a-z-]+\s+){0,2}?"
+    r"(?!(?:students|people|passersby|patrons|guards|teachers|members|classmates|bystanders|others|men|women|children|kids|friends|girls|boys|twins|siblings|parents|officers|soldiers)\b)"
+    r"[a-z]{3,}s\b",
+    re.IGNORECASE,
+)
+
+
+def _rewrite_unanchored_segment(segment: str, replacer, allow_they: bool) -> str:
+    """
+    Applies a gender pronoun replacer to a narration segment with no named character anchor.
+    Singular-they conversion is allowed only when a present NPC anchors the scene and the
+    sentence has no plural object antecedent before 'they' (e.g. "the digital numbers ... they").
+    """
+    if not allow_they:
+        return replacer(segment, convert_they=False)
+    out = []
+    for sent in _split_into_sentences(segment):
+        they_m = re.search(r"\b(?:they|them|their|theirs|themselves)\b", sent, re.I)
+        has_object_plural = bool(they_m and _OBJECT_PLURAL_ANTECEDENT_RE.search(sent[:they_m.start()]))
+        out.append(replacer(sent, convert_they=not has_object_plural))
+    return "".join(out)
+
+
+def _replace_pronouns_to_masculine(segment: str, convert_they: bool = True) -> str:
     res = segment
     placeholders = {}
     def _mask(m):
         tok = f"__PLURAL_MASK_{len(placeholders)}__"
         placeholders[tok] = m.group(0)
         return tok
+
+    # When no named character anchors the segment, plural they/them/their most likely refers
+    # to objects or groups (e.g. "the numbers... they are spinning"), so never singularize it.
+    if not convert_they:
+        res = re.sub(r"\b(?:they(?:'re|'ve|'d|'ll|’re|’ve|’d|’ll)?|them|their|theirs|themselves)\b", _mask, res, flags=re.I)
 
     # Protect genuine plural phrases from singular masculine conversion
     res = re.sub(r'\b(?:one|some|all|both|most|none|few|many|several|couple)\s+of\s+them\b', _mask, res, flags=re.I)
@@ -862,13 +891,18 @@ def _replace_pronouns_to_masculine(segment: str) -> str:
     return res
 
 
-def _replace_pronouns_to_feminine(segment: str) -> str:
+def _replace_pronouns_to_feminine(segment: str, convert_they: bool = True) -> str:
     res = segment
     placeholders = {}
     def _mask(m):
         tok = f"__PLURAL_MASK_{len(placeholders)}__"
         placeholders[tok] = m.group(0)
         return tok
+
+    # When no named character anchors the segment, plural they/them/their most likely refers
+    # to objects or groups, so never singularize it.
+    if not convert_they:
+        res = re.sub(r"\b(?:they(?:'re|'ve|'d|'ll|’re|’ve|’d|’ll)?|them|their|theirs|themselves)\b", _mask, res, flags=re.I)
 
     # Protect genuine plural phrases from singular feminine conversion
     res = re.sub(r'\b(?:one|some|all|both|most|none|few|many|several|couple)\s+of\s+them\b', _mask, res, flags=re.I)
@@ -1450,12 +1484,15 @@ def sanitize_npc_pronoun_consistency(
             processed_paragraphs.append("".join(out_segs))
         elif not male_matches and not female_matches:
             scene_genders = set()
+            npc_contributed = False
             for n in scene_npcs:
                 n_nm = (n.get("name") if isinstance(n, dict) else str(n)).strip().lower()
                 if n_nm in char_genders:
                     scene_genders.add(char_genders[n_nm])
+                    npc_contributed = True
                 elif n_nm.split() and n_nm.split()[-1] in char_genders:
                     scene_genders.add(char_genders[n_nm.split()[-1]])
+                    npc_contributed = True
             for p in (party or []):
                 p_c = p[0] if isinstance(p, (list, tuple)) else p
                 if isinstance(p_c, dict) and p_c.get("name"):
@@ -1467,6 +1504,14 @@ def sanitize_npc_pronoun_consistency(
                 active_text_genders = {g for name, g in char_genders.items() if re.search(rf"\b{re.escape(name)}\b", text_lower)}
                 if active_text_genders:
                     scene_genders = active_text_genders
+                    npc_contributed = True
+
+            # Second-person narration addresses the protagonist as "you": when no NPC anchors the
+            # scene, any third-person pronoun must belong to an unnamed person or object
+            # (e.g. "a man ... his eyes", "the numbers ... they are spinning"), so never rewrite.
+            if not npc_contributed and re.search(r"\b(?:you|your|yours|yourself)\b", nar_only, re.I):
+                processed_paragraphs.append(para)
+                continue
 
             if scene_genders == {"male"}:
                 # If paragraph contains explicit feminine markers (girl, woman, she, her, etc.)
@@ -1476,7 +1521,7 @@ def sanitize_npc_pronoun_consistency(
                     continue
                 out_segs = []
                 for s, in_q in segs:
-                    out_segs.append(s if in_q else _replace_pronouns_to_masculine(s))
+                    out_segs.append(s if in_q else _rewrite_unanchored_segment(s, _replace_pronouns_to_masculine, npc_contributed))
                 processed_paragraphs.append("".join(out_segs))
             elif scene_genders == {"female"}:
                 # If paragraph contains explicit masculine markers (boy, man, he, him, etc.)
@@ -1486,7 +1531,7 @@ def sanitize_npc_pronoun_consistency(
                     continue
                 out_segs = []
                 for s, in_q in segs:
-                    out_segs.append(s if in_q else _replace_pronouns_to_feminine(s))
+                    out_segs.append(s if in_q else _rewrite_unanchored_segment(s, _replace_pronouns_to_feminine, npc_contributed))
                 processed_paragraphs.append("".join(out_segs))
             else:
                 processed_paragraphs.append(para)
