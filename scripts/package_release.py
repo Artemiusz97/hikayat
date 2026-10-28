@@ -29,7 +29,7 @@ EXCLUDE_DIRS = {
     'venv', 'env', 'ENV', '.venv',
     '__pycache__', '.pytest_cache',
     'node_modules', '.git', '.idea', '.vscode',
-    'bin', 'scratch', 'releases', 'icon', 'backups', 'tests'
+    'bin', 'scratch', 'releases', 'icon', 'backups', 'tests', 'generated_images'
 }
 
 EXCLUDE_EXTS = {
