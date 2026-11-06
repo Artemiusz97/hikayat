@@ -187,18 +187,34 @@ def find_spatial_path(
             if not u_hidden:
                 adj[v].append((u, w))
 
-    # Add implicit parent-child transitions ONLY between FACILITY and ROOM for nodes that have no explicit edges defined
-    explicit_nodes = {e.get("from_node_id") for e in edges} | {e.get("to_node_id") for e in edges}
+    # Add implicit parent-child transitions between FACILITY and ROOM if no direct edge exists
+    existing_pairs = set()
+    nodes_with_edges = set()
+    for e in edges:
+        u_id = e.get("from_node_id")
+        v_id = e.get("to_node_id")
+        existing_pairs.add((u_id, v_id))
+        nodes_with_edges.add(u_id)
+        nodes_with_edges.add(v_id)
+        if e.get("is_bidirectional", 1):
+            existing_pairs.add((v_id, u_id))
+
+    from mechanics.world.locations.seeds import is_entrance_sublocation
     for n in nodes:
         pid = n.get("parent_id")
         nid = n.get("node_id")
         p_node = node_map.get(pid)
         if p_node and p_node.get("node_type") == "FACILITY" and n.get("node_type") == "ROOM":
-            if nid not in explicit_nodes or pid not in explicit_nodes:
-                n_hidden = bool(is_node_hidden(n) and nid not in discovered and not include_hidden)
-                if not n_hidden:
-                    adj[pid].append((nid, 1))
-                    adj[nid].append((pid, 1))
+            if (pid, nid) not in existing_pairs:
+                s_json = n.get("state_json")
+                s_parsed = (json.loads(s_json) if isinstance(s_json, str) and s_json else s_json) if s_json else {}
+                is_ent = bool(n.get("is_entrance") == 1 or (isinstance(s_parsed, dict) and s_parsed.get("is_entrance") == 1) or is_entrance_sublocation(n.get("name") or "") or is_entrance_sublocation(nid or ""))
+                has_any_edge = nid in nodes_with_edges
+                if is_ent or not has_any_edge:
+                    n_hidden = bool(is_node_hidden(n) and nid not in discovered and not include_hidden)
+                    if not n_hidden:
+                        adj[pid].append((nid, 1))
+                        adj[nid].append((pid, 1))
 
     dist = {from_node_id: 0}
     parent: Dict[str, Optional[str]] = {from_node_id: None}
@@ -226,6 +242,83 @@ def find_spatial_path(
         curr = parent.get(curr)
     path.reverse()
     return path
+
+
+def build_barrier_obstacle_choices(
+    session_id: int,
+    current_node_id: str,
+    barrier_node_id: str,
+    edge: dict = None,
+    session: dict = None,
+    party: list = None,
+) -> list[dict]:
+    """
+    Constructs deterministic barrier breach/turnback choices when movement is halted at an obstacle:
+      1. Unlock with Key (if party holds matching key)
+      2. Attempt Lockpicking / Force Passage (skill check)
+      3. Turn Back / Explore Current Room
+    Returns clean dictionaries adhering to JSON serialization contracts (zero dataclass objects).
+    """
+    edge = edge or {}
+    session = session or {}
+    barrier_node = db.get_world_node(session_id, barrier_node_id) if session_id and barrier_node_id else None
+    b_name = (barrier_node.get("name") if barrier_node else barrier_node_id) or "Area"
+
+    curr_node = db.get_world_node(session_id, current_node_id) if session_id and current_node_id else None
+    c_name = (curr_node.get("name") if curr_node else current_node_id) or "Current Area"
+
+    choices: list[dict] = []
+
+    # 1. Key Check
+    key_name = edge.get("lock_key_item") or ""
+    has_key = False
+    if key_name and party:
+        k_low = key_name.strip().lower()
+        for member in party:
+            inv = member[1] if isinstance(member, (tuple, list)) and len(member) > 1 else (member.get("inventory", []) if isinstance(member, dict) else [])
+            for it in inv:
+                it_nm = str(it.get("name") if isinstance(it, dict) else it).strip().lower()
+                if k_low in it_nm or it_nm in k_low:
+                    has_key = True
+                    break
+            if has_key:
+                break
+
+    if has_key:
+        choices.append({
+            "label": f"Use {key_name} to unlock pathway to {b_name}",
+            "stat": "NONE",
+            "requirement": 0,
+            "target_node_id": barrier_node_id,
+            "sub_intent": "use_key",
+            "is_barrier_breach": True,
+        })
+
+    # 2. Skill Check choice (Lockpick or Force Door)
+    check_stat = str(edge.get("skill_check_type") or "AGI").upper()
+    if check_stat not in ("AGI", "STR", "INT", "PER", "CHA", "END"):
+        check_stat = "AGI"
+    dc = int(edge.get("skill_check_dc") or 12)
+    action_verb = "Pick the lock leading to" if check_stat == "AGI" else "Force passage into"
+    choices.append({
+        "label": f"{action_verb} {b_name}",
+        "stat": check_stat,
+        "requirement": dc,
+        "target_node_id": barrier_node_id,
+        "sub_intent": "lockpick" if check_stat == "AGI" else "force_barrier",
+        "is_barrier_breach": True,
+    })
+
+    # 3. Turn Back / Alternative
+    choices.append({
+        "label": f"Turn back and remain in {c_name}",
+        "stat": "NONE",
+        "requirement": 0,
+        "target_node_id": current_node_id,
+        "sub_intent": "turn_back",
+    })
+
+    return choices
 
 
 def evaluate_spatial_route(
@@ -541,6 +634,20 @@ def evaluate_spatial_route(
                 f"[STAGE DIRECTION — COMPANION REUNION]: {names} re-join the party upon exiting into public space."
             )
 
+    barrier_choices = []
+    if gated and barrier_node_id:
+        barrier_edge = get_edge_between(session_id, effective_node_id, barrier_node_id)
+        barrier_choices = build_barrier_obstacle_choices(
+            session_id=session_id,
+            current_node_id=effective_node_id,
+            barrier_node_id=barrier_node_id,
+            edge=barrier_edge,
+            session=session,
+            party=party,
+        )
+        last_gate_res = dict(last_gate_res) if isinstance(last_gate_res, dict) else {"gated": True}
+        last_gate_res.update({"barrier_node_id": barrier_node_id, "barrier_choices": barrier_choices})
+
     return {
         "success": not gated,
         "effective_node_id": effective_node_id,
@@ -551,6 +658,7 @@ def evaluate_spatial_route(
         "gated": gated,
         "barrier_node_id": barrier_node_id,
         "access_gate": last_gate_res if (gated and last_gate_res) else {"gated": False},
+        "barrier_choices": barrier_choices,
         "stage_directives": stage_directives,
         "waiting_outside_companions": waiting_outside,
         "traveling_companions": traveling_companions or [],

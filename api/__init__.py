@@ -10,6 +10,7 @@ from .inventory_merchant import router as inventory_merchant_router
 from .adventure import router as adventure_router
 from .codex_phone import router as codex_phone_router
 from .settings_ws import router as settings_ws_router
+from .world_events import router as world_events_router
 
 __all__ = [
     "ConnectionManager",
@@ -22,4 +23,5 @@ __all__ = [
     "adventure_router",
     "codex_phone_router",
     "settings_ws_router",
+    "world_events_router",
 ]

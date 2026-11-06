@@ -321,7 +321,7 @@ class FactionsCog(commands.Cog):
             await interaction.followup.send("❌ You have no active character. Create one with `/character create`.", ephemeral=True)
             return
 
-        session_id = char.get("active_session_id")
+        session_id = char.get("active_session_id") or (await adb(db.get_active_session_id_for_user, interaction.user.id))
         if not session_id:
             await interaction.followup.send("❌ Your character is not currently in an adventure session.", ephemeral=True)
             return
@@ -332,7 +332,7 @@ class FactionsCog(commands.Cog):
             await interaction.followup.send("❌ Faction mechanics are disabled for this scenario.", ephemeral=True)
             return
 
-        factions = ensure_session_factions_seeded(session_id, scen_key)
+        factions = await adb(ensure_session_factions_seeded, session_id, scen_key)
         if not factions:
             await interaction.followup.send("📜 No factions discovered yet.", ephemeral=True)
             return
@@ -341,6 +341,299 @@ class FactionsCog(commands.Cog):
         embed = build_faction_list_embed(factions, char, scen_key)
         view = FactionsView(factions, char, scen_key, active_faction=None, user_id=interaction.user.id)
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+    @app_commands.command(name="encyclopedia", description="View the Anomaly & Folklore Encyclopedia, Codex progress, and Containment Vault log.")
+    async def encyclopedia(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        char = await adb(db.get_character, interaction.user.id)
+        session_id = (char.get("active_session_id") if char else None) or (await adb(db.get_active_session_id_for_user, interaction.user.id))
+        effective_sid = session_id
+        if session_id:
+            session = await adb(db.get_session, session_id)
+            scen_key = str((session or {}).get("scenario") or "fantasy")
+            if not scenario_data.is_anomalous_incursions_scenario(scen_key):
+                effective_sid = None
+
+        from mechanics.world.folklore_codex import build_encyclopedia_payload
+
+        payload = await adb(build_encyclopedia_payload, effective_sid, interaction.user.id)
+        view = EncyclopediaView(payload=payload, user_id=interaction.user.id)
+        embed = view.build_embed()
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+
+class EncyclopediaTraditionSelect(discord.ui.Select):
+    def __init__(self, traditions: list[dict], current_tradition: str):
+        options = [
+            discord.SelectOption(
+                label="All Cultural Traditions",
+                value="all",
+                emoji="🌍",
+                default=(current_tradition == "all"),
+            )
+        ]
+        for tr in traditions[:24]:
+            key = str(tr.get("key") or "")
+            lbl = str(tr.get("label") or key)[:80]
+            disc = int(tr.get("discovered", 0) or 0)
+            tot = int(tr.get("total", 0) or 0)
+            options.append(
+                discord.SelectOption(
+                    label=lbl,
+                    value=key,
+                    description=f"Discovered: {disc}/{tot}",
+                    emoji="📜",
+                    default=(current_tradition == key),
+                )
+            )
+        super().__init__(placeholder="Filter by Folklore Tradition...", min_values=1, max_values=1, options=options, row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: EncyclopediaView = self.view  # type: ignore[assignment]
+        if interaction.user.id != view.user_id:
+            await interaction.response.send_message("This menu belongs to another player.", ephemeral=True)
+            return
+        view.tradition = self.values[0]
+        view.page = 0
+        view.refresh_items()
+        await interaction.response.edit_message(embed=view.build_embed(), view=view)
+
+
+class EncyclopediaEntrySelect(discord.ui.Select):
+    def __init__(self, entries: list[dict], user_id: int):
+        self.entries_by_id = {str(e.get("codex_id")): e for e in entries if e.get("codex_id")}
+        self.user_id = user_id
+        options = [
+            discord.SelectOption(
+                label=str(e.get("name") or "Unknown")[:100],
+                value=str(e.get("codex_id")),
+                description=str(e.get("subtitle") or e.get("tradition") or "")[:100],
+                emoji="📜" if e.get("unlock_stage") == "contained" else "🔍",
+            )
+            for e in entries
+            if e.get("codex_id")
+        ][:25]
+        if not options:
+            options = [discord.SelectOption(label="No Discoveries", value="__none__", description="No entries available")]
+        super().__init__(
+            placeholder="🔍 Inspect Folklore Record Details...",
+            options=options,
+            row=3,
+        )
+
+    async def callback(self, inter: discord.Interaction):
+        if inter.user.id != self.user_id:
+            await inter.response.send_message("This menu belongs to another player.", ephemeral=True)
+            return
+        if not self.values or self.values[0] == "__none__":
+            await inter.response.send_message("No folklore record selected.", ephemeral=True)
+            return
+        entry = self.entries_by_id.get(self.values[0])
+        if not entry:
+            await inter.response.send_message("Record not found.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title=f"📜 {entry.get('name', 'Anomalous Record')}",
+            description=f"*{entry.get('subtitle') or entry.get('tradition', 'Global Folklore')}*",
+            color=0x9B59B6,
+        )
+        if entry.get("lore_summary"):
+            embed.add_field(name="📖 Folklore Lore", value=entry["lore_summary"][:1024], inline=False)
+        if entry.get("taboo_rule"):
+            embed.add_field(name="⚠️ Taboo Rule", value=f"```yaml\n{str(entry['taboo_rule'])[:1008]}\n```", inline=False)
+        if entry.get("containment_protocol"):
+            embed.add_field(name="🛡️ Containment Protocol", value=entry["containment_protocol"][:1024], inline=False)
+        if entry.get("tether_vessel"):
+            embed.add_field(name="🪢 Vessel Tether", value=str(entry["tether_vessel"])[:1024], inline=True)
+        if entry.get("weaknesses"):
+            weaks = ", ".join(entry["weaknesses"]) if isinstance(entry["weaknesses"], list) else str(entry["weaknesses"])
+            embed.add_field(name="🎯 Known Weaknesses", value=weaks[:1024], inline=True)
+        if entry.get("relic_gear_name"):
+            embed.add_field(name="⚔️ Secured Relic", value=str(entry["relic_gear_name"])[:1024], inline=True)
+
+        stage = str(entry.get("unlock_stage") or "sighted").title()
+        embed.set_footer(text=f"Codex ID: {entry.get('codex_id')} | Research Status: {stage}")
+        await inter.response.send_message(embed=embed, ephemeral=True)
+
+
+class EncyclopediaView(discord.ui.View):
+    PAGE_SIZE = 8
+
+    def __init__(self, payload: dict, user_id: int):
+        super().__init__(timeout=300)
+        self.payload = payload or {}
+        self.user_id = user_id
+        self.mode = "folklore"  # "folklore" | "field_log"
+        self.tradition = "all"
+        self.page = 0
+        self.refresh_items()
+
+    def _filtered_entries(self) -> list[dict]:
+        entries = list(self.payload.get("folklore_codex") or [])
+        if self.tradition != "all":
+            entries = [e for e in entries if e.get("tradition_key") == self.tradition or e.get("tradition") == self.tradition]
+        return entries
+
+    def refresh_items(self) -> None:
+        self.clear_items()
+        if self.mode == "folklore":
+            traditions = list(self.payload.get("traditions") or [])
+            if traditions:
+                self.add_item(EncyclopediaTraditionSelect(traditions, self.tradition))
+
+        codex_btn = discord.ui.Button(
+            label=f"Folklore Codex [{self.payload.get('discovered_count', 0)}/{self.payload.get('total_folklore_count', 50)}]",
+            emoji="📜",
+            style=discord.ButtonStyle.primary if self.mode == "folklore" else discord.ButtonStyle.secondary,
+            row=1,
+        )
+        vault_count = len(self.payload.get("field_log") or []) + len(self.payload.get("vault_log") or [])
+        vault_btn = discord.ui.Button(
+            label=f"Field Log & Vault [{vault_count}]",
+            emoji="🔒",
+            style=discord.ButtonStyle.primary if self.mode == "field_log" else discord.ButtonStyle.secondary,
+            row=1,
+        )
+
+        async def _switch_folklore(inter: discord.Interaction):
+            if inter.user.id != self.user_id:
+                await inter.response.send_message("This menu belongs to another player.", ephemeral=True)
+                return
+            self.mode = "folklore"
+            self.page = 0
+            self.refresh_items()
+            await inter.response.edit_message(embed=self.build_embed(), view=self)
+
+        async def _switch_vault(inter: discord.Interaction):
+            if inter.user.id != self.user_id:
+                await inter.response.send_message("This menu belongs to another player.", ephemeral=True)
+                return
+            self.mode = "field_log"
+            self.page = 0
+            self.refresh_items()
+            await inter.response.edit_message(embed=self.build_embed(), view=self)
+
+        codex_btn.callback = _switch_folklore
+        vault_btn.callback = _switch_vault
+        self.add_item(codex_btn)
+        self.add_item(vault_btn)
+
+        total_items = (
+            len(self._filtered_entries())
+            if self.mode == "folklore"
+            else max(1, len(self.payload.get("field_log") or []), len(self.payload.get("vault_log") or []))
+        )
+        max_page = max(0, (total_items - 1) // self.PAGE_SIZE)
+        if max_page > 0:
+            prev_btn = discord.ui.Button(label="◀ Prev", style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), row=2)
+            next_btn = discord.ui.Button(label="Next ▶", style=discord.ButtonStyle.secondary, disabled=(self.page >= max_page), row=2)
+
+            async def _prev(inter: discord.Interaction):
+                if inter.user.id != self.user_id:
+                    await inter.response.send_message("This menu belongs to another player.", ephemeral=True)
+                    return
+                self.page = max(0, self.page - 1)
+                self.refresh_items()
+                await inter.response.edit_message(embed=self.build_embed(), view=self)
+
+            async def _next(inter: discord.Interaction):
+                if inter.user.id != self.user_id:
+                    await inter.response.send_message("This menu belongs to another player.", ephemeral=True)
+                    return
+                self.page = min(max_page, self.page + 1)
+                self.refresh_items()
+                await inter.response.edit_message(embed=self.build_embed(), view=self)
+
+            prev_btn.callback = _prev
+            next_btn.callback = _next
+            self.add_item(prev_btn)
+            self.add_item(next_btn)
+
+        if self.mode == "folklore":
+            all_entries = self._filtered_entries()
+            start = self.page * self.PAGE_SIZE
+            page_entries = all_entries[start : start + self.PAGE_SIZE]
+            discovered_entries = [e for e in page_entries if e.get("unlock_stage") != "undiscovered" and e.get("codex_id")]
+            if discovered_entries:
+                self.add_item(EncyclopediaEntrySelect(discovered_entries, self.user_id))
+
+    def build_embed(self) -> discord.Embed:
+        disc = int(self.payload.get("discovered_count", 0) or 0)
+        ver = int(self.payload.get("verified_count", 0) or 0)
+        cont = int(self.payload.get("contained_count", 0) or 0)
+        tot = int(self.payload.get("total_folklore_count", 50) or 50)
+
+        if self.mode == "field_log":
+            embed = discord.Embed(
+                title="🔒 Session Field Log & Containment Vault",
+                description="Campaign-specific sightings, unmasked anomalies, and sealed Containment Vault captures.",
+                color=discord.Color.teal(),
+            )
+            vault_log = list(self.payload.get("vault_log") or [])
+            start = self.page * self.PAGE_SIZE
+            v_chunk = vault_log[start : start + self.PAGE_SIZE]
+            if v_chunk:
+                v_lines = [
+                    f"• **{v.get('entity_name') or v.get('name', 'Anomaly')}** — `{v.get('resolution_method') or v.get('resolution_mode') or 'Vaulted'}`"
+                    for v in v_chunk
+                ]
+                embed.add_field(name=f"Containment Vault ({len(vault_log)})", value="\n".join(v_lines)[:1020], inline=False)
+            elif not vault_log:
+                embed.add_field(name="Containment Vault", value="*No anomalies sealed in this session yet.*", inline=False)
+
+            f_log = list(self.payload.get("field_log") or [])
+            chunk = f_log[start : start + self.PAGE_SIZE]
+            if chunk:
+                f_lines = []
+                for item in chunk:
+                    nm = item.get("public_name") if item.get("is_disguised") else (item.get("name") or "Unknown Anomaly")
+                    st = str(item.get("status") or "sighted").upper()
+                    tag = " `[Folklore]`" if (item.get("codex_id") and not item.get("is_disguised")) else ""
+                    f_lines.append(f"• **{nm}**{tag} — `{st}`")
+                embed.add_field(name=f"Session Field Sightings ({len(f_log)})", value="\n".join(f_lines)[:1020], inline=False)
+            else:
+                embed.add_field(name="Session Field Sightings", value="*No field sightings logged yet.*", inline=False)
+            return embed
+
+        entries = self._filtered_entries()
+        max_page = max(1, (len(entries) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+        start = self.page * self.PAGE_SIZE
+        chunk = entries[start : start + self.PAGE_SIZE]
+
+        embed = discord.Embed(
+            title=f"📜 Global Folklore Codex [{disc}/{tot}]",
+            description=(
+                f"👁️ **Sighted:** `{disc}` | 🛡️ **Verified:** `{ver}` | 🔒 **Contained:** `{cont}`\n"
+                f"*Verified & Contained entries grant **Folklore Recognition (-1 Stage 1 Clue)** across future runs.*"
+            ),
+            color=discord.Color.gold(),
+        )
+        lines = []
+        for e in chunk:
+            st = str(e.get("unlock_stage") or "undiscovered")
+            if st == "undiscovered":
+                hint = str(e.get("hint") or "Unknown habitat")
+                lines.append(f"🔒 **`???`** *({e.get('tradition_label', 'Folklore')})* — {hint}")
+            else:
+                icon = "🔒" if st == "contained" else ("🛡️" if st == "verified" else "👁️")
+                rec = " `🧠 -1 Clue`" if e.get("folklore_recognition_active") else ""
+                sub = f" — *{e.get('subtitle')}*" if e.get("subtitle") else ""
+                line = f"{icon} **{e.get('name')}**{sub} `[{st.upper()}]`{rec}"
+                if st in ("verified", "contained") and e.get("taboo_name"):
+                    line += f"\n   ↳ ⚠️ *Taboo: {e.get('taboo_name')}* | Elem: `{str(e.get('primary_element', '')).upper()}`"
+                elif e.get("sensory_omen"):
+                    omen_short = str(e.get("sensory_omen"))[:95]
+                    line += f"\n   ↳ *{omen_short}...*"
+                lines.append(line)
+
+        embed.add_field(
+            name=f"Entries (Page {self.page + 1}/{max_page})",
+            value="\n".join(lines)[:1020] if lines else "*No entries match filter.*",
+            inline=False,
+        )
+        return embed
 
 
 async def setup(bot: commands.Bot):

@@ -58,7 +58,7 @@ ITEM_ICON_KEYWORDS = {
     "food": ("jedzenie", "chleb", "pieczeń"),
     "health": ("leczenie", "zdrowie", "opatrunek", "balsam", "maść"),
     "mana": ("mana", "eliksir many"),
-    "potion": ("mikstura", "eliksir", "zużywalny"),
+    "potion": ("mikstura", "eliksir", "zużywalny", "kadzidło", "święcona sól", "limonka kaffir", "ogórek", "tofu", "talizman", "żelazny amulet"),
     "quest": ("klucz", "mapa", "list", "zwój", "relikwia", "dokument"),
 }
 

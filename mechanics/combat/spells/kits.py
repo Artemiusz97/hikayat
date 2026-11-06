@@ -294,6 +294,10 @@ def format_spell_choice_label(spell: Dict[str, Any], hit_chance: int, player_mp:
     emoji = spell.get("emoji", "🔮")
     name = spell.get("name", "Spell")
     mp_cost = spell.get("mp_cost", 0)
+    if spell.get("is_ultimate") and int(spell.get("pip_cost", 0) or 0) > 0:
+        pips = int(spell.get("pip_cost", 3))
+        scope = "AOE" if spell.get("target_type") == "aoe" else "ST"
+        return f"{emoji} {name} ({hit_chance}% • {pips} Pips • {scope})"
     discipline = spell.get("discipline", "attack")
     target_type = spell.get("target_type", "single")
     crit_bonus = spell.get("crit_bonus", 0.0)

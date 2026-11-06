@@ -22,8 +22,6 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-import db
-
 log = logging.getLogger("hikayat.memory.digest")
 
 # Number of raw turns kept in working memory (was 8, now 4 for tighter Tier-1).
@@ -32,27 +30,28 @@ RAW_HISTORY_LIMIT: int = 4
 # Minimum raw turns before we bother generating a digest.
 MIN_TURNS_FOR_DIGEST: int = 3
 
-# Maximum bullets the LLM may emit per digest call.
-MAX_DIGEST_BULLETS: int = 3
+# Maximum bullets emitted per standard 4-turn digest window.
+MAX_WINDOW_DIGEST_BULLETS: int = 4
+MAX_DIGEST_BULLETS: int = MAX_WINDOW_DIGEST_BULLETS
 
-# Digest system prompt — utility-model friendly, enriched with mechanical fields.
+# Digest system prompt — utility-model friendly, enriched with mechanical & recall fields.
 _DIGEST_SYSTEM = (
     "You are an archivist for an AI-driven roleplaying game. "
     "Given a list of recent narrative turn summaries, extract the most "
     "important story facts, NPC interactions, player commitments, resource "
     "changes, and unresolved environmental hooks that occurred. "
-    "Output strictly JSON with EXACTLY these four keys:\n"
-    '{"key_events": ["<2-3 concise past-tense facts about what happened>"], '
+    "Output strictly JSON with these keys:\n"
+    '{"key_events": ["<concise past-tense facts about what happened>"], '
     '"commitments": [{"source_entity": "...", "target_entity": "...", '
     '"commitment_type": "promise|secret|debt|pact|threat", "description": "..."}], '
-    '"mechanical_summary": ["<net resource change, e.g. \'Gold: +50 (reward from merchant)\', '
-    '\'Lost: Iron Key\', \'Spent: 2 Health Potions\'>"], '
-    '"active_hooks": ["<unresolved clue/rumor/environmental detail the party has not yet acted on, '
-    'e.g. \'Scratching behind the chapel altar — uninvestigated\', '
-    '\'Wanted poster seen for a red-cloaked rogue\'>"]}'
+    '"mechanical_summary": ["<net resource change, e.g. \'Gold: +50 (reward from merchant)\'>"], '
+    '"active_hooks": ["<unresolved clue/rumor/environmental detail not yet acted on>"], '
+    '"entities": ["<named NPCs involved>"], '
+    '"location_tag": "<primary room/location name>", '
+    '"quest_ids": ["<active quest_ids touched>"]}'
     "\nRules: mechanical_summary only for EXPLICIT numeric or named resource changes. "
     "active_hooks only for leads the player has NOT yet resolved. "
-    "Omit a field if nothing qualifies (use empty list []). Max 3 items per list."
+    "Omit a field if nothing qualifies (use empty list [] or empty string)."
 )
 
 
@@ -73,36 +72,35 @@ _DIALOGUE_EXIT_KEYWORDS = frozenset({
 })
 
 
-def should_trigger_digest(session: dict, actions: list, outcome: dict) -> bool:
-    """Return True when an arc boundary has been crossed and a digest is warranted.
-
-    This is purely synchronous and cheap — just keyword matching against
-    action labels and outcome keys so it never adds latency.
-    """
-    history = session.get("history") or []
-    # Must have enough raw turns to be worth summarising
-    if len(history) < MIN_TURNS_FOR_DIGEST:
-        return False
-
+def is_arc_boundary_event(session: dict, actions: list, outcome: dict) -> bool:
+    """Return True strictly when a narrative arc boundary (travel, dialogue exit, or sub-quest completion) occurred."""
     from mechanics.narrative.intent import is_conversational_exit
     from mechanics.world.mobility import get_session_dialogue_partners
 
     for a in (actions or []):
         label_lower = str(a.get("label", "")).lower()
-        # Zone/establishment travel
         if any(kw in label_lower for kw in _TRAVEL_KEYWORDS):
             return True
-        # Dialogue exit from a named NPC conversation
         if is_conversational_exit(label_lower) or any(kw in label_lower for kw in _DIALOGUE_EXIT_KEYWORDS):
             if get_session_dialogue_partners(session):
                 return True
 
-    # Story sub-quest completed this turn
     for qu in (outcome.get("quest_updates") or []):
         if isinstance(qu, dict) and qu.get("completed_sub_quest_ids"):
             return True
 
-    # Working history is at or over the raw window — time to archive
+    return False
+
+
+def should_trigger_digest(session: dict, actions: list, outcome: dict) -> bool:
+    """Return True when an arc boundary has been crossed or raw history reached RAW_HISTORY_LIMIT."""
+    history = session.get("history") or []
+    if len(history) < MIN_TURNS_FOR_DIGEST:
+        return False
+
+    if is_arc_boundary_event(session, actions, outcome):
+        return True
+
     if len(history) >= RAW_HISTORY_LIMIT:
         return True
 
@@ -115,33 +113,69 @@ def should_trigger_digest(session: dict, actions: list, outcome: dict) -> bool:
 
 def build_deterministic_arc_digest(raw_turns: list) -> dict:
     """Build a complete Tier 2 digest dict (`key_events`, `commitments`,
-    `mechanical_summary`, `active_hooks`) 100% deterministically in Python
-    from structured turn history dicts or plain turn strings (0 LLM calls).
+    `mechanical_summary`, `active_hooks`, `entities`, `location_tag`, `quest_ids`)
+    100% deterministically in Python from structured turn history dicts or plain
+    turn strings (0 LLM calls, 0 HTTP embedding calls).
     """
     key_events: list[str] = []
     mechanical_summary: list[str] = []
     active_hooks: list[str] = []
     commitments: list[dict] = []
+    entities: list[str] = []
+    quest_ids: list[str] = []
+    location_tag: str = ""
 
-    has_structured_dicts = any(isinstance(t, dict) for t in (raw_turns or []))
+    filtered_turns = [
+        t for t in (raw_turns or [])
+        if not (isinstance(t, dict) and t.get("type") == "scene")
+    ]
+    if not filtered_turns:
+        return {
+            "key_events": [],
+            "commitments": [],
+            "mechanical_summary": [],
+            "active_hooks": [],
+            "entities": [],
+            "location_tag": "",
+            "quest_ids": [],
+        }
+
+    has_structured_dicts = any(isinstance(t, dict) for t in filtered_turns)
     if not has_structured_dicts:
-        return _extractive_fallback([str(t) for t in (raw_turns or [])])
+        fb = _extractive_fallback([str(t) for t in filtered_turns])
+        fb.setdefault("entities", [])
+        fb.setdefault("location_tag", "")
+        fb.setdefault("quest_ids", [])
+        return fb
 
-    for entry in (raw_turns or [])[-MAX_DIGEST_BULLETS:]:
+    def _add_entity(name: str, skip_name: str = "") -> None:
+        clean_n = str(name or "").strip()
+        if not clean_n or clean_n.lower() in {"none", "player", "hero", skip_name.lower()}:
+            return
+        if clean_n not in entities:
+            entities.append(clean_n)
+
+    for entry in filtered_turns:
         if not isinstance(entry, dict):
             fb = _extractive_fallback([str(entry)])
-            key_events.extend(fb.get("key_events", []))
-            mechanical_summary.extend(fb.get("mechanical_summary", []))
+            for ev in fb.get("key_events", []):
+                if ev not in key_events:
+                    key_events.append(ev)
+            for ms in fb.get("mechanical_summary", []):
+                if ms not in mechanical_summary:
+                    mechanical_summary.append(ms)
             continue
 
         char_name = str(entry.get("character_name") or "Player").strip()
         label = str(entry.get("label") or "").strip().rstrip(".")
         loc = str(entry.get("location") or "").strip()
         loc_short = loc.split("➔")[-1].strip() if "➔" in loc else loc
+        if loc_short:
+            location_tag = loc_short
         nar = str(entry.get("outcome_narrative") or entry.get("narrative") or entry.get("next_narrative") or "").strip()
         first_sent = ""
         if nar:
-            m_sent = re.split(r"(?<=[.!?])\s+", nar, maxsplit=1)
+            m_sent = re.split(r"(?<=[.!?])\s+|(?<=[。！？])\s*", nar, maxsplit=1)
             first_sent = m_sent[0].strip() if m_sent else nar[:180].strip()
             if len(first_sent) > 190:
                 first_sent = first_sent[:187].strip() + "…"
@@ -157,7 +191,16 @@ def build_deterministic_arc_digest(raw_turns: list) -> dict:
             if bullet not in key_events:
                 key_events.append(bullet[:200])
 
-        # Extract deterministic resource diffs
+        for wit in (entry.get("witnessed_by") or []):
+            _add_entity(str(wit), skip_name=char_name)
+        for npc_item in (entry.get("npcs_present") or []):
+            npc_nm = npc_item.get("name") if isinstance(npc_item, dict) else str(npc_item)
+            _add_entity(str(npc_nm or ""), skip_name=char_name)
+
+        for raw_c in (entry.get("commitments") or entry.get("new_commitments") or []):
+            if isinstance(raw_c, dict) and str(raw_c.get("description") or "").strip():
+                commitments.append(raw_c)
+
         for itm in (entry.get("items_gained") or []):
             if itm:
                 r_str = f"Gained: {itm}"
@@ -180,17 +223,21 @@ def build_deterministic_arc_digest(raw_turns: list) -> dict:
                         mechanical_summary.append(r_str)
 
         for ru in (entry.get("relationship_updates") or []):
-            if isinstance(ru, dict) and ru.get("npc_name") and int(ru.get("delta_score") or 0) != 0:
-                d_val = int(ru["delta_score"])
-                sign = "+" if d_val > 0 else ""
-                r_str = f"Affinity ({ru['npc_name']}): {sign}{d_val}"
-                if r_str not in mechanical_summary:
-                    mechanical_summary.append(r_str)
+            if isinstance(ru, dict) and ru.get("npc_name"):
+                _add_entity(str(ru["npc_name"]), skip_name=char_name)
+                if int(ru.get("delta_score") or 0) != 0:
+                    d_val = int(ru["delta_score"])
+                    sign = "+" if d_val > 0 else ""
+                    r_str = f"Affinity ({ru['npc_name']}): {sign}{d_val}"
+                    if r_str not in mechanical_summary:
+                        mechanical_summary.append(r_str)
 
-        # Extract active hooks from quest updates
         for qu in (entry.get("quest_updates") or []):
             if not isinstance(qu, dict):
                 continue
+            q_id = str(qu.get("quest_id") or qu.get("title") or "").strip()
+            if q_id and q_id not in quest_ids:
+                quest_ids.append(q_id)
             q_status = str(qu.get("status") or "Active")
             q_title = str(qu.get("title") or qu.get("quest_id") or "").strip()
             q_clue = str(qu.get("current_clues") or qu.get("new_clue") or "").strip()
@@ -199,12 +246,53 @@ def build_deterministic_arc_digest(raw_turns: list) -> dict:
                 if h_str not in active_hooks:
                     active_hooks.append(h_str[:180])
 
+    max_bullets = max(MAX_WINDOW_DIGEST_BULLETS, len(filtered_turns))
     return {
-        "key_events": key_events[:MAX_DIGEST_BULLETS],
+        "key_events": key_events[-max_bullets:],
         "commitments": commitments,
-        "mechanical_summary": mechanical_summary[:MAX_DIGEST_BULLETS],
-        "active_hooks": active_hooks[:MAX_DIGEST_BULLETS],
+        "mechanical_summary": mechanical_summary[-MAX_WINDOW_DIGEST_BULLETS:],
+        "active_hooks": active_hooks[-MAX_WINDOW_DIGEST_BULLETS:],
+        "entities": entities,
+        "location_tag": location_tag,
+        "quest_ids": quest_ids,
     }
+
+
+def format_digest_bullets_and_commitments(result: dict) -> tuple[list[str], list[dict]]:
+    """Convert a digest result dict into tagged bullet strings and commitment records."""
+    bullets: list[str] = []
+    commitments: list[dict] = []
+    if not isinstance(result, dict):
+        return bullets, commitments
+
+    raw_bullets = result.get("key_events") or []
+    if isinstance(raw_bullets, list):
+        cap_events = max(MAX_WINDOW_DIGEST_BULLETS, len(raw_bullets))
+        bullets = [str(b).strip() for b in raw_bullets if b and str(b).strip()][:cap_events]
+
+    raw_mech = result.get("mechanical_summary") or []
+    if isinstance(raw_mech, list):
+        for item in raw_mech[:MAX_WINDOW_DIGEST_BULLETS]:
+            text = str(item).strip()
+            if text:
+                tagged = f"[RESOURCE] {text}" if not text.startswith("[RESOURCE]") else text
+                bullets.append(tagged)
+
+    raw_hooks = result.get("active_hooks") or []
+    if isinstance(raw_hooks, list):
+        for item in raw_hooks[:MAX_WINDOW_DIGEST_BULLETS]:
+            text = str(item).strip()
+            if text:
+                tagged = f"[HOOK] {text}" if not text.startswith("[HOOK]") else text
+                bullets.append(tagged)
+
+    raw_commits = result.get("commitments") or []
+    if isinstance(raw_commits, list):
+        for c in raw_commits:
+            if isinstance(c, dict) and c.get("description"):
+                commitments.append(c)
+
+    return bullets, commitments
 
 
 async def generate_arc_digest(
@@ -215,22 +303,18 @@ async def generate_arc_digest(
 ) -> tuple[list[str], list[dict]]:
     """Distil ``raw_turns`` into permanent narrative bullets and commitment records.
 
-    In the deterministic-first architecture, builds the digest directly in Python
-    via `build_deterministic_arc_digest` (0 LLM calls). If `llm_client.call_llm_json`
-    is explicitly mocked in a unit test (or `use_deterministic=False`), honors the
-    LLM/mock response for backward compatibility.
+    Uses `build_deterministic_arc_digest` directly when `use_deterministic=True`
+    (0 LLM calls, 0 HTTP embedding calls). Only calls `llm_client.call_llm_json`
+    when `use_deterministic=False` is explicitly passed.
     """
     if not raw_turns:
         return [], []
 
-    import llm_client  # lazy import to avoid circular deps at module load time
-    from unittest.mock import AsyncMock, MagicMock
-
-    is_llm_mocked = isinstance(getattr(llm_client, "call_llm_json", None), (AsyncMock, MagicMock))
-
-    if use_deterministic and not is_llm_mocked:
+    if use_deterministic:
         result = build_deterministic_arc_digest(raw_turns)
     else:
+        import llm_client  # lazy import to avoid circular deps at module load time
+
         turns_text = "\n".join(f"- {t}" for t in raw_turns)
         user_msg = (
             f"Recent adventure turns to archive (oldest first):\n{turns_text}\n\n"
@@ -248,58 +332,36 @@ async def generate_arc_digest(
         except Exception as exc:
             log.warning("Arc digest LLM call failed (%s); falling back to deterministic summary.", exc)
             result = build_deterministic_arc_digest(raw_turns)
+        else:
+            if isinstance(result, dict):
+                det_meta = build_deterministic_arc_digest(raw_turns)
+                merged_ent = list(dict.fromkeys([
+                    *(str(e).strip() for e in (result.get("entities") or []) if e and str(e).strip()),
+                    *(str(e).strip() for e in (det_meta.get("entities") or []) if e and str(e).strip()),
+                ]))
+                merged_qids = list(dict.fromkeys([
+                    *(str(q).strip() for q in (result.get("quest_ids") or []) if q and str(q).strip()),
+                    *(str(q).strip() for q in (det_meta.get("quest_ids") or []) if q and str(q).strip()),
+                ]))
+                result["entities"] = merged_ent
+                if not str(result.get("location_tag") or "").strip():
+                    result["location_tag"] = str(det_meta.get("location_tag") or "")
+                result["quest_ids"] = merged_qids
 
-    bullets: list[str] = []
-    commitments: list[dict] = []
+    bullets, commitments = format_digest_bullets_and_commitments(result)
 
-    if isinstance(result, dict):
-        # -- key_events: plain narrative bullets (no prefix)
-        raw_bullets = result.get("key_events") or []
-        if isinstance(raw_bullets, list):
-            bullets = [str(b).strip() for b in raw_bullets if b and str(b).strip()][:MAX_DIGEST_BULLETS]
+    import db as _db
 
-        # -- mechanical_summary: resource diffs tagged [RESOURCE]
-        raw_mech = result.get("mechanical_summary") or []
-        if isinstance(raw_mech, list):
-            for item in raw_mech[:MAX_DIGEST_BULLETS]:
-                text = str(item).strip()
-                if text:
-                    tagged = f"[RESOURCE] {text}" if not text.startswith("[RESOURCE]") else text
-                    bullets.append(tagged)
-
-        # -- active_hooks: unresolved leads tagged [HOOK]
-        raw_hooks = result.get("active_hooks") or []
-        if isinstance(raw_hooks, list):
-            for item in raw_hooks[:MAX_DIGEST_BULLETS]:
-                text = str(item).strip()
-                if text:
-                    tagged = f"[HOOK] {text}" if not text.startswith("[HOOK]") else text
-                    bullets.append(tagged)
-
-        # -- commitments: structured promise/debt records
-        raw_commits = result.get("commitments") or []
-        if isinstance(raw_commits, list):
-            for c in raw_commits:
-                if isinstance(c, dict) and c.get("description"):
-                    commitments.append(c)
-
-    # Persist results
     if bullets:
         try:
-            import asyncio
-            from llm_client import get_embedding
-            embeddings = await asyncio.gather(*(get_embedding(b) for b in bullets))
-        except Exception as e:
-            log.warning(f"Failed to fetch embeddings for digest: {e}")
-            embeddings = None
-
-        try:
-            db.append_chapter_digest(
+            _db.append_chapter_digest(
                 session_id=session_id,
                 turn_start=turn_start,
                 turn_end=turn_start + len(raw_turns) - 1,
                 bullets=bullets,
-                embeddings=embeddings,
+                entities=result.get("entities") if isinstance(result, dict) else None,
+                location_tag=str(result.get("location_tag") or "") if isinstance(result, dict) else "",
+                quest_ids=result.get("quest_ids") if isinstance(result, dict) else None,
             )
         except Exception as exc:
             log.warning("Failed to persist chapter digest: %s", exc)
@@ -307,16 +369,14 @@ async def generate_arc_digest(
     if commitments:
         try:
             turn_number = turn_start + len(raw_turns)
-            db.bulk_add_commitments(session_id, commitments, turn_number=turn_number)
+            _db.bulk_add_commitments(session_id, commitments, turn_number=turn_number)
         except Exception as exc:
             log.warning("Failed to persist commitments: %s", exc)
 
-    # Trigger Tier 3 compaction if Tier 2 is getting bloated
     try:
-        from mechanics.system.memory.compaction import schedule_tier3_compaction_if_needed
-        schedule_tier3_compaction_if_needed(session_id)
+        _db.run_deterministic_tier3_compaction(session_id)
     except Exception as exc:
-        log.warning("Failed to schedule tier 3 compaction: %s", exc)
+        log.warning("Failed to run tier 3 compaction: %s", exc)
 
     return bullets, commitments
 

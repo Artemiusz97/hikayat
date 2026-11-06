@@ -489,7 +489,7 @@ def _resolve_sibling_relation(m1_grade: str, m1_gender: str, m2_grade: str) -> s
         return "Twin brother" if is_male else "Twin sister"
 
 
-def generate_campus_directory(session_id: int, scen_key: str = "high_school_drama") -> List[Dict[str, Any]]:
+def generate_campus_directory(session_id: int, scen_key: str = "high_school_drama", player_gender: str = "") -> List[Dict[str, Any]]:
     """
     Generates a full 88-character persistent High School & Town directory:
     - 16 Faculty & Campus Staff
@@ -532,6 +532,14 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
     used_names: set[str] = set()
     directory: List[Dict[str, Any]] = []
 
+    if not player_gender and session_id:
+        try:
+            player_gender = db.get_session_player_gender(session_id)
+        except Exception:
+            player_gender = ""
+    from scenario_data import should_skew_female_npcs
+    skew_female = should_skew_female_npcs(scen_key, player_gender)
+
     from mechanics.social.races import normalize_race
 
     # Sibling surname pools (to link 8 sibling pairs across homeroom, upperclassmen, and underclassmen)
@@ -563,7 +571,7 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
 
     # 1. Faculty & Staff (16)
     for idx, f_tmpl in enumerate(FACULTY_TEMPLATES):
-        g = f_tmpl["gender"]
+        g = ("female" if (idx % 3 != 2) else "male") if skew_female else f_tmpl["gender"]
         f_role = f_tmpl["role"]
         if "Chemistry" in f_role:
             title_prefix = "Dr."
@@ -625,7 +633,7 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
     homeroom_fac = f"{school_name} ➔ {classroom_name} ➔ Student Desks Cluster"
     secondary_courtyard = f"{commons_name} ➔ Central Courtyard ➔ Courtyard Fountain"
     for idx, h_tmpl in enumerate(HOMEROOM_TEMPLATES):
-        is_female = (idx % 2 == 1)
+        is_female = (idx % 3 != 2) if skew_female else (idx % 2 == 1)
         g = "female" if is_female else "male"
 
         # Link first 4 homeroom peers as siblings to family lineages 0..3
@@ -683,7 +691,7 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
 
     # 3. Upperclassmen (16)
     for idx, u_tmpl in enumerate(UPPERCLASSMEN_TEMPLATES):
-        is_female = ((idx + 1) % 2 == 1)
+        is_female = ((idx + 1) % 3 != 2) if skew_female else ((idx + 1) % 2 == 1)
         g = "female" if is_female else "male"
 
         if idx < 4:
@@ -740,7 +748,7 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
 
     # 4. Underclassmen (16)
     for idx, un_tmpl in enumerate(UNDERCLASSMEN_TEMPLATES):
-        is_female = (idx % 2 == 0)
+        is_female = (idx % 3 != 2) if skew_female else (idx % 2 == 0)
         g = "female" if is_female else "male"
 
         # Link first 8 freshmen/sophomores as younger siblings to family lineages 0..7
@@ -829,7 +837,7 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
         nsfw_club_name = get_session_nsfw_club_name(session_id, scen_key)
         nsfw_hq_fac = f"{abandoned_name} ➔ Velvet Basement Salon ➔ Candlelit Velvet Divan Lounge"
         for idx, nf_tmpl in enumerate(NSFW_FACTION_TEMPLATES):
-            g = nf_tmpl["gender"]
+            g = ("female" if (idx % 3 != 2) else "male") if skew_female else nf_tmpl["gender"]
             full_name = ""
             for attempt in range(25):
                 cand = namegen.generate_person_name(scen_key, gender=g, seed=seed_val + 340 + idx * 19 + attempt * 113)
@@ -877,24 +885,42 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
         family_races=family_races,
         campus_directory=directory,
         fmt_kwargs=town_fmt,
+        player_gender=player_gender,
     )
     directory.extend(town_entries)
 
     return directory
 
 
-def ensure_school_directory_exists(session: dict) -> list[dict]:
+def ensure_school_directory_exists(session: int | dict | str | None, player_gender: str = "") -> list[dict]:
     """
     Ensures that the full Campus & Town directory is seeded for a high school session
     (94 characters in SFW; 101 in NSFW), non-destructively backfilling older 50- or 88-character
     save files with new Campus staff/students, student part-time shifts, Town proprietors,
     and the `loc_city_square` spatial hub.
     """
-    if not session or not session.get("id"):
+    if not session:
         return []
 
-    sess_id = session["id"]
-    scen_key = session.get("scenario", "high_school_drama")
+    if isinstance(session, dict):
+        sess_dict = session
+        sess_id = sess_dict.get("id")
+    else:
+        try:
+            sess_id = int(session)
+        except (ValueError, TypeError):
+            return []
+        sess_dict = db.get_session(sess_id) or {}
+
+    if not sess_id:
+        return []
+
+    scen_key = sess_dict.get("scenario", "high_school_drama")
+    if not player_gender:
+        try:
+            player_gender = db.get_session_player_gender(sess_dict or sess_id)
+        except Exception:
+            player_gender = ""
 
     from mechanics.social.town_roster import (
         assign_student_part_time_shifts,
@@ -903,6 +929,14 @@ def ensure_school_directory_exists(session: dict) -> list[dict]:
         get_town_format_kwargs,
     )
     import scenario_data
+    if scenario_data.is_anomalous_high_school_scenario(scen_key):
+        existing = db.get_school_roster(sess_id)
+        if existing and len(existing) >= 60:
+            return existing
+        seeded = generate_campus_directory(sess_id, scen_key=scen_key, player_gender=player_gender)
+        if not existing:
+            db.save_school_roster(sess_id, seeded)
+        return existing or seeded
     ensure_high_school_transit_plaza_seeded(sess_id, scen_key)
 
     expected_campus = 64 + (len(NSFW_FACTION_TEMPLATES) if scenario_data.is_nsfw_scenario(scen_key) else 0)
@@ -910,7 +944,7 @@ def ensure_school_directory_exists(session: dict) -> list[dict]:
 
     existing = db.get_school_roster(sess_id)
     if not existing or len(existing) < 30:
-        seeded = generate_campus_directory(sess_id, scen_key=scen_key)
+        seeded = generate_campus_directory(sess_id, scen_key=scen_key, player_gender=player_gender)
         db.save_school_roster(sess_id, seeded)
         existing = db.get_school_roster(sess_id)
     elif len(existing) < expected_total:
@@ -926,7 +960,7 @@ def ensure_school_directory_exists(session: dict) -> list[dict]:
             db.save_school_roster(sess_id, modified_existing)
 
         # 2. Backfill missing Campus templates & all 24 Town templates without overwriting existing rows
-        ref_dir = generate_campus_directory(sess_id, scen_key=scen_key)
+        ref_dir = generate_campus_directory(sess_id, scen_key=scen_key, player_gender=player_gender)
         existing_roles = {str(r.get("role", "")).strip().lower() for r in existing}
         existing_names = {str(r.get("name", "")).strip().lower() for r in existing}
         existing_ids = {str(r.get("npc_id", "")).strip().lower() for r in existing}
@@ -1015,6 +1049,20 @@ def ensure_school_directory_exists(session: dict) -> list[dict]:
         ensure_canonical_peer_couples(sess_id, scen_key=scen_key)
     except Exception:
         pass
+
+    # Cleanse any legacy "club" data on regular adults, citizens, and staff
+    dirty_clubs = False
+    for r in (existing or []):
+        grade_clean = str(r.get("grade") or "").strip().lower()
+        srt_clean = str(r.get("social_role_type") or "").strip().lower()
+        if (grade_clean in ("citizen", "adult", "civilian", "faculty", "staff", "youth peer") or srt_clean in ("adult_service", "citizen")) and r.get("club"):
+            r["club"] = ""
+            dirty_clubs = True
+    if dirty_clubs:
+        try:
+            db.save_school_roster(sess_id, existing)
+        except Exception:
+            pass
 
     return existing
 
@@ -1615,12 +1663,14 @@ def _score_ambient_student_candidate(
         if cand_sib and cand_sib == c_name.lower():
             score += 150 * weight_mult
         elif cand_sur:
-            try:
-                c_sur = namegen.normalize_base_surname(namegen.extract_first_and_last_name(c_name)[1]).lower()
-                if c_sur and c_sur == cand_sur:
-                    score += 150 * weight_mult
-            except Exception:
-                pass
+            c_sur = contact.get("_sur")
+            if not c_sur:
+                try:
+                    c_sur = namegen.normalize_base_surname(namegen.extract_first_and_last_name(c_name)[1]).lower()
+                except Exception:
+                    c_sur = ""
+            if c_sur and c_sur == cand_sur:
+                score += 150 * weight_mult
 
         # Check club match
         c_club = str(contact.get("club", "")).lower()
@@ -1893,8 +1943,9 @@ def get_facility_ambient_characters(
                 safe_active_names.add(str(pm["name"]).lower().strip())
 
     # Ensure roster exists in database
-    ensure_school_directory_exists(sess or {"id": session_id, "scenario": scen_key})
-    roster = db.get_school_roster(session_id)
+    roster = ensure_school_directory_exists(sess or {"id": session_id, "scenario": scen_key})
+    if not roster:
+        roster = db.get_school_roster(session_id)
     if not roster:
         return []
 
@@ -1928,6 +1979,12 @@ def get_facility_ambient_characters(
 
     # 2. Score and rank candidates
     established_contacts = db.get_contacts(session_id) or []
+    for contact in established_contacts:
+        c_name = str(contact.get("name", "")).strip()
+        try:
+            contact["_sur"] = namegen.normalize_base_surname(namegen.extract_first_and_last_name(c_name)[1]).lower()
+        except Exception:
+            contact["_sur"] = ""
     scored_candidates = []
     for cand in eligible_candidates:
         score = _score_ambient_student_candidate(
@@ -2053,16 +2110,40 @@ def hydrate_school_character(session_id: int, char_dict: dict) -> bool:
     char_app = char_dict.get("appearance")
     if not char_app or not isinstance(char_app, dict):
         from mechanics.social.persona import normalize_appearance
+        is_provocative = False
         if grade == "Citizen":
             outfit_default = f"Practical {clean_role.lower()} attire and neat town workwear"
         elif grade == "Youth Peer":
             outfit_default = "Rival high school crimson blazer uniform" if "rival" in clean_role.lower() else "Trendy casual youth streetwear"
         elif grade == "Faculty":
-            outfit_default = f"Professional faculty attire at {school_name}"
+            r_low = clean_role.lower()
+            if any(k in r_low for k in ("nurse", "medical", "clinic")):
+                outfit_default = f"Crisp medical scrubs and clean lab coat at {school_name}"
+            elif any(k in r_low for k in ("coach", "athletic", "gym", "pe", "sports")):
+                outfit_default = f"Official {school_name} faculty athletic tracksuit and whistle lanyard"
+            elif any(k in r_low for k in ("science", "biology", "chemistry", "physics", "lab")):
+                outfit_default = f"Professional button-down, tailored trousers, and white laboratory coat at {school_name}"
+            elif any(k in r_low for k in ("principal", "dean", "vice-principal")):
+                outfit_default = f"Immaculate formal academic suit and pressed dress attire at {school_name}"
+            else:
+                outfit_default = f"Tailored professional faculty blazer and pressed slacks at {school_name}"
         else:
-            outfit_default = f"Standard {school_name} school uniform"
+            from scenario_data import is_nsfw_scenario
+            is_nsfw = is_nsfw_scenario(scen_key)
+            openness = int(char_dict.get("openness", 50) or 50) if isinstance(char_dict.get("openness"), (int, float, str)) and str(char_dict.get("openness")).isdigit() else 50
+            traits = [str(t).lower() for t in (char_dict.get("traits") or [])]
+            is_provocative = is_nsfw and (openness >= 70 or any(t in ("bold", "flirtatious", "rebellious", "exhibitionist", "uninhibited") for t in traits))
+
+            if is_provocative:
+                if str(char_gender).lower() == "female":
+                    outfit_default = f"Micro-pleated school skirt and skin-tight unbuttoned uniform blouse at {school_name}"
+                else:
+                    outfit_default = f"Half-unbuttoned school uniform shirt and low-slung tailored slacks at {school_name}"
+            else:
+                outfit_default = f"Standard {school_name} school uniform"
         base_app = {
-            "outfit_style": outfit_default
+            "outfit_style": outfit_default,
+            "social_flags": ["provocative"] if is_provocative else []
         }
         if sib:
             sib_c = db.get_contact(session_id, sib.lower().replace(" ", "_"))
@@ -2078,21 +2159,28 @@ def hydrate_school_character(session_id: int, char_dict: dict) -> bool:
             scen_key=scen_key,
             desc=full_desc
         )
+        if base_app.get("social_flags"):
+            char_app["social_flags"] = list(base_app["social_flags"])
 
     mannerisms_val = char_dict.get("mannerisms") or extracted_mannerism or ""
 
     is_faculty = (grade == "Faculty")
     is_citizen = (grade == "Citizen")
     is_youth_peer = (grade == "Youth Peer")
+    is_family = bool(char_dict.get("is_adult_family") or char_dict.get("is_family") or char_dict.get("household_role") in ("father", "mother", "guardian") or sib)
+    social_role_type = (
+        "family_relative" if (is_family and (is_faculty or is_citizen)) else (
+            char_dict.get("social_role_type") or (
+                "faculty_staff" if is_faculty else ("adult_service" if is_citizen else "student_peer")
+            )
+        )
+    )
+    from mechanics.social.roster_tags import derive_age_group
+    age_grp = char_dict.get("age_group") or derive_age_group(grade=grade, role=clean_role, social_role_type=social_role_type, scen_key=scen_key, is_family=is_family)
     contact_role = f"Faculty / {clean_role}" if is_faculty else clean_role
     contact_disposition = (
         "faculty_mentor" if is_faculty else (
             "town_citizen" if is_citizen else ("friendly_peer" if sib else "neutral_student")
-        )
-    )
-    social_role_type = (
-        "faculty_staff" if is_faculty else (
-            "adult_service" if is_citizen else "student_peer"
         )
     )
 
@@ -2117,36 +2205,51 @@ def hydrate_school_character(session_id: int, char_dict: dict) -> bool:
         )
         formal_title = f"{f_title} {f_base}".strip()
 
-    db.upsert_contact(
-        session_id=session_id,
-        npc_id=npc_id,
+    from mechanics.social.relationships import is_contact_eligible
+    can_be_contact = is_contact_eligible(
         name=name,
-        character_id=0,
-        delta_score=0,
-        race=char_race,
-        gender=char_gender,
-        appearance=char_app,
-        basic_info={
-            "location": fac or school_name,
-            "primary_facility": char_dict.get("primary_facility", "") or fac or school_name,
-            "secondary_facility": char_dict.get("secondary_facility", ""),
-            "role": contact_role,
-            "grade": grade,
-            "club": club,
-            "clique": clique,
-            "social_role_type": social_role_type,
-            "description": full_desc,
-            "sibling_name": sib,
-            "mannerisms": mannerisms_val,
-            "speech_style": char_dict.get("speech_style", ""),
-            "disposition": contact_disposition,
-            "is_faculty": is_faculty,
-            "is_youth_peer": is_youth_peer,
-            "formal_title": formal_title,
-            "initial_activity": char_dict.get("activity", "")
-        },
-        track="platonic"
+        role=contact_role,
+        grade=grade,
+        social_role_type=social_role_type,
+        age_group=age_grp,
+        is_adult_family=is_family,
+        scenario=scen_key,
+        session_id=session_id,
     )
+
+    if can_be_contact:
+        db.upsert_contact(
+            session_id=session_id,
+            npc_id=npc_id,
+            name=name,
+            character_id=0,
+            delta_score=0,
+            race=char_race,
+            gender=char_gender,
+            appearance=char_app,
+            basic_info={
+                "location": fac or school_name,
+                "primary_facility": char_dict.get("primary_facility", "") or fac or school_name,
+                "secondary_facility": char_dict.get("secondary_facility", ""),
+                "role": contact_role,
+                "grade": grade,
+                "club": club,
+                "clique": clique,
+                "social_role_type": social_role_type,
+                "age_group": age_grp,
+                "is_adult_family": is_family,
+                "description": full_desc,
+                "sibling_name": sib,
+                "mannerisms": mannerisms_val,
+                "speech_style": char_dict.get("speech_style", ""),
+                "disposition": contact_disposition,
+                "is_faculty": is_faculty,
+                "is_youth_peer": is_youth_peer,
+                "formal_title": formal_title,
+                "initial_activity": char_dict.get("activity", "")
+            },
+            track="platonic"
+        )
 
     # Reciprocal sibling sync into contacts relations and relationship graph
     if sib:
@@ -2178,7 +2281,7 @@ def hydrate_school_character(session_id: int, char_dict: dict) -> bool:
     return True
 
 
-def generate_dynamic_student_peer(session_id: int, scen_key: str = "high_school_drama", seed: int | None = None) -> dict:
+def generate_dynamic_student_peer(session_id: int, scen_key: str = "high_school_drama", seed: int | None = None, player_gender: str = "") -> dict:
     """
     Generates an authentic, quirky student peer on the fly and persists them into school_directory.
     Used for 'Find Friends' / peer discovery when initial directory candidates are already befriended.
@@ -2189,7 +2292,17 @@ def generate_dynamic_student_peer(session_id: int, scen_key: str = "high_school_
     rng = random.Random(seed) if seed is not None else random
     grades = ["Sophomore", "Junior", "Senior", "Freshman"]
     grade = rng.choice(grades)
-    is_female = rng.choice([True, False])
+    if not player_gender and session_id:
+        try:
+            player_gender = db.get_session_player_gender(session_id)
+        except Exception:
+            player_gender = ""
+    from scenario_data import should_skew_female_npcs
+    skew_female = should_skew_female_npcs(scen_key, player_gender)
+    if skew_female:
+        is_female = (rng.random() < (2.0 / 3.0))
+    else:
+        is_female = rng.choice([True, False])
     g = "female" if is_female else "male"
 
     seed_val = (int(session_id or 1234) * 37 + len(existing) * 19 + (seed if seed is not None else random.randint(1, 999)))

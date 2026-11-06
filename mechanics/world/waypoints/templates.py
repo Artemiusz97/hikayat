@@ -162,20 +162,92 @@ ARCHETYPE_WAYPOINT_TEMPLATES: dict[str, list[dict]] = {
 }
 
 
+SCHOOL_ARCHETYPE_WAYPOINT_TEMPLATES: dict[str, list[dict]] = {
+    "investigation": [
+        {"stage_index": 1, "stage_label": "Head to the disturbance site and inspect the area", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": "Search for misplaced notes, discarded belongings, or witness clues", "target_location": "", "target_npc": "", "completion_trigger": "skill_check", "resource_target": 3},
+        {"stage_index": 3, "stage_label": "Analyze the findings and identify who was behind the incident", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+    ],
+    "infiltration": [
+        {"stage_index": 1, "stage_label": "Slip past hall monitors and staff toward the restricted wing", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": "Search quiet archives or student lockers for confidential records", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+        {"stage_index": 3, "stage_label": "Secure the evidence and slip away before staff notice", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+    ],
+    "diplomacy": [
+        {"stage_index": 1, "stage_label": "Seek out key student witnesses and representatives", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": "De-escalate tension and press for honest testimonies", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+        {"stage_index": 3, "stage_label": "Negotiate a formal understanding or club cooperation agreement", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+    ],
+    "academic": [
+        {"stage_index": 1, "stage_label": "Consult with the instructor or study lead regarding the coursework issue", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": "Gather syllabus materials and review curriculum archives", "target_location": "", "target_npc": "", "completion_trigger": "skill_check", "resource_target": 3},
+        {"stage_index": 3, "stage_label": "Complete the practical demonstration and submit the finalized work", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+    ],
+    "gossip control": [
+        {"stage_index": 1, "stage_label": "Trace the circulating rumors back to their campus origin", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": "Uncover counter-evidence or confront the student spreading rumors", "target_location": "", "target_npc": "", "completion_trigger": "skill_check", "resource_target": 3},
+        {"stage_index": 3, "stage_label": "Dispel the rumors and restore your peer standing", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+    ],
+    "club showdown": [
+        {"stage_index": 1, "stage_label": "Rendezvous with club representatives to assess the rival challenge", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": "Represent the club in the showdown trial against your rivals", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+        {"stage_index": 3, "stage_label": "Secure the decisive club victory and formalize terms", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+    ],
+    "romance": [
+        {"stage_index": 1, "stage_label": "Arrange a discreet rendezvous at a quiet campus spot", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": "Engage in genuine conversation and overcome awkward tension", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+        {"stage_index": 3, "stage_label": "Share a meaningful moment and deepen your bond", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+    ],
+}
+
+CYBER_ARCHETYPE_WAYPOINT_TEMPLATES: dict[str, list[dict]] = {
+    "investigation": [
+        {"stage_index": 1, "stage_label": "Jack into the local subnet and scan for altered forensic logs", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": "Decrypt corrupted data shards and isolate biometric signatures", "target_location": "", "target_npc": "", "completion_trigger": "skill_check", "resource_target": 3},
+        {"stage_index": 3, "stage_label": "Reconstruct the breach timeline and identify the operative", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+    ],
+    "infiltration": [
+        {"stage_index": 1, "stage_label": "Bypass perimeter ICE and reach the service conduit", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": "Slice corporate lockouts and slip into the terminal core", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+        {"stage_index": 3, "stage_label": "Extract the unencrypted datapad and sever the trace", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+    ],
+    "diplomacy": [
+        {"stage_index": 1, "stage_label": "Meet the fixer in the back booths of the neon lounge", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": "Barter encrypted credentials and establish trust with the syndicate", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+        {"stage_index": 3, "stage_label": "Lock in the contract terms and receive the decryption key", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+    ],
+}
+
 def get_archetype_fallback_waypoints(
     quest_type: str,
     target_location: str = "",
     target_npc: str = "",
     intermediate_location: str = "",
-    final_location: str = ""
+    final_location: str = "",
+    scen_key: str = "",
 ) -> list[dict]:
-    """Returns default 3-stage waypoint templates for a given quest archetype, supporting multi-location routing."""
-    q_lower = (quest_type or "").lower()
+    """Returns scenario-specialized 3-stage waypoint templates for a given quest archetype, supporting multi-location routing."""
+    q_lower = (quest_type or "").lower().strip()
     template = None
-    for key in ARCHETYPE_WAYPOINT_TEMPLATES:
-        if key in q_lower:
-            template = ARCHETYPE_WAYPOINT_TEMPLATES[key]
-            break
+    from mechanics.world.locations import is_school_scenario
+    if is_school_scenario(scen_key):
+        for key in SCHOOL_ARCHETYPE_WAYPOINT_TEMPLATES:
+            if key in q_lower:
+                template = SCHOOL_ARCHETYPE_WAYPOINT_TEMPLATES[key]
+                break
+        if template is None:
+            template = SCHOOL_ARCHETYPE_WAYPOINT_TEMPLATES["investigation"]
+    elif "cyber" in str(scen_key).lower():
+        for key in CYBER_ARCHETYPE_WAYPOINT_TEMPLATES:
+            if key in q_lower:
+                template = CYBER_ARCHETYPE_WAYPOINT_TEMPLATES[key]
+                break
+
+    if template is None:
+        for key in ARCHETYPE_WAYPOINT_TEMPLATES:
+            if key in q_lower:
+                template = ARCHETYPE_WAYPOINT_TEMPLATES[key]
+                break
     if template is None:
         template = ARCHETYPE_WAYPOINT_TEMPLATES["default"]
     import copy
@@ -194,6 +266,14 @@ def get_archetype_fallback_waypoints(
         if not stage.get("target_npc") and target_npc:
             stage["target_npc"] = target_npc
     return result
+
+
+def _safe_resource_target(raw: object) -> int:
+    """Coerces LLM-provided resource targets ("", None, "3 samples") to a non-negative int."""
+    try:
+        return max(0, int(str(raw or 0).strip().split()[0]))
+    except (TypeError, ValueError, IndexError):
+        return 0
 
 
 def ensure_multi_stage_waypoints(
@@ -238,7 +318,8 @@ def ensure_multi_stage_waypoints(
             target_location=default_loc,
             intermediate_location=secondary_loc,
             final_location=fin_loc,
-            target_npc=client_npc if client_npc else ""
+            target_npc=client_npc if client_npc else "",
+            scen_key=scen_key or ""
         )
         if client_npc and res:
             res[-1]["target_npc"] = client_npc
@@ -270,7 +351,7 @@ def ensure_multi_stage_waypoints(
                 "follow_npc_schedule": int(bool(wp.get("follow_npc_schedule", 1 if t_npc else 0))),
                 "required_item": str(wp.get("required_item", "") or "")[:100],
                 "completion_trigger": str(wp.get("completion_trigger", "skill_check" if idx > 1 else "arrival")),
-                "resource_target": int(wp.get("resource_target", 0)) if any(k in str(wp.get("stage_label", "")).lower() for k in ("harvest", "gather", "collect", "fragments", "clues", "countermeasures", "destroy the spawn", "samples", "parts", "items", "ore", "herbs")) else 0,
+                "resource_target": _safe_resource_target(wp.get("resource_target")) if any(k in str(wp.get("stage_label", "")).lower() for k in ("harvest", "gather", "collect", "fragments", "clues", "countermeasures", "destroy the spawn", "samples", "parts", "items", "ore", "herbs")) else 0,
             })
 
     if len(validated) == 1:

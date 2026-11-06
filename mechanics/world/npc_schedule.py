@@ -265,18 +265,19 @@ def _resolve_student_classroom_node_and_path(
     """Resolves the exclusive grade classroom `(node_id, fallback_path)` for a High School student."""
     basic = npc.get("basic_info") if isinstance(npc.get("basic_info"), dict) else {}
     grade_low = str(npc.get("grade") or basic.get("grade") or "").strip().lower()
-    clique_low = str(npc.get("clique") or basic.get("clique") or "").strip().lower()
     pf_low = str(primary_fac or "").lower()
 
-    if grade_low == "freshman" or "freshman classroom" in pf_low:
+    if any(k in grade_low for k in ("freshman", "grade 9", "9th", "year 1", "1st")) or "freshman classroom" in pf_low or "1-a" in pf_low:
         return "loc_freshman_class", "Main Academy Campus ➔ Main Campus Building ➔ Freshman Classroom 1-A"
-    if grade_low == "sophomore" or "sophomore classroom" in pf_low:
+    if any(k in grade_low for k in ("sophomore", "grade 10", "10th", "year 2", "2nd")) or "sophomore classroom" in pf_low or "2-a" in pf_low:
+        if "2-b" in pf_low or "homeroom" in pf_low:
+            return "loc_homeroom", "Main Academy Campus ➔ Main Campus Building ➔ Classroom 2-B (Homeroom)"
         return "loc_sophomore_class", "Main Academy Campus ➔ Main Campus Building ➔ Sophomore Classroom 2-A"
-    if grade_low == "senior" or "senior classroom" in pf_low:
+    if any(k in grade_low for k in ("senior", "grade 12", "12th", "year 4", "4th")) or "senior classroom" in pf_low or "4-a" in pf_low:
         return "loc_senior_class", "Main Academy Campus ➔ Main Campus Building ➔ Senior Classroom 4-A"
-    if "junior classroom 3-b" in pf_low or (
-        grade_low == "junior" and clique_low in ("upperclassmen", "hedonists") and "homeroom" not in pf_low
-    ):
+    if any(k in grade_low for k in ("junior", "grade 11", "11th", "year 3", "3rd")) or "junior classroom" in pf_low or "3-b" in pf_low:
+        if "2-b" in pf_low or "homeroom" in pf_low:
+            return "loc_homeroom", "Main Academy Campus ➔ Main Campus Building ➔ Classroom 2-B (Homeroom)"
         return "loc_junior_class", "Main Academy Campus ➔ Main Campus Building ➔ Junior Classroom 3-B"
     hr_path = primary_fac if "homeroom" in pf_low else "Main Academy Campus ➔ Main Campus Building ➔ Homeroom Classroom"
     return "loc_homeroom", hr_path
@@ -296,6 +297,8 @@ def _resolve_school_faculty_class_station(
                 return c_nid, c_path
 
     comb = f"{role} {primary_fac}".lower()
+    if any(k in comb for k in ("security", "gatekeeper", "patrol", "sentry")) or ("guard" in comb and "basketball" not in comb):
+        return "loc_school_gate", "Main Academy Campus ➔ Main Campus Building ➔ School Main Gates"
     if "nurse" in comb or ("infirmary" in comb and "boarded" not in comb):
         return "loc_school_infirmary", "Main Academy Campus ➔ Main Campus Building ➔ School Infirmary"
     if "librarian" in comb or "library" in comb:
@@ -304,13 +307,13 @@ def _resolve_school_faculty_class_station(
         return "loc_cafeteria", "Main Academy Campus ➔ Student Commons & Central Plaza ➔ Campus Dining Hall & Cafeteria"
     if any(k in comb for k in ("custodian", "groundskeeper", "janitor")):
         return "loc_greenhouse", "Main Academy Campus ➔ Student Commons & Central Plaza ➔ Botanical Glasshouse"
-    if any(k in comb for k in ("science", "chem", "robotics", "physics", "lab")):
+    if re.search(r"\b(?:science|chem\w*|robotics|physics|lab|labs)\b", comb):
         return "loc_science_lab", "Main Academy Campus ➔ Main Campus Building ➔ Chemistry & Science Lab"
     if any(k in comb for k in ("coach", "pe ", "p.e.", "physical")):
         return "loc_gymnasium", "Main Academy Campus ➔ School Grounds & Athletics ➔ Main Gymnasium"
     if "music" in comb:
         return "loc_old_east_music_room", "Main Academy Campus ➔ Cultural Arts & Student Union ➔ Old East Wing Music Room"
-    if "art" in comb and "martial" not in comb:
+    if re.search(r"\b(?:art|arts|fine arts)\b", comb) and "martial" not in comb:
         return "loc_fine_arts_studio", "Main Academy Campus ➔ Cultural Arts & Student Union ➔ Fine Arts Studio"
     if "homeroom" in comb:
         return "loc_homeroom", "Main Academy Campus ➔ Main Campus Building ➔ Homeroom Classroom"
@@ -601,6 +604,11 @@ def _is_town_citizen_or_youth_peer(npc: Dict[str, Any]) -> bool:
     srt = str(npc.get("social_role_type") or basic.get("social_role_type") or "").strip().lower()
     if srt == "adult_service" and grade != "faculty":
         return True
+    from mechanics.social.roster_tags import derive_age_group, normalize_standing
+    role = str(npc.get("role") or basic.get("role") or basic.get("occupation") or "").strip()
+    if role and derive_age_group(grade=grade, role=role, social_role_type=srt) == "adult":
+        if normalize_standing(role=role, grade=grade) not in ("Faculty", "Staff"):
+            return True
     return False
 
 
@@ -632,7 +640,7 @@ _HS_NODE_FALLBACK_PATHS: Dict[str, str] = {
     "loc_sakura_grove": "Recreational Park ➔ Sakura Blossom Grove",
     "loc_park_shrine": "Recreational Park ➔ Wayside Shrine & Cedar Path",
     "loc_picnic_pavilions": "Recreational Park ➔ Picnic Pavilions & Open Lawn",
-    "loc_school_gate": "Main Academy Campus ➔ Main Campus Building ➔ Entrance Foyer & Shoe Lockers",
+    "loc_school_gate": "Main Academy Campus ➔ Main Campus Building ➔ School Main Gates",
     "loc_entrance_foyer": "Main Academy Campus ➔ Main Campus Building ➔ Entrance Foyer & Shoe Lockers",
     "loc_school_hallway": "Main Academy Campus ➔ Main Campus Building ➔ School Hallways",
     "loc_homeroom": "Main Academy Campus ➔ Main Campus Building ➔ Homeroom Classroom",
@@ -727,6 +735,77 @@ def _has_active_club_or_sport(role: str, club: str, trait_names: List[str]) -> b
     return False
 
 
+def _hydrate_npc_from_db(npc: Dict[str, Any], session_id: Optional[int]) -> Dict[str, Any]:
+    """Hydrates missing school NPC identity fields (grade, role, club, clique, primary_facility) from DB."""
+    if not isinstance(npc, dict) or not session_id or npc.get("_db_hydrated"):
+        return npc
+
+    basic = npc.get("basic_info") if isinstance(npc.get("basic_info"), dict) else {}
+    name = str(npc.get("name") or basic.get("name") or "").strip()
+    grade_val = str(npc.get("grade") or basic.get("grade") or "").strip()
+    role = str(npc.get("role") or basic.get("role") or basic.get("occupation") or "").strip().lower()
+    club = str(npc.get("club") or basic.get("club") or basic.get("faction") or "").strip().lower()
+    clique_val = str(npc.get("clique") or basic.get("clique") or "").strip()
+    primary_fac = str(npc.get("primary_facility") or basic.get("primary_facility") or basic.get("location") or "").strip()
+
+    # Only attempt DB lookup if fundamental identity is missing
+    if not grade_val or not role or role == "none":
+        try:
+            import db as local_db
+            c_row = local_db.get_contact(session_id, name)
+            if c_row:
+                b_inf = c_row.get("basic_info") or {}
+                if isinstance(b_inf, str):
+                    try:
+                        import json
+                        b_inf = json.loads(b_inf)
+                    except Exception:
+                        b_inf = {}
+                grade_val = grade_val or str(c_row.get("grade") or b_inf.get("grade") or "").strip()
+                if not role or role == "none":
+                    role = str(c_row.get("role") or b_inf.get("role") or b_inf.get("occupation") or "").lower()
+                if not club:
+                    club = str(c_row.get("club") or b_inf.get("club") or b_inf.get("faction") or "").lower()
+                if not clique_val:
+                    clique_val = str(c_row.get("clique") or b_inf.get("clique") or "").strip()
+                if not primary_fac:
+                    primary_fac = str(c_row.get("primary_facility") or b_inf.get("primary_facility") or b_inf.get("location") or "").strip()
+            if not grade_val or not role or role == "none":
+                r_rows = local_db.get_school_roster(session_id) or []
+                for r_item in r_rows:
+                    if str(r_item.get("name", "")).strip().lower() == name.lower():
+                        grade_val = grade_val or str(r_item.get("grade") or "").strip()
+                        if not role or role == "none":
+                            role = str(r_item.get("role") or "").lower()
+                        if not club:
+                            club = str(r_item.get("club") or "").lower()
+                        if not clique_val:
+                            clique_val = str(r_item.get("clique") or "").strip()
+                        if not primary_fac:
+                            primary_fac = str(r_item.get("primary_facility") or "").strip()
+                        break
+        except Exception:
+            pass
+
+    hydrated = dict(npc)
+    hydrated["_db_hydrated"] = True
+    if grade_val:
+        hydrated["grade"] = grade_val
+    if role:
+        hydrated["role"] = role
+    if club:
+        hydrated["club"] = club
+    if clique_val:
+        hydrated["clique"] = clique_val
+    if primary_fac:
+        hydrated["primary_facility"] = primary_fac
+    if npc.get("schedule_archetype") or (isinstance(npc.get("basic_info"), dict) and npc["basic_info"].get("schedule_archetype")):
+        hydrated["schedule_archetype"] = npc.get("schedule_archetype") or npc["basic_info"].get("schedule_archetype")
+    if npc.get("social_role_type") or (isinstance(npc.get("basic_info"), dict) and npc["basic_info"].get("social_role_type")):
+        hydrated["social_role_type"] = npc.get("social_role_type") or npc["basic_info"].get("social_role_type")
+    return hydrated
+
+
 def get_npc_schedule_node_ids(
     npc: Dict[str, Any],
     scen_key: str = "fantasy",
@@ -752,32 +831,64 @@ def get_npc_schedule_node_ids(
     seed_val = int(hashlib.md5(f"{name}_{role}_{club}".encode("utf-8")).hexdigest(), 16)
     scen_key_low = str(scen_key or "").lower()
     is_school = is_high_school_setting(scen_key_low)
+    is_anom_hs = False
+    try:
+        import scenario_data
+        is_anom_hs = bool(scenario_data.is_anomalous_high_school_scenario(scen_key_low))
+    except Exception:
+        is_anom_hs = ("anomalous_high_school" in scen_key_low)
+    is_spec_agent = bool(
+        npc.get("is_special_agent")
+        or basic.get("is_special_agent")
+        or str(npc.get("anomalous_npc_tag") or basic.get("anomalous_npc_tag") or "").lower() == "special_agent"
+    )
+    is_stu_agent = bool(npc.get("is_student_agent") or basic.get("is_student_agent"))
+    grade_raw_low = str(npc.get("grade") or basic.get("grade") or "").strip().lower()
+    age_grp_low = str(npc.get("age_group") or basic.get("age_group") or "").strip().lower()
+    is_teen_npc = bool(
+        is_stu_agent
+        or age_grp_low in ("teen", "student")
+        or any(g in grade_raw_low for g in ("freshman", "sophomore", "junior", "senior"))
+    )
+    if is_anom_hs and is_spec_agent and not is_teen_npc:
+        is_school = False
     weekend = is_weekend(current_day)
     name_slug = re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_')
 
     schedule_nodes: Dict[str, str] = {}
 
-    primary_fac = str(npc.get("primary_facility") or basic.get("primary_facility") or basic.get("location") or "").strip()
     if is_school:
-        if _is_town_citizen_or_youth_peer(npc):
+        hydrated_npc = _hydrate_npc_from_db(npc, session_id)
+        grade_val = str(hydrated_npc.get("grade") or "").strip()
+        role = str(hydrated_npc.get("role") or "").strip().lower()
+        club = str(hydrated_npc.get("club") or "").strip().lower()
+        clique_val = str(hydrated_npc.get("clique") or "").strip()
+        primary_fac = str(hydrated_npc.get("primary_facility") or "").strip()
+
+        if _is_town_citizen_or_youth_peer(hydrated_npc):
             from mechanics.social.town_roster import get_town_citizen_schedule_nodes
             return get_town_citizen_schedule_nodes(
-                npc, current_day=current_day, seed_val=seed_val, current_minute=current_minute
+                hydrated_npc, current_day=current_day, seed_val=seed_val, current_minute=current_minute
             )
 
-        clique_low = str(npc.get("clique") or basic.get("clique") or "").strip().lower()
+        clique_low = clique_val.lower()
         gender_low = str(npc.get("gender") or basic.get("gender") or "").strip().lower()
         safe_min = (int(current_minute) % 1440) if current_minute is not None else None
         club_node, _ = _resolve_school_extracurricular_node(
             role, club, trait_names, seed_val, primary_fac=primary_fac, clique=clique_low, current_day=current_day
         )
-        grade_low = str(npc.get("grade") or basic.get("grade") or "").strip().lower()
-        is_faculty = grade_low == "faculty" or any(
-            w in role for w in ("teacher", "staff", "principal", "counselor", "nurse", "librarian", "coach", "custodian", "chef", "dean")
+        grade_low = grade_val.lower()
+        is_student = any(g in grade_low for g in ("freshman", "sophomore", "junior", "senior", "student", "peer"))
+        is_faculty = (not is_student) and (
+            grade_low in ("faculty", "staff", "citizen")
+            or any(
+                w in role for w in ("teacher", "staff", "principal", "counselor", "nurse", "librarian", "coach", "custodian", "chef", "dean", "security", "gatekeeper", "patrol")
+            )
+            or ("guard" in role and "basketball" not in role)
         )
         fac_morning_node, _ = _resolve_school_faculty_class_station(role, primary_fac, current_day=current_day, phase="morning")
         fac_aft_node, _ = _resolve_school_faculty_class_station(role, primary_fac, current_day=current_day, phase="class_afternoon")
-        student_cls_node, _ = _resolve_student_classroom_node_and_path(npc, primary_fac=primary_fac)
+        student_cls_node, _ = _resolve_student_classroom_node_and_path(hydrated_npc, primary_fac=primary_fac)
         house_nid = f"loc_{name_slug}_house"
 
         is_athlete = (not is_faculty) and any(
@@ -808,7 +919,9 @@ def get_npc_schedule_node_ids(
             # WEEKDAY SCHEDULE (Monday - Friday)
             # 0. Commute / Morning Prep (07:00 - 07:59)
             if is_faculty:
-                if "librarian" in role:
+                if any(w in role for w in ("guard", "security", "gatekeeper", "patrol")):
+                    schedule_nodes["commute"] = "loc_school_gate"
+                elif "librarian" in role:
                     schedule_nodes["commute"] = "loc_library"
                 elif "chef" in role or "cafeteria" in role:
                     schedule_nodes["commute"] = "loc_cafeteria"
@@ -832,7 +945,9 @@ def get_npc_schedule_node_ids(
 
             # 2. Lunch Break (12:00 - 12:59)
             if is_faculty:
-                if "nurse" in role:
+                if any(w in role for w in ("guard", "security", "gatekeeper", "patrol")):
+                    schedule_nodes["lunch"] = "loc_school_gate" if seed_val % 2 == 0 else "loc_cafeteria"
+                elif "nurse" in role:
                     schedule_nodes["lunch"] = "loc_school_infirmary"
                 elif "librarian" in role:
                     schedule_nodes["lunch"] = "loc_library"
@@ -859,6 +974,10 @@ def get_npc_schedule_node_ids(
                 schedule_nodes["extracurricular"] = house_nid if nurse_after_five else "loc_school_infirmary"
                 schedule_nodes["afternoon"] = "loc_school_infirmary"
                 schedule_nodes["evening"] = house_nid
+            elif is_faculty and any(w in role for w in ("guard", "security", "gatekeeper", "patrol")):
+                schedule_nodes["extracurricular"] = "loc_school_gate"
+                schedule_nodes["afternoon"] = "loc_school_gate"
+                schedule_nodes["evening"] = "loc_school_gate" if seed_val % 2 == 0 else house_nid
             elif is_nsfw_member or is_nsfw_guest:
                 in_weekday_salon = (safe_min is None) or (960 <= safe_min < 1200)
                 pre_salon = "loc_clubroom_corridor" if is_nsfw_member else club_node
@@ -949,6 +1068,21 @@ def get_npc_schedule_node_ids(
                     elif not weekend and day_mod in pt_spec["weekday_mods"]:
                         schedule_nodes["evening"] = pt_spec["venue_node_id"]
 
+        # 7. Student Special Agent after-school / weekend field patrol & club stationing in Anomalous High School
+        if is_anom_hs and (is_stu_agent or (is_spec_agent and is_teen_npc)):
+            sec_agent_nid = str(npc.get("secondary_node_id") or basic.get("secondary_node_id") or "").strip()
+            if sec_agent_nid:
+                if not weekend:
+                    schedule_nodes["extracurricular"] = sec_agent_nid
+                    schedule_nodes["afternoon"] = sec_agent_nid
+                    schedule_nodes["evening"] = sec_agent_nid
+                else:
+                    schedule_nodes["morning"] = sec_agent_nid
+                    schedule_nodes["class_afternoon"] = sec_agent_nid
+                    schedule_nodes["extracurricular"] = sec_agent_nid
+                    schedule_nodes["afternoon"] = sec_agent_nid
+                    schedule_nodes["evening"] = sec_agent_nid
+
     elif _is_anomalous_incursions_setting(scen_key_low):
         prof = _resolve_anomalous_npc_profile(npc, seed_val)
         fac_id = prof["faction_id"]
@@ -1020,6 +1154,10 @@ def get_npc_schedule_node_ids(
             schedule_nodes["afternoon"] = s_nid if weekend else p_nid
             schedule_nodes["evening"] = s_nid
             schedule_nodes["night"] = f"loc_{name_slug}_apartment"
+
+        schedule_nodes.setdefault("commute", schedule_nodes.get("morning", p_nid))
+        schedule_nodes.setdefault("class_afternoon", schedule_nodes.get("afternoon", p_nid))
+        schedule_nodes.setdefault("extracurricular", schedule_nodes.get("evening", s_nid))
 
     elif any(k in scen_key_low for k in ("cyberpunk", "sci_fi", "space")):
         if "cyberpunk" in scen_key_low:
@@ -1122,18 +1260,53 @@ def get_npc_scheduled_node_id(
     scen_key: str = "fantasy",
     time_slot: str = "",
     current_day: int = 1,
-    session_id: Optional[int] = None
+    session_id: Optional[int] = None,
+    story_waypoints: Optional[List[Dict[str, Any]]] = None,
+    active_events: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """Returns the canonical node_id where the NPC is scheduled at (current_minute, current_day) or time_slot."""
+    story_nid = ""
+    date_nid = ""
     if session_id:
+        import db
+        npc_nm_clean = str(npc.get("name") or "").strip().lower()
+        if npc_nm_clean:
+            try:
+                if story_waypoints is not None:
+                    sq_wp = story_waypoints
+                else:
+                    with db.get_conn() as conn:
+                        sq_wp = [
+                            dict(r)
+                            for r in conn.execute(
+                                """SELECT qw.target_node_id, qw.stage_label, q.objective
+                                   FROM quest_waypoints qw
+                                   JOIN quests q ON q.session_id = qw.session_id AND q.quest_id = qw.quest_id
+                                   WHERE qw.session_id = ? AND qw.status = 'active'
+                                     AND q.status = 'Active' AND q.is_story_quest = 1
+                                     AND qw.target_node_id != ''""",
+                                (session_id,),
+                            ).fetchall()
+                        ]
+                for r in sq_wp:
+                    blob = f"{r['stage_label'] or ''} {r['objective'] or ''}".lower()
+                    if npc_nm_clean in blob:
+                        story_nid = str(r["target_node_id"])
+                        break
+            except Exception:
+                pass
         try:
             from mechanics.system.commitments_engine import inject_npc_schedule_overrides
             npc_id = str(npc.get("npc_id") or npc.get("name") or "").strip().lower().replace(" ", "_")
             override = inject_npc_schedule_overrides(session_id, npc_id, current_day, current_minute)
             if override and override.get("node_id"):
-                return override["node_id"]
+                date_nid = str(override["node_id"])
         except Exception:
             pass
+        if story_nid:
+            return story_nid
+        if date_nid:
+            return date_nid
 
     valid_blocks = (
         "morning", "lunch", "afternoon", "evening", "night",
@@ -1147,7 +1320,25 @@ def get_npc_scheduled_node_id(
     node_sched = get_npc_schedule_node_ids(
         npc, scen_key=scen_key, current_day=current_day, current_minute=current_minute, session_id=session_id
     )
-    return node_sched.get(block_key, node_sched.get(get_time_block_key(current_minute), node_sched.get("morning", "loc_homeroom")))
+    base_sched_nid = node_sched.get(block_key, node_sched.get(get_time_block_key(current_minute), node_sched.get("morning", "loc_homeroom")))
+
+    in_mandatory_class = is_high_school_setting(scen_key) and (not is_weekend(current_day)) and block_key in ("morning", "class_afternoon")
+    if session_id and 360 <= int(current_minute or 480) < 1320 and block_key != "night" and not in_mandatory_class:
+        try:
+            from mechanics.world.world_events.modifiers import resolve_npc_stationing_with_events
+            ev_list = active_events if active_events is not None else db.get_world_events(session_id, entity_type="macro_event")
+            if ev_list:
+                return resolve_npc_stationing_with_events(
+                    ev_list,
+                    npc,
+                    scheduled_node_id=base_sched_nid,
+                    date_node_id=date_nid,
+                    story_node_id=story_nid,
+                )
+        except Exception:
+            pass
+
+    return base_sched_nid
 
 
 def get_npc_schedule(
@@ -1166,31 +1357,53 @@ def get_npc_schedule(
     if not isinstance(npc, dict):
         return {}
 
-    name = str(npc.get("name") or "NPC").strip()
-    basic = npc.get("basic_info") or {}
-    role = str(npc.get("role") or basic.get("role") or npc.get("occupation") or "").lower()
-    club = str(npc.get("club") or basic.get("club") or "").lower()
-    primary_fac = str(npc.get("primary_facility") or basic.get("primary_facility") or basic.get("location") or "").strip()
-    home_loc = str(npc.get("home_location") or basic.get("home_location") or "").strip()
-    traits = npc.get("unlocked_traits") or npc.get("traits") or basic.get("traits") or []
+    hydrated_npc = _hydrate_npc_from_db(npc, session_id)
+    name = str(hydrated_npc.get("name") or "NPC").strip()
+    basic = hydrated_npc.get("basic_info") or {}
+    role = str(hydrated_npc.get("role") or basic.get("role") or hydrated_npc.get("occupation") or "").lower()
+    club = str(hydrated_npc.get("club") or basic.get("club") or "").lower()
+    primary_fac = str(hydrated_npc.get("primary_facility") or basic.get("primary_facility") or basic.get("location") or "").strip()
+    home_loc = str(hydrated_npc.get("home_location") or basic.get("home_location") or "").strip()
+    traits = hydrated_npc.get("unlocked_traits") or hydrated_npc.get("traits") or basic.get("traits") or []
     trait_names = [str(t.get("name") if isinstance(t, dict) else t).lower() for t in traits if t]
 
     seed_val = int(hashlib.md5(f"{name}_{role}_{club}".encode("utf-8")).hexdigest(), 16)
     is_school = is_high_school_setting(scen_key)
+    is_anom_hs_s = False
+    try:
+        import scenario_data
+        is_anom_hs_s = bool(scenario_data.is_anomalous_high_school_scenario(scen_key))
+    except Exception:
+        is_anom_hs_s = ("anomalous_high_school" in str(scen_key or "").lower())
+    is_spec_s = bool(
+        hydrated_npc.get("is_special_agent")
+        or basic.get("is_special_agent")
+        or str(hydrated_npc.get("anomalous_npc_tag") or basic.get("anomalous_npc_tag") or "").lower() == "special_agent"
+    )
+    is_stu_s = bool(hydrated_npc.get("is_student_agent") or basic.get("is_student_agent"))
+    grade_s_low = str(hydrated_npc.get("grade") or basic.get("grade") or "").strip().lower()
+    age_s_low = str(hydrated_npc.get("age_group") or basic.get("age_group") or "").strip().lower()
+    is_teen_s = bool(
+        is_stu_s
+        or age_s_low in ("teen", "student")
+        or any(g in grade_s_low for g in ("freshman", "sophomore", "junior", "senior"))
+    )
+    if is_anom_hs_s and is_spec_s and not is_teen_s:
+        is_school = False
     weekend = is_weekend(current_day)
 
     node_sched = get_npc_schedule_node_ids(
-        npc, scen_key=scen_key, current_day=current_day, current_minute=current_minute, session_id=session_id
+        hydrated_npc, scen_key=scen_key, current_day=current_day, current_minute=current_minute, session_id=session_id
     )
     schedule: Dict[str, str] = {}
 
     if is_school:
-        if _is_town_citizen_or_youth_peer(npc):
-            sec_fac = str(npc.get("secondary_facility") or basic.get("secondary_facility") or "").strip()
+        if _is_town_citizen_or_youth_peer(hydrated_npc):
+            sec_fac = str(hydrated_npc.get("secondary_facility") or basic.get("secondary_facility") or "").strip()
             for blk, nid in node_sched.items():
-                if nid == str(npc.get("primary_node_id") or "") and primary_fac:
+                if nid == str(hydrated_npc.get("primary_node_id") or "") and primary_fac:
                     schedule[blk] = primary_fac
-                elif nid == str(npc.get("secondary_node_id") or "") and sec_fac:
+                elif nid == str(hydrated_npc.get("secondary_node_id") or "") and sec_fac:
                     schedule[blk] = sec_fac
                 elif nid in _HS_NODE_FALLBACK_PATHS:
                     schedule[blk] = _HS_NODE_FALLBACK_PATHS[nid]
@@ -1201,15 +1414,22 @@ def get_npc_schedule(
                 else:
                     schedule[blk] = home_loc or "Residential Neighborhood ➔ Private Residence"
         else:
-            clique_low = str(npc.get("clique") or basic.get("clique") or "").strip().lower()
+            grade_val = str(hydrated_npc.get("grade") or basic.get("grade") or "").strip()
+            clique_val = str(hydrated_npc.get("clique") or basic.get("clique") or "").strip()
+            clique_low = clique_val.lower()
             _, club_path = _resolve_school_extracurricular_node(
                 role, club, trait_names, seed_val, primary_fac=primary_fac, clique=clique_low
             )
-            grade_low = str(npc.get("grade") or basic.get("grade") or "").strip().lower()
-            is_faculty = grade_low == "faculty" or any(
-                w in role for w in ("teacher", "staff", "principal", "counselor", "nurse", "librarian", "coach", "custodian", "chef", "dean")
+            grade_low = grade_val.lower()
+            is_student = any(g in grade_low for g in ("freshman", "sophomore", "junior", "senior", "student", "peer"))
+            is_faculty = (not is_student) and (
+                grade_low in ("faculty", "staff", "citizen")
+                or any(
+                    w in role for w in ("teacher", "staff", "principal", "counselor", "nurse", "librarian", "coach", "custodian", "chef", "dean", "security", "gatekeeper", "patrol")
+                )
+                or ("guard" in role and "basketball" not in role)
             )
-            _, student_cls_path = _resolve_student_classroom_node_and_path(npc, primary_fac=primary_fac)
+            _, student_cls_path = _resolve_student_classroom_node_and_path(hydrated_npc, primary_fac=primary_fac)
             sec_fac = str(npc.get("secondary_facility") or basic.get("secondary_facility") or "").strip()
 
             for blk, nid in node_sched.items():
@@ -1231,6 +1451,8 @@ def get_npc_schedule(
                         schedule[blk] = club_path
                     else:
                         schedule[blk] = fb_p
+                elif nid == str(hydrated_npc.get("secondary_node_id") or basic.get("secondary_node_id") or "") and sec_fac:
+                    schedule[blk] = sec_fac
                 else:
                     schedule[blk] = home_loc or "Residential Neighborhood ➔ Residential Area"
 
@@ -1269,6 +1491,10 @@ def get_npc_schedule(
             schedule["afternoon"] = (s_path if field_patrol else p_path) if not weekend else (p_path if on_weekend_duty else s_path)
             schedule["evening"] = s_path
             schedule["night"] = p_path if night_watch else (home_loc or "Suburban Residential District ➔ Private Apartment")
+
+        schedule.setdefault("commute", schedule.get("morning", p_path))
+        schedule.setdefault("class_afternoon", schedule.get("afternoon", p_path))
+        schedule.setdefault("extracurricular", schedule.get("evening", s_path))
 
     else:
         base_primary = primary_fac or "Adventurer's Guild ➔ Guild Hall"
@@ -1356,3 +1582,88 @@ def get_npc_scheduled_location(
         npc, scen_key=scen_key, session_id=session_id, current_day=current_day, current_minute=current_minute
     )
     return sched.get(block_key, sched.get(get_time_block_key(current_minute), sched.get("morning", "")))
+
+
+def is_npc_eligible_for_private_room(
+    npc_name: str,
+    session: dict,
+    node_id: str = "",
+) -> bool:
+    """
+    Checks if an NPC is eligible to be physically present inside a private, restricted,
+    or discreet room (Decision 4 - Micro Social JIT Dispatch & Private Room Shield):
+      1. Active dialogue partner with the player
+      2. Active rendezvous commitment scheduled for this time/location
+      3. Companion with elevated affinity (affinity >= 40) or romance track
+      4. Station authority: NPC is resident/owner or assigned official (e.g., nurse, dorm resident)
+    """
+    if not npc_name:
+        return False
+    nm_low = str(npc_name).strip().lower()
+
+    # 1. Active dialogue partner
+    active_partners = [str(p).strip().lower() for p in (session.get("dialogue_partners") or [])]
+    if session.get("dialogue_partner"):
+        active_partners.append(str(session["dialogue_partner"]).strip().lower())
+    if nm_low in active_partners:
+        return True
+
+    # 2. Traveling companion check
+    comps = session.get("temporary_companions") or []
+    for c in comps:
+        if isinstance(c, dict):
+            c_name = str(c.get("name") or "").strip().lower()
+            if c_name == nm_low or nm_low in c_name:
+                if c.get("is_romantic") or int(c.get("affinity", 0) or 0) >= 40:
+                    return True
+
+    # 3. Rendezvous commitments check
+    session_id = session.get("id") or session.get("session_id")
+    if session_id:
+        try:
+            import db
+            with db.get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT npc_id, status FROM commitments_ledger WHERE session_id = ? AND commitment_type = 'rendezvous'",
+                    (session_id,)
+                ).fetchall()
+                for r in rows:
+                    r_npc = str(r["npc_id"] or "").strip().lower()
+                    if (r_npc == nm_low or nm_low in r_npc) and str(r["status"]).lower() in ("active", "confirmed", "in_progress", "pending"):
+                        return True
+        except Exception:
+            pass
+
+    # 4. Station authority check
+    if node_id and session_id:
+        try:
+            import db
+            from mechanics.world.locations.access_gate import has_npc_authority_for_node
+            if has_npc_authority_for_node(session_id, node_id, npc_name):
+                return True
+        except Exception:
+            pass
+
+    return False
+
+
+def dispatch_micro_social_npcs(
+    session_id: int,
+    node_id: str,
+    session: dict,
+) -> list[dict]:
+    """
+    Dispatches JIT micro-social NPCs into private/discreet nodes based on ongoing
+    affinity, commitments, and companion status, filtering out ambient crowds.
+    """
+    if not session_id or not node_id:
+        return []
+    eligible: list[dict] = []
+    comps = session.get("temporary_companions") or []
+    for c in comps:
+        if isinstance(c, dict):
+            c_nm = c.get("name") or ""
+            if is_npc_eligible_for_private_room(c_nm, session, node_id=node_id):
+                eligible.append(dict(c))
+    return eligible
+

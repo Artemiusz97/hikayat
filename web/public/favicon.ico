@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#2a1b0a" />
+      <stop offset="70%" stop-color="#140f09" />
+      <stop offset="100%" stop-color="#0a0806" />
+    </radialGradient>
+    <linearGradient id="goldBorder" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="50%" stop-color="#b45309" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+    <linearGradient id="pageGradL" x1="100%" y1="50%" x2="0%" y2="50%">
+      <stop offset="0%" stop-color="#e2cfad" />
+      <stop offset="40%" stop-color="#fef3c7" />
+      <stop offset="100%" stop-color="#bfa378" />
+    </linearGradient>
+    <linearGradient id="pageGradR" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#e2cfad" />
+      <stop offset="40%" stop-color="#fef3c7" />
+      <stop offset="100%" stop-color="#bfa378" />
+    </linearGradient>
+    <linearGradient id="emberStar" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fffbeb" />
+      <stop offset="40%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="1.5" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background Tile -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#bgGlow)" stroke="url(#goldBorder)" stroke-width="2" />
+  
+  <!-- Outer Corner Accents -->
+  <circle cx="8" cy="8" r="1.5" fill="#f59e0b" opacity="0.8"/>
+  <circle cx="56" cy="8" r="1.5" fill="#f59e0b" opacity="0.8"/>
+  <circle cx="8" cy="56" r="1.5" fill="#f59e0b" opacity="0.8"/>
+  <circle cx="56" cy="56" r="1.5" fill="#f59e0b" opacity="0.8"/>
+
+  <!-- Book Spine & Binding Backing -->
+  <path d="M 32 49 Q 32 53 32 55" stroke="#78350f" stroke-width="3" stroke-linecap="round"/>
+  <path d="M 10 42 Q 32 46 54 42 L 53 45 Q 32 49 11 45 Z" fill="#78350f" />
+
+  <!-- Left Page Stack -->
+  <path d="M 32 44 C 24 43 14 38 12 37 L 12 21 C 14 22 24 27 32 28 Z" fill="url(#pageGradL)" stroke="#92400e" stroke-width="0.8" />
+  <!-- Left Page Top Foil -->
+  <path d="M 32 43 C 25 42 16 37 14 36 L 14 20 C 16 21 25 26 32 27 Z" fill="#fffbeb" opacity="0.6" />
+
+  <!-- Right Page Stack -->
+  <path d="M 32 44 C 40 43 50 38 52 37 L 52 21 C 50 22 40 27 32 28 Z" fill="url(#pageGradR)" stroke="#92400e" stroke-width="0.8" />
+  <!-- Right Page Top Foil -->
+  <path d="M 32 43 C 39 42 48 37 50 36 L 50 20 C 48 21 39 26 32 27 Z" fill="#fffbeb" opacity="0.6" />
+
+  <!-- Center Spine Seam -->
+  <line x1="32" y1="20" x2="32" y2="44" stroke="#92400e" stroke-width="1.5" />
+
+  <!-- Text Script Lines (Left & Right) -->
+  <line x1="17" y1="26" x2="28" y2="29" stroke="#b45309" stroke-width="1" stroke-linecap="round" opacity="0.75"/>
+  <line x1="17" y1="30" x2="27" y2="33" stroke="#b45309" stroke-width="1" stroke-linecap="round" opacity="0.75"/>
+  <line x1="18" y1="34" x2="25" y2="37" stroke="#b45309" stroke-width="1" stroke-linecap="round" opacity="0.75"/>
+
+  <line x1="36" y1="29" x2="47" y2="26" stroke="#b45309" stroke-width="1" stroke-linecap="round" opacity="0.75"/>
+  <line x1="37" y1="33" x2="47" y2="30" stroke="#b45309" stroke-width="1" stroke-linecap="round" opacity="0.75"/>
+  <line x1="39" y1="37" x2="46" y2="34" stroke="#b45309" stroke-width="1" stroke-linecap="round" opacity="0.75"/>
+
+  <!-- Crimson Bookmark Ribbon -->
+  <path d="M 30.5 24 L 30.5 49 L 32 47.5 L 33.5 49 L 33.5 24 Z" fill="#dc2626" stroke="#991b1b" stroke-width="0.5"/>
+
+  <!-- Floating Arcane Ember Star / Chronicle Crest -->
+  <g filter="url(#glow)">
+    <path d="M 32 8 Q 33.5 13 38 14.5 Q 33.5 16 32 21 Q 30.5 16 26 14.5 Q 30.5 13 32 8 Z" fill="url(#emberStar)" />
+    <circle cx="32" cy="14.5" r="1.5" fill="#ffffff" />
+  </g>
+  <!-- Sparkles -->
+  <circle cx="23" cy="11" r="0.8" fill="#fbbf24" opacity="0.9"/>
+  <circle cx="41" cy="11" r="0.8" fill="#fbbf24" opacity="0.9"/>
+</svg>

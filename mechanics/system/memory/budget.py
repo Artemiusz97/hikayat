@@ -144,11 +144,38 @@ class DynamicTokenBudget:
         if not text or limit <= 0 or len(text) <= limit:
             return text
         cut = text[:limit]
-        # Try to end on a sentence boundary
-        last_punct = max(cut.rfind("."), cut.rfind("!"), cut.rfind("?"), cut.rfind("\n"))
+        # Try to end on a sentence boundary (ASCII or CJK full-width)
+        last_punct = max(
+            cut.rfind("."),
+            cut.rfind("!"),
+            cut.rfind("?"),
+            cut.rfind("。"),
+            cut.rfind("！"),
+            cut.rfind("？"),
+            cut.rfind("\n"),
+        )
         if last_punct > limit // 2:
             return cut[: last_punct + 1].rstrip()
         return cut.rstrip() + "…"
+
+    def trim_keep_tail(self, text: str, section: str) -> str:
+        """Trim *text* to the character budget for *section*, preserving newest content at the tail."""
+        limit = self.chars_for(section)
+        if not text or limit <= 0 or len(text) <= limit:
+            return text
+        tail = text[-limit:]
+        first_nl = tail.find("\n")
+        if 0 <= first_nl < limit // 2:
+            return tail[first_nl + 1 :].lstrip()
+        candidates: list[tuple[int, int]] = []
+        for token, step in ((". ", 2), ("! ", 2), ("? ", 2), ("。", 1), ("！", 1), ("？", 1)):
+            pos = tail.find(token)
+            if 0 <= pos < limit // 2:
+                candidates.append((pos, step))
+        if candidates:
+            best_pos, best_step = min(candidates, key=lambda item: item[0])
+            return tail[best_pos + best_step :].lstrip()
+        return "…" + tail.lstrip()
 
     def is_combat(self) -> bool:
         return self.mode == SceneMode.COMBAT

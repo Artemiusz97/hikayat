@@ -38,13 +38,37 @@ class FactionMixin:
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     async def faction_apply(self, interaction: discord.Interaction, session_id: int, user_id: int, faction: dict):
-        char = db.get_character(user_id)
+        import scenario_data
+
+        session = (await adb(db.get_session, session_id)) or {}
+        if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
+            from mechanics.social.factions import infer_anomalous_faction_archetype, join_or_transfer_anomalous_faction
+
+            target_fac = (
+                infer_anomalous_faction_archetype(faction)
+                or faction.get("faction_id")
+                or faction.get("name", "")
+            )
+            res = await adb(join_or_transfer_anomalous_faction, session_id, target_fac, user_id)
+            if not res.get("success"):
+                await interaction.response.send_message(
+                    res.get("error") or "Unable to enlist in this faction.",
+                    ephemeral=True,
+                )
+                return
+            await interaction.response.send_message(
+                res.get("message") or f"Welcome to **{faction.get('name', 'the faction')}**!",
+                ephemeral=True,
+            )
+            return
+
+        char = await adb(db.get_character, user_id)
         if char.get("joined_faction_id"):
             await interaction.response.send_message("You are already pledged to a faction! Defecting carries severe penalties.", ephemeral=True)
             return
             
         # Join faction logic
-        db.set_character_faction_membership(char["id"], faction["faction_id"], 1, "Initiate")
+        await adb(db.set_character_faction_membership, char["id"], faction["faction_id"], 1, "Initiate")
         await interaction.response.send_message(f"Welcome to **{faction.get('name', 'the faction')}**! You are now a member.", ephemeral=True)
 
     async def faction_rest(self, interaction: discord.Interaction, session_id: int, user_id: int, faction: dict):
@@ -74,7 +98,8 @@ class FactionMixin:
             BuySelectView,
             get_or_create_merchant_catalogue,
             update_merchant_catalogue,
-            discounted_price,
+            compute_effective_shop_item_price,
+            get_anomalous_shop_faction_context,
         )
 
         cat_entry, needs_restock = get_or_create_merchant_catalogue(
@@ -91,6 +116,7 @@ class FactionMixin:
             "stock": cat_entry["stock"],
             "discount_pct": discount,
             "is_faction_quartermaster": True,
+            "quartermaster_faction_arch": faction.get("archetype_key") or faction.get("category") or "",
             "restock_day": cat_entry.get("restock_day", current_day),
             "restock_minute": cat_entry.get("restock_minute", current_minute),
         })
@@ -104,9 +130,16 @@ class FactionMixin:
             )
             return
 
-        view = BuySelectView(self, session_id, stock, discount)
+        shop_ctx = await adb(
+            get_anomalous_shop_faction_context,
+            session,
+            session.get("current_location", ""),
+            False,
+            user_id,
+        )
+        view = BuySelectView(self, session_id, stock, discount, shop_ctx=shop_ctx)
         lines = "\n".join(
-            f"**{i['name']}** ({i['item_type']}) — {discounted_price(i['price'], discount)}g "
+            f"**{i['name']}** ({i['item_type']}) — {compute_effective_shop_item_price(i, shop_ctx=shop_ctx, discount_pct=discount)}g "
             f"x{i['quantity']}\n{i.get('description') or ''}".rstrip()
             for i in stock)
 
@@ -114,14 +147,18 @@ class FactionMixin:
         embed = discord.Embed(title="🛍️ Faction Quartermaster", description=intro, color=discord.Color.dark_gold())
         embed.add_field(name="Discount", value=f"{discount}% off", inline=False)
         embed.set_footer(text=f"🕒 Daily Restock: Start of Day {current_day + 1}")
-        await interaction.followup.send(content=f"**For sale:**\n{lines}", embed=embed, view=view, ephemeral=True)
+        content = f"**For sale:**\n{lines}"
+        if len(content) > 1950:
+            content = content[:1920] + "\n\n*(additional items available in dropdown below)*"
+        await interaction.followup.send(content=content, embed=embed, view=view, ephemeral=True)
 
     async def faction_bounty(self, interaction: discord.Interaction, session_id: int, user_id: int, faction: dict):
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
             
-        session = db.get_session(session_id)
-        from mechanics.narrative.bounty import generate_faction_bounty_board
+        session = await adb(db.get_session, session_id)
+        from mechanics.narrative.bounty import generate_faction_bounty_board, get_faction_rep_reward_from_quest
+        from cogs.adventure.views.quests import BountyBoardView
         bounties = await generate_faction_bounty_board(session, faction, force_refresh=False)
         
         if not bounties:
@@ -129,18 +166,79 @@ class FactionMixin:
             return
             
         embed = discord.Embed(title="📋 Faction Bounty Board", description="Exclusive tasks for members.", color=discord.Color.dark_red())
-        for b in bounties:
-            from mechanics.narrative.bounty import get_faction_rep_reward_from_quest
+        for b in bounties[:25]:
             rep_reward = get_faction_rep_reward_from_quest(b)
             req = f"{b['reward_xp']} XP | {b['reward_gold']} Gold | +{rep_reward} Faction Rep"
             if b.get("reward_item"):
                 req += f" | {b['reward_item']}"
-            embed.add_field(name=f"[{b['status']}] {b['title']}", value=f"{b['objective']}\n**Reward:** {req}", inline=False)
+            f_name = f"[{b['status']}] {b['title']}"[:250]
+            f_val = f"{b['objective']}\n**Reward:** {req}"[:1020]
+            embed.add_field(name=f_name, value=f_val, inline=False)
             
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        avail_bounties = [b for b in bounties if b.get("status") == "Available"]
+        view = BountyBoardView(session, avail_bounties) if session else None
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+    async def faction_calibrate(
+        self,
+        interaction: discord.Interaction,
+        session_id: int,
+        user_id: int,
+        faction_id: str,
+        attribute: str,
+        combat_archetype: str,
+        ability_medium: str,
+    ):
+        from api.codex_phone import faction_hq_action
+        from api.deps import FactionHQActionRequest
+        from fastapi import HTTPException
+
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        try:
+            res = await faction_hq_action(
+                session_id,
+                FactionHQActionRequest(
+                    user_id=user_id,
+                    faction_id=faction_id,
+                    action="calibrate",
+                    attribute=attribute,
+                    combat_archetype=combat_archetype,
+                    ability_medium=ability_medium,
+                ),
+            )
+            await interaction.edit_original_response(
+                content=f"🧬 **Telemetry Calibration Complete!** {res.get('message', '')}",
+                view=None,
+            )
+        except HTTPException as exc:
+            await interaction.edit_original_response(content=f"❌ Calibration denied: {exc.detail}", view=None)
 
     async def faction_promotion(self, interaction: discord.Interaction, session_id: int, user_id: int, faction: dict):
-        char = db.get_character(user_id)
+        import scenario_data
+
+        session = (await adb(db.get_session, session_id)) or {}
+        if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
+            from mechanics.social.factions import get_anomalous_faction_state
+
+            a_state = await adb(get_anomalous_faction_state, session_id, user_id)
+            tier = int(a_state.get("promotion_tier", 0) or 0)
+            title = a_state.get("promotion_title") or "Independent Freelancer"
+            rep = int(a_state.get("promotion_rep", 0) or 0)
+            if a_state.get("faction_archetype_key") == "freelancer" or tier <= 0:
+                await interaction.response.send_message(
+                    "Independent Freelancers do not hold agency rank. Enlist at a joinable Faction HQ first!",
+                    ephemeral=True,
+                )
+                return
+            await interaction.response.send_message(
+                f"🎖️ **Agent Promotion Meter**: **Tier {tier} — {title}** ({rep}/100 Rep).\n"
+                "Promotions in Anomalous Incursions advance automatically at **20 / 45 / 70 / 90 Rep** by completing Daily Mandatory Dispatches and Agency Bounties (no duel trials required).",
+                ephemeral=True,
+            )
+            return
+
+        char = await adb(db.get_character, user_id)
         rep = faction.get("reputation_score", 0)
         from mechanics.social.factions import get_eligible_rank, get_hierarchy, get_rank_title, get_incumbent_at_rank, get_promotion_trial_directive
         

@@ -1,14 +1,18 @@
+from __future__ import annotations
+
 import db
 import asyncio
 import json
 import time
 from contextlib import contextmanager
+from typing import Any, Optional
 import re
 import sqlite3
 from config import DB_PATH
 import character_data as cd
 from .core import *
 from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
+from .dossiers import _enrich_dossier_dict, get_quest_dossier
 
 _TRANSIENT_SUB_OBJ_KEYS = {
     "waypoints",
@@ -45,7 +49,8 @@ def upsert_quest(session_id: int, quest_id: str, quest_type: str, title: str,
                  client_location: str = None, required_item: str = None,
                  required_item_count: int = None, strikes: int = None,
                  max_strikes: int = None, deadline_day: int = None,
-                 deadline_minute: int = None, resolution_approach: str = None) -> dict:
+                 deadline_minute: int = None, resolution_approach: str = None,
+                 engine: str = None, dossier_stage: str = None) -> dict:
     now = time.time()
     sub_obj_str = _clean_sub_objectives_for_storage(sub_objectives)
     if blueprint_id is None:
@@ -78,6 +83,8 @@ def upsert_quest(session_id: int, quest_id: str, quest_type: str, title: str,
                    deadline_day=COALESCE(?, deadline_day),
                    deadline_minute=COALESCE(?, deadline_minute),
                    resolution_approach=COALESCE(?, resolution_approach),
+                   engine=COALESCE(?, engine),
+                   dossier_stage=COALESCE(?, dossier_stage),
                    updated_at=?
                    WHERE id=?""",
                 (quest_type or "Main Quest", title, objective, progress or "", current_clues or "",
@@ -86,6 +93,7 @@ def upsert_quest(session_id: int, quest_id: str, quest_type: str, title: str,
                  quest_notes, sub_obj_str, sub_obj_str,
                  blueprint_id, client_npc, client_location, required_item, required_item_count,
                  strikes, max_strikes, deadline_day, deadline_minute, resolution_approach,
+                 engine, dossier_stage,
                  now, existing["id"])
             )
         else:
@@ -96,26 +104,59 @@ def upsert_quest(session_id: int, quest_id: str, quest_type: str, title: str,
                     is_story_quest, clues_required, reward_claimed, quest_notes,
                     sub_objectives_json, blueprint_id, client_npc, client_location,
                     required_item, required_item_count, strikes, max_strikes,
-                    deadline_day, deadline_minute, resolution_approach, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    deadline_day, deadline_minute, resolution_approach, engine, dossier_stage, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (session_id, quest_id, quest_type or "Main Quest", title, objective, progress or "",
                  current_clues or "", status or "Active", reward_xp, reward_gold, reward_stat_points,
                  reward_item or "", is_story_quest, clues_required, quest_notes or "",
                  sub_obj_str, blueprint_id or "", client_npc or "", client_location or "",
                  required_item or "", int(required_item_count if required_item_count is not None else 1),
                  int(strikes or 0), int(max_strikes if max_strikes is not None else 2),
-                 deadline_day, deadline_minute, resolution_approach or "", now, now)
+                 deadline_day, deadline_minute, resolution_approach or "",
+                 engine or "", dossier_stage or "legacy", now, now)
             )
 
     return get_quest_by_id(session_id, quest_id)
 
-def _enrich_quest_dict(row) -> dict | None:
+def _hydrate_quest_waypoint_for_enrichment(session_id: int, wr: Any) -> dict:
+    w_dict = dict(wr)
+    try:
+        appr_raw = w_dict.get("approaches_json") or "[]"
+        w_dict["approaches"] = json.loads(appr_raw) if isinstance(appr_raw, str) else (appr_raw or [])
+    except Exception:
+        w_dict["approaches"] = []
+    if w_dict.get("target_location"):
+        w_dict["target_location"] = _normalize_loc_arrow(w_dict["target_location"])
+    w_dict["static_target_location"] = w_dict.get("target_location", "")
+    if w_dict.get("follow_npc_schedule") and w_dict.get("target_npc"):
+        try:
+            from mechanics.world.waypoints.matching import resolve_effective_waypoint_location
+            eff_loc = resolve_effective_waypoint_location(session_id, w_dict)
+            if eff_loc:
+                norm_eff = _normalize_loc_arrow(eff_loc)
+                w_dict["live_scheduled_location"] = norm_eff
+                w_dict["effective_location"] = norm_eff
+                w_dict["target_location"] = norm_eff
+        except Exception:
+            pass
+    if not w_dict.get("effective_location"):
+        w_dict["effective_location"] = w_dict.get("target_location", "")
+    return w_dict
+
+def _enrich_quest_dict(
+    row: Any,
+    preloaded_wps: Optional[list[Any]] = None,
+    preloaded_dossier: Optional[dict] = None,
+    dossier_preloaded: bool = False,
+) -> dict | None:
     if not row:
         return None
     d = dict(row)
     d["strikes"] = int(d.get("strikes") or 0)
     d["max_strikes"] = int(d.get("max_strikes") or 2)
     d["resolution_approach"] = str(d.get("resolution_approach") or "")
+    d["engine"] = str(d.get("engine") or "")
+    d["dossier_stage"] = str(d.get("dossier_stage") or "legacy")
     if d.get("sub_objectives_json"):
         try:
             raw_sos = json.loads(d["sub_objectives_json"])
@@ -127,42 +168,32 @@ def _enrich_quest_dict(row) -> dict | None:
 
     session_id = d.get("session_id")
     quest_id = d.get("quest_id")
-    all_wps = []
+    all_wps: list[dict] = []
     if session_id and quest_id:
-        try:
-            with get_conn() as conn:
-                wp_rows = conn.execute(
-                    """SELECT * FROM quest_waypoints
-                       WHERE session_id=? AND quest_id=?
-                       ORDER BY COALESCE(sub_obj_id, 0) ASC, stage_index ASC""",
-                    (session_id, quest_id)
-                ).fetchall()
-                for wr in wp_rows:
-                    w_dict = dict(wr)
-                    try:
-                        appr_raw = w_dict.get("approaches_json") or "[]"
-                        w_dict["approaches"] = json.loads(appr_raw) if isinstance(appr_raw, str) else (appr_raw or [])
-                    except Exception:
-                        w_dict["approaches"] = []
-                    if w_dict.get("target_location"):
-                        w_dict["target_location"] = _normalize_loc_arrow(w_dict["target_location"])
-                    w_dict["static_target_location"] = w_dict.get("target_location", "")
-                    if w_dict.get("follow_npc_schedule") and w_dict.get("target_npc"):
-                        try:
-                            from mechanics.world.waypoints.matching import resolve_effective_waypoint_location
-                            eff_loc = resolve_effective_waypoint_location(session_id, w_dict)
-                            if eff_loc:
-                                norm_eff = _normalize_loc_arrow(eff_loc)
-                                w_dict["live_scheduled_location"] = norm_eff
-                                w_dict["effective_location"] = norm_eff
-                                w_dict["target_location"] = norm_eff
-                        except Exception:
-                            pass
-                    if not w_dict.get("effective_location"):
-                        w_dict["effective_location"] = w_dict.get("target_location", "")
-                    all_wps.append(w_dict)
-        except Exception:
-            all_wps = []
+        if preloaded_wps is not None:
+            all_wps = [_hydrate_quest_waypoint_for_enrichment(session_id, wr) for wr in preloaded_wps]
+        else:
+            try:
+                with get_conn() as conn:
+                    wp_rows = conn.execute(
+                        """SELECT * FROM quest_waypoints
+                           WHERE session_id=? AND quest_id=?
+                           ORDER BY COALESCE(sub_obj_id, 0) ASC, stage_index ASC""",
+                        (session_id, quest_id)
+                    ).fetchall()
+                    all_wps = [_hydrate_quest_waypoint_for_enrichment(session_id, wr) for wr in wp_rows]
+            except Exception:
+                all_wps = []
+
+        if dossier_preloaded:
+            d["dossier"] = preloaded_dossier
+        else:
+            try:
+                d["dossier"] = get_quest_dossier(int(session_id), str(quest_id))
+            except Exception:
+                d["dossier"] = None
+    else:
+        d["dossier"] = preloaded_dossier if dossier_preloaded else None
 
     if d["sub_objectives"]:
         for idx, so in enumerate(d["sub_objectives"]):
@@ -254,6 +285,8 @@ def get_active_story_quest(session_id: int) -> dict | None:
     return _enrich_quest_dict(row)
 
 def get_session_quests(session_id: int, status: str = None) -> list[dict]:
+    wps_by_qid: dict[str, list[Any]] = {}
+    dossiers_by_qid: dict[str, dict] = {}
     with get_conn() as conn:
         if status:
             rows = conn.execute(
@@ -265,7 +298,44 @@ def get_session_quests(session_id: int, status: str = None) -> list[dict]:
                 "SELECT * FROM quests WHERE session_id=? ORDER BY updated_at DESC",
                 (session_id,)
             ).fetchall()
-    return [_enrich_quest_dict(r) for r in rows if r]
+        if rows:
+            try:
+                wp_rows = conn.execute(
+                    """SELECT * FROM quest_waypoints
+                       WHERE session_id=?
+                       ORDER BY quest_id ASC, COALESCE(sub_obj_id, 0) ASC, stage_index ASC""",
+                    (session_id,)
+                ).fetchall()
+                for wr in wp_rows:
+                    qid_key = str(wr["quest_id"] or "")
+                    wps_by_qid.setdefault(qid_key, []).append(wr)
+            except Exception:
+                wps_by_qid = {}
+            try:
+                d_rows = conn.execute(
+                    "SELECT * FROM quest_dossiers WHERE session_id=?",
+                    (session_id,)
+                ).fetchall()
+                for dr in d_rows:
+                    ed = _enrich_dossier_dict(dr)
+                    if ed and ed.get("quest_id"):
+                        dossiers_by_qid[str(ed["quest_id"])] = ed
+            except Exception:
+                dossiers_by_qid = {}
+    out: list[dict] = []
+    for r in rows:
+        if not r:
+            continue
+        qid = str(r["quest_id"] or "")
+        enriched = _enrich_quest_dict(
+            r,
+            preloaded_wps=wps_by_qid.get(qid, []),
+            preloaded_dossier=dossiers_by_qid.get(qid),
+            dossier_preloaded=True,
+        )
+        if enriched:
+            out.append(enriched)
+    return out
 
 get_quests = get_session_quests
 
@@ -535,7 +605,8 @@ def add_session_clue(
     quest_id: str = "",
     chapter: int = 1,
     is_verified: int = 0,
-    deduction_parents: list = None
+    deduction_parents: list = None,
+    turn_created: int | None = None,
 ) -> int:
     """Inserts a new structured evidence record into session_clues with deduplication check."""
     if not title or not lead_text:
@@ -549,6 +620,13 @@ def add_session_clue(
     now = time.time()
 
     with get_conn() as conn:
+        if turn_created is None:
+            try:
+                s_row = conn.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+                turn_created = int(db.infer_session_turn(dict(s_row))) if s_row else 1
+            except Exception:
+                turn_created = 1
+
         rows = conn.execute(
             "SELECT * FROM session_clues WHERE session_id=? ORDER BY created_at ASC, id ASC",
             (session_id,)
@@ -565,9 +643,9 @@ def add_session_clue(
 
         cur = conn.execute(
             """INSERT INTO session_clues
-               (session_id, quest_id, chapter, title, lead_text, category, source_location, linked_npc, is_verified, deduction_parents_json, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (session_id, quest_id or "", chapter or 1, clean_title, clean_lead, clean_cat, source_location or "", linked_npc or "", int(is_verified), parents_json, now, now)
+               (session_id, quest_id, chapter, title, lead_text, category, source_location, linked_npc, is_verified, deduction_parents_json, turn_created, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (session_id, quest_id or "", chapter or 1, clean_title, clean_lead, clean_cat, source_location or "", linked_npc or "", int(is_verified), parents_json, int(turn_created or 1), now, now)
         )
         new_id = cur.lastrowid
 
@@ -790,7 +868,8 @@ def synthesize_deduction_clue(
     clue_ids: list[int],
     title: str,
     lead_text: str,
-    chapter: int = 1
+    chapter: int = 1,
+    turn_created: int | None = None,
 ) -> int:
     """Creates a verified deduction breakthrough linking parent clues and applying quest breakthrough shortcuts."""
     inherited_npc = ""
@@ -813,7 +892,8 @@ def synthesize_deduction_clue(
         quest_id=inherited_qid,
         chapter=chapter,
         is_verified=1,
-        deduction_parents=clue_ids
+        deduction_parents=clue_ids,
+        turn_created=turn_created,
     )
     for parent_id in clue_ids:
         verify_session_clue(parent_id)
@@ -999,6 +1079,43 @@ def advance_waypoint(session_id: int, quest_id: str, stage_index: int, sub_obj_i
                     (now, session_id, quest_id, sub_obj_id, next_row["stage_index"])
                 )
         return dict(next_row) if next_row else None
+
+
+def unlock_climax_waypoint(
+    session_id: int,
+    quest_id: str,
+    climax_loc: str = "",
+    target_npc: str = "",
+) -> int:
+    """Promotes a 'locked' climax stage in quest_waypoints to 'active' when climax_spec['is_unlocked'] becomes True."""
+    now = time.time()
+    with get_conn() as conn:
+        row = None
+        if climax_loc:
+            row = conn.execute(
+                """SELECT id, stage_index FROM quest_waypoints
+                   WHERE session_id=? AND quest_id=? AND sub_obj_id IS NULL AND status='locked'
+                     AND (target_location=? OR ? LIKE '%' || target_location || '%')
+                   ORDER BY stage_index ASC LIMIT 1""",
+                (session_id, quest_id, climax_loc, climax_loc),
+            ).fetchone()
+        if not row:
+            row = conn.execute(
+                """SELECT id, stage_index FROM quest_waypoints
+                   WHERE session_id=? AND quest_id=? AND sub_obj_id IS NULL AND status='locked'
+                   ORDER BY stage_index ASC LIMIT 1""",
+                (session_id, quest_id),
+            ).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE quest_waypoints SET status='active', target_npc=CASE WHEN target_npc='' OR target_npc IS NULL THEN ? ELSE target_npc END, updated_at=? WHERE id=?",
+                (target_npc or "", now, row["id"]),
+            )
+            return 1
+        return 0
+
+
+promote_locked_quest_waypoints = unlock_climax_waypoint
 
 def update_waypoint_resource_progress(session_id: int, quest_id: str, stage_index: int, delta: int, sub_obj_id: int | None = None) -> dict:
     """Increment resource_collected for a gathering waypoint.

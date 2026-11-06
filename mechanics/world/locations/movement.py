@@ -310,7 +310,7 @@ def process_llm_location_update(session_id: int, raw_location: str, scenario_key
             room_nouns = (
                 "room", "hall", "hallway", "corridor", "wing", "bay", "lounge", "deck",
                 "ward", "office", "chamber", "court", "courtyard", "plaza", "alley",
-                "patio", "terrace", "foyer", "lobby", "entrance", "gate", "archway",
+                "patio", "terrace", "balcony", "booth", "rooftop", "shed", "foyer", "lobby", "entrance", "gate", "archway",
                 "porch", "kitchen", "library", "lab", "studio", "dojo", "stage",
                 "sanctuary", "vault", "cellar", "crypt", "cavern", "grotto", "bridge",
                 "quarters", "cabin", "stateroom", "pavilion", "midway", "nook", "alcove",
@@ -2154,7 +2154,7 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
                     gate_p = next((r["primary_name"] for r in existing if r.get("zone_name") == s_name and ("gate" in r.get("primary_name", "").lower() or "entrance" in r.get("primary_name", "").lower())), "School Main Gates")
 
-                    sub_area = "Entrance Path & Archway" if "path" in narr_prose else ("Gate Checkpoint" if ("checkpoint" in narr_prose or "delinquent" in narr_prose) else resolve_default_sublocation(gate_p, s_name, session_id=session_id, scenario_key=scen_key, char_name=char_name))
+                    sub_area = "Main Academy Stone Walkway" if "path" in narr_prose else ("Campus Security Guard Post" if ("checkpoint" in narr_prose or "delinquent" in narr_prose) else resolve_default_sublocation(gate_p, s_name, session_id=session_id, scenario_key=scen_key, char_name=char_name))
 
                     formatted = format_tiered_location_string(s_name, gate_p, sub_area)
 
@@ -2263,16 +2263,18 @@ _TACTICAL_FOCAL_POINT_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+_ARCHITECTURAL_NOUNS = (
+    r"cellar|basement|boiler\s+room|storage\s+room|annex\s+storage|supply\s+closet|janitor'?s\s+closet|"
+    r"equipment\s+shed|back\s+room|back\s+office|inner\s+sanctum|vault|archive\s+room|darkroom|"
+    r"dressing\s+room|green\s+room|broadcast\s+booth|server\s+room|attic|loft|wine\s+cellar|"
+    r"laboratory\s+annex|prep\s+room|changing\s+stall|private\s+study\s+room|catacombs|crypt|"
+    r"balcony|terrace|alcove|booth|booths|shed|veranda|patio|observatory|mezzanine|courtyard|chamber|chambers|nook"
+)
+
 _ARCHITECTURAL_SUBROOM_PATTERNS = re.compile(
     r"\b(?:into|enter|entering|sneak\s+into|slip\s+into|step\s+into|head\s+into|go\s+into|open|explore|search\s+inside|unlock)\s+"
     r"(?:the\s+|a\s+|an\s+)?"
-    r"(?P<room>"
-    r"(?:secret\s+|old\s+|hidden\s+|abandoned\s+|inner\s+|back\s+|private\s+|annex\s+|basement\s+|underground\s+|locked\s+)?"
-    r"(?:cellar|basement|boiler\s+room|storage\s+room|annex\s+storage|supply\s+closet|janitor'?s\s+closet|"
-    r"equipment\s+shed|back\s+room|back\s+office|inner\s+sanctum|vault|archive\s+room|darkroom|"
-    r"dressing\s+room|green\s+room|broadcast\s+booth|server\s+room|attic|loft|wine\s+cellar|"
-    r"laboratory\s+annex|prep\s+room|changing\s+stall|private\s+study\s+room|catacombs|crypt)"
-    r")\b",
+    rf"(?P<room>(?:[A-Za-z0-9'\-]+\s+){{0,3}}(?:{_ARCHITECTURAL_NOUNS}))\b",
     re.IGNORECASE,
 )
 
@@ -2330,17 +2332,24 @@ def resolve_hybrid_sublocation_or_focal_point(
         if action_text and (current_node_id or current_location):
             try:
                 from .seeds import get_node_props
-                _, pp_curr, ps_curr = parse_tiered_location(current_location, scen_key, session_id=session_id)
-                room_label = ps_curr if ps_curr and ps_curr != "Main Area" else pp_curr
-                room_props = get_node_props(current_node_id or "", room_label, scenario_key=scen_key)
+                pz_curr, pp_curr, ps_curr = parse_tiered_location(current_location, scen_key, session_id=session_id)
+                room_props = get_node_props(session_id, current_node_id or "", scenario_key=scen_key)
                 act_low = str(action_text).lower()
-                if any(w in act_low for w in ("sit", "stand", "lean", "move", "walk", "step", "behind", "beside", "under", "at the", "by the", "near the", "hide", "crouch")):
+                if any(w in act_low for w in ("sit", "stand", "lean", "move", "walk", "step", "behind", "beside", "under", "at the", "by the", "near the", "hide", "crouch", "for privacy")):
+                    arch_keywords = ("balcony", "terrace", "alcove", "booth", "shed", "veranda", "patio", "observatory", "mezzanine", "chamber", "vault", "cellar", "crypt", "nook")
                     for prop in room_props:
                         if prop.lower() in act_low:
+                            if any(ak in prop.lower() for ak in arch_keywords):
+                                # Architectural sub-area promoted to Tier-3 room
+                                sub_name = prop
+                                kind = "architectural_room"
+                                break
+                            is_relocate = any(kw in act_low for kw in ("step into", "slip into", "head into", "move to", "walk to", "go to", "for privacy"))
+                            new_loc = format_tiered_location_string(pz_curr, pp_curr, prop) if is_relocate else current_location
                             return {
                                 "matched": True,
                                 "kind": "focal_point",
-                                "location": current_location,
+                                "location": new_loc,
                                 "node_id": current_node_id,
                                 "focal_point": prop,
                             }

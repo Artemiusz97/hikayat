@@ -46,6 +46,7 @@ _HOSTILE_RESTRICTED_KEYWORDS = (
     "dungeon", "crypt", "vault", "stronghold", "fortress", "citadel", "lair",
     "den", "bandit", "cult", "syndicate", "armory", "sanctum", "ruins", "sewer",
     "catacomb", "laboratory", "black site", "restricted", "bunker", "incursion",
+    "breach",
     "anomaly", "rift", "prison", "cellblock", "watchtower", "barracks",
 )
 
@@ -497,7 +498,7 @@ def is_stealth_context_warranted(
     """
     Determines whether stealth actions and the manual Stealth/Distract dock buttons
     are contextually warranted in the current scene (Issue 1):
-    - Warranted during combat, near living hostiles, or during an active anomaly incursion.
+    - Warranted during combat, near living hostiles, or during an active anomaly breach.
     - Warranted inside or at the locked threshold of a `restricted` or `private` area (excluding player's home),
       or during active curfew / after-hours trespassing (`20:00–07:00`).
     - Warranted when an active local quest waypoint explicitly calls for covert/infiltration tactics.
@@ -530,7 +531,7 @@ def is_stealth_context_warranted(
     focal_low = focal_str.lower()
     combined_loc = f"{loc_low} {focal_low} {curr_nid.lower()}".strip()
 
-    # 2. Active anomalous incursion at current location
+    # 2. Active anomaly breach at current location
     if sid and (curr_loc or curr_nid):
         try:
             from mechanics.world.anomalous_events import get_active_incursion_at_location
@@ -582,7 +583,7 @@ def is_stealth_context_warranted(
         except Exception:
             pass
 
-    # Player's own home / bedroom is never a stealth zone unless enemies/incursions are present
+    # Player's own home / bedroom is never a stealth zone unless enemies/breaches are present
     if curr_nid.lower() in ("loc_player_house", "sub_player_bedroom") or "player's house" in loc_low or "player's bedroom" in loc_low:
         return False
 

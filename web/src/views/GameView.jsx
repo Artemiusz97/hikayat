@@ -28,6 +28,7 @@ import { useInventory } from '../hooks/useInventory';
 import { useCodex } from '../hooks/useCodex';
 import { usePhone } from '../hooks/usePhone';
 import { useSettings } from '../hooks/useSettings';
+import { isValidSessionId } from '../utils/session';
 
 const GameView = ({
   user,
@@ -80,6 +81,11 @@ const GameView = ({
   // Right rail (world & outcomes) only fits on wide screens; below that it becomes a sidebar tab.
   const isWide = useMediaQuery('(min-width: 1280px)');
 
+  const inventory = useInventory(user);
+  const codex = useCodex(session?.id, user, session);
+  const phone = usePhone(session?.id, user);
+  const settings = useSettings(user?.user_id);
+
   const handleSelectContact = (name) => {
     setTargetContactName(name);
     setTargetContactPulse(Date.now());
@@ -131,11 +137,6 @@ const GameView = ({
     }
   };
 
-  const inventory = useInventory(user);
-  const codex = useCodex(session?.id, user);
-  const phone = usePhone(session?.id, user);
-  const settings = useSettings(user?.user_id);
-
   // Sync selectedCombatTarget with first living enemy in session.nearby_enemies
   useEffect(() => {
     const enemies = (session?.nearby_enemies || session?.monsters || []).filter(e => e && e.name && (e.hp ?? 1) > 0);
@@ -171,7 +172,7 @@ const GameView = ({
   const handleToggleStealth = async () => {
     const nextState = !isStealthActive;
     setIsStealthActive(nextState);
-    if (session?.id && user?.user_id) {
+    if (isValidSessionId(session?.id) && user?.user_id) {
       try {
         const res = await apiCall('/api/adventure/toggle_stealth', {
           method: 'POST',
@@ -334,6 +335,8 @@ const GameView = ({
             onTriggerAction={handleAction}
             targetContactName={targetContactName}
             targetContactPulse={targetContactPulse}
+            isStreaming={isStreaming}
+            processingTurn={processingTurn}
             onJumpToSavedContact={(npcName) => {
               setTargetContactName(npcName);
               setTargetContactPulse(Date.now());

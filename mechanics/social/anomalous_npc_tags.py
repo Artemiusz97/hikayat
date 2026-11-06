@@ -18,6 +18,7 @@ import scenario_data
 
 TAG_SPECIAL_AGENT = "special_agent"
 TAG_CIVILIAN = "civilian"
+TAG_ANOMALY_ENTITY = "anomaly_entity"
 
 CIVILIAN_BASE_HP = 100
 CIVILIAN_BASE_MP = 0
@@ -80,14 +81,18 @@ def _extract_basic_info(entity: Any) -> Dict[str, Any]:
     return {}
 
 
+_UNSET = object()
+
+
 def _get_known_faction_class_names_lower() -> set[str]:
     try:
         from mechanics.combat.items.anomalous_gear import ANOMALOUS_FACTION_CLASSES
         names: set[str] = set()
-        for c_list in ANOMALOUS_FACTION_CLASSES.values():
-            for c_entry in c_list:
-                if isinstance(c_entry, dict) and c_entry.get("name"):
-                    names.add(str(c_entry["name"]).strip().lower())
+        for f_classes in ANOMALOUS_FACTION_CLASSES.values():
+            if isinstance(f_classes, dict):
+                for c_name in f_classes.keys():
+                    if c_name:
+                        names.add(str(c_name).strip().lower())
         return names
     except Exception:
         return set()
@@ -97,6 +102,9 @@ def classify_anomalous_npc_tag(
     entity: Any,
     session_id: int = 0,
     scen_key: str = "",
+    contact_record: Any = _UNSET,
+    lore_record: Any = _UNSET,
+    agent_roster_names: Optional[set[str]] = None,
 ) -> str:
     """
     Deterministically classifies an NPC in Anomalous Incursions as either
@@ -117,13 +125,25 @@ def classify_anomalous_npc_tag(
 
     basic = _extract_basic_info(ent_dict)
 
+    # 0. Anomalous Entities in "Present in Scene" tracker are never classified as human Civilians or Special Agents
+    if (
+        ent_dict.get("is_anomalous_entity")
+        or basic.get("is_anomalous_entity")
+        or str(ent_dict.get("npc_type") or basic.get("npc_type") or "").strip().lower() == "anomaly"
+        or str(ent_dict.get("social_role_type") or basic.get("social_role_type") or "").strip().lower() == "anomaly"
+    ):
+        return TAG_ANOMALY_ENTITY
+    role_check_low = str(ent_dict.get("role") or basic.get("role") or "").strip().lower()
+    if any(k in role_check_low for k in ("non-hostile entity", "non-hostile object", "non-hostile phenomenon")):
+        return TAG_ANOMALY_ENTITY
+
     # 1. Check direct persisted tag on entity or basic_info (Strictly Permanent)
     for raw_tag in (
         ent_dict.get("anomalous_npc_tag"),
         basic.get("anomalous_npc_tag"),
     ):
         clean_t = str(raw_tag or "").strip().lower()
-        if clean_t in (TAG_SPECIAL_AGENT, TAG_CIVILIAN):
+        if clean_t in (TAG_SPECIAL_AGENT, TAG_CIVILIAN, TAG_ANOMALY_ENTITY):
             return clean_t
 
     if ent_dict.get("is_special_agent") is True or basic.get("is_special_agent") is True:
@@ -132,21 +152,30 @@ def classify_anomalous_npc_tag(
         return TAG_CIVILIAN
 
     # 2. Check 44 Pre-Seeded Special Agents Roster + Persisted DB Contact / Lorebook
-    if session_id and name:
-        try:
-            from mechanics.social.agent_roster import find_special_agent_by_name
-            if find_special_agent_by_name(session_id, name, scen_key=scen_key):
+    if (session_id or contact_record is not _UNSET or lore_record is not _UNSET or agent_roster_names is not None) and name:
+        if agent_roster_names is not None:
+            if name.lower() in agent_roster_names:
                 return TAG_SPECIAL_AGENT
-        except Exception:
-            pass
+        elif session_id:
+            try:
+                from mechanics.social.agent_roster import find_special_agent_by_name
+                if find_special_agent_by_name(session_id, name, scen_key=scen_key):
+                    return TAG_SPECIAL_AGENT
+            except Exception:
+                pass
 
         try:
-            c_rec = db.get_contact(session_id, name)
-            if not isinstance(c_rec, dict):
-                for cand in (db.get_contacts(session_id) or []):
-                    if isinstance(cand, dict) and str(cand.get("name") or "").strip().lower() == name.lower():
-                        c_rec = cand
-                        break
+            if contact_record is not _UNSET:
+                c_rec = contact_record if isinstance(contact_record, dict) else None
+            elif session_id:
+                c_rec = db.get_contact(session_id, name)
+                if not isinstance(c_rec, dict):
+                    for cand in (db.get_contacts(session_id) or []):
+                        if isinstance(cand, dict) and str(cand.get("name") or "").strip().lower() == name.lower():
+                            c_rec = cand
+                            break
+            else:
+                c_rec = None
             if isinstance(c_rec, dict):
                 cb = _extract_basic_info(c_rec)
                 persisted_c_tag = str(cb.get("anomalous_npc_tag") or c_rec.get("anomalous_npc_tag") or "").strip().lower()
@@ -161,7 +190,12 @@ def classify_anomalous_npc_tag(
             pass
 
         try:
-            lore_ent = db.get_lorebook_entity(session_id, name)
+            if lore_record is not _UNSET:
+                lore_ent = lore_record if isinstance(lore_record, dict) else None
+            elif session_id:
+                lore_ent = db.get_lorebook_entity(session_id, name)
+            else:
+                lore_ent = None
             if isinstance(lore_ent, dict):
                 l_meta = lore_ent.get("metadata") if isinstance(lore_ent.get("metadata"), dict) else {}
                 persisted_l_tag = str(
@@ -200,7 +234,7 @@ def classify_anomalous_npc_tag(
 
     # HQ quartermasters, clerks, regular police, security guards, street thugs -> Civilian unless explicitly Awakened
     if has_mundane_in_role:
-        if re.search(r"\b(awakened|mana[-\s]wielder|special\s+agent|exorcist|esper|thaumaturge|ritualist)\b", role_and_cls, re.IGNORECASE):
+        if re.search(r"\b(awakened|mana[-\s]wielder|special\s+agent|exorcist|esper|thaumaturge|ritualist|operative|rift\s+runner|illusion\s+breaker|ward\s+scribe|alley\s+breacher)\b", role_and_cls, re.IGNORECASE):
             return TAG_SPECIAL_AGENT
         return TAG_CIVILIAN
 
@@ -241,8 +275,10 @@ def _infer_emergent_agent_faction_and_class(role_text: str, seed_val: int) -> Tu
         return ("monastic_order", "Eastern Shrine Order", "Shinto Shrine Exorcist", tier)
     if any(k in low for k in ("marshal", "bureau", "directorate", "public containment", "federal")):
         return ("public_agency", "Public Containment Bureau", "Field Containment Agent", tier)
-    if any(k in low for k in ("corporate", "contractor", "executive")):
-        return ("private_agency_1", "Private Defense Syndicate", "Corporate Strike Contractor", tier)
+    if any(k in low for k in ("surplus", "storefront", "trouble-shooter", "small agency", "local agency")):
+        return ("private_agency_2", "Local Private Agency", "Contract Trouble-Shooter", tier)
+    if any(k in low for k in ("corporate", "contractor", "executive", "conglomerate", "proprietary")):
+        return ("private_agency_1", "Corporate Containment Conglomerate", "Corporate Strike Operator", tier)
 
     freelance_classes = [
         "Freelance Anomaly Hunter",
@@ -262,6 +298,60 @@ def resolve_special_agent_weapon_profile(faction_id: str, agent_class: str, agen
     matk_bonus = 5 + tier_clamped * 3
     cls_low = f"{faction_id} {agent_class}".lower()
 
+    if "honor roll student" in cls_low:
+        return {
+            "name": "Suppressed 9mm Service Pistol",
+            "atk_bonus": atk_bonus + 1,
+            "matk_bonus": matk_bonus + 1,
+            "damage_types": {"piercing": 0.6, "magical": 0.4},
+            "mundane_weapon": False,
+            "mana_infused": True,
+        }
+    if "athletic regular" in cls_low:
+        return {
+            "name": "Live-Steel Wakizashi Blade",
+            "atk_bonus": atk_bonus + 2,
+            "matk_bonus": matk_bonus,
+            "damage_types": {"slashing": 0.6, "magical": 0.4},
+            "mundane_weapon": False,
+            "mana_infused": True,
+        }
+    if "quiet bookworm" in cls_low:
+        return {
+            "name": "Consecrated Silver Athame",
+            "atk_bonus": atk_bonus,
+            "matk_bonus": matk_bonus + 2,
+            "damage_types": {"holy": 0.6, "piercing": 0.4},
+            "mundane_weapon": False,
+            "mana_infused": True,
+        }
+    if "back-row rebel" in cls_low:
+        return {
+            "name": "Sawed-Off Street Scattergun",
+            "atk_bonus": atk_bonus + 2,
+            "matk_bonus": matk_bonus,
+            "damage_types": {"piercing": 0.6, "bludgeoning": 0.4},
+            "mundane_weapon": False,
+            "mana_infused": True,
+        }
+    if "after-school tinkerer" in cls_low:
+        return {
+            "name": "Modified Gauss Coil-Carbine",
+            "atk_bonus": atk_bonus + 1,
+            "matk_bonus": matk_bonus + 1,
+            "damage_types": {"piercing": 0.5, "shock": 0.5},
+            "mundane_weapon": False,
+            "mana_infused": True,
+        }
+    if "class sharpshooter" in cls_low:
+        return {
+            "name": "Folding Takedown Marksman Carbine",
+            "atk_bonus": atk_bonus + 2,
+            "matk_bonus": matk_bonus + 1,
+            "damage_types": {"piercing": 0.7, "magical": 0.3},
+            "mundane_weapon": False,
+            "mana_infused": True,
+        }
     if "monastic" in cls_low or "exorcist" in cls_low or "shrine" in cls_low:
         return {
             "name": "Sanctified Shakujo & Ofuda Blade",
@@ -289,9 +379,18 @@ def resolve_special_agent_weapon_profile(faction_id: str, agent_class: str, agen
             "mundane_weapon": False,
             "mana_infused": True,
         }
-    if "private" in cls_low or "contractor" in cls_low or "sniper" in cls_low:
+    if "private_agency_2" in cls_low or "surplus" in cls_low or "trouble-shooter" in cls_low or "storefront" in cls_low or "aftermarket" in cls_low:
         return {
-            "name": "Aether-Core Rail Carbine",
+            "name": "Aftermarket Ward-Modded Surplus Shotgun",
+            "atk_bonus": atk_bonus + 2,
+            "matk_bonus": matk_bonus,
+            "damage_types": {"piercing": 0.6, "shock": 0.4},
+            "mundane_weapon": False,
+            "mana_infused": True,
+        }
+    if "private" in cls_low or "corporate" in cls_low or "proprietary" in cls_low or "contractor" in cls_low or "sniper" in cls_low:
+        return {
+            "name": "Proprietary R&D Gauss Carbine",
             "atk_bonus": atk_bonus + 2,
             "matk_bonus": matk_bonus + 1,
             "damage_types": {"piercing": 0.5, "shock": 0.5},
@@ -528,12 +627,15 @@ def format_innate_ability_details(innate_abilities: List[Any]) -> List[Dict[str,
                 })
             continue
         tier_num = int(sp.get("tier", 3) or 3)
-        is_ult = tier_num == 1 or "ultimate" in str(sp.get("name", "")).lower()
+        is_ult = bool(sp.get("is_ultimate") or tier_num == 1 or "ultimate" in str(sp.get("name", "")).lower())
+        raw_mp = sp.get("mp_cost", 0 if is_ult else 8)
         details.append({
             "id": str(sp.get("id") or item),
             "name": str(sp.get("name") or item),
             "emoji": str(sp.get("emoji") or ("🌟" if is_ult else "⚡")),
-            "mp_cost": int(sp.get("mp_cost", 8) or 8),
+            "mp_cost": int(raw_mp) if raw_mp is not None else (0 if is_ult else 8),
+            "pip_cost": int(sp.get("pip_cost", 3 if is_ult else 0) or 0),
+            "slot_tier": str(sp.get("slot_tier") or ("ultimate" if is_ult else "tactical")),
             "tier": tier_num,
             "tier_name": "Signature Ultimate" if is_ult else str(sp.get("tier_name") or "Tactical"),
             "discipline": str(sp.get("discipline") or "attack"),
@@ -612,6 +714,31 @@ def hydrate_anomalous_npc_profile(
             or ("Independent Hunter" if faction_id == "freelancer" else f"Tier {agent_tier} Operative")
         ).strip()
 
+        from mechanics.combat.spells.awakened_kits import (
+            build_awakened_kit_ids,
+            derive_default_3axis,
+            normalize_anomalous_attribute,
+        )
+        def_attr, def_arch, def_med = derive_default_3axis(
+            char_class=f"{agent_class} {role_text}",
+            faction_id=faction_id,
+            seed=f"{session_id}:{name.lower()}",
+        )
+        raw_attr = (sp_agent or {}).get("attribute") or entity.get("attribute") or basic.get("attribute") or def_attr
+        attribute = normalize_anomalous_attribute(raw_attr, fallback=def_attr)
+        combat_archetype = str(
+            (sp_agent or {}).get("combat_archetype")
+            or entity.get("combat_archetype")
+            or basic.get("combat_archetype")
+            or def_arch
+        ).strip().lower()
+        ability_medium = str(
+            (sp_agent or {}).get("ability_medium")
+            or entity.get("ability_medium")
+            or basic.get("ability_medium")
+            or def_med
+        ).strip().lower()
+
         innate_abilities = list(
             (sp_agent or {}).get("innate_abilities")
             or entity.get("innate_abilities")
@@ -619,13 +746,7 @@ def hydrate_anomalous_npc_profile(
             or []
         )
         if not innate_abilities:
-            from mechanics.combat.spells import get_anomalous_starting_innate_abilities
-            innate_abilities = get_anomalous_starting_innate_abilities(
-                agent_class,
-                scenario=scen_key or "anomalous_incursions",
-                class_description=role_text,
-                seed=f"{session_id}:{name.lower()}:{agent_class}",
-            )
+            innate_abilities = build_awakened_kit_ids(attribute, combat_archetype, ability_medium)
 
         combat_stats = compute_special_agent_combat_stats(
             agent_tier=agent_tier,
@@ -645,6 +766,9 @@ def hydrate_anomalous_npc_profile(
             "agent_class": agent_class,
             "faction_id": faction_id,
             "faction_name": faction_name,
+            "attribute": attribute,
+            "combat_archetype": combat_archetype,
+            "ability_medium": ability_medium,
             "innate_abilities": innate_abilities,
             "innate_ability_details": format_innate_ability_details(innate_abilities),
             **combat_stats,
@@ -874,7 +998,7 @@ def apply_civilian_permadeath(
         try:
             lore_ent = db.get_lorebook_entity(session_id, clean_name)
             prev_desc = str((lore_ent or {}).get("description") or "Civilian resident.").strip()
-            death_note = f" [DECEASED: Slain by {killer_name} during an anomalous incursion.]"
+            death_note = f" [DECEASED: Slain by {killer_name} during an anomaly breach.]"
             if "[DECEASED:" not in prev_desc:
                 prev_desc = f"{prev_desc}{death_note}"
             db.upsert_lorebook_entity(
@@ -931,15 +1055,44 @@ def resolve_anomalous_ally_combat_action(
     tag = str(comp.get("anomalous_npc_tag") or (TAG_SPECIAL_AGENT if comp.get("is_special_agent") else TAG_CIVILIAN)).lower()
     comp_stats = comp.get("stats") if isinstance(comp.get("stats"), dict) else {}
 
+    def _is_protected_capture(e_obj: Dict[str, Any]) -> bool:
+        if not e_obj.get("requires_non_lethal_subdue"):
+            return False
+        if e_obj.get("is_breached") or int(e_obj.get("hp", 100) or 0) <= 1:
+            return True
+        sub_pct = float(e_obj.get("subdue_threshold_pct") or 0.35)
+        return (int(e_obj.get("hp", 100) or 0) / max(1, int(e_obj.get("max_hp", 100) or 100))) <= sub_pct
+
+    engageable_enemies = [e for e in living_enemies if int(e.get("hp", 0) or 0) > 0 and not _is_protected_capture(e)]
+
     # --- BRANCH A: CIVILIAN (Weapon-Only, 0 MP, Reduced Chip vs Supernatural Anomalies) ---
     if tag == TAG_CIVILIAN:
-        target_m = r.choice(living_enemies)
+        if not engageable_enemies:
+            held_name = living_enemies[0].get("name", "the specimen")
+            combat_log.append(
+                f"🛡️ **{comp_name}** (*Civilian*) holds fire so the containment team can subdue **{held_name}** alive!"
+            )
+            return
+        target_m = r.choice(engageable_enemies)
         role_txt = str(comp.get("role") or "")
         weapon = comp.get("weapon_profile") or resolve_civilian_weapon_profile(role_txt, seed_str=comp_name)
         w_name = str(weapon.get("name") or "Improvised Object")
         w_atk = int(weapon.get("atk_bonus", 3) or 3)
         stat_val = max(comp_stats.get("STR", 2), comp_stats.get("PER", 3), comp_stats.get("AGI", 2))
         m_def = int((target_m.get("stats") or {}).get("END", 3) or 3)
+
+        if str(target_m.get("physicality") or "").strip().lower() == "non_corporeal":
+            target_m["spotter_marked"] = True
+            spot_eff = "Spotter Cover [+5% EVA] [1 turn]"
+            for ally in living_allies:
+                if ally.get("hp", 0) > 0:
+                    effs = ally.setdefault("status_effects", [])
+                    if isinstance(effs, list) and spot_eff not in effs:
+                        effs.append(spot_eff)
+            combat_log.append(
+                f"🔦 **{comp_name}** (*Civilian — {w_name}*) cannot harm non-corporeal **{target_m['name']}** with mundane weapons (0 dmg) — instead provides a **Tactical Spotter & Cover Assist** (**+5% EVA** & **+1 containment bonus**)!"
+            )
+            return
 
         hit_chance = max(25, min(85, 52 + (stat_val - m_def) * 6))
         if r.randint(1, 100) <= hit_chance:
@@ -994,23 +1147,74 @@ def resolve_anomalous_ally_combat_action(
         )
         return
 
-    # 2. Check Signature Ultimate (Tier 1 spell) when fighting an Elite/Boss or wounded
+    # Smart Capture Ceasefire: never strike protected <=35% HP / 1 HP / Breached non-lethal capture targets!
+    if not engageable_enemies:
+        support_spells = [
+            s for s in resolved_spells
+            if s.get("discipline") == "support" and not s.get("is_ultimate") and cur_mp >= int(s.get("mp_cost", 8))
+        ]
+        if support_spells:
+            sp = support_spells[0]
+            cost = int(sp.get("mp_cost", 8))
+            comp["mp"] = max(0, cur_mp - cost)
+            for ally in living_allies:
+                if ally.get("hp", 0) > 0:
+                    ally["temp_hp"] = max(int(ally.get("temp_hp", 0) or 0), int(sp.get("temp_hp_shield", 16) or 16))
+            combat_log.append(
+                f"🛡️ **{comp_name}** holds fire on the weakened capture target and casts **{sp['name']}** (-{cost} MP) to fortify the squad!"
+            )
+        else:
+            held_name = living_enemies[0].get("name", "the specimen")
+            comp["temp_hp"] = max(int(comp.get("temp_hp", 0) or 0), 12)
+            combat_log.append(
+                f"🛡️ **{comp_name}** ceases lethal fire on **{held_name}** and maintains a containment guard perimeter!"
+            )
+        return
+
+    from mechanics.combat.awakened_resonance import (
+        apply_stability_and_break,
+        compute_stability_shred,
+    )
+    from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids, normalize_anomalous_attribute
+
+    comp_attr = normalize_anomalous_attribute(comp.get("attribute"), fallback="physical")
+    comp_arch = str(comp.get("combat_archetype") or "vanguard").strip().lower()
+    comp_med = str(comp.get("ability_medium") or "direct_manifestation").strip().lower()
+    if not resolved_spells:
+        for ab_id in build_awakened_kit_ids(comp_attr, comp_arch, comp_med):
+            sp_obj = get_spell(ab_id)
+            if isinstance(sp_obj, dict):
+                resolved_spells.append(sp_obj)
+
+    def _pick_role_target(pool: List[Dict[str, Any]]) -> Dict[str, Any]:
+        weak_matches = [
+            e for e in pool
+            if comp_attr in [normalize_anomalous_attribute(w) for w in (e.get("weaknesses") or [])]
+        ]
+        if weak_matches:
+            return max(weak_matches, key=lambda e: int(e.get("stability", 0) or 0))
+        if comp_arch == "breaker":
+            return max(pool, key=lambda e: int(e.get("stability", 0) or 0))
+        return max(pool, key=lambda e: int(e.get("hp", 0) or 0))
+
+    # 2. Check Signature Ultimate (Tier 1 / is_ultimate, 1/combat, 0 MP on Awakened kits)
     ult_spells = [
         s for s in resolved_spells
-        if (int(s.get("tier", 3) or 3) == 1 or "ultimate" in str(s.get("name", "")).lower())
-        and cur_mp >= int(s.get("mp_cost", 28))
+        if (s.get("is_ultimate") or int(s.get("tier", 3) or 3) == 1 or "ultimate" in str(s.get("name", "")).lower())
+        and cur_mp >= int(s.get("mp_cost", 0) if s.get("mp_cost") is not None else 28)
     ]
-    high_threat = any(int(e.get("tier_rank", 2) or 2) >= 3 or int(e.get("hp", 0)) >= 110 for e in living_enemies)
+    high_threat = any(int(e.get("tier_rank", 2) or 2) >= 3 or int(e.get("hp", 0)) >= 110 for e in engageable_enemies)
     self_low = (comp.get("hp", 100) / max(1, comp.get("max_hp", 100))) <= 0.50
     if ult_spells and not comp.get("_used_ultimate_this_combat") and (high_threat or self_low):
         sp = ult_spells[0]
-        cost = int(sp.get("mp_cost", 28))
+        raw_ucost = sp.get("mp_cost", 0)
+        cost = int(raw_ucost) if raw_ucost is not None else 0
         comp["mp"] = max(0, cur_mp - cost)
         comp["_used_ultimate_this_combat"] = True
         p_mult = float(sp.get("power_mult", 3.0) or 3.0)
         int_stat = max(comp_stats.get("INT", 5), comp_stats.get("PER", 5), comp_stats.get("STR", 5))
         base_power = 18 + agent_tier * 6 + int_stat * 2
-        targets = list(living_enemies) if sp.get("target_type") == "aoe" else [max(living_enemies, key=lambda e: e.get("hp", 0))]
+        targets = list(engageable_enemies) if sp.get("target_type") == "aoe" else [_pick_role_target(engageable_enemies)]
         total_dealt = 0
         hit_names = []
         for tm in targets:
@@ -1018,6 +1222,9 @@ def resolve_anomalous_ally_combat_action(
                 continue
             dmg = max(18, min(tm.get("hp", 100), int(round(base_power * p_mult * (0.75 if len(targets) > 1 else 1.0)))))
             apply_damage_fn(tm, dmg)
+            if tm.get("hp", 0) > 0 and int(tm.get("max_stability", 0) or 0) > 0:
+                u_shred = compute_stability_shred(int(sp.get("stability_shred", 50) or 50), comp_attr, comp_arch, comp_attr, tm)
+                apply_stability_and_break(tm, u_shred, comp_attr, base_power, combat_log)
             total_dealt += dmg
             hit_names.append(f"{tm['name']} ({dmg} dmg)")
             if sp.get("status_ailment"):
@@ -1074,7 +1281,7 @@ def resolve_anomalous_ally_combat_action(
             return
 
         if disc == "curse":
-            target_m = max(living_enemies, key=lambda e: e.get("hp", 0))
+            target_m = _pick_role_target(engageable_enemies)
             eff = "Weakened [-20% ATK] [2 turns]"
             if eff not in (target_m.get("status_effects") or []):
                 target_m.setdefault("status_effects", []).append(eff)
@@ -1089,7 +1296,7 @@ def resolve_anomalous_ally_combat_action(
         p_mult = float(sp.get("power_mult", 1.35) or 1.35)
         int_stat = max(comp_stats.get("INT", 5), comp_stats.get("PER", 5), comp_stats.get("AGI", 5))
         base_power = 12 + agent_tier * 5 + int_stat * 2
-        targets = list(living_enemies) if sp.get("target_type") == "aoe" else [r.choice(living_enemies)]
+        targets = list(engageable_enemies) if sp.get("target_type") == "aoe" else [_pick_role_target(engageable_enemies)]
         hit_parts = []
         total_dealt = 0
         for tm in targets:
@@ -1097,6 +1304,9 @@ def resolve_anomalous_ally_combat_action(
                 continue
             dmg = max(10, min(tm.get("hp", 100), int(round(base_power * p_mult * (0.75 if len(targets) > 1 else 1.0)))))
             apply_damage_fn(tm, dmg)
+            if tm.get("hp", 0) > 0 and int(tm.get("max_stability", 0) or 0) > 0:
+                t_shred = compute_stability_shred(int(sp.get("stability_shred", 20) or 20), comp_attr, comp_arch, comp_attr, tm)
+                apply_stability_and_break(tm, t_shred, comp_attr, base_power, combat_log)
             total_dealt += dmg
             hit_parts.append(f"**{tm['name']}** (**{dmg} damage**)")
             if sp.get("status_ailment"):
@@ -1110,13 +1320,20 @@ def resolve_anomalous_ally_combat_action(
             return
 
     # 4. Mana-Infused Faction Weapon Fallback (when conserving or out of MP)
-    target_m = r.choice(living_enemies)
+    target_m = _pick_role_target(engageable_enemies)
     weapon = comp.get("weapon_profile") or resolve_special_agent_weapon_profile(
         str(comp.get("faction_id") or ""),
         str(comp.get("agent_class") or ""),
         agent_tier,
     )
     w_name = str(weapon.get("name") or "Resonance Weapon")
+    if str(target_m.get("physicality") or "").strip().lower() == "non_corporeal" and comp_attr == "physical":
+        target_m["spotter_marked"] = True
+        comp["temp_hp"] = max(int(comp.get("temp_hp", 0) or 0), 10)
+        combat_log.append(
+            f"🛡️ **{comp_name}**'s physical strike with **{w_name}** phases through non-corporeal **{target_m['name']}** (0 dmg) — shifts to projecting a **Resonance Containment Anchor** (+1 containment bonus)!"
+        )
+        return
     best_stat = max(["STR", "AGI", "INT", "PER"], key=lambda s: comp_stats.get(s, 5))
     stat_val = int(comp_stats.get(best_stat, 5))
     m_def = int((target_m.get("stats") or {}).get("END", 3) or 3)
@@ -1124,8 +1341,9 @@ def resolve_anomalous_ally_combat_action(
     if r.randint(1, 100) <= hit_chance:
         dmg = max(10, min(target_m.get("hp", 100), r.randint(10, 18) + int(weapon.get("atk_bonus", 8)) + stat_val))
         apply_damage_fn(target_m, dmg)
+        elem_tag = f" ({comp_attr.title()} Resonance)" if str(target_m.get("physicality") or "").strip().lower() == "non_corporeal" else ""
         combat_log.append(
-            f"⚔️ **{comp_name}** struck **{target_m['name']}** with **{w_name}**: Dealt **{dmg} damage**."
+            f"⚔️ **{comp_name}** struck **{target_m['name']}** with **{w_name}**{elem_tag}: Dealt **{dmg} damage**."
         )
     else:
         combat_log.append(
@@ -1146,22 +1364,23 @@ def resolve_hostile_special_agent_ability_modifier(
     if str(enemy.get("anomalous_npc_tag") or "").lower() != TAG_SPECIAL_AGENT:
         return None
     cur_mp = int(enemy.get("mp", 0) or 0)
-    if cur_mp <= 0:
-        return None
 
     from mechanics.combat.spells.registry import get_spell
     r = rng or random
     resolved = []
     for ab in (enemy.get("innate_abilities") or []):
         sp = get_spell(ab) if isinstance(ab, str) else (ab if isinstance(ab, dict) else None)
-        if isinstance(sp, dict) and cur_mp >= int(sp.get("mp_cost", 6)):
-            resolved.append(sp)
+        if isinstance(sp, dict):
+            raw_c = sp.get("mp_cost", 6)
+            req_mp = int(raw_c) if raw_c is not None else 6
+            if cur_mp >= req_mp:
+                resolved.append(sp)
     if not resolved:
         return None
 
     hp_ratio = enemy.get("hp", 100) / max(1, enemy.get("max_hp", 100))
     # Emergency self-heal
-    heals = [s for s in resolved if int(s.get("heal_amount", 0) or 0) > 0]
+    heals = [s for s in resolved if int(s.get("heal_amount", 0) or 0) > 0 and not s.get("is_ultimate")]
     if hp_ratio < 0.45 and heals and r.random() < 0.65:
         sp = heals[0]
         cost = int(sp.get("mp_cost", 8))
@@ -1173,11 +1392,12 @@ def resolve_hostile_special_agent_ability_modifier(
         )
         return {"skip_attack": True}
 
-    # Signature Ultimate when wounded <= 55% HP
-    ults = [s for s in resolved if int(s.get("tier", 3) or 3) == 1]
+    # Signature Ultimate when wounded <= 55% HP (1/combat, 0 MP on Awakened kits)
+    ults = [s for s in resolved if s.get("is_ultimate") or int(s.get("tier", 3) or 3) == 1]
     if hp_ratio <= 0.55 and ults and not enemy.get("_used_ultimate_this_combat"):
         sp = ults[0]
-        cost = int(sp.get("mp_cost", 28))
+        raw_uc = sp.get("mp_cost", 0)
+        cost = int(raw_uc) if raw_uc is not None else 0
         enemy["mp"] = max(0, cur_mp - cost)
         enemy["_used_ultimate_this_combat"] = True
         return {"spell": sp, "damage_mult": 1.65, "is_ultimate": True, "cost": cost}

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict, Any, List, Tuple, Optional
 import json
 import logging
+import random
 import re
 
 import db
@@ -78,14 +79,26 @@ def _spawn_canonical_role_npc_pre_turn(
                         is_match = True
                 if is_match:
                     if c.get("appearance") and isinstance(c.get("appearance"), dict):
+                        from mechanics.social.roster_tags import derive_age_group, normalize_standing
+                        matched_grade = str(c.get("grade") or (c.get("basic_info") or {}).get("grade") or "").strip()
+                        if not matched_grade:
+                            matched_grade = normalize_standing(c.get("role") or clean_role, "", scen_key=scen_key)
+                        matched_age = c.get("age_group") or (c.get("basic_info") or {}).get("age_group") or derive_age_group(grade=matched_grade, role=c.get("role") or clean_role, scen_key=scen_key)
+                        b_info = dict(c.get("basic_info") or {})
+                        b_info.setdefault("role", c.get("role") or clean_role)
+                        b_info.setdefault("grade", matched_grade)
+                        b_info.setdefault("age_group", matched_age)
+                        b_info.setdefault("location", effective_location)
                         return {
                             "name": c["name"],
                             "role": c.get("role") or (c.get("basic_info") or {}).get("role") or clean_role,
+                            "grade": matched_grade,
+                            "age_group": matched_age,
                             "gender": c.get("gender") or (c.get("basic_info") or {}).get("gender") or "female",
                             "appearance": c.get("appearance") or {},
                             "traits": c.get("traits") or [],
                             "unlocked_traits": c.get("unlocked_traits") or (c.get("traits") or [])[:2],
-                            "basic_info": c.get("basic_info") or {"role": clean_role, "location": effective_location},
+                            "basic_info": b_info,
                             "status_effects": ["Present"],
                             "stage_role": "active_partner",
                             "attention_ring": "ring_1_primary",
@@ -114,6 +127,10 @@ def _spawn_canonical_role_npc_pre_turn(
             "king", "prince", "lord", "sir", "father", "brother", "boy", "man", "gentleman",
         }:
             role_gender_hint = "male"
+        else:
+            player_gen = db.get_session_player_gender(sess_id) if sess_id else ""
+            from scenario_data import resolve_scenario_npc_gender
+            role_gender_hint = resolve_scenario_npc_gender(scen_key, player_gen, rng=random)
         npc_name = namegen.generate_person_name(scenario=scen_key, gender=role_gender_hint)
         gender = role_gender_hint or infer_contact_gender({"name": npc_name, "basic_info": {"role": clean_role}}) or "female"
         from mechanics.social.races import normalize_race
@@ -137,9 +154,26 @@ def _spawn_canonical_role_npc_pre_turn(
     )
     demeanor = str(app_dict.get("intimate_demeanor") or "attentive")
 
+    from mechanics.social.roster_tags import derive_age_group, normalize_standing, is_school_scenario
+    char_grade = str((matched_seed_char or {}).get("grade") or ((matched_seed_char or {}).get("basic_info") or {}).get("grade") or "").strip()
+    if is_school_scenario(scen_key) and not char_grade:
+        derived_standing = normalize_standing(clean_role, "", scen_key=scen_key)
+        if derived_standing in ("Faculty", "Staff", "Citizen"):
+            char_grade = derived_standing
+        else:
+            if derive_age_group(grade="", role=clean_role, scen_key=scen_key) == "adult":
+                char_grade = "Citizen"
+            elif any(k in effective_location.lower() for k in ("school", "academy", "classroom", "campus", "courtyard", "cafeteria", "gate", "field", "gym", "hall")):
+                char_grade = "Sophomore"
+            else:
+                char_grade = "Citizen"
+    char_age_group = derive_age_group(grade=char_grade, role=clean_role, scen_key=scen_key)
+
     npc_dict = {
         "name": npc_name,
         "role": clean_role,
+        "grade": char_grade,
+        "age_group": char_age_group,
         "gender": gender,
         "demeanor": demeanor,
         "traits": traits,
@@ -152,6 +186,8 @@ def _spawn_canonical_role_npc_pre_turn(
         "attention_ring": "ring_1_primary",
         "basic_info": {
             "role": clean_role,
+            "grade": char_grade,
+            "age_group": char_age_group,
             "gender": gender,
             "location": effective_location,
             "met_in_person": True,
@@ -253,6 +289,35 @@ def compute_pre_turn_stage(
     focal_point: Optional[str] = session.get("focal_point") or None
     stage_directives: list[str] = []
     schedule_departed_npcs: list[str] = []
+
+    cached_stage_contacts: Optional[list] = None
+    cached_stage_roster: Optional[list] = None
+
+    def _get_stage_contacts() -> list:
+        nonlocal cached_stage_contacts
+        if cached_stage_contacts is None:
+            if ctx and hasattr(ctx, "contacts") and ctx.contacts:
+                cached_stage_contacts = ctx.contacts
+            elif sess_id and hasattr(db, "get_contacts"):
+                try:
+                    cached_stage_contacts = db.get_contacts(sess_id) or []
+                except Exception:
+                    cached_stage_contacts = []
+            else:
+                cached_stage_contacts = []
+        return cached_stage_contacts
+
+    def _get_stage_roster() -> list:
+        nonlocal cached_stage_roster
+        if cached_stage_roster is None:
+            if sess_id and hasattr(db, "get_school_roster"):
+                try:
+                    cached_stage_roster = db.get_school_roster(sess_id) or []
+                except Exception:
+                    cached_stage_roster = []
+            else:
+                cached_stage_roster = []
+        return cached_stage_roster
     spawned_role_npcs: list[dict] = []
     traveling_companions: list[dict] = []
     left_behind_patrons: list[dict] = []
@@ -300,17 +365,13 @@ def compute_pre_turn_stage(
                 return
 
             contact_display_map: dict[str, str] = {}
-            if hasattr(db, "get_contacts"):
-                try:
-                    for c in (db.get_contacts(sess_id) or []):
-                        c_nm = str(c.get("name") or "").strip()
-                        if not c_nm:
-                            continue
-                        for k in (c.get("npc_id"), c_nm, _canon_key(c_nm)):
-                            if k:
-                                contact_display_map[str(k).strip().lower()] = c_nm
-                except Exception:
-                    pass
+            for c in _get_stage_contacts():
+                c_nm = str(c.get("name") or "").strip()
+                if not c_nm:
+                    continue
+                for k in (c.get("npc_id"), c_nm, _canon_key(c_nm)):
+                    if k:
+                        contact_display_map[str(k).strip().lower()] = c_nm
 
             for appt in appts:
                 is_conf = bool(appt.get("is_confidential") or (appt.get("metadata") or {}).get("is_romantic"))
@@ -428,7 +489,56 @@ def compute_pre_turn_stage(
         target_loc_candidate = None
         move_action_lbl = ""
         move_action_intent = ""
-        if not party_cohesion_deferred:
+        is_privacy_action = False
+        privacy_partner_name = ""
+        privacy_check_passed = True
+
+        priv_nudge_act = next(
+            (a for a in actions if isinstance(a, dict) and (
+                a.get("_privacy_nudge")
+                or a.get("is_privacy_nudge")
+                or str(a.get("sub_intent") or "").lower() == "privacy_nudge"
+                or "for privacy" in str(a.get("label") or "").lower()
+            )),
+            None
+        )
+
+        if priv_nudge_act and not party_cohesion_deferred:
+            is_privacy_action = True
+            privacy_partner_name = str(priv_nudge_act.get("target_npc") or session.get("dialogue_partner") or "")
+            chk_obj = priv_nudge_act.get("check")
+            chk_tier = str(
+                (chk_obj.get("tier") if isinstance(chk_obj, dict) else getattr(chk_obj, "tier", ""))
+                if chk_obj is not None
+                else priv_nudge_act.get("tier", "")
+            ).lower()
+            chk_failed = chk_tier in ("fail", "failure", "crit_fail", "critical_failure") or (
+                chk_obj is not None
+                and not bool(chk_obj.get("succeeded", True) if isinstance(chk_obj, dict) else getattr(chk_obj, "succeeded", True))
+            )
+            if priv_nudge_act.get("success") is False:
+                chk_failed = True
+
+            if chk_failed:
+                privacy_check_passed = False
+                target_nid = None
+                target_loc_candidate = None
+                move_action_lbl = ""
+                move_action_intent = ""
+                p_display = privacy_partner_name or "Your partner"
+                p_key = re.sub(r'[^a-z0-9_]+', '_', p_display.lower().strip())
+                stage_directives.append(
+                    f"[STAGE DIRECTION — PRIVACY DEFLECTED]: {p_display} politely declines or deflects moving to a more private spot right now. The conversation remains in {raw_curr}."
+                )
+                session["travel_minutes_elapsed"] = 0
+                if "extra" not in session or not isinstance(session["extra"], dict):
+                    session["extra"] = {}
+                session["extra"][f"privacy_deflected_{p_key}"] = (
+                    int(session.get("current_day", 1) or 1),
+                    int(session.get("current_minute", 480) or 480)
+                )
+
+        if not party_cohesion_deferred and not (is_privacy_action and not privacy_check_passed):
             for a in actions:
                 if not isinstance(a, dict):
                     a_lbl = str(a)
@@ -451,13 +561,13 @@ def compute_pre_turn_stage(
                     move_action_lbl = a_lbl
                     move_action_intent = a_int
 
-        if not target_nid and target_loc_candidate and sess_id:
+        if not party_cohesion_deferred and not (is_privacy_action and not privacy_check_passed) and not target_nid and target_loc_candidate and sess_id:
             target_nid = db.resolve_node_id_from_location(sess_id, target_loc_candidate)
 
         curr_nid = session.get("current_node_id") or (db.resolve_node_id_from_location(sess_id, raw_curr) if sess_id else None)
 
         # Freeform text matching (A10) — strictly gated on movement intent + word boundaries
-        if not party_cohesion_deferred and not target_nid and sess_id and curr_nid:
+        if not party_cohesion_deferred and not (is_privacy_action and not privacy_check_passed) and not target_nid and sess_id and curr_nid:
             from mechanics.world.locations.pathfinding import (
                 match_freeform_spatial_destination,
                 resolve_unmatched_movement_destination,
@@ -513,10 +623,11 @@ def compute_pre_turn_stage(
                                 try:
                                     from mechanics.world.npc_schedule import get_npc_scheduled_node_id
                                     s_nid = get_npc_scheduled_node_id(
-                                        sess_id, cand_npc,
-                                        current_day=int(session.get("current_day") or 1),
+                                        {"name": cand_npc},
                                         current_minute=int(session.get("current_minute") or 480),
+                                        current_day=int(session.get("current_day") or 1),
                                         scen_key=scen_key,
+                                        session_id=sess_id,
                                     )
                                     if s_nid and s_nid != curr_nid:
                                         target_nid = s_nid
@@ -531,7 +642,37 @@ def compute_pre_turn_stage(
                 # Check micro-positioning / hybrid sub-location first so local room props aren't flagged as invalid exits
                 hybrid_probe = resolve_hybrid_sublocation_or_focal_point(sess_id, raw_curr, curr_nid, cand_lbl, scen_key=scen_key)
                 is_threshold_turn_back = any(k in cand_lbl.lower() for k in ("turn back", "step away", "step back", "return to campus"))
-                if not hybrid_probe.get("matched") and not is_threshold_turn_back:
+                if hybrid_probe.get("matched") and not (is_privacy_action and not privacy_check_passed):
+                    if hybrid_probe.get("kind") == "focal_point":
+                        focal_point = hybrid_probe.get("focal_point")
+                        session["focal_point"] = focal_point
+                        if hybrid_probe.get("location") and hybrid_probe["location"] != raw_curr:
+                            effective_location = hybrid_probe["location"]
+                            movement_dest_str = effective_location
+                            session["current_location"] = effective_location
+                            is_movement = True
+                            if is_privacy_action and privacy_check_passed and privacy_partner_name:
+                                p_low = privacy_partner_name.lower().strip()
+                                existing_comp_names = {_get_npc_name(c).lower() for c in traveling_companions if _get_npc_name(c)}
+                                if p_low not in existing_comp_names:
+                                    p_npc = next((n for n in (session.get("current_npcs") or []) if _get_npc_name(n).lower() == p_low), None)
+                                    if p_npc:
+                                        traveling_companions.append(p_npc)
+                                    else:
+                                        traveling_companions.append({"name": privacy_partner_name, "role": "Dialogue Partner", "status_effects": ["Present"]})
+                                    existing_comp_names.add(p_low)
+                    elif hybrid_probe.get("kind") == "architectural_room":
+                        target_nid = hybrid_probe.get("node_id")
+                        if hybrid_probe.get("location"):
+                            target_loc_candidate = hybrid_probe["location"]
+                            effective_location = hybrid_probe["location"]
+                            movement_dest_str = effective_location
+                            session["current_location"] = effective_location
+                            is_movement = True
+                        if target_nid:
+                            effective_node_id = target_nid
+                            session["current_node_id"] = target_nid
+                elif not hybrid_probe.get("matched") and not is_threshold_turn_back:
                     unmatched_res = resolve_unmatched_movement_destination(
                         sess_id,
                         curr_nid,
@@ -549,7 +690,7 @@ def compute_pre_turn_stage(
                         if unmatched_res.get("directive"):
                             stage_directives.append(unmatched_res["directive"])
 
-        if not party_cohesion_deferred and target_nid and sess_id:
+        if not party_cohesion_deferred and not (is_privacy_action and not privacy_check_passed) and target_nid and sess_id:
             from mechanics.world.locations.pathfinding import find_spatial_path, evaluate_spatial_route
             if not curr_nid or target_nid == curr_nid:
                 route = [target_nid]
@@ -568,6 +709,16 @@ def compute_pre_turn_stage(
                 t_comps, l_patrons = classify_scene_npcs(session, actions, old_primary=old_primary, dest_primary=dest_primary)
                 traveling_companions = list(t_comps or [])
                 existing_comp_names = {_get_npc_name(c).lower() for c in traveling_companions if _get_npc_name(c)}
+                if is_privacy_action and privacy_check_passed and privacy_partner_name:
+                    p_low = privacy_partner_name.lower().strip()
+                    if p_low not in existing_comp_names:
+                        p_npc = next((n for n in (session.get("current_npcs") or []) if _get_npc_name(n).lower() == p_low), None)
+                        if p_npc:
+                            traveling_companions.append(p_npc)
+                            existing_comp_names.add(p_low)
+                        else:
+                            traveling_companions.append({"name": privacy_partner_name, "role": "Dialogue Partner", "status_effects": ["Present"]})
+                            existing_comp_names.add(p_low)
                 for tc in (session.get("temporary_companions") or []):
                     tc_name = _get_npc_name(tc)
                     if tc_name and tc_name.lower() not in existing_comp_names:
@@ -590,7 +741,35 @@ def compute_pre_turn_stage(
                 effective_location = route_res["effective_location"]
                 effective_node_id = route_res["effective_node_id"]
                 movement_dest_str = effective_location
-                if route_res.get("focal_point"):
+
+                # Ensure explicit target_location on privacy/relocation actions is never regressed by parent room hierarchy
+                if is_privacy_action and privacy_check_passed and priv_nudge_act:
+                    dest_loc = priv_nudge_act.get("target_location") or target_loc_candidate
+                    dest_nid = priv_nudge_act.get("target_node_id") or target_nid
+                    dest_focal = priv_nudge_act.get("focal_point")
+                    if dest_loc:
+                        effective_location = dest_loc
+                        movement_dest_str = dest_loc
+                        session["current_location"] = dest_loc
+                    if dest_nid:
+                        effective_node_id = dest_nid
+                        session["current_node_id"] = dest_nid
+                    if dest_focal:
+                        focal_point = dest_focal
+                        session["focal_point"] = dest_focal
+                    else:
+                        focal_point = None
+                        session["focal_point"] = None
+                    stage_directives.append(
+                        f"[STAGE DIRECTION — SECLUDED RELOCATION]: Stepped into {effective_location} with {privacy_partner_name} for privacy. "
+                        f"Both characters are now situated in {effective_location}."
+                    )
+                elif target_loc_candidate and target_loc_candidate != effective_location:
+                    effective_location = target_loc_candidate
+                    movement_dest_str = target_loc_candidate
+                    session["current_location"] = target_loc_candidate
+
+                if route_res.get("focal_point") and not (is_privacy_action and priv_nudge_act and not priv_nudge_act.get("focal_point")):
                     focal_point = route_res["focal_point"]
                     session["focal_point"] = focal_point
                 if curr_nid:
@@ -605,7 +784,15 @@ def compute_pre_turn_stage(
                 unlocked_edges = list(route_res.get("unlocked_edges") or [])
                 unlocked_nodes = list(route_res.get("unlocked_nodes") or [])
                 consumed_key_items = list(route_res.get("consumed_key_items") or [])
-                access_gate_info = route_res.get("access_gate") or {"gated": route_res["gated"], "barrier_node_id": route_res["barrier_node_id"]}
+                access_gate_info = route_res.get("access_gate") or {
+                    "gated": route_res["gated"],
+                    "barrier_node_id": route_res["barrier_node_id"],
+                    "barrier_choices": route_res.get("barrier_choices") or [],
+                }
+                if route_res.get("barrier_choices"):
+                    session["barrier_obstacle_choices"] = list(route_res["barrier_choices"])
+                else:
+                    session.pop("barrier_obstacle_choices", None)
 
         # Hydrated fallback ONLY when session does not yet have a spatial graph node
         if not party_cohesion_deferred and not blocked_invalid_exit and not is_movement and not curr_nid:
@@ -676,7 +863,7 @@ def compute_pre_turn_stage(
                     break
 
         # If not moving between primary facilities, evaluate hybrid sublocation or tactical focal point
-        if not party_cohesion_deferred and not blocked_invalid_exit and not is_movement and actions:
+        if not party_cohesion_deferred and not blocked_invalid_exit and not is_movement and actions and not (is_privacy_action and not privacy_check_passed):
             act_lbl = actions[0].get("label", "") if isinstance(actions[0], dict) else str(actions[0])
             c_node = session.get("current_node_id") or (db.resolve_node_id_from_location(sess_id, raw_curr) if sess_id else None)
             hybrid_res = resolve_hybrid_sublocation_or_focal_point(sess_id, raw_curr, c_node, act_lbl, scen_key=scen_key)
@@ -684,14 +871,41 @@ def compute_pre_turn_stage(
                 if hybrid_res.get("kind") == "focal_point":
                     focal_point = hybrid_res["focal_point"]
                     session["focal_point"] = focal_point
+                    if hybrid_res.get("location") and hybrid_res["location"] != raw_curr:
+                        effective_location = hybrid_res["location"]
+                        movement_dest_str = effective_location
+                        session["current_location"] = effective_location
+                        is_movement = True
+                        if is_privacy_action and privacy_check_passed and privacy_partner_name:
+                            p_low = privacy_partner_name.lower().strip()
+                            existing_comp_names = {_get_npc_name(c).lower() for c in traveling_companions if _get_npc_name(c)}
+                            if p_low not in existing_comp_names:
+                                p_npc = next((n for n in (session.get("current_npcs") or []) if _get_npc_name(n).lower() == p_low), None)
+                                if p_npc:
+                                    traveling_companions.append(p_npc)
+                                else:
+                                    traveling_companions.append({"name": privacy_partner_name, "role": "Dialogue Partner", "status_effects": ["Present"]})
+                                existing_comp_names.add(p_low)
                     stage_directives.append(f"[STAGE DIRECTION — MICRO-POSITIONING]: Player moved to focal position '{focal_point}' within {effective_location}.")
                 elif hybrid_res.get("kind") == "architectural_room":
                     is_movement = True
                     effective_location = hybrid_res["location"]
                     movement_dest_str = effective_location
+                    session["current_location"] = effective_location
+                    if hybrid_res.get("node_id"):
+                        effective_node_id = hybrid_res["node_id"]
+                        session["current_node_id"] = effective_node_id
                     pz, pp, _ = parse_tiered_location(effective_location, scen_key, session_id=sess_id)
                     t_comps, l_patrons = classify_scene_npcs(session, actions, old_primary=old_primary, dest_primary=pp)
                     traveling_companions = t_comps or []
+                    if is_privacy_action and privacy_check_passed and privacy_partner_name:
+                        p_low = privacy_partner_name.lower().strip()
+                        existing_comp_names = {_get_npc_name(c).lower() for c in traveling_companions if _get_npc_name(c)}
+                        if p_low not in existing_comp_names:
+                            p_npc = next((n for n in (session.get("current_npcs") or []) if _get_npc_name(n).lower() == p_low), None)
+                            if p_npc:
+                                traveling_companions.append(p_npc)
+                                existing_comp_names.add(p_low)
                     left_behind_patrons = l_patrons or []
                     stage_directives.append(f"[STAGE DIRECTION — ARCHITECTURAL EXPLORATION]: Entered inner chamber {effective_location}.")
 
@@ -862,7 +1076,26 @@ def compute_pre_turn_stage(
             if target_resident_name.strip().lower() in sched_res_names or (420 <= (curr_stage_min % 1440) < 1200):
                 _add_stage_npc({"name": target_resident_name, "role": "Resident", "status_effects": ["Present"]})
 
+        if not access_gate_info.get("gated") and sess_id and effective_node_id:
+            try:
+                from mechanics.world.npc_schedule import dispatch_micro_social_npcs
+                for micro_npc in dispatch_micro_social_npcs(sess_id, effective_node_id, session):
+                    if isinstance(micro_npc, dict):
+                        _add_stage_npc(micro_npc)
+                    elif isinstance(micro_npc, str) and micro_npc.strip():
+                        _add_stage_npc({"name": micro_npc.strip(), "role": "Companion", "status_effects": ["Present"]})
+            except Exception:
+                pass
+
         if not access_gate_info.get("gated") and scheduled_residents:
+            is_priv_dest = False
+            if sess_id and effective_node_id:
+                try:
+                    dest_node_obj = db.get_world_node(sess_id, effective_node_id)
+                    if dest_node_obj and str(dest_node_obj.get("privacy_level") or "").lower() in ("private", "restricted", "discreet"):
+                        is_priv_dest = True
+                except Exception:
+                    pass
             fac_added = 0
             for fr in scheduled_residents:
                 if len(stage_npcs) >= 4 or fac_added >= 3:
@@ -870,6 +1103,10 @@ def compute_pre_turn_stage(
                 fr_nm = fr.get("name")
                 if not fr_nm or fr_nm.strip().lower() in seen_stage_names:
                     continue
+                if is_priv_dest:
+                    from mechanics.world.npc_schedule import is_npc_eligible_for_private_room
+                    if not is_npc_eligible_for_private_room(fr_nm, session, node_id=effective_node_id):
+                        continue
                 _add_stage_npc({
                     "name": fr_nm,
                     "role": fr.get("role") or "Faculty",
@@ -935,8 +1172,8 @@ def compute_pre_turn_stage(
                 from mechanics.world.waypoints import check_location_matches_waypoint
                 curr_min = int(session.get("current_minute", 480) or 480)
                 curr_day = int(session.get("current_day", 1) or 1)
-                contacts = db.get_contacts(sess_id) or []
-                roster = db.get_school_roster(sess_id) if hasattr(db, "get_school_roster") else []
+                contacts = _get_stage_contacts()
+                roster = _get_stage_roster()
                 # Known contacts prioritized first, then roster
                 seen_cand_names = set()
                 combined_cands = []
@@ -946,6 +1183,27 @@ def compute_pre_turn_stage(
                         seen_cand_names.add(c_nm.lower())
                         combined_cands.append(c)
 
+                hoisted_waypoints = None
+                hoisted_events = None
+                if sess_id:
+                    try:
+                        with db.get_conn() as conn:
+                            hoisted_waypoints = [
+                                dict(r)
+                                for r in conn.execute(
+                                    """SELECT qw.target_node_id, qw.stage_label, q.objective
+                                       FROM quest_waypoints qw
+                                       JOIN quests q ON q.session_id = qw.session_id AND q.quest_id = qw.quest_id
+                                       WHERE qw.session_id = ? AND qw.status = 'active'
+                                         AND q.status = 'Active' AND q.is_story_quest = 1
+                                         AND qw.target_node_id != ''""",
+                                    (sess_id,),
+                                ).fetchall()
+                            ]
+                        hoisted_events = db.get_world_events(sess_id, entity_type="macro_event")
+                    except Exception:
+                        pass
+
                 scheduled_added = 0
                 for cand in combined_cands[:25]:
                     if scheduled_added >= 2:
@@ -953,7 +1211,15 @@ def compute_pre_turn_stage(
                     cand_name = cand.get("name")
                     if not cand_name or cand_name.lower() in seen_stage_names:
                         continue
-                    sched_node = get_npc_scheduled_node_id(cand, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
+                    sched_node = get_npc_scheduled_node_id(
+                        cand,
+                        current_minute=curr_min,
+                        scen_key=scen_key,
+                        current_day=curr_day,
+                        session_id=sess_id,
+                        story_waypoints=hoisted_waypoints,
+                        active_events=hoisted_events,
+                    )
                     is_match = False
                     if sched_node and effective_node_id:
                         is_match = (
@@ -962,7 +1228,7 @@ def compute_pre_turn_stage(
                             or db.is_descendant_of(sess_id, sched_node, effective_node_id)
                         )
                     elif not sched_node or not effective_node_id:
-                        sched_loc = get_npc_scheduled_location(cand, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
+                        sched_loc = get_npc_scheduled_location(cand, current_minute=curr_min, scen_key=scen_key, current_day=curr_day, session_id=sess_id)
                         if sched_loc:
                             is_match = check_location_matches_waypoint(
                                 effective_location, sched_loc,
@@ -972,6 +1238,7 @@ def compute_pre_turn_stage(
                         _add_stage_npc({
                             "name": cand_name,
                             "role": cand.get("role") or (cand.get("basic_info") or {}).get("role") or "Student",
+                            "grade": cand.get("grade") or (cand.get("basic_info") or {}).get("grade") or "",
                             "status_effects": ["Present"],
                             "stage_role": "room_bystander",
                             "attention_ring": "ring_3_bystander",
@@ -990,7 +1257,7 @@ def compute_pre_turn_stage(
         curr_node_id_val = session.get("current_node_id") or (db.resolve_node_id_from_location(sess_id, raw_curr) if sess_id else None)
         bound_info = {"crossed": False}
 
-        if prev_min is not None and prev_min != curr_min:
+        if prev_min is not None and (prev_min != curr_min or (prev_day is not None and prev_day != curr_day)):
             from mechanics.world.schedules import detect_schedule_boundary_crossed
             bound_info = detect_schedule_boundary_crossed(prev_day or curr_day, prev_min, curr_day, curr_min, scen_key=scen_key)
             if bound_info.get("crossed"):
@@ -1005,9 +1272,15 @@ def compute_pre_turn_stage(
                     if not n_nm or n_nm.strip().lower() in partner_names_lower:
                         continue
                     from mechanics.world.npc_schedule import get_npc_scheduled_node_id
-                    n_target_nid = get_npc_scheduled_node_id(n, current_minute=curr_min, current_day=curr_day, scen_key=scen_key)
-                    if n_target_nid and curr_node_id_val and n_target_nid != curr_node_id_val:
-                        schedule_departed_npcs.append(n_nm)
+                    n_target_nid = get_npc_scheduled_node_id(n, current_minute=curr_min, current_day=curr_day, scen_key=scen_key, session_id=sess_id)
+                    if n_target_nid and curr_node_id_val:
+                        is_co_located = (
+                            n_target_nid == curr_node_id_val
+                            or db.is_descendant_of(sess_id, curr_node_id_val, n_target_nid)
+                            or db.is_descendant_of(sess_id, n_target_nid, curr_node_id_val)
+                        )
+                        if not is_co_located:
+                            schedule_departed_npcs.append(n_nm)
 
         for n in old_npcs:
             if not isinstance(n, dict):
@@ -1038,11 +1311,11 @@ def compute_pre_turn_stage(
         _check_rendezvous_for_stage(effective_location, curr_node_id_val)
 
         # If schedule crossed, introduce newly scheduled arrivals at this location
-        if prev_min is not None and prev_min != curr_min and bound_info.get("crossed") and sess_id and curr_node_id_val:
+        if prev_min is not None and (prev_min != curr_min or (prev_day is not None and prev_day != curr_day)) and bound_info.get("crossed") and sess_id and curr_node_id_val:
             try:
                 from mechanics.world.npc_schedule import get_npc_scheduled_node_id
-                contacts = db.get_contacts(sess_id) or []
-                roster = db.get_school_roster(sess_id) if hasattr(db, "get_school_roster") else []
+                contacts = _get_stage_contacts()
+                roster = _get_stage_roster()
                 newly_added = 0
                 for cand in contacts + roster:
                     if newly_added >= 2:
@@ -1050,11 +1323,12 @@ def compute_pre_turn_stage(
                     cand_nm = cand.get("name")
                     if not cand_nm or cand_nm.lower() in seen_stage_names:
                         continue
-                    sched_n = get_npc_scheduled_node_id(cand, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
+                    sched_n = get_npc_scheduled_node_id(cand, current_minute=curr_min, scen_key=scen_key, current_day=curr_day, session_id=sess_id)
                     if sched_n == curr_node_id_val or (db.is_descendant_of(sess_id, curr_node_id_val, sched_n) or db.is_descendant_of(sess_id, sched_n, curr_node_id_val)):
                         _add_stage_npc({
                             "name": cand_nm,
                             "role": cand.get("role") or (cand.get("basic_info") or {}).get("role") or "Student",
+                            "grade": cand.get("grade") or (cand.get("basic_info") or {}).get("grade") or "",
                             "status_effects": ["Present"],
                             "stage_role": "room_bystander",
                             "attention_ring": "ring_3_bystander",
@@ -1132,14 +1406,7 @@ def compute_pre_turn_stage(
                     pass
 
     # Hydrate stage_npcs with known contact data before Ring 1/2/3 classification and micro-blocking
-    known_contacts = []
-    if ctx and hasattr(ctx, "contacts") and ctx.contacts:
-        known_contacts = ctx.contacts
-    elif sess_id:
-        try:
-            known_contacts = db.get_contacts(sess_id) or []
-        except Exception:
-            known_contacts = []
+    known_contacts = _get_stage_contacts()
 
     contacts_by_low = {
         str(c.get("name") or "").strip().lower(): c

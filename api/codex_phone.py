@@ -1,6 +1,9 @@
+from __future__ import annotations
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel
 import json
+import time
 
 import db
 from db import adb
@@ -9,6 +12,7 @@ import mechanics.social.persona
 import mechanics.social.relationships
 import mechanics.social.genealogy
 import mechanics.narrative.bounty
+from mechanics.system.concurrency import distributed_session_lock, distributed_user_lock
 from mechanics.system.phone import (
     scenario_has_smartphone,
     get_phone_branding,
@@ -44,26 +48,10 @@ from mechanics.social.factions import (
 from mechanics.narrative.clues import evaluate_clue_deduction
 from mechanics.world.locations import location_has_bounty_board, get_notice_board_label
 from mechanics.combat.items import is_digital_item, parse_digital_item_metadata
-
-if not hasattr(game_engine, "generate_faction_bounty_board"):
-    game_engine.generate_faction_bounty_board = mechanics.narrative.bounty.generate_faction_bounty_board
-
-
-def _default_get_or_generate_family_tree(session_id: int, contact: dict, scenario: str = "fantasy"):
-    rel = (contact.get("relations") or {}) if isinstance(contact, dict) else {}
-    if not rel.get("family"):
-        try:
-            rel = mechanics.social.genealogy.ensure_contact_relations(
-                contact, session_id=session_id, scenario=scenario
-            ) or {}
-        except Exception:
-            rel = {}
-    return rel.get("family") or []
-
-
-if not hasattr(mechanics.social.genealogy, "get_or_generate_family_tree"):
-    mechanics.social.genealogy.get_or_generate_family_tree = _default_get_or_generate_family_tree
+from mechanics.world.world_events.engine import build_client_world_pulse_payload
 from .deps import (
+    manager,
+    _serializable_action,
     PhoneMessageRequest,
     CompanionPartyRequest,
     FactionHQActionRequest,
@@ -73,6 +61,9 @@ from .deps import (
     BountyGenerateRequest,
     BountyActionRequest,
     ClueDeductionRequest,
+    SuspectAccusationRequest,
+    QuestTurnInRequest,
+    EpilogueChoiceRequest,
 )
 
 router = APIRouter()
@@ -184,6 +175,11 @@ def _enrich_commitments_for_ui(session_id: int, raw_commitments: list[dict] | No
 @router.post("/api/party/companion")
 async def manage_party_companion(req: CompanionPartyRequest):
     """Recruits a high-affinity NPC into the active party (max 2 companions) or dismisses them."""
+    async with distributed_session_lock(req.session_id), distributed_user_lock(req.user_id):
+        return await _execute_manage_party_companion(req)
+
+
+async def _execute_manage_party_companion(req: CompanionPartyRequest):
     session = await adb(db.get_session, req.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -210,10 +206,11 @@ async def manage_party_companion(req: CompanionPartyRequest):
             "party_npcs": party_npcs,
         }
 
-    # Non-combat scenario guard
+    # Non-combat scenario guard (pure school scenarios are non-combat, but anomalous_high_school enables tactical_combat)
     scen_key = str(session.get("scenario") or "fantasy").lower()
     import scenario_data
-    if not scenario_data.is_mechanic_enabled(scen_key, "tactical_combat") or scenario_data.has_tag(scen_key, "non_combat") or scenario_data.has_tag(scen_key, "high_school"):
+    is_pure_hs = scenario_data.has_tag(scen_key, "high_school") and not scenario_data.is_anomalous_incursions_scenario(scen_key)
+    if not scenario_data.is_mechanic_enabled(scen_key, "tactical_combat") or scenario_data.has_tag(scen_key, "non_combat") or is_pure_hs:
         raise HTTPException(status_code=400, detail="Party companion recruitment is disabled in non-combat scenarios.")
 
     # Recruit flow: enforce 2-companion cap
@@ -364,7 +361,24 @@ async def manage_party_companion(req: CompanionPartyRequest):
     )
 
     from .adventure import _enrich_session_for_client
+    try:
+        from mechanics.world.world_events.social_hooks import handle_mid_rumor_npc_promotion
+        await adb(handle_mid_rumor_npc_promotion, req.session_id, npc_name=npc_payload["name"])
+    except Exception:
+        pass
     updated_sess = await adb(db.get_session, req.session_id) or {}
+    try:
+        from game_engine.quest_turn_resolver import handle_npc_death_or_recruitment_fallout
+        await adb(
+            handle_npc_death_or_recruitment_fallout,
+            req.session_id,
+            npc_payload["name"],
+            "recruited",
+            str(updated_sess.get("current_location") or ""),
+            int(db.infer_session_turn(updated_sess)),
+        )
+    except Exception:
+        pass
     enriched_sess = await adb(_enrich_session_for_client, updated_sess, req.user_id)
     party_npcs = enriched_sess.get("party_npcs") if isinstance(enriched_sess, dict) else await adb(db.get_session_party_npcs, req.session_id)
     return {
@@ -375,6 +389,16 @@ async def manage_party_companion(req: CompanionPartyRequest):
         "message": f"{npc_payload['name']} joined your party!",
         "party_npcs": party_npcs,
     }
+
+
+def _infer_school_grade_badge(role: str, current_grade: str, scen_key: str) -> str:
+    """Infers academic standing or faculty/staff badge for school characters."""
+    if current_grade and str(current_grade).strip():
+        return str(current_grade).strip()
+    from mechanics.social.roster_tags import normalize_standing, is_school_scenario
+    if not is_school_scenario(scen_key):
+        return ""
+    return normalize_standing(role=role, grade=current_grade, scen_key=scen_key)
 
 
 @router.get("/api/lorebook/{session_id}")
@@ -496,6 +520,27 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
                             it_dict["gender"] = it_dict.get("gender") or ""
                         it_dict["role"] = it_dict.get("role") or dir_entry.get("role") or ""
 
+                    # Fallback hydration from current scene NPCs or description
+                    matched_curr_npc = next((n for n in curr_npcs if isinstance(n, dict) and str(n.get("name", "")).strip().lower() == p_name), None)
+                    if matched_curr_npc:
+                        c_role_val = matched_curr_npc.get("role")
+                        if c_role_val and str(c_role_val).lower() != "none":
+                            it_dict["role"] = it_dict.get("role") or str(c_role_val)
+                        if matched_curr_npc.get("grade"):
+                            it_dict["grade"] = it_dict.get("grade") or str(matched_curr_npc["grade"])
+                        if matched_curr_npc.get("club"):
+                            it_dict["club"] = it_dict.get("club") or str(matched_curr_npc["club"])
+
+                    if not it_dict.get("role") or str(it_dict.get("role")).lower() == "none":
+                        desc_str = str(it_dict.get("description") or "")
+                        m_desc_role = re.search(r"\(([^)]+)\)", desc_str)
+                        if m_desc_role:
+                            extracted_role = m_desc_role.group(1).strip()
+                            if extracted_role and not any(k in extracted_role.lower() for k in ("née", "nee", "formerly")):
+                                it_dict["role"] = extracted_role
+
+                    it_dict["grade"] = _infer_school_grade_badge(it_dict.get("role") or "", it_dict.get("grade") or "", scen_key)
+
                     # Ensure valid gender
                     raw_g = str(it_dict.get("gender") or "").strip().lower()
                     if not raw_g or raw_g in ("unknown", "none"):
@@ -525,19 +570,6 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
                         )
                         it_dict["appearance"] = norm_app
                         it_dict["appearance_json"] = json.dumps(norm_app)
-                        # Persist back into DB so it heals permanently
-                        try:
-                            await adb(
-                                db.upsert_lorebook_entity,
-                                session_id=session_id,
-                                entity_type="person",
-                                name=it_dict["name"],
-                                gender=it_dict["gender"],
-                                race=it_dict.get("race", "human"),
-                                appearance=norm_app
-                            )
-                        except Exception:
-                            pass
 
                     # Enrich full dossier for character profile viewing
                     it_basic = it_dict.get("basic_info") or {}
@@ -546,9 +578,12 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
                             it_basic = json.loads(it_basic)
                         except Exception:
                             it_basic = {}
-                    it_basic.setdefault("role", it_dict.get("role") or "")
-                    it_basic.setdefault("grade", it_dict.get("grade") or "")
-                    it_basic.setdefault("club", it_dict.get("club") or "")
+                    if not it_basic.get("role"):
+                        it_basic["role"] = it_dict.get("role") or ""
+                    if not it_basic.get("grade"):
+                        it_basic["grade"] = it_dict.get("grade") or ""
+                    if not it_basic.get("club"):
+                        it_basic["club"] = it_dict.get("club") or ""
                     it_basic.setdefault("race", it_dict.get("race") or "human")
                     it_basic.setdefault("gender", it_dict["gender"])
                     it_basic.setdefault("description", it_dict.get("description") or "")
@@ -608,7 +643,8 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
             p_dict["role"] = b_info.get("role") or b_info.get("occupation") or (dir_entry_c.get("role") if dir_entry_c else None) or "Contact"
             p_dict["race"] = c_race
             p_dict["gender"] = c_gender
-            p_dict["grade"] = b_info.get("grade") or (dir_entry_c.get("grade") if dir_entry_c else "") or ""
+            raw_c_grade = b_info.get("grade") or (dir_entry_c.get("grade") if dir_entry_c else "") or ""
+            p_dict["grade"] = _infer_school_grade_badge(p_dict["role"], raw_c_grade, scen_key)
             p_dict["club"] = b_info.get("club") or (dir_entry_c.get("club") if dir_entry_c else "") or ""
             p_dict["mannerisms"] = b_info.get("mannerisms") or (dir_entry_c.get("mannerisms") if dir_entry_c else "") or ""
             p_dict["description"] = b_info.get("description") or (dir_entry_c.get("personality_summary") if dir_entry_c else "") or ""
@@ -641,7 +677,8 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
             synth_gender = (r_entry.get("gender") if r_entry else None) or (matched_curr_npc.get("gender") if matched_curr_npc else None) or infer_contact_gender({"name": display_name, "basic_info": matched_curr_npc or {}}) or "female"
             synth_race = (r_entry.get("race") if r_entry else None) or (matched_curr_npc.get("race") if matched_curr_npc else None) or "human"
             synth_role = (r_entry.get("role") if r_entry else None) or (matched_curr_npc.get("role") if matched_curr_npc else "Acquaintance")
-            synth_grade = (r_entry.get("grade") if r_entry else None) or (matched_curr_npc.get("grade") if matched_curr_npc else "") or ""
+            raw_s_grade = (r_entry.get("grade") if r_entry else None) or (matched_curr_npc.get("grade") if matched_curr_npc else "") or ""
+            synth_grade = _infer_school_grade_badge(synth_role, raw_s_grade, scen_key)
             synth_club = (r_entry.get("club") if r_entry else None) or (matched_curr_npc.get("club") if matched_curr_npc else "") or ""
             synth_desc = (r_entry.get("personality_summary") if r_entry else None) or (matched_curr_npc.get("description") if matched_curr_npc else "") or ""
             synth_app = normalize_appearance(
@@ -692,12 +729,45 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
         "categories": grouped,
         "entities": all_entities,
         "commitments": _enrich_commitments_for_ui(session_id, commitments, contacts),
+        "world_pulse": await adb(build_client_world_pulse_payload, session_id),
     }
 
 
-def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_reveal_all: bool, phys_st: dict | None = None) -> dict:
+def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_reveal_all: bool, phys_st: dict | None = None, party_names: set[str] | None = None) -> dict:
     from mechanics.social.relationships import enrich_contact_dossier
-    return enrich_contact_dossier(c_raw, session_id, scen_key, debug_reveal_all=debug_reveal_all, phys_st=phys_st)
+    from mechanics.social.roster_tags import resolve_character_badges
+    res = enrich_contact_dossier(c_raw, session_id, scen_key, debug_reveal_all=debug_reveal_all, phys_st=phys_st)
+    if not res.get("grade"):
+        b_inf = res.get("basic_info") or {}
+        raw_g = b_inf.get("grade") if isinstance(b_inf, dict) else ""
+        inferred = _infer_school_grade_badge(res.get("role") or "", raw_g, scen_key)
+        if inferred:
+            res["grade"] = inferred
+
+    c_badges = resolve_character_badges(
+        res,
+        scen_key=scen_key,
+        party_names=party_names,
+        is_contact=True,
+        is_blocked=bool(res.get("is_blocked")),
+    )
+    res["standing"] = c_badges.standing
+    res["age_group"] = c_badges.age_group
+    res["badges"] = c_badges.badges
+    res["is_student"] = c_badges.is_student
+    res["is_faculty"] = c_badges.is_faculty
+    res["is_staff"] = c_badges.is_staff
+    res["is_citizen"] = c_badges.is_citizen
+    res["is_merchant"] = c_badges.is_merchant
+    res["is_special_agent"] = c_badges.is_special_agent
+
+    # Only enrolled school students belong to school clubs; regular adults/citizens have no club.
+    if not res.get("is_student"):
+        res["club"] = ""
+        if isinstance(res.get("basic_info"), dict):
+            res["basic_info"]["club"] = ""
+
+    return res
 
 
 @router.get("/api/contacts/{session_id}")
@@ -719,16 +789,18 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None)):
     contacts = await adb(db.get_contacts, session_id, char_id)
     if not contacts and lookup_uid and char_id != lookup_uid:
         contacts = await adb(db.get_contacts, session_id, lookup_uid)
-    enriched_contacts = await adb(
-        lambda: [_enrich_contact_record(c, session_id, scen_key, debug_reveal_all, phys_st=phys_st) for c in contacts]
-    )
     from mechanics.social.relationships import collect_met_npc_names, is_unlocked_contact
     party_npcs = await adb(db.get_session_party_npcs, session_id)
     party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
     met_names = collect_met_npc_names(session, party_npcs=party_npcs)
-    unlocked_contacts = [c for c in enriched_contacts if is_unlocked_contact(c, party_names, met_in_story_names=met_names)]
+
+    # Pre-filter unlocked contacts before expensive enrichment loop
+    unlocked_raw = [c for c in (contacts or []) if is_unlocked_contact(c, party_names, met_in_story_names=met_names)]
+    enriched_contacts = await adb(
+        lambda: [_enrich_contact_record(c, session_id, scen_key, debug_reveal_all, phys_st=phys_st, party_names=party_names) for c in unlocked_raw]
+    )
     return {
-        "contacts": unlocked_contacts,
+        "contacts": enriched_contacts,
         "is_nsfw": is_nsfw_scenario(scen_key),
         "scenario": scen_key
     }
@@ -753,6 +825,16 @@ def _enrich_factions_list(session_id: int, user_id: int | None = None) -> dict:
         pass
 
     agent_dossier = get_agent_dossier_summary(session_id, lookup_uid) if is_anom else {"is_anomalous_incursions": False}
+    if is_anom and isinstance(agent_dossier, dict):
+        arc_key = str(session.get("current_arc") or session.get("chapter_number") or session.get("act_number") or 1)
+        cal_map = dict(session.get("telemetry_calibrations_used") or {})
+        used_in_arc = int(cal_map.get(arc_key, 0) or 0)
+        p_tier = int(agent_dossier.get("promotion_tier") or 0)
+        agent_dossier["telemetry_calibrations_used"] = cal_map
+        agent_dossier["current_arc_key"] = arc_key
+        agent_dossier["can_calibrate_telemetry"] = bool(p_tier >= 4 and used_in_arc < 1)
+        if lookup_uid:
+            agent_dossier["character_3axis"] = db.get_character_3axis(lookup_uid)
     char = db.get_character(lookup_uid) if lookup_uid else None
     membership = {
         "joined_faction_id": (char or {}).get("joined_faction_id") or "",
@@ -785,6 +867,9 @@ def _enrich_factions_list(session_id: int, user_id: int | None = None) -> dict:
         perks = get_active_perks(f_dict, eff_rank, rep)
         f_dict["active_perks"] = perks or []
         f_dict["rival_faction_ids"] = f_dict.get("rival_faction_ids") or []
+        from mechanics.social.factions import is_school_club_faction, get_faction_category_tag
+        f_dict["is_school_club"] = is_school_club_faction(f_dict)
+        f_dict["category_tag"] = get_faction_category_tag(f_dict, scen_key)
         if is_anom:
             arch = infer_anomalous_faction_archetype(f_dict)
             f_dict["archetype_key"] = arch
@@ -804,6 +889,11 @@ async def get_factions(session_id: int, user_id: int | None = None):
 @router.post("/api/factions/{session_id}/hq-action")
 async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
     """Executes a Faction HQ operation: join, leave, rest, quartermaster, bounty, or promote."""
+    async with distributed_session_lock(session_id), distributed_user_lock(req.user_id):
+        return await _execute_faction_hq_action(session_id, req)
+
+
+async def _execute_faction_hq_action(session_id: int, req: FactionHQActionRequest):
     session = await adb(db.get_session, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -856,13 +946,15 @@ async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
         }
 
     if action == "leave":
+        from mechanics.social.factions import is_school_club_faction
         if is_anom:
-            res = await adb(join_or_transfer_anomalous_faction, session_id, "freelancer", req.user_id)
+            fallback_target = "student_freelancer" if (scenario_data.is_anomalous_high_school_scenario(scen_key) and is_school_club_faction(faction)) else "freelancer"
+            res = await adb(join_or_transfer_anomalous_faction, session_id, fallback_target, req.user_id)
             payload = await adb(_enrich_factions_list, session_id, req.user_id)
             return {
                 "success": True,
                 "action": "leave",
-                "message": res.get("message", f"You have parted ways with {faction.get('name')} and are now an Independent Freelancer."),
+                "message": res.get("message", f"You have parted ways with {faction.get('name')}."),
                 **payload,
             }
         roster = faction.get("leadership_roster") or []
@@ -879,7 +971,9 @@ async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
         }
 
     if action == "rest":
-        if is_anom:
+        from mechanics.social.factions import is_school_club_faction
+        is_club = is_school_club_faction(faction)
+        if is_anom and not is_club:
             from mechanics.social.factions import get_anomalous_faction_state, infer_anomalous_faction_archetype
             a_st = await adb(get_anomalous_faction_state, session_id, req.user_id)
             fac_arch = infer_anomalous_faction_archetype(faction)
@@ -888,7 +982,7 @@ async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
                     status_code=403,
                     detail=f"Safehouse recovery quarters at {faction.get('name', 'this faction')} are restricted to enlisted operatives."
                 )
-        elif tier["tier_level"] < 2:
+        elif tier["tier_level"] < 2 and not (is_anom and is_club):
             raise HTTPException(
                 status_code=400,
                 detail="You need Liked standing or higher (+1 Rep) to use the faction safehouse rest."
@@ -920,7 +1014,18 @@ async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
 
     if action == "quartermaster":
         fac_arch = ""
-        if is_anom:
+        from mechanics.social.factions import is_school_club_faction
+        is_club = is_school_club_faction(faction)
+        if is_anom and is_club:
+            from mechanics.social.factions import get_anomalous_faction_state
+            a_st = await adb(get_anomalous_faction_state, session_id, req.user_id)
+            joined_club = str(a_st.get("joined_club_name") or "")
+            if joined_club.lower() != str(faction.get("name", "")).lower():
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Club quartermaster equipment is reserved for active members of {faction.get('name', 'this club')}."
+                )
+        elif is_anom and not is_club:
             from mechanics.social.factions import (
                 ANOMALOUS_DISTRUSTED_ARCHETYPES,
                 get_anomalous_faction_state,
@@ -934,10 +1039,10 @@ async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
                 )
             a_st = await adb(get_anomalous_faction_state, session_id, req.user_id)
             player_arch = str(a_st.get("faction_archetype_key") or "freelancer")
-            if fac_arch in ("private_agency_1", "private_agency_2") and player_arch != fac_arch:
+            if fac_arch in ("private_agency_1", "private_agency_2", "monastic_order") and player_arch != fac_arch:
                 raise HTTPException(
                     status_code=403,
-                    detail=f"{faction.get('name', 'Private Syndicate')} Quartermaster access is restricted exclusively to contracted operatives of this agency."
+                    detail=f"{faction.get('name', 'This organization')} Quartermaster access is restricted exclusively to contracted operatives of this organization."
                 )
         current_day, current_minute, _ = await adb(db.get_session_time, session_id)
         merchant = session.setdefault("merchant", {})
@@ -980,7 +1085,9 @@ async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
         }
 
     if action == "bounty":
-        if is_anom:
+        from mechanics.social.factions import is_school_club_faction
+        is_club = is_school_club_faction(faction)
+        if is_anom and not is_club:
             from mechanics.social.factions import (
                 ANOMALOUS_DISTRUSTED_ARCHETYPES,
                 get_anomalous_faction_state,
@@ -1010,7 +1117,9 @@ async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
         }
 
     if action in ("promote", "challenge_leader"):
-        if is_anom:
+        from mechanics.social.factions import is_school_club_faction
+        is_club = is_school_club_faction(faction)
+        if is_anom and not is_club:
             raise HTTPException(
                 status_code=400,
                 detail="In Anomalous Incursions, operatives cannot usurp the fixed leadership hierarchy. Advance from Tier 1 (Probationary Agent) to Tier 5 (Elite Agent) on the 5-Tier Promotion Meter (0-100 Rep) by completing Faction Bounties (+10 Rep) and Daily Mandatory Dispatches (+15 Rep)!"
@@ -1074,10 +1183,117 @@ async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
             **payload,
         }
 
+    if action == "calibrate":
+        if not is_anom:
+            raise HTTPException(
+                status_code=400,
+                detail="HQ Telemetry Calibration is exclusive to Anomalous Incursions scenarios.",
+            )
+        from mechanics.social.factions import (
+            ANOMALOUS_DISTRUSTED_ARCHETYPES,
+            get_anomalous_faction_state,
+            infer_anomalous_faction_archetype,
+        )
+        from mechanics.combat.spells.awakened_kits import (
+            ABILITY_MEDIUMS,
+            ANOMALOUS_ATTRIBUTES,
+            COMBAT_ARCHETYPES,
+            normalize_anomalous_attribute,
+        )
+        from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
+
+        fac_arch = infer_anomalous_faction_archetype(faction)
+        if fac_arch in ANOMALOUS_DISTRUSTED_ARCHETYPES:
+            raise HTTPException(
+                status_code=403,
+                detail="Unlicensed clandestine/cult factions lack HQ Telemetry Calibration chambers.",
+            )
+        a_st = await adb(get_anomalous_faction_state, session_id, req.user_id)
+        player_arch = str(a_st.get("faction_archetype_key") or "freelancer")
+        eff_tier = max(int(a_st.get("promotion_tier") or 0), int(char.get("faction_rank") or 0))
+        if player_arch == "freelancer" or (fac_arch and player_arch != fac_arch):
+            raise HTTPException(
+                status_code=403,
+                detail="You must be an enlisted operative of this faction HQ to access Telemetry Calibration.",
+            )
+        if eff_tier < 4:
+            raise HTTPException(
+                status_code=403,
+                detail="HQ Telemetry Calibration requires Tier 4 (Special Investigator) standing or higher.",
+            )
+
+        raw_attr = str(req.attribute or "").strip().lower()
+        new_attr = normalize_anomalous_attribute(raw_attr, fallback="") if raw_attr else ""
+        new_arch = str(req.combat_archetype or "").strip().lower()
+        new_med = str(req.ability_medium or "").strip().lower()
+        if new_attr not in ANOMALOUS_ATTRIBUTES or new_arch not in COMBAT_ARCHETYPES or new_med not in ABILITY_MEDIUMS:
+            raise HTTPException(
+                status_code=400,
+                detail="Specify a valid Attribute (9), Combat Archetype (4), and Ability Medium (4) for calibration.",
+            )
+
+        arc_key = str(session.get("current_arc") or session.get("chapter_number") or session.get("act_number") or 1)
+        cal_map = dict(session.get("telemetry_calibrations_used") or {})
+        if int(cal_map.get(arc_key, 0) or 0) >= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Telemetry Calibration has already been completed once during this campaign chapter/arc.",
+            )
+
+        cur_gold = int(char.get("gold", 0) or 0)
+        if cur_gold < 500:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Telemetry Calibration requires 500G (you currently have {cur_gold}G).",
+            )
+
+        inv_items = await adb(db.get_inventory, req.user_id)
+        core_item = next(
+            (
+                it for it in (inv_items or [])
+                if not it.get("equipped")
+                and any(
+                    kw in str(it.get("name") or "").strip().lower()
+                    for kw in ("hume core", "resonance core", "anomalous core")
+                )
+            ),
+            None,
+        )
+        if not core_item:
+            raise HTTPException(
+                status_code=400,
+                detail="Telemetry Calibration requires 1x Hume Core in your unequipped inventory.",
+            )
+
+        await adb(db.apply_hp_mp_delta, req.user_id, 0, 0, -500)
+        await adb(db.remove_item, req.user_id, int(core_item["id"]))
+        await adb(db.set_character_3axis, req.user_id, new_attr, new_arch, new_med)
+        await adb(sync_equipped_anomalous_spells, req.user_id)
+
+        cal_map[arc_key] = int(cal_map.get(arc_key, 0) or 0) + 1
+        await adb(db.update_session, session_id, extra={"telemetry_calibrations_used": cal_map})
+        learned_after = await adb(db.get_learned_spells, req.user_id)
+        payload = await adb(_enrich_factions_list, session_id, req.user_id)
+        return {
+            "success": True,
+            "action": "calibrate",
+            "attribute": new_attr,
+            "combat_archetype": new_arch,
+            "ability_medium": new_med,
+            "learned_spells": learned_after,
+            "telemetry_calibrations_used": cal_map,
+            "message": (
+                f"HQ Telemetry Calibration complete! Re-attuned to "
+                f"{new_attr.replace('_', ' ').title()} / {new_arch.replace('_', ' ').title()} / "
+                f"{new_med.replace('_', ' ').title()} (-500G, -1 {core_item['name']})."
+            ),
+            **payload,
+        }
+
     raise HTTPException(status_code=400, detail=f"Unsupported faction HQ action: {req.action}")
 
 
-def _build_quests_payload(session_id: int) -> dict:
+def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dict:
     from mechanics.world.waypoints import ensure_quest_waypoints_exist, get_story_quest_climax_location
     try:
         ensure_quest_waypoints_exist(session_id)
@@ -1086,6 +1302,10 @@ def _build_quests_payload(session_id: int) -> dict:
     session = db.get_session(session_id) or {}
     scen_key = session.get("scenario", "fantasy")
     current_loc = session.get("current_location") or ""
+    eff_uid = user_id if user_id is not None else session.get("host_user_id")
+    settings = (db.get_settings(eff_uid) or {}) if eff_uid else {}
+    reveal_all = bool(int(settings.get("debug_reveal_all_info") or 0))
+
     quests = [dict(q) for q in db.get_session_quests(session_id) if q]
     from mechanics.world.locations.hierarchy import (
         resolve_session_location_tokens,
@@ -1125,6 +1345,44 @@ def _build_quests_payload(session_id: int) -> dict:
                                     wp["stage_label"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, wp["stage_label"], scen_key))
                                 if wp.get("target_location"):
                                     wp["target_location"] = dedupe_location_stutter(resolve_session_location_tokens(session_id, wp["target_location"], scen_key))
+        q["fow_dossier"] = game_engine.build_fog_of_war_quest_payload(
+            session_id,
+            q,
+            dossier=q.get("dossier"),
+            reveal_all=reveal_all,
+        )
+        if not reveal_all:
+            q.pop("dossier", None)
+        q_notes_raw = str(q.get("quest_notes") or "")
+        if "anomaly_bp:" in q_notes_raw or "anomaly_blueprint:" in q_notes_raw:
+            try:
+                from mechanics.world.anomaly_engine import (
+                    parse_blueprint_from_notes,
+                    format_anomaly_dossier_summary,
+                )
+                from mechanics.world.folklore_mechanics import get_public_anomaly_name, is_blueprint_disguised
+                bp_q = parse_blueprint_from_notes(q_notes_raw)
+                if bp_q:
+                    is_rev = bool(reveal_all or "dossier_revealed:1" in q_notes_raw or bp_q.get("dossier_revealed"))
+                    q["anomaly_dossier_revealed"] = is_rev
+                    q["anomaly_dossier"] = format_anomaly_dossier_summary(bp_q, revealed=is_rev)
+                    if is_rev:
+                        q["anomaly_blueprint"] = bp_q
+                    else:
+                        q_disg = is_blueprint_disguised(bp_q, dossier_revealed=False)
+                        q["anomaly_blueprint"] = {
+                            "name": get_public_anomaly_name(bp_q, dossier_revealed=False, fallback="Unknown Anomaly"),
+                            "type": "unknown" if q_disg else bp_q.get("type"),
+                            "form": "" if q_disg else bp_q.get("form"),
+                            "physicality": "unknown",
+                            "disposition": bp_q.get("disposition"),
+                            "sapience": "unknown",
+                            "element": "unknown",
+                            "is_disguised": q_disg,
+                            "dossier_revealed": False,
+                        }
+            except Exception:
+                pass
 
     for q in quests:
         _clean_quest_dict(q)
@@ -1147,10 +1405,12 @@ def _build_quests_payload(session_id: int) -> dict:
     if _sd_qp.is_anomalous_incursions_scenario(scen_key):
         try:
             from mechanics.narrative.bounty import evaluate_anomalous_bounty_eligibility, parse_anomalous_quest_board_source
+            from mechanics.social.factions import get_anomalous_faction_state
             host_uid = session.get("host_user_id") if session else None
+            fac_st = get_anomalous_faction_state(session_id, user_id=host_uid)
             for bq in available_bounties:
-                elig = evaluate_anomalous_bounty_eligibility(session_id, host_uid, bq)
-                bq["board_source"] = parse_anomalous_quest_board_source(bq, session_id=session_id)
+                elig = evaluate_anomalous_bounty_eligibility(session_id, host_uid, bq, session=session, fac_state=fac_st)
+                bq["board_source"] = elig.get("board_source") or parse_anomalous_quest_board_source(bq, session_id=session_id)
                 bq["anomalous_eligible"] = bool(elig.get("allowed", True))
                 bq["anomalous_lock_reason"] = str(elig.get("reason") or "")
         except Exception:
@@ -1159,6 +1419,46 @@ def _build_quests_payload(session_id: int) -> dict:
     current_chapter = db.get_session_chapter(session_id) or 1
     campaign_end_goals = session.get("campaign_end_goals") or db.get_session_campaign_goals(session_id) or []
     chapter_digest = db.get_chapter_digest(session_id) or []
+
+    spine = db.get_campaign_spine(session_id)
+    world_scars = [
+        {
+            "event_key": e.get("event_key"),
+            "title": e.get("title"),
+            "location_name": e.get("location_name"),
+            "description": e.get("description"),
+            "remediation_quest_id": (e.get("metadata") or {}).get("remediation_quest_id") if isinstance(e.get("metadata"), dict) else None,
+        }
+        for e in (db.get_world_events(session_id, statuses=("active",)) or [])
+        if (
+            str(e.get("event_type") or "") == "world_scar"
+            or (isinstance(e.get("metadata"), dict) and e["metadata"].get("is_world_scar"))
+            or str(e.get("template_key") or "").startswith("world_scar_")
+            or str(e.get("event_key") or "").startswith("scar_")
+        )
+    ]
+    campaign_spine_summary = {
+        "max_chapters": 11,
+        "has_spine": spine is not None,
+        "climax_status": (spine or {}).get("climax_status") or "pending",
+        "epilogue_status": (spine or {}).get("epilogue_status") or "pending",
+        "nemeses_count": len((spine or {}).get("nemeses") or []),
+        "world_scars": world_scars,
+        "campaign_game_over": bool(session.get("campaign_game_over")),
+        "fallen_world": bool(session.get("fallen_world")),
+        "epilogue_ready": bool(session.get("epilogue_ready")),
+        "epilogue_choices": list(session.get("epilogue_choices") or []),
+        "endless_mode_unlocked": bool(session.get("endless_mode_unlocked")),
+        "campaign_archived": bool(session.get("campaign_archived") or session.get("chronicle_archived")),
+    }
+
+    # Machine tokens in quest_notes (base64 anomaly blueprint, dossier/faction flags) are server-only:
+    # redact them after eligibility parsing so disguised folklore identities never reach clients.
+    if not reveal_all:
+        for q_red in list(quests) + ([active_sq] if isinstance(active_sq, dict) else []):
+            if isinstance(q_red, dict) and "anomaly_bp:" in str(q_red.get("quest_notes") or ""):
+                q_red["quest_notes"] = ""
+
     return {
         "quests": quests,
         "available_bounties": available_bounties,
@@ -1168,15 +1468,18 @@ def _build_quests_payload(session_id: int) -> dict:
         "notice_board_label": nb_label,
         "notice_board_emoji": nb_emoji,
         "current_chapter": current_chapter,
+        "max_chapters": 11,
         "campaign_end_goals": campaign_end_goals,
         "chapter_digest": chapter_digest,
+        "campaign_spine": campaign_spine_summary,
+        "debug_reveal_all": reveal_all,
     }
 
 
 @router.get("/api/quests/{session_id}")
-async def get_quests(session_id: int):
-    """Fetches active, available, and completed quests, active story quest, and detective caseboard clues."""
-    return await adb(_build_quests_payload, session_id)
+async def get_quests(session_id: int, user_id: Optional[int] = Query(None)):
+    """Fetches active, available, and completed quests, active story quest, Fog-of-War dossiers, and Caseboard clues."""
+    return await adb(_build_quests_payload, session_id, user_id)
 
 
 @router.post("/api/quests/{session_id}/bounties/generate")
@@ -1186,17 +1489,18 @@ async def generate_session_bounties(session_id: int, req: BountyGenerateRequest)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if req.faction_id:
-        factions = await adb(db.get_factions, session_id)
-        target_f = next((f for f in (factions or []) if f.get("faction_id") == req.faction_id), None)
-        if target_f:
-            bounties = await game_engine.generate_faction_bounty_board(session, target_f, force_refresh=req.force_refresh)
+    async with distributed_session_lock(session_id):
+        if req.faction_id:
+            factions = await adb(db.get_factions, session_id)
+            target_f = next((f for f in (factions or []) if f.get("faction_id") == req.faction_id), None)
+            if target_f:
+                bounties = await game_engine.generate_faction_bounty_board(session, target_f, force_refresh=req.force_refresh)
+            else:
+                bounties = await game_engine.generate_bounty_board(session, force_refresh=req.force_refresh)
         else:
             bounties = await game_engine.generate_bounty_board(session, force_refresh=req.force_refresh)
-    else:
-        bounties = await game_engine.generate_bounty_board(session, force_refresh=req.force_refresh)
 
-    payload = await adb(_build_quests_payload, session_id)
+    payload = await adb(_build_quests_payload, session_id, req.user_id)
     return {
         "success": True,
         "bounties": [dict(b) for b in (bounties or []) if b],
@@ -1206,7 +1510,7 @@ async def generate_session_bounties(session_id: int, req: BountyGenerateRequest)
 
 @router.post("/api/quests/{session_id}/bounties/action")
 async def bounty_contract_action(session_id: int, req: BountyActionRequest):
-    """Accepts an available bounty or abandons an active bounty."""
+    """Accepts an available bounty (compiling Stage-2 QuestDossier + optional CHA advance) or abandons/forfeits an active bounty."""
     quest = await adb(db.get_quest_by_id, session_id, req.quest_id)
     if not quest:
         raise HTTPException(status_code=404, detail="Bounty contract not found")
@@ -1230,114 +1534,188 @@ async def bounty_contract_action(session_id: int, req: BountyActionRequest):
                     detail="Mandatory Daily Dispatches cannot be abandoned! Complete it before 24:00 to avoid a -15 Reputation penalty."
                 )
 
+    advance_result = None
+    forfeit_details = None
     if action == "accept":
-        can_take = await adb(game_engine.can_accept_side_bounty, session_id, quest)
-        if not can_take:
+        # accept_bounty_contract_async manages its own distributed_session_lock internally
+        acc_res = await game_engine.accept_bounty_contract_async(
+            session_id=session_id,
+            quest_id=req.quest_id,
+            user_id=req.user_id,
+            haggle_advance=bool(req.haggle_advance),
+            enrich_llm=False,
+        )
+        if not acc_res.get("success"):
             raise HTTPException(
-                status_code=400,
-                detail="Maximum 3 active side bounties reached! Complete or abandon one first.",
+                status_code=int(acc_res.get("status_code") or 400),
+                detail=acc_res.get("reason") or "Cannot accept this contract.",
             )
         new_status = "Active"
-        msg = f"Accepted contract: {quest.get('title', 'Bounty')}!"
-        await adb(db.update_quest_status, session_id, req.quest_id, new_status)
+        advance_result = acc_res.get("advance_result")
+        adv_note = (
+            f" (+{advance_result['advance_gold']}G upfront advance secured!)"
+            if isinstance(advance_result, dict) and advance_result.get("succeeded")
+            else ""
+        )
+        msg = f"Accepted contract: {quest.get('title', 'Bounty')}!{adv_note}"
     elif action == "abandon":
-        forfeit_res = await adb(game_engine.forfeit_side_bounty, session_id, req.quest_id, [req.user_id])
-        if not forfeit_res.get("success"):
-            raise HTTPException(status_code=400, detail=forfeit_res.get("reason") or "Cannot abandon this contract.")
-        new_status = "Abandoned"
-        msg = f"Abandoned contract: {quest.get('title', 'Bounty')}."
+        async with distributed_session_lock(session_id):
+            forfeit_res = await adb(
+                game_engine.forfeit_side_bounty,
+                session_id,
+                req.quest_id,
+                [req.user_id] if req.user_id is not None else None,
+                req.user_id,
+            )
+            if not forfeit_res.get("success"):
+                raise HTTPException(
+                    status_code=int(forfeit_res.get("status_code") or 400),
+                    detail=forfeit_res.get("reason") or "Cannot abandon this contract.",
+                )
+            new_status = str(forfeit_res.get("status") or "Abandoned")
+            forfeit_details = _serializable_action(forfeit_res)
+            if new_status == "Failed":
+                msg = f"Forfeited engaged contract '{quest.get('title', 'Bounty')}' — marked Failed with regional fallout!"
+            else:
+                msg = f"Abandoned contract: {quest.get('title', 'Bounty')}."
     else:
         raise HTTPException(status_code=400, detail=f"Invalid bounty action: {req.action}")
 
-    payload = await adb(_build_quests_payload, session_id)
-    return {
+    payload = await adb(_build_quests_payload, session_id, req.user_id)
+    return _serializable_action({
         "success": True,
         "quest_id": req.quest_id,
         "status": new_status,
         "message": msg,
+        "advance_result": advance_result,
+        "forfeit_details": forfeit_details,
         **payload,
-    }
+    })
 
 
 @router.post("/api/quests/{session_id}/clues/deduce")
 async def deduce_caseboard_clues(session_id: int, req: ClueDeductionRequest):
-    """Cross-references two evidence clues to synthesize a Breakthrough deduction and award +50 XP."""
-    if req.clue_a_id == req.clue_b_id:
-        raise HTTPException(status_code=400, detail="Select two distinct pieces of evidence to deduce a connection.")
+    """Deterministically cross-references two evidence clues via QuestDossier clue_graph / Logic Caseboard (zero RNG!)."""
+    is_single = req.clue_b_id is None or int(req.clue_a_id) == int(req.clue_b_id)
 
-    session = await adb(db.get_session, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    async with distributed_session_lock(session_id):
+        session = await adb(db.get_session, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
 
-    clue_a = await adb(db.get_session_clue_by_id, req.clue_a_id)
-    clue_b = await adb(db.get_session_clue_by_id, req.clue_b_id)
-    if not clue_a or not clue_b:
-        raise HTTPException(status_code=404, detail="One or both selected evidence records could not be found.")
-    if clue_a.get("is_consumed") or clue_b.get("is_consumed"):
-        raise HTTPException(status_code=400, detail="One or both selected leads have already been consumed.")
+        clue_a = await adb(db.get_session_clue_by_id, req.clue_a_id)
+        if not clue_a:
+            raise HTTPException(status_code=404, detail="Selected evidence record could not be found.")
+        if clue_a.get("is_consumed"):
+            raise HTTPException(status_code=400, detail="The selected lead has already been consumed.")
 
-    # D18 Anti-spam cooldown: max 1 attempt per pair per turn
-    pair_key = f"{min(int(req.clue_a_id), int(req.clue_b_id))}:{max(int(req.clue_a_id), int(req.clue_b_id))}"
-    cur_turn = len(session.get("history") or [])
-    attempts_map = dict(session.get("deduction_attempts_turn") or {})
-    if attempts_map.get(pair_key) == cur_turn:
-        raise HTTPException(
-            status_code=400,
-            detail="You already attempted to connect this pair of leads this turn. Advance the story or try another lead!",
-        )
+        if is_single:
+            pair_key = f"single:{int(req.clue_a_id)}"
+            eff_clue_b_id = None
+        else:
+            clue_b = await adb(db.get_session_clue_by_id, req.clue_b_id)
+            if not clue_b:
+                raise HTTPException(status_code=404, detail="Secondary evidence record could not be found.")
+            if clue_b.get("is_consumed"):
+                raise HTTPException(status_code=400, detail="Secondary lead has already been consumed.")
+            pair_key = f"{min(int(req.clue_a_id), int(req.clue_b_id))}:{max(int(req.clue_a_id), int(req.clue_b_id))}"
+            eff_clue_b_id = req.clue_b_id
 
-    scen_key = session.get("scenario", "fantasy")
-    is_valid, title, detail_text = evaluate_clue_deduction(clue_a, clue_b, scen_key=scen_key)
+        cur_turn = len(session.get("history") or [])
+        attempts_map = dict(session.get("deduction_attempts_turn") or {})
+        if attempts_map.get(pair_key) == cur_turn:
+            raise HTTPException(
+                status_code=400,
+                detail="You already attempted to connect this lead or pair this turn. Advance the story or try another lead!",
+            )
 
-    xp_awarded = 0
-    if is_valid:
+        ded_res = await adb(game_engine.resolve_caseboard_deduction, session_id, req.clue_a_id, eff_clue_b_id, req.user_id)
         attempts_map[pair_key] = cur_turn
         await adb(db.update_session, session_id, extra={"deduction_attempts_turn": attempts_map})
-        char_row = await adb(db.get_character, req.user_id) if req.user_id else {}
-        import random
-        cats = {clue_a.get("category", "physical"), clue_b.get("category", "physical")}
-        if "deduction" in cats or "digital" in cats or "document" in cats:
-            stat_key = "int_"
-            stat_name = "INT"
-        elif "testimonial" in cats:
-            stat_key = "cha"
-            stat_name = "CHA"
-        else:
-            stat_key = "per_"
-            stat_name = "PER"
-            
-        stat_val = char_row.get(stat_key, 5) if char_row else 5
-        success_rate = max(10, min(100, 20 + (stat_val * 10)))
-        
-        roll = random.randint(1, 100)
-        if roll > success_rate:
-            is_valid = False
-            title = "Deduction Failed"
-            detail_text = f"You tried to connect the evidence, but couldn't quite see the full picture. (Rolled {roll} vs {success_rate}% {stat_name})"
-        else:
-            def _apply_deduction():
-                cur_ch = db.get_session_chapter(session_id) or 1
-                db.synthesize_deduction_clue(
-                    session_id, [req.clue_a_id, req.clue_b_id], title, detail_text, chapter=cur_ch
-                )
-                members = db.get_session_members(session_id)
-                for uid in members:
-                    try:
-                        db.add_xp(uid, 50)
-                    except Exception:
-                        pass
-            await adb(_apply_deduction)
-            xp_awarded = 50
 
-    payload = await adb(_build_quests_payload, session_id)
-    return {
+        payload = await adb(_build_quests_payload, session_id, req.user_id)
+    return _serializable_action({
         "success": True,
-        "is_valid": is_valid,
-        "title": title,
-        "detail_text": detail_text,
-        "xp_awarded": xp_awarded,
+        "is_valid": bool(ded_res.get("is_valid")),
+        "is_red_herring": bool(ded_res.get("is_red_herring")),
+        "title": ded_res.get("title") or "",
+        "detail_text": ded_res.get("detail_text") or "",
+        "xp_awarded": int(ded_res.get("xp_awarded") or 0),
+        "climax_unlocked": bool(ded_res.get("climax_unlocked")),
+        "twist_revealed": bool(ded_res.get("twist_revealed")),
         **payload,
-    }
+    })
+
+
+@router.post("/api/quests/{session_id}/caseboard/accuse")
+async def accuse_caseboard_suspect(session_id: int, req: SuspectAccusationRequest):
+    """Resolves a Private Confrontation vs. Formal Public Accusation against a Caseboard suspect."""
+    async with distributed_session_lock(session_id):
+        session = await adb(db.get_session, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        res = await adb(
+            game_engine.resolve_suspect_accusation,
+            session_id,
+            req.quest_id,
+            req.suspect_name,
+            req.mode,
+            req.user_id,
+        )
+        if not res.get("success"):
+            raise HTTPException(
+                status_code=int(res.get("status_code") or 400),
+                detail=res.get("reason") or "Could not resolve suspect accusation.",
+            )
+
+        payload = await adb(_build_quests_payload, session_id, req.user_id)
+    return _serializable_action({**res, **payload})
+
+
+@router.post("/api/quests/{session_id}/turn-in")
+async def resolve_contract_turn_in(session_id: int, req: QuestTurnInRequest):
+    """Resolves Contract Turn-In, Side-Switching, `2x` Twist Blackmail, or Tangible MacGuffin Keep/Destroy/Fence."""
+    async with distributed_session_lock(session_id):
+        session = await adb(db.get_session, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        res = await adb(
+            game_engine.resolve_quest_turn_in_or_betrayal,
+            session_id,
+            req.quest_id,
+            req.user_id,
+            req.disposition,
+            None,
+            str(session.get("current_location") or ""),
+        )
+        if not res.get("success"):
+            raise HTTPException(
+                status_code=int(res.get("status_code") or 400),
+                detail=res.get("reason") or "Could not resolve contract turn-in.",
+            )
+
+        payload = await adb(_build_quests_payload, session_id, req.user_id)
+    return _serializable_action({**res, **payload})
+
+
+@router.post("/api/quests/{session_id}/epilogue")
+async def resolve_campaign_epilogue_choice(session_id: int, req: EpilogueChoiceRequest):
+    """Resolves Chapter 11 Universal Epilogue choice: 'archive' vs 'endless'."""
+    async with distributed_session_lock(session_id):
+        session = await adb(db.get_session, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        res = await adb(
+            game_engine.resolve_epilogue_choice,
+            session_id,
+            req.choice_id,
+            [req.user_id] if req.user_id is not None else None,
+        )
+        payload = await adb(_build_quests_payload, session_id, req.user_id)
+    return _serializable_action({"success": True, **res, **payload})
 
 
 @router.get("/api/phone/{session_id}")
@@ -1488,16 +1866,30 @@ async def scour_phone_feed(session_id: int, req: PhoneFeedActionRequest):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    res = await scour_feed_for_rumor(dict(session), req.user_id)
+    async with distributed_session_lock(session_id):
+        res = await scour_feed_for_rumor(dict(session), req.user_id)
     social_state = await adb(get_social_state_summary, session_id, session)
     gossip = res.get("gossip_feed")
     if not gossip:
         gossip = [dict(g) for g in (await adb(db.get_gossip_feed, session_id, limit=20))]
-    return {
+    resp = {
         **res,
         "gossip_feed": [dict(g) for g in gossip],
         "social_state": social_state,
     }
+    if res.get("discovered_rumor"):
+        world_pulse = res.get("world_pulse") or await adb(build_client_world_pulse_payload, session_id)
+        resp["world_pulse"] = world_pulse
+        await manager.broadcast(
+            session_id,
+            {
+                "type": "WORLD_PULSE_SYNC",
+                "session_id": int(session_id),
+                "world_pulse": world_pulse,
+                "sync_timestamp": time.time(),
+            },
+        )
+    return resp
 
 
 @router.post("/api/phone/{session_id}/peerpulse/discover")
@@ -1642,7 +2034,13 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
             "basic_info": {}
         }
 
-    from mechanics.social.relationships import is_contact_blocked
+    from mechanics.social.relationships import is_contact_blocked, is_contact_eligible
+    scen_key = str(session.get("scenario") or "")
+    if not is_contact_eligible(contact, scenario=scen_key, session_id=session_id):
+        raise HTTPException(
+            status_code=403,
+            detail=f"{contact.get('name', 'This entity')} is not eligible as a personal phone contact in this scenario."
+        )
     if isinstance(contact, dict) and (
         contact.get("is_dispatch_channel")
         or (isinstance(contact.get("basic_info"), dict) and contact["basic_info"].get("is_dispatch_channel"))
@@ -1663,7 +2061,7 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
     ):
         raise HTTPException(
             status_code=400,
-            detail=f"{contact.get('name', 'This contact')}'s line is disconnected — they perished during an anomalous incursion."
+            detail=f"{contact.get('name', 'This contact')}'s line is disconnected — they perished during an anomaly breach."
         )
 
     if not text or text == "__auto__":
@@ -1726,5 +2124,20 @@ async def cancel_session_commitment(
         "commitments": _enrich_commitments_for_ui(session_id, active_commitments, contacts),
         "appointments": _enrich_commitments_for_ui(session_id, appointments, contacts),
     }
+
+
+@router.get("/api/codex/encyclopedia")
+async def get_codex_encyclopedia(
+    session_id: Optional[int] = Query(default=None),
+    user_id: Optional[int] = Query(default=None),
+):
+    """Returns the account-wide Canonical Folklore Codex [X/50] and session Field Log & Containment Vault."""
+    from mechanics.world.folklore_codex import build_encyclopedia_payload
+
+    eff_uid = int(user_id) if user_id is not None else None
+    eff_sid = int(session_id) if session_id is not None else None
+    payload = await adb(build_encyclopedia_payload, session_id=eff_sid, user_id=eff_uid)
+    return payload
+
 
 

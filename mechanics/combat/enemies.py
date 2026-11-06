@@ -611,7 +611,7 @@ def generate_scenario_enemy(scenario: str, location: str, chapter: int, custom_n
     final_name = f"{display_affix} {name}" if display_affix else name
     initial_intent = roll_enemy_intent(arch_name) if tier_rank >= 3 else None
 
-    return {
+    enemy_dict = {
         "name": final_name,
         "base_name": name,
         "level": level,
@@ -633,6 +633,49 @@ def generate_scenario_enemy(scenario: str, location: str, chapter: int, custom_n
         "weaknesses": list(set(base_weak)),
         "immunities": list(set(base_imm))
     }
+
+    if scenario_lower == "anomalous_incursions":
+        name_low = str(custom_name or name or "").lower()
+        is_human_op = (
+            any(k in name_low for k in ("cult", "syndicate", "operative", "hunter", "mercenary", "enforcer", "zealot", "smuggler"))
+            or (arch_name in ("Corporate Operative",) and "aberration" not in (category or []))
+        )
+        if is_human_op:
+            from mechanics.world.anomaly_engine import ANOMALOUS_ELEMENTS
+            elem_pick = random.choice(list(ANOMALOUS_ELEMENTS))
+            enemy_dict["is_human_operative"] = True
+            enemy_dict["physicality"] = "corporeal"
+            enemy_dict["sapience"] = "sapient"
+            enemy_dict["equipped_anomalous_element"] = elem_pick
+            enemy_dict["element"] = elem_pick
+        else:
+            try:
+                from mechanics.world.anomaly_engine import (
+                    generate_anomaly_blueprint,
+                    instantiate_enemy_from_blueprint,
+                )
+                pool_names = {str(t.get("name", "")).lower() for t in SCENARIO_ENEMY_TEMPLATES.get("anomalous_incursions", [])}
+                preserve_custom = bool(custom_name and str(custom_name).strip().lower() not in pool_names)
+                bp = generate_anomaly_blueprint(
+                    location_str=str(location or ""),
+                    disposition="hostile",
+                    tier_rank=tier_rank,
+                    scen_key=str(scenario or "anomalous_incursions"),
+                    force_procedural=preserve_custom,
+                    # Unique per-encounter seed: a static seed cloned the same anomaly in every room forever
+                    seed_key=f"wild:{tier_rank}:{final_name}:{random.getrandbits(32)}",
+                )
+                if preserve_custom:
+                    bp["name"] = final_name
+                    bp["canonical_name"] = final_name
+                    bp["entity_name"] = final_name
+                    bp["codex_id"] = ""
+                    bp["is_canonical_folklore"] = False
+                enemy_dict = instantiate_enemy_from_blueprint(bp, level=level, tier_rank=tier_rank, base_enemy=enemy_dict)
+            except Exception:
+                pass
+
+    return enemy_dict
 
 generate_scenario_monster = generate_scenario_enemy
 
@@ -726,7 +769,7 @@ def generate_balanced_encounter(party_members: list, scenario: str, location: st
             exact_tier=tier_rank, exact_extra_points=extra_pts,
             language=language
         )
-        if scenario_lower == "anomalous_incursions":
+        if scenario_lower == "anomalous_incursions" and not e_obj.get("anomaly_blueprint") and not e_obj.get("is_human_operative"):
             try:
                 import namegen
                 anom_tags = [c for c in (category or []) if c in ("cognitohazard", "spatial_warp", "bio_aberration", "cursed_relic", "spectral_echo")]

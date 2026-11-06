@@ -73,6 +73,15 @@ TYPE_AFFINITIES: dict[str, dict[str, float]] = {
     },
     "energy": {
         "power_armor": 0.80, "composite": 0.80, "magic_robe": 0.70, "ceramic": 0.80
+    },
+    "electric": {
+        "plate": 1.40, "chainmail": 1.30, "magic_robe": 0.60, "power_armor": 1.30, "unarmored": 1.10
+    },
+    "bio": {
+        "plate": 0.70, "power_armor": 0.50, "unarmored": 1.40, "clothes": 1.40, "magic_robe": 1.00
+    },
+    "aether": {
+        "magic_robe": 0.85, "plate": 1.15, "power_armor": 1.15, "unarmored": 1.15
     }
 }
 
@@ -94,8 +103,11 @@ DAMAGE_TYPE_ALIASES: dict[str, set[str]] = {
     "frost": {"ice", "cold", "frost", "chill"},
     "shock": {"shock", "lightning", "electric", "electricity"},
     "lightning": {"shock", "lightning", "electric", "electricity"},
-    "poison": {"poison", "toxic", "venom", "acid", "corrosive"},
-    "acid": {"poison", "toxic", "venom", "acid", "corrosive"},
+    "electric": {"shock", "lightning", "electric", "electricity"},
+    "bio": {"bio", "poison", "toxic", "venom", "acid", "corrosive"},
+    "poison": {"bio", "poison", "toxic", "venom", "acid", "corrosive"},
+    "acid": {"bio", "poison", "toxic", "venom", "acid", "corrosive"},
+    "aether": {"aether", "hume", "rift"},
     "holy": {"holy", "radiant", "divine", "sacred"},
     "dark": {"dark", "shadow", "necrotic", "void", "evil"},
     "energy": {"energy", "plasma", "laser"},
@@ -268,7 +280,10 @@ def calculate_tactical_damage(
         profile_mult *= 1.25
         brawler_synergy_active = True
 
-    is_magical = chosen_dmg_type in ("magical", "energy", "fire", "shock", "ice", "holy", "dark", "poison", "acid", "water", "earth", "wind")
+    is_magical = chosen_dmg_type in (
+        "magical", "energy", "fire", "shock", "electric", "ice",
+        "holy", "dark", "poison", "bio", "acid", "water", "earth", "wind", "aether",
+    )
     phys_mult = get_attack_type_multiplier([active_type], armor_meta)
     elem_mult = get_elemental_multiplier({chosen_dmg_type: 1.0}, armor_meta, defender_attrs)
 
@@ -276,13 +291,52 @@ def calculate_tactical_damage(
     target_resistances = defender_attrs.get("resistances", [])
     target_weaknesses = defender_attrs.get("weaknesses", [])
 
-    is_immune = matches_damage_type(target_immunities, chosen_dmg_type, active_type)
+    # Check for elemental conversion or Anomalous elemental weapon channel early
+    convert_pct = float(weapon_meta.get("elem_convert_pct", 0.0))
+    convert_type = weapon_meta.get("elem_convert_type")
+    if convert_pct <= 0:
+        stat_mods = weapon_meta.get("stat_modifiers", {})
+        for sm_k, sm_v in stat_mods.items():
+            if sm_k.endswith("_convert") and float(sm_v) > 0:
+                convert_type = sm_k.split("_")[0]
+                convert_pct = float(sm_v)
+                break
+    anom_w_elem = str(weapon_meta.get("anomalous_element") or "").strip().lower()
+    if anom_w_elem and anom_w_elem not in ("physical", "ballistic", "none") and convert_pct <= 0 and not is_magical:
+        convert_type = anom_w_elem
+        convert_pct = 0.65
+
+    is_non_corporeal = (
+        str(defender_attrs.get("physicality") or "").strip().lower() == "non_corporeal"
+        or "non_corporeal" in defender_tags
+    )
+    has_non_phys_conv = bool(
+        convert_pct > 0
+        and convert_type
+        and str(convert_type).lower() not in ("physical", "ballistic", "ranged", "slash", "slashing", "hack", "thrust", "pierce", "piercing", "stabbing", "blunt", "bludgeoning")
+    )
+
+    if is_non_corporeal and not is_magical:
+        if has_non_phys_conv:
+            is_immune = matches_damage_type(target_immunities, str(convert_type))
+        else:
+            is_immune = True
+    else:
+        is_immune = matches_damage_type(target_immunities, chosen_dmg_type, active_type)
+
     if matches_damage_type(target_resistances, chosen_dmg_type, active_type):
         phys_mult *= 0.5
         elem_mult *= 0.5
     if matches_damage_type(target_weaknesses, chosen_dmg_type, active_type):
         phys_mult *= 1.5
         elem_mult *= 1.5
+
+    # Elemental Amplification from Anomalous Wearable Passives
+    attacker_elem_amp: dict = attacker_attrs.get("elemental_amp") or {}
+    if isinstance(attacker_elem_amp, dict) and attacker_elem_amp:
+        for amp_k, amp_v in attacker_elem_amp.items():
+            if matches_damage_type([amp_k], chosen_dmg_type):
+                elem_mult *= (1.0 + max(0.0, float(amp_v or 0.0)))
 
     # Projectile type resolution
     proj_type = weapon_meta.get("projectile_type") if active_type == "ranged" else None
@@ -303,7 +357,10 @@ def calculate_tactical_damage(
         Armor Penetration is strictly capped at 75% maximum (0.75).
         """
         # Step 1: Resolve total DR for this damage channel
-        is_elem = damage_type in ("magical", "fire", "shock", "ice", "poison", "holy", "dark", "energy", "acid", "water", "earth", "wind")
+        is_elem = damage_type in (
+            "magical", "fire", "shock", "electric", "ice", "poison", "bio",
+            "holy", "dark", "energy", "acid", "water", "earth", "wind", "aether",
+        )
         if is_elem:
             ch_gear_dr = gear_dr.get(damage_type, 0.0)
             total_dr = max(-0.25, min(0.85, ch_gear_dr + innate_magic_dr))
@@ -337,17 +394,6 @@ def calculate_tactical_damage(
         is_glancing = penetrating <= floor_damage
         return max(floor_damage, penetrating), is_glancing
 
-    # Check for elemental conversion on weapon
-    convert_pct = float(weapon_meta.get("elem_convert_pct", 0.0))
-    convert_type = weapon_meta.get("elem_convert_type")
-    if convert_pct <= 0:
-        stat_mods = weapon_meta.get("stat_modifiers", {})
-        for sm_k, sm_v in stat_mods.items():
-            if sm_k.endswith("_convert") and float(sm_v) > 0:
-                convert_type = sm_k.split("_")[0]
-                convert_pct = float(sm_v)
-                break
-
     is_ambush = False
     is_backstab = False
     is_versatile_2h = False
@@ -370,10 +416,21 @@ def calculate_tactical_damage(
 
         if convert_pct > 0 and convert_type:
             phys_portion = max(0.0, 1.0 - convert_pct)
-            raw_phys = max(1.0, adjusted_stat * phys_portion * phys_mult)
-            net_phys, is_glancing_p = _apply_dt(raw_phys, chosen_dmg_type, active_proj=proj_type)
+            if is_non_corporeal and not is_magical:
+                net_phys, is_glancing_p = 0.0, True
+            else:
+                raw_phys = max(1.0, adjusted_stat * phys_portion * phys_mult)
+                net_phys, is_glancing_p = _apply_dt(raw_phys, chosen_dmg_type, active_proj=proj_type)
 
             elem_mult_conv = get_elemental_multiplier({convert_type: 1.0}, armor_meta, defender_attrs)
+            if matches_damage_type(target_resistances, str(convert_type)):
+                elem_mult_conv *= 0.5
+            if matches_damage_type(target_weaknesses, str(convert_type)):
+                elem_mult_conv *= 1.5
+            if isinstance(attacker_elem_amp, dict):
+                for amp_k, amp_v in attacker_elem_amp.items():
+                    if matches_damage_type([amp_k], str(convert_type)):
+                        elem_mult_conv *= (1.0 + max(0.0, float(amp_v or 0.0)))
             raw_elem = max(1.0, adjusted_stat * convert_pct * elem_mult_conv)
             net_elem, is_glancing_e = _apply_dt(raw_elem, convert_type)
 

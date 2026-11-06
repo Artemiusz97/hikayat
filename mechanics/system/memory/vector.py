@@ -1,5 +1,13 @@
+"""Offline cosine-similarity & RRF math helpers preserved for backwards-compatible callers and tests.
+
+Note: Production episodic recall switched to zero-HTTP deterministic 2-Signal FTS5 + metadata affinity
+in Migration 37 (`db/memory.py:recall_chapter_digests`).
+"""
+from __future__ import annotations
+
 import math
 from typing import List, Tuple
+
 
 def cosine_similarity(v1: List[float], v2: List[float]) -> float:
     if not v1 or not v2 or len(v1) != len(v2):
@@ -11,40 +19,37 @@ def cosine_similarity(v1: List[float], v2: List[float]) -> float:
         return 0.0
     return dot_product / (norm_v1 * norm_v2)
 
+
 def hybrid_search(
     fts_results: List[str],
     vector_results: List[Tuple[str, List[float]]],
     query_embedding: List[float],
     alpha: float = 0.5,
-    top_k: int = 6
+    top_k: int = 6,
+    min_similarity: float = 0.25,
 ) -> List[str]:
-    """
-    Combine FTS5 results and Vector cosine similarity results using Reciprocal Rank Fusion (RRF)
-    or a normalized score. We will just use RRF for simplicity, but boost vector scores.
-    fts_results: list of strings (ordered by BM25 rank).
-    vector_results: list of (text, embedding) tuples.
-    """
-    scores = {}
-    
-    # 1. Score FTS matches (RRF)
-    for rank, text in enumerate(fts_results):
+    """Backwards-compatible RRF combiner with deduplication and cosine similarity floor."""
+    scores: dict[str, float] = {}
+    seen_fts: set[str] = set()
+
+    for rank, text in enumerate(fts_results or []):
+        if not text or text in seen_fts:
+            continue
+        seen_fts.add(text)
         scores[text] = scores.get(text, 0.0) + (1.0 - alpha) * (1.0 / (rank + 60))
-        
-    # 2. Score Vector matches
+
     if query_embedding and vector_results:
-        # Calculate cosine similarity for all
-        vec_scores = []
+        best_sim_by_text: dict[str, float] = {}
         for text, emb in vector_results:
+            if not text:
+                continue
             sim = cosine_similarity(query_embedding, emb)
-            vec_scores.append((sim, text))
-            
-        # Sort by similarity
-        vec_scores.sort(key=lambda x: x[0], reverse=True)
-        
-        for rank, (sim, text) in enumerate(vec_scores):
-            # Add to RRF score
+            if sim >= min_similarity and sim > best_sim_by_text.get(text, -1.0):
+                best_sim_by_text[text] = sim
+
+        vec_scores = sorted(best_sim_by_text.items(), key=lambda kv: kv[1], reverse=True)
+        for rank, (text, _sim) in enumerate(vec_scores):
             scores[text] = scores.get(text, 0.0) + alpha * (1.0 / (rank + 60))
-            
-    # 3. Sort combined and return top_k
-    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    return [text for text, score in ranked[:top_k]]
+
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    return [text for text, _score in ranked[:top_k]]

@@ -2,11 +2,22 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Smartphone, Users, Heart, Search, MessageCircle, MapPin,
-  ChevronDown, ChevronRight, User, UserMinus, Sparkles, Scroll, ShieldAlert
+  ChevronDown, ChevronRight, User, UserPlus, UserMinus, Sparkles, Scroll, ShieldAlert
 } from 'lucide-react';
 import { StatusEffectBadge } from './CharacterSheet';
 import { getRelationshipTier } from './CodexPanel';
 import { formatCleanLocation } from '../../utils/locationFormat';
+
+const isStudentNpc = (npc, basic) => {
+  if (npc?.is_student !== undefined) return Boolean(npc.is_student);
+  const gradeStr = String(basic?.grade || npc?.grade || '').trim().toLowerCase();
+  const srtStr = String(npc?.social_role_type || basic?.social_role_type || '').trim().toLowerCase();
+  if (['citizen', 'adult', 'faculty', 'staff', 'civilian'].includes(gradeStr)) return false;
+  if (['adult_service', 'faculty_staff'].includes(srtStr)) return false;
+  if (['freshman', 'sophomore', 'junior', 'senior', 'student', 'classmate'].some(k => gradeStr.includes(k))) return true;
+  if (srtStr === 'student_peer') return true;
+  return false;
+};
 
 const formatPersonEntity = (item) => {
   if (!item) return '';
@@ -527,11 +538,26 @@ const ContactsPanel = ({
                         {formatTitle(basic.grade || npc.grade)}
                       </span>
                     )}
-                    {(basic.club || npc.club) && (
-                      <span className="px-1.5 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40 text-[10.5px]">
-                        Club: {formatTitle(basic.club || npc.club)}
-                      </span>
-                    )}
+                    {(() => {
+                      const isStudent = isStudentNpc(npc, basic);
+                      const clubVal = basic.club || npc.club;
+                      const affilVal = basic.affiliation || npc.affiliation;
+                      if (isStudent && clubVal && clubVal.toLowerCase() !== 'none') {
+                        return (
+                          <span className="px-1.5 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40 text-[10.5px]">
+                            Club: {formatTitle(clubVal)}
+                          </span>
+                        );
+                      }
+                      if (!isStudent && affilVal && affilVal.toLowerCase() !== 'none') {
+                        return (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-900/60 text-slate-300 border border-slate-700/50 text-[10.5px]">
+                            {formatTitle(affilVal)}
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
                     {(basic.race || npc.race) && (
                       <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
                         {formatRace(basic.race || npc.race)}
@@ -615,7 +641,7 @@ const ContactsPanel = ({
                       </div>
                     )}
 
-                    {isInParty && (
+                    {isInParty ? (
                       <div className="flex items-center justify-between bg-black/40 p-2.5 rounded-lg border border-fantasy-border/40">
                         <span className="text-xs text-gray-300">
                           {t('codex.in_party_desc', 'Currently traveling in your party.')}
@@ -631,6 +657,24 @@ const ContactsPanel = ({
                         >
                           <UserMinus size={13} />
                           <span>{companionBusy === npc.name ? '...' : t('codex.dismiss', 'Dismiss')}</span>
+                        </button>
+                      </div>
+                    ) : isSpecialAgent && (
+                      <div className="flex items-center justify-between bg-black/40 p-2.5 rounded-lg border border-fantasy-border/40">
+                        <span className="text-xs text-gray-300">
+                          {t('codex.recruit_desc', 'Invite this operative to join your strike team.')}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={companionBusy === npc.name}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleCompanion(npc.name, false);
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold border transition-all shrink-0 bg-emerald-950/50 border-emerald-800/60 text-emerald-300 hover:bg-emerald-900/60 cursor-pointer"
+                        >
+                          <UserPlus size={13} />
+                          <span>{companionBusy === npc.name ? '...' : t('codex.recruit', 'Recruit')}</span>
                         </button>
                       </div>
                     )}
@@ -849,11 +893,26 @@ const ContactsPanel = ({
                                   {formatTitle(basic.grade)}
                                 </span>
                               )}
-                              {basic.club && (
-                                <span className="text-xs px-2 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40">
-                                  Club: {formatTitle(basic.club)}
-                                </span>
-                              )}
+                              {(() => {
+                                const isStudent = isStudentNpc(npc, basic);
+                                const clubVal = basic.club || npc.club;
+                                const affilVal = basic.affiliation || npc.affiliation;
+                                if (isStudent && clubVal && clubVal.toLowerCase() !== 'none') {
+                                  return (
+                                    <span className="text-xs px-2 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40">
+                                      Club: {formatTitle(clubVal)}
+                                    </span>
+                                  );
+                                }
+                                if (!isStudent && affilVal && affilVal.toLowerCase() !== 'none') {
+                                  return (
+                                    <span className="text-xs px-2 py-0.5 rounded bg-slate-900/60 text-slate-300 border border-slate-700/50">
+                                      {formatTitle(affilVal)}
+                                    </span>
+                                  );
+                                }
+                                return null;
+                              })()}
                             </div>
 
                             {hasPhysicalAttributes && (() => {

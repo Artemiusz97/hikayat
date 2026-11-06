@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import HistoryCard, { formatNarrative, getOutcomeTierTheme } from './HistoryCard';
 import SceneImageCard from './SceneImageCard';
 import { Feather, Sparkles, Swords, Skull, Heart } from 'lucide-react';
@@ -16,6 +17,7 @@ const StoryFeed = ({
   onRerollImage = null,
   rerollingImage = false
 }) => {
+  const { t } = useTranslation();
   const scrollContainerRef = useRef(null);
   const feedEndRef = useRef(null);
 
@@ -207,9 +209,22 @@ const StoryFeed = ({
                 <Swords size={16} className="text-red-400 animate-pulse" />
                 <span>Active Combat Encounter</span>
               </div>
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-red-900/50 text-red-200 border border-red-700/50">
-                {activeMonsters.filter((m) => (m.hp ?? 1) > 0).length} / {activeMonsters.length} Hostiles Active
-              </span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {currentScene?.construct_status && (
+                  <span className="text-[10.5px] font-mono px-2 py-0.5 rounded bg-cyan-950/70 text-cyan-200 border border-cyan-600/50">
+                    🤖 {t('awakened.construct_active', {
+                      name: currentScene.construct_status.name,
+                      hp: currentScene.construct_status.hp,
+                      max_hp: currentScene.construct_status.max_hp,
+                      defaultValue: `Construct: ${currentScene.construct_status.name} (${currentScene.construct_status.hp}/${currentScene.construct_status.max_hp} HP)`,
+                    })}
+                    {currentScene.construct_status.windup_skill ? ` • ⚙️ ${currentScene.construct_status.windup_skill}` : ''}
+                  </span>
+                )}
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-red-900/50 text-red-200 border border-red-700/50">
+                  {activeMonsters.filter((m) => (m.hp ?? 1) > 0).length} / {activeMonsters.length} Hostiles Active
+                </span>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -273,6 +288,67 @@ const StoryFeed = ({
                         />
                       </div>
                     </div>
+
+                    {/* Anomalous Stability / Poise Bar & Weakness Pills */}
+                    {Number(monster.max_stability || 0) > 0 && !isDefeated && (() => {
+                      const maxStab = Math.max(1, Number(monster.max_stability));
+                      const curStab = Math.max(0, Number(monster.stability ?? maxStab));
+                      const stabPct = Math.min(100, Math.round((curStab / maxStab) * 100));
+                      const isBreached = Boolean(monster.is_breached);
+                      const breachTurns = Number(monster.breached_turns_left || 1);
+                      const weakList = Array.isArray(monster.display_weaknesses)
+                        ? monster.display_weaknesses
+                        : (Array.isArray(monster.revealed_weaknesses) ? monster.revealed_weaknesses : (Array.isArray(monster.weaknesses) ? monster.weaknesses : []));
+                      return (
+                        <div className="mt-2 pt-1.5 border-t border-red-900/40 space-y-1.5">
+                          {isBreached ? (
+                            <div className="px-2 py-0.5 rounded bg-fuchsia-950/80 border border-fuchsia-400 text-fuchsia-200 text-[10px] font-mono font-bold uppercase tracking-wider text-center animate-pulse">
+                              💥 {t('awakened.breached_badge', { turns: breachTurns, defaultValue: `ANOMALY BREACHED! [${breachTurns}T]` })}
+                            </div>
+                          ) : (
+                            <div className="space-y-0.5">
+                              <div className="flex justify-between items-center text-[9.5px] font-mono">
+                                <span className="text-cyan-300">💠 {t('awakened.stability_label', 'Poise')}</span>
+                                <span className="text-cyan-100 font-semibold">{curStab} / {maxStab}</span>
+                              </div>
+                              <div className="h-1.5 w-full bg-black/80 rounded-full overflow-hidden border border-cyan-900/60">
+                                <div className="h-full bg-cyan-400 transition-all duration-500" style={{ width: `${stabPct}%` }} />
+                              </div>
+                            </div>
+                          )}
+                          {weakList.length > 0 && (
+                            <div className="flex items-center gap-1 flex-wrap">
+                              <span className="text-[9px] font-mono uppercase text-gray-400">{t('awakened.weakness_label', 'Weak')}:</span>
+                              {weakList.map((wk, wIdx) => (
+                                <span
+                                  key={`${wk}-${wIdx}`}
+                                  className={`text-[9px] font-mono font-bold uppercase px-1.5 py-0.2 rounded border ${
+                                    wk === '?'
+                                      ? 'bg-purple-950/70 text-purple-200 border-purple-500/60'
+                                      : 'bg-cyan-950/60 text-cyan-200 border-cyan-700/50'
+                                  }`}
+                                >
+                                  {wk}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {monster.tether_vessel_name && (
+                            <div className={`px-2 py-0.5 rounded border text-[9.5px] font-mono font-bold flex items-center justify-between gap-1 ${
+                              monster.tether_sealed
+                                ? 'bg-emerald-950/70 border-emerald-600/60 text-emerald-200'
+                                : 'bg-amber-950/70 border-amber-600/60 text-amber-200'
+                            }`}>
+                              <span>
+                                {monster.tether_sealed
+                                  ? `⛓️ ${t('codex.tether_sealed', 'Tether Sealed')}`
+                                  : `🏺 ${t('codex.bound_vessel', 'Bound Vessel')}: ${monster.tether_vessel_name}`}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Monster Status Effects */}
                     {statuses.length > 0 && (

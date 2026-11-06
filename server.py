@@ -107,6 +107,7 @@ from api import (
     adventure_router,
     codex_phone_router,
     settings_ws_router,
+    world_events_router,
 )
 
 import argparse
@@ -195,6 +196,7 @@ app.include_router(inventory_merchant_router)
 app.include_router(adventure_router)
 app.include_router(codex_phone_router)
 app.include_router(settings_ws_router)
+app.include_router(world_events_router)
 
 
 @app.get("/api/server/public-url")
@@ -216,6 +218,35 @@ class SafeStaticFiles(StaticFiles):
             await WebSocketClose()(scope, receive, send)
             return
         await super().__call__(scope, receive, send)
+
+
+from fastapi.responses import FileResponse, Response
+from pathlib import Path
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon_ico():
+    for candidate in [
+        Path("web/dist/favicon.ico"),
+        Path("web/public/favicon.ico"),
+        Path("web/dist/favicon.svg"),
+        Path("web/public/favicon.svg"),
+    ]:
+        if candidate.is_file():
+            media_type = "image/svg+xml" if candidate.suffix.lower() == ".svg" else "image/x-icon"
+            return FileResponse(candidate, media_type=media_type)
+    return Response(status_code=204)
+
+
+@app.get("/favicon.svg", include_in_schema=False)
+async def favicon_svg():
+    for candidate in [
+        Path("web/dist/favicon.svg"),
+        Path("web/public/favicon.svg"),
+    ]:
+        if candidate.is_file():
+            return FileResponse(candidate, media_type="image/svg+xml")
+    return Response(status_code=204)
 
 
 # Serve locally saved generated scene images (shared across Discord & WebUI)

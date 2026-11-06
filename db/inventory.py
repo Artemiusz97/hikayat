@@ -10,8 +10,7 @@ import re
 import sqlite3
 from config import DB_PATH
 import character_data as cd
-from .core import *
-from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
+from .core import get_conn
 
 log = logging.getLogger(__name__)
 
@@ -133,12 +132,14 @@ def can_add_item(
     name: str = "",
     item_type: str = "",
     effect: str = "",
+    char: dict | None = None,
 ) -> bool:
-    char = db.get_character(user_id)
+    if char is None:
+        char = db.get_character(user_id)
     if not char:
         return True
     cap = cd.inventory_capacity(char.get("str_", 1))
-    existing = get_inventory(user_id)
+    existing = get_inventory(user_id, char=char)
     raw_cost = int(slot_cost) if slot_cost is not None else 1
     if raw_cost <= 0:
         return True
@@ -154,18 +155,49 @@ def can_add_item(
     return (compute_inventory_used_slots(existing) + raw_cost) <= cap
 
 
-def add_item(user_id: int, name: str, item_type: str, effect: str = "", slot_cost: int = 1, force: bool = False) -> int | None:
-    char = db.get_character(user_id)
+def add_item(
+    user_id: int,
+    name: str,
+    item_type: str,
+    effect: str = "",
+    slot_cost: int = 1,
+    force: bool = False,
+    char: dict | None = None,
+    is_quest_locked: int = 0,
+    linked_quest_id: str = "",
+) -> int | None:
+    if char is None:
+        char = db.get_character(user_id)
     char_id = char["id"] if char else None
     if not force and char:
-        if not can_add_item(user_id, slot_cost=slot_cost, name=name, item_type=item_type, effect=effect):
+        if not can_add_item(user_id, slot_cost=slot_cost, name=name, item_type=item_type, effect=effect, char=char):
             return None
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO inventory (user_id, character_id, name, item_type, effect, slot_cost) VALUES (?,?,?,?,?,?)",
-            (user_id, char_id, name, item_type, effect, slot_cost),
+            "INSERT INTO inventory (user_id, character_id, name, item_type, effect, slot_cost, is_quest_locked, linked_quest_id) VALUES (?,?,?,?,?,?,?,?)",
+            (user_id, char_id, name, item_type, effect, slot_cost, int(bool(is_quest_locked)), str(linked_quest_id or "")),
         )
         return cur.lastrowid
+
+
+def set_item_quest_lock(user_id: int, quest_id: str, locked: int = 0) -> int:
+    """Unlocks or locks inventory items bound to a specific quest_id for a user's active character."""
+    char = db.get_character(user_id)
+    char_id = char["id"] if char else None
+    if not quest_id:
+        return 0
+    with get_conn() as conn:
+        if char_id is not None:
+            cur = conn.execute(
+                "UPDATE inventory SET is_quest_locked = ? WHERE (character_id = ? OR (character_id IS NULL AND user_id = ?)) AND linked_quest_id = ?",
+                (int(bool(locked)), char_id, user_id, str(quest_id)),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE inventory SET is_quest_locked = ? WHERE user_id = ? AND linked_quest_id = ?",
+                (int(bool(locked)), user_id, str(quest_id)),
+            )
+        return cur.rowcount
 
 def remove_item_by_name(user_id: int, name: str) -> bool:
     char = db.get_character(user_id)
@@ -219,13 +251,13 @@ def remove_item_by_name(user_id: int, name: str) -> bool:
     if removed and was_equipped:
         try:
             _sync_equipment_to_physical_state(user_id)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Failed syncing physical state after removing '%s' for user %s: %s", name, user_id, e, exc_info=True)
         try:
             from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
             sync_equipped_anomalous_spells(user_id)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Failed syncing anomalous spells after removing '%s' for user %s: %s", name, user_id, e, exc_info=True)
     return removed
 
 def remove_item(user_id: int, item_id: int) -> bool:
@@ -251,17 +283,18 @@ def remove_item(user_id: int, item_id: int) -> bool:
     if removed and was_equipped:
         try:
             _sync_equipment_to_physical_state(user_id)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Failed syncing physical state after removing item %s for user %s: %s", item_id, user_id, e, exc_info=True)
         try:
             from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
             sync_equipped_anomalous_spells(user_id)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Failed syncing anomalous spells after removing item %s for user %s: %s", item_id, user_id, e, exc_info=True)
     return removed
 
-def get_inventory(user_id: int):
-    char = db.get_character(user_id)
+def get_inventory(user_id: int, char: dict | None = None) -> list[dict]:
+    if char is None:
+        char = db.get_character(user_id)
     if not char:
         return []
     with get_conn() as conn:
@@ -285,6 +318,20 @@ def equip_item(user_id: int, item_id: int, slot: str) -> dict | None:
         if not owned:
             raise ValueError("That item isn't in your inventory.")
         item_dict = dict(owned)
+
+        # 0.0 Scenario Equip Compatibility Validation (Single Source of Truth)
+        from mechanics.combat.items.clothing import can_equip_item_in_scenario
+        active_sid = char.get("active_session_id")
+        current_scen = None
+        if active_sid:
+            s_row = conn.execute("SELECT scenario FROM sessions WHERE id=?", (active_sid,)).fetchone()
+            if s_row:
+                current_scen = s_row[0] if isinstance(s_row, (list, tuple)) else s_row["scenario"]
+        if not current_scen:
+            current_scen = char.get("scenario") or "fantasy"
+        allowed_scen, scen_rejection = can_equip_item_in_scenario(item_dict, slot, current_scen)
+        if not allowed_scen:
+            raise ValueError(scen_rejection)
 
         # 0. Slot-Type Compatibility Validation
         from mechanics.combat.equipment import parse_equipment_metadata
@@ -505,8 +552,8 @@ def get_equipment(user_id: int) -> dict:
     by_slot = {r["slot"]: dict(r) for r in rows}
     return {slot: by_slot.get(slot) for slot in cd.EQUIPMENT_SLOTS}
 
-def used_slots(user_id: int) -> int:
-    return compute_inventory_used_slots(get_inventory(user_id))
+def used_slots(user_id: int, char: dict | None = None) -> int:
+    return compute_inventory_used_slots(get_inventory(user_id, char=char))
 
 
 def drop_item_to_session_floor(user_id: int, item_dict: dict, session_id: int | None = None) -> bool:

@@ -1,3 +1,4 @@
+from __future__ import annotations
 from .constants import *
 import asyncio
 import json
@@ -39,8 +40,6 @@ from mechanics.world.locations import is_location_engine_enabled, get_discovered
 from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as _quest_type_icon
 from mechanics.combat.items import parse_item_effect, apply_item_to_target
 import unicodedata
-from ..embeds import *
-from ..embeds import _build_bounties_embed, _build_bounty_board_embed, _build_campaign_goals_embed, _build_caseboard_embed, _build_history_embed, _build_main_quest_embed, _build_quest_log_embed, _choice_button_label, _format_items_gained, _format_items_gained_multi, _format_tracker_entity, _get_choice_emoji, _get_choice_quest_icon, _get_choice_skill_emoji, _get_quest_scenario_labels, _is_dialogue_partner, _location_text, _norm_name, _parse_status_effects, _party_vitals_text, _safe_add_field, _safe_int, _scenario_command_choices, _strip_leading_emojis, _tracker_group_text, _tracker_header, _truncate_embed_text, _truncate_field_name, _truncate_field_value
 from ..embeds import _RESULT_COLORS, _RESULT_TITLES, _scenario_command_choices, _parse_status_effects, _party_vitals_text, _location_text, _safe_int, _truncate_field_value, _truncate_field_name, _safe_add_field, _norm_name, _is_dialogue_partner, _format_tracker_entity, _tracker_group_text, _strip_leading_emojis, _get_choice_quest_icon, _get_choice_skill_emoji, _get_choice_emoji, _format_items_gained, _format_items_gained_multi, _tracker_header, _truncate_embed_text, _choice_button_label, _get_quest_scenario_labels, _build_campaign_goals_embed, _build_main_quest_embed, _build_bounties_embed, _build_history_embed, _build_caseboard_embed, _build_quest_log_embed, _build_bounty_board_embed
 
 class ActiveBountySelect(discord.ui.Select):
@@ -72,8 +71,7 @@ class ActiveBountySelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         val = self.values[0]
         selected_id = None if val == "__overview__" else val
-        view = QuestLogView(self.session_id, current_tab="Bounties", selected_quest_id=selected_id)
-        embed = _build_quest_log_embed(self.session_id, tab="Bounties", selected_quest_id=selected_id)
+        view, embed = await create_quest_log_view_and_embed(self.session_id, tab="Bounties", selected_quest_id=selected_id)
         await interaction.response.edit_message(embed=embed, view=view)
 
 class HistoryQuestSelect(discord.ui.Select):
@@ -106,8 +104,7 @@ class HistoryQuestSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         val = self.values[0]
         selected_id = None if val == "__overview__" else val
-        view = QuestLogView(self.session_id, current_tab="History", selected_quest_id=selected_id)
-        embed = _build_quest_log_embed(self.session_id, tab="History", selected_quest_id=selected_id)
+        view, embed = await create_quest_log_view_and_embed(self.session_id, tab="History", selected_quest_id=selected_id)
         await interaction.response.edit_message(embed=embed, view=view)
 
 class CaseboardSuspectSelect(discord.ui.Select):
@@ -135,8 +132,7 @@ class CaseboardSuspectSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         val = self.values[0]
         selected_suspect = None if val == "__all__" else val
-        view = QuestLogView(self.session_id, current_tab="Caseboard", selected_suspect=selected_suspect)
-        embed = _build_quest_log_embed(self.session_id, tab="Caseboard", selected_suspect=selected_suspect)
+        view, embed = await create_quest_log_view_and_embed(self.session_id, tab="Caseboard", selected_suspect=selected_suspect)
         await interaction.response.edit_message(embed=embed, view=view)
 
 class ClueDeductionView(discord.ui.View):
@@ -179,112 +175,187 @@ class ClueDeductionView(discord.ui.View):
 
     async def _on_select_a(self, interaction: discord.Interaction):
         self.clue_a_id = int(self.select_a.values[0])
-        await interaction.response.defer()
+        for opt in self.select_a.options:
+            opt.default = (opt.value == self.select_a.values[0])
+        await interaction.response.edit_message(view=self)
 
     async def _on_select_b(self, interaction: discord.Interaction):
         self.clue_b_id = int(self.select_b.values[0])
-        await interaction.response.defer()
+        for opt in self.select_b.options:
+            opt.default = (opt.value == self.select_b.values[0])
+        await interaction.response.edit_message(view=self)
 
     async def _on_cancel(self, interaction: discord.Interaction):
-        view = QuestLogView(self.session_id, current_tab="Caseboard")
-        embed = _build_quest_log_embed(self.session_id, tab="Caseboard")
+        view, embed = await create_quest_log_view_and_embed(self.session_id, tab="Caseboard")
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _on_deduce(self, interaction: discord.Interaction):
-        if not self.clue_a_id or not self.clue_b_id:
-            await interaction.response.send_message("Please select both Evidence A and Evidence B first!", ephemeral=True)
-            return
-        if self.clue_a_id == self.clue_b_id:
-            await interaction.response.send_message("Please select two distinct pieces of evidence to deduce a connection.", ephemeral=True)
+        if not self.clue_a_id:
+            await interaction.response.send_message("Please select at least Evidence A first!", ephemeral=True)
             return
 
-        clue_a = db.get_session_clue_by_id(self.clue_a_id)
-        clue_b = db.get_session_clue_by_id(self.clue_b_id)
-        if not clue_a or not clue_b:
-            await interaction.response.send_message("One or both evidence items could not be found.", ephemeral=True)
+        is_single = not self.clue_b_id or int(self.clue_a_id) == int(self.clue_b_id)
+
+        clue_a = await adb(db.get_session_clue_by_id, self.clue_a_id)
+        if not clue_a:
+            await interaction.response.send_message("Evidence A could not be found.", ephemeral=True)
+            return
+        if clue_a.get("is_consumed"):
+            await interaction.response.send_message("Evidence A has already been consumed in a previous breakthrough!", ephemeral=True)
             return
 
-        if clue_a.get("is_consumed") or clue_b.get("is_consumed"):
-            await interaction.response.send_message("One or both leads have already been consumed in a previous breakthrough!", ephemeral=True)
-            return
+        if is_single:
+            pair_key = f"single:{int(self.clue_a_id)}"
+            eff_clue_b_id = None
+        else:
+            clue_b = await adb(db.get_session_clue_by_id, self.clue_b_id)
+            if not clue_b:
+                await interaction.response.send_message("Evidence B could not be found.", ephemeral=True)
+                return
+            if clue_b.get("is_consumed"):
+                await interaction.response.send_message("Evidence B has already been consumed in a previous breakthrough!", ephemeral=True)
+                return
+            pair_key = f"{min(int(self.clue_a_id), int(self.clue_b_id))}:{max(int(self.clue_a_id), int(self.clue_b_id))}"
+            eff_clue_b_id = self.clue_b_id
 
-        from mechanics.narrative.clues import evaluate_clue_deduction
-        session = db.get_session(self.session_id)
-        scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-        pair_key = f"{min(int(self.clue_a_id), int(self.clue_b_id))}:{max(int(self.clue_a_id), int(self.clue_b_id))}"
+        session = await adb(db.get_session, self.session_id)
         cur_turn = len((session or {}).get("history") or [])
         attempts_map = dict((session or {}).get("deduction_attempts_turn") or {})
         if attempts_map.get(pair_key) == cur_turn:
-            await interaction.response.send_message("⏳ You already attempted to connect this pair of leads this turn. Advance the story or try another lead!", ephemeral=True)
-            return
-        is_valid, title, detail_text = evaluate_clue_deduction(clue_a, clue_b, scen_key=scen_key)
-
-        if not is_valid:
-            await interaction.response.send_message(f"🔍 **No Connection Found:** {detail_text}", ephemeral=True)
+            await interaction.response.send_message("⏳ You already attempted to connect this lead or pair this turn. Advance the story or try another lead!", ephemeral=True)
             return
 
-        # S.P.E.C.I.A.L. Stat Check
+        ded_res = await adb(
+            game_engine.resolve_caseboard_deduction,
+            self.session_id,
+            self.clue_a_id,
+            eff_clue_b_id,
+            interaction.user.id,
+        )
         attempts_map[pair_key] = cur_turn
-        db.update_session(self.session_id, extra={"deduction_attempts_turn": attempts_map})
-        char_row = db.get_character(interaction.user.id) or {}
-        cats = {clue_a.get("category", "physical"), clue_b.get("category", "physical")}
-        if "deduction" in cats or "digital" in cats or "document" in cats:
-            stat_key = "int_"
-            stat_name = "INT"
-        elif "testimonial" in cats:
-            stat_key = "cha"
-            stat_name = "CHA"
-        else:
-            stat_key = "per_"
-            stat_name = "PER"
+        await adb(db.update_session, self.session_id, extra={"deduction_attempts_turn": attempts_map})
 
-        stat_val = char_row.get(stat_key, 5) if char_row else 5
-        success_rate = max(10, min(100, 20 + (stat_val * 10)))
-
-        import random
-        roll = random.randint(1, 100)
-        if roll > success_rate:
+        if not ded_res.get("is_valid"):
+            prefix = "🚩 **Red Herring Rejected:**" if ded_res.get("is_red_herring") else "🔍 **No Logical Link:**"
             await interaction.response.send_message(
-                f"🎲 **Deduction Check Failed!** (Rolled `{roll}` vs `{success_rate}%` {stat_name})\n\n"
-                f"You tried to connect the evidence, but couldn't quite see the full picture.\n"
-                f"*Leads are NOT consumed.* Boost your **{stat_name}** or try again later!",
-                ephemeral=True
+                f"{prefix} {ded_res.get('detail_text') or 'These two items do not corroborate a shared lead.'}",
+                ephemeral=True,
             )
             return
 
-        cur_ch = db.get_session_chapter(self.session_id) or 1
-        db.synthesize_deduction_clue(self.session_id, [self.clue_a_id, self.clue_b_id], title, detail_text, chapter=cur_ch)
-        members = db.get_session_members(self.session_id)
-        for uid in members:
-            try:
-                db.add_xp(uid, 50)
-            except Exception:
-                pass
+        title = ded_res.get("title") or "Confirmed Trail"
+        detail_text = ded_res.get("detail_text") or ""
+        unlock_notes = []
+        if ded_res.get("climax_unlocked"):
+            unlock_notes.append("🔓 **Climax Unlocked:** Hidden culprit / lair revealed!")
+        if ded_res.get("twist_revealed"):
+            unlock_notes.append("⚡ **Twist Uncovered:** New side-switch / blackmail leverage unlocked!")
+        extra_str = ("\n" + "\n".join(unlock_notes)) if unlock_notes else ""
 
         embed = discord.Embed(
             title=f"⚡ Deduction Breakthrough: {title}!",
             description=(
-                f"🎲 **Success Check:** Rolled `{roll}` vs `{success_rate}%` ({stat_name})\n\n"
+                f"🧩 **Corroborated Logic Link Verified**\n\n"
                 f"{detail_text}\n\n"
-                f"🎉 **Reward:** `+50 XP` awarded to party!\n"
-                f"Both component leads have been verified and archived. Confrontation choices unlocked in story scenes!"
+                f"🎉 **Reward:** `+{ded_res.get('xp_awarded', 50)} XP` awarded to party!{extra_str}"
             ),
             color=discord.Color.gold()
         )
-        view = QuestLogView(self.session_id, current_tab="Caseboard")
+        view, _ = await create_quest_log_view_and_embed(self.session_id, tab="Caseboard", custom_embed=embed)
         await interaction.response.edit_message(embed=embed, view=view)
 
+
+def _hydrate_quest_log_data(
+    session_id: int,
+    current_tab: str = "Main Quest",
+    selected_quest_id: str | None = None,
+    selected_suspect: str | None = None,
+) -> dict:
+    norm_tab = "Main Quest" if current_tab in ("Active", "Notes") else current_tab
+    session = db.get_session(session_id) or {}
+    scen_key = session.get("scenario", "fantasy") if session else "fantasy"
+    cur_loc = session.get("current_location", "") if session else ""
+    data = {
+        "session": session,
+        "scen_key": scen_key,
+        "cur_loc": cur_loc,
+        "active_bounties": [],
+        "dossier": None,
+        "clues": [],
+        "compiled_dossiers": [],
+        "history_quests": [],
+    }
+    if norm_tab == "Bounties":
+        all_active = db.get_session_quests(session_id, status="Active") or []
+        data["active_bounties"] = [
+            q for q in all_active
+            if not (q.get("is_story_quest") or q.get("quest_type") in ("Story Quest", "Main Quest"))
+            and q.get("title") and q["title"] not in ("Active Objective", "Complete objective.", "")
+        ]
+        if selected_quest_id:
+            data["dossier"] = db.get_quest_dossier(session_id, selected_quest_id)
+    elif norm_tab == "Caseboard":
+        data["clues"] = db.get_session_clues(session_id) or []
+        data["compiled_dossiers"] = db.get_session_quest_dossiers(session_id, status_stage="compiled") or []
+    elif norm_tab == "History":
+        all_quests = db.get_session_quests(session_id) or []
+        data["history_quests"] = [
+            q for q in all_quests
+            if q.get("status") in ("Completed", "Failed", "Abandoned")
+            and q.get("title") and q["title"] not in ("Active Objective", "Complete objective.", "")
+        ]
+    return data
+
+
+async def create_quest_log_view_and_embed(
+    session_id: int,
+    tab: str = "Main Quest",
+    selected_quest_id: str | None = None,
+    selected_suspect: str | None = None,
+    custom_embed: discord.Embed | None = None,
+) -> tuple[QuestLogView, discord.Embed]:
+    hydrated = await adb(_hydrate_quest_log_data, session_id, tab, selected_quest_id, selected_suspect)
+    embed = custom_embed if custom_embed is not None else await adb(
+        _build_quest_log_embed,
+        session_id,
+        tab=tab,
+        selected_quest_id=selected_quest_id,
+        selected_suspect=selected_suspect,
+    )
+    view = QuestLogView(
+        session_id,
+        current_tab=tab,
+        selected_quest_id=selected_quest_id,
+        selected_suspect=selected_suspect,
+        hydrated=hydrated,
+    )
+    return view, embed
+
+
 class QuestLogView(discord.ui.View):
-    def __init__(self, session_id: int, current_tab: str = "Main Quest", selected_quest_id: str | None = None, selected_suspect: str | None = None):
+    def __init__(
+        self,
+        session_id: int,
+        current_tab: str = "Main Quest",
+        selected_quest_id: str | None = None,
+        selected_suspect: str | None = None,
+        hydrated: dict | None = None,
+    ):
         super().__init__(timeout=300)
         self.session_id = session_id
         self.current_tab = "Main Quest" if current_tab in ("Active", "Notes") else current_tab
         self.selected_quest_id = selected_quest_id
         self.selected_suspect = selected_suspect
+        self.hydrated = hydrated
 
-        session = db.get_session(session_id)
-        scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-        cur_loc = session.get("current_location", "") if session else ""
+        if hydrated is not None:
+            session = hydrated.get("session") or {}
+            scen_key = hydrated.get("scen_key") or (session.get("scenario", "fantasy") if session else "fantasy")
+            cur_loc = hydrated.get("cur_loc") if "cur_loc" in hydrated else (session.get("current_location", "") if session else "")
+        else:
+            session = db.get_session(session_id)
+            scen_key = session.get("scenario", "fantasy") if session else "fantasy"
+            cur_loc = session.get("current_location", "") if session else ""
         labels = _get_quest_scenario_labels(scen_key)
 
         main_btn = discord.ui.Button(
@@ -330,6 +401,10 @@ class QuestLogView(discord.ui.View):
         self.add_item(caseboard_btn)
         self.add_item(history_btn)
 
+        world_pulse_btn = discord.ui.Button(label="World Pulse", emoji="🌐", style=discord.ButtonStyle.secondary, row=4)
+        world_pulse_btn.callback = self._open_world_pulse
+        self.add_item(world_pulse_btn)
+
         # Conditionally render Notice Board button ONLY if location has a board and tab supports it
         from mechanics.world.locations import location_has_bounty_board
         has_board = location_has_bounty_board(cur_loc, scen_key=scen_key)
@@ -346,12 +421,15 @@ class QuestLogView(discord.ui.View):
 
         # Dropdowns and Sub-Actions
         if self.current_tab == "Bounties":
-            all_active = db.get_session_quests(session_id, status="Active")
-            active_bounties = [
-                q for q in all_active
-                if not (q.get("is_story_quest") or q.get("quest_type") in ("Story Quest", "Main Quest"))
-                and q.get("title") and q["title"] not in ("Active Objective", "Complete objective.", "")
-            ]
+            if hydrated is not None:
+                active_bounties = hydrated.get("active_bounties") or []
+            else:
+                all_active = db.get_session_quests(session_id, status="Active") or []
+                active_bounties = [
+                    q for q in all_active
+                    if not (q.get("is_story_quest") or q.get("quest_type") in ("Story Quest", "Main Quest"))
+                    and q.get("title") and q["title"] not in ("Active Objective", "Complete objective.", "")
+                ]
             seen = set()
             deduped = []
             for b in active_bounties:
@@ -362,7 +440,7 @@ class QuestLogView(discord.ui.View):
             if deduped:
                 self.add_item(ActiveBountySelect(session_id, deduped, selected_quest_id=selected_quest_id))
 
-            if has_board:
+            if has_board and not selected_quest_id:
                 board_btn = discord.ui.Button(
                     label=labels["board_label"],
                     emoji=labels["board_emoji"],
@@ -381,28 +459,68 @@ class QuestLogView(discord.ui.View):
                 abandon_btn.callback = self._abandon_selected_bounty
                 self.add_item(abandon_btn)
 
-        elif self.current_tab == "Caseboard":
-            all_clues = db.get_session_clues(session_id)
-            if not all_clues:
-                all_clues = db.get_session_clues(session_id)
+                dos = hydrated.get("dossier") if hydrated is not None else db.get_quest_dossier(session_id, selected_quest_id)
+                if dos and dos.get("status_stage") == "compiled":
+                    self.add_item(ContractDispositionSelect(session_id, selected_quest_id, dos, row=3))
 
-            suspects = sorted(list({c["linked_npc"].strip() for c in all_clues if c.get("linked_npc") and c["linked_npc"].strip()}))
+        elif self.current_tab == "Caseboard":
+            all_clues = (hydrated.get("clues") if hydrated is not None else db.get_session_clues(session_id)) or []
+            suspect_set = {c["linked_npc"].strip() for c in all_clues if c.get("linked_npc") and c["linked_npc"].strip()}
+            comp_dossiers = (
+                hydrated.get("compiled_dossiers")
+                if hydrated is not None
+                else (db.get_session_quest_dossiers(session_id, status_stage="compiled") or [])
+            )
+            for dos in (comp_dossiers or []):
+                cb = dos.get("cast_bindings") or {}
+                climax = dos.get("climax_spec") or {}
+                twist = dos.get("twist_spec") or {}
+                climax_unlocked = bool(climax.get("gate_type") == "open" or climax.get("is_unlocked"))
+                twist_visible = bool(twist.get("has_twist") and twist.get("is_discovered"))
+                client_nm = (cb.get("client") or {}).get("name") if isinstance(cb.get("client"), dict) else ""
+                if client_nm and str(client_nm).strip():
+                    suspect_set.add(str(client_nm).strip())
+                for ld in (dos.get("leads_graph") or []):
+                    if ld.get("status") in ("unlocked", "active", "completed") or ld.get("roster_cleared") or ld.get("is_discovered"):
+                        tgt_npc = ld.get("target_npc")
+                        if tgt_npc and str(tgt_npc).strip():
+                            suspect_set.add(str(tgt_npc).strip())
+                if climax_unlocked or twist_visible:
+                    for r_key in ("target", "accomplice", "informant"):
+                        nm = (cb.get(r_key) or {}).get("name") if isinstance(cb.get(r_key), dict) else ""
+                        if nm and str(nm).strip():
+                            suspect_set.add(str(nm).strip())
+
+            suspects = sorted(list(suspect_set))
             if suspects:
                 self.add_item(CaseboardSuspectSelect(session_id, suspects, selected_suspect=self.selected_suspect))
 
             available = [c for c in all_clues if not c.get("is_consumed") and c.get("category") != "deduction"]
-            if len(available) >= 2:
-                deduce_btn = discord.ui.Button(label="Connect 2 Leads", emoji="🧩", style=discord.ButtonStyle.primary, row=2)
+            if len(available) >= 1:
+                btn_lbl = "Connect 2 Leads" if len(available) >= 2 else "Folklore Deduction"
+                deduce_btn = discord.ui.Button(label=btn_lbl, emoji="🧩", style=discord.ButtonStyle.primary, row=2)
                 deduce_btn.callback = self._open_deduction_menu
                 self.add_item(deduce_btn)
 
+            if self.selected_suspect and self.selected_suspect != "__all__":
+                priv_btn = discord.ui.Button(label="Confront Privately", emoji="🗣️", style=discord.ButtonStyle.secondary, row=2)
+                priv_btn.callback = self._make_accuse_callback("private")
+                self.add_item(priv_btn)
+
+                pub_btn = discord.ui.Button(label="Accuse Publicly", emoji="⚖️", style=discord.ButtonStyle.danger, row=2)
+                pub_btn.callback = self._make_accuse_callback("formal")
+                self.add_item(pub_btn)
+
         elif self.current_tab == "History":
-            all_quests = db.get_session_quests(session_id)
-            history_quests = [
-                q for q in all_quests
-                if q.get("status") in ("Completed", "Failed", "Abandoned")
-                and q.get("title") and q["title"] not in ("Active Objective", "Complete objective.", "")
-            ]
+            if hydrated is not None:
+                history_quests = hydrated.get("history_quests") or []
+            else:
+                all_quests = db.get_session_quests(session_id) or []
+                history_quests = [
+                    q for q in all_quests
+                    if q.get("status") in ("Completed", "Failed", "Abandoned")
+                    and q.get("title") and q["title"] not in ("Active Objective", "Complete objective.", "")
+                ]
             seen = set()
             deduped = []
             for q in history_quests:
@@ -418,18 +536,29 @@ class QuestLogView(discord.ui.View):
                 back_hist_btn.callback = self._back_to_history_overview
                 self.add_item(back_hist_btn)
 
+    async def _open_world_pulse(self, interaction: discord.Interaction):
+        from .world_pulse import WorldPulseView, build_world_pulse_embed
+        from mechanics.world.world_events.engine import build_client_world_pulse_payload
+        payload = await adb(build_client_world_pulse_payload, self.session_id)
+        embed = build_world_pulse_embed(self.session_id, "all", payload=payload)
+        uid = interaction.user.id if getattr(interaction, "user", None) else 0
+        view = WorldPulseView(self.session_id, uid, filter_mode="all", payload=payload)
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
     def _make_tab_callback(self, tab: str):
         async def callback(interaction: discord.Interaction):
-            view = QuestLogView(self.session_id, current_tab=tab, selected_quest_id=None, selected_suspect=None)
-            embed = _build_quest_log_embed(self.session_id, tab=tab, selected_quest_id=None, selected_suspect=None)
+            view, embed = await create_quest_log_view_and_embed(self.session_id, tab=tab, selected_quest_id=None, selected_suspect=None)
             await interaction.response.edit_message(embed=embed, view=view)
         return callback
 
     async def _open_deduction_menu(self, interaction: discord.Interaction):
-        all_clues = db.get_session_clues(self.session_id)
+        all_clues = await adb(db.get_session_clues, self.session_id)
         available = [c for c in all_clues if not c.get("is_consumed") and c.get("category") != "deduction"]
-        if len(available) < 2:
-            await interaction.response.send_message("You need at least 2 unconsumed pieces of evidence to deduce a connection.", ephemeral=True)
+        if not available:
+            await interaction.response.send_message("You need at least 1 unconsumed piece of evidence to deduce a connection.", ephemeral=True)
             return
         view = ClueDeductionView(self.session_id, available)
         embed = discord.Embed(
@@ -440,20 +569,77 @@ class QuestLogView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _back_to_bounties_overview(self, interaction: discord.Interaction):
-        view = QuestLogView(self.session_id, current_tab="Bounties", selected_quest_id=None)
-        embed = _build_quest_log_embed(self.session_id, tab="Bounties", selected_quest_id=None)
+        view, embed = await create_quest_log_view_and_embed(self.session_id, tab="Bounties", selected_quest_id=None)
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _back_to_history_overview(self, interaction: discord.Interaction):
-        view = QuestLogView(self.session_id, current_tab="History", selected_quest_id=None)
-        embed = _build_quest_log_embed(self.session_id, tab="History", selected_quest_id=None)
+        view, embed = await create_quest_log_view_and_embed(self.session_id, tab="History", selected_quest_id=None)
         await interaction.response.edit_message(embed=embed, view=view)
+
+    def _make_accuse_callback(self, mode: str):
+        async def callback(interaction: discord.Interaction):
+            suspect = self.selected_suspect
+            if not suspect or suspect == "__all__":
+                await interaction.response.send_message("Select a suspect from the Caseboard filter first.", ephemeral=True)
+                return
+            all_clues = await adb(db.get_session_clues, self.session_id) or []
+            suspect_low = suspect.strip().lower()
+            clue_qids = {
+                str(c["quest_id"])
+                for c in all_clues
+                if c.get("quest_id") and str(c.get("linked_npc") or "").strip().lower() == suspect_low
+            }
+            dossiers = await adb(db.get_session_quest_dossiers, self.session_id, "compiled") or []
+            target_qid = None
+            fallback_qid = None
+            for d in dossiers:
+                qid = d.get("quest_id")
+                q_row = await adb(db.get_quest_by_id, self.session_id, qid)
+                if not q_row or q_row.get("status") != "Active":
+                    continue
+                if not fallback_qid:
+                    fallback_qid = qid
+                if str(qid) in clue_qids:
+                    target_qid = qid
+                    break
+                cb = d.get("cast_bindings") or {}
+                cast_names = [
+                    str(((cb.get(r) or {}).get("name") if isinstance(cb.get(r), dict) else "")).strip().lower()
+                    for r in ("target", "accomplice", "client", "informant")
+                ]
+                climax_culprit = str((d.get("climax_spec") or {}).get("true_culprit") or "").strip().lower()
+                lead_npcs = [
+                    str(ld.get("target_npc") or "").strip().lower()
+                    for ld in (d.get("leads_graph") or [])
+                    if isinstance(ld, dict)
+                ]
+                if suspect_low in cast_names or suspect_low == climax_culprit or suspect_low in lead_npcs:
+                    target_qid = qid
+                    break
+            target_qid = target_qid or fallback_qid
+            if not target_qid:
+                await interaction.response.send_message("No active compiled investigation dossier found.", ephemeral=True)
+                return
+
+            res = await adb(
+                game_engine.resolve_suspect_accusation,
+                self.session_id,
+                target_qid,
+                suspect,
+                mode,
+                interaction.user.id,
+            )
+            view, embed = await create_quest_log_view_and_embed(self.session_id, tab="Caseboard", selected_suspect=suspect)
+            await interaction.response.edit_message(embed=embed, view=view)
+            icon = "✅" if res.get("correct") else ("🛑" if mode == "formal" else "⚠️")
+            await interaction.followup.send(f"{icon} {res.get('message') or 'Accusation resolved.'}", ephemeral=True)
+        return callback
 
     async def _abandon_selected_bounty(self, interaction: discord.Interaction):
         if not self.selected_quest_id:
             await interaction.response.send_message("No bounty selected to abandon.", ephemeral=True)
             return
-        bounty = db.get_quest_by_id(self.session_id, self.selected_quest_id)
+        bounty = await adb(db.get_quest_by_id, self.session_id, self.selected_quest_id)
         if not bounty:
             await interaction.response.send_message("Bounty not found.", ephemeral=True)
             return
@@ -464,17 +650,34 @@ class QuestLogView(discord.ui.View):
                 ephemeral=True,
             )
             return
-        game_engine.forfeit_side_bounty(self.session_id, self.selected_quest_id, [interaction.user.id])
-        view = QuestLogView(self.session_id, current_tab="Bounties", selected_quest_id=None)
-        embed = _build_quest_log_embed(self.session_id, tab="Bounties", selected_quest_id=None)
-        await interaction.response.edit_message(embed=embed, view=view)
-        await interaction.followup.send(
-            f"🗑️ Abandoned bounty: **{bounty.get('title', 'Bounty')}**.\nThe bounty slot is now freed up!",
-            ephemeral=True
+        forfeit_res = await adb(
+            game_engine.forfeit_side_bounty,
+            self.session_id,
+            self.selected_quest_id,
+            [interaction.user.id],
+            interaction.user.id,
         )
+        if not forfeit_res.get("success"):
+            await interaction.response.send_message(
+                f"🔒 {forfeit_res.get('reason') or 'Cannot abandon this contract.'}",
+                ephemeral=True,
+            )
+            return
+        view, embed = await create_quest_log_view_and_embed(self.session_id, tab="Bounties", selected_quest_id=None)
+        await interaction.response.edit_message(embed=embed, view=view)
+        if forfeit_res.get("status") == "Failed":
+            await interaction.followup.send(
+                f"🛑 **Engaged Contract Forfeited:** **{bounty.get('title', 'Bounty')}** was marked **Failed** with regional fallout!",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                f"🗑️ Abandoned bounty: **{bounty.get('title', 'Bounty')}**.\nThe bounty slot is now freed up!",
+                ephemeral=True
+            )
 
     async def _open_bounty_board(self, interaction: discord.Interaction):
-        session = db.get_session(self.session_id)
+        session = await adb(db.get_session, self.session_id)
         if not session:
             await interaction.response.send_message("Session not found.", ephemeral=True)
             return
@@ -496,8 +699,84 @@ class QuestLogView(discord.ui.View):
         view = BountyBoardView(session, bounties)
         await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=view)
 
+
+class ContractDispositionSelect(discord.ui.Select):
+    def __init__(self, session_id: int, quest_id: str, dossier: dict, row: int = 3):
+        self.session_id = session_id
+        self.quest_id = quest_id
+        twist = dossier.get("twist_spec") or {}
+        t_item = dossier.get("tangible_item") or {}
+
+        options = [
+            discord.SelectOption(
+                label="Deliver Contract (Standard Turn-In)",
+                value="deliver",
+                description="Complete the contract on standard client terms",
+                emoji="📦",
+            )
+        ]
+        if twist.get("has_twist") and twist.get("is_discovered"):
+            if twist.get("side_switch_available"):
+                options.append(discord.SelectOption(
+                    label="Side-Switch with Twist Target (1.25x Gold)",
+                    value="side_switch",
+                    description="Back the uncovered twist faction instead of the client",
+                    emoji="🤝",
+                ))
+            if twist.get("blackmail_available"):
+                options.append(discord.SelectOption(
+                    label="Blackmail Client for Hush-Money (2x Gold, CHA)",
+                    value="blackmail_client",
+                    description="Leverage incriminating twist evidence for double payout",
+                    emoji="🕵️",
+                ))
+        if t_item.get("has_item"):
+            options.append(discord.SelectOption(
+                label=f"Keep '{t_item.get('name', 'Item')}' (Betray Client)",
+                value="keep",
+                description="Unlock quest item for personal use; triggers client retaliation",
+                emoji="🎒",
+            ))
+            options.append(discord.SelectOption(
+                label=f"Fence '{t_item.get('name', 'Item')}' (1.5x Gold)",
+                value="fence",
+                description="Sell quest item on the black market; spawns World Scar",
+                emoji="💰",
+            ))
+            options.append(discord.SelectOption(
+                label=f"Destroy '{t_item.get('name', 'Item')}'",
+                value="destroy",
+                description="Destroy dangerous or cursed payload permanently",
+                emoji="🔥",
+            ))
+        super().__init__(placeholder="Resolve / Turn-In Contract...", min_values=1, max_values=1, options=options, row=row)
+
+    async def callback(self, interaction: discord.Interaction):
+        disp = self.values[0]
+        sess = await adb(db.get_session, self.session_id) or {}
+        res = await adb(
+            game_engine.resolve_quest_turn_in_or_betrayal,
+            self.session_id,
+            self.quest_id,
+            interaction.user.id,
+            disp,
+            None,
+            str(sess.get("current_location") or ""),
+        )
+        if not res.get("success"):
+            await interaction.response.send_message(f"⚠️ {res.get('reason') or 'Cannot resolve turn-in yet.'}", ephemeral=True)
+            return
+        view, embed = await create_quest_log_view_and_embed(self.session_id, tab="Bounties", selected_quest_id=None)
+        await interaction.response.edit_message(embed=embed, view=view)
+        gold_note = f" (`+{res.get('gold_awarded', 0)}G`)" if res.get("gold_awarded") else ""
+        await interaction.followup.send(
+            f"📜 **Contract Resolution ({disp.replace('_', ' ').title()}):** Status `{res.get('quest_status', 'Resolved')}`{gold_note}",
+            ephemeral=True,
+        )
+
+
 class BountySelect(discord.ui.Select):
-    def __init__(self, session_id: int, bounties: list[dict]):
+    def __init__(self, session_id: int, bounties: list[dict], haggle_advance: bool = False):
         options = []
         for b in bounties[:25]:
             label = b["title"][:100]
@@ -512,19 +791,20 @@ class BountySelect(discord.ui.Select):
             ))
         super().__init__(placeholder="Select a bounty to accept...", min_values=1, max_values=1, options=options)
         self.session_id = session_id
+        self.haggle_advance = haggle_advance
 
     async def callback(self, interaction: discord.Interaction):
         quest_id = self.values[0]
-        quest = db.get_quest_by_id(self.session_id, quest_id)
+        quest = await adb(db.get_quest_by_id, self.session_id, quest_id)
         if not quest or quest.get("status") != "Available":
             await interaction.response.send_message("That bounty is no longer available.", ephemeral=True)
             return
 
-        session = db.get_session(self.session_id) or {"id": self.session_id}
+        session = await adb(db.get_session, self.session_id) or {"id": self.session_id}
         import scenario_data
         if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
             from mechanics.narrative.bounty import evaluate_anomalous_bounty_eligibility
-            elig = evaluate_anomalous_bounty_eligibility(self.session_id, interaction.user.id, quest)
+            elig = await adb(evaluate_anomalous_bounty_eligibility, self.session_id, interaction.user.id, quest)
             if not elig.get("allowed", True):
                 await interaction.response.send_message(
                     f"🔒 **Contract Restricted:** {elig.get('reason') or 'Your current faction affiliation prohibits accepting this contract.'}",
@@ -532,49 +812,83 @@ class BountySelect(discord.ui.Select):
                 )
                 return
 
-        if not game_engine.can_accept_side_bounty(self.session_id, quest):
-            await interaction.response.send_message("⚠️ **Bounty Limit Reached (3/3)!** Complete or abandon an active side bounty first.", ephemeral=True)
+        acc_res = await game_engine.accept_bounty_contract_async(
+            session_id=self.session_id,
+            quest_id=quest_id,
+            user_id=interaction.user.id,
+            haggle_advance=bool(self.haggle_advance),
+            enrich_llm=False,
+        )
+        if not acc_res.get("success"):
+            await interaction.response.send_message(
+                f"⚠️ {acc_res.get('reason') or 'Cannot accept this bounty right now.'}",
+                ephemeral=True,
+            )
             return
-        db.update_quest_status(self.session_id, quest_id, "Active")
 
-        remaining_bounties = db.get_session_quests(self.session_id, status="Available")
+        remaining_bounties = await adb(db.get_session_quests, self.session_id, "Available")
         embed = _build_bounty_board_embed(session, remaining_bounties)
-        view = BountyBoardView(session, remaining_bounties)
+        view = BountyBoardView(session, remaining_bounties, haggle_advance=self.haggle_advance)
+
+        adv = acc_res.get("advance_result") or {}
+        adv_line = f"\n💰 **Upfront Advance Secured:** `+{adv['advance_gold']}G`!" if adv.get("succeeded") else ""
 
         await interaction.response.edit_message(embed=embed, view=view)
         await interaction.followup.send(
-            f"🎯 **Bounty Accepted!** Added **{quest['title']}** to your active Quest Log.\n"
+            f"🎯 **Bounty Accepted!** Added **{quest['title']}** to your active Quest Log.{adv_line}\n"
             f"Objective: {quest['objective']}",
             ephemeral=True
         )
 
+
 class BountyBoardView(discord.ui.View):
-    def __init__(self, session: dict, bounties: list[dict]):
+    def __init__(self, session: dict, bounties: list[dict], haggle_advance: bool = False):
         super().__init__(timeout=300)
         self.session = session
         self.session_id = session["id"]
+        self.haggle_advance = haggle_advance
 
         if bounties:
-            self.add_item(BountySelect(self.session_id, bounties))
+            self.add_item(BountySelect(self.session_id, bounties, haggle_advance=haggle_advance))
 
         refresh_btn = discord.ui.Button(label="Refresh Board", emoji="🔄", style=discord.ButtonStyle.primary)
+        haggle_btn = discord.ui.Button(
+            label="Advance (CHA): ON" if haggle_advance else "Advance (CHA): OFF",
+            emoji="💰",
+            style=discord.ButtonStyle.success if haggle_advance else discord.ButtonStyle.secondary,
+        )
         quest_btn = discord.ui.Button(label="Quest Log", emoji="📜", style=discord.ButtonStyle.secondary)
 
         refresh_btn.callback = self._refresh_board
+        haggle_btn.callback = self._toggle_haggle_advance
         quest_btn.callback = self._open_quest_log
 
         self.add_item(refresh_btn)
+        self.add_item(haggle_btn)
         self.add_item(quest_btn)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        turn_order = (self.session or {}).get("turn_order") or []
+        if turn_order and interaction.user.id not in turn_order:
+            await interaction.response.send_message("You're not in this session.", ephemeral=True)
+            return False
+        return True
+
+    async def _toggle_haggle_advance(self, interaction: discord.Interaction):
+        self.haggle_advance = not self.haggle_advance
+        bounties = await adb(db.get_session_quests, self.session_id, "Available")
+        embed = _build_bounty_board_embed(self.session, bounties)
+        view = BountyBoardView(self.session, bounties, haggle_advance=self.haggle_advance)
+        await interaction.response.edit_message(embed=embed, view=view)
 
     async def _refresh_board(self, interaction: discord.Interaction):
         await interaction.response.defer()
         new_bounties = await game_engine.generate_bounty_board(self.session, force_refresh=True)
         embed = _build_bounty_board_embed(self.session, new_bounties)
-        view = BountyBoardView(self.session, new_bounties)
+        view = BountyBoardView(self.session, new_bounties, haggle_advance=self.haggle_advance)
         await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=view)
 
     async def _open_quest_log(self, interaction: discord.Interaction):
-        embed = _build_quest_log_embed(self.session_id, tab="Main Quest")
-        view = QuestLogView(self.session_id, current_tab="Main Quest")
+        view, embed = await create_quest_log_view_and_embed(self.session_id, tab="Main Quest")
         await interaction.response.edit_message(embed=embed, view=view)
 

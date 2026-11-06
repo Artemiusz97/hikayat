@@ -116,6 +116,12 @@ _NEGATED_STOP_RE = re.compile(
     re.I,
 )
 
+_STOP_WORD_RE = re.compile(r"\bstop\b", re.I)
+_PULL_OUT_ITEM_RE = re.compile(
+    r"\bpull(?:ed)?\s+out\s+(?:a|an|the|that|this|her|his|my|some|your)?\s*(?:paper|script|page|note|clue|item|weapon|coin|book|letter|phone|device|wallet|card|key|sheet)\b",
+    re.I
+)
+
 _AMBIGUOUS_DISENGAGE_PHRASES = (
     "pull back", "pull out", "pulled out", "withdraw", "withdrew", "ease back", "let go"
 )
@@ -153,11 +159,11 @@ def detect_intimate_disengagement(actions: list) -> bool:
         if any(kw in lbl for kw in _EXPLICIT_DISENGAGE_CUES):
             return True
         clean_lbl = _NEGATED_STOP_RE.sub(" ", lbl)
-        if re.search(r"\bstop\b", clean_lbl):
+        if _STOP_WORD_RE.search(clean_lbl):
             return True
         if any(kw in clean_lbl for kw in _AMBIGUOUS_DISENGAGE_PHRASES):
             # Pulling out a physical item/prop is an inventory/investigative action, not intimate withdrawal
-            if re.search(r"\bpull(?:ed)?\s+out\s+(?:a|an|the|that|this|her|his|my|some|your)?\s*(?:paper|script|page|note|clue|item|weapon|coin|book|letter|phone|device|wallet|card|key|sheet)\b", clean_lbl):
+            if _PULL_OUT_ITEM_RE.search(clean_lbl):
                 continue
             if not any(cue in clean_lbl for cue in _ACTIVE_CONTINUATION_CUES):
                 return True
@@ -960,6 +966,7 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
         lines.append("### 🪑 PHYSICAL SCENE & MICRO-STATE (Internal Continuity Anchor):")
         lines.append("- Positions & Held Objects:")
         has_any_commando_or_braless = False
+        has_any_provocative = False
         for name, data in sorted_actors[:5]:
             if not isinstance(data, dict):
                 continue
@@ -982,6 +989,14 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
             )
             if has_special_under:
                 has_any_commando_or_braless = True
+
+            if (
+                "[provocative]" in str(top).lower() or
+                "[provocative]" in str(bot).lower() or
+                "[provocative]" in str(outer).lower() or
+                "provocative" in str(cloth.get("social_flags", [])).lower()
+            ):
+                has_any_provocative = True
 
             line_str = f"  * {name}: [Posture: {posture}] [Holding: {holding}]"
             has_special_outer = outer and str(outer).lower() not in ("none", "")
@@ -1034,6 +1049,12 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
                 "they are completely bare underneath their clothing. "
                 "STRICTLY FORBIDDEN: If their skirt, dress, or bottoms are lifted, opened, pulled down, or revealed, "
                 "NEVER narrate peeling back, sliding aside, snapping, or removing phantom panties/underwear—they are completely bare underneath."
+            )
+        if has_any_provocative:
+            lines.append(
+                "- DRESS CODE & PROVOCATIVE ATTIRE CONTINUITY: One or more actors are wearing noticeably revealing or provocative attire ([provocative]). "
+                "In public school areas, faculty/teachers should deliver strict reprimands or dress-code warnings, and peers will tease, whisper, or blush. "
+                "In intimate or private settings, this bold attire naturally amplifies tension, excitement, and flirtatious reactions."
             )
 
     return "\n".join(lines)
@@ -1375,17 +1396,34 @@ def get_all_actor_physical_states(session_id: int, conn: Optional[sqlite3.Connec
             (session_id,)
         ).fetchall()
 
+        if not rows:
+            return []
+
+        # Single batch query to fetch all session garments in O(1) database trips, eliminating N+1 query loop
+        all_garments = c.execute(
+            "SELECT actor_key, slot, state, item_name, layer_depth FROM actor_garments "
+            "WHERE session_id=? ORDER BY layer_depth DESC, slot ASC",
+            (session_id,)
+        ).fetchall()
+
+        from collections import defaultdict
+        garments_by_actor: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for g in all_garments:
+            g_dict = dict(g)
+            ak = str(g_dict.pop("actor_key") or "").strip()
+            garments_by_actor[ak].append(g_dict)
+            ak_lower = ak.lower()
+            if ak_lower != ak:
+                garments_by_actor[ak_lower].append(g_dict)
+
         result = []
         for r in rows:
             res = dict(r)
-            g_rows = c.execute(
-                "SELECT slot, state, item_name, layer_depth FROM actor_garments WHERE session_id=? AND actor_key=? ORDER BY layer_depth DESC, slot ASC",
-                (session_id, res["canonical_key"])
-            ).fetchall()
+            c_key = str(res.get("canonical_key") or "").strip()
+            actor_garments = garments_by_actor.get(c_key) or garments_by_actor.get(c_key.lower(), [])
             clothing = {}
             garments_list = []
-            for g in g_rows:
-                g_dict = dict(g)
+            for g_dict in actor_garments:
                 garments_list.append(g_dict)
                 st = g_dict["state"]
                 nm = g_dict.get("item_name")
@@ -1878,13 +1916,26 @@ def check_venue_indecency_exposure(
 
     is_exposed = fully_naked or bottom_exposed or (top_exposed and not is_male) or underwear_only
     private = is_private_venue(location_or_name)
+    top_val = str(cloth.get("top", ""))
+    bot_val = str(cloth.get("bottom", ""))
+    is_provocative = "[provocative]" in top_val.lower() or "[provocative]" in bot_val.lower() or "provocative" in str(cloth.get("social_flags", [])).lower()
     if not is_exposed:
-        return {"is_exposed": False, "requires_reaction": False, "exposure_type": "none", "is_private_venue": private}
+        if is_provocative and not private:
+            return {
+                "is_exposed": False,
+                "is_provocative": True,
+                "requires_reaction": True,
+                "exposure_type": "provocative_attire",
+                "is_private_venue": private,
+                "gossip_topic": "#DressCodeViolation",
+            }
+        return {"is_exposed": False, "is_provocative": is_provocative, "requires_reaction": False, "exposure_type": "none", "is_private_venue": private}
 
     exposure_type = "fully_naked" if fully_naked else ("bottomless" if bottom_exposed else ("underwear_only" if underwear_only else "topless"))
 
     return {
         "is_exposed": True,
+        "is_provocative": is_provocative,
         "exposure_type": exposure_type,
         "is_private_venue": private,
         "requires_reaction": not private,

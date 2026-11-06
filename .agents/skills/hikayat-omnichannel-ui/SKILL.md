@@ -48,11 +48,11 @@ Do **not** send turn actions over WebSockets. Hikayat separates HTTP command sub
 ## 3. React SPA Structure, Styling & i18n (`web/`)
 
 - **Views (`web/src/views/`)**: `AuthView.jsx`, `DashboardView.jsx`, `GameView.jsx`.
-- **Key Components (`web/src/components/`)**:
+- **Key Components (`web/src/components/`)** — representative, not exhaustive; list the directory for the current set:
   - `Sidebar/`: `TacticalActionDock.jsx`, `InventoryPanel.jsx`, `CodexPanel.jsx`, `QuestLogPanel.jsx`, `PartyWidget.jsx`, `WorldOutcomeSidebar.jsx`.
   - `ActionPanel/TurnOutcomePanel.jsx` & `StoryFeed/` (`StoryFeed.jsx`, `HistoryCard.jsx`).
   - `Modals/` (`WorldMapModal.jsx`, `TimeSkipModal.jsx`, etc.), `Phone/PhoneModal.jsx`, `Character/CharacterCreatorModal.jsx`, `Adventure/EmbarkationModal.jsx`.
-- **Tailwind Theme (`web/tailwind.config.js`)**:
+- **Tailwind Theme (`web/tailwind.config.js`)** — values below are a snapshot; confirm in the config before relying on exact hex codes:
   - Surfaces & Borders: `bg-fantasy-dark` (`#0f0f13`), `bg-fantasy-panel` (`#1a1a24`), `border-fantasy-border` (`#2d2d3f`).
   - Accents & Vitals: `text-fantasy-accent` (`#c9a25e`), `hover:text-fantasy-accent-hover` (`#e3b86b`), `health` (`#e53935`), `mana` (`#1e88e5`), `stamina` (`#43a047`).
   - Fonts & Icons: `font-rpg` (`Cinzel`), `font-sans` (`Inter`), icons from `lucide-react`.

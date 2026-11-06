@@ -588,16 +588,16 @@ SCENARIO_SPELL_AFFIXES: Dict[str, Dict[str, Any]] = {
             2: ["Protocol", "Seal", "Resonance", "of Containment", "of Exorcism", "Vector"]
         },
         "elem_adjectives": {
-            "fire": ["Thermokinetic", "Pyro-Resonant", "Cremation-Rite", "Incendiary-Vector", "Plasma-Flare"],
-            "cold": ["Cryo-Stasis", "Endothermic", "Zero-Kelvin", "Entropy-Chill", "Hoarfrost-Seal"],
-            "lightning": ["Electro-Static", "Grid-Surge", "Thunder-Talisman", "High-Voltage", "Fulminating"],
+            "fire": ["Thermokinetic", "Pyro-Resonant", "Banaspati-Flare", "Cremation-Rite", "Incendiary-Vector", "Plasma-Flare"],
+            "cold": ["Cryo-Stasis", "Endothermic", "Zero-Kelvin", "Yuki-Onna", "Hoarfrost-Seal", "Entropy-Chill"],
+            "lightning": ["Electro-Static", "Faraday-Surge", "Thunder-Talisman", "High-Voltage", "Fulminating"],
             "earth": ["Graviton-Anchor", "Tectonic-Lock", "Obsidian-Seal", "Lithic-Barrier", "Dense-Mass"],
             "water": ["Abyssal-Pressure", "Purification-Tide", "Hydro-Stasis", "Dark-Current", "Cleansing-Stream"],
             "wind": ["Vacuum-Shear", "Sonic-Gale", "Kamaitachi-Rite", "Barometric", "Vortex-Slip"],
             "acid": ["Molecular-Dissolve", "Caustic-Residue", "Bio-Solvent", "Corrosive-Phase"],
-            "force": ["Telekinetic", "Spatial-Shear", "Vector-Crush", "Gravity-Fold", "Reality-Anchor"],
+            "force": ["Telekinetic", "Hume-Anchor", "Spatial-Shear", "Vector-Crush", "Reality-Anchor"],
             "thunder": ["Acoustic-Rupture", "Infrasonic", "Resonance-Shock", "Shatter-Wave"],
-            "poison": ["Miasmic-Spore", "Blight-Contagion", "Neuro-Toxin", "Black-Ichor"],
+            "poison": ["Miasmic-Spore", "Blight-Contagion", "Bio-Acoustic", "Neuro-Toxin", "Black-Ichor"],
             "radiant": ["Sacred-Ofuda", "Purifying-Light", "Shrine-Flare", "Consecrated", "Astral-Ward"],
             "necrotic": ["Entropy-Drain", "Abyssal-Decay", "Curse-Siphon", "Hollow-Echo", "Soul-Sever"],
             "psychic": ["Cognitohazard", "Telepathic-Spike", "Mind-Fracture", "Memetic-Pulse", "Synaptic-Lock"],
@@ -709,7 +709,8 @@ def generate_procedural_spell(
     school: Optional[str] = None,
     element: Optional[str] = None,
     shape: Optional[str] = None,
-    custom_theme: Optional[str] = None
+    custom_theme: Optional[str] = None,
+    slot_role: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Synthesizes a unique procedural spell adhering to the 6 D&D dimensions.
@@ -718,10 +719,23 @@ def generate_procedural_spell(
     tier = max(1, min(3, tier))
     tier_names = {3: "Basic", 2: "Advanced", 1: "Master"}
     tier_name = tier_names[tier]
+    raw_source_element = str(element).strip().lower() if element else None
 
-    # 1. School selection
+    # 1. School selection (with Weapon 50/50 vs. Accessory 30/70 role weighting in Anomalous Incursions)
     if not school or school not in DND_SCHOOLS:
-        school = random.choice(list(DND_SCHOOLS.keys()))
+        role_low = str(slot_role or "").strip().lower()
+        if role_low == "weapon":
+            if random.random() < 0.50:
+                school = "Evocation"
+            else:
+                school = random.choice(["Abjuration", "Transmutation", "Divination", "Enchantment", "Illusion", "Conjuration"])
+        elif role_low.startswith("accessory"):
+            if random.random() < 0.30:
+                school = "Evocation"
+            else:
+                school = random.choice(["Abjuration", "Transmutation", "Divination", "Enchantment", "Illusion"])
+        else:
+            school = random.choice(list(DND_SCHOOLS.keys()))
     school_info = DND_SCHOOLS[school]
 
     # 2. Element selection (with canonical alias resolution)
@@ -743,6 +757,12 @@ def generate_procedural_spell(
             element = "wind"
         elif elem_lower in ("hydro", "aqua"):
             element = "water"
+        elif elem_lower in ("bio", "biological", "spore", "venom"):
+            element = "poison"
+        elif elem_lower in ("aether", "hume", "void_rift"):
+            element = "force"
+        elif elem_lower in ("physical", "kinetic"):
+            element = "bludgeoning"
     if not element or element not in DND_DAMAGE_TYPES:
         element = random.choice(school_info["default_damage_types"])
     elem_info = DND_DAMAGE_TYPES[element]
@@ -800,6 +820,7 @@ def generate_procedural_spell(
         "school": school,
         "discipline": canonical_discipline,
         "damage_type": element,
+        "source_element": raw_source_element or element,
         "target_type": shape_info["target_type"],
         "tier": tier,
         "tier_name": tier_name,

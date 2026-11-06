@@ -95,6 +95,19 @@ def build_language_directive(session: dict) -> str:
         )
     return ""
 
+def build_anomalous_resonance_directive(session: dict) -> str:
+    """Static Z1 genre rule for Awakened Resonance (independent of player stats/pips for KV-cache stability)."""
+    import scenario_data
+    if not scenario_data.is_anomalous_incursions_scenario(session.get("scenario")):
+        return ""
+    return (
+        "AWAKENED RESONANCE & ELEMENTAL LOCK GROUNDING:\n"
+        "- Every Awakened Special Agent (including the protagonist) has a permanently locked Attribute, Combat Archetype, and Ability Medium listed in `[Awakened Resonance: ...]` on their Character Sheet.\n"
+        "- Freeform actions aligned with a character's locked Attribute and Medium manifest naturally with sensory flavor and circumstantial synergy.\n"
+        "- If the protagonist attempts a freeform anomalous power outside their locked Attribute or Medium (unless channelled through an explicitly equipped Relic), narrate the attempt fizzling—it must fizzle or fail to resonate in-universe.\n"
+        "- Mundane Civilians possess zero mana or resonance abilities. Never leak raw stat numbers, Pip counts, Stability percentages, or bracketed internal tags into narrative prose."
+    )
+
 def build_session_zone(session: dict) -> str:
     """Z1: changes only when scenario / style settings change."""
     import game_engine
@@ -105,6 +118,7 @@ def build_session_zone(session: dict) -> str:
         game_engine._style_block(session),
         "STYLE-BOUND NARRATIVE REQUIREMENTS:\n" + get_narrative_requirements(
             session.get("verbosity", "vivid"), session.get("dialogue_mode", "balanced")),
+        build_anomalous_resonance_directive(session),
         merchant_prompt_note(scen_key=session.get("scenario")),
         build_language_directive(session),
     ] if p and p.strip())

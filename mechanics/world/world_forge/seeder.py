@@ -285,6 +285,13 @@ async def forge_world_state(session: dict, party: list) -> None:
     session_id = session.get("id")
     scen_key   = session.get("scenario", "fantasy")
 
+    try:
+        from db import adb
+        from mechanics.world.world_events.engine import seed_opening_world_events
+        await adb(seed_opening_world_events, session_id, scen_key)
+    except Exception as e:
+        log.warning("[WorldForge] seed_opening_world_events failed: %s", e)
+
     if not scenario_data.is_mechanic_enabled(scen_key, "faction_reputation"):
         log.debug("[WorldForge] faction_reputation disabled for scenario %s — skipping.", scen_key)
         return

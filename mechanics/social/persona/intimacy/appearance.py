@@ -1185,6 +1185,7 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
 
     # Preserve all revealed flags and metadata state from input dictionary
     for flag_k in (
+        "social_flags",
         "intimate_revealed", "intercourse_revealed", "oral_revealed", "manual_revealed",
         "demeanor_revealed", "dynamic_revealed", "openness_revealed",
         "sensitive_spots_revealed", "turn_ons_revealed", "turn_offs_revealed", "fetishes_revealed",

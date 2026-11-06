@@ -117,7 +117,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
 
   // Extract present NPCs, companions, and nearby enemies for the inline target picker
   const partyCompanions = (session?.party_npcs || []).map(n => (typeof n === 'string' ? n : n?.name)).filter(Boolean);
-  const sceneNpcs = (session?.current_npcs || [])
+  const sceneNpcs = (session?.current_npcs || []).filter(n => !(typeof n === 'object' && (n?.is_anomalous_entity || n?.npc_type === 'anomaly' || n?.anomalous_npc_tag === 'anomaly_entity')))
     .map(n => (typeof n === 'string' ? n : n?.name))
     .filter(n => n && !partyCompanions.includes(n));
   const nearbyEnemies = (session?.nearby_enemies || session?.monsters || [])
@@ -339,7 +339,22 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                 const isInspected = inspectedItemId === item.id;
                 const cleanEffect = item.clean_effect !== undefined ? item.clean_effect : (item.effect && !item.effect.startsWith('[') ? item.effect : '');
                 const inspectData = item.inspect_data || {};
-                const statDeltas = inspectData.stat_deltas || inspectData.comparison || inspectData.vs_equipped || {};
+                const rawStatDeltas = inspectData.stat_deltas || inspectData.comparison || inspectData.vs_equipped || {};
+                const statDeltaRows = Array.isArray(rawStatDeltas)
+                  ? rawStatDeltas
+                      .map((row) => ({
+                        key: row.label || row.stat || 'STAT',
+                        num: Number(row.delta),
+                        display: row.new && row.current ? `${row.current} → ${row.new}` : null,
+                      }))
+                      .filter((r) => !Number.isNaN(r.num) && r.num !== 0)
+                  : Object.entries(rawStatDeltas)
+                      .map(([statName, deltaVal]) => ({
+                        key: statName,
+                        num: Number(deltaVal),
+                        display: null,
+                      }))
+                      .filter((r) => !Number.isNaN(r.num) && r.num !== 0);
 
                 return (
                   <div
@@ -518,27 +533,26 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                         )}
 
                         {/* 🔄 vs Equipped Stat Delta Comparison Table */}
-                        {Object.keys(statDeltas).length > 0 && (
+                        {statDeltaRows.length > 0 && (
                           <div className="space-y-1 pt-1">
                             <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">
                               🔄 {t('inventory.vs_equipped')}
                             </span>
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
-                              {Object.entries(statDeltas).map(([statName, deltaVal]) => {
-                                const num = Number(deltaVal);
-                                if (Number.isNaN(num) || num === 0) return null;
+                              {statDeltaRows.map(({ key: statName, num, display }) => {
                                 const isUp = num > 0;
                                 return (
                                   <div
                                     key={statName}
-                                    className={`px-2 py-1 rounded border font-mono text-[10px] flex items-center justify-between ${
+                                    className={`px-2 py-1 rounded border font-mono text-[10px] flex items-center justify-between gap-1 ${
                                       isUp
                                         ? 'bg-emerald-950/50 border-emerald-700/50 text-emerald-300'
                                         : 'bg-red-950/50 border-red-800/50 text-red-300'
                                     }`}
+                                    title={display || undefined}
                                   >
-                                    <span className="uppercase">{statName}</span>
-                                    <span className="font-bold">
+                                    <span className="uppercase truncate">{statName}</span>
+                                    <span className="font-bold shrink-0">
                                       {isUp ? `🔺 +${num}` : `🔻 ${num}`}
                                     </span>
                                   </div>
@@ -575,7 +589,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                             onClick={() => handleUse(item.id, 'npc', name)}
                             className="flex items-center gap-1 px-2 py-1 rounded bg-pink-950/60 hover:bg-pink-900 border border-pink-700/60 text-pink-200 text-[10px] font-semibold"
                           >
-                            🎁 {t('inventory.give_gift')}
+                            🎁 {t('inventory.gift_to_npc', { name, defaultValue: `Gift to ${name}` })}
                           </button>
                         ))}
                         {nearbyEnemies.map(name => (

@@ -362,9 +362,10 @@ def sanitize_meta_objective_leaks(text: str) -> str:
         return "Objective" if is_sentence_start else "objective"
 
     text = re.sub(r'(?i)\bSub[-\s]?(?:Objective|Quest)\b', _replace_general, text)
-    # 4. Bracketed meta tags e.g. [OBJECTIVE COMPLETE], [QUEST COMPLETED]
-    text = re.sub(r'(?i)\s*\[(?:OBJECTIVE|QUEST|SUB[-\s]?OBJECTIVE|MISSION)\s+(?:COMPLETE|COMPLETED|RESOLVED|UPDATED|SUCCEEDED)\]\s*', ' ', text).strip()
-    return text
+    # 4. Bracketed meta tags e.g. [OBJECTIVE COMPLETE], [QUEST COMPLETED], [RESOURCE], [HOOK], [EVENT]
+    text = re.sub(r'(?i)\s*\[(?:OBJECTIVE|QUEST|SUB[-\s]?OBJECTIVE|MISSION)\s+(?:COMPLETE|COMPLETED|RESOLVED|UPDATED|SUCCEEDED)\]\s*', ' ', text)
+    text = re.sub(r'(?i)\[(?:RESOURCE|HOOK|EVENT)\b[^\]]*\]\s*', '', text)
+    return re.sub(r' {2,}', ' ', text).strip()
 
 
 def sanitize_auditor_meta_leaks(text: str) -> str:

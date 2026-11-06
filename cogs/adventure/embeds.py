@@ -27,18 +27,7 @@ from cogs.character import build_character_sheet_embed
 from db import STAT_COLUMN
 from scenario_data import DEFAULT_SCENARIO, ScenarioError, load_scenarios, resolve_scenario_key
 from skill_check import resolve_check, success_chance, CheckResult
-from mechanics.combat.merchant import (
-    apply_merchant_encounter_result as _apply_merchant_encounter_result,
-    handle_talk_to_merchant as _handle_talk_to_merchant,
-    build_merchant_embed as _merchant_embed,
-    discounted_price as _discounted_price,
-    sell_bonus_price as _sell_bonus_price,
-    MerchantView,
-    MerchantVoteView,
-    BuySelectView,
-    SellSelectView,
-    RumorView,
-)
+from mechanics.combat.merchant import apply_merchant_encounter_result as _apply_merchant_encounter_result
 from mechanics.social.races import normalize_race
 from mechanics.social.persona import normalize_appearance
 from mechanics.world.locations import is_location_engine_enabled, get_discovered_location_tree, is_hub_location
@@ -285,7 +274,11 @@ def _format_tracker_entity(entity: dict, dialogue_partners: list = None, show_vi
 
     role_str = f" ({role})" if role else ""
     is_conv = _is_dialogue_partner(name, dialogue_partners)
-    conv_prefix = "💬 " if is_conv else ""
+    is_compulsive_anom = bool(
+        (entity.get("is_anomalous_entity") or str(entity.get("npc_type") or "").lower() == "anomaly")
+        and (str(entity.get("sapience") or "").lower() == "compulsive" or entity.get("pattern_observable"))
+    )
+    conv_prefix = ("👁️ " if is_compulsive_anom else "💬 ") if is_conv else ""
 
     tier_rank = entity.get("tier_rank")
     tier_name = str(entity.get("tier") or "").lower()
@@ -297,7 +290,17 @@ def _format_tracker_entity(entity: dict, dialogue_partners: list = None, show_vi
     elif tier_rank == 3 or tier_name == "elite":
         tier_badge = " `[Elite]`"
 
-    if entity.get("anomalous_npc_tag") == "special_agent":
+    if entity.get("is_summon"):
+        tier_badge += " `[🤖 Construct]`"
+    elif entity.get("is_disguised") or entity.get("uncanny_presence"):
+        tier_badge += " `[🎭 Uncanny Presence]`"
+    elif (
+        entity.get("is_anomalous_entity")
+        or str(entity.get("npc_type") or "").lower() == "anomaly"
+        or entity.get("anomalous_npc_tag") == "anomaly_entity"
+    ):
+        tier_badge += " `[👁️ Anomaly]`"
+    elif entity.get("anomalous_npc_tag") == "special_agent":
         tier_badge += " `[⚡ Special Agent]`"
     elif entity.get("anomalous_npc_tag") == "civilian":
         tier_badge += " `[Civilian]`"
@@ -314,8 +317,37 @@ def _format_tracker_entity(entity: dict, dialogue_partners: list = None, show_vi
         line += f"{conv_prefix}**{name}**{tier_badge}{role_str}"
         if hp is not None:
             line += f" — ❤️ {hp}/{max_hp}"
+            if entity.get("temp_hp"):
+                line += f" (+🛡️{int(entity['temp_hp'])})"
             if mp is not None and mp > 0:
                 line += f" | 💙 {mp}/{max_mp}"
+        max_stab = entity.get("max_stability")
+        if max_stab is not None and int(max_stab or 0) > 0:
+            cur_stab = int(entity.get("stability", max_stab) or 0)
+            if entity.get("is_breached"):
+                b_turns = int(entity.get("breached_turns_left", 1) or 1)
+                line += f" | 💥 **ANOMALY BREACHED! [{b_turns}T]**"
+            else:
+                line += f" | 💠 Poise {cur_stab}/{int(max_stab)}"
+            vis_weak = list(entity.get("display_weaknesses") or entity.get("revealed_weaknesses") or entity.get("weaknesses") or [])
+            hid_w = entity.get("hidden_weakness")
+            if hid_w and hid_w != "?" and not entity.get("hidden_weakness_revealed"):
+                vis_weak = [w for w in vis_weak if w != hid_w] + ["?"]
+            if vis_weak:
+                line += f" `Weak: {'/'.join(str(w).upper() for w in vis_weak)}`"
+        tether_st = entity.get("tether_state") if isinstance(entity.get("tether_state"), dict) else None
+        if tether_st and tether_st.get("has_tether"):
+            if tether_st.get("sealed") or entity.get("tether_sealed"):
+                line += " | 🔒 **Tether Sealed**"
+            elif tether_st.get("reformed_once") or entity.get("tether_reformed_once") or entity.get("dossier_revealed"):
+                v_nm = str(tether_st.get("vessel_name") or "Hidden Vessel")
+                line += f" | 🏺 *Tether: {v_nm}*"
+        if entity.get("is_summon"):
+            q_act_emb = entity.get("queued_windup") or entity.get("queued_construct_action")
+            if isinstance(q_act_emb, dict):
+                q_sk = q_act_emb.get("skill_name") or q_act_emb.get("name")
+                if q_sk:
+                    line += f" | ⚡ *Primed: {q_sk}*"
         status_text = ", ".join(status_items) if status_items else "None"
         line += f" | Status: {status_text}"
         line += intent_line
@@ -1192,7 +1224,7 @@ def build_facility_rooms_embed(zone_name: str, primary_item: dict) -> discord.Em
             lock_str = f" `🔒 {r_badge}`" if r_locked else (" `🔓 Unlocked`" if rd.get("is_unlocked") and r_badge != "Open" else "")
             eta_str = f" `[⏱️ {r_eta}]`" if r_eta else ""
             props = rd.get("props") or []
-            prop_str = f"\n  ↳ *Props: {', '.join(props[:4])}*" if props else ""
+            prop_str = f"\n  ↳ *In-Room Features: {', '.join(props[:4])}*" if props else ""
             room_lines.append(f"• {icon} **{r_name}**{eta_str}{lock_str}{prop_str}")
     else:
         for s_name in raw_subs[:15]:
@@ -1243,14 +1275,106 @@ def _get_quest_scenario_labels(scen_key: str = None) -> dict:
         "board_emoji": "📋"
     }
 
+def _format_fow_dossier_embed_fields(embed: discord.Embed, session_id: int, quest: dict) -> None:
+    """Appends Fog-of-War Alert Meter, Multi-Approach Leads, Bypassed badges, and Uncovered Twist intel."""
+    reveal_all = False
+    try:
+        sess = db.get_session(session_id) or {}
+        host_uid = sess.get("host_user_id")
+        reveal_all = bool(int((db.get_settings(host_uid) or {}).get("debug_reveal_all_info") or 0)) if host_uid else False
+        q_notes_raw = str((quest or {}).get("quest_notes") or "")
+        if "anomaly_bp:" in q_notes_raw or "anomaly_blueprint:" in q_notes_raw:
+            from mechanics.world.anomaly_engine import (
+                parse_blueprint_from_notes,
+                format_anomaly_dossier_summary,
+            )
+            bp_q = parse_blueprint_from_notes(q_notes_raw)
+            if bp_q:
+                is_rev = bool(reveal_all or "dossier_revealed:1" in q_notes_raw or bp_q.get("dossier_revealed"))
+                dossier_obj = format_anomaly_dossier_summary(bp_q, revealed=is_rev)
+                dossier_txt = dossier_obj.get("summary_text", "") if isinstance(dossier_obj, dict) else str(dossier_obj or "")
+                if dossier_txt:
+                    embed.add_field(
+                        name="👁️ Anomaly Dossier (Revealed)" if is_rev else "🔒 Anomaly Dossier (Unrevealed)",
+                        value=dossier_txt[:1024],
+                        inline=False,
+                    )
+        fow = game_engine.build_fog_of_war_quest_payload(session_id, quest, reveal_all=reveal_all)
+    except Exception:
+        return
+    if not isinstance(fow, dict) or fow.get("dossier_stage") != "compiled":
+        return
+
+    alert = int(fow.get("alert_level") or 0)
+    max_alert = max(2, int(fow.get("max_alert") or 4))
+    pips = "🔴" * alert + "⚪" * max(0, max_alert - alert)
+    shield_badge = " • 🛡️ Companion Shield Ready" if not fow.get("rescue_shield_used") else " • 🛡️ Shield Spent"
+    embed.add_field(
+        name="🚨 Alert & Vigilance",
+        value=f"{pips} `{alert}/{max_alert}`{shield_badge}",
+        inline=True,
+    )
+
+    leads = fow.get("leads") or []
+    if leads:
+        lead_lines = []
+        for ld in leads[:4]:
+            st = ld.get("status") or "active"
+            badge = "☑️" if st == "completed" else ("⏭️ `[Bypassed]`" if st == "bypassed" else "📍")
+            apprs = []
+            for a in (ld.get("approaches") or [])[:4]:
+                lbl = str(a.get("stat") or a.get("approach_id") or "").upper()
+                apprs.append(f"~~{lbl}~~" if a.get("burned") else f"`{lbl}`")
+            appr_str = f" — {' / '.join(apprs)}" if apprs else ""
+            scout_str = ""
+            if ld.get("scouted_enemies"):
+                names = ", ".join(str(e.get("name") or "Hostile") for e in ld["scouted_enemies"][:3])
+                scout_str = f"\n   ↳ 👁️ *Scouted Pack:* {names}"
+            lead_lines.append(f"{badge} **{ld.get('title', 'Lead')}**{appr_str}{scout_str}")
+        embed.add_field(name="🧭 Known Leads (Any Order)", value="\n".join(lead_lines)[:1024], inline=False)
+
+    twist = fow.get("twist") or {}
+    if twist.get("is_discovered") and twist.get("summary"):
+        embed.add_field(
+            name="⚡ Uncovered Twist",
+            value=f"*{twist['summary']}*",
+            inline=False,
+        )
+
+
 def _build_campaign_goals_embed(session_id: int) -> discord.Embed:
+    session = db.get_session(session_id) or {}
     goals = db.get_session_campaign_goals(session_id)
     cur_ch = db.get_session_chapter(session_id) or 1
+    status_banner = ""
+    if session.get("campaign_game_over"):
+        status_banner = "\n💀 **FALLEN WORLD — CAMPAIGN DEFEAT (Chapter 10 Climax Lost)**"
+    elif session.get("epilogue_ready"):
+        status_banner = "\n🌅 **CHAPTER 11 EPILOGUE READY** — Choose Archive or Endless World!"
+    elif session.get("endless_mode_unlocked"):
+        status_banner = "\n♾️ **ENDLESS POST-CAMPAIGN WORLD ACTIVE**"
+
     embed = discord.Embed(
         title="🏆 Campaign End Goals",
-        description=f"Current Progress: **Chapter {cur_ch} of 10**\nLong-term campaign objectives tracking overall story progression.",
-        color=discord.Color.gold()
+        description=(
+            f"Current Progress: **Chapter {cur_ch} of 11**{status_banner}\n"
+            "Long-term campaign objectives tracking overall story progression."
+        ),
+        color=discord.Color.dark_red() if session.get("campaign_game_over") else discord.Color.gold()
     )
+    scars = [
+        e
+        for e in (db.get_world_events(session_id, statuses=("active",)) or [])
+        if (
+            str(e.get("event_type") or "") == "world_scar"
+            or (isinstance(e.get("metadata"), dict) and e["metadata"].get("is_world_scar"))
+            or str(e.get("template_key") or "").startswith("world_scar_")
+            or str(e.get("event_key") or "").startswith("scar_")
+        )
+    ]
+    if scars:
+        scar_lines = [f"• 🔥 **{s.get('title', 'World Scar')}** (`{s.get('location_name', 'Region')}`)" for s in scars[:5]]
+        embed.add_field(name=f"⚠️ Active World Scars ({len(scars)})", value="\n".join(scar_lines)[:1024], inline=False)
     if not goals:
         embed.add_field(name="No Campaign Goals", value="No long-term campaign goals are currently active.", inline=False)
         return embed
@@ -1310,7 +1434,7 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
         for so in sub_objs:
             if not so.get("completed") and so.get("id"):
                 try:
-                    wp = db.get_active_waypoint(session_id, active_sq.get("quest_id"), so["id"])
+                    wp = so.get("active_waypoint") or db.get_active_waypoint(session_id, active_sq.get("quest_id"), so["id"])
                     if wp and wp.get("target_location"):
                         active_wp_lead = wp
                         break
@@ -1340,7 +1464,7 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
             line = f"{chk}{arch} {raw_text}"
             if not is_done and so.get("id"):
                 try:
-                    wp = db.get_active_waypoint(session_id, active_sq.get("quest_id"), so["id"])
+                    wp = so.get("active_waypoint") or db.get_active_waypoint(session_id, active_sq.get("quest_id"), so["id"])
                     if wp:
                         s_idx = wp.get("stage_index", 1)
                         s_lbl = clean_narrative_location_arrows(wp.get("stage_label", ""))
@@ -1387,6 +1511,7 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
         )
 
     # Rewards
+    _format_fow_dossier_embed_fields(embed, session_id, active_sq)
     rxp = active_sq.get("reward_xp", 100)
     rgold = active_sq.get("reward_gold", 25)
     ritem = active_sq.get("reward_item", "")
@@ -1510,6 +1635,7 @@ def _build_bounties_embed(session_id: int, selected_quest_id: str | None = None)
                 embed.add_field(name="🔍 Bounty Intel & Notes", value=clues[:1024], inline=False)
 
             # 4. Rewards
+            _format_fow_dossier_embed_fields(embed, session_id, target_bounty)
             rxp = target_bounty.get("reward_xp", 100)
             rgold = target_bounty.get("reward_gold", 25)
             ritem = target_bounty.get("reward_item", "")
@@ -1663,7 +1789,7 @@ def _build_caseboard_embed(session_id: int, selected_suspect: str | None = None)
     embed = discord.Embed(
         title="🗂️ Campaign Investigation Caseboard",
         description=(
-            f"Campaign Dossier — **Chapter {cur_ch} of 10** • Total Evidence: `{len(all_clues)}` Leads\n"
+            f"Campaign Dossier — **Chapter {cur_ch} of 11** • Total Evidence: `{len(all_clues)}` Leads\n"
             + (f"🔍 *Filtered by suspect:* **{suspect_filter}**\n" if suspect_filter else "*All verified findings, witness testimonies, and physical traces recorded across all chapters.*\n")
         ),
         color=discord.Color.dark_teal()

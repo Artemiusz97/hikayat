@@ -73,19 +73,17 @@ async def handle_dm_over_limit(
     user_prompt = f"Player ({player_char.get('name', 'Hero')}): {user_message}\nGenerate {contact_name}'s refusal text reply:"
 
     reply_text = None
-    _is_llm_mocked = hasattr(mechanics.system.phone.call_llm_json, "_mock_name")
-    if _is_llm_mocked:
-        try:
-            res_json = await mechanics.system.phone.call_llm_json(
-                system_prompt,
-                user_prompt,
-                temperature=0.7,
-                is_nsfw=scenario_data.uses_nsfw_model(scen_key),
-                use_utility=True,
-            )
-            reply_text = (res_json.get("reply_text") or "").strip()
-        except Exception as e:
-            log.warning(f"[phone] Failed to generate LLM over-limit refusal: {e}")
+    try:
+        res_json = await mechanics.system.phone.call_llm_json(
+            system_prompt,
+            user_prompt,
+            temperature=0.7,
+            is_nsfw=scenario_data.uses_nsfw_model(scen_key),
+            use_utility=True,
+        )
+        reply_text = (res_json.get("reply_text") or "").strip()
+    except Exception as e:
+        log.warning(f"[phone] Failed to generate LLM over-limit refusal: {e}")
 
     if not reply_text:
         if intent_category == "flirt":

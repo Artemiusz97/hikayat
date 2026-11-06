@@ -35,16 +35,16 @@ def filter_unlocked_contacts(contacts: list[dict], party_names: set[str], scenar
     from mechanics.social.relationships import is_contact_eligible, is_unlocked_contact
     from scenario_data import has_tag
     is_hs = has_tag(scenario_key, "high_school")
+    is_anom = scenario_data.is_anomalous_incursions_scenario(scenario_key)
     unlocked = []
     for c in contacts:
         if not is_unlocked_contact(c, party_names):
             continue
-        if is_hs:
+        if is_hs or is_anom:
             b_info = c.get("basic_info") or {}
             r = b_info.get("role") or b_info.get("occupation") or ""
             d = b_info.get("description") or ""
-            name = c.get("name", "")
-            if not is_contact_eligible(name=name, role=r, description=d, scenario=scenario_key):
+            if not is_contact_eligible(name=c, role=r, description=d, scenario=scenario_key):
                 continue
         unlocked.append(c)
     return unlocked
@@ -1112,26 +1112,34 @@ def build_contact_detail_embed(contact: dict, scenario_key: str, user_id: int = 
             anom_prof = hydrate_anomalous_npc_profile(contact, session_id=sess_id_cd, scen_key=scenario_key)
             is_dec_cd = bool(basic.get("deceased") or contact.get("deceased"))
             if anom_prof["anomalous_npc_tag"] == TAG_SPECIAL_AGENT:
-                same_fac_cd = False
-                if sess_id_cd:
-                    p_fst = get_anomalous_faction_state(sess_id_cd, user_id=user_id)
-                    p_fid = str(p_fst.get("faction_archetype_key") or "").strip()
-                    same_fac_cd = bool(p_fid and p_fid != "freelancer" and p_fid == anom_prof.get("faction_id"))
+                from mechanics.social.relationships import enrich_contact_dossier
+                sess_obj_cd = db.get_session(sess_id_cd) if sess_id_cd else {}
+                dos = enrich_contact_dossier(
+                    contact,
+                    sess_id_cd,
+                    (sess_obj_cd or {}).get("scenario", scenario_key or "anomalous_incursions"),
+                    debug_reveal_all=bool(reveal_debug),
+                )
+                attr_disp = str(dos.get("attribute") or anom_prof.get("attribute") or "physical").title()
+                arch_disp = str(dos.get("combat_archetype") or anom_prof.get("combat_archetype") or "vanguard").title()
                 dossier_lines = [
                     "• **Classification**: ⚡ **Special Agent**" + (" *(💀 Deceased)*" if is_dec_cd else ""),
                     f"• **Rank & Class**: Tier {anom_prof['agent_tier']} {anom_prof['rank_title']} — *{anom_prof['agent_class']}*",
+                    f"• **Stage 1 Resonance**: **{attr_disp}** Attribute • **{arch_disp}** Archetype",
                     f"• **Combat Vitals**: ❤️ `{anom_prof['hp']}/{anom_prof['max_hp']} HP` | 💙 `{anom_prof['mp']}/{anom_prof['max_mp']} MP`",
                 ]
-                if score >= 100 or reveal_debug or same_fac_cd:
-                    ab_list = anom_prof.get("innate_ability_details") or []
+                if int(dos.get("dossier_stage", 1)) >= 2:
+                    med_disp = str(dos.get("ability_medium") or anom_prof.get("ability_medium") or "direct_manifestation").replace("_", " ").title()
+                    dossier_lines.append(f"• **Stage 2 Medium**: **{med_disp}**")
+                    ab_list = dos.get("innate_ability_details") or anom_prof.get("innate_ability_details") or []
                     if ab_list:
                         ab_fmt = "\n".join(
-                            f"  - {ab['emoji']} **{ab['name']}** (`{ab['mp_cost']} MP` • {ab['tier_name']})"
+                            f"  - {ab['emoji']} **{ab['name']}** (`{'3 Pips • 0 MP' if ab.get('is_ultimate') else str(ab.get('mp_cost', 0)) + ' MP'}` • {ab['tier_name']})"
                             for ab in ab_list
                         )
-                        dossier_lines.append(f"• **Innate Special Abilities**:\n{ab_fmt}")
+                        dossier_lines.append(f"• **Awakened 5-Skill Kit**:\n{ab_fmt}")
                 else:
-                    dossier_lines.append("• *🔒 Innate Special Abilities Locked (Requires Friend 100+ or Same-Faction Colleague)*")
+                    dossier_lines.append("• *🔒 Stage 2 Dossier Classified — Ability Medium & 5-Skill Kit unlock at Affinity 15+, Party Companion, or Same-Faction Colleague.*")
                 embed.add_field(name="⚡ Operative Combat Dossier", value="\n".join(dossier_lines)[:1024], inline=False)
             else:
                 civ_w = (anom_prof.get("weapon_profile") or {}).get("name", "Improvised Object")

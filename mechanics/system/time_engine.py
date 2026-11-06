@@ -432,6 +432,18 @@ def advance_time(
     if (curr_min < 300 and new_minute >= 300) or days_elapsed > 0:
         fatigue_notices = check_and_apply_fatigue(session_id, party_uids or [])
 
+    try:
+        from mechanics.world.world_events.engine import advance_world_pulse
+        advance_world_pulse(
+            session_id=session_id,
+            delta_minutes=delta_minutes,
+            current_day=new_day,
+            current_minute=new_minute,
+            is_sleep_skip=False,
+        )
+    except Exception as e:
+        log.warning("Failed advancing world pulse for session %s: %s", session_id, e)
+
     return {
         "session_id": session_id,
         "old_day": curr_day,
@@ -506,6 +518,19 @@ def apply_sleep_rest(
             replenish_daily_bounties_deterministic(session_id)
         except Exception as e:
             log.warning("Failed daily bounty replenishment on sleep for session %s: %s", session_id, e)
+
+    try:
+        from mechanics.world.world_events.engine import advance_world_pulse
+        sleep_delta = max(480, ((new_day - curr_day) * 1440) + (new_minute - curr_min))
+        advance_world_pulse(
+            session_id=session_id,
+            delta_minutes=sleep_delta,
+            current_day=new_day,
+            current_minute=new_minute,
+            is_sleep_skip=True,
+        )
+    except Exception as e:
+        log.warning("Failed advancing world pulse on sleep for session %s: %s", session_id, e)
 
     # Restock all merchant catalogues upon sleeping / morning wake-up
     try:

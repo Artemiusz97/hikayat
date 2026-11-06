@@ -5,7 +5,7 @@ description: "Use this skill whenever running pytest, reproducing bugs with seed
 
 # Hikayat Testing, Fuzz Simulation & Release Verification Runbook
 
-Hikayat contains 200+ test modules and 6 deterministic fuzzing simulators. Always pick the fastest targeted runner below rather than running the entire test suite blindly.
+Hikayat contains 130+ test modules and 6 deterministic fuzzing simulators. Always pick the fastest targeted runner below rather than running the entire test suite blindly. All of `tests/`, `pytest.ini`, `scripts/run_tests.py`, and `scripts/simulate_*.py` are **local-only (gitignored)**: run them, but never `git add -f` or commit them.
 
 ---
 
@@ -25,6 +25,7 @@ Prefer these presets to keep execution fast and context output minimal:
 ### Mandatory Contract & Cutover Checks After Structural Edits
 ```bash
 pytest tests/test_codebase_contracts.py tests/test_five_normalized_models_cutover.py -q
+pytest tests/test_agent_docs_contracts.py -q   # after editing AGENTS.md or .agents/
 ```
 
 ---

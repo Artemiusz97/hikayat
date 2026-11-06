@@ -21,6 +21,17 @@ from .llm_schemas import (
     NextStoryQuest,
     SubQuestDefinition,
     PhysicalUpdate,
+    AgeGroup,
+    CharacterBadges,
+)
+from .world_events import (
+    DictAccessibleModel,
+    EventModifierSpec,
+    WorldEventRecord,
+    WorldPityState,
+    WorldPulseClientPayload,
+    WorldPulsePayload,
+    WorldEventsSnapshot,
 )
 
 __all__ = [
@@ -44,4 +55,13 @@ __all__ = [
     "NextStoryQuest",
     "SubQuestDefinition",
     "PhysicalUpdate",
+    "AgeGroup",
+    "CharacterBadges",
+    "DictAccessibleModel",
+    "EventModifierSpec",
+    "WorldEventRecord",
+    "WorldPityState",
+    "WorldPulseClientPayload",
+    "WorldPulsePayload",
+    "WorldEventsSnapshot",
 ]

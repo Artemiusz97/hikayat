@@ -351,7 +351,7 @@ def generate_quest_action_choices(
                         stage_index=stage_idx,
                         is_story_quest=is_story,
                         contract_type=trigger,
-                        dc_mod=out_of_window_dc_penalty,
+                        dc_mod=out_of_window_dc_penalty, session_id=session_id,
                     )
                     quest_choices.extend(nh_choices)
                     break
@@ -1102,7 +1102,7 @@ def tag_and_enrich_quest_choices(
                             sub_obj_id=sub_obj_id,
                             stage_index=stage_idx,
                             is_story_quest=is_story,
-                            contract_type=trigger,
+                            contract_type=trigger, session_id=session_id,
                         )
                         inserted_idx = 0
                         for nh_c in nh_choices:

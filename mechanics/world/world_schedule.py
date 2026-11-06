@@ -145,14 +145,18 @@ def get_day_type(current_day: int) -> str:
 
 def is_high_school_setting(scen_key: str) -> bool:
     """Checks if the scenario key or its genre tags belong to the High School genre."""
-    s = str(scen_key or "").lower().strip()
-    if any(k in s for k in ("high_school", "school", "academy")):
-        return True
     try:
-        from scenario_data import has_tag
-        return bool(has_tag(s, "high_school") or has_tag(s, "high_school_drama"))
+        import scenario_data
+        return scenario_data.has_school_campus_mechanics(scen_key)
     except Exception:
-        return False
+        s = str(scen_key or "").lower().strip()
+        if any(k in s for k in ("high_school", "school", "academy")):
+            return True
+        try:
+            from scenario_data import has_tag
+            return bool(has_tag(s, "high_school") or has_tag(s, "high_school_drama"))
+        except Exception:
+            return False
 
 
 def resolve_genre_schedule_key(scen_key: str = "fantasy") -> str:
@@ -204,7 +208,8 @@ def get_scenario_sleep_minute(scen_key: str = "fantasy") -> int:
 def is_nsfw_faction_hq_node(
     node: Optional[Dict[str, Any]] = None,
     parent_node: Optional[Dict[str, Any]] = None,
-    location_str: str = ""
+    location_str: str = "",
+    node_id: str = ""
 ) -> bool:
     """Returns True if the specific node is the restricted NSFW Faction HQ (`Velvet Basement Salon`)."""
     own_parts = [str(location_str or "")]
@@ -218,7 +223,8 @@ def is_nsfw_faction_hq_node(
 def is_abandoned_school_node(
     node: Optional[Dict[str, Any]] = None,
     parent_node: Optional[Dict[str, Any]] = None,
-    location_str: str = ""
+    location_str: str = "",
+    node_id: str = ""
 ) -> bool:
     """
     Returns True if the node or location belongs to the Abandoned Old Campus Building zone
@@ -229,6 +235,8 @@ def is_abandoned_school_node(
     if is_nsfw_faction_hq_node(node, parent_node, location_str=location_str):
         return False
     parts = [str(location_str or "")]
+    if node_id:
+        parts.append(str(node_id))
     for n in (node, parent_node):
         if isinstance(n, dict):
             parts.append(str(n.get("node_id") or ""))
@@ -259,7 +267,7 @@ def is_abandoned_school_node(
         "dark_equipment_room",
         "sub_dark_equipment_room",
         "loc_abandoned_boiler_cellar",
-        "boiler cellar",
+        "boiler cellar", "loc_abandoned_school_wing", "sub_custodian_boiler_locker", "custodian's boiler-room locker",
     )
     return any(m in combined for m in abandoned_markers)
 
@@ -268,8 +276,9 @@ def is_campus_node_or_location(
     node: Optional[Dict[str, Any]] = None,
     parent_node: Optional[Dict[str, Any]] = None,
     location_str: str = "",
+    node_id: str = "",
     session_id: int = 0,
-    scen_key: str = "high_school_drama"
+    scen_key: str = "high_school_drama",
 ) -> bool:
     """
     Determines whether a node or tiered location string is part of the school campus.
@@ -280,6 +289,8 @@ def is_campus_node_or_location(
         return True
 
     parts = [str(location_str or "")]
+    if node_id:
+        parts.append(str(node_id))
     for n in (node, parent_node):
         if isinstance(n, dict):
             parts.append(str(n.get("node_id") or ""))
@@ -330,7 +341,7 @@ def is_campus_node_or_location(
         "loc_student_council", "loc_auditorium_stage", "loc_auditorium",
         "loc_old_east_music_room", "loc_old_music_room", "loc_fine_arts_studio", "loc_art_studio",
         "loc_broadcasting_room", "loc_broadcast_room", "loc_clubroom_corridor", "loc_clubroom_wing",
-        "loc_backstage_prop_loft", "loc_soundproof_practice_booth", "loc_nsfw_faction_hq",
+        "loc_backstage_prop_loft", "loc_soundproof_practice_booth", "loc_nsfw_faction_hq", "zone_school_campus", "loc_main_academic", "loc_school_commons", "loc_school_club_annex", "loc_abandoned_school_wing", "loc_13th_stairwell", "sub_custodian_boiler_locker", "loc_school_rooftop",
     )
     if any(m in combined for m in campus_markers):
         return True
@@ -598,7 +609,7 @@ def evaluate_world_schedule_node_access(
 
     # 0. Special Rule: Theme Park & Amusement Resort (`zone_theme_park`) closes at 22:00 (10:00 PM)
     # and manifests its anomalous state from 22:00 (1320) until it reopens at 08:00 AM (480).
-    if genre_family == "urban_fantasy" and any(k in combined for k in ("zone_theme_park", "theme park", "amusement resort", "loc_tp_")):
+    if (genre_family == "urban_fantasy" or "anomalous" in str(scen_key or "").lower()) and any(k in combined for k in ("zone_theme_park", "theme park", "amusement resort", "loc_tp_")):
         if safe_min >= 1320 or safe_min < 480:
             return {
                 "schedule_locked": False,
@@ -723,7 +734,7 @@ def evaluate_world_schedule_node_access(
             }
 
         # Urban Fantasy / Cyberpunk dedicated late-night & nocturnal venues stay open after 22:00
-        if genre_family in ("urban_fantasy", "cyberpunk") and any(
+        if (genre_family in ("urban_fantasy", "cyberpunk") or "anomalous" in str(scen_key or "").lower()) and any(
             k in combined for k in (
                 "late-night", "izakaya", "jazz", "cocktail", "red-lantern",
                 "black market", "masquerade auction", "sky-high penthouse", "fight pit"

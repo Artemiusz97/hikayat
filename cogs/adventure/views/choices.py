@@ -75,6 +75,7 @@ class ChoiceDropdown(discord.ui.Select):
         self.is_sync = is_sync
         self.turn_user_id = turn_user_id
         self.party = party
+        self.choices = list(choices or [])
         
         options = []
         session = (db.get_session(session_id) if session_id else {}) or {}
@@ -217,7 +218,8 @@ class ChoiceDropdown(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         idx = int(self.values[0])
         if self.is_sync:
-            await self.cog.handle_sync_pick(interaction, self.session_id, choice_index=idx)
+            chosen = self.choices[idx] if getattr(self, "choices", None) and 0 <= idx < len(self.choices) else None
+            await self.cog.handle_sync_pick(interaction, self.session_id, choice_index=idx, direct_choice=chosen)
         else:
             if interaction.user.id != self.turn_user_id:
                 await interaction.response.send_message(f"It's not your turn — waiting on <@{self.turn_user_id}>.", ephemeral=True)
@@ -277,6 +279,7 @@ class ChoiceView(discord.ui.View):
             or bool(session.get("is_fallback_generation"))
         )
         is_fb = any(choice.get("is_fallback") for choice in choices) or is_fallback_narr or bool(session.get("is_truncated_generation"))
+
 
         self._choices = choices
         self._actor_char = actor_char
@@ -412,8 +415,25 @@ class ChoiceView(discord.ui.View):
         atk_btn.callback = self._switch_menu("attacks")
         root_items.append(atk_btn)
 
-        magic_style = discord.ButtonStyle.primary if player_mp >= 6 else discord.ButtonStyle.secondary
-        magic_btn = discord.ui.Button(label=f"Magic ({player_mp} MP)", emoji="🔮", style=magic_style, row=0)
+        from scenario_data import is_anomalous_incursions_scenario
+        is_anom_view = is_anomalous_incursions_scenario((self.session or {}).get("scenario", ""))
+        if is_anom_view:
+            from mechanics.combat.awakened_resonance import get_actor_resonance_pips
+            ult_pips = get_actor_resonance_pips(self.session, self.turn_user_id)
+        else:
+            ult_pips = 0
+        if is_anom_view:
+            pip_dots = ("●" * ult_pips) + ("○" * (3 - ult_pips))
+            magic_style = discord.ButtonStyle.primary if (player_mp >= 6 or ult_pips >= 3) else discord.ButtonStyle.secondary
+            magic_btn = discord.ui.Button(
+                label=f"Abilities [{pip_dots}] ({player_mp} MP)",
+                emoji="🧬",
+                style=magic_style,
+                row=0,
+            )
+        else:
+            magic_style = discord.ButtonStyle.primary if player_mp >= 6 else discord.ButtonStyle.secondary
+            magic_btn = discord.ui.Button(label=f"Magic ({player_mp} MP)", emoji="🔮", style=magic_style, row=0)
         magic_btn.callback = self._switch_menu("magic")
         root_items.append(magic_btn)
 
@@ -456,14 +476,20 @@ class ChoiceView(discord.ui.View):
         back_btn.callback = self._switch_menu("root")
         attack_items.append(back_btn)
 
-        # ── magic menu ───────────────────────────────────────────────────────
+        # ── magic / abilities menu ───────────────────────────────────────────
         magic_items = []
         for idx, sp in enumerate(magic[:8]):
-            mp_cost = sp.get("mp_cost", 0)
-            can_cast = player_mp >= mp_cost
+            is_ult_sp = bool(sp.get("is_ultimate"))
+            if is_ult_sp and is_anom_view:
+                can_cast = ult_pips >= int(sp.get("pip_cost", 3) or 3)
+                btn_style = discord.ButtonStyle.success if can_cast else discord.ButtonStyle.secondary
+            else:
+                mp_cost = sp.get("mp_cost", 0)
+                can_cast = bool(sp.get("can_afford", player_mp >= mp_cost))
+                btn_style = discord.ButtonStyle.primary if can_cast else discord.ButtonStyle.secondary
             btn = discord.ui.Button(
                 label=sp.get("label", "Spell")[:80],
-                style=discord.ButtonStyle.primary if can_cast else discord.ButtonStyle.secondary,
+                style=btn_style,
                 disabled=not can_cast,
                 row=min(3, idx // 2)
             )
@@ -475,11 +501,12 @@ class ChoiceView(discord.ui.View):
 
         # ── tactics menu ─────────────────────────────────────────────────────
         tactics_items = []
-        for idx, tac in enumerate(tactics[:4]):
-            btn = discord.ui.Button(label=tac.get("label", "Tactic")[:80], style=discord.ButtonStyle.secondary, row=idx // 2)
+        for idx, tac in enumerate(tactics[:8]):
+            tac_style = discord.ButtonStyle.success if tac.get("subdue_highlighted") else discord.ButtonStyle.secondary
+            btn = discord.ui.Button(label=tac.get("label", "Tactic")[:80], style=tac_style, row=min(3, idx // 2))
             btn.callback = self._make_direct_choice_callback(tac)
             tactics_items.append(btn)
-        back_btn = discord.ui.Button(label="Back to Battle Menu", emoji="⬅️", style=discord.ButtonStyle.secondary, row=2)
+        back_btn = discord.ui.Button(label="Back to Battle Menu", emoji="⬅️", style=discord.ButtonStyle.secondary, row=4)
         back_btn.callback = self._switch_menu("root")
         tactics_items.append(back_btn)
 
@@ -518,23 +545,39 @@ class ChoiceView(discord.ui.View):
             self.add_item(atk_select)
 
         if magic:
+            from scenario_data import is_anomalous_incursions_scenario as _is_anom_dd
+            is_anom_dd = _is_anom_dd((self.session or {}).get("scenario", ""))
+            if is_anom_dd:
+                from mechanics.combat.awakened_resonance import get_actor_resonance_pips as _get_pips_dd
+                ult_pips_dd = _get_pips_dd(self.session, self.turn_user_id)
+            else:
+                ult_pips_dd = 0
             mag_options = [
                 discord.SelectOption(
                     label=m.get("label", "Spell")[:100],
                     value=str(i),
-                    emoji="🔮" if m.get("discipline") == "attack" else ("💚" if m.get("discipline") == "support" else "💀"),
-                    description=None if player_mp >= m.get("mp_cost", 0) else f"Needs {m.get('mp_cost')} MP"
+                    emoji="🌟" if m.get("is_ultimate") else ("🔮" if m.get("discipline") == "attack" else ("💚" if m.get("discipline") == "support" else "💀")),
+                    description=(
+                        (None if ult_pips_dd >= int(m.get("pip_cost", 3) or 3) else f"Needs 3 Resonance Pips ({ult_pips_dd}/3)")
+                        if (m.get("is_ultimate") and is_anom_dd)
+                        else (None if player_mp >= m.get("mp_cost", 0) else f"Needs {m.get('mp_cost')} MP")
+                    ),
                 )
                 for i, m in enumerate(magic[:10])
             ]
-            mag_select = discord.ui.Select(placeholder=f"🔮 Magic & Spells ({player_mp} MP)...", options=mag_options, row=1)
+            dd_ph = (
+                f"🧬 Abilities [{'●' * ult_pips_dd}{'○' * (3 - ult_pips_dd)}] ({player_mp} MP)..."
+                if is_anom_dd
+                else f"🔮 Magic & Spells ({player_mp} MP)..."
+            )
+            mag_select = discord.ui.Select(placeholder=dd_ph, options=mag_options, row=1)
             mag_select.callback = self._make_dropdown_action_callback(magic)
             self.add_item(mag_select)
 
         if tactics:
             tac_options = [
                 discord.SelectOption(label=t.get("label", "Tactic")[:100], value=str(i), emoji="🧠")
-                for i, t in enumerate(tactics[:5])
+                for i, t in enumerate(tactics[:10])
             ]
             tac_select = discord.ui.Select(placeholder="🧠 Tactics & Environment...", options=tac_options, row=2)
             tac_select.callback = self._make_dropdown_action_callback(tactics)
@@ -565,6 +608,15 @@ class ChoiceView(discord.ui.View):
             target_btn.callback = self._switch_target_callback
             self.add_item(target_btn)
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        turn_order = list((self.session or {}).get("turn_order") or [])
+        if not turn_order and self.turn_user_id:
+            turn_order = [self.turn_user_id]
+        if turn_order and interaction.user.id not in turn_order:
+            await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
+            return False
+        return True
+
     async def _switch_target_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.turn_user_id:
             await interaction.response.send_message(f"It's not your turn — waiting on <@{self.turn_user_id}>.", ephemeral=True)
@@ -579,7 +631,7 @@ class ChoiceView(discord.ui.View):
             current_loc = self.session.get("current_location", "area") if self.session else "area"
             scen_key = self.session.get("scenario", "fantasy")
             from mechanics.narrative.choice_generator import generate_categorized_combat_actions
-            self.categorized = generate_categorized_combat_actions(party_loadout, monster, current_loc, scen_key)
+            self.categorized = generate_categorized_combat_actions(party_loadout, monster, current_loc, scen_key, session=self.session)
 
             actor_settings = db.get_settings(self.turn_user_id) if self.turn_user_id else {}
             combat_style = actor_settings.get("combat_ui_style", self.session.get("combat_ui_style", "battle_deck") if self.session else "battle_deck")
@@ -879,6 +931,12 @@ class SyncChoiceView(discord.ui.View):
     """Synchronized mode: every party member picks independently; nobody
     sees anyone else's pick until everyone has locked one in."""
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if self.member_ids and interaction.user.id not in self.member_ids:
+            await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
+            return False
+        return True
+
     def __init__(self, cog: "AdventureCog", session_id: int, member_ids: list, choices: list, party: list,
                  merchant: dict = None):
         super().__init__(timeout=86400)
@@ -887,6 +945,7 @@ class SyncChoiceView(discord.ui.View):
         self.member_ids = member_ids
         self.merchant = merchant or {}
         self.party = party
+        self.choices = list(choices or [])
 
         session = db.get_session(session_id) or {}
         curr_narr = str(session.get("narrative") or "")
@@ -897,6 +956,31 @@ class SyncChoiceView(discord.ui.View):
         )
         is_fb = any(choice.get("is_fallback") for choice in choices) or is_fallback_narr or bool(session.get("is_truncated_generation"))
         
+
+        self._choices = choices
+        from mechanics.combat import is_in_combat
+        self._is_combat = is_in_combat(session)
+        if self._is_combat:
+            from mechanics.narrative.choice_generator import generate_categorized_combat_actions
+            hostiles = session.get("nearby_enemies", [])
+            living_hostiles = [m for m in hostiles if isinstance(m, dict) and m.get("hp", 1) > 0]
+            target_enemy = living_hostiles[0] if living_hostiles else (hostiles[0] if hostiles else {"name": "Enemy", "stats": {}})
+            current_loc = session.get("current_location", "area")
+            categorized = generate_categorized_combat_actions(
+                party or [], target_enemy, current_loc, scenario=session.get("scenario", "fantasy"), session=session
+            )
+            combat_choices = []
+            if categorized.get("attacks"):
+                combat_choices.extend(categorized["attacks"][:3])
+            if categorized.get("magic"):
+                combat_choices.extend(categorized["magic"][:8])
+            if categorized.get("tactics"):
+                combat_choices.extend(categorized["tactics"][:4])
+            if categorized.get("flee"):
+                combat_choices.append(categorized["flee"])
+            if combat_choices:
+                choices = combat_choices[:24]
+                self.choices = list(choices)
         self._choices = choices
         self._choice_dropdown = ChoiceDropdown(cog, session_id, choices, is_sync=True, party=party)
         self.add_item(self._choice_dropdown)
@@ -1220,7 +1304,8 @@ class SyncChoiceView(discord.ui.View):
 
     def _make_callback(self, idx: int):
         async def callback(interaction: discord.Interaction):
-            await self.cog.handle_sync_pick(interaction, self.session_id, choice_index=idx)
+            chosen = self.choices[idx] if getattr(self, "choices", None) and 0 <= idx < len(self.choices) else None
+            await self.cog.handle_sync_pick(interaction, self.session_id, choice_index=idx, direct_choice=chosen)
         return callback
 
     async def _custom_callback(self, interaction: discord.Interaction):

@@ -460,73 +460,48 @@ class GameLoopMixin:
                           for uid in member_ids]
                     ))
                     try:
-                        outcome = await game_engine.resolve_turn(session, party, actions)
+                        turn_response = await TurnService.resolve_action(
+                            session_id,
+                            member_ids[0],
+                            actions[0],
+                            mode="sync",
+                            actions=actions,
+                        )
                     except Exception as e:
                         await adb(db.clear_pending_picks, session_id)
                         await interaction.followup.send(f"⚠️ The LLM failed to resolve this round: {e}")
                         return
 
-                    mp_already_spent = {
-                        a["char"]["user_id"]: a["mp_spent"]
-                        for a in actions
-                        if a.get("_mp_already_deducted")
-                    }
-                    items_gained_by_user = await adb(
-                        game_engine.apply_outcome, session_id, party, outcome, mp_already_spent, actions=actions
-                    )
+                    outcome = turn_response.outcome
+                    items_gained_by_user = turn_response.items_gained_by_user
 
                     summaries, all_levels = [], []
                     xp_by_name = {}
-                    deduction_xp_bonus = int(outcome.get("_deduction_xp_bonus") or 0) if isinstance(outcome, dict) else 0
                     for uid, action in zip(member_ids, actions):
-                        bonus_xp = deduction_xp_bonus
-                        for co in outcome.get("character_outcomes", []):
-                            if isinstance(co, dict) and co.get("name", "").lower() == action["char"]["name"].lower():
-                                bonus_xp += _safe_int(co.get("xp_change"), default=0)
-                                break
-                        
-                        levels_gained = self._apply_xp(uid, action["check"])
-                        if bonus_xp > 0:
-                            bonus_levels = await adb(db.add_xp, uid, bonus_xp)
-                            levels_gained.extend(bonus_levels)
-                    
-                        xp_by_name[action["char"]["name"]] = XP_REWARDS.get(action["check"].tier, 0) + bonus_xp
+                        char_name = action["char"]["name"]
+                        xp_by_name[char_name] = int(turn_response.xp_by_user.get(uid, 0))
+                        levels_gained = list(turn_response.levels_by_user.get(uid, []))
                         is_free = (
                             str(action.get("stat") or "").upper() in ("NONE", "FREE", "ITEM", "")
                             or (action["check"].chance == 100 and str(action.get("stat") or "").upper() in ("NONE", "FREE", "ITEM", "None"))
                         )
                         if is_free:
                             emoji = _get_choice_skill_emoji(action)
-                            line = f"**{action['char']['name']}** {emoji} *{action.get('label', 'Action')}*"
+                            line = f"**{char_name}** {emoji} *{action.get('label', 'Action')}*"
                         else:
-                            line = (f"**{action['char']['name']}** — {action['stat']} check "
+                            line = (f"**{char_name}** — {action['stat']} check "
                                     f"({action['check'].chance}%) → **{action['check'].tier_label}**")
                         summaries.append(line)
                         if levels_gained:
                             all_levels.append((uid, levels_gained))
 
-                    scen_curr = session.get("scenario", "fantasy")
-                    loc_curr = outcome.get("location") or session.get("current_location", "")
+                    scen_curr = turn_response.session.get("scenario", "fantasy")
+                    loc_curr = outcome.get("location") or turn_response.session.get("current_location", "")
                     first_char = party[0][0] if party and party[0] else None
-
-                    action_summary_str = "; ".join(
-                        f"[{a['check'].tier_label}] {a['char']['name']}: {a['label']}" for a in actions
-                    )
-                    outcome_nar = outcome.get("outcome_narrative", "")
-                    next_nar_hist = outcome.get("next_narrative") or outcome.get("narrative") or ""
-                    history_entry = {
-                        "action": action_summary_str,
-                        "outcome": outcome_nar,
-                        "next": next_nar_hist,
-                        "summary": f"{action_summary_str} -> {self._compact_summary(outcome_nar, max_chars=500)}",
-                    }
-            
-                    from mechanics.world.mobility import get_session_dialogue_partners; has_partner = bool(get_session_dialogue_partners(outcome))
-                    dyn_limit = 12 if has_partner else 4
-                    new_history = game_engine.push_history(session["history"], history_entry, limit=dyn_limit)
+                    new_history = list(turn_response.session.get("history", []))
 
                     raw_next_choices, next_narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
-                        outcome, session=session
+                        outcome, session=turn_response.session
                     )
                     if isinstance(outcome, dict) and outcome.get("_hybrid_choices_built") and raw_next_choices:
                         new_choices = list(raw_next_choices)

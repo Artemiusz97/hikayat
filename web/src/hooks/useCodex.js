@@ -1,36 +1,52 @@
 import { useState, useCallback, useEffect } from 'react';
 import { apiCall } from '../api/client';
+import { isValidSessionId } from '../utils/session';
 
-export const useCodex = (sessionId, user) => {
+export const useCodex = (sessionId, user, session = null) => {
   const [contacts, setContacts] = useState([]);
   const [factions, setFactions] = useState([]);
+  const [agentDossier, setAgentDossier] = useState(null);
   const [factionMembership, setFactionMembership] = useState({ joined_faction_id: '', faction_rank: 0, faction_title: '' });
   const [lorebook, setLorebook] = useState({ categories: {}, entities: [] });
+  const [worldPulse, setWorldPulse] = useState(null);
   const [commitments, setCommitments] = useState([]);
   const [quests, setQuests] = useState([]);
   const [availableBounties, setAvailableBounties] = useState([]);
   const [activeStoryQuest, setActiveStoryQuest] = useState(null);
   const [clues, setClues] = useState([]);
   const [currentChapter, setCurrentChapter] = useState(1);
+  const [maxChapters, setMaxChapters] = useState(11);
+  const [campaignSpine, setCampaignSpine] = useState(null);
   const [campaignEndGoals, setCampaignEndGoals] = useState([]);
   const [chapterDigest, setChapterDigest] = useState([]);
   const [hasBountyBoard, setHasBountyBoard] = useState(false);
   const [noticeBoardLabel, setNoticeBoardLabel] = useState('Bounty Board');
+  const [encyclopedia, setEncyclopedia] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const isAnomalousScenario = String(session?.scenario || '').toLowerCase().includes('anomalous');
+
   const fetchCodexData = useCallback(async () => {
-    if (!sessionId || !user) return;
+    if (!isValidSessionId(sessionId) || !user) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
 
-      const [contactsRes, factionsRes, lorebookRes, questsRes] = await Promise.allSettled([
+      const requests = [
         apiCall(`/api/contacts/${sessionId}?user_id=${user.user_id}`),
         apiCall(`/api/factions/${sessionId}?user_id=${user.user_id}`),
         apiCall(`/api/lorebook/${sessionId}?user_id=${user.user_id}`),
-        apiCall(`/api/quests/${sessionId}`)
-      ]);
+        apiCall(`/api/quests/${sessionId}?user_id=${user.user_id}`),
+      ];
+      if (isAnomalousScenario) {
+        requests.push(apiCall(`/api/codex/encyclopedia?session_id=${sessionId}&user_id=${user.user_id}`));
+      }
+
+      const [contactsRes, factionsRes, lorebookRes, questsRes, encyclopediaRes] = await Promise.allSettled(requests);
 
       if (contactsRes.status === 'fulfilled') {
         setContacts(contactsRes.value.contacts || []);
@@ -38,6 +54,7 @@ export const useCodex = (sessionId, user) => {
       if (factionsRes.status === 'fulfilled') {
         const fData = factionsRes.value || {};
         setFactions(fData.factions || []);
+        setAgentDossier(fData.agent_dossier || null);
         if (fData.membership) {
           setFactionMembership(fData.membership);
         }
@@ -46,6 +63,9 @@ export const useCodex = (sessionId, user) => {
         const loreVal = lorebookRes.value || { categories: {}, entities: [] };
         setLorebook(loreVal);
         setCommitments(loreVal.commitments || []);
+        if (loreVal.world_pulse) {
+          setWorldPulse(loreVal.world_pulse);
+        }
       }
       if (questsRes.status === 'fulfilled') {
         const qData = questsRes.value || {};
@@ -54,6 +74,8 @@ export const useCodex = (sessionId, user) => {
         setActiveStoryQuest(qData.active_story_quest || null);
         setClues(qData.clues || []);
         setCurrentChapter(qData.current_chapter || 1);
+        setMaxChapters(qData.max_chapters || 11);
+        setCampaignSpine(qData.campaign_spine || null);
         setCampaignEndGoals(qData.campaign_end_goals || []);
         setChapterDigest(qData.chapter_digest || []);
         setHasBountyBoard(Boolean(qData.has_bounty_board));
@@ -61,35 +83,48 @@ export const useCodex = (sessionId, user) => {
           setNoticeBoardLabel(qData.notice_board_label);
         }
       }
+      if (encyclopediaRes && encyclopediaRes.status === 'fulfilled') {
+        setEncyclopedia(encyclopediaRes.value || null);
+      } else if (!isAnomalousScenario) {
+        setEncyclopedia(null);
+      }
     } catch (err) {
       console.error("Failed to load codex data:", err);
       setError(err.message || "Failed to load codex data");
     } finally {
       setLoading(false);
     }
-  }, [sessionId, user]);
+  }, [sessionId, user, isAnomalousScenario]);
 
   useEffect(() => {
     fetchCodexData();
   }, [fetchCodexData]);
 
-  const factionHqAction = async (factionId, action) => {
-    if (!sessionId || !user?.user_id) return null;
+  useEffect(() => {
+    if (session?.world_pulse) {
+      setWorldPulse(session.world_pulse);
+    }
+  }, [session?.world_pulse]);
+
+  const factionHqAction = async (factionId, action, extraPayload = {}) => {
+    if (!isValidSessionId(sessionId) || !user?.user_id) return null;
     const data = await apiCall(`/api/factions/${sessionId}/hq-action`, {
       method: 'POST',
       body: JSON.stringify({
         user_id: user.user_id,
         faction_id: factionId,
         action,
+        ...extraPayload,
       }),
     });
     if (data?.factions) setFactions(data.factions);
+    if (data?.agent_dossier) setAgentDossier(data.agent_dossier);
     if (data?.membership) setFactionMembership(data.membership);
     return data;
   };
 
   const generateBounties = async (forceRefresh = false, factionId = null) => {
-    if (!sessionId) return null;
+    if (!isValidSessionId(sessionId)) return null;
     const data = await apiCall(`/api/quests/${sessionId}/bounties/generate`, {
       method: 'POST',
       body: JSON.stringify({
@@ -98,42 +133,113 @@ export const useCodex = (sessionId, user) => {
         faction_id: factionId || undefined,
       }),
     });
-    if (data?.quests) setQuests(data.quests);
-    if (data?.available_bounties) setAvailableBounties(data.available_bounties);
+    syncQuestPayload(data);
     return data;
   };
 
-  const bountyAction = async (questId, action = 'accept') => {
-    if (!sessionId || !questId) return null;
+  const syncQuestPayload = (data) => {
+    if (!data) return;
+    if (data.quests) setQuests(data.quests);
+    if (data.available_bounties) setAvailableBounties(data.available_bounties);
+    if ('active_story_quest' in data) setActiveStoryQuest(data.active_story_quest || null);
+    if (data.clues) setClues(data.clues);
+    if (data.current_chapter) setCurrentChapter(data.current_chapter);
+    if (data.max_chapters) setMaxChapters(data.max_chapters);
+    if (data.campaign_spine) setCampaignSpine(data.campaign_spine);
+    if (data.chapter_digest) setChapterDigest(data.chapter_digest);
+    if (data.campaign_end_goals) setCampaignEndGoals(data.campaign_end_goals);
+    if ('has_bounty_board' in data) setHasBountyBoard(Boolean(data.has_bounty_board));
+    if (data.notice_board_label) setNoticeBoardLabel(data.notice_board_label);
+  };
+
+  const bountyAction = async (questId, action = 'accept', haggleAdvance = false) => {
+    if (!isValidSessionId(sessionId) || !questId) return null;
     const data = await apiCall(`/api/quests/${sessionId}/bounties/action`, {
       method: 'POST',
       body: JSON.stringify({
         user_id: user?.user_id,
         quest_id: questId,
         action,
+        haggle_advance: Boolean(haggleAdvance),
       }),
     });
-    if (data?.quests) setQuests(data.quests);
-    if (data?.available_bounties) setAvailableBounties(data.available_bounties);
+    syncQuestPayload(data);
     return data;
   };
 
-  const deduceClues = async (clueAId, clueBId) => {
-    if (!sessionId || !clueAId || !clueBId) return null;
+  const refreshEncyclopediaIfActive = useCallback(async () => {
+    if (!isAnomalousScenario || !isValidSessionId(sessionId) || !user?.user_id) return;
+    try {
+      const encData = await apiCall(`/api/codex/encyclopedia?session_id=${sessionId}&user_id=${user.user_id}`);
+      if (encData) setEncyclopedia(encData);
+    } catch {
+      // Non-fatal background refresh
+    }
+  }, [isAnomalousScenario, sessionId, user?.user_id]);
+
+  const deduceClues = async (clueAId, clueBId = null) => {
+    if (!isValidSessionId(sessionId) || !clueAId) return null;
+    const body = {
+      user_id: user?.user_id,
+      clue_a_id: Number(clueAId),
+    };
+    if (clueBId !== null && clueBId !== undefined && clueBId !== '') {
+      body.clue_b_id = Number(clueBId);
+    }
     const data = await apiCall(`/api/quests/${sessionId}/clues/deduce`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    syncQuestPayload(data);
+    await refreshEncyclopediaIfActive();
+    return data;
+  };
+
+  const accuseSuspect = async (questId, suspectName, mode = 'private') => {
+    if (!isValidSessionId(sessionId) || !questId || !suspectName) return null;
+    const data = await apiCall(`/api/quests/${sessionId}/caseboard/accuse`, {
       method: 'POST',
       body: JSON.stringify({
         user_id: user?.user_id,
-        clue_a_id: Number(clueAId),
-        clue_b_id: Number(clueBId),
+        quest_id: questId,
+        suspect_name: suspectName,
+        mode,
       }),
     });
-    if (data?.clues) setClues(data.clues);
+    syncQuestPayload(data);
+    return data;
+  };
+
+  const turnInQuest = async (questId, disposition = 'deliver') => {
+    if (!isValidSessionId(sessionId) || !questId || !user?.user_id) return null;
+    const data = await apiCall(`/api/quests/${sessionId}/turn-in`, {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: user.user_id,
+        quest_id: questId,
+        disposition,
+      }),
+    });
+    syncQuestPayload(data);
+    await refreshEncyclopediaIfActive();
+    return data;
+  };
+
+  const chooseEpilogue = async (choiceId = 'endless') => {
+    if (!isValidSessionId(sessionId)) return null;
+    const data = await apiCall(`/api/quests/${sessionId}/epilogue`, {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: user?.user_id,
+        choice_id: choiceId,
+      }),
+    });
+    syncQuestPayload(data);
     return data;
   };
 
   const cancelCommitment = async (commitmentId, reason = 'player_cancelled') => {
-    if (!sessionId || !commitmentId) return null;
+    if (!isValidSessionId(sessionId) || !commitmentId) return null;
     const data = await apiCall(`/api/commitments/${sessionId}/${commitmentId}/cancel`, {
       method: 'POST',
       body: JSON.stringify({
@@ -149,21 +255,43 @@ export const useCodex = (sessionId, user) => {
     return data;
   };
 
+  const trackRumor = async (eventKey) => {
+    if (!isValidSessionId(sessionId) || !eventKey) return null;
+    const data = await apiCall(`/api/adventure/${sessionId}/rumors/${encodeURIComponent(eventKey)}/track`, {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: user?.user_id,
+      }),
+    });
+    if (data?.world_pulse) {
+      setWorldPulse(data.world_pulse);
+    }
+    if (Array.isArray(data?.quests)) {
+      setQuests(data.quests);
+    }
+    return data;
+  };
+
   return {
     contacts,
     factions,
+    agentDossier,
     factionMembership,
     lorebook,
+    worldPulse,
     commitments,
     quests,
     availableBounties,
     activeStoryQuest,
     clues,
     currentChapter,
+    maxChapters,
+    campaignSpine,
     campaignEndGoals,
     chapterDigest,
     hasBountyBoard,
     noticeBoardLabel,
+    encyclopedia,
     loading,
     error,
     refreshCodex: fetchCodexData,
@@ -171,7 +299,10 @@ export const useCodex = (sessionId, user) => {
     generateBounties,
     bountyAction,
     deduceClues,
+    accuseSuspect,
+    turnInQuest,
+    chooseEpilogue,
     cancelCommitment,
+    trackRumor,
   };
 };
-

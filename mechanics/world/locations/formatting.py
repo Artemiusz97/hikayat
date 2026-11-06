@@ -121,9 +121,13 @@ def build_node_sensory_and_memory_block(session_id: int, curr_node: dict, curren
     if access_info.get("is_unlocked") and access_info.get("access_tier") in ("restricted", "private"):
         lines.append("- ACCESS PERMISSION: Door unlocked (access granted for this session/day).")
 
-    room_props = get_node_props(curr_node.get("node_id", ""), curr_node.get("name", ""), scenario_key=scen_key)
+    detailed_props = get_detailed_node_props(session_id, curr_node.get("node_id", ""), scenario_key=scen_key)
+    room_props = [p["name"] for p in detailed_props] if detailed_props else get_node_props(session_id, curr_node.get("node_id", ""), scenario_key=scen_key)
     if room_props:
         lines.append(f"- Room Props & Micro-Anchors (for `focal_point` positioning): {', '.join(room_props)}.")
+        searched_props = [p["name"] for p in detailed_props if p.get("is_searched") or p.get("is_looted")]
+        if searched_props:
+            lines.append(f"- Previously Searched Props: {', '.join(searched_props)}.")
 
     return "\n".join(lines)
 
@@ -146,36 +150,53 @@ def format_llm_location_context(session_id: int, current_location_raw: str, scen
 
 
     existing = db.get_session_locations(session_id)
+    world_nodes = db.get_session_world_nodes(session_id) if hasattr(db, "get_session_world_nodes") else []
 
-    atm_raw = ""
+    zone_atm = ""
+    fac_atm = ""
 
-    for r in existing:
+    # 1. First probe spatial graph world_nodes for explicit tier atmosphere
+    for n in world_nodes:
+        if n.get("node_type") == "ZONE" and n.get("name") == zone and n.get("atmosphere"):
+            zone_atm = n.get("atmosphere")
+        elif n.get("node_type") == "FACILITY" and n.get("name") == primary and n.get("atmosphere"):
+            fac_atm = n.get("atmosphere")
 
-        if r.get("zone_name") == zone and r.get("atmosphere"):
+    # 2. Fall back to session_locations rows
+    if not fac_atm:
+        for r in existing:
+            if r.get("zone_name") == zone and r.get("primary_name") == primary and r.get("atmosphere"):
+                fac_atm = r.get("atmosphere")
+                break
 
-            atm_raw = r.get("atmosphere")
+    if not zone_atm:
+        for r in existing:
+            if r.get("zone_name") == zone and r.get("atmosphere"):
+                zone_atm = r.get("atmosphere")
+                break
 
-            break
-
-
-
-    env_data = parse_zone_environment_data(atm_raw)
+    zone_data = parse_zone_environment_data(zone_atm)
+    fac_data = parse_zone_environment_data(fac_atm)
 
     env_lines = []
+    if zone_data.get("theme"):
+        env_lines.append(f"- Zone Theme: {zone_data['theme']}")
+    if fac_data.get("theme") and fac_data.get("theme") != zone_data.get("theme"):
+        env_lines.append(f"- Facility Architecture & Theme: {fac_data['theme']}")
 
-    if env_data.get("theme"):
+    fac_features = fac_data.get("features")
+    zone_features = zone_data.get("features")
+    if fac_features:
+        env_lines.append(f"- Facility Features: {fac_features}")
+    elif zone_features:
+        env_lines.append(f"- Environmental Features: {zone_features}")
 
-        env_lines.append(f"- Zone Theme: {env_data['theme']}")
-
-    if env_data.get("features"):
-
-        env_lines.append(f"- Environmental Features: {env_data['features']}")
-
-    if env_data.get("sensory"):
-
-        env_lines.append(f"- Ambient Sensory: {env_data['sensory']}")
-
-
+    fac_sensory = fac_data.get("sensory")
+    zone_sensory = zone_data.get("sensory")
+    if fac_sensory:
+        env_lines.append(f"- Ambient Facility Atmosphere: {fac_sensory}")
+    elif zone_sensory:
+        env_lines.append(f"- Ambient Sensory: {zone_sensory}")
 
     env_text = ("\n" + "\n".join(env_lines)) if env_lines else ""
 
@@ -925,7 +946,7 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                                 "is_current_room": cr_is_here,
                                 "travel_minutes": cr_mins,
                                 "travel_tag": format_travel_eta_tag(cr_mins, is_same_zone=is_same_z, scen_key=scen_key, is_here=cr_is_here),
-                                "props": get_node_props(cr_id, cr_name, scenario_key=scen_key),
+                                "props": get_node_props(session_id, cr_id, scenario_key=scen_key),
                                 "access_tier": cr_acc.get("access_tier", "open"),
                                 "access_badge": cr_acc.get("status_badge", "Open"),
                                 "is_unlocked": cr_acc.get("is_unlocked", False),

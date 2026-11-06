@@ -137,8 +137,34 @@ class MerchantMixin:
     async def open_buy_menu(self, interaction: discord.Interaction, session_id: int):
         """Task 2's Buy -- ephemeral, no LLM call needed (stock was already
         generated at shop entry), so this responds instantly."""
+        from mechanics.combat.merchant import (
+            compute_effective_shop_item_price,
+            get_anomalous_shop_faction_context,
+        )
+
         session = await adb(db.get_session, session_id)
         merchant = session["merchant"]
+        is_phone_shop = bool(merchant.get("is_phone_shop", False))
+        shop_ctx = await adb(
+            get_anomalous_shop_faction_context,
+            session,
+            session.get("current_location", ""),
+            is_phone_shop,
+            interaction.user.id,
+        )
+        if not shop_ctx.get("allowed", True):
+            await interaction.response.send_message(
+                shop_ctx.get("access_denied_reason") or "Access denied to this faction store.",
+                ephemeral=True,
+            )
+            return
+        if shop_ctx.get("shrine_daily_exhausted"):
+            await interaction.response.send_message(
+                "Daily Sacred Shrine provisions (3/3) have been claimed today. Stock refreshes tomorrow morning.",
+                ephemeral=True,
+            )
+            return
+
         stock = [item for item in merchant.get("stock", []) if item.get("quantity", 0) > 0]
         if not stock:
             current_day, _, _ = await adb(db.get_session_time, session_id)
@@ -148,10 +174,10 @@ class MerchantMixin:
             )
             return
         discount = merchant.get("discount_pct", 0)
-        view = BuySelectView(self, session_id, stock, discount)
+        view = BuySelectView(self, session_id, stock, discount, shop_ctx=shop_ctx)
         lines = []
         for i in stock:
-            price = _discounted_price(i["price"], discount)
+            price = compute_effective_shop_item_price(i, shop_ctx=shop_ctx, discount_pct=discount)
             t_str = i.get("item_type", "Item")
             desc = (i.get("description") or "").strip()
             if len(desc) > 120:
@@ -170,51 +196,127 @@ class MerchantMixin:
         (first come, first served), which is a separate concern from
         personal gold/inventory and not something Task 3.2 asks to be
         per-player."""
-        session = db.get_session(session_id)
-        merchant = session["merchant"]
-        stock = merchant.get("stock", [])
-        entry = next((i for i in stock if i["name"] == item_name and i.get("quantity", 0) > 0), None)
-        if not entry and " #" in item_name:
-            base_name = item_name.rsplit(" #", 1)[0]
-            entry = next((i for i in stock if i["name"] == base_name and i.get("quantity", 0) > 0), None)
-        if not entry:
-            await interaction.response.send_message("That item is no longer available.", ephemeral=True)
-            return
+        import json as _json
+        from mechanics.combat.merchant import (
+            compute_effective_shop_item_price,
+            get_anomalous_shop_faction_context,
+            mark_vault_requisition_claimed,
+            stamp_discounted_purchase_metadata,
+        )
+        from mechanics.system.concurrency import distributed_session_lock
 
-        price = _discounted_price(entry["price"], merchant.get("discount_pct", 0))
-        char = db.get_character(user_id)
-        if not char or char["gold"] < price:
-            await interaction.response.send_message(f"You don't have enough gold ({price}g needed).",
-                                                      ephemeral=True)
-            return
-
-        effect_val = entry.get("effect") or entry.get("description", "")
-        slot_cost_val = entry.get("slot_cost", 1)
-        if not db.can_add_item(
-            user_id,
-            slot_cost=slot_cost_val,
-            name=entry["name"],
-            item_type=entry.get("item_type", "Item"),
-            effect=effect_val,
-        ):
-            cap = inventory_capacity(char.get("str_", 1))
-            used = db.used_slots(user_id)
-            await interaction.response.send_message(
-                f"🎒 Your inventory is full ({used}/{cap} slots). Sell or drop items before buying!",
-                ephemeral=True
+        async with distributed_session_lock(session_id):
+            session = await adb(db.get_session, session_id)
+            if not session:
+                await interaction.response.send_message("Session not found.", ephemeral=True)
+                return
+            merchant = session["merchant"]
+            is_phone_shop = bool(merchant.get("is_phone_shop", False))
+            shop_ctx = await adb(
+                get_anomalous_shop_faction_context,
+                session,
+                session.get("current_location", ""),
+                is_phone_shop,
+                user_id,
             )
-            return
+            if not shop_ctx.get("allowed", True):
+                await interaction.response.send_message(
+                    shop_ctx.get("access_denied_reason") or "Access denied to this faction store.",
+                    ephemeral=True,
+                )
+                return
+            if shop_ctx.get("shrine_daily_exhausted"):
+                await interaction.response.send_message(
+                    "Daily Sacred Shrine provisions (3/3) have been claimed today. Stock refreshes tomorrow morning.",
+                    ephemeral=True,
+                )
+                return
 
-        db.apply_hp_mp_delta(user_id, 0, 0, -price)
-        db.add_item(user_id, entry["name"], entry["item_type"], effect_val, slot_cost_val)
-        entry["quantity"] -= 1
+            stock = merchant.get("stock", [])
+            entry = next((i for i in stock if i["name"] == item_name and i.get("quantity", 0) > 0), None)
+            if not entry and " #" in item_name:
+                base_name = item_name.rsplit(" #", 1)[0]
+                entry = next((i for i in stock if i["name"] == base_name and i.get("quantity", 0) > 0), None)
+            if not entry:
+                await interaction.response.send_message("That item is no longer available.", ephemeral=True)
+                return
 
-        active_key = merchant.get("active_store_key")
-        if active_key and "catalogues" in merchant and active_key in merchant["catalogues"]:
-            merchant["catalogues"][active_key]["stock"] = stock
+            discount_pct = merchant.get("discount_pct", 0)
+            price = compute_effective_shop_item_price(entry, shop_ctx=shop_ctx, discount_pct=discount_pct)
 
-        db.save_merchant_state(session_id, merchant)
-        game_engine.evaluate_quest_state_predicates(session_id, user_id=user_id)
+            char = await adb(db.get_character, user_id)
+            if not char or (char.get("gold", 0) or 0) < price:
+                await interaction.response.send_message(
+                    f"You don't have enough gold ({price}g needed).",
+                    ephemeral=True,
+                )
+                return
+
+            effect_val = str(entry.get("effect") or entry.get("description", ""))
+            if shop_ctx.get("is_monastic_free_shop") or shop_ctx.get("is_public_discounted_shop"):
+                for prefix in ("[ITEM_JSON]", "[GEAR_JSON]", "[CONSUMABLE_JSON]"):
+                    if effect_val.startswith(prefix):
+                        try:
+                            meta_obj = _json.loads(effect_val[len(prefix):])
+                            if shop_ctx.get("is_monastic_free_shop"):
+                                meta_obj["shrine_sacred_grant"] = True
+                            if shop_ctx.get("is_public_discounted_shop"):
+                                meta_obj["purchase_price_paid"] = price
+                                meta_obj["public_requisition_item"] = True
+                            effect_val = f"{prefix}{_json.dumps(meta_obj)}"
+                        except Exception:
+                            pass
+                        break
+                else:
+                    if shop_ctx.get("is_monastic_free_shop"):
+                        effect_val = f"[CONSUMABLE_JSON]{_json.dumps({'description': effect_val, 'shrine_sacred_grant': True})}"
+                    elif shop_ctx.get("is_public_discounted_shop"):
+                        effect_val = f"[CONSUMABLE_JSON]{_json.dumps({'description': effect_val, 'purchase_price_paid': price, 'public_requisition_item': True})}"
+            elif shop_ctx.get("is_event_discounted_shop"):
+                effect_val = stamp_discounted_purchase_metadata(effect_val, price)
+
+            slot_cost_val = int(entry.get("slot_cost", 1) or 1)
+            can_fit = await adb(
+                db.can_add_item,
+                user_id,
+                slot_cost_val,
+                entry["name"],
+                entry.get("item_type", "Item"),
+                effect_val,
+            )
+            if not can_fit:
+                cap = inventory_capacity(char.get("str_", 1))
+                used = await adb(db.used_slots, user_id)
+                await interaction.response.send_message(
+                    f"🎒 Your inventory is full ({used}/{cap} slots). Sell or drop items before buying!",
+                    ephemeral=True,
+                )
+                return
+
+            if shop_ctx.get("is_monastic_free_shop"):
+                from mechanics.social.factions import get_anomalous_faction_state, save_anomalous_faction_state
+                a_state = await adb(get_anomalous_faction_state, session_id, user_id)
+                new_claims = int(a_state.get("shrine_free_claims_today", a_state.get("shrine_free_claimed_today", 0)) or 0) + 1
+                a_state["shrine_free_claims_today"] = new_claims
+                a_state["shrine_free_claimed_today"] = new_claims
+                await adb(save_anomalous_faction_state, session_id, a_state, user_id)
+
+            await adb(db.apply_hp_mp_delta, user_id, 0, 0, -price)
+            await adb(db.add_item, user_id, entry["name"], entry.get("item_type", "Item"), effect_val, slot_cost_val)
+            entry["quantity"] -= 1
+
+            active_key = merchant.get("active_store_key")
+            if active_key and "catalogues" in merchant and active_key in merchant["catalogues"]:
+                merchant["catalogues"][active_key]["stock"] = stock
+
+            if entry.get("is_vault_requisition"):
+                claimed_reqs = mark_vault_requisition_claimed(session, entry.get("name", ""))
+                if claimed_reqs is not None:
+                    await adb(db.update_session, session_id, extra={"anomalous_vault_requisitions": claimed_reqs})
+
+            await adb(db.save_merchant_state, session_id, merchant)
+            await adb(game_engine.evaluate_quest_state_predicates, session_id, user_id)
+
         await interaction.response.edit_message(
             content=f"🛒 You bought **{entry['name']}** for **{price}g**!", view=None)
 

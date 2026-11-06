@@ -98,6 +98,8 @@ def infer_node_category(z_id: str, p_id: str, name: str, parent_category: str = 
 def infer_node_privacy(node_type: str, p_id: str, name: str, explicit_meta: dict | None = None) -> str:
     """Infers default privacy level: 'public', 'semi_private', or 'private'."""
     meta = explicit_meta or {}
+    if meta.get("privacy_level") in ("public", "semi_private", "private", "restricted"):
+        return meta["privacy_level"]
     if meta.get("is_private_intimate"):
         return "private"
     if meta.get("is_discreet"):
@@ -105,13 +107,16 @@ def infer_node_privacy(node_type: str, p_id: str, name: str, explicit_meta: dict
     low = f"{p_id} {name}".lower()
     if any(k in low for k in ("player_house", "bedroom", "safe", "archive", "staff room", "teachers' staff", "private", "secret", "boarded", "love_hotel_mirrored", "love_hotel_jacuzzi", "nsfw_faction_hq", "velvet basement", "fitting_room")):
         return "private"
-    if any(k in low for k in ("empty_class", "behind", "storage", "rooftop", "stairwell", "greenhouse", "glasshouse", "music room", "studio", "council", "alcove", "shed", "aisle", "aisles", "stacks", "corner", "balcony", "restroom", "shower_room", "infirmary", "underpass")):
+    if any(k in low for k in ("empty_class", "behind", "storage", "rooftop", "stairwell", "greenhouse", "glasshouse", "music room", "studio", "council", "alcove", "shed", "aisle", "aisles", "stacks", "corner", "balcony", "booth", "booths", "veranda", "terrace", "patio", "restroom", "shower_room", "infirmary", "underpass")):
         return "semi_private"
     return "public"
 
 
-def infer_is_enclosed(node_type: str, node_id: str, name: str) -> int:
+def infer_is_enclosed(node_type: str, node_id: str, name: str, explicit_meta: dict | None = None) -> int:
     """Infers whether a node is an indoor/enclosed structure (1) or outdoor/open-air (0)."""
+    meta = explicit_meta or {}
+    if "is_enclosed" in meta and meta["is_enclosed"] is not None:
+        return int(bool(meta["is_enclosed"]))
     low = f"{node_id} {name}".lower()
     if any(k in low for k in ("cabin interior", "boathouse", "storage shed", "changing cabanas", "underpass")):
         return 1
@@ -119,7 +124,8 @@ def infer_is_enclosed(node_type: str, node_id: str, name: str) -> int:
         "courtyard", "fountain", "gate", "park", "field", "track", "rooftop", "street",
         "grounds", "garden", "terrace", "patio", "plaza", "city square", "night market",
         "sakura grove", "hilltop", "lookout", "campsite", "picnic", "avenue", "pier",
-        "boardwalk", "trail", "path", "beach", "forest", "woods", "mountain", "lake", "dunes"
+        "boardwalk", "trail", "path", "beach", "forest", "woods", "mountain", "lake", "dunes",
+        "balcony", "veranda", "porch", "deck"
     )
     if any(k in low for k in outdoor_keywords):
         return 0
@@ -189,11 +195,162 @@ def infer_curfew_window(node_type: str, z_id: str, node_id: str, name: str, cate
     return None, None
 
 
+_FACILITY_CATEGORY_ATMOSPHERE_FALLBACKS: dict[str, dict[str, str]] = {
+    "agency_hq": {
+        "theme": "Fortified Civil Containment & Operations Headquarters",
+        "features": "Ballistic glass revolving doors, wall-mounted crisis monitors, biometric turnstiles, armed security details.",
+        "sensory": "Hiss of pneumatic doors, distant radio chatter from dispatch, sharp aroma of espresso, humming server banks."
+    },
+    "hospital": {
+        "theme": "High-Volume Municipal Trauma & Triage Center",
+        "features": "Fluorescent-lit corridors, rolling crash carts, psychic decontamination showers, sterile observation rooms.",
+        "sensory": "Smell of antiseptic and rubbing alcohol, rhythmic chime of vital monitors, squeak of rubber soles on linoleum."
+    },
+    "transit": {
+        "theme": "Bustling Multi-Level Metropolitan Transit Terminal",
+        "features": "High vaulted steel ceilings, digital departure timetables, turnstile banks, sweeping concourses.",
+        "sensory": "Echoing commuter footsteps, automated chime of arriving trains, smell of warm pretzels and diesel exhaust."
+    },
+    "airport": {
+        "theme": "Trans-Continental International Aviation Hub & Concourse",
+        "features": "Panoramic terminal glass overlooking runways, flight departure boards, jet-bridge corridors, customs gates.",
+        "sensory": "Distant thrum of jet turbines, rhythmic gate announcements in multiple languages, chime of passenger boarding bells."
+    },
+    "temple": {
+        "theme": "Serene Mountain Shrine & Spiritual Ward Sanctuary",
+        "features": "Ancient cypress timber beams, bronze incense cauldrons, weathered stone lanterns, woven talisman cords.",
+        "sensory": "Drifting cedar incense smoke, gentle rustle of bamboo leaves, deep resonance of bronze temple bells."
+    },
+    "cathedral": {
+        "theme": "Historic Sacred Cathedral & Consecrated Sanctuary",
+        "features": "Soaring vaulted stone ribs, stained-glass clerestory windows, rows of oak pews, ornate baptismal font.",
+        "sensory": "Cool sacred stillness, scent of beeswax candles and damp stone, echoing organ notes in high vaults."
+    },
+    "theme_park": {
+        "theme": "Vibrant Coastal Amusement Resort & Carnival Midway",
+        "features": "Twinkling neon midway lights, towering rollercoaster trestles, candy stalls, prize game booths.",
+        "sensory": "Upbeat calliope music, sweet aroma of popcorn and funnel cakes, echoing laughter and whir of coaster machinery."
+    },
+    "galleria": {
+        "theme": "Multi-Tier Glass-Domed Commercial Shopping Plaza",
+        "features": "Tiered escalators, indoor decorative fountains, boutique window displays, polished terrazzo floors.",
+        "sensory": "Gentle splash of fountain water, ambient pop music from retail boutiques, murmur of daytime shoppers."
+    },
+    "residential": {
+        "theme": "Quiet Tree-Lined Suburban Residential Neighborhood",
+        "features": "Single-family houses with manicured lawns, asphalt driveways, neighborhood mailboxes, park benches.",
+        "sensory": "Morning birdsong, distant hum of a lawnmower, rustle of maple trees in the breeze, smell of fresh laundry."
+    },
+    "industrial": {
+        "theme": "Heavy Manufacturing & Automated Logistics Grid",
+        "features": "Corrugated iron warehouses, overhead crane gantries, steam exhaust stacks, chain-link security gates.",
+        "sensory": "Low thrum of heavy machinery, hiss of high-pressure steam, smell of motor oil and hot metal."
+    },
+    "docks": {
+        "theme": "Saltwater Commercial Cargo Port & Harbor Quays",
+        "features": "Towering shipping container cranes, weathered timber pilings, tidal seawalls, cargo freighters.",
+        "sensory": "Crying seagulls overhead, salt spray on the breeze, clanking of container cables, smell of brine and creosote."
+    },
+    "undercity": {
+        "theme": "Subterranean Utility Labyrinth & Civil Defense Drainage",
+        "features": "Reinforced concrete drainage vaults, damp brick masonry, high-pressure steam pipes, rusted steel catwalks.",
+        "sensory": "Echoing water drips, cool subterranean air drafts, faint metallic scent of rust and damp earth."
+    },
+    "academic": {
+        "theme": "Academic Campus Lecture & Research Facility",
+        "features": "Lecture amphitheatres, seminar rooms, reference libraries, faculty office suites.",
+        "sensory": "Echoing footsteps in linoleum corridors, chalk dust, rustle of notebook pages, quiet intellectual focus."
+    },
+    "nightlife": {
+        "theme": "Atmospheric Urban Nightlife & Social Venue",
+        "features": "Dim amber filament lighting, velvet banquette booths, polished mahogany bar counter, neon signage.",
+        "sensory": "Clink of cocktail glasses, low murmur of conversation, mellow jazz or retro synth chords, aroma of spiced rum and tobacco."
+    },
+    "museum": {
+        "theme": "Grand Archival Exhibition & Curatorial Repository",
+        "features": "Marble columns, glass exhibition display vitrines, velvet stanchion ropes, cataloged archival placards.",
+        "sensory": "Hushed echoes of footsteps on marble, cool climate-controlled air, faint scent of old parchment and beeswax."
+    },
+    "curio_occult": {
+        "theme": "Esoteric Antiquities & Warded Curio Apothecary",
+        "features": "Dark hardwood apothecary drawers, brass magnifying lenses, velvet-lined display cases, hanging dried sage bundles.",
+        "sensory": "Aroma of frankincense and dried bitter herbs, ticking brass pendulum clocks, faint psychic hum from ward seals."
+    },
+    "anomaly_site": {
+        "theme": "Quarantined Reality Breach & Hazardous Spatial Rupture",
+        "features": "Hazardous cordon tape, pulsating localized distortion fractures, deployed lead-alloy barricades, biometric warning strobes.",
+        "sensory": "Ozone tang in the air, high-frequency static whining in the ears, eerie warping of shadows and ambient lighting."
+    }
+}
+
+
+def infer_facility_atmosphere(fac_id: str, fac_name: str, zone_id: str, raw_fac: dict, session_id: int = 0, scenario_key: str = "", char_name: str = "") -> str:
+    """Returns a serialized JSON atmosphere for any facility, prioritizing explicit seed fields with functional fallback."""
+    from .hierarchy import resolve_session_location_tokens
+    if "theme" in raw_fac or "sensory" in raw_fac:
+        return json.dumps({
+            "theme": resolve_session_location_tokens(session_id, raw_fac.get("theme", ""), scenario_key, char_name),
+            "features": resolve_session_location_tokens(session_id, raw_fac.get("features", ""), scenario_key, char_name),
+            "sensory": resolve_session_location_tokens(session_id, raw_fac.get("sensory", raw_fac.get("atmosphere", "")), scenario_key, char_name)
+        })
+
+    name_lower = fac_name.lower()
+    id_lower = fac_id.lower()
+    cat_key = "galleria"
+
+    if any(k in id_lower or k in name_lower for k in ("anomaly", "breach", "rupture", "silo_7", "monolith", "ghost", "quarantined", "inverted", "whispering", "weeping", "escher", "crooked", "liminal")):
+        cat_key = "anomaly_site"
+    elif any(k in id_lower or k in name_lower for k in ("agency", "hq", "bureau", "command", "precinct", "dispatch")):
+        cat_key = "agency_hq"
+    elif any(k in id_lower or k in name_lower for k in ("hospital", "clinic", "medical", "infirmary", "triage", "dispensary")):
+        cat_key = "hospital"
+    elif any(k in id_lower or k in name_lower for k in ("airport", "hangar", "flight", "airfield", "runway", "air-freight")):
+        cat_key = "airport"
+    elif any(k in id_lower or k in name_lower for k in ("metro", "transit", "station", "terminal", "rail")):
+        cat_key = "transit"
+    elif any(k in id_lower or k in name_lower for k in ("temple", "shrine", "sanctuary", "monastery", "dojo")):
+        cat_key = "temple"
+    elif any(k in id_lower or k in name_lower for k in ("cathedral", "church", "crypt", "chapel")):
+        cat_key = "cathedral"
+    elif any(k in id_lower or k in name_lower for k in ("museum", "gallery", "exhibit", "history", "stacks", "archives", "observatory")):
+        cat_key = "museum"
+    elif any(k in id_lower or k in name_lower for k in ("bar", "club", "pub", "lounge", "ramen", "izakaya", "jazz", "billiards", "diner", "night_market")):
+        cat_key = "nightlife"
+    elif any(k in id_lower or k in name_lower for k in ("curio", "antiquities", "apothecary", "herbal", "occult", "wards", "pawn")):
+        cat_key = "curio_occult"
+    elif any(k in id_lower or k in name_lower for k in ("theme_park", "amusement", "carnival", "arcade")):
+        cat_key = "theme_park"
+    elif any(k in id_lower or k in name_lower for k in ("plaza", "galleria", "mall", "market", "boutique", "shop", "salon", "couture", "konbini", "laundry")):
+        cat_key = "galleria"
+    elif any(k in id_lower or k in name_lower for k in ("house", "residence", "apartment", "suburb", "living", "tenement", "penthouse", "estate", "dormitor")):
+        cat_key = "residential"
+    elif any(k in id_lower or k in name_lower for k in ("factory", "plant", "works", "industrial", "warehouse", "foundry", "substation", "bunker")):
+        cat_key = "industrial"
+    elif any(k in id_lower or k in name_lower for k in ("dock", "pier", "harbor", "quay", "wharf", "shipyard", "seawall")):
+        cat_key = "docks"
+    elif any(k in id_lower or k in name_lower for k in ("under", "drain", "sewer", "tunnel", "vault", "chasm", "catacomb", "cistern", "conduit")):
+        cat_key = "undercity"
+    elif any(k in id_lower or k in name_lower for k in ("school", "academy", "university", "campus", "library", "lab", "gymnasium", "quad")):
+        cat_key = "academic"
+
+    fb = _FACILITY_CATEGORY_ATMOSPHERE_FALLBACKS.get(cat_key, _FACILITY_CATEGORY_ATMOSPHERE_FALLBACKS["galleria"])
+    return json.dumps({
+        "theme": resolve_session_location_tokens(session_id, fb["theme"], scenario_key, char_name),
+        "features": resolve_session_location_tokens(session_id, fb["features"], scenario_key, char_name),
+        "sensory": resolve_session_location_tokens(session_id, fb["sensory"], scenario_key, char_name),
+    })
+
+
 def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "high_school_drama", char_name: str = "") -> None:
     """
     Populates `world_nodes` and `world_edges` from scenario seeds with personalized names,
     semantic categories, and navigation edges. Idempotent.
     """
+    # Guard with schema_epoch: legacy sessions (epoch 1) remain on their legacy macro graph.
+    epoch = db.get_session_schema_epoch(session_id)
+    if epoch < 2:
+        return
+
     existing_nodes = db.get_session_world_nodes(session_id)
     if existing_nodes:
         return
@@ -375,7 +532,7 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
 
             p_seed_meta = {
                 k: primary[k]
-                for k in ("is_discreet", "is_private_intimate", "gender_restriction", "grade_exclusive", "suite_fee", "nsfw_only")
+                for k in ("privacy_level", "is_discreet", "is_private_intimate", "is_enclosed", "gender_restriction", "grade_exclusive", "suite_fee", "nsfw_only")
                 if k in primary
             }
             p_category = infer_node_category(z_id, p_id, primary_name, parent_category=z_category)
@@ -386,6 +543,11 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
             p_curfew_start, p_curfew_end = infer_curfew_window("FACILITY", z_id, p_id, primary_name, p_category, primary.get("curfew_start_min"), primary.get("curfew_end_min"))
             if p_transit:
                 transit_hubs.append(p_id)
+
+            fac_atmosphere = infer_facility_atmosphere(
+                p_id, primary_name, z_id, primary,
+                session_id=session_id, scenario_key=scenario_key, char_name=char_name
+            )
 
             # 2. Insert Facility Node
             db.save_world_node(
@@ -401,7 +563,7 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
                 access_tier=p_access,
                 curfew_start_min=p_curfew_start,
                 curfew_end_min=p_curfew_end,
-                atmosphere=atmosphere,
+                atmosphere=fac_atmosphere,
                 is_dynamic=0,
                 state_json=p_seed_meta if p_seed_meta else None
             )
@@ -415,6 +577,7 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
             entrance_node_id = None
             room_access_map: dict[str, str] = {}
             room_locked_map: dict[str, bool] = {}
+            room_parent_sub_map: dict[str, Any] = {}
 
             for sub in subs:
                 s_id = sub.get("id") or f"sub_{_slugify(primary_name)}_{_slugify(sub.get('name', 'room'))}"
@@ -428,18 +591,24 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
                     sub_name = get_session_urban_facility_name(session_id, "zone_agency_hq", s_id, sub_name, scenario_key, char_name)
                 sub_name = resolve_session_location_tokens(session_id, sub_name, scenario_key, char_name)
 
-                if (sub.get("is_entrance") or is_entrance_sublocation(sub_name)) and not entrance_node_id:
+                is_child_or_discreet = bool(sub.get("parent_sub_id")) or sub.get("privacy_level") in ("private", "semi_private")
+                if (sub.get("is_entrance") or is_entrance_sublocation(sub_name)) and not entrance_node_id and not is_child_or_discreet:
                     entrance_node_id = s_id
 
                 s_seed_meta = {
                     k: sub[k]
-                    for k in ("is_discreet", "is_private_intimate", "gender_restriction", "grade_exclusive", "suite_fee", "nsfw_only")
+                    for k in ("privacy_level", "is_discreet", "is_private_intimate", "is_enclosed", "is_entrance", "parent_sub_id", "gender_restriction", "grade_exclusive", "suite_fee", "nsfw_only")
                     if k in sub
                 }
                 s_privacy = infer_node_privacy("ROOM", s_id, sub_name, explicit_meta=s_seed_meta) or p_privacy
                 s_access = infer_access_tier("ROOM", z_id, s_id, sub_name, p_category, sub.get("access_tier", ""))
-                if s_access == "open" and p_access in ("restricted", "private"):
-                    s_access = p_access
+                p_sub_parent = sub.get("parent_sub_id")
+                if s_access == "open":
+                    parent_sub_access = room_access_map.get(p_sub_parent) if p_sub_parent else None
+                    if parent_sub_access in ("restricted", "private"):
+                        s_access = parent_sub_access
+                    elif p_access in ("restricted", "private"):
+                        s_access = p_access
                 s_curfew_start, s_curfew_end = infer_curfew_window("ROOM", z_id, s_id, sub_name, p_category, sub.get("curfew_start_min"), sub.get("curfew_end_min"))
                 if s_curfew_start is None and p_curfew_start is not None and not p_id.startswith("bld_school_") and p_id not in ("loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2"):
                     s_curfew_start, s_curfew_end = p_curfew_start, p_curfew_end
@@ -448,10 +617,12 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
                     "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
                     "loc_general_hospital", "loc_theme_park", "loc_eastern_temple", "loc_botanical_zoo",
                 }
-                if p_id.startswith("bld_school_") or p_id in mega_complex_ids:
-                    s_enclosed = infer_is_enclosed("ROOM", s_id, sub_name)
+                if "is_enclosed" in s_seed_meta and s_seed_meta["is_enclosed"] is not None:
+                    s_enclosed = int(bool(s_seed_meta["is_enclosed"]))
+                elif p_id.startswith("bld_school_") or p_id in mega_complex_ids:
+                    s_enclosed = infer_is_enclosed("ROOM", s_id, sub_name, explicit_meta=s_seed_meta)
                 else:
-                    r_enc = infer_is_enclosed("ROOM", s_id, sub_name)
+                    r_enc = infer_is_enclosed("ROOM", s_id, sub_name, explicit_meta=s_seed_meta)
                     if r_enc == 0:
                         s_enclosed = 0
                     elif any(k in f"{s_id} {sub_name}".lower() for k in ("cabin interior", "boathouse", "storage shed", "changing cabanas", "underpass")):
@@ -461,6 +632,7 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
 
                 room_access_map[s_id] = s_access
                 room_locked_map[s_id] = bool(sub.get("is_locked", False))
+                room_parent_sub_map[s_id] = sub.get("parent_sub_id")
 
                 db.save_world_node(
                     session_id=session_id,
@@ -482,7 +654,8 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
                 room_nodes.append(s_id)
 
             if not entrance_node_id and room_nodes:
-                entrance_node_id = room_nodes[0]
+                non_child_candidates = [r for r in room_nodes if not room_parent_sub_map.get(r)]
+                entrance_node_id = non_child_candidates[0] if non_child_candidates else room_nodes[0]
             if entrance_node_id:
                 facility_entrance_map[p_id] = entrance_node_id
 
@@ -498,16 +671,27 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
             room_to_room_mins = 3 if is_mega_complex else 2
             room_edge_type = "hallway" if is_mega_complex else "door"
 
-            # Connect Entrance Room to each interior room
+            # Connect Entrance Room to standard interior rooms (or connect child sub-room to parent_sub_id)
             for r_id in room_nodes:
                 if r_id != entrance_node_id:
-                    is_edge_locked = 1 if room_locked_map.get(r_id) else 0
-                    check_type = "AGI" if is_edge_locked else ""
-                    check_dc = 12 if is_edge_locked else 0
-                    db.save_world_edge(session_id, entrance_node_id, r_id, travel_minutes=ent_to_room_mins, edge_type=room_edge_type, is_locked=is_edge_locked, skill_check_type=check_type, skill_check_dc=check_dc)
+                    p_sub = room_parent_sub_map.get(r_id)
+                    if p_sub and (p_sub not in room_nodes or p_sub == r_id):
+                        log.warning("Invalid parent_sub_id '%s' for room '%s' in facility '%s'; falling back to entrance.", p_sub, r_id, p_id)
+                        p_sub = None
 
-            # Connect interior rooms to each other
-            interior_rooms = [r for r in room_nodes if r != entrance_node_id]
+                    if p_sub:
+                        is_edge_locked = 1 if room_locked_map.get(r_id) else 0
+                        check_type = "AGI" if is_edge_locked else ""
+                        check_dc = 12 if is_edge_locked else 0
+                        db.save_world_edge(session_id, p_sub, r_id, travel_minutes=1, edge_type="door", is_locked=is_edge_locked, skill_check_type=check_type, skill_check_dc=check_dc)
+                    else:
+                        is_edge_locked = 1 if room_locked_map.get(r_id) else 0
+                        check_type = "AGI" if is_edge_locked else ""
+                        check_dc = 12 if is_edge_locked else 0
+                        db.save_world_edge(session_id, entrance_node_id, r_id, travel_minutes=ent_to_room_mins, edge_type=room_edge_type, is_locked=is_edge_locked, skill_check_type=check_type, skill_check_dc=check_dc)
+
+            # Connect standard interior rooms to each other (excluding rooms with parent_sub_id)
+            interior_rooms = [r for r in room_nodes if r != entrance_node_id and not room_parent_sub_map.get(r)]
             for i in range(len(interior_rooms)):
                 for j in range(i + 1, len(interior_rooms)):
                     db.save_world_edge(session_id, interior_rooms[i], interior_rooms[j], travel_minutes=room_to_room_mins, edge_type=room_edge_type)
@@ -756,6 +940,7 @@ def migrate_session_to_spatial_graph(session_id: int) -> dict[str, Any]:
             return {"status": "not_found", "session_id": session_id}
 
     scenario_key = s_row["scenario"] or "high_school_drama"
+    db.set_session_schema_epoch(session_id, 2)
     ensure_session_spatial_graph_seeded(session_id, scenario_key=scenario_key)
 
     nodes = db.get_session_world_nodes(session_id)
@@ -814,7 +999,7 @@ def migrate_session_to_spatial_graph(session_id: int) -> dict[str, Any]:
     # Update session pointer
     with db.get_conn() as conn:
         conn.execute(
-            "UPDATE sessions SET current_node_id=?, focal_point='' WHERE id=?",
+            "UPDATE sessions SET current_node_id=?, focal_point='', schema_epoch=2 WHERE id=?",
             (current_node_id, session_id)
         )
 

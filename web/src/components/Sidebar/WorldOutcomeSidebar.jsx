@@ -330,6 +330,14 @@ const WorldOutcomeSidebar = ({
                   const isPartner = dialoguePartners.has(name.toLowerCase().trim());
                   const clothing = typeof npc === 'object' ? npc?.clothing_status : null;
                   const anomTag = typeof npc === 'object' ? (npc?.anomalous_npc_tag || npc?.basic_info?.anomalous_npc_tag) : null;
+                  const isAnomaly = Boolean(
+                    typeof npc === 'object' && (
+                      npc?.is_anomalous_entity ||
+                      npc?.npc_type === 'anomaly' ||
+                      npc?.social_role_type === 'anomaly' ||
+                      anomTag === 'anomaly_entity'
+                    )
+                  );
                   const statusEffects = (typeof npc === 'object' && Array.isArray(npc?.status_effects) ? npc.status_effects : []).filter(eff => {
                     const str = (typeof eff === 'string' ? eff : (eff?.name || '')).trim();
                     const low = str.toLowerCase();
@@ -385,7 +393,7 @@ const WorldOutcomeSidebar = ({
 
                   const excMeter = actorExc?.meter !== undefined && actorExc?.meter !== null ? Number(actorExc.meter) : null;
                   const isExcActive = Boolean(actorExc?.active || physExc?.active || (excMeter !== null && excMeter > 0));
-                  const showExcitement = isExcActive && excMeter !== null;
+                  const showExcitement = !isAnomaly && isExcActive && excMeter !== null;
 
                   return (
                     <div
@@ -393,6 +401,8 @@ const WorldOutcomeSidebar = ({
                       className={`flex flex-col gap-1.5 p-2 rounded-lg border text-xs transition-all shadow-sm ${
                         isPartner
                           ? 'bg-purple-950/45 border-purple-500/60 shadow-purple-950/40'
+                          : isAnomaly
+                          ? 'bg-amber-950/20 border-amber-700/50 hover:border-amber-600/70'
                           : 'bg-black/50 border-neutral-800/90 hover:border-neutral-700 hover:bg-black/70'
                       }`}
                     >
@@ -400,56 +410,101 @@ const WorldOutcomeSidebar = ({
                       <div className="flex items-center justify-between gap-1.5">
                         <button
                           type="button"
-                          onClick={() => onSelectContact && onSelectContact(name)}
+                          onClick={() => !isAnomaly && onSelectContact && onSelectContact(name)}
                           className={`inline-flex items-center gap-1.5 font-bold transition-colors text-left truncate ${
+                            isAnomaly ? 'cursor-default text-amber-100' : ''
+                          } ${
                             isPartner
                               ? 'text-purple-200 hover:text-purple-100'
-                              : 'text-gray-100 hover:text-fantasy-accent'
+                              : !isAnomaly
+                              ? 'text-gray-100 hover:text-fantasy-accent'
+                              : ''
                           }`}
-                          title={onSelectContact ? `View ${name} in Codex` : name}
+                          title={
+                            isAnomaly
+                              ? `${name}${npc?.role ? ` — ${npc.role}` : ''}`
+                              : (onSelectContact ? `View ${name} in Codex` : name)
+                          }
                         >
-                          <span className={`w-2 h-2 rounded-full shrink-0 ${isPartner ? 'bg-purple-400 animate-pulse' : 'bg-emerald-400'}`} />
+                          <span
+                            className={`w-2 h-2 rounded-full shrink-0 ${
+                              isPartner
+                                ? 'bg-purple-400 animate-pulse'
+                                : isAnomaly
+                                ? 'bg-amber-400 animate-pulse'
+                                : 'bg-emerald-400'
+                            }`}
+                          />
                           <span className="truncate max-w-[150px] text-xs">{name}</span>
-                          {anomTag === 'special_agent' && (
+                          {isAnomaly && (npc?.is_disguised || npc?.uncanny_presence) && (
+                            <span className="text-[8.5px] font-mono uppercase px-1 py-0.2 rounded bg-purple-950/85 text-purple-200 border border-purple-500/60 font-bold shrink-0">
+                              🎭 {t('scene.uncanny_presence', 'Uncanny Presence')}
+                            </span>
+                          )}
+                          {isAnomaly && !(npc?.is_disguised || npc?.uncanny_presence) && (
+                            <span className="text-[8.5px] font-mono uppercase px-1 py-0.2 rounded bg-amber-950/85 text-amber-300 border border-amber-600/60 font-bold shrink-0">
+                              👁️ {t('codex.anomaly_entity', 'Anomaly')}
+                            </span>
+                          )}
+                          {!isAnomaly && anomTag === 'special_agent' && (
                             <span className="text-[8.5px] font-mono uppercase px-1 py-0.2 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-700/50 font-bold shrink-0">
                               ⚡ {t('codex.special_agent', 'Special Agent')}
                             </span>
                           )}
-                          {anomTag === 'civilian' && (
+                          {!isAnomaly && anomTag === 'civilian' && (
                             <span className="text-[8.5px] font-mono uppercase px-1 py-0.2 rounded bg-slate-900/80 text-slate-300 border border-slate-700/60 font-semibold shrink-0">
                               {t('codex.civilian', 'Civilian')}
                             </span>
                           )}
                           {isPartner && (
                             <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded bg-purple-900/90 text-purple-200 font-bold shrink-0">
-                              {t('scene.talking', 'Talking')}
+                              {isAnomaly && (npc?.sapience === 'compulsive' || npc?.pattern_observable)
+                                ? t('scene.observing', 'Observing')
+                                : t('scene.talking', 'Talking')}
                             </span>
                           )}
                         </button>
-                        {clothing && (
+                        {!isAnomaly && clothing && (
                           <span className="text-[10px] font-mono px-2 py-0.2 rounded bg-neutral-900/95 border border-neutral-700 text-gray-300 font-normal shrink-0">
                             {clothing}
                           </span>
                         )}
                       </div>
 
-                      {/* Row 2: Affinity Meter Bar */}
-                      <div className="space-y-0.5 pt-1 border-t border-fantasy-border/25">
-                        <div className="flex items-center justify-between text-[10px]">
-                          <span className={`font-semibold ${tier.color}`}>
-                            {tier.label}
+                      {/* Row 2: Anomaly Manifestation Metadata OR Human Affinity Meter Bar */}
+                      {isAnomaly ? (
+                        <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-amber-800/35 text-[10px]">
+                          <span className="text-amber-200/85 truncate">
+                            {(npc?.is_disguised || npc?.uncanny_presence)
+                              ? (npc?.role || t('scene.uncanny_stranger', 'Uncanny Stranger'))
+                              : (npc?.role || 'Non-Hostile Anomaly')}
                           </span>
-                          <span className="font-mono font-bold text-gray-300">
-                            {score > 0 ? `+${score}` : score}
+                          <span className="font-mono font-semibold px-1.5 py-0.2 rounded bg-black/60 border border-amber-700/50 text-amber-300 shrink-0">
+                            {(npc?.is_disguised || npc?.uncanny_presence)
+                              ? `🎭 ${t('scene.uncanny_presence', 'Uncanny Presence')}`
+                              : (npc?.dossier_revealed
+                                ? `📜 ${t('codex.dossier_revealed', 'Dossier Known')}`
+                                : (npc?.temperament || (npc?.talkable ? 'Sapient' : (npc?.sapience === 'compulsive' ? 'Compulsive' : 'Observed'))))}
                           </span>
                         </div>
-                        <div className="h-1.5 w-full bg-black/80 rounded-full overflow-hidden border border-fantasy-border/40">
-                          <div 
-                            className={`h-full ${tier.bg} transition-all duration-300`}
-                            style={{ width: `${Math.max(5, Math.min(100, ((score + 100) / 400) * 100))}%` }}
-                          />
+                      ) : (
+                        <div className="space-y-0.5 pt-1 border-t border-fantasy-border/25">
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className={`font-semibold ${tier.color}`}>
+                              {tier.label}
+                            </span>
+                            <span className="font-mono font-bold text-gray-300">
+                              {score > 0 ? `+${score}` : score}
+                            </span>
+                          </div>
+                          <div className="h-1.5 w-full bg-black/80 rounded-full overflow-hidden border border-fantasy-border/40">
+                            <div 
+                              className={`h-full ${tier.bg} transition-all duration-300`}
+                              style={{ width: `${Math.max(5, Math.min(100, ((score + 100) / 400) * 100))}%` }}
+                            />
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       {/* Row 3: Excitement Meter (When Applicable) */}
                       {showExcitement && (

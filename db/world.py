@@ -69,6 +69,16 @@ def upsert_lorebook_entity(session_id: int, entity_type: str, name: str,
                     scen = s_row["scenario"] if s_row and s_row["scenario"] else "fantasy"
             except Exception:
                 scen = "fantasy"
+            if not gender and session_id:
+                try:
+                    import db
+                    p_gen = db.get_session_player_gender(session_id)
+                    from scenario_data import should_skew_female_npcs
+                    if should_skew_female_npcs(scen, p_gen):
+                        import random
+                        gender = "female" if random.random() < (2.0 / 3.0) else "male"
+                except Exception:
+                    pass
             name = matched_name or namegen.generate_person_name(scen, gender=gender)
             if role_title.lower() not in (description or "").lower():
                 description = f"{role_title} — {description or ''}".strip(" —")
@@ -387,33 +397,9 @@ def get_session_locations(session_id: int) -> list[dict]:
     return synthesized
 
 
-async def update_missing_lorebook_embeddings(session_id: int):
-    """Asynchronously batch embed any lorebook entries that lack embeddings."""
-    with get_conn() as conn:
-        rows = conn.execute("SELECT id, name, description FROM lorebook WHERE session_id=? AND (embedding_json IS NULL OR embedding_json = '[]')", (session_id,)).fetchall()
-        
-    if not rows:
-        return
-        
-    import asyncio
-    from llm_client import get_embedding
-    import json
-    import logging
-    
-    log = logging.getLogger("hikayat.db.world")
-    
-    async def embed_row(r):
-        text = f"{r['name']}: {r['description']}"
-        emb = await get_embedding(text)
-        return r['id'], emb
-        
-    results = await asyncio.gather(*(embed_row(r) for r in rows))
-    
-    with get_conn() as conn:
-        for row_id, emb in results:
-            if emb:
-                conn.execute("UPDATE lorebook SET embedding_json=? WHERE id=?", (json.dumps(emb), row_id))
-        conn.commit()
+async def update_missing_lorebook_embeddings(session_id: int) -> None:
+    """Deprecated no-op: Lorebook retrieval uses deterministic keyword matching without external HTTP embeddings."""
+    return None
 
 
 # =========================================================================
@@ -531,6 +517,55 @@ def update_world_node_state(session_id: int, node_id: str, updates: dict) -> dic
     return cur_state
 
 
+def get_world_node_props_state(session_id: int, node_id: str) -> dict[str, dict]:
+    """Retrieves sparse props_state dictionary for a node from world_nodes.state_json."""
+    st = get_world_node_state(session_id, node_id)
+    props_st = st.get("props_state")
+    if isinstance(props_st, dict):
+        return props_st
+    return {}
+
+
+def update_world_node_prop_delta(session_id: int, node_id: str, prop_name: str, delta: dict) -> dict:
+    """Merges a delta into props_state for a prop in world_nodes.state_json.
+    Normalizes prop key via _slugify to prevent casing and whitespace desynchronization.
+    """
+    if not session_id or not node_id or not prop_name:
+        return {}
+    from mechanics.world.locations.seeds import slugify_location
+    prop_key = slugify_location(prop_name)
+    cur_state = get_world_node_state(session_id, node_id)
+    props_state = dict(cur_state.get("props_state") or {})
+    prop_cur = dict(props_state.get(prop_key) or {})
+    prop_cur.update(delta or {})
+    props_state[prop_key] = prop_cur
+    cur_state["props_state"] = props_state
+    update_world_node_state(session_id, node_id, cur_state)
+    return prop_cur
+
+
+def get_session_schema_epoch(session_id: int) -> int:
+    """Returns the schema_epoch for a session.
+    If the session exists in DB and has schema_epoch set, returns it.
+    If no session row exists (e.g. synthetic test session), defaults to 2 (current epoch).
+    """
+    if not session_id:
+        return 2
+    with get_conn() as conn:
+        row = conn.execute("SELECT schema_epoch FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        if row is not None:
+            return int(row["schema_epoch"] or 1)
+    return 2
+
+
+def set_session_schema_epoch(session_id: int, epoch: int = 2) -> None:
+    """Sets schema_epoch for a session."""
+    if not session_id:
+        return
+    with get_conn() as conn:
+        conn.execute("UPDATE sessions SET schema_epoch = ? WHERE id = ?", (epoch, session_id))
+
+
 def get_session_world_nodes(session_id: int) -> list[dict]:
     """Retrieves all spatial graph nodes for a session ordered by hierarchy."""
     with get_conn() as conn:
@@ -613,8 +648,9 @@ def _sync_location_to_spatial_graph(
         # Initial bulk seed will seed the full graph
         return
 
+    from mechanics.world.locations.seeds import slugify_location as _slugify
     from mechanics.world.locations.graph_seeder import (
-        _slugify, infer_node_category, infer_node_privacy,
+        infer_node_category, infer_node_privacy,
         infer_is_enclosed, infer_is_transit_hub, infer_access_tier,
         infer_curfew_window
     )

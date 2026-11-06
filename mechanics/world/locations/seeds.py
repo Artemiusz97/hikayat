@@ -22,9 +22,11 @@ def _load_seeds() -> Dict[str, Any]:
             _LOCATION_SEEDS_CACHE = {}
     return _LOCATION_SEEDS_CACHE
 
-def _slugify(text: str) -> str:
+def slugify_location(text: str) -> str:
     cleaned = re.sub(r"[^\w\s-]", "", str(text or "").lower()).strip()
     return re.sub(r"[-\s]+", "_", cleaned) or "loc"
+
+_slugify = slugify_location
 
 TAG_TO_LOCATION_SEED_KEY = {
     "space": "sci_fi",
@@ -42,6 +44,10 @@ TAG_TO_LOCATION_SEED_KEY = {
     "fantasy": "fantasy",
     "urban_fantasy": "anomalous_incursions",
     "anomalous_incursions": "anomalous_incursions",
+    "anomalous_high_school": "anomalous_high_school",
+    "nsfw_gore_anomalous_high_school": "anomalous_high_school",
+    "furry_anomalous_high_school": "anomalous_high_school",
+    "nsfw_furry_gore_anomalous_high_school": "anomalous_high_school",
 }
 
 def _filter_seed_zones_for_nsfw(zones: list[dict], allow_nsfw: bool) -> list[dict]:
@@ -201,8 +207,14 @@ def get_discreet_locations_for_scenario(scenario_key: str = "high_school_drama",
     return results
 
 def is_school_scenario(scenario_key: str) -> bool:
-    """Checks if scenario is an academic/school setting."""
+    """Checks if scenario is an academic/school setting.
+
+    The Anomalous High hybrid is deliberately excluded: it runs on the Anomalous Incursions
+    city topology and opts into campus systems via `scenario_data.has_school_campus_mechanics()`.
+    """
     scen = str(scenario_key or "").lower().strip()
+    if "anomalous_high_school" in scen:
+        return False
     if any(k in scen for k in ("high_school", "school", "furry_high_school", "academy")):
         return True
     try:
@@ -409,6 +421,37 @@ def get_session_agency_hq_name(session_id: int = 0, scenario_key: str = "urban_a
     return generate_agency_hq_name(scenario=scenario_key, hash_val=h_val)
 
 
+def get_session_private_agency_name(session_id: int = 0, scenario_key: str = "anomalous_incursions", agency_index: int = 1) -> str:
+    """Deterministically resolves the private agency organization name for a session."""
+    from namegen import generate_private_agency_name
+    h_val = int(session_id) if session_id else 1
+    if agency_index == 2:
+        priv_1_name = generate_private_agency_name(scenario_key, hash_val=h_val, agency_index=1)
+        priv_2_name = generate_private_agency_name(scenario_key, hash_val=h_val, agency_index=2)
+        if priv_2_name == priv_1_name:
+            priv_2_name = generate_private_agency_name(scenario_key, hash_val=h_val + 99, agency_index=3)
+        return priv_2_name
+    return generate_private_agency_name(scenario_key, hash_val=h_val, agency_index=1)
+
+
+def get_session_private_agency_hq_name(session_id: int = 0, scenario_key: str = "anomalous_incursions", agency_index: int = 1) -> str:
+    """Deterministically resolves the private agency Tier-2 HQ facility name for a session."""
+    target_nid = f"loc_private_hq_{agency_index}"
+    if session_id:
+        try:
+            node = db.get_world_node(session_id, target_nid)
+            if node and node.get("name"):
+                return str(node["name"])
+        except Exception:
+            pass
+    from namegen import format_org_acronym
+    p_name = get_session_private_agency_name(session_id, scenario_key, agency_index=agency_index)
+    p_acr = format_org_acronym(p_name)
+    if agency_index == 2:
+        return f"{p_acr} Field Office HQ" if p_acr else f"{p_name} Office HQ"
+    return f"{p_acr} Corporate Tower HQ" if p_acr else f"{p_name} Tower HQ"
+
+
 def is_urban_anomalous_scenario(scenario_key: str = "") -> bool:
     """Checks if the scenario uses the Anomalous Incursions / Urban Fantasy procedural city topology."""
     s = str(scenario_key or "").lower().strip()
@@ -479,9 +522,9 @@ def inject_anomalous_faction_hq_facilities(zones: list[dict], session_id: int = 
     synd_name = generate_clandestine_syndicate_name(scenario_key, hash_val=h_val)
 
     priv_1_acronym = format_org_acronym(priv_1_name)
-    priv_1_hq = f"{priv_1_acronym} Tower HQ" if priv_1_acronym else f"{priv_1_name} HQ"
+    priv_1_hq = f"{priv_1_acronym} Corporate Tower HQ" if priv_1_acronym else f"{priv_1_name} Tower HQ"
     priv_2_acronym = format_org_acronym(priv_2_name)
-    priv_2_hq = f"{priv_2_acronym} Operations HQ" if priv_2_acronym else f"{priv_2_name} HQ"
+    priv_2_hq = f"{priv_2_acronym} Field Office HQ" if priv_2_acronym else f"{priv_2_name} Office HQ"
 
     urban_core_zones = ["zone_city_center", "zone_downtown", "zone_uptown"]
     p1_zone = urban_core_zones[h_val % 3]
@@ -497,62 +540,62 @@ def inject_anomalous_faction_hq_facilities(zones: list[dict], session_id: int = 
             "sub_locations": [
                 {
                     "id": "sub_priv1_entrance",
-                    "name": "Corporate Security Lobby & Entrance",
+                    "name": "Corporate Atrium & Biometric Lobby",
                     "is_entrance": 1,
-                    "props": ["Biometric Turnstiles", "Reception Concierge Desk", "Executive Directory Display", "Leather Waiting Lounge"],
+                    "props": ["Biometric Glass Turnstiles", "Marble Concierge Desk", "Executive Floor Directory", "Panoramic Atrium Fountain"],
                 },
                 {
                     "id": "sub_priv1_dispatch",
-                    "name": "Executive Contract & Tactical Dispatch Wing",
-                    "props": ["Holographic Contract Board", "Client Briefing Table", "Encrypted Dispatch Terminal", "Priority Threat Ticker"],
+                    "name": "Executive Contract & Telemetry Floor",
+                    "props": ["Holographic Portfolio Wall", "Executive Briefing Table", "Encrypted Telemetry Console", "Global Breach Ticker"],
                 },
                 {
                     "id": "sub_priv1_armory",
-                    "name": "Syndicate Tactical Armory & Requisition Depot",
+                    "name": "In-House R&D Ordnance & Prototype Vault",
                     "access_tier": "restricted",
-                    "props": ["Quartermaster Counter", "Anomalous Ordnance Racks", "Ammunition Lockers", "Weapon Calibration Bench"],
+                    "props": ["Proprietary Quartermaster Desk", "Serialized Prototype Racks", "Smart-Linked Ammo Lockers", "Laser Ballistic Bench"],
                 },
                 {
                     "id": "sub_priv1_outfitter",
-                    "name": "Bespoke Ballistic Outfitter & Tailoring Atelier",
+                    "name": "Proprietary Exo-Weave & Ballistic Atelier",
                     "access_tier": "restricted",
-                    "props": ["Ballistic Mannequin Row", "Kevlar Tailoring Counter", "Warded Trenchcoat Racks", "Fitting Mirror Booth"],
+                    "props": ["Exo-Weave Mannequin Row", "Custom Aramid Tailoring Pod", "Corporate Tech-Duster Racks", "3D Body-Scan Fitting Booth"],
                 },
                 {
                     "id": "sub_priv1_medbay",
-                    "name": "Corporate Trauma & Psychic Detox Clinic",
+                    "name": "Corporate Trauma & Neural-Cleanse Suite",
                     "access_tier": "restricted",
-                    "props": ["Trauma Stabilization Pod", "Psychic Cleansing Chair", "Stim-Pack Dispensary Counter", "Bio-Scan Console"],
+                    "props": ["Automated Trauma Pod", "Neural Detox Recliner", "Proprietary Nano-Med Dispenser", "Biometric Vitals Array"],
                 },
                 {
                     "id": "sub_priv1_canteen",
-                    "name": "Skyline Executive Espresso Bar & Canteen",
+                    "name": "Skyline Executive Espresso & Dining Lounge",
                     "access_tier": "restricted",
-                    "props": ["Marble Espresso Counter", "Panoramic Window Booths", "Chef's Hot-Plate Station", "Executive Wine & Tea Rack"],
+                    "props": ["Italian Marble Espresso Bar", "Skyline Observation Booths", "Private Chef's Tasting Counter", "Filtered Sparkling Water Tap"],
                 },
                 {
                     "id": "sub_priv1_research",
-                    "name": "Proprietary Relic R&D & Appraisal Division",
+                    "name": "In-House Anomalous R&D & Fabrication Lab",
                     "access_tier": "restricted",
-                    "props": ["Lead-Glass Analysis Hood", "Resonance Spectrometer", "Catalogued Relic Vault", "Lead Researcher's Terminal"],
+                    "props": ["Cleanroom Fabrication Arm", "Resonance Mass Spectrometer", "Proprietary Core Containment Hood", "Chief Scientist's Terminal"],
                 },
                 {
                     "id": "sub_priv1_training",
-                    "name": "VR Tactical & Resonance Calibration Range",
+                    "name": "Holographic VR Kill-House & Calibration Deck",
                     "access_tier": "restricted",
-                    "props": ["Live-Fire Ballistic Lanes", "Holographic Breach Simulator", "Resonance Output Meter", "Weapon Maintenance Rack"],
+                    "props": ["Acoustic-Damped Gauss Lanes", "Full-Dive VR Breach Arena", "Telemetry Recoil Rig", "Prototype Diagnostics Rack"],
                 },
                 {
                     "id": "sub_priv1_quarters",
-                    "name": "Operative Penthouse Suites & Rest Quarters",
+                    "name": "Executive Penthouse Operative Suites",
                     "access_tier": "restricted",
-                    "props": ["Memory-Foam Suite Bed", "Plush Leather Sofa", "Private Locker & Wardrobe", "Cityscape Balcony Window"],
+                    "props": ["King-Size Memory-Foam Bed", "Designer Leather Lounge", "Climate-Controlled Gear Closet", "Floor-to-Ceiling Skyline Glass"],
                 },
                 {
                     "id": "sub_priv1_vault",
-                    "name": "Sub-Basement Corporate Containment & Quarantine Vault",
+                    "name": "Sub-Basement Cryo-Stasis Containment Vault",
                     "access_tier": "restricted",
-                    "props": ["Reinforced Blast Airlock", "Suppression Stasis Cells", "Black-Box Relic Lockers", "Security Overwatch Console"],
+                    "props": ["Biometric Blast Airlock", "Cryo-Stasis Suppression Pods", "Corporate Black-Box Safes", "Automated Turret Overwatch"],
                 },
             ],
         },
@@ -563,62 +606,62 @@ def inject_anomalous_faction_hq_facilities(zones: list[dict], session_id: int = 
             "sub_locations": [
                 {
                     "id": "sub_priv2_entrance",
-                    "name": "Executive Security Lobby & Entrance",
+                    "name": "Walk-Up Commercial Foyer & Reception Desk",
                     "is_entrance": 1,
-                    "props": ["Biometric Turnstiles", "Executive Reception Desk", "Operations Status Wall", "Visitor Screening Lounge"],
+                    "props": ["Frosted-Glass Suite Door", "Buzz-In Intercom Panel", "Cluttered Reception Counter", "Cracked Vinyl Waiting Chairs"],
                 },
                 {
                     "id": "sub_priv2_dispatch",
-                    "name": "Executive Contract & Tactical Dispatch Wing",
-                    "props": ["Holographic Contract Board", "Tactical Briefing Holotable", "Encrypted Dispatch Terminal", "Municipal Bid Monitor"],
+                    "name": "Corkboard Case Room & Dispatch Bullpen",
+                    "props": ["Pin-Covered Bounty Corkboard", "Mismatched Metal Office Desks", "Dry-Erase Case Schedule", "Police-Band Radio Scanner"],
                 },
                 {
                     "id": "sub_priv2_armory",
-                    "name": "Syndicate Tactical Armory & Requisition Depot",
+                    "name": "Padlocked Back-Room Gun Cage & Surplus Locker",
                     "access_tier": "restricted",
-                    "props": ["Quartermaster Counter", "Heavy Anomalous Weapon Racks", "Ordnance Lockers", "Ballistic Test Bench"],
+                    "props": ["Chain-Link Supply Cage", "Multi-Vendor Surplus Crates", "Dented Steel Gun Lockers", "Vise-Clamped Cleaning Bench"],
                 },
                 {
                     "id": "sub_priv2_outfitter",
-                    "name": "Bespoke Ballistic Outfitter & Tailoring Atelier",
+                    "name": "Surplus Tactical Rack & Patching Corner",
                     "access_tier": "restricted",
-                    "props": ["Tactical Suit Display", "Armored Tailoring Bench", "Field Rigging Lockers", "Fitting Mirror Alcove"],
+                    "props": ["Rolling Garment Pipe-Rack", "Assorted Surplus Kevlar Bins", "Heavy-Duty Patching Sewing Machine", "Scuffed Full-Length Mirror"],
                 },
                 {
                     "id": "sub_priv2_medbay",
-                    "name": "Corporate Trauma & Psychic Detox Clinic",
+                    "name": "Back-Office First-Aid Cot & Triage Closet",
                     "access_tier": "restricted",
-                    "props": ["Surgical Recovery Bed", "Neural Cleansing Pod", "Combat Pharmacy Counter", "Vital Telemetry Array"],
+                    "props": ["Folding Vinyl Exam Cot", "Wall-Mounted First-Aid Tin", "Pharmacy Bandage & Painkiller Boxes", "Secondhand Portable Defibrillator"],
                 },
                 {
                     "id": "sub_priv2_canteen",
-                    "name": "Skyline Executive Espresso Bar & Canteen",
+                    "name": "Fluorescent Breakroom & Drip-Coffee Kitchenette",
                     "access_tier": "restricted",
-                    "props": ["Brushed-Steel Espresso Bar", "Skyline Dining Tables", "High-Protein Ration Counter", "Private Lounge Booth"],
+                    "props": ["Burnt-Glass Drip Coffee Pot", "Humming Sticker-Covered Mini-Fridge", "Wobbly Formica Break Table", "Bulk Cup-Noodle & Biscuit Shelf"],
                 },
                 {
                     "id": "sub_priv2_research",
-                    "name": "Proprietary Relic R&D & Appraisal Division",
+                    "name": "Cluttered Appraisal Bench & Secondhand Lab",
                     "access_tier": "restricted",
-                    "props": ["Containment Glovebox", "Aetheric Frequency Scanner", "Secured Specimen Drawers", "Appraisal Ledger Terminal"],
+                    "props": ["Solder-Scarred Wooden Workbench", "Used Oscilloscope & EMF Meter", "Masking-Tape Mason Jar Samples", "Dog-Eared Occult Reference Binders"],
                 },
                 {
                     "id": "sub_priv2_training",
-                    "name": "VR Tactical & Resonance Calibration Range",
+                    "name": "Soundproofed Cellar Firing Lane & Sandbag Pit",
                     "access_tier": "restricted",
-                    "props": ["Modular Kill-House Floor", "Firing Range Dividers", "Psychic Dampening Pylons", "Combat Telemetry Desk"],
+                    "props": ["Egg-Crate Foam Wall Panels", "Clipped Paper Silhouette Targets", "Stacked Sandbag Bullet Backstop", "Box of Reused Ear Protectors"],
                 },
                 {
                     "id": "sub_priv2_quarters",
-                    "name": "Operative Penthouse Suites & Rest Quarters",
+                    "name": "Partitioned Bunk Room & Folding Cots",
                     "access_tier": "restricted",
-                    "props": ["Memory-Foam Suite Bed", "Plush Leather Sofa", "Armored Gear Locker", "Nightstand Intercom"],
+                    "props": ["Creaking Canvas Folding Cots", "Padlocked Surplus Gym Lockers", "Rattling Pedestal Box Fan", "Overloaded Coat-Hook Strip"],
                 },
                 {
                     "id": "sub_priv2_vault",
-                    "name": "Sub-Basement Corporate Containment & Quarantine Vault",
+                    "name": "Reinforced Cellar Boiler-Room Evidence Cage",
                     "access_tier": "restricted",
-                    "props": ["Hydraulic Vault Door", "High-Threat Stasis Pods", "Classified Evidence Safe", "Containment Control Desk"],
+                    "props": ["Padlocked Iron-Grate Door", "Chalk-Salt Surplus Floor Safes", "Lead-Lined Hardware Toolboxes", "Flickering Wire-Caged Worklight"],
                 },
             ],
         },
@@ -1384,7 +1427,7 @@ def get_room_contextual_props(room_name: str, primary_name: str = "") -> list[st
     r_clean = str(room_name or primary_name or "Room").strip()
 
     if "homeroom" in low or "class" in low or "lecture" in low:
-        return ["Classroom Sliding Door", "Student Desks", "Teacher's Podium", "Back Window"]
+        return ["Front Chalkboard", "Student Desks", "Teacher's Podium", "Back Window"]
     if "library" in low or "archive" in low or "reading" in low:
         return ["Study Tables", "Book Aisles", "Librarian Counter", "Quiet Reading Alcove"]
     if "lab" in low or "chemistry" in low or "science" in low or "research" in low:
@@ -1394,11 +1437,11 @@ def get_room_contextual_props(room_name: str, primary_name: str = "") -> list[st
     if "council" in low or "office" in low or "dispatch" in low or "executive" in low:
         return ["Executive Desk", "Central Meeting Table", "Filing Cabinets & Safe", "Window Ledge"]
     if "roof" in low:
-        return ["Rooftop Benches", "Chain-Link Fence Line", "Behind Water Tank", "Heavy Access Door"]
+        return ["Rooftop Benches", "Chain-Link Fence Line", "Behind Water Tank", "Ventilation Duct Housing"]
     if "gate" in low or "checkpoint" in low:
-        return ["Entrance Path & Archway", "Gate Checkpoint", "Notice Board & Banners", "Front Bicycle Racks"]
+        return ["Main Academy Stone Walkway", "Campus Security Guard Post", "Notice Board & Banners", "Front Bicycle Racks"]
     if "foyer" in low or "lobby" in low or "shoe locker" in low:
-        return ["Shoe Lockers", "Main Entrance Lobby", "Announcement Board", "Reception Bench"]
+        return ["Shoe Lockers", "Terrazzo Floor Plaque", "Announcement Board", "Reception Bench"]
     if "hallway" in low or "corridor" in low:
         return ["Behind the Stairwell", "Locker Row", "Noticeboard Wall", "Corridor Window"]
     if "gym" in low or "court" in low:
@@ -1406,9 +1449,9 @@ def get_room_contextual_props(room_name: str, primary_name: str = "") -> list[st
     if "field" in low or "track" in low or "stadium" in low:
         return ["Running Track", "Field Bleachers", "Under the Bleachers", "Soccer Goal Posts"]
     if "pool" in low or "aquatic" in low:
-        return ["Poolside Deck", "Starting Blocks", "Swim Club Locker Bench", "Footbath Threshold"]
+        return ["Poolside Deck", "Starting Blocks", "Swim Club Locker Bench", "Footbath Water Basin"]
     if "dojo" in low or "martial" in low or "tatami" in low:
-        return ["Central Tatami Mat", "Wooden Weapon Rack", "Meditation Altar", "Sliding Doors"]
+        return ["Central Tatami Mat", "Wooden Weapon Rack", "Meditation Altar", "Tatami Seating Area"]
     if "shed" in low or "alley" in low:
         return ["Hangout Benches", "Behind Equipment Shed", "Chain-Link Fence Corner", "Stacked Crates"]
     if "dining" in low or "cafeteria" in low or "canteen" in low:
@@ -1442,10 +1485,10 @@ def get_room_contextual_props(room_name: str, primary_name: str = "") -> list[st
     if "arcade" in low or "game" in low:
         return ["Fighting Game Cabinets", "Rhythm Game Stage", "Prize Redemption Counter", "Token Change Machine"]
     if "shop" in low or "store" in low or "market" in low:
-        return ["Checkout Counter", "Display Aisles", "Window Display", "Stockroom Door"]
+        return ["Checkout Counter", "Display Aisles", "Window Display", "Stockroom Partition"]
     if "tavern" in low or "inn" in low or "pub" in low or "bar" in low:
         return ["Bar Counter", "Hearthside Tables", "Secluded Corner Booth", "Bounty Notice Board"]
-    return [f"{r_clean} Entrance", f"{r_clean} Central Area", "Secluded Corner Alcove"]
+    return [f"{r_clean} Main Area", f"{r_clean} Focal Point", "Secluded Corner Alcove", "Inspection Feature"]
 
 
 def get_node_props(
@@ -1512,6 +1555,104 @@ def get_node_props(
                             return [desk_name if pr == "Player's Desk" else str(pr) for pr in s["props"]]
 
     return get_room_contextual_props(node_name or nid, parent_name)
+
+
+_HIDING_KEYWORDS = (
+    "locker", "wardrobe", "closet", "under bed", "bed frame", "curtain", "curtains",
+    "crate", "crates", "trunk", "alcove", "vent", "ventilation", "shadow", "shadowed",
+    "catwalk", "foliage", "bush", "bushes", "shrub", "shrubs", "tree", "dumpster",
+    "screen", "sofa", "booth", "cabinet", "canopy", "rubble", "tapestry", "partition"
+)
+
+_CLUE_KEYWORDS = (
+    "desk", "filing", "bookshelf", "bookshelves", "noticeboard", "blackboard", "chalkboard",
+    "terminal", "computer", "diary", "journal", "safe", "document", "documents",
+    "archive", "podium", "drawer", "drawers", "cubby", "cubbies", "shelf", "shelves",
+    "whiteboard", "ledger", "logbook", "bulletin", "binder", "clipboard"
+)
+
+_SENSORY_KEYWORDS = (
+    "window", "skylight", "balcony", "clockface", "clock", "fountain", "chime",
+    "incense", "fireplace", "hearth", "radio", "speaker", "stream", "exhaust",
+    "candelabra", "lantern", "candle", "chandelier", "stained glass", "waterfall",
+    "bell", "organ", "piano"
+)
+
+_HEAVY_COVER_KEYWORDS = (
+    "locker", "wardrobe", "crate", "crates", "trunk", "sofa", "dumpster", "rubble",
+    "concrete", "boulder", "counter", "pillar", "barricade", "safe"
+)
+
+_LIGHT_COVER_KEYWORDS = (
+    "desk", "podium", "planter", "alcove", "partition", "booth", "screen", "bench",
+    "table", "cabinet", "bookshelf"
+)
+
+
+def classify_node_prop(prop_name: str) -> dict:
+    """Classifies a prop by archetype, stealth affordances, clue potential, and cover."""
+    low = str(prop_name or "").lower().strip()
+    is_hiding = any(k in low for k in _HIDING_KEYWORDS)
+    is_clue = any(k in low for k in _CLUE_KEYWORDS)
+    is_sensory = any(k in low for k in _SENSORY_KEYWORDS)
+
+    if any(k in low for k in _HEAVY_COVER_KEYWORDS):
+        cover_bonus = 4
+    elif any(k in low for k in _LIGHT_COVER_KEYWORDS) or is_hiding:
+        cover_bonus = 2
+    else:
+        cover_bonus = 0
+
+    if is_hiding:
+        archetype = "stealth_hiding"
+    elif is_clue:
+        archetype = "clue_source"
+    elif is_sensory:
+        archetype = "sensory"
+    else:
+        archetype = "interactive"
+
+    return {
+        "name": prop_name,
+        "archetype": archetype,
+        "is_hiding_spot": is_hiding,
+        "is_clue_container": is_clue,
+        "is_sensory": is_sensory,
+        "cover_bonus": cover_bonus,
+    }
+
+
+def get_detailed_node_props(
+    session_id: int,
+    node_id: str,
+    scenario_key: str = "high_school_drama",
+    char_name: str = "",
+) -> list[dict]:
+    """Merges static scenario seed props for node_id with runtime sparse delta from SQLite.
+    Normalizes prop keys via _slugify to prevent case/spacing mismatches.
+    """
+    raw_props = get_node_props(session_id, node_id, scenario_key=scenario_key, char_name=char_name)
+    import db
+    deltas = db.get_world_node_props_state(session_id, node_id) if session_id else {}
+
+    detailed: list[dict] = []
+    for p_name in raw_props:
+        info = classify_node_prop(p_name)
+        slug = _slugify(p_name)
+        delta = deltas.get(slug) or deltas.get(p_name) or {}
+        merged = dict(info)
+        merged["slug"] = slug
+        merged["delta"] = delta
+        merged["is_searched"] = bool(delta.get("is_searched", False))
+        merged["is_looted"] = bool(delta.get("is_looted", False))
+        merged["clues_found"] = list(delta.get("clues_found", []))
+        merged["cover_active"] = bool(delta.get("cover_active", False))
+        for k, v in delta.items():
+            if k not in merged:
+                merged[k] = v
+        detailed.append(merged)
+    return detailed
+
 
 
 

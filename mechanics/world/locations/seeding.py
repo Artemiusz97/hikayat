@@ -828,6 +828,12 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
                 primary_name = get_session_urban_facility_name(session_id, z_id, p_id, primary_name, scenario_key, char_name)
             primary_name = resolve_session_location_tokens(session_id, primary_name, scenario_key, char_name)
 
+            from .graph_seeder import infer_facility_atmosphere
+            fac_atmosphere = infer_facility_atmosphere(
+                p_id, primary_name, z_id, primary,
+                session_id=session_id, scenario_key=scenario_key, char_name=char_name
+            ) or atmosphere
+
             for sub in primary.get("sub_locations") or []:
 
                 s_id = sub.get("id", "")
@@ -866,7 +872,7 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
                     "sub_name": sub_name,
 
-                    "atmosphere": atmosphere,
+                    "atmosphere": fac_atmosphere,
 
                     "is_dynamic": 0
 

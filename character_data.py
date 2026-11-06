@@ -172,10 +172,11 @@ def get_all_class_templates() -> dict[str, dict]:
 
 def get_class_templates(scenario: str | None = None, starting_faction: str | None = None) -> dict[str, dict]:
     try:
-        from scenario_data import is_anomalous_incursions_scenario
+        from scenario_data import is_anomalous_incursions_scenario, is_anomalous_high_school_scenario
         if is_anomalous_incursions_scenario(scenario):
             from mechanics.combat.items.anomalous_gear import get_anomalous_faction_classes
-            return get_anomalous_faction_classes(starting_faction or "public_agency")
+            default_fac = "student_freelancer" if is_anomalous_high_school_scenario(scenario) else "public_agency"
+            return get_anomalous_faction_classes(starting_faction or default_fac)
     except Exception:
         pass
     templates = load_class_templates()
@@ -227,12 +228,13 @@ def get_starting_weapons(scenario: str | None = None, starting_faction: str | No
     if not scenario or scenario == "all":
         return get_all_starting_weapons()
     try:
-        from scenario_data import is_non_combat_scenario, is_anomalous_incursions_scenario
+        from scenario_data import is_non_combat_scenario, is_anomalous_incursions_scenario, is_anomalous_high_school_scenario
         if is_non_combat_scenario(scenario):
             return []
         if is_anomalous_incursions_scenario(scenario):
             from mechanics.combat.items.anomalous_gear import get_anomalous_faction_weapons
-            return get_anomalous_faction_weapons(starting_faction or "public_agency")
+            default_fac = "student_freelancer" if is_anomalous_high_school_scenario(scenario) else "public_agency"
+            return get_anomalous_faction_weapons(starting_faction or default_fac)
     except Exception:
         pass
     if scenario in weapons:
@@ -277,6 +279,9 @@ def get_starter_gear_by_class(scenario: str = "fantasy", char_class: str = "", g
         raw_templates = load_class_templates()
         key = _resolve_template_scenario_key(scenario, raw_templates)
         class_info = (raw_templates.get(scenario) or {}).get(char_class) or (raw_templates.get(key) or {}).get(char_class)
+    if not class_info:
+        all_templates = get_all_class_templates()
+        class_info = all_templates.get(char_class)
     if not class_info:
         # Fallback to fantasy if class not found in given scenario
         scen_classes = get_class_templates("fantasy")
@@ -338,11 +343,45 @@ def get_starter_gear_by_class(scenario: str = "fantasy", char_class: str = "", g
             gear_map[slot] = None
 
     try:
-        from scenario_data import is_non_combat_scenario
+        from scenario_data import is_non_combat_scenario, is_school_scenario
         if is_non_combat_scenario(scenario):
+            from mechanics.combat.items.clothing import can_equip_item_in_scenario
             gear_map["Weapon"] = None
             gear_map["Shield"] = None
             gear_map["Armor"] = None
+            is_school = is_school_scenario(scenario) or any(k in str(scenario).lower() for k in ("school", "academy"))
+            if is_school:
+                gear_map["Head"] = None
+                gear_map["Gloves"] = None
+            else:
+                for slot_name in ("Head", "Gloves"):
+                    slot_entry = gear_map.get(slot_name)
+                    if slot_entry and not can_equip_item_in_scenario(slot_entry, slot_name, scenario)[0]:
+                        gear_map[slot_name] = None
+
+            top_entry = gear_map.get("Top")
+            if not top_entry or not can_equip_item_in_scenario(top_entry, "Top", scenario)[0]:
+                gear_map["Top"] = (
+                    ("School Uniform Blazer", "Standard academy uniform blazer.", 1)
+                    if is_school
+                    else ("Casual Shirt", "Comfortable everyday shirt.", 1)
+                )
+
+            bottom_entry = gear_map.get("Bottom")
+            if not bottom_entry or not can_equip_item_in_scenario(bottom_entry, "Bottom", scenario)[0]:
+                if is_school:
+                    bottom_name = "School Uniform Slacks" if is_male else "School Uniform Skirt"
+                    gear_map["Bottom"] = (bottom_name, "Standard academy uniform wear.", 1)
+                else:
+                    gear_map["Bottom"] = ("Casual Trousers", "Comfortable everyday trousers.", 1)
+
+            shoe_entry = gear_map.get("Shoes")
+            if not shoe_entry or not can_equip_item_in_scenario(shoe_entry, "Shoes", scenario)[0]:
+                gear_map["Shoes"] = (
+                    ("Standard School Loafers", "Polished uniform loafers suitable for daily academy wear.", 1)
+                    if is_school
+                    else ("Comfortable Sneakers", "Flexible and comfortable everyday walking sneakers.", 1)
+                )
     except Exception:
         pass
 
@@ -363,14 +402,21 @@ def get_starting_items(scenario: str = "fantasy", char_class: str = "", starting
         key = _resolve_template_scenario_key(scenario, raw_templates)
         class_info = (raw_templates.get(scenario) or {}).get(char_class) or (raw_templates.get(key) or {}).get(char_class)
     if not class_info:
+        all_templates = get_all_class_templates()
+        class_info = all_templates.get(char_class)
+    if not class_info:
         scen_classes = get_class_templates("fantasy")
         class_info = scen_classes.get(char_class, {})
 
     try:
         from scenario_data import is_anomalous_incursions_scenario
         if is_anomalous_incursions_scenario(scenario):
-            from mechanics.combat.items.anomalous_gear import get_anomalous_faction_starting_items
-            anom_items = list(get_anomalous_faction_starting_items(scenario, starting_faction or "public_agency"))
+            from mechanics.combat.items.anomalous_gear import (
+                get_anomalous_faction_starting_items,
+                infer_anomalous_faction_from_class,
+            )
+            eff_fac = starting_faction or infer_anomalous_faction_from_class(char_class) or "public_agency"
+            anom_items = list(get_anomalous_faction_starting_items(scenario, eff_fac))
             raw_items = class_info.get("starting_items", [])
             for entry in raw_items:
                 if isinstance(entry, list) and len(entry) >= 4 and str(entry[1]).lower() in ("tool", "quest"):

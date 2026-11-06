@@ -107,6 +107,42 @@ export const THEMES = {
     font: { display: "'Cinzel', serif", sans: "'Inter', system-ui, sans-serif" },
     swatch: ['#16120a', '#ffd34d', '#fff2b0'],
   },
+  crystal: {
+    labelKey: 'theme.names.crystal', label: 'Liquid Crystal', emoji: '💎', scheme: 'light', manualOnly: true,
+    neutral: [222, 0.02], accent: [220, 1.25],
+    surface: {
+      bg: '0.925 0.032 220',
+      deep: '0.875 0.045 224',
+      panel: '0.965 0.012 222',
+      border: '0.82 0.035 222',
+      accent: '0.48 0.18 222',
+      accentHover: '0.42 0.20 222',
+      ink: '0.995 0.003 220',
+      paper: '0.16 0.025 225',
+      shadow: '0.35 0.08 230',
+    },
+    alpha: { panel: 0.68, bg: 0.60 },
+    font: { display: "'Space Grotesk', 'Inter', sans-serif", sans: "'Inter', system-ui, sans-serif" },
+    swatch: ['#bae6fd', '#0284c7', '#f0f9ff'],
+  },
+  obsidian: {
+    labelKey: 'theme.names.obsidian', label: 'Obsidian Fluid', emoji: '🌑', scheme: 'dark', manualOnly: true,
+    neutral: [260, 0.018], accent: [195, 1.3],
+    surface: {
+      bg: '0.09 0.02 260',
+      deep: '0.055 0.015 260',
+      panel: '0.135 0.024 255',
+      border: '0.26 0.042 260',
+      accent: '0.78 0.17 195',
+      accentHover: '0.85 0.15 190',
+      ink: '0.05 0.01 260',
+      paper: '0.99 0.008 220',
+      shadow: '0.015 0.02 260',
+    },
+    alpha: { panel: 0.65, bg: 0.70 },
+    font: { display: "'Space Grotesk', 'Inter', sans-serif", sans: "'Inter', system-ui, sans-serif" },
+    swatch: ['#080a10', '#38bdf8', '#1a2234'],
+  },
 };
 
 export const DEFAULT_THEME = 'ember';

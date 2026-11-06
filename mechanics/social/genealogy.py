@@ -939,86 +939,6 @@ def generate_friends_and_rivals(
     return (friends, rivals)
 
 
-def _get_raw_contact_gender_and_grade(session_id: int, name_query: str) -> tuple[str, str]:
-    """Safely looks up gender and grade without triggering get_contact post-processing recursion."""
-    if not session_id or not name_query:
-        return ("", "")
-    try:
-        import db
-        with db.get_conn() as conn:
-            q_clean = name_query.strip().lower()
-            row = conn.execute(
-                """SELECT gender, basic_info_json FROM contacts
-                   WHERE session_id=? AND (lower(npc_id)=? OR lower(name)=? OR lower(name) LIKE ?)
-                   LIMIT 1""",
-                (session_id, q_clean, q_clean, f"{q_clean}%")
-            ).fetchone()
-            if row:
-                g = str(row["gender"] or "").strip()
-                gr = ""
-                try:
-                    b = json.loads(row["basic_info_json"] or "{}")
-                    gr = b.get("grade", "")
-                except Exception:
-                    pass
-                return (g, gr)
-    except Exception:
-        pass
-    return ("", "")
-
-
-def _register_named_sibling(
-    session_id: int,
-    clean_surname: str,
-    sib_name: str,
-    children_dict: dict,
-    child_race: str,
-    child_appearance: dict,
-    grade_order: dict
-) -> bool:
-    """Helper to register an explicitly named sibling into the children roster deterministically."""
-    if not sib_name:
-        return False
-    s_first, _ = extract_surname_and_firstname(sib_name)
-    if not s_first or s_first.lower() in children_dict:
-        return False
-
-    s_gender, s_grade = _get_raw_contact_gender_and_grade(session_id, sib_name)
-    if not s_gender:
-        s_gender, s_grade = _get_raw_contact_gender_and_grade(session_id, s_first)
-    if not s_gender:
-        if namegen.is_known_female_name(s_first):
-            s_gender = "female"
-        elif namegen.is_known_male_name(s_first):
-            s_gender = "male"
-        else:
-            s_gender = "female" if any(f in s_first.lower() for f in ["sofia", "sophia", "maya", "elena", "chloe", "hana", "seraphina", "alina", "anna", "ann", "amanda", "yea-ji", "zihan", "mia", "ayane", "su-bin"]) else "male"
-
-    if not s_grade:
-        s_grade = "Senior" if s_first.lower() in ("amanda", "ann", "andrew") else ("Freshman" if s_first.lower() in ("maya", "su-bin") else "Junior")
-
-    s_role = "Drama Club Lead" if "amanda" in s_first.lower() else ("Library Assistant" if "ann" in s_first.lower() else ("Student" if "maya" in s_first.lower() else "Student"))
-    s_full = namegen.format_cultural_full_name(
-        s_first, clean_surname, gender=s_gender,
-        deterministic_seed=f"sib_linked_{s_first}_{clean_surname}"
-    ).strip()
-
-    children_dict[s_first.lower()] = {
-        "name": s_full,
-        "first_name": s_first,
-        "surname": clean_surname,
-        "grade": s_grade,
-        "grade_val": grade_order.get(s_grade, 2),
-        "gender": s_gender,
-        "role": s_role,
-        "race": child_race,
-        "status": "Alive",
-        "sibling_name": sib_name,
-        "features": f"{child_appearance.get('eyes', 'Amber')} eyes, {child_appearance.get('hair', 'Golden-Blonde')} hair"
-    }
-    return True
-
-
 # ==============================================================================
 # CANONICAL SHARED HOUSEHOLD LINEAGE ENGINE (ARCHITECTURE 1)
 # ==============================================================================
@@ -2646,4 +2566,21 @@ def build_topic_aware_npc_context(
         )
 
     return "\n".join(sections)
+
+
+def get_or_generate_family_tree(
+    session_id: int,
+    contact: Dict[str, Any],
+    scenario: str = "fantasy",
+) -> List[Dict[str, Any]]:
+    """Returns materialized family members for `contact`, generating household relations if missing."""
+    rel = (contact.get("relations") or {}) if isinstance(contact, dict) else {}
+    if not rel.get("family"):
+        try:
+            rel = ensure_contact_relations(contact, session_id=session_id, scenario=scenario) or {}
+        except Exception:
+            rel = {}
+    fam = rel.get("family")
+    return list(fam) if isinstance(fam, list) else []
+
 

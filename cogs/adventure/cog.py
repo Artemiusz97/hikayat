@@ -1,6 +1,8 @@
+from __future__ import annotations
 from .game_loop_mixin import GameLoopMixin
 from .merchant_mixin import MerchantMixin
 from .faction_mixin import FactionMixin
+from .world_pulse_mixin import WorldPulseMixin
 import asyncio
 import json
 import logging
@@ -45,8 +47,8 @@ from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as 
 from mechanics.combat.items import parse_item_effect, apply_item_to_target
 import unicodedata
 
-from .embeds import *
 from .embeds import (
+    MODE_LABELS, build_world_map_embed, prepare_discord_image, scene_embed, sync_scene_embed,
     _RESULT_COLORS, _RESULT_TITLES, _build_bounties_embed, _build_bounty_board_embed,
     _build_campaign_goals_embed, _build_caseboard_embed, _build_history_embed,
     _build_main_quest_embed, _build_quest_log_embed, _choice_button_label,
@@ -60,7 +62,7 @@ from .embeds import (
 
 from .views import *
 
-class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
+class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, WorldPulseMixin):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._last_picks: dict[int, tuple[int, dict]] = {}
@@ -133,8 +135,8 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
                 await interaction.response.send_message(msg, ephemeral=True)
             return
 
-        embed = _build_quest_log_embed(session_id, tab="Main Quest")
-        view = QuestLogView(session_id, current_tab="Main Quest")
+        view, embed = await create_quest_log_view_and_embed(session_id, tab="Main Quest")
+
         if interaction.response.is_done():
             await interaction.followup.send(embed=embed, view=view)
         else:
@@ -160,8 +162,8 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
                 await interaction.response.send_message(msg, ephemeral=True)
             return
 
-        embed = _build_quest_log_embed(session_id, tab="Caseboard")
-        view = QuestLogView(session_id, current_tab="Caseboard")
+        view, embed = await create_quest_log_view_and_embed(session_id, tab="Caseboard")
+
         if interaction.response.is_done():
             await interaction.followup.send(embed=embed, view=view)
         else:
@@ -276,6 +278,14 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin):
     @adventure_group.command(name="map", description="View the World Map and explore discovered regions")
     async def adventure_map(self, interaction: discord.Interaction):
         await self._do_map(interaction)
+
+    @app_commands.command(name="world", description="View active World Events and discovered local Rumors")
+    async def world_cmd(self, interaction: discord.Interaction):
+        await self._do_world_pulse(interaction)
+
+    @adventure_group.command(name="world_pulse", description="View active World Events and discovered local Rumors")
+    async def adventure_world_pulse(self, interaction: discord.Interaction):
+        await self._do_world_pulse(interaction)
 
     @adventure_group.command(name="hub", description="Access your communication device and network hub (Smartphone, Cyberdeck, Comms Pad)")
     async def adventure_hub(self, interaction: discord.Interaction):

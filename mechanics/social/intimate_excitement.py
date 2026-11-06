@@ -1308,14 +1308,15 @@ def classify_intimate_act(
 def calculate_excitement_delta(
     base_stim: int,
     endurance: int,
-    sensitive_spot_bonus: bool = False
+    sensitive_spot_bonus: bool = False,
+    event_arousal_multiplier: float = 1.0,
 ) -> int:
     """Calculates single-turn excitement delta scaled inversely by endurance."""
     if base_stim <= 0:
         return 0
     safe_end = max(1, min(10, endurance))
     multiplier = 10.0 / (5.0 + safe_end)
-    raw_delta = int(round(base_stim * multiplier))
+    raw_delta = int(round(base_stim * multiplier * max(0.5, min(2.0, float(event_arousal_multiplier or 1.0)))))
     if sensitive_spot_bonus:
         raw_delta += 6  # +6% flat bonus for targeting revealed sensitive spot
     return max(5, min(35, raw_delta))
@@ -1722,6 +1723,14 @@ def compute_excitement_step(
         act_type = "foreplay_nongenital"
 
     player_stimulated = any(cl["player_stimulated"] for cl in partner_classifications.values())
+    _ev_arousal_mult = 1.0
+    if isinstance(session, dict) and session.get("id"):
+        try:
+            from mechanics.world.world_events.modifiers import compute_arousal_event_multiplier
+            _snap_ev = session.get("_world_events_snapshot") or db.get_world_events_snapshot(int(session["id"]))
+            _ev_arousal_mult = compute_arousal_event_multiplier(_snap_ev, location_node_id=str(session.get("current_node_id") or ""))
+        except Exception:
+            _ev_arousal_mult = 1.0
     any_partner_stimulated_now = any(cl.get("partner_stimulated") for cl in partner_classifications.values())
     p_delta = 0
     if male_spent:
@@ -1730,7 +1739,7 @@ def compute_excitement_step(
         p_data["idle_turns"] = 0
         p_data["aroused_turns"] = 3
         base_p = 18 if act_type in ("penetrative", "anal_give", "anal_receive", "oral_receive", "oral_mutual") else 14
-        p_delta = calculate_excitement_delta(base_p, p_data.get("endurance", 10))
+        p_delta = calculate_excitement_delta(base_p, p_data.get("endurance", 10), event_arousal_multiplier=_ev_arousal_mult)
     elif is_sensual_action:
         p_data["idle_turns"] = 0
         p_data["aroused_turns"] = 3
@@ -1785,7 +1794,8 @@ def compute_excitement_step(
             n_delta = calculate_excitement_delta(
                 base_n,
                 n_d.get("endurance", 10),
-                sensitive_spot_bonus=cl["sensitive_spot_matched"]
+                sensitive_spot_bonus=cl["sensitive_spot_matched"],
+                event_arousal_multiplier=_ev_arousal_mult,
             )
         elif len(partner_actor_tuples) > 1 and act_type not in ("none", "foreplay_nongenital"):
             # Passive spectator warmth or secondary foreplay warmth in active multi-partner scene

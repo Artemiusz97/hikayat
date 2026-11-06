@@ -34,7 +34,11 @@ async def _default_generate_class_starter_equipment(
     **kwargs,
 ) -> dict:
     """Generates starter equipment loadout with optional LLM dynamic generation and graceful fallback."""
-    starting_faction = str(kwargs.get("starting_faction") or "public_agency")
+    raw_fac = str(kwargs.get("starting_faction") or "").strip()
+    if not raw_fac and scenario_data.is_anomalous_incursions_scenario(scenario):
+        from mechanics.combat.items.anomalous_gear import infer_anomalous_faction_from_class
+        raw_fac = infer_anomalous_faction_from_class(char_class) or "public_agency"
+    starting_faction = raw_fac or "public_agency"
     if force_dynamic or (class_description and len(class_description.strip()) > 3):
         try:
             import game_engine
@@ -55,6 +59,7 @@ async def _default_generate_class_starter_equipment(
                             starting_faction=starting_faction,
                             gender=gender or "Male",
                             race=race or "Human",
+                            char_class=char_class,
                         )
                     return res
         except Exception as e:
@@ -421,8 +426,13 @@ async def get_class_templates(scenario: Optional[str] = None, tags: Optional[str
                 for c_name, c_info in f_classes.items()
             }
             for f_key, f_classes in ANOMALOUS_FACTION_CLASSES.items()
+            if scenario_data.is_anomalous_high_school_scenario(resolved_scenario) or f_key != "student_freelancer"
         }
-        faction_starting_weapons = dict(ANOMALOUS_FACTION_WEAPONS)
+        faction_starting_weapons = {
+            f_key: wpns
+            for f_key, wpns in ANOMALOUS_FACTION_WEAPONS.items()
+            if scenario_data.is_anomalous_high_school_scenario(resolved_scenario) or f_key != "student_freelancer"
+        }
     elif not scenario or scenario == "all":
         classes = all_classes
         starting_weapons = all_starting_weapons
@@ -484,13 +494,36 @@ async def get_class_templates(scenario: Optional[str] = None, tags: Optional[str
         "Beastfolk / Anthro", "Half-Beast / Hybrid", "Cyborg", "Android / Synth",
         "Mutant", "Alien", "Dragonkin", "Angel", "Demon", "Tiefling"
     ]
+    is_anom_tpl = scenario_data.is_anomalous_incursions_scenario(resolved_scenario)
+    anom_attrs: list[str] = []
+    anom_archs: list[str] = []
+    anom_meds: list[str] = []
+    med_synergy: dict[str, list[str]] = {}
+    if is_anom_tpl:
+        from mechanics.combat.spells.awakened_kits import (
+            ANOMALOUS_ATTRIBUTES,
+            COMBAT_ARCHETYPES,
+            ABILITY_MEDIUMS,
+            MEDIUM_STAT_SYNERGY,
+        )
+        anom_attrs = list(ANOMALOUS_ATTRIBUTES)
+        anom_archs = list(COMBAT_ARCHETYPES)
+        anom_meds = list(ABILITY_MEDIUMS)
+        med_synergy = {k: list(v) for k, v in MEDIUM_STAT_SYNERGY.items()}
+
     return {
         "classes": classes,
         "starting_weapons": starting_weapons,
         "faction_classes": faction_classes,
         "faction_starting_weapons": faction_starting_weapons,
         "is_non_combat": is_non_combat,
-        "is_anomalous_incursions": scenario_data.is_anomalous_incursions_scenario(resolved_scenario),
+        "is_anomalous_incursions": is_anom_tpl,
+        "is_anomalous_high_school": scenario_data.is_anomalous_high_school_scenario(resolved_scenario),
+        "student_grades": ["Freshman", "Sophomore", "Junior", "Senior"] if scenario_data.is_anomalous_high_school_scenario(resolved_scenario) else [],
+        "anomalous_attributes": anom_attrs,
+        "combat_archetypes": anom_archs,
+        "ability_mediums": anom_meds,
+        "medium_stat_synergy": med_synergy,
         "all_classes": all_classes,
         "all_starting_weapons": all_starting_weapons,
         "resolved_scenario": resolved_scenario,
@@ -517,6 +550,10 @@ async def preview_character_gear(req: PreviewGearRequest):
     race = req.race or "Human"
     weapon_name = (req.starting_weapon or "").strip()
     starting_faction = (req.starting_faction or "").strip()
+    if scenario_data.is_anomalous_high_school_scenario(scen_key) and (
+        getattr(req, "origin_mode", "") == "student" or starting_faction in ("student_freelancer", "student")
+    ):
+        starting_faction = "student_freelancer"
 
     is_non_combat = scenario_data.is_non_combat_scenario(scen_key)
     is_anomalous = scenario_data.is_anomalous_incursions_scenario(scen_key)
@@ -555,9 +592,39 @@ async def preview_character_gear(req: PreviewGearRequest):
         raw_loadout.pop("Armor", None)
     normalized = _normalize_loadout_dict(raw_loadout)
     if is_non_combat and isinstance(normalized, dict):
+        from mechanics.combat.items.clothing import can_equip_item_in_scenario
         normalized.pop("Weapon", None)
         normalized.pop("Shield", None)
         normalized.pop("Armor", None)
+        is_school = scenario_data.is_school_scenario(scen_key)
+        if is_school:
+            normalized.pop("Head", None)
+            normalized.pop("Gloves", None)
+        else:
+            for slot in ("Head", "Gloves"):
+                item = normalized.get(slot)
+                if item and not can_equip_item_in_scenario(item, slot, scen_key)[0]:
+                    normalized.pop(slot, None)
+
+        shoes_item = normalized.get("Shoes")
+        if not shoes_item or not can_equip_item_in_scenario(shoes_item, "Shoes", scen_key)[0]:
+            normalized["Shoes"] = (
+                {
+                    "name": "Standard School Loafers",
+                    "description": "Polished uniform loafers suitable for daily academy wear.",
+                    "effect": "Polished uniform loafers suitable for daily academy wear.",
+                    "slot_cost": 1,
+                    "item_type": "Shoes",
+                }
+                if is_school
+                else {
+                    "name": "Comfortable Sneakers",
+                    "description": "Flexible and comfortable everyday walking sneakers.",
+                    "effect": "Flexible and comfortable everyday walking sneakers.",
+                    "slot_cost": 1,
+                    "item_type": "Shoes",
+                }
+            )
     starting_items = [
         {"name": item[0], "item_type": item[1], "effect": item[2], "description": item[2], "slot_cost": item[3]}
         for item in (cd.get_starting_items(scen_key, chosen_class, starting_faction=starting_faction or "public_agency") or [])
@@ -653,9 +720,10 @@ async def get_character(user_id: int):
     is_non_combat = is_non_combat_scenario(char_scen)
     combat_attrs = cd.calculate_combat_attributes(char_dict, equipped_list)
 
-    from mechanics.combat.spells import get_spell
+    from mechanics.combat.spells.awakened_kits import get_actor_spell
     known_sids = await adb(db.get_learned_spells, canonical_id)
-    known_spells = [get_spell(sid) for sid in known_sids if get_spell(sid)]
+    skill_prog = db.get_skill_progress(char_dict)
+    known_spells = [sp for sid in known_sids if (sp := get_actor_spell(sid, skill_prog))]
 
     return {
         "character": char_dict,
@@ -706,6 +774,10 @@ async def create_character(req: CharacterCreateRequest):
             appearance_payload.pop("penis_size", None)
         if req.asset_texture:
             appearance_payload["asset_texture"] = req.asset_texture
+        if getattr(req, "origin_mode", None):
+            appearance_payload["origin_mode"] = str(req.origin_mode).strip().lower()
+        if getattr(req, "student_grade", None):
+            appearance_payload["student_grade"] = str(req.student_grade).strip()
 
         await adb(
             db.create_character,
@@ -720,9 +792,16 @@ async def create_character(req: CharacterCreateRequest):
             race=req.race or "Human",
             race_description=req.race_description or "",
             appearance=appearance_payload if appearance_payload else None,
+            attribute=req.attribute,
+            combat_archetype=req.combat_archetype,
+            ability_medium=req.ability_medium,
         )
 
         req_starting_fac = str(getattr(req, "starting_faction", "") or "public_agency").strip()
+        if scenario_data.is_anomalous_high_school_scenario(scen_key) and (
+            getattr(req, "origin_mode", "") == "student" or req_starting_fac in ("student_freelancer", "student")
+        ):
+            req_starting_fac = "student_freelancer"
         if isinstance(req.starter_loadout, dict) and len(req.starter_loadout) > 0:
             starter_loadout = req.starter_loadout
         else:
@@ -788,30 +867,33 @@ async def create_character(req: CharacterCreateRequest):
             except Exception:
                 pass
             try:
-                from mechanics.combat.items.anomalous_gear import get_anomalous_starting_innate_abilities, sync_equipped_anomalous_spells
-                from mechanics.combat.spells.registry import register_spell
-                existing_sp = await adb(db.get_learned_spells, user_id)
-                if not existing_sp:
-                    innate_defs = await adb(
+                from mechanics.combat.spells.kits import get_anomalous_starting_innate_abilities
+                from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
+                from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
+                ch_cur = await adb(db.get_character, user_id)
+                prog = db.get_skill_progress(ch_cur) if ch_cur else {}
+                if not prog.get("innate_spells"):
+                    c_attr = (ch_cur or {}).get("attribute") or getattr(req, "attribute", None)
+                    c_arch = (ch_cur or {}).get("combat_archetype") or getattr(req, "combat_archetype", None)
+                    c_med = (ch_cur or {}).get("ability_medium") or getattr(req, "ability_medium", None)
+                    if c_attr and c_arch and c_med:
+                        innate_ids = list(build_awakened_kit_ids(c_attr, c_arch, c_med))
+                    else:
+                        innate_ids = await adb(
                         get_anomalous_starting_innate_abilities,
                         chosen_class,
                         scen_key,
                         req.class_description or "",
                     )
-                    innate_ids = []
-                    for sp_d in (innate_defs or []):
-                        if isinstance(sp_d, dict) and sp_d.get("id"):
-                            await adb(register_spell, sp_d)
-                            innate_ids.append(sp_d["id"])
-                    if innate_ids:
-                        ch_cur = await adb(db.get_character, user_id)
-                        prog = db.get_skill_progress(ch_cur) if ch_cur else {}
+                    if innate_ids and isinstance(innate_ids, list):
                         prog["innate_spells"] = list(innate_ids)
                         await adb(db.set_skill_progress, user_id, prog)
-                        await adb(db.set_learned_spells, user_id, innate_ids)
+                        cur_learned = await adb(db.get_learned_spells, user_id) or []
+                        merged = list(dict.fromkeys(list(innate_ids) + list(cur_learned)))
+                        await adb(db.set_learned_spells, user_id, merged)
                 await adb(sync_equipped_anomalous_spells, user_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed setting anomalous innate spells for user {user_id}: {e}")
 
         created = await adb(db.get_character, user_id)
         return {"success": True, "character": _format_character_dict(created), "resolved_scenario": scen_key}
@@ -843,6 +925,22 @@ async def regenerate_character_gear(req: RegenerateGearRequest):
     class_desc = char_dict.get("class_description") or ""
     gender = char_dict.get("gender") or "Male"
 
+    resolved_faction = (req.starting_faction or "").strip()
+    if not resolved_faction and scenario_data.is_anomalous_incursions_scenario(scen_key):
+        active_sid = char_dict.get("active_session_id")
+        if active_sid:
+            try:
+                from mechanics.social.factions import get_anomalous_faction_state
+                f_state = await adb(get_anomalous_faction_state, int(active_sid), canonical_id)
+                cand_fac = str(f_state.get("faction_archetype_key") or "").strip()
+                if cand_fac in ("public_agency", "private_agency_1", "private_agency_2", "monastic_order", "freelancer"):
+                    resolved_faction = cand_fac
+            except Exception:
+                pass
+        if not resolved_faction:
+            from mechanics.combat.items.anomalous_gear import infer_anomalous_faction_from_class
+            resolved_faction = infer_anomalous_faction_from_class(chosen_class) or "public_agency"
+
     loadout = await _invoke_starter_equipment_generator(
         chosen_class,
         scen_key,
@@ -850,6 +948,7 @@ async def regenerate_character_gear(req: RegenerateGearRequest):
         class_description=class_desc,
         gender=gender,
         race=char_dict.get("race") or "Human",
+        starting_faction=resolved_faction or "public_agency",
         force_dynamic=True,
     )
     # Remove old equipped starter items so inventory does not fill with orphaned gear

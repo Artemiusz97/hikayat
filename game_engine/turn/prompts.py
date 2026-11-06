@@ -1,3 +1,4 @@
+from __future__ import annotations
 from .constants import *
 import db
 import re
@@ -13,8 +14,16 @@ import asyncio
 from game_engine.turn_context import TurnContext
 from models.llm_schemas import TurnOutcome, ActionClassification, OpeningScene
 
-def _build_quest_and_bounty_directives(session: dict, ctx) -> tuple[str, str]:
+def _build_quest_and_bounty_directives(session: dict, ctx, include_fow: bool = True) -> tuple[str, str]:
     """Extracted Phase 2A Builder for Story Quests and Bounties."""
+    try:
+        from mechanics.social.physical_state import is_erotic_intimate_contact
+        _ps_q = (session.get("physical_state") if isinstance(session, dict) else None) or {}
+        _ic_q = str(_ps_q.get("intimate_contact", "") if isinstance(_ps_q, dict) else "")
+        if is_erotic_intimate_contact(_ic_q):
+            return "", ""
+    except Exception:
+        pass
     cur_chapter = db.get_session_chapter(session["id"])
 
     campaign_goals = db.get_session_campaign_goals(session["id"])
@@ -40,6 +49,17 @@ def _build_quest_and_bounty_directives(session: dict, ctx) -> tuple[str, str]:
         ctx.invalidate("story_quest")
     story_quest = ctx.story_quest
 
+    wp_map: dict[tuple[str, int | None], dict] = {}
+    if ctx and getattr(ctx, "active_waypoints", None):
+        for w in ctx.active_waypoints:
+            if isinstance(w, dict) and w.get("quest_id"):
+                s_id = w.get("sub_obj_id") if w.get("sub_obj_id") is not None else w.get("sub_objective_id")
+                try:
+                    s_id_int = int(s_id) if s_id is not None else None
+                except (TypeError, ValueError):
+                    s_id_int = None
+                wp_map[(str(w["quest_id"]), s_id_int)] = w
+
     if story_quest:
 
         clues_str = story_quest.get("current_clues") or ""
@@ -51,17 +71,29 @@ def _build_quest_and_bounty_directives(session: dict, ctx) -> tuple[str, str]:
 
 
         sub_objs = story_quest.get("sub_objectives", []) or []
-
         sub_obj_lines = []
-
         for so in sub_objs:
-
+            so_id = so.get("id")
             box = "[x]" if so.get("completed") else "[ ]"
-
             arch_str = f" [{so['archetype']}]" if so.get("archetype") else ""
-
-            sub_obj_lines.append(f"  {box} Sub-Quest #{so.get('id', '?')}{arch_str}: {so.get('text', '')}")
-
+            wp_ctx = ""
+            if not so.get("completed") and so_id is not None and session.get("id"):
+                sq_qid = str(story_quest.get("quest_id") or "")
+                so_id_int = int(so_id)
+                active_wp = (
+                    so.get("active_waypoint")
+                    or wp_map.get((sq_qid, so_id_int))
+                    or (db.get_active_waypoint(session["id"], sq_qid, so_id_int) if not ctx else None)
+                )
+                if active_wp:
+                    wps = so.get("waypoints") or db.get_quest_waypoints(session["id"], story_quest.get("quest_id", ""), so_id) or []
+                    tot_st = len(wps) if wps else 3
+                    st_idx = active_wp.get("stage_index", 1)
+                    st_lbl = active_wp.get("stage_label", "")
+                    st_loc = active_wp.get("target_location", "")
+                    loc_part = f" @ {st_loc}" if st_loc else ""
+                    wp_ctx = f" -> [ACTIVE STAGE {st_idx}/{tot_st}: {st_lbl}{loc_part}]"
+            sub_obj_lines.append(f"  {box} Sub-Quest #{so.get('id', '?')}{arch_str}: {so.get('text', '')}{wp_ctx}")
         sub_objs_context = "\n".join(sub_obj_lines) if sub_obj_lines else "  (No sub-quests listed)"
 
 
@@ -150,9 +182,12 @@ def _build_quest_and_bounty_directives(session: dict, ctx) -> tuple[str, str]:
 
         for b in active_bounties[:3]:
 
-            qid = b.get("quest_id", "")
+            qid = str(b.get("quest_id") or "")
 
-            active_wp = db.get_active_waypoint(session["id"], qid, sub_obj_id=None) if qid else None
+            active_wp = (
+                wp_map.get((qid, None))
+                or (db.get_active_waypoint(session["id"], qid, sub_obj_id=None) if qid and not ctx else None)
+            )
 
             wp_info = ""
 
@@ -181,6 +216,20 @@ def _build_quest_and_bounty_directives(session: dict, ctx) -> tuple[str, str]:
     else:
 
         side_bounties_context = "No active side bounties."
+
+    if include_fow and session and session.get("id"):
+        try:
+            from game_engine.quest_agency import build_fog_of_war_quest_prompt_block
+            fow_block = build_fog_of_war_quest_prompt_block(
+                int(session["id"]),
+                session=session,
+                in_intimate_scene=False,
+            )
+            if fow_block:
+                story_quest_context = f"{story_quest_context}\n\n{fow_block}".strip()
+        except Exception:
+            pass
+
     return story_quest_context, side_bounties_context
 
 def _is_social_or_non_combat_action(a: dict, session: dict | None = None) -> bool:
@@ -373,22 +422,53 @@ def _build_player_actions_text(actions: list, session: dict | None = None) -> st
 
     return "\n".join(action_lines)
 
-async def _build_history_context(session: dict, ctx, budget=None) -> str:
-    """Extracted Phase 2A Builder for Memory and History."""
+async def _build_history_context(
+    session: dict,
+    ctx,
+    budget=None,
+    actions: list | None = None,
+    effective_location: str = "",
+    pre_turn_stage_npcs: list | None = None,
+) -> str:
+    """Extracted Phase 2A Builder for Memory and History (deterministic 2-signal recall, 0 HTTP embeddings)."""
     import game_engine
-    # Build hybrid FTS5 query context for past arc memory retrieval
 
-    q_loc = session.get('current_location', '')
+    q_loc = str(effective_location or session.get("current_location") or "")
+    raw_npcs = pre_turn_stage_npcs if pre_turn_stage_npcs is not None else (session.get("current_npcs") or [])
+    present_npcs = [
+        n.get("name", "") if isinstance(n, dict) else str(n)
+        for n in raw_npcs
+        if n
+    ]
+    q_npcs = " ".join(present_npcs)
+    q_quest = ctx.story_quest.get("objective", "") if (ctx and getattr(ctx, "story_quest", None)) else ""
+    q_actions = " ".join(
+        str(a.get("label") or "")
+        for a in (actions or [])
+        if isinstance(a, dict) and a.get("label")
+    )
+    query_context = " ".join(part for part in (q_loc, q_npcs, q_quest, q_actions) if part).strip()
 
-    q_npcs = " ".join(n.get("name", "") if isinstance(n, dict) else str(n) for n in session.get("current_npcs", []))
+    active_quest_ids: list[str] = []
+    seen_qids: set[str] = set()
+    if ctx and getattr(ctx, "story_quest", None) and ctx.story_quest.get("quest_id"):
+        sq_id = str(ctx.story_quest["quest_id"])
+        active_quest_ids.append(sq_id)
+        seen_qids.add(sq_id)
+    for q_obj in (getattr(ctx, "active_quests", None) or []) + (getattr(ctx, "active_bounties", None) or []):
+        if isinstance(q_obj, dict) and q_obj.get("quest_id"):
+            qid_str = str(q_obj["quest_id"])
+            if qid_str not in seen_qids:
+                active_quest_ids.append(qid_str)
+                seen_qids.add(qid_str)
 
-    q_quest = ctx.story_quest.get("objective", "") if ctx.story_quest else ""
-
-    query_context = f"{q_loc} {q_npcs} {q_quest}"
-
-    from llm_client import get_embedding
-    query_embedding = await get_embedding(query_context)
-
-    hist_text = game_engine._history_text(session['history'], session_id=session.get('id'), query_context=query_context, budget=budget, query_embedding=query_embedding)
-    return hist_text, query_embedding
+    return game_engine._history_text(
+        session["history"],
+        session_id=session.get("id"),
+        query_context=query_context,
+        budget=budget,
+        present_npcs=present_npcs,
+        current_location=q_loc,
+        active_quest_ids=active_quest_ids,
+    )
 

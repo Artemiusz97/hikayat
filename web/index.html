@@ -5,12 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#1b1712" />
     <title>Hikayat - AI RPG Console</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" href="/favicon.ico" />
     <script>
       // Paint a manually-chosen theme before React boots to avoid a flash.
       (function () {
         try {
           var m = localStorage.getItem('hikayat_theme_mode');
-          var light = { daylight: 1, aero: 1 };
+          var light = { daylight: 1, aero: 1, crystal: 1 };
           if (m && m !== 'auto') {
             document.documentElement.setAttribute('data-theme', m);
             document.documentElement.setAttribute('data-scheme', light[m] ? 'light' : 'dark');

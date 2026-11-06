@@ -12,8 +12,15 @@ from llm_client import call_llm_json
 log = logging.getLogger("hikayat.phone")
 from skill_check import resolve_check, success_chance, CheckResult
 
-from .embeds import *
-from .embeds import _build_media_item_detail_embed, _build_dm_chat_embed, _build_gossip_feed_embed, _build_social_profile_embed
+from .embeds import (
+    build_media_gallery_embed,
+    build_phone_home_embed,
+    get_phone_branding,
+    _build_media_item_detail_embed,
+    _build_dm_chat_embed,
+    _build_gossip_feed_embed,
+    _build_social_profile_embed,
+)
 from .messaging import *
 
 class PhoneMainView(discord.ui.View):
@@ -368,6 +375,9 @@ class SocialFeedView(discord.ui.View):
 
         # Row 1: Refresh & Navigation
         refresh_btn = discord.ui.Button(label="Refresh Feed", emoji="🔄", style=discord.ButtonStyle.secondary, row=1)
+        world_pulse_btn = discord.ui.Button(label="World Pulse", emoji="🌐", style=discord.ButtonStyle.secondary, row=1)
+        world_pulse_btn.callback = self._open_world_pulse
+        self.add_item(world_pulse_btn)
         back_btn = discord.ui.Button(label="Phone Home", emoji="📱", style=discord.ButtonStyle.secondary, row=1)
 
         refresh_btn.callback = self._refresh_feed
@@ -433,6 +443,19 @@ class SocialFeedView(discord.ui.View):
         embed = _build_social_profile_embed(self.session_id, profile, branding)
         view = SocialProfileView(self.cog, self.session_id, self.user_id, profile, self.posts)
         await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=view)
+
+    async def _open_world_pulse(self, interaction: discord.Interaction):
+        from cogs.adventure.views.world_pulse import WorldPulseView, build_world_pulse_embed
+        from mechanics.world.world_events.engine import build_client_world_pulse_payload
+        from db import adb
+        payload = await adb(build_client_world_pulse_payload, self.session_id)
+        embed = build_world_pulse_embed(self.session_id, "all", payload=payload)
+        uid = interaction.user.id if getattr(interaction, "user", None) else self.user_id
+        view = WorldPulseView(self.session_id, uid, filter_mode="all", payload=payload)
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     async def _refresh_feed(self, interaction: discord.Interaction):
         await interaction.response.defer()

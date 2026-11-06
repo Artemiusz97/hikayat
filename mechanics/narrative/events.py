@@ -87,3 +87,4 @@ class QuestCompletedEvent:
     quest_id: str
     party_uids: list[int]
     result: dict = None
+    persist_db: bool = True

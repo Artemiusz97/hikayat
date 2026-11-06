@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <radialGradient id="quillBg" cx="50%" cy="50%" r="55%">
+      <stop offset="0%" stop-color="#26170d" />
+      <stop offset="70%" stop-color="#110d0a" />
+      <stop offset="100%" stop-color="#080605" />
+    </radialGradient>
+    <linearGradient id="quillGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="40%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#92400e" />
+    </linearGradient>
+    <linearGradient id="featherPlume" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="35%" stop-color="#f59e0b" />
+      <stop offset="70%" stop-color="#b45309" />
+      <stop offset="100%" stop-color="#78350f" />
+    </linearGradient>
+    <linearGradient id="flameTip" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="30%" stop-color="#fef08a" />
+      <stop offset="60%" stop-color="#f97316" />
+      <stop offset="100%" stop-color="#dc2626" />
+    </linearGradient>
+    <filter id="flameGlow">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Circular Outer Shield -->
+  <circle cx="32" cy="32" r="30" fill="url(#quillBg)" stroke="url(#quillGold)" stroke-width="2" />
+  
+  <!-- Subtle Arcane Orbit Ring -->
+  <circle cx="32" cy="32" r="25" fill="none" stroke="#b45309" stroke-width="1" stroke-dasharray="6 4" opacity="0.6"/>
+
+  <!-- Ink Trail / Swirl beneath the Nib -->
+  <path d="M 15 50 Q 20 54 28 52 Q 36 50 38 46" fill="none" stroke="#fbbf24" stroke-width="1.8" stroke-linecap="round" opacity="0.85"/>
+  <circle cx="15" cy="50" r="1.5" fill="#fef08a" />
+  <circle cx="21" cy="53" r="0.9" fill="#f59e0b" />
+
+  <!-- Feather Plumes (Upper Right toward Center) -->
+  <!-- Upper vane of the quill -->
+  <path d="M 50 12 C 46 16 38 18 30 25 C 24 30 21 37 19 43 C 24 38 31 35 37 27 C 44 20 48 15 50 12 Z" 
+        fill="url(#featherPlume)" stroke="#fef08a" stroke-width="0.75" />
+  
+  <!-- Feather Barb notches & details -->
+  <path d="M 46 16 L 39 21" stroke="#fef08a" stroke-width="0.8" opacity="0.7"/>
+  <path d="M 40 21 L 34 26" stroke="#fef08a" stroke-width="0.8" opacity="0.7"/>
+  <path d="M 34 27 L 29 32" stroke="#fef08a" stroke-width="0.8" opacity="0.7"/>
+  <path d="M 28 33 L 24 38" stroke="#fef08a" stroke-width="0.8" opacity="0.7"/>
+
+  <!-- Lower slender vane -->
+  <path d="M 50 12 C 48 18 43 25 35 32 C 30 36 24 41 20 45 C 22 41 25 38 30 33 C 37 26 44 19 50 12 Z" 
+        fill="#92400e" opacity="0.85" />
+
+  <!-- Central Quill Shaft / Spine -->
+  <path d="M 51 11 Q 35 27 18 45" fill="none" stroke="#fffbeb" stroke-width="1.6" stroke-linecap="round" />
+
+  <!-- Metal Nib Collar -->
+  <path d="M 18 45 L 20 47 L 17 50 L 15 48 Z" fill="#d97706" stroke="#fbbf24" stroke-width="0.8" />
+
+  <!-- Flaming Nib / Blazing Fire Tip -->
+  <g filter="url(#flameGlow)">
+    <path d="M 16 48 Q 12 50 11 53 Q 14 52 15 54 Q 17 51 18 47 Z" fill="url(#flameTip)" />
+    <circle cx="13" cy="51" r="1.2" fill="#ffffff" />
+  </g>
+  
+  <!-- Floating Ember Sparkles -->
+  <circle cx="10" cy="46" r="1" fill="#fef08a" opacity="0.9"/>
+  <circle cx="16" cy="41" r="0.8" fill="#f97316" opacity="0.8"/>
+  <circle cx="27" cy="46" r="1" fill="#fef08a" opacity="0.85"/>
+  <circle cx="48" cy="8" r="1" fill="#fbbf24" opacity="0.9"/>
+</svg>

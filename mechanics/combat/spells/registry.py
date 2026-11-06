@@ -1,5 +1,14 @@
 from __future__ import annotations
+import contextvars
 from typing import Dict, Any, List, Optional, Tuple
+
+_ACTIVE_EMPOWERED_SPELLS_CTX: contextvars.ContextVar[frozenset[str]] = contextvars.ContextVar(
+    "_ACTIVE_EMPOWERED_SPELLS_CTX", default=frozenset()
+)
+
+
+def set_active_empowered_spells_context(spell_ids: Any) -> None:
+    _ACTIVE_EMPOWERED_SPELLS_CTX.set(frozenset(str(s) for s in (spell_ids or []) if s))
 
 SPELL_REGISTRY: Dict[str, Dict[str, Any]] = {
     # -------------------------------------------------------------------------
@@ -831,19 +840,29 @@ def register_spell(spell_def: Dict[str, Any]) -> None:
 def get_spell(spell_id: str) -> Optional[Dict[str, Any]]:
     if not spell_id:
         return None
-    if spell_id in SPELL_REGISTRY:
-        return SPELL_REGISTRY[spell_id]
-    
-    # Lazy fallback: attempt to re-hydrate from database
-    try:
-        import db
-        proc_spell = db.get_procedural_spell(spell_id)
-        if proc_spell:
-            register_spell(proc_spell)
-            return proc_spell
-    except Exception:
-        pass
-    return None
+    if spell_id not in SPELL_REGISTRY and str(spell_id).startswith("awk_"):
+        try:
+            from .awakened_kits import ensure_awakened_kits_registered
+            ensure_awakened_kits_registered()
+        except Exception:
+            pass
+    sp = SPELL_REGISTRY.get(spell_id)
+    if sp is None:
+        # Lazy fallback: attempt to re-hydrate from database
+        try:
+            import db
+            proc_spell = db.get_procedural_spell(spell_id)
+            if proc_spell:
+                register_spell(proc_spell)
+                sp = proc_spell
+        except Exception:
+            pass
+    if sp is None:
+        return None
+    emp = _ACTIVE_EMPOWERED_SPELLS_CTX.get()
+    if emp and spell_id in emp:
+        return {**sp, "duplicate_empowered": True}
+    return sp
 
 def get_all_spells() -> Dict[str, Dict[str, Any]]:
     return SPELL_REGISTRY
