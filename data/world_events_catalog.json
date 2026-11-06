@@ -1,0 +1,1509 @@
+[
+  {
+    "template_key": "fantasy_aether_surge",
+    "genre_families": ["fantasy", "isekai", "dark_fantasy"],
+    "entity_type": "macro_event",
+    "event_subtype": "crisis",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"INT": 2, "PER": 1}, "price_multiplier": 1.25},
+    "locales": {
+      "en": {"title": "Aetheric Surge Across {zone}", "description": "Wild arcane currents fracture ley-lines around {zone}, causing runes and lanterns tied to {faction} to flare unpredictably.", "bounty_title": "Stabilize the Ley Conduit", "bounty_objective": "Escort arcanists into {zone} and anchor the surging ley-stone."},
+      "pl": {"title": "Skok Eteryczny w {zone}", "description": "Dzikie prądy magiczne rozrywają linie mocy wokół {zone}, przez co runy frakcji {faction} płoną niestabilnie.", "bounty_title": "Stabilizacja Węzła Mocy", "bounty_objective": "Eskortuj arkanistów do {zone} i zakotwicz kamień mocy."},
+      "ms": {"title": "Lonjakan Aeter di {zone}", "description": "Arus arka liar mengganggu garisan ley sekitar {zone}, menyebabkan lentera {faction} berkelip tidak menentu.", "bounty_title": "Stabilkan Saluran Ley", "bounty_objective": "Iringi ahli sihir ke {zone} dan kunci batu ley yang bergolak."},
+      "zh": {"title": "{zone}以太潮汐失控", "description": "狂暴的奥术乱流撕裂了{zone}周边的地脉，令{faction}布设的符文灯阵剧烈闪烁。", "bounty_title": "镇压地脉节点", "bounty_objective": "护送奥术师前往{zone}并锚定躁动的地脉核心。"},
+      "de": {"title": "Äthersprung in {zone}", "description": "Ungezähmte arkane Ströme zerreißen die Ley-Linien um {zone} und lassen die Runen von {faction} wild aufflackern.", "bounty_title": "Ley-Knoten stabilisieren", "bounty_objective": "Begleite Arkanisten nach {zone} und verankere den Ley-Stein."}
+    }
+  },
+  {
+    "template_key": "fantasy_caravan_embargo",
+    "genre_families": ["fantasy", "isekai", "dark_fantasy"],
+    "entity_type": "macro_event",
+    "event_subtype": "crisis",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 7200,
+    "modifiers": {"dc_modifiers": {"CHA": 1}, "price_multiplier": 1.4},
+    "locales": {
+      "en": {"title": "Iron Toll Blockade at {zone}", "description": "Mercenary toll-wardens aligned with {faction} have chained the trade gates of {zone}, driving merchant stalls into steep shortages.", "bounty_title": "Break the Gate Blockade", "bounty_objective": "Negotiate or force open the supply road outside {venue}."},
+      "pl": {"title": "Blokada Celna w {zone}", "description": "Najemni poborcy powiązani z {faction} zamknęli bramy handlowe {zone}, wywołując dotkliwe braki towarów.", "bounty_title": "Przełamanie Blokady", "bounty_objective": "Wynegocjuj lub wymuś otwarcie szlaku przy {venue}."},
+      "ms": {"title": "Sekatan Tol Besi di {zone}", "description": "Pengawal upahan {faction} merantai pintu dagang {zone}, menyebabkan bekalan pasar menyusut mendadak.", "bounty_title": "Pecahkan Sekatan Gerbang", "bounty_objective": "Berunding atau buka semula laluan bekalan di luar {venue}."},
+      "zh": {"title": "{zone}铁税封锁令", "description": "依附于{faction}的雇佣税官封锁了{zone}的商道城门，导致集市物资紧缺。", "bounty_title": "解除商道封锁", "bounty_objective": "通过交涉或武力打通{venue}外的补给要道。"},
+      "de": {"title": "Eiserne Zollblockade in {zone}", "description": "Söldner von {faction} haben die Handelstore von {zone} angekettet und treiben die Marktpreise in die Höhe.", "bounty_title": "Blockade durchbrechen", "bounty_objective": "Öffne durch Verhandlung oder Stärke die Versorgungsstraße vor {venue}."}
+    }
+  },
+  {
+    "template_key": "fantasy_harvest_jubilee",
+    "genre_families": ["fantasy", "isekai"],
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 7200,
+    "modifiers": {"dc_modifiers": {"CHA": -1}, "price_multiplier": 0.8, "arousal_multiplier": 1.15, "crowd_density": "high"},
+    "locales": {
+      "en": {"title": "Suncrest Harvest Jubilee", "description": "Garlands of golden wheat drape {zone} as traveling bards and {faction} brewers pour spiced cider around {venue}.", "bounty_title": "Jubilee Peacekeeping", "bounty_objective": "Keep cutpurses and rowdy duelists from spoiling the festivities at {venue}."},
+      "pl": {"title": "Święto Złotych Żniw w {zone}", "description": "Girlandy pszenicy zdobią {zone}, a wędrowni bardowie i piwowarzy {faction} rozlewają cydr wokół {venue}.", "bounty_title": "Straż Festiwalowa", "bounty_objective": "Powstrzymaj kieszonkowców i zawadiaków podczas zabawy w {venue}."},
+      "ms": {"title": "Jubli Menuai Suria di {zone}", "description": "Kalungan gandum keemasan menghiasi {zone} ketika penyair jalanan dan pembuat minuman {faction} memeriahkan {venue}.", "bounty_title": "Kawal Keamanan Jubli", "bounty_objective": "Halang penyeluk saku daripada mengganggu keramaian di {venue}."},
+      "zh": {"title": "{zone}金穗丰收庆典", "description": "金色麦穗花环装点着{zone}，游吟诗人与{faction}酿酒师在{venue}外畅饮欢歌。", "bounty_title": "庆典治安巡护", "bounty_objective": "防范扒手与闹事决斗者搅乱{venue}的庆典。"},
+      "de": {"title": "Sonnenkamm-Erntefest in {zone}", "description": "Goldene Weizengirlanden schmücken {zone}, während Barden und Brauer von {faction} rund um {venue} Würzwein ausschenken.", "bounty_title": "Festtagswache", "bounty_objective": "Halte Taschendiebe und Raufbolde von den Feierlichkeiten in {venue} fern."}
+    }
+  },
+  {
+    "template_key": "fantasy_lantern_vigil",
+    "genre_families": ["fantasy", "dark_fantasy", "isekai"],
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"AGI": -1}, "price_multiplier": 0.85, "crowd_density": "high"},
+    "locales": {
+      "en": {"title": "Night of a Thousand Lanterns", "description": "Floating paper flames drift above {zone} in remembrance of fallen heroes while {faction} hosts open banquets near {venue}.", "bounty_title": "Escort the Relic Procession", "bounty_objective": "Guard the ceremonial lantern shrine on its march through {zone}."},
+      "pl": {"title": "Noc Tysiąca Lampionów", "description": "Latające lampiony unoszą się nad {zone} ku pamięci poległych, a {faction} wydaje ucztę przy {venue}.", "bounty_title": "Eskorta Procesji", "bounty_objective": "Chroń ceremonialny relikwiarz podczas przemarszu przez {zone}."},
+      "ms": {"title": "Malam Seribu Lentera", "description": "Ribuan lentera terapung di langit {zone} memperingati wira gugur sementara {faction} membuka jamuan di {venue}.", "bounty_title": "Iringi Perarakan Relik", "bounty_objective": "Kawal keselamatan perarakan suci merentasi {zone}."},
+      "zh": {"title": "{zone}千灯祈愿夜", "description": "万千纸灯升入{zone}夜空缅怀先烈，{faction}在{venue}旁设下流水席。", "bounty_title": "护卫圣物巡游", "bounty_objective": "守护祭典灯龛安全穿行{zone}街道。"},
+      "de": {"title": "Nacht der Tausend Laternen", "description": "Schwebende Papierlaternen erhellen {zone} zum Gedenken an gefallene Helden, während {faction} nahe {venue} Tafeln aufstellt.", "bounty_title": "Reliquienprozession schützen", "bounty_objective": "Bewache den zeremoniellen Laternenschrein auf seinem Zug durch {zone}."}
+    }
+  },
+  {
+    "template_key": "fantasy_smuggled_grimoire",
+    "genre_families": ["fantasy", "dark_fantasy", "isekai"],
+    "entity_type": "rumor",
+    "event_subtype": "intrigue",
+    "is_nsfw": 0,
+    "escalation_chance": 0.30,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"PER": 1}},
+    "locales": {
+      "en": {"title": "The Stolen Seal of {faction}", "description": "Tavern whispers claim {npc} was spotted trading a wax-sealed {faction} cipher ledger behind {venue} after midnight.", "bounty_title": "Trace the Cipher Ledger", "bounty_objective": "Question witnesses near {venue} and recover the missing seal."},
+      "pl": {"title": "Skradziona Pieczęć {faction}", "description": "Plotki głoszą, że {npc} handlował nocą zapieczętowanym rejestrem {faction} na tyłach {venue}.", "bounty_title": "Ślad Szyfrowanej Księgi", "bounty_objective": "Przesłuchaj świadków w pobliżu {venue} i odzyskaj pieczęć."},
+      "ms": {"title": "Mohor Curian {faction}", "description": "Bisikan kedai mendakwa {npc} dilihat menukar buku kod {faction} di belakang {venue} selepas tengah malam.", "bounty_title": "Jejak Buku Kod", "bounty_objective": "Soal saksi berhampiran {venue} dan dapatkan semula mohor yang hilang."},
+      "zh": {"title": "{faction}失窃密印传闻", "description": "酒馆流言称有人目击{npc}午夜后在{venue}后巷交易盖有{faction}火漆的密册。", "bounty_title": "追查密册下落", "bounty_objective": "走访{venue}附近的目击者并追回失窃印信。"},
+      "de": {"title": "Das gestohlene Siegel von {faction}", "description": "Tavernengerüchte besagen, dass {npc} nach Mitternacht hinter {venue} ein versiegeltes Chiffrebuch von {faction} übergab.", "bounty_title": "Dem Chiffrebuch nachspüren", "bounty_objective": "Befrage Zeugen nahe {venue} und beschaffe das fehlende Siegel zurück."}
+    }
+  },
+  {
+    "template_key": "fantasy_poisoned_wellspring",
+    "genre_families": ["fantasy", "dark_fantasy", "isekai"],
+    "entity_type": "rumor",
+    "event_subtype": "scandal",
+    "is_nsfw": 0,
+    "escalation_chance": 0.35,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"END": 1}},
+    "locales": {
+      "en": {"title": "Bitter Draught in {zone}", "description": "Apothecaries murmur that {npc} quietly bought up every vial of nightshade antidote before the cistern near {venue} turned brackish.", "bounty_title": "Inspect the Cistern", "bounty_objective": "Examine the water supply at {venue} and confront whoever tainted it."},
+      "pl": {"title": "Gorzka Woda w {zone}", "description": "Aptekarze szepczą, że {npc} wykupił całe antidotum tuż przed zatruciem cysterny przy {venue}.", "bounty_title": "Zbadaj Cysternę", "bounty_objective": "Sprawdź ujęcie wody przy {venue} i znajdź sprawcę."},
+      "ms": {"title": "Air Pahit di {zone}", "description": "Ahli ubat berbisik bahawa {npc} membeli semua penawar sebelum takungan air dekat {venue} berubah keruh.", "bounty_title": "Periksa Takungan Air", "bounty_objective": "Siasat punca pencemaran air di {venue} dan bersemuka dengan dalangnya."},
+      "zh": {"title": "{zone}苦泉疑云", "description": "药师们私下议论，在{venue}旁蓄水池变苦之前，{npc}曾悄然买空了解毒剂。", "bounty_title": "勘验蓄水池", "bounty_objective": "检查{venue}的水源并揪出幕后投毒者。"},
+      "de": {"title": "Bitteres Wasser in {zone}", "description": "Apotheker tuscheln, dass {npc} jedes Gegengift aufkaufte, kurz bevor die Zisterne nahe {venue} brackig wurde.", "bounty_title": "Die Zisterne untersuchen", "bounty_objective": "Prüfe die Wasserquelle bei {venue} und stelle den Verursacher."}
+    }
+  },
+  {
+    "template_key": "fantasy_phantom_duelist",
+    "genre_families": ["fantasy", "dark_fantasy", "isekai"],
+    "entity_type": "rumor",
+    "event_subtype": "intrigue",
+    "is_nsfw": 0,
+    "escalation_chance": 0.25,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"AGI": 1}},
+    "locales": {
+      "en": {"title": "The Masked Challenger of {zone}", "description": "A cloaked swordsman has been disarming {faction} patrols outside {venue} and leaving silver coins stamped with {npc}'s crest.", "bounty_title": "Unmask the Duelist", "bounty_objective": "Patrol the alleys around {venue} at dusk and identify the challenger."},
+      "pl": {"title": "Zamaskowany Szermierz z {zone}", "description": "Tajemniczy wojownik rozbraja patrole {faction} pod {venue}, zostawiając monety z herbem {npc}.", "bounty_title": "Zdemaskuj Szermierza", "bounty_objective": "Patroluj zaułki wokół {venue} o zmierzchu i odkryj jego tożsamość."},
+      "ms": {"title": "Pendekar Bertopeng di {zone}", "description": "Pendekar berjubah melucutkan senjata rondaan {faction} di luar {venue} sambil meninggalkan syiling berlambang {npc}.", "bounty_title": "Dedahkan Pendekar Bertopeng", "bounty_objective": "Ronda lorong sekitar {venue} waktu senja dan kenal pasti pencabar itu."},
+      "zh": {"title": "{zone}假面剑客传闻", "description": "神秘蒙面剑客屡次在{venue}外击落{faction}巡逻队的兵刃，并留下刻有{npc}纹章的银币。", "bounty_title": "揭开剑客真容", "bounty_objective": "黄昏时巡查{venue}周边暗巷并查明挑战者身份。"},
+      "de": {"title": "Der maskierte Duellant von {zone}", "description": "Ein verhüllter Schwertkämpfer entwaffnet Patrouillen von {faction} vor {venue} und hinterlässt Münzen mit {npc}s Wappen.", "bounty_title": "Den Duellanten entlarven", "bounty_objective": "Streife in der Dämmerung um {venue} und stelle den Herausforderer."}
+    }
+  },
+  {
+    "template_key": "fantasy_guild_embezzlement",
+    "genre_families": ["fantasy", "dark_fantasy", "isekai"],
+    "entity_type": "rumor",
+    "event_subtype": "scandal",
+    "is_nsfw": 0,
+    "escalation_chance": 0.30,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"CHA": 1}},
+    "locales": {
+      "en": {"title": "Phantom Bounties in {faction}", "description": "Clerks allege {npc} has been signing off payouts for monster hunts in {zone} that never took place, funneling gold through {venue}.", "bounty_title": "Audit the Guild Coffers", "bounty_objective": "Gather ledger proofs inside {venue} without alerting the conspirators."},
+      "pl": {"title": "Fikcyjne Zlecenia w {faction}", "description": "Skrybowie twierdzą, że {npc} zatwierdzał wypłaty za nieistniejące łowy w {zone}, piorąc złoto przez {venue}.", "bounty_title": "Audyt Skarbca Gildii", "bounty_objective": "Zbierz dowody księgowe w {venue} bez ostrzegania spiskowców."},
+      "ms": {"title": "Ganjaran Hantu dalam {faction}", "description": "Kerani mendakwa {npc} meluluskan bayaran buruan palsu di {zone} dan menyalurkan emas melalui {venue}.", "bounty_title": "Audit Perbendaharaan", "bounty_objective": "Kumpul bukti lejar di {venue} tanpa menyedarkan komplot itu."},
+      "zh": {"title": "{faction}空饷贪墨案", "description": "账房书记私语，{npc}一直在为{zone}子虚乌有的讨伐任务签发赏金，并借{venue}转移金币。", "bounty_title": "暗查金库账目", "bounty_objective": "在不惊动同伙的前提下搜集{venue}内的假账铁证。"},
+      "de": {"title": "Scheinaufträge bei {faction}", "description": "Schreiber behaupten, {npc} habe Auszahlungen für erfundene Jagden in {zone} genehmigt und Gold über {venue} geschleust.", "bounty_title": "Gildenkasse prüfen", "bounty_objective": "Sichere Belege in {venue}, ohne die Verschwörer zu warnen."}
+    }
+  },
+  {
+    "template_key": "modern_transit_blackout",
+    "genre_families": ["modern_school", "slice_of_life"],
+    "entity_type": "macro_event",
+    "event_subtype": "crisis",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"AGI": 1, "PER": 1}, "price_multiplier": 1.25},
+    "locales": {
+      "en": {"title": "Commuter Line Disruption in {zone}", "description": "Signal failures and safety inspections run by {faction} have bottlenecked transit around {zone}, packing cafes and convenience shops near {venue}.", "bounty_title": "Coordinate Student Couriers", "bounty_objective": "Deliver stranded club supplies across {zone} before evening lockup."},
+      "pl": {"title": "Awaria Komunikacji w {zone}", "description": "Usterki sygnalizacji i kontrole {faction} sparaliżowały ruch wokół {zone}, zapychając kawiarnie przy {venue}.", "bounty_title": "Pomoc Kurierska", "bounty_objective": "Dostarcz utknięte zaopatrzenie klubowe przez {zone} przed wieczorem."},
+      "ms": {"title": "Gangguan Laluan Transit di {zone}", "description": "Kerosakan isyarat dan pemeriksaan {faction} menyesakkan laluan sekitar {zone}, memenuhi kedai berhampiran {venue}.", "bounty_title": "Selaras Penghantaran Kelab", "bounty_objective": "Hantar bekalan kelab yang terkandas merentasi {zone} sebelum malam."},
+      "zh": {"title": "{zone}通勤干线停摆", "description": "信号故障与{faction}的临时安检令{zone}周边交通大排长龙，{venue}附近的咖啡店人满为患。", "bounty_title": "协助社团急件派送", "bounty_objective": "在晚间门禁前将滞留物资送达{zone}各处。"},
+      "de": {"title": "Pendlerstörung in {zone}", "description": "Signalausfälle und Kontrollen durch {faction} legen den Verkehr um {zone} lahm und füllen die Cafés nahe {venue}.", "bounty_title": "Kurierdienst koordinieren", "bounty_objective": "Bringe festsitzende Klubvorräte vor Torschluss durch {zone}."}
+    }
+  },
+  {
+    "template_key": "modern_disciplinary_sweep",
+    "genre_families": ["modern_school", "slice_of_life"],
+    "entity_type": "macro_event",
+    "event_subtype": "crisis",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"AGI": 2, "CHA": 1}, "stealth_modifier": 2},
+    "locales": {
+      "en": {"title": "Surprise Inspection Week at {zone}", "description": "Strict monitors from {faction} are conducting unannounced dress, locker, and hall-pass checks around {venue}.", "bounty_title": "Clear Contraband Lockers", "bounty_objective": "Relocate harmless club gear from {venue} before {faction} confiscates it."},
+      "pl": {"title": "Niezapowiedziana Kontrola w {zone}", "description": "Surowi dyżurni z {faction} prowadzą nagłe kontrole szafek i przepustek w okolicach {venue}.", "bounty_title": "Oczyść Szafki Klubowe", "bounty_objective": "Przenieś sprzęt klubowy z {venue} zanim {faction} go skonfiskuje."},
+      "ms": {"title": "Minggu Pemeriksaan Mengejut di {zone}", "description": "Pengawas tegas daripada {faction} menjalankan pemeriksaan loker dan pas laluan di sekitar {venue}.", "bounty_title": "Selamatkan Barang Kelab", "bounty_objective": "Pindahkan peralatan kelab dari {venue} sebelum dirampas oleh {faction}."},
+      "zh": {"title": "{zone}突击风纪整肃周", "description": "{faction}的风纪委员正在{venue}周边开展突击储物柜与通行证抽查。", "bounty_title": "转移社团违禁器材", "bounty_objective": "在{faction}没收之前将{venue}内的私藏社团物品安全转移。"},
+      "de": {"title": "Unangekündigte Kontrollwoche in {zone}", "description": "Strenge Aufseher von {faction} führen rund um {venue} spontane Spind- und Ausweiskontrollen durch.", "bounty_title": "Klubspinde räumen", "bounty_objective": "Bringe harmlose Klubausrüstung aus {venue} weg, bevor {faction} sie einzieht."}
+    }
+  },
+  {
+    "template_key": "modern_cultural_fair",
+    "genre_families": ["modern_school", "slice_of_life"],
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 7200,
+    "modifiers": {"dc_modifiers": {"CHA": -2}, "price_multiplier": 0.85, "arousal_multiplier": 1.15, "crowd_density": "high"},
+    "locales": {
+      "en": {"title": "Autumn Lantern & Culture Fair", "description": "Food stalls, acoustic stages, and {faction} showcase booths transform {zone} and {venue} into a bustling celebration.", "bounty_title": "Save the Headliner Stage", "bounty_objective": "Track down the missing soundboard cable for the showcase at {venue}."},
+      "pl": {"title": "Jesienny Festiwal Kultury w {zone}", "description": "Stoiska z jedzeniem, sceny muzyczne i pokazy {faction} zmieniają {zone} oraz {venue} w tętniące życiem święto.", "bounty_title": "Uratuj Scenę Główną", "bounty_objective": "Odnajdź zaginiony sprzęt nagłośnieniowy przed występem w {venue}."},
+      "ms": {"title": "Karnival Budaya Musim Luruh", "description": "Gerai makanan, pentas akustik dan pameran {faction} mengubah {zone} serta {venue} menjadi pesta meriah.", "bounty_title": "Selamatkan Pentas Utama", "bounty_objective": "Cari kabel audio yang hilang untuk persembahan di {venue}."},
+      "zh": {"title": "{zone}秋日文化游园祭", "description": "小吃摊、露天舞台与{faction}展位将{zone}和{venue}装点得热闹非凡。", "bounty_title": "抢修压轴舞台音响", "bounty_objective": "在{venue}演出开场前找回遗失的调音台线材。"},
+      "de": {"title": "Herbstliches Kulturfest in {zone}", "description": "Essensstände, Musikbühnen und Pavillons von {faction} verwandeln {zone} und {venue} in ein lebhaftes Fest.", "bounty_title": "Hauptbühne retten", "bounty_objective": "Finde das fehlende Mischpultkabel für den Auftritt in {venue}."}
+    }
+  },
+  {
+    "template_key": "modern_flea_market_weekend",
+    "genre_families": ["modern_school", "slice_of_life"],
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 5760,
+    "modifiers": {"price_multiplier": 0.75, "crowd_density": "high"},
+    "locales": {
+      "en": {"title": "Neighborhood Vintage Bazaar", "description": "Collectors, bakers, and {faction} volunteers line the walkways of {zone} outside {venue} with rare bargains.", "bounty_title": "Recover the Misplaced Keepsake", "bounty_objective": "Locate the heirloom music box accidentally sold at a booth near {venue}."},
+      "pl": {"title": "Weekendowy Targ Staroci w {zone}", "description": "Kolekcjonerzy, piekarze i wolontariusze {faction} wypełniają alejki {zone} przed {venue} rzadkimi okazjami.", "bounty_title": "Odzyskaj Pamiątkę", "bounty_objective": "Odnajdź rodzinną pozytywkę przypadkowo sprzedaną przy {venue}."},
+      "ms": {"title": "Bazar Barangan Antik {zone}", "description": "Pengumpul, pembuat roti dan sukarelawan {faction} memenuhi laluan {zone} di luar {venue} dengan tawaran istimewa.", "bounty_title": "Jejak Kotak Muzik Warisan", "bounty_objective": "Kesan kotak muzik pusaka yang tersalah jual di gerai dekat {venue}."},
+      "zh": {"title": "{zone}周末复古跳蚤市集", "description": "收藏家、烘焙师与{faction}志愿者在{venue}外的步道摆满珍奇好物。", "bounty_title": "寻回误售纪念八音盒", "bounty_objective": "在{venue}周边的摊位中找回被误卖的家传八音盒。"},
+      "de": {"title": "Nachbarschafts-Flohmarkt in {zone}", "description": "Sammler, Bäcker und Helfer von {faction} säumen die Wege von {zone} vor {venue} mit seltenen Schnäppchen.", "bounty_title": "Verlorenes Erbstück finden", "bounty_objective": "Spüre die versehentlich verkaufte Spieluhr an einem Stand nahe {venue} auf."}
+    }
+  },
+  {
+    "template_key": "modern_leaked_exam_key",
+    "genre_families": ["modern_school", "slice_of_life"],
+    "entity_type": "rumor",
+    "event_subtype": "scandal",
+    "is_nsfw": 0,
+    "escalation_chance": 0.30,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"INT": 1}},
+    "locales": {
+      "en": {"title": "Midnight Photocopier Leak", "description": "Group chats buzz that {npc} was seen leaving {venue} late last night with envelopes bearing {faction}'s confidential stamp.", "bounty_title": "Trace the Leaked Envelopes", "bounty_objective": "Check the print log in {venue} and uncover who framed or bribed {npc}."},
+      "pl": {"title": "Nocny Wyciek z Kserokopiarki", "description": "Czaty grupowe huczą, że {npc} wychodził późno z {venue} z kopertami opatrzonymi pieczęcią {faction}.", "bounty_title": "Zbadaj Wyciek Dokumentów", "bounty_objective": "Sprawdź rejestr wydruków w {venue} i ustal prawdę o {npc}."},
+      "ms": {"title": "Kebocoran Kertas Sulit Tengah Malam", "description": "Sembang kumpulan kecoh bahawa {npc} dilihat keluar dari {venue} lewat malam membawa sampul sulit {faction}.", "bounty_title": "Siasat Sampul Bocor", "bounty_objective": "Periksa rekod cetakan di {venue} dan bongkar siapa yang memerangkap {npc}."},
+      "zh": {"title": "{venue}深夜试题外泄传闻", "description": "群聊疯传昨晚有人撞见{npc}拿着盖有{faction}绝密印章的信封离开{venue}。", "bounty_title": "核查影印室记录", "bounty_objective": "调查{venue}的打印日志，查明是谁收买或栽赃了{npc}。"},
+      "de": {"title": "Nächtliches Kopierer-Leck", "description": "In Gruppenchats heißt es, {npc} habe spät nachts {venue} mit vertraulichen Umschlägen von {faction} verlassen.", "bounty_title": "Den Umschlägen nachgehen", "bounty_objective": "Prüfe das Druckprotokoll in {venue} und kläre {npc}s Rolle auf."}
+    }
+  },
+  {
+    "template_key": "modern_club_budget_skimming",
+    "genre_families": ["modern_school", "slice_of_life"],
+    "entity_type": "rumor",
+    "event_subtype": "scandal",
+    "is_nsfw": 0,
+    "escalation_chance": 0.30,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"CHA": 1}},
+    "locales": {
+      "en": {"title": "Missing Sponsorship Funds", "description": "Rumors swirl around {zone} that {npc} quietly diverted {faction}'s festival sponsorship receipts into an off-the-books account at {venue}.", "bounty_title": "Follow the Receipt Trail", "bounty_objective": "Compare vendor invoices around {venue} to verify the missing funds."},
+      "pl": {"title": "Zaginione Fundusze Sponsorskie", "description": "Wokół {zone} krążą plotki, że {npc} przekierował wpłaty sponsorskie {faction} na ukryte konto w {venue}.", "bounty_title": "Ślad Rachunków", "bounty_objective": "Porównaj faktury dostawców przy {venue} i wyjaśnij brakujące środki."},
+      "ms": {"title": "Dana Tajaan Lesap", "description": "Khabar angin bertiup di {zone} bahawa {npc} mengalihkan resit tajaan {faction} ke akaun rahsia di {venue}.", "bounty_title": "Jejak Resit Tajaan", "bounty_objective": "Bandingkan invois peniaga di {venue} untuk mengesahkan dana yang hilang."},
+      "zh": {"title": "{faction}赞助经费失踪之谜", "description": "{zone}流言四起，称{npc}暗中将{faction}的活动赞助款转入了{venue}的账外户头。", "bounty_title": "核对商户票据", "bounty_objective": "比对{venue}周边的收据存根以查清资金去向。"},
+      "de": {"title": "Verschwundene Sponsorengelder", "description": "In {zone} geht das Gerücht um, {npc} habe Sponsorengelder von {faction} über {venue} abgezweigt.", "bounty_title": "Belegspur verfolgen", "bounty_objective": "Vergleiche Rechnungen rund um {venue}, um den Verbleib der Gelder zu klären."}
+    }
+  },
+  {
+    "template_key": "modern_rooftop_trespasser",
+    "genre_families": ["modern_school", "slice_of_life"],
+    "entity_type": "rumor",
+    "event_subtype": "intrigue",
+    "is_nsfw": 0,
+    "escalation_chance": 0.25,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"PER": 1}},
+    "locales": {
+      "en": {"title": "Spare Key to {venue}", "description": "Someone duplicated {faction}'s master padlock key, and {npc} reportedly knows who has been slipping into {venue} after dusk.", "bounty_title": "Track the Duplicate Key", "bounty_objective": "Stake out {venue} at twilight and recover the unauthorized key."},
+      "pl": {"title": "Zapasowy Klucz do {venue}", "description": "Ktoś dorobił główny klucz {faction}, a {npc} podobno wie, kto zakrada się po zmroku do {venue}.", "bounty_title": "Odnajdź Dorobiony Klucz", "bounty_objective": "Obserwuj {venue} o zmierzchu i odzyskaj nieautoryzowany klucz."},
+      "ms": {"title": "Kunci Pendua ke {venue}", "description": "Seseorang menduplikasi kunci induk {faction}, dan {npc} dikatakan tahu siapa yang menyelinap masuk ke {venue} selepas senja.", "bounty_title": "Jejak Kunci Pendua", "bounty_objective": "Intai {venue} waktu senja dan dapatkan semula kunci tersebut."},
+      "zh": {"title": "{venue}私配万能钥匙传闻", "description": "有人私配了{faction}的门锁母匙，据说{npc}清楚是谁每逢傍晚潜入{venue}。", "bounty_title": "追回私配钥匙", "bounty_objective": "傍晚在{venue}外蹲守并收回违规钥匙。"},
+      "de": {"title": "Nachschlüssel für {venue}", "description": "Jemand hat den Hauptschlüssel von {faction} kopiert, und {npc} soll wissen, wer sich nach Einbruch der Dunkelheit in {venue} schleicht.", "bounty_title": "Den Nachschlüssel sichern", "bounty_objective": "Beobachte {venue} in der Dämmerung und stelle den Schlüssel sicher."}
+    }
+  },
+  {
+    "template_key": "modern_anonymous_confession_page",
+    "genre_families": ["modern_school", "slice_of_life"],
+    "entity_type": "rumor",
+    "event_subtype": "scandal",
+    "is_nsfw": 0,
+    "escalation_chance": 0.30,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"CHA": 1}},
+    "locales": {
+      "en": {"title": "The Burner Account of {zone}", "description": "An anonymous social account keeps posting candid photos taken near {venue}, and suspicion has fallen squarely on {npc}.", "bounty_title": "Unmask the Page Admin", "bounty_objective": "Cross-check camera angles around {venue} to find the real uploader."},
+      "pl": {"title": "Anonimowy Profil z {zone}", "description": "Tajemnicze konto publikuje zdjęcia robione z ukrycia przy {venue}, a podejrzenia padły na {npc}.", "bounty_title": "Zdemaskuj Administratora", "bounty_objective": "Sprawdź kąty zdjęć wokół {venue}, by znaleźć prawdziwego autora."},
+      "ms": {"title": "Akaun Tanpa Nama di {zone}", "description": "Sebuah akaun misteri memuat naik gambar curi berhampiran {venue}, dan syak wasangka terarah kepada {npc}.", "bounty_title": "Bongkar Pengendali Akaun", "bounty_objective": "Periksa sudut kamera di sekitar {venue} untuk mencari pemilik sebenar."},
+      "zh": {"title": "{zone}匿名爆料号风波", "description": "一个神秘小号接连发布在{venue}附近抓拍的照片，众人纷纷怀疑幕后推手是{npc}。", "bounty_title": "揪出爆料号号主", "bounty_objective": "比对{venue}周边的拍摄角度，查出真正的上传者。"},
+      "de": {"title": "Das anonyme Konto aus {zone}", "description": "Ein anonymes Profil postet heimliche Schnappschüsse nahe {venue}, und der Verdacht fällt auf {npc}.", "bounty_title": "Den Betreiber entlarven", "bounty_objective": "Prüfe die Kamerawinkel rund um {venue}, um den wahren Urheber zu finden."}
+    }
+  },
+  {
+    "template_key": "urban_reality_quarantine",
+    "genre_families": ["urban_fantasy"],
+    "entity_type": "macro_event",
+    "event_subtype": "crisis",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"PER": 2, "INT": 1}, "price_multiplier": 1.35},
+    "locales": {
+      "en": {"title": "Anomalous Fog Cordon in {zone}", "description": "Containment vans from {faction} have ringed {zone} under a cover story of gas leaks while compasses spin wildly near {venue}.", "bounty_title": "Calibrate Field Anchors", "bounty_objective": "Deploy resonance beacons around {venue} before the distortion widens."},
+      "pl": {"title": "Kordon Anomalnej Mgły w {zone}", "description": "Furgonetki {faction} otoczyły {zone} pod pretekstem wycieku gazu, podczas gdy kompasy wariują przy {venue}.", "bounty_title": "Kalibracja Kotwic Polowych", "bounty_objective": "Rozmieść nadajniki rezonansowe wokół {venue} zanim anomalia wzrośnie."},
+      "ms": {"title": "Kordon Kabus Anomali di {zone}", "description": "Van pembendungan {faction} mengepung {zone} atas alasan kebocoran gas ketika kompas berpusing liar dekat {venue}.", "bounty_title": "Kalibrasi Sauh Medan", "bounty_objective": "Pasang suar resonans di sekitar {venue} sebelum herotan merebak."},
+      "zh": {"title": "{zone}异常迷雾封控", "description": "{faction}的收容车队以燃气抢修为掩护封锁了{zone}，{venue}周边的指南针正疯狂乱转。", "bounty_title": "校准现实锚点", "bounty_objective": "在扭曲扩大前于{venue}四周布设共鸣信标。"},
+      "de": {"title": "Anomaler Nebelkordon in {zone}", "description": "Einsatzwagen von {faction} riegeln {zone} unter dem Vorwand eines Gaslecks ab, während Kompasse nahe {venue} verrücktspielen.", "bounty_title": "Feldanker kalibrieren", "bounty_objective": "Platziere Resonanzbaken um {venue}, bevor sich die Verzerrung ausdehnt."}
+    }
+  },
+  {
+    "template_key": "urban_static_blackout",
+    "genre_families": ["urban_fantasy"],
+    "entity_type": "macro_event",
+    "event_subtype": "crisis",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"INT": 2}, "stealth_modifier": -1},
+    "locales": {
+      "en": {"title": "Whisper-Frequency Interference", "description": "Radios and streetlights across {zone} hum with backward static, prompting {faction} operatives to sweep every basement near {venue}.", "bounty_title": "Silence the Broadcast Node", "bounty_objective": "Triangulate the rogue transmitter hidden beneath {venue}."},
+      "pl": {"title": "Zakłócenia Szepczącej Częstotliwości", "description": "Radia i latarnie w {zone} buczą dziwnym szumem, a agenci {faction} przeszukują piwnice koło {venue}.", "bounty_title": "Wycisz Węzeł Nadawczy", "bounty_objective": "Namierz nielegalny nadajnik ukryty pod {venue}."},
+      "ms": {"title": "Gangguan Frekuensi Bisikan", "description": "Radio dan lampu jalan di {zone} berdengung aneh, mendorong ejen {faction} memeriksa ruang bawah tanah dekat {venue}.", "bounty_title": "Matikan Pemancar Liar", "bounty_objective": "Kesan kedudukan pemancar ganjil di bawah {venue}."},
+      "zh": {"title": "{zone}低语频段干扰潮", "description": "{zone}的收音机与路灯持续发出倒放般的电流杂音，{faction}特工正排查{venue}附近的地下室。", "bounty_title": "掐断异常广播源", "bounty_objective": "定位并关闭藏在{venue}地下的异常发射端。"},
+      "de": {"title": "Flüsterfrequenz-Störung in {zone}", "description": "Radios und Laternen in {zone} summen rückwärtsgewandtes Rauschen, während Agenten von {faction} Keller nahe {venue} durchsuchen.", "bounty_title": "Sendeknoten abschalten", "bounty_objective": "Peile den verborgenen Sender unter {venue} an."}
+    }
+  },
+  {
+    "template_key": "urban_twilight_night_market",
+    "genre_families": ["urban_fantasy"],
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 7200,
+    "modifiers": {"price_multiplier": 0.8, "dc_modifiers": {"CHA": -1}, "crowd_density": "high"},
+    "locales": {
+      "en": {"title": "Solstice Curio Night Market", "description": "Neon awnings and occult curio vendors gather along {zone} under a truce brokered by {faction} outside {venue}.", "bounty_title": "Verify Curio Authenticity", "bounty_objective": "Appraise suspect talismans being peddled along {venue}."},
+      "pl": {"title": "Nocny Targ Osobliwości w {zone}", "description": "Sprzedawcy okultystycznych antyków zjeżdżają do {zone} pod rozejmem zawartym przez {faction} przed {venue}.", "bounty_title": "Weryfikacja Talizmanów", "bounty_objective": "Oceń podejrzane artefakty sprzedawane przy {venue}."},
+      "ms": {"title": "Pasar Malam Antik Ghaib {zone}", "description": "Peniaga barangan mistik berkumpul di {zone} di bawah gencatan senjata {faction} di luar {venue}.", "bounty_title": "Sahkan Keaslian Azimat", "bounty_objective": "Periksa azimat mencurigakan yang dijual sepanjang {venue}."},
+      "zh": {"title": "{zone}至日奇物夜市", "description": "在{faction}斡旋的临时休战下，神秘古玩商贩云集于{zone}与{venue}街口。", "bounty_title": "甄别古玩真伪", "bounty_objective": "鉴定{venue}夜市摊位上流通的可疑护符。"},
+      "de": {"title": "Sonnenwend-Kuriositätenmarkt in {zone}", "description": "Händler okkulter Raritäten versammeln sich in {zone} unter einem von {faction} vermittelten Waffenstillstand vor {venue}.", "bounty_title": "Talismane prüfen", "bounty_objective": "Begutachte verdächtige Kuriositäten entlang von {venue}."}
+    }
+  },
+  {
+    "template_key": "urban_eclipse_vigil",
+    "genre_families": ["urban_fantasy"],
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 5760,
+    "modifiers": {"arousal_multiplier": 1.2, "price_multiplier": 0.9, "crowd_density": "high"},
+    "locales": {
+      "en": {"title": "Crimson Moon Rooftop Gala", "description": "Skywatchers and secret societies toast the lunar eclipse across {zone}, turning {venue} into neutral social ground watched by {faction}.", "bounty_title": "Monitor Truce Guests", "bounty_objective": "Ensure rival envoys at {venue} honor the eclipse ceasefire."},
+      "pl": {"title": "Gala Krwawego Księżyca w {zone}", "description": "Obserwatorzy nieba i tajne bractwa wznoszą toasty zaćmieniowe w {venue} pod czujnym okiem {faction}.", "bounty_title": "Nadzór Rozejmu", "bounty_objective": "Dopilnuj, by rywalizujący wysłannicy w {venue} dotrzymali zawieszenia broni."},
+      "ms": {"title": "Gala Gerhana Bulan Merah", "description": "Pemerhati langit dan pertubuhan rahsia meraikan gerhana di {zone}, menjadikan {venue} kawasan berkecuali di bawah pengawasan {faction}.", "bounty_title": "Pantau Tetamu Gencatan", "bounty_objective": "Pastikan utusan bersaing di {venue} mematuhi gencatan gerhana."},
+      "zh": {"title": "{zone}赤月食天台盛会", "description": "观星者与隐秘结社齐聚{zone}举杯共赏月食，{venue}在{faction}监督下化为中立社交场。", "bounty_title": "监督停火宾客", "bounty_objective": "确保齐聚{venue}的对立密使遵守月食停战协定。"},
+      "de": {"title": "Blutmond-Dachgala in {zone}", "description": "Himmelsbeobachter und Geheimbünde feiern die Mondfinsternis in {zone} und machen {venue} unter Aufsicht von {faction} zu neutralem Boden.", "bounty_title": "Waffenruhe überwachen", "bounty_objective": "Sorge dafür, dass rivalisierende Gesandte in {venue} den Frieden wahren."}
+    }
+  },
+  {
+    "template_key": "urban_unregistered_relic",
+    "genre_families": ["urban_fantasy"],
+    "entity_type": "rumor",
+    "event_subtype": "intrigue",
+    "is_nsfw": 0,
+    "escalation_chance": 0.35,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"PER": 1}},
+    "locales": {
+      "en": {"title": "Ticking Briefcase at {venue}", "description": "Informants claim {npc} checked an unshielded altered artifact into the coatroom of {venue} behind {faction}'s back.", "bounty_title": "Intercept the Altered Case", "bounty_objective": "Locate the briefcase inside {venue} before it destabilizes."},
+      "pl": {"title": "Tykająca Walizka w {venue}", "description": "Informatorzy twierdzą, że {npc} zostawił nieekranowany artefakt w szatni {venue} za plecami {faction}.", "bounty_title": "Przechwyć Walizkę", "bounty_objective": "Odnajdź walizkę w {venue} zanim straci stabilność."},
+      "ms": {"title": "Beg Bimbit Berdetik di {venue}", "description": "Pemberi maklumat mendakwa {npc} menyimpan artifak tidak berperisai di bilik simpanan {venue} tanpa pengetahuan {faction}.", "bounty_title": "Pintasan Beg Artifak", "bounty_objective": "Cari beg tersebut di {venue} sebelum ia menjadi tidak stabil."},
+      "zh": {"title": "{venue}滴答手提箱密闻", "description": "线人透露{npc}背着{faction}将一件未加屏蔽的异变遗物寄存进了{venue}衣帽间。", "bounty_title": "截获异变手提箱", "bounty_objective": "在遗物失控前从{venue}找出该手提箱。"},
+      "de": {"title": "Tickender Aktenkoffer in {venue}", "description": "Informanten behaupten, {npc} habe hinter dem Rücken von {faction} ein ungeschirmtes Artefakt in der Garderobe von {venue} abgegeben.", "bounty_title": "Artefaktkoffer abfangen", "bounty_objective": "Finde den Koffer in {venue}, bevor er instabil wird."}
+    }
+  },
+  {
+    "template_key": "urban_memory_wipe_coverup",
+    "genre_families": ["urban_fantasy"],
+    "entity_type": "rumor",
+    "event_subtype": "scandal",
+    "is_nsfw": 0,
+    "escalation_chance": 0.30,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"INT": 1}},
+    "locales": {
+      "en": {"title": "Missing Hours in {zone}", "description": "Three night-shift clerks near {venue} woke up with identical blank diaries, and {npc} was the last {faction} liaison on site.", "bounty_title": "Reconstruct the Blank Night", "bounty_objective": "Recover CCTV backups at {venue} and question {npc}."},
+      "pl": {"title": "Skradzione Godziny w {zone}", "description": "Trzej pracownicy nocnej zmiany przy {venue} stracili pamięć, a {npc} był ostatnim łącznikiem {faction} na miejscu.", "bounty_title": "Odtwórz Nocną Lukę", "bounty_objective": "Odzyskaj nagrania w {venue} i przesłuchaj {npc}."},
+      "ms": {"title": "Waktu Hilang di {zone}", "description": "Tiga petugas syif malam dekat {venue} hilang ingatan serentak, dan {npc} ialah pegawai {faction} terakhir di lokasi.", "bounty_title": "Bongkar Malam Kosong", "bounty_objective": "Pulihkan rakaman kamera di {venue} dan soal {npc}."},
+      "zh": {"title": "{zone}夜班空白记忆事件", "description": "{venue}附近三名夜班职员醒来后记忆同时出现空白，而{npc}是当晚最后在场的{faction}联络官。", "bounty_title": "还原空白之夜", "bounty_objective": "调取{venue}的监控备份并盘问{npc}。"},
+      "de": {"title": "Fehlende Stunden in {zone}", "description": "Drei Nachtschichtkräfte nahe {venue} erwachten mit identischen Erinnerungslücken, und {npc} war zuletzt für {faction} vor Ort.", "bounty_title": "Die leere Nacht rekonstruieren", "bounty_objective": "Sichere Kamera-Backups in {venue} und befrage {npc}."}
+    }
+  },
+  {
+    "template_key": "urban_subway_echo",
+    "genre_families": ["urban_fantasy"],
+    "entity_type": "rumor",
+    "event_subtype": "intrigue",
+    "is_nsfw": 0,
+    "escalation_chance": 0.25,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"PER": 1}},
+    "locales": {
+      "en": {"title": "The Extra Platform Under {zone}", "description": "Commuters swear an unnumbered train stops beneath {venue} at midnight, and {npc} has been buying tickets that do not exist.", "bounty_title": "Survey the Ghost Platform", "bounty_objective": "Follow the service stairs below {venue} and log what arrives."},
+      "pl": {"title": "Dodatkowy Peron pod {zone}", "description": "Pasażerowie przysięgają, że o północy pod {venue} staje pociąg widmo, a {npc} skupuje nieistniejące bilety.", "bounty_title": "Zbadaj Peron Widmo", "bounty_objective": "Zejdź schodami technicznymi pod {venue} i udokumentuj zjawisko."},
+      "ms": {"title": "Platform Tambahan Bawah {zone}", "description": "Penumpang bersumpah sebuah tren tanpa nombor berhenti di bawah {venue} tengah malam, dan {npc} membeli tiket ganjil.", "bounty_title": "Tinjau Platform Hantu", "bounty_objective": "Turuni tangga servis bawah {venue} dan rekodkan ketibaannya."},
+      "zh": {"title": "{zone}地下幽灵站台传闻", "description": "通勤者声称午夜有列无编号列车停靠在{venue}正下方，而{npc}一直在暗中收购不存在的车票。", "bounty_title": "勘察地下秘站", "bounty_objective": "沿{venue}下方检修梯潜入并记录进站异象。"},
+      "de": {"title": "Der zusätzliche Bahnsteig unter {zone}", "description": "Pendler schwören, dass um Mitternacht unter {venue} ein unnummerierter Zug hält und {npc} Fahrkarten dafür sammelt.", "bounty_title": "Geisterbahnsteig erkunden", "bounty_objective": "Folge der Wartungstreppe unter {venue} und dokumentiere die Ankunft."}
+    }
+  },
+  {
+    "template_key": "urban_black_auction",
+    "genre_families": ["urban_fantasy"],
+    "entity_type": "rumor",
+    "event_subtype": "scandal",
+    "is_nsfw": 0,
+    "escalation_chance": 0.30,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"CHA": 1}},
+    "locales": {
+      "en": {"title": "Sealed Evidence Lot at {venue}", "description": "Occult brokers whisper that {npc} is auctioning decommissioned {faction} containment charms in a private room of {venue}.", "bounty_title": "Infiltrate the Lot Bidding", "bounty_objective": "Gain entry to the back parlor of {venue} and seize the charms."},
+      "pl": {"title": "Aukcja Dowodów w {venue}", "description": "Brokerzy szepczą, że {npc} licytuje wycofane talizmany {faction} w prywatnej sali {venue}.", "bounty_title": "Infiltracja Licytacji", "bounty_objective": "Wejdź na zaplecze {venue} i przejmij talizmany."},
+      "ms": {"title": "Lelongan Bukti Sulit di {venue}", "description": "Broker ghaib berbisik bahawa {npc} melelong azimat simpanan {faction} di bilik peribadi {venue}.", "bounty_title": "Menyusup Masuk Lelongan", "bounty_objective": "Masuk ke bilik belakang {venue} dan rampas semula azimat tersebut."},
+      "zh": {"title": "{venue}封存证物黑市竞拍", "description": "神秘掮客耳语，{npc}正在{venue}包厢内私下拍卖{faction}报废的收容符具。", "bounty_title": "潜入地下竞拍会", "bounty_objective": "混入{venue}后厅并截回流出的收容物。"},
+      "de": {"title": "Geheime Beweisauktion in {venue}", "description": "Okkulte Makler flüstern, {npc} versteigere ausgemusterte Schutzsiegel von {faction} in einem Hinterzimmer von {venue}.", "bounty_title": "Die Auktion unterwandern", "bounty_objective": "Verschaffe dir Zutritt zum Salon von {venue} und sichere die Siegel."}
+    }
+  },
+  {
+    "template_key": "tech_grid_brownout",
+    "genre_families": ["cyberpunk", "sci_fi", "steampunk", "post_apocalypse"],
+    "entity_type": "macro_event",
+    "event_subtype": "crisis",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"INT": 2, "PER": 1}, "price_multiplier": 1.35},
+    "locales": {
+      "en": {"title": "Sector Power Rationing in {zone}", "description": "Overloaded conduits managed by {faction} plunge blocks around {zone} and {venue} into rolling blackouts and emergency rationing.", "bounty_title": "Reroute Auxiliary Cells", "bounty_objective": "Restore backup power relays feeding {venue}."},
+      "pl": {"title": "Racjonowanie Energii w {zone}", "description": "Przeciążone łącza {faction} pogrążają {zone} i okolice {venue} w kroczących wyłączeniach prądu.", "bounty_title": "Przekieruj Ogniwa Zapasowe", "bounty_objective": "Przywróć zasilanie awaryjne dla {venue}."},
+      "ms": {"title": "Catuan Tenaga Sektor di {zone}", "description": "Saluran kuasa {faction} yang sarat menyebabkan {zone} dan sekitar {venue} bergelap secara bergilir.", "bounty_title": "Alihkan Sel Sokongan", "bounty_objective": "Pulihkan geganti kuasa kecemasan yang membekalkan {venue}."},
+      "zh": {"title": "{zone}扇区能源配给危机", "description": "{faction}管辖的干线过载令{zone}与{venue}周边陷入轮流停电与紧急配给。", "bounty_title": "重构备用能源回路", "bounty_objective": "修复为{venue}供电的应急中继站。"},
+      "de": {"title": "Energierationierung in {zone}", "description": "Überlastete Leitungen von {faction} stürzen {zone} und die Umgebung von {venue} in rollierende Stromausfälle.", "bounty_title": "Ersatzzellen umleiten", "bounty_objective": "Stelle die Notstromrelais für {venue} wieder her."}
+    }
+  },
+  {
+    "template_key": "tech_security_lockdown",
+    "genre_families": ["cyberpunk", "sci_fi", "steampunk", "post_apocalypse"],
+    "entity_type": "macro_event",
+    "event_subtype": "crisis",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"AGI": 2}, "price_multiplier": 1.3, "stealth_modifier": 2},
+    "locales": {
+      "en": {"title": "Enforcer Checkpoint Sweep in {zone}", "description": "Armored patrols from {faction} have erected ID scanners and cargo barricades across {zone} outside {venue}.", "bounty_title": "Smuggle Relief Supplies", "bounty_objective": "Slip essential medkits past the {faction} cordon into {venue}."},
+      "pl": {"title": "Blokada Skanerów {faction} w {zone}", "description": "Uzbrojone patrole {faction} rozstawiły skanery i barykady w {zone} przed {venue}.", "bounty_title": "Przemyt Zaopatrzenia", "bounty_objective": "Przenieś apteczki przez kordon {faction} do {venue}."},
+      "ms": {"title": "Sekatan Penguatkuasa di {zone}", "description": "Rondaan berperisai {faction} mendirikan pengimbas identiti dan penghadang kargo di luar {venue}.", "bounty_title": "Seludup Bekalan Bantuan", "bounty_objective": "Bawa masuk bekalan perubatan melepasi kordon {faction} ke {venue}."},
+      "zh": {"title": "{zone}武装安检封锁潮", "description": "{faction}的装甲巡逻队在{zone}与{venue}外架设了身份扫描岗与货运路障。", "bounty_title": "暗运急需物资", "bounty_objective": "绕过{faction}封锁线将医疗补给送入{venue}。"},
+      "de": {"title": "Kontrollpunkt-Razzia in {zone}", "description": "Gepanzerte Patrouillen von {faction} haben rund um {venue} in {zone} Scanner und Frachtsperren errichtet.", "bounty_title": "Hilfsgüter einschleusen", "bounty_objective": "Schmuggle wichtige Medipacks am Kordon von {faction} vorbei nach {venue}."}
+    }
+  },
+  {
+    "template_key": "tech_trade_expo_jubilee",
+    "genre_families": ["cyberpunk", "sci_fi", "steampunk", "post_apocalypse"],
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 7200,
+    "modifiers": {"price_multiplier": 0.8, "dc_modifiers": {"CHA": -1}, "crowd_density": "high"},
+    "locales": {
+      "en": {"title": "Grand Fleet & Tinkerers' Expo", "description": "Traders, engineers, and {faction} quartermasters flood {zone} around {venue} with discounted gear, music, and street food.", "bounty_title": "Guard the Prototype Booth", "bounty_objective": "Prevent saboteurs from tampering with the showcase rig at {venue}."},
+      "pl": {"title": "Wielkie Targi Konstruktorów w {zone}", "description": "Handlarze, inżynierowie i kwatermistrzowie {faction} zalewają {zone} wokół {venue} tańszym sprzętem i muzyką.", "bounty_title": "Ochrona Prototypu", "bounty_objective": "Powstrzymaj sabotażystów przed uszkodzeniem maszyny w {venue}."},
+      "ms": {"title": "Ekspo Armada & Pereka {zone}", "description": "Pedagang, jurutera dan kuartermaster {faction} membanjiri {zone} sekitar {venue} dengan jualan murah dan muzik.", "bounty_title": "Kawal Gerai Prototaip", "bounty_objective": "Halang pensabotaj daripada mengusik pameran utama di {venue}."},
+      "zh": {"title": "{zone}远航与工匠博览会", "description": "行商、技师与{faction}军需官齐聚{zone}，{venue}外摆满了折扣装备与街头美食。", "bounty_title": "看护原型展台", "bounty_objective": "防止破坏分子在{venue}展台上动手脚。"},
+      "de": {"title": "Große Tüftler- und Flottenmesse in {zone}", "description": "Händler, Ingenieure und Quartiermeister von {faction} füllen {zone} rund um {venue} mit günstiger Ausrüstung und Musik.", "bounty_title": "Prototypenstand sichern", "bounty_objective": "Verhindere Sabotage am Ausstellungsstück in {venue}."}
+    }
+  },
+  {
+    "template_key": "tech_neon_carnival",
+    "genre_families": ["cyberpunk", "sci_fi", "steampunk", "post_apocalypse"],
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 5760,
+    "modifiers": {"price_multiplier": 0.85, "arousal_multiplier": 1.15, "crowd_density": "high"},
+    "locales": {
+      "en": {"title": "All-Night Concourse Revelry", "description": "Searchlights and music rigs light up {zone} as crews celebrate survival and {faction} declares an open-port holiday around {venue}.", "bounty_title": "Settle the Crew Wager", "bounty_objective": "Referee the high-spirited skills contest outside {venue}."},
+      "pl": {"title": "Całonocna Zabawa w {zone}", "description": "Szperacze i głośniki rozświetlają {zone}, gdy załogi świętują, a {faction} ogłasza wolny port wokół {venue}.", "bounty_title": "Rozstrzygnij Zakład Załóg", "bounty_objective": "Sędziuj zawody zręcznościowe przed {venue}."},
+      "ms": {"title": "Pesta Semalaman Pangkalan {zone}", "description": "Lampu sorot dan muzik menerangi {zone} apabila kru meraikan cuti pelabuhan terbuka {faction} di {venue}.", "bounty_title": "Adili Pertaruhan Kru", "bounty_objective": "Jadi pengadil pertandingan kemahiran di luar {venue}."},
+      "zh": {"title": "{zone}不夜港狂欢节", "description": "探照灯与音浪点亮{zone}，{faction}宣布开放港休假日，各路船队在{venue}彻夜欢庆。", "bounty_title": "主持船队竞技赌局", "bounty_objective": "在{venue}外担任技艺比拼的公正裁判。"},
+      "de": {"title": "Nächtliches Promenadenfest in {zone}", "description": "Suchscheinwerfer und Musik erfüllen {zone}, während Mannschaften feiern und {faction} rund um {venue} Freihafen ausruft.", "bounty_title": "Mannschaftswette schlichten", "bounty_objective": "Leite den ausgelassenen Geschicklichkeitswettkampf vor {venue}."}
+    }
+  },
+  {
+    "template_key": "tech_encrypted_datacore_theft",
+    "genre_families": ["cyberpunk", "sci_fi", "steampunk", "post_apocalypse"],
+    "entity_type": "rumor",
+    "event_subtype": "intrigue",
+    "is_nsfw": 0,
+    "escalation_chance": 0.35,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"INT": 1}},
+    "locales": {
+      "en": {"title": "The Ghost Manifest of {faction}", "description": "Fixers whisper that {npc} lifted an encrypted {faction} route manifest and stashed it inside a dead-drop locker at {venue}.", "bounty_title": "Recover the Route Manifest", "bounty_objective": "Locate the dead-drop locker at {venue} before rivalrunners crack it."},
+      "pl": {"title": "Widmowy Manifest {faction}", "description": "Fixerzy szepczą, że {npc} wykradł zaszyfrowany manifest {faction} i ukrył go w skrytce w {venue}.", "bounty_title": "Odzyskaj Manifest Tras", "bounty_objective": "Znajdź skrytkę w {venue} zanim ubiegną cię rywale."},
+      "ms": {"title": "Manifes Hantu {faction}", "description": "Perantara berbisik bahawa {npc} mencuri manifes laluan sulit {faction} dan menyembunyikannya di loker {venue}.", "bounty_title": "Dapatkan Semula Manifes", "bounty_objective": "Kesan loker rahsia di {venue} sebelum jatuh ke tangan pesaing."},
+      "zh": {"title": "{faction}幽灵航线清单失窃", "description": "中间人耳语，{npc}盗走了加密的{faction}航线清单，并将其藏在{venue}的死信储物格中。", "bounty_title": "追回加密清单", "bounty_objective": "在竞争对手破译前找到{venue}内的秘密储物格。"},
+      "de": {"title": "Das Geistermanifest von {faction}", "description": "Schieber flüstern, {npc} habe ein verschlüsseltes Routenmanifest von {faction} entwendet und in einem Toten Briefkasten in {venue} versteckt.", "bounty_title": "Routenmanifest bergen", "bounty_objective": "Finde das Schließfach in {venue}, bevor Rivalen es knacken."}
+    }
+  },
+  {
+    "template_key": "tech_sabotaged_ventilator",
+    "genre_families": ["cyberpunk", "sci_fi", "steampunk", "post_apocalypse"],
+    "entity_type": "rumor",
+    "event_subtype": "scandal",
+    "is_nsfw": 0,
+    "escalation_chance": 0.30,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"END": 1}},
+    "locales": {
+      "en": {"title": "Counterfeit Filters in {zone}", "description": "Mechanics claim {npc} swapped genuine {faction} purifier cores near {venue} for cheap knockoffs and pocketed the difference.", "bounty_title": "Inspect the Purifier Cores", "bounty_objective": "Check serial plates behind {venue} and expose the swap."},
+      "pl": {"title": "Podrobione Filtry w {zone}", "description": "Mechanicy twierdzą, że {npc} podmienił oryginalne filtry {faction} przy {venue} na tanie podróbki.", "bounty_title": "Sprawdź Rdzenie Filtrów", "bounty_objective": "Zweryfikuj tabliczki znamionowe za {venue} i ujawnij podmianę."},
+      "ms": {"title": "Penapis Tiruan di {zone}", "description": "Mekanik mendakwa {npc} menukar teras penapis tulen {faction} dekat {venue} dengan barang tiruan murah.", "bounty_title": "Periksa Teras Penapis", "bounty_objective": "Semak nombor siri di belakang {venue} dan dedahkan penipuan itu."},
+      "zh": {"title": "{zone}劣质滤芯调包传闻", "description": "技工们盛传{npc}将{venue}附近的{faction}原装净化滤芯偷换成了廉价仿品以中饱私囊。", "bounty_title": "核验净化器铭牌", "bounty_objective": "检查{venue}后方的设备序列号并揭穿调包内幕。"},
+      "de": {"title": "Gefälschte Filter in {zone}", "description": "Mechaniker behaupten, {npc} habe echte Filterkerne von {faction} nahe {venue} gegen billige Imitate getauscht.", "bounty_title": "Filterkerne prüfen", "bounty_objective": "Kontrolliere die Seriennummern hinter {venue} und decke den Schwindel auf."}
+    }
+  },
+  {
+    "template_key": "tech_black_clinic_bounty",
+    "genre_families": ["cyberpunk", "sci_fi", "steampunk", "post_apocalypse"],
+    "entity_type": "rumor",
+    "event_subtype": "intrigue",
+    "is_nsfw": 0,
+    "escalation_chance": 0.25,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"PER": 1}},
+    "locales": {
+      "en": {"title": "Unmarked Cargo Pod Behind {venue}", "description": "Scavengers report a sealed {faction} prototype pod dropped into {zone}, and {npc} is quietly hiring muscle to crack it open.", "bounty_title": "Secure the Prototype Pod", "bounty_objective": "Track the haulers around {venue} before the seal is breached."},
+      "pl": {"title": "Nieoznakowana Kapsuła za {venue}", "description": "Złomiarze widzieli zapieczętowaną kapsułę {faction} w {zone}, a {npc} po cichu szuka ludzi do jej otwarcia.", "bounty_title": "Zabezpiecz Kapsułę", "bounty_objective": "Namierz tragarzy przy {venue} zanim złamią pieczęć."},
+      "ms": {"title": "Pod Kargo Tanpa Tanda di {venue}", "description": "Pencari besi melaporkan pod prototaip {faction} jatuh di {zone}, dan {npc} sedang mengupah orang untuk membukanya.", "bounty_title": "Amankan Pod Prototaip", "bounty_objective": "Jejak pengangkut di sekitar {venue} sebelum kunci pod dipecahkan."},
+      "zh": {"title": "{venue}后巷无标货舱秘闻", "description": "拾荒者称一只密封的{faction}原型舱落入了{zone}，而{npc}正暗中雇人强行破拆。", "bounty_title": "夺回原型货舱", "bounty_objective": "在封条被破开前追踪{venue}周边的搬运队。"},
+      "de": {"title": "Unmarkierte Frachtkapsel hinter {venue}", "description": "Sammler melden eine versiegelte Prototyp-Kapsel von {faction} in {zone}, und {npc} heuert heimlich Leute an, um sie aufzubrechen.", "bounty_title": "Prototyp-Kapsel sichern", "bounty_objective": "Spüre die Träger rund um {venue} auf, bevor das Siegel bricht."}
+    }
+  },
+  {
+    "template_key": "tech_defector_safehouse",
+    "genre_families": ["cyberpunk", "sci_fi", "steampunk", "post_apocalypse"],
+    "entity_type": "rumor",
+    "event_subtype": "scandal",
+    "is_nsfw": 0,
+    "escalation_chance": 0.30,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"CHA": 1}},
+    "locales": {
+      "en": {"title": "Double Agent in {zone}", "description": "Intercepted chatter hints that {npc} has been sheltering a high-ranking {faction} defector in an upper room of {venue}.", "bounty_title": "Verify the Safehouse Lead", "bounty_objective": "Make discreet contact at {venue} and decide the defector's fate."},
+      "pl": {"title": "Podwójny Agent w {zone}", "description": "Przechwycone rozmowy sugerują, że {npc} ukrywa wysoko postawionego dezertera z {faction} na piętrze {venue}.", "bounty_title": "Sprawdź Kryjówkę", "bounty_objective": "Nawiąż dyskretny kontakt w {venue} i zdecyduj o losie zbiega."},
+      "ms": {"title": "Ejen Dua Muka di {zone}", "description": "Isyarat pintasan membayangkan {npc} menyembunyikan pembelot kanan {faction} di tingkat atas {venue}.", "bounty_title": "Sahkan Petunjuk Rumah Selamat", "bounty_objective": "Hubungi saksi secara sulit di {venue} dan tentukan nasib pembelot itu."},
+      "zh": {"title": "{zone}双面密探藏匿传闻", "description": "截获的暗语显示{npc}正将一名{faction}高层叛逃者藏在{venue}楼上暗室。", "bounty_title": "查证安全屋线索", "bounty_objective": "秘密潜访{venue}并定夺叛逃者的去留。"},
+      "de": {"title": "Doppelagent in {zone}", "description": "Abgefangene Funksprüche deuten darauf hin, dass {npc} einen hochrangigen Überläufer von {faction} über {venue} versteckt.", "bounty_title": "Versteck überprüfen", "bounty_objective": "Nimm in {venue} diskret Kontakt auf und entscheide über das Schicksal des Überläufers."}
+    }
+  },
+  {
+    "template_key": "nsfw_velvet_masquerade",
+    "genre_families": ["fantasy", "dark_fantasy", "isekai", "modern_school", "slice_of_life", "urban_fantasy", "cyberpunk", "sci_fi", "steampunk", "post_apocalypse"],
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_nsfw": 1,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"CHA": -2}, "arousal_multiplier": 1.5, "price_multiplier": 0.9, "crowd_density": "high"},
+    "locales": {
+      "en": {
+        "title": "Midnight Velvet Masquerade at {venue}",
+        "description": "Silk masks, dim candlelight, and consensual late-night revelry sweep {zone} as {faction} hosts an indulgent adults-only masquerade inside {venue}.",
+        "sfw_fallback": "Silk masks and late-night music fill {zone} as {faction} hosts an exclusive velvet masquerade gala inside {venue}.",
+        "bounty_title": "Retrieve the Lost Signet",
+        "bounty_objective": "Recover a VIP guest's signet ring dropped in the private lounges of {venue}."
+      },
+      "pl": {
+        "title": "Aksamitna Maskarada Północy w {venue}",
+        "description": "Jedwabne maski, blask świec i zmysłowa nocna zabawa wypełniają {zone}, gdy {faction} organizuje ekskluzywną maskaradę dla dorosłych w {venue}.",
+        "sfw_fallback": "Jedwabne maski i nocna muzyka wypełniają {zone} podczas uroczystej gali maskowej {faction} w {venue}.",
+        "bounty_title": "Odzyskaj Zgubiony Sygnet",
+        "bounty_objective": "Odnajdź sygnet gościa VIP upuszczony w prywatnych salonach {venue}."
+      },
+      "ms": {
+        "title": "Maskarad Baldu Tengah Malam di {venue}",
+        "description": "Topeng sutera, cahaya lilin malap dan keraian dewasa yang menggoda memenuhi {zone} apabila {faction} menganjurkan malam eksklusif di {venue}.",
+        "sfw_fallback": "Topeng sutera dan muzik malam memenuhi {zone} sempena majlis gala eksklusif {faction} di {venue}.",
+        "bounty_title": "Cari Cincin Mohor VIP",
+        "bounty_objective": "Dapatkan semula cincin tetamu kehormat yang tercicir di ruang istirahat {venue}."
+      },
+      "zh": {
+        "title": "{venue}午夜丝绒假面盛宴",
+        "description": "丝绸面具、微醺烛火与暧昧迷人的成人欢宴席卷{zone}，{faction}正在{venue}举办私密假面夜会。",
+        "sfw_fallback": "丝绸面具与悠扬夜曲萦绕{zone}，{faction}正在{venue}举办盛大的假面晚宴。",
+        "bounty_title": "寻回贵宾遗落纹戒",
+        "bounty_objective": "在{venue}私密包厢内找回贵宾遗失的印章戒指。"
+      },
+      "de": {
+        "title": "Mitternächtliche Samtmaskerade in {venue}",
+        "description": "Seidenmasken, Kerzenschein und sinnliche Ausgelassenheit erfüllen {zone}, während {faction} in {venue} einen exklusiven Maskenball für Erwachsene feiert.",
+        "sfw_fallback": "Seidenmasken und nächtliche Musik erfüllen {zone}, während {faction} in {venue} eine exklusive Maskengala ausrichtet.",
+        "bounty_title": "Verlorenen Siegelring finden",
+        "bounty_objective": "Finde den Siegelring eines Ehrengastes in den Salons von {venue}."
+      }
+    }
+  },
+  {
+    "template_key": "nsfw_aphrodisiac_haze",
+    "genre_families": ["fantasy", "dark_fantasy", "isekai", "modern_school", "slice_of_life", "urban_fantasy", "cyberpunk", "sci_fi", "steampunk", "post_apocalypse"],
+    "entity_type": "macro_event",
+    "event_subtype": "crisis",
+    "is_nsfw": 1,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"END": 1, "CHA": -1}, "arousal_multiplier": 1.65, "price_multiplier": 1.15},
+    "locales": {
+      "en": {
+        "title": "Crimson Orchid Incense Spill in {zone}",
+        "description": "Crates of heady euphoric perfume spilled near {venue} have left {zone} flushed with lowered inhibitions and bold, flirtatious tension as {faction} scrambles to air out the plaza.",
+        "sfw_fallback": "Crates of rare spiced perfume spilled near {venue} have left {zone} hazy and distracted while {faction} works to clear the plaza.",
+        "bounty_title": "Seal the Perfume Casks",
+        "bounty_objective": "Help {faction} seal the leaking aromatic casks stored behind {venue}."
+      },
+      "pl": {
+        "title": "Rozlane Kadzidło Szkarłatnej Orchidei w {zone}",
+        "description": "Rozbite skrzynie odurzających perfum przy {venue} obniżyły hamulce mieszkańców {zone}, wywołując gorące, flirtujące napięcie podczas interwencji {faction}.",
+        "sfw_fallback": "Rozbite skrzynie rzadkich perfum przy {venue} spowiły {zone} gęstą mgiełką, którą uprząta {faction}.",
+        "bounty_title": "Uszczelnij Beczki Aromatów",
+        "bounty_objective": "Pomóż {faction} zabezpieczyć przeciekające skrzynie na tyłach {venue}."
+      },
+      "ms": {
+        "title": "Tumpahan Wangian Orkid Merah di {zone}",
+        "description": "Peti wangian memikat yang tumpah dekat {venue} membuatkan suasana {zone} penuh godaan berani sementara {faction} cuba membersihkan dataran.",
+        "sfw_fallback": "Peti minyak wangi rempah yang tumpah dekat {venue} menyelubungi {zone} sementara {faction} membersihkan kawasan.",
+        "bounty_title": "Tutup Tong Wangian",
+        "bounty_objective": "Bantu {faction} menutup semula tong aromatik yang bocor di belakang {venue}."
+      },
+      "zh": {
+        "title": "{zone}绯兰迷香倾泻骚动",
+        "description": "倾洒在{venue}附近的催情兰香令整片{zone}弥漫着大胆撩人的暧昧热潮，{faction}正手忙脚乱地疏散通风。",
+        "sfw_fallback": "倾洒在{venue}周边的名贵浓香令{zone}雾气弥漫，{faction}正紧急清理街区。",
+        "bounty_title": "封存漏香木箱",
+        "bounty_objective": "协助{faction}密封堆放在{venue}后方的渗漏香料箱。"
+      },
+      "de": {
+        "title": "Purpurorchideen-Duftwolke in {zone}",
+        "description": "Ausgelaufene Kisten betörenden Parfüms nahe {venue} tauchen {zone} in knisternde, hemmungslose Flirtstimmung, während {faction} den Platz lüftet.",
+        "sfw_fallback": "Ausgelaufene Kisten seltenen Gewürzparfüms nahe {venue} hüllen {zone} in dichten Duftnebel, während {faction} aufräumt.",
+        "bounty_title": "Duftfässer versiegeln",
+        "bounty_objective": "Hilf {faction}, die undichten Aromafässer hinter {venue} zu verschließen."
+      }
+    }
+  },
+  {
+    "template_key": "nsfw_secret_taboo_tryst",
+    "genre_families": ["fantasy", "dark_fantasy", "isekai", "modern_school", "slice_of_life", "urban_fantasy", "cyberpunk", "sci_fi", "steampunk", "post_apocalypse"],
+    "entity_type": "rumor",
+    "event_subtype": "scandal",
+    "is_nsfw": 1,
+    "escalation_chance": 0.30,
+    "default_duration_minutes": 5760,
+    "modifiers": {"arousal_multiplier": 1.25, "dc_modifiers": {"CHA": 1}},
+    "locales": {
+      "en": {
+        "title": "After-Hours Passion Behind {venue}",
+        "description": "Steamy whispers claim {npc} and a rival {faction} insider have been slipping into {venue} late at night for consensual, breathless trysts that would shock both sides.",
+        "sfw_fallback": "Whispers claim {npc} and a rival {faction} insider have been meeting secretly inside {venue} late at night for unauthorized talks.",
+        "bounty_title": "Cover or Expose the Tryst",
+        "bounty_objective": "Verify who is meeting inside {venue} and decide how to handle the secret."
+      },
+      "pl": {
+        "title": "Gorąca Schadzka po Godzinach w {venue}",
+        "description": "Pikantne plotki głoszą, że {npc} i wysłannik rywalizującej grupy {faction} wymykają się nocą do {venue} na namiętne, dobrowolne schadzki.",
+        "sfw_fallback": "Plotki głoszą, że {npc} i wysłannik {faction} spotykają się potajemnie nocą w {venue} na poufne rozmowy.",
+        "bounty_title": "Zbadaj Tajną Schadzkę",
+        "bounty_objective": "Sprawdź, kto spotyka się w {venue}, i zdecyduj, co zrobić z sekretem."
+      },
+      "ms": {
+        "title": "Pertemuan Hangat Lewat Malam di {venue}",
+        "description": "Gosip hangat mendakwa {npc} dan wakil saingan {faction} menyelinap ke {venue} lewat malam untuk pertemuan asmara rahsia atas kerelaan bersama.",
+        "sfw_fallback": "Khabar angin mendakwa {npc} dan wakil {faction} bertemu secara rahsia lewat malam di {venue} untuk rundingan tertutup.",
+        "bounty_title": "Siasat Pertemuan Rahsia",
+        "bounty_objective": "Sahkan siapa yang bertemu di {venue} dan tentukan tindakan lanjut."
+      },
+      "zh": {
+        "title": "{venue}深夜禁忌私会绯闻",
+        "description": "香艳流言盛传{npc}与对立阵营{faction}的核心人物每夜溜进{venue}私下幽会缠绵，一旦曝光必令双方哗然。",
+        "sfw_fallback": "流言盛传{npc}与{faction}内部人士每夜秘密潜入{venue}进行私下密谈。",
+        "bounty_title": "查证深夜幽会真相",
+        "bounty_objective": "核实{venue}内的私会双方并决定掩护或揭发。"
+      },
+      "de": {
+        "title": "Heimliches Stelldichein hinter {venue}",
+        "description": "Pikante Gerüchte besagen, dass sich {npc} und ein Mitglied der rivalisierenden Gruppe {faction} spät nachts einvernehmlich zu leidenschaftlichen Treffen in {venue} schleichen.",
+        "sfw_fallback": "Gerüchte besagen, dass sich {npc} und ein Kontakt von {faction} spät nachts heimlich zu vertraulichen Gesprächen in {venue} treffen.",
+        "bounty_title": "Das Stelldichein überprüfen",
+        "bounty_objective": "Finde heraus, wer sich in {venue} trifft, und entscheide über das Geheimnis."
+      }
+    }
+  },
+  {
+    "template_key": "nsfw_tryst_leak_blackmail",
+    "genre_families": ["fantasy", "dark_fantasy", "isekai", "modern_school", "slice_of_life", "urban_fantasy", "cyberpunk", "sci_fi", "steampunk", "post_apocalypse"],
+    "entity_type": "rumor",
+    "event_subtype": "scandal",
+    "is_nsfw": 1,
+    "escalation_chance": 0.35,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"PER": 1, "CHA": 1}},
+    "locales": {
+      "en": {
+        "title": "Compromising Boudoir Snapshots in {zone}",
+        "description": "An extortionist is threatening to publish intimate consensual boudoir keepsakes stolen from {npc}'s suite near {venue} unless {faction} pays hush money.",
+        "sfw_fallback": "An extortionist is threatening to publish private correspondence stolen from {npc}'s office near {venue} unless {faction} pays hush money.",
+        "bounty_title": "Foil the Blackmailer",
+        "bounty_objective": "Intercept the extortionist near {venue} and destroy or recover the stolen keepsakes."
+      },
+      "pl": {
+        "title": "Szantaż Intymnymi Pamiątkami w {zone}",
+        "description": "Szantażysta grozi ujawnieniem prywatnych, intymnych pamiątek skradzionych z apartamentu {npc} przy {venue}, jeśli {faction} nie zapłaci okupu.",
+        "sfw_fallback": "Szantażysta grozi ujawnieniem prywatnej korespondencji skradzionej z biura {npc} przy {venue}, żądając okupu od {faction}.",
+        "bounty_title": "Udaremnij Szantaż",
+        "bounty_objective": "Przechwyć szantażystę koło {venue} i odzyskaj skradzione materiały."
+      },
+      "ms": {
+        "title": "Ugutan Gambar Peribadi di {zone}",
+        "description": "Seorang pemeras ugut mengancam mahu menyebarkan koleksi peribadi intim yang dicuri dari bilik {npc} dekat {venue} melainkan {faction} membayar wang tutup mulut.",
+        "sfw_fallback": "Seorang pemeras ugut mengancam mahu menyebarkan surat peribadi yang dicuri dari pejabat {npc} dekat {venue} melainkan {faction} membayar.",
+        "bounty_title": "Gagalkan Pemeras Ugut",
+        "bounty_objective": "Pintasan pemeras ugut berhampiran {venue} dan dapatkan semula barang curian itu."
+      },
+      "zh": {
+        "title": "{zone}私密闺房照勒索疑云",
+        "description": "勒索者窃走了{npc}在{venue}居所珍藏的情侣私密留影，威胁若{faction}不付封口费便公之于众。",
+        "sfw_fallback": "勒索者窃走了{npc}存放在{venue}的私人信函，威胁若{faction}不付封口费便将其公开。",
+        "bounty_title": "挫败勒索阴谋",
+        "bounty_objective": "在{venue}附近截住勒索者并追回失窃私物。"
+      },
+      "de": {
+        "title": "Erpressung mit Boudoir-Andenken in {zone}",
+        "description": "Ein Erpresser droht damit, gestohlene intime Erinnerungsstücke aus {npc}s Gemächern nahe {venue} zu veröffentlichen, falls {faction} kein Schweigegeld zahlt.",
+        "sfw_fallback": "Ein Erpresser droht damit, gestohlene Privatbriefe aus {npc}s Büro nahe {venue} zu veröffentlichen, falls {faction} nicht zahlt.",
+        "bounty_title": "Den Erpresser stoppen",
+        "bounty_objective": "Fange den Erpresser nahe {venue} ab und sichere die gestohlenen Stücke."
+      }
+    }
+  },
+  {
+    "template_key": "nsfw_midnight_exhibition_dare",
+    "genre_families": ["fantasy", "dark_fantasy", "isekai", "modern_school", "slice_of_life", "urban_fantasy", "cyberpunk", "sci_fi", "steampunk", "post_apocalypse"],
+    "entity_type": "rumor",
+    "event_subtype": "intrigue",
+    "is_nsfw": 1,
+    "escalation_chance": 0.25,
+    "default_duration_minutes": 5760,
+    "modifiers": {"arousal_multiplier": 1.3, "dc_modifiers": {"AGI": 1}},
+    "locales": {
+      "en": {
+        "title": "The Midnight Dare Society of {zone}",
+        "description": "Gossip feeds buzz about a thrill-seeking clique running consensual late-night streaking and exhibitionism dares past {faction} lookouts near {venue}, with {npc} rumored to hold the wager book.",
+        "sfw_fallback": "Gossip feeds buzz about a thrill-seeking clique running late-night rooftop parkour dares past {faction} lookouts near {venue}, with {npc} rumored to hold the wager book.",
+        "bounty_title": "Track the Dare Wager Book",
+        "bounty_objective": "Stake out {venue} after midnight and confront the organizers behind the dares."
+      },
+      "pl": {
+        "title": "Nocny Klub Wyzwań w {zone}",
+        "description": "Plotki huczą o grupie śmiałków podejmujących nocne, dobrowolne wyzwania ekshibicjonistyczne obok czujek {faction} przy {venue}, a {npc} ma prowadzić księgę zakładów.",
+        "sfw_fallback": "Plotki huczą o grupie śmiałków podejmujących nocne wyzwania zręcznościowe obok czujek {faction} przy {venue}, a {npc} ma prowadzić księgę zakładów.",
+        "bounty_title": "Odnajdź Księgę Zakładów",
+        "bounty_objective": "Obserwuj {venue} po północy i skonfrontuj się z organizatorami wyzwań."
+      },
+      "ms": {
+        "title": "Kelab Cabaran Berani Tengah Malam di {zone}",
+        "description": "Suapan gosip kecoh tentang kumpulan pencari debaran yang melakukan cabaran berani lewat malam melepasi pengawal {faction} dekat {venue}, dengan {npc} dikatakan memegang buku pertaruhan.",
+        "sfw_fallback": "Suapan gosip kecoh tentang kumpulan pencari cabaran yang melakukan aksi tangkas lewat malam melepasi pengawal {faction} dekat {venue}, dengan {npc} memegang buku pertaruhan.",
+        "bounty_title": "Jejak Buku Pertaruhan",
+        "bounty_objective": "Intai {venue} selepas tengah malam dan temui penganjur cabaran tersebut."
+      },
+      "zh": {
+        "title": "{zone}午夜大胆真心话赌局",
+        "description": "八卦圈盛传一群寻求刺激的成年同好每夜在{venue}外绕过{faction}岗哨进行自愿的大胆露出挑战，据说赌本名册就握在{npc}手中。",
+        "sfw_fallback": "八卦圈盛传一群寻求刺激的挑战者每夜在{venue}外绕过{faction}岗哨进行天台潜行打赌，据说赌本名册握在{npc}手中。",
+        "bounty_title": "追查午夜赌约名册",
+        "bounty_objective": "午夜后在{venue}蹲守并查明挑战组织者。"
+      },
+      "de": {
+        "title": "Mitternächtlicher Mutproben-Zirkel in {zone}",
+        "description": "Gerüchte kursieren über eine abenteuerlustige Clique, die nahe {venue} einvernehmliche nächtliche Entblößungs-Mutproben an den Posten von {faction} vorbei wagt, wobei {npc} das Wettbuch führen soll.",
+        "sfw_fallback": "Gerüchte kursieren über eine abenteuerlustige Clique, die nahe {venue} nächtliche Kletter-Mutproben an den Posten von {faction} vorbei wagt, wobei {npc} das Wettbuch führen soll.",
+        "bounty_title": "Das Wettbuch aufspüren",
+        "bounty_objective": "Beobachte {venue} nach Mitternacht und stelle die Organisatoren der Mutproben."
+      }
+    }
+  },
+  {
+    "template_key": "hs_minor_locker_vandalism",
+    "genre_families": ["minor_high_school"],
+    "entity_type": "minor_event",
+    "event_subtype": "intrigue",
+    "is_nsfw": 0,
+    "can_spawn_bounty": true,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Defaced Locker Bank at {venue}",
+        "description": "Obnoxious acrylic graffiti and pasted caricatures cover the locker row near {venue}. Students linger to snap photos before hallway monitors arrive.",
+        "bounty_title": "Clean Locker Graffiti",
+        "bounty_objective": "Scrub the acrylic slogans from the lockers at {venue} and identify who left the stencils behind."
+      },
+      "pl": {
+        "title": "Zniszczony Ciąg Szafek w {venue}",
+        "description": "Złośliwe napisy akrylowe i karykatury pokryły rząd szafek przy {venue}. Uczniowie robią zdjęcia, zanim zjawią się dyżurni.",
+        "bounty_title": "Usuń Napisy z Szafek",
+        "bounty_objective": "Zmyj farbę z szafek w {venue} i ustal, kto zostawił szablony."
+      },
+      "ms": {
+        "title": "Loker Diconteng di {venue}",
+        "description": "Grafiti akrilik dan karikatur menutupi deretan loker berhampiran {venue}. Pelajar merakam gambar sebelum pengawas tiba.",
+        "bounty_title": "Bersihkan Grafiti Loker",
+        "bounty_objective": "Cuci contengan akrilik di {venue} dan kenal pasti pemilik stensil yang ditinggalkan."
+      },
+      "zh": {
+        "title": "{venue}更衣柜涂鸦骚动",
+        "description": "{venue}旁的整排储物柜被喷上了恶作剧涂鸦与滑稽画像，引得路过学生纷纷围观拍照。",
+        "bounty_title": "清理柜面涂鸦",
+        "bounty_objective": "协助清除{venue}柜排上的恶作剧喷漆，并查明是谁遗留了模板。"
+      },
+      "de": {
+        "title": "Beschmierte Spindreihe in {venue}",
+        "description": "Freche Acryl-Graffiti und Karikaturen zieren die Spinde nahe {venue}. Schüler machen Fotos, bevor die Aufsicht einschreitet.",
+        "bounty_title": "Spind-Graffiti entfernen",
+        "bounty_objective": "Reinige die Spindtüren in {venue} und finde heraus, wer die Schablonen zurückließ."
+      }
+    }
+  },
+  {
+    "template_key": "hs_minor_missing_belongings",
+    "genre_families": ["minor_high_school"],
+    "entity_type": "minor_event",
+    "event_subtype": "intrigue",
+    "is_nsfw": 0,
+    "can_spawn_bounty": true,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Misplaced Club Pouch at {venue}",
+        "description": "A velvet pouch containing tournament registration badges and locker padlocks went missing right beside the bench at {venue}.",
+        "bounty_title": "Recover Lost Tournament Pouch",
+        "bounty_objective": "Search the lost-and-found bins and corners around {venue} to return the misplaced pouch."
+      },
+      "pl": {
+        "title": "Zagubiony Woreczek Klubowy w {venue}",
+        "description": "Aksamitny woreczek z plakietkami turniejowymi i kłódkami zaginął tuż obok ławki w {venue}.",
+        "bounty_title": "Odnajdź Zgubiony Woreczek",
+        "bounty_objective": "Przeszukaj schowki i zakamarki wokół {venue}, aby zwrócić zgubiony woreczek."
+      },
+      "ms": {
+        "title": "Pundi Kelab Hilang di {venue}",
+        "description": "Kantung baldu berisi lencana kejohanan dan mangga loker tercicir di sebelah bangku di {venue}.",
+        "bounty_title": "Cari Semula Kantung Kejohanan",
+        "bounty_objective": "Periksa ruang simpanan barang hilang sekitar {venue} untuk memulangkan kantung itu."
+      },
+      "zh": {
+        "title": "{venue}遗失的社团收纳袋",
+        "description": "装有锦标赛参赛胸牌与备用挂锁的丝绒布袋在{venue}的长椅旁不翼而飞。",
+        "bounty_title": "搜寻失落的收纳袋",
+        "bounty_objective": "翻查{venue}周围的失物招领箱与角落，物归原主。"
+      },
+      "de": {
+        "title": "Verlegter Klubbeutel in {venue}",
+        "description": "Ein Samtbeutel mit Turnierausweisen und Spindschlössern ist neben der Bank in {venue} abhandengekommen.",
+        "bounty_title": "Turnierbeutel wiederfinden",
+        "bounty_objective": "Durchsuche Fundkisten und Ecken rund um {venue}, um den Beutel zurückzubringen."
+      }
+    }
+  },
+  {
+    "template_key": "hs_minor_night_figure",
+    "genre_families": ["minor_high_school"],
+    "entity_type": "minor_event",
+    "event_subtype": "phenomenon",
+    "is_nsfw": 0,
+    "can_spawn_bounty": false,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Prowling Flashlight Behind {venue}",
+        "description": "Evening club members whisper about an unidentified figure wandering the darkened breezeway behind {venue} carrying an old brass flashlight.",
+        "bounty_title": "Evening Breezeway Sighting",
+        "bounty_objective": "Trade stories about the mysterious late-night figure spotted behind {venue}."
+      },
+      "pl": {
+        "title": "Błyski Latarki za {venue}",
+        "description": "Wieczorni klubowicze szepczą o tajemniczej postaci z latarką krążącej po zmroku za budynkiem {venue}.",
+        "bounty_title": "Nocne Światło za Korytarzem",
+        "bounty_objective": "Porozmawiaj o tajemniczej postaci widzianej nocą za {venue}."
+      },
+      "ms": {
+        "title": "Kelibat Lampu Suluh di Belakang {venue}",
+        "description": "Ahli kelab petang berbisik tentang lembaga berlampu suluh berlegar di laluan gelap belakang {venue}.",
+        "bounty_title": "Kelibat Laluan Gelap",
+        "bounty_objective": "Bualkan kisah kelibat misteri yang kelihatan di belakang {venue}."
+      },
+      "zh": {
+        "title": "{venue}后巷的手电筒亮光",
+        "description": "晚间留校的学生私下议论，称曾瞥见神秘人影拿着旧手电筒在{venue}后方的昏暗连廊附近徘徊。",
+        "bounty_title": "后巷夜影奇谈",
+        "bounty_objective": "聊聊{venue}后方夜晚出现的神秘人影传闻。"
+      },
+      "de": {
+        "title": "Taschenlampenschein hinter {venue}",
+        "description": "Abendliche AG-Teilnehmer tuscheln über eine unbekannte Gestalt mit Taschenlampe im dunklen Verbindungsgang hinter {venue}.",
+        "bounty_title": "Nächtlicher Lichtschein",
+        "bounty_objective": "Tausche Gerüchte über die Gestalt hinter {venue} aus."
+      }
+    }
+  },
+  {
+    "template_key": "hs_minor_vending_stray_cat",
+    "genre_families": ["minor_high_school"],
+    "entity_type": "minor_event",
+    "event_subtype": "phenomenon",
+    "is_nsfw": 0,
+    "can_spawn_bounty": false,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Vending Alcove Mascot at {venue}",
+        "description": "A plump calico stray has made a bed on the warm cardboard flat beside the soda machine in {venue}, purring loudly whenever students buy warm canned tea.",
+        "bounty_title": "Calico Comfort",
+        "bounty_objective": "Enjoy a moment of campus warmth watching the sleepy calico cat."
+      },
+      "pl": {
+        "title": "Maskotka z Automatu w {venue}",
+        "description": "Puszysty bezdomny kot rozgościł się na ciepłym kartonie obok automatu z napojami w {venue}, mrucząc do każdego kupującego ciepłą herbatę.",
+        "bounty_title": "Koci Spokój",
+        "bounty_objective": "Zatrzymaj się na chwilę przy sennym kocie obok automatu."
+      },
+      "ms": {
+        "title": "Kucing Penunggu Mesin Layan Diri {venue}",
+        "description": "Seekor kucing belang tidur di atas kotak kadbod hangat bersebelahan mesin minuman di {venue}, mendengkur mesra kepada sesiapa yang lalu.",
+        "bounty_title": "Ketenangan Bersama Kucing",
+        "bounty_objective": "Nikmati ketenangan seketika melihat gelagat kucing tidur di {venue}."
+      },
+      "zh": {
+        "title": "{venue}自动售货机旁的校猫",
+        "description": "一只圆滚滚的三花流浪猫在{venue}的饮料贩卖机旁找到了暖和的纸箱安睡，有人投币便发出惬意的呼噜声。",
+        "bounty_title": "猫咪的闲适午后",
+        "bounty_objective": "在自动售货机前驻足，享受片刻温馨的校园时光。"
+      },
+      "de": {
+        "title": "Der Kater am Getränkeautomat in {venue}",
+        "description": "Eine rundliche Katze hat es sich auf einem warmen Karton neben dem Automaten in {venue} bequem gemacht und schnurrt leise vor sich hin.",
+        "bounty_title": "Katzenpause am Automaten",
+        "bounty_objective": "Verweile einen Moment und beobachte das schläfrige Tier."
+      }
+    }
+  },
+  {
+    "template_key": "hs_nsfw_minor_used_condom",
+    "genre_families": ["minor_high_school"],
+    "entity_type": "minor_event",
+    "event_subtype": "scandal",
+    "is_nsfw": 1,
+    "can_spawn_bounty": false,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Used Condom Found on the Floor at {venue}",
+        "description": "A torn foil wrapper and a knotted used condom were spotted on the floor behind the equipment stack at {venue}, sparking scandalized whispers and quiet snickers across campus.",
+        "sfw_fallback": "A crushed energy drink can and discarded sweet wrappers sit tucked behind the furthest equipment stack at {venue}, drawing annoyed looks from hallway sweeps.",
+        "bounty_title": "Bleacher Floor Gossip",
+        "bounty_objective": "Note the lingering traces of a late-night campus hookup."
+      },
+      "pl": {
+        "title": "Zużyta Prezerwatywa na Podłodze w {venue}",
+        "description": "Rozerwane opakowanie i zużyta prezerwatywa leżały na podłodze za stertą materacy w {venue}, wywołując gorące plotki i chichoty na korytarzach.",
+        "sfw_fallback": "Pusta puszka po napoju energetycznym i papierki leżą za stertą materacy w {venue}, ściągając wzrok dyżurnych.",
+        "bounty_title": "Sekrety za Trybunami",
+        "bounty_objective": "Zauważ ślady nocnej schadzki w {venue}."
+      },
+      "ms": {
+        "title": "Kondom Terpakai Ditemui di Lantai {venue}",
+        "description": "Kepingan pembalut koyak dan kondom terpakai ditemui di atas lantai belakang timbunan alatan {venue}, mencetuskan bisikan hangat di seluruh kampus.",
+        "sfw_fallback": "Tin minuman tenaga kosong dan pembalut gula-gula terselit di belakang timbunan alatan {venue}, menarik perhatian pekerja pembersihan.",
+        "bounty_title": "Gosip Belakang Pentas",
+        "bounty_objective": "Perhatikan sisa pertemuan rahsia lewat malam di {venue}."
+      },
+      "zh": {
+        "title": "{venue}地板上惊现用过的避孕套",
+        "description": "{venue}器材堆后的地板上赫然遗落着撕开的铝箔包装与打结的用过避孕套，引发路过众人脸红耳赤的私下议论。",
+        "sfw_fallback": "{venue}后排垫堆深处散落着踩扁的功能饮料罐与零食包装纸，引来值日人员无奈的叹息。",
+        "bounty_title": "角落里的风流残迹",
+        "bounty_objective": "留意昨夜有人在{venue}私下偷欢留下的痕迹。"
+      },
+      "de": {
+        "title": "Benutztes Kondom auf dem Boden in {venue}",
+        "description": "Eine aufgerissene Folienhülle und ein benutztes Kondom wurden auf dem Boden hinter den Matten in {venue} entdeckt und sorgen überall für aufgeregtes Getuschel.",
+        "sfw_fallback": "Eine zerbeulte Dose und Bonbonpapier liegen hinter den Matten in {venue} und ärgern die Hallenaufsicht.",
+        "bounty_title": "Getuschel hinter den Bänken",
+        "bounty_objective": "Nimm die Spuren eines heimlichen Treffens in {venue} wahr."
+      }
+    }
+  },
+  {
+    "template_key": "hs_nsfw_minor_mysterious_moaning",
+    "genre_families": ["minor_high_school"],
+    "entity_type": "minor_event",
+    "event_subtype": "scandal",
+    "is_nsfw": 1,
+    "can_spawn_bounty": false,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Mysterious Moaning Behind Locked Doors at {venue}",
+        "description": "Rhythmic creaks and unmistakable breathless moaning drifted from a locked supply room inside {venue} after classes, leaving passersby flustered as the doorknob rattled from within.",
+        "sfw_fallback": "Muffled arguing and rhythmic thumps drift from the locked utility alcove inside {venue}, where drama club members rehearse lines past schedule.",
+        "bounty_title": "Locked Room Whispers",
+        "bounty_objective": "Overhear the campus chatter about the passionate noises inside {venue}."
+      },
+      "pl": {
+        "title": "Tajemnicze Jęki zza Zamkniętych Drzwi w {venue}",
+        "description": "Rytmiczne skrzypienie i namiętne jęki dobiegały po zajęciach z zamkniętego schowka w {venue}, wprawiając przechodniów w rumieńce.",
+        "sfw_fallback": "Stłumione spory i głuche uderzenia dobiegają z zamkniętego schowka w {venue}, gdzie kółko teatralne ćwiczy po godzinach.",
+        "bounty_title": "Szepty pod Schowkiem",
+        "bounty_objective": "Posłuchaj plotek o odgłosach z zamkniętego pokoju w {venue}."
+      },
+      "ms": {
+        "title": "Desahan Misteri dari Bilik Berkunci di {venue}",
+        "description": "Keriut berirama dan desahan ghairah kedengaran jelas dari sebalik pintu bilik stor berkunci di {venue} selepas waktu kelas, membuatkan sesiapa yang melintas tersipu malu.",
+        "sfw_fallback": "Suara perbalahan dan ketukan perlahan kedengaran dari bilik stor di {venue}, tempat ahli kelab teater berlatih watak.",
+        "bounty_title": "Bisikan Bilik Berkunci",
+        "bounty_objective": "Dengarkan bualan hangat mengenai bunyi dari bilik stor {venue}."
+      },
+      "zh": {
+        "title": "{venue}反锁房门后传出的神秘娇喘",
+        "description": "放学后{venue}深处反锁的储物间传出有节奏的晃动声与压抑不住的暧昧娇喘，门把手微微颤动，令路过的人面红耳赤。",
+        "sfw_fallback": "{venue}深处反锁的杂物隔间传出阵阵争辩与台词对读声，戏剧社成员正在延时排演剧目。",
+        "bounty_title": "储物间的暧昧动静",
+        "bounty_objective": "听听大家对{venue}反锁房间内神秘喘息声的议论。"
+      },
+      "de": {
+        "title": "Geheimnisvolles Stöhnen hinter verschlossener Tür in {venue}",
+        "description": "Rhythmisches Knarren und unverkennbares leidenschaftliches Stöhnen drangen nach Unterrichtsschluss aus einer verschlossenen Kammer in {venue} und sorgten für rote Köpfe.",
+        "sfw_fallback": "Gedämpftes Gezänk dringt aus der Kammer in {venue}, wo die Theatergruppe heimlich für ihren Auftritt probt.",
+        "bounty_title": "Geräusche aus der Kammer",
+        "bounty_objective": "Höre dem Getuschel über die Geräusche in {venue} zu."
+      }
+    }
+  },
+  {
+    "template_key": "hs_nsfw_minor_missing_panties",
+    "genre_families": ["minor_high_school"],
+    "entity_type": "minor_event",
+    "event_subtype": "intrigue",
+    "is_nsfw": 1,
+    "can_spawn_bounty": true,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Missing Lace Panties from {venue} Changing Room",
+        "description": "Several pairs of designer lace panties vanished straight out of unattended changing baskets inside {venue}, sparking outrage over a brazen locker-room thief.",
+        "sfw_fallback": "Several team-issued track ribbons and stopwatches vanished from unattended gym baskets inside {venue}, sparking outrage over a locker-room thief.",
+        "bounty_title": "Catch the Panty Thief",
+        "bounty_objective": "Discreetly stake out the changing corridor at {venue} and unmask the undergarment thief."
+      },
+      "pl": {
+        "title": "Zaginione Koronkowe Majtki w Szatni {venue}",
+        "description": "Kilka par koronkowej bielizny zniknęło prosto z koszyków w przebieralni {venue}, wywołując oburzenie na bezczelnego złodzieja.",
+        "sfw_fallback": "Kilka wstęg klubowych i stoperów zniknęło z koszyków w szatni {venue}, wywołując poruszenie.",
+        "bounty_title": "Złap Złodzieja Bielizny",
+        "bounty_objective": "Dyskretnie obserwuj korytarz przebieralni w {venue} i zdemaskuj sprawcę kradzieży."
+      },
+      "ms": {
+        "title": "Seluar Dalam Renda Hilang di Bilik Persalinan {venue}",
+        "description": "Beberapa helai seluar dalam renda berjenama lesap dari bakul persalinan di {venue}, mencetuskan kemarahan terhadap pencuri pakaian dalam yang berani.",
+        "sfw_fallback": "Beberapa pita larian rasmi dan jam randik hilang dari bakul di {venue}, mencetuskan kemarahan ramai.",
+        "bounty_title": "Tangkap Pencuri Bilik Salin",
+        "bounty_objective": "Awasi laluan bilik persalinan di {venue} secara rahsia dan dedahkan pencuri itu."
+      },
+      "zh": {
+        "title": "{venue}更衣室蕾丝内裤连环失窃",
+        "description": "{venue}更衣篮里的好几条名牌蕾丝内裤接连不翼而飞，大家纷纷愤慨痛斥那名胆大包天的内衣小偷。",
+        "sfw_fallback": "{venue}更衣篮里的几条纪念运动束带与秒表接连失踪，引发众人对小偷的不满。",
+        "bounty_title": "揪出更衣室内衣窃贼",
+        "bounty_objective": "暗中蹲守{venue}更衣室走廊，当场抓获顺手牵羊的窃贼。"
+      },
+      "de": {
+        "title": "Verschwundene Spitzenhöschen in der Umkleide von {venue}",
+        "description": "Mehrere Spitzenhöschen sind direkt aus den Umkleidekörben in {venue} verschwunden und sorgen für Empörung über einen dreisten Wäschedieb.",
+        "sfw_fallback": "Mehrere Vereinsbänder und Stoppuhren sind aus den Umkleidekörben in {venue} verschwunden.",
+        "bounty_title": "Den Wäschedieb stellen",
+        "bounty_objective": "Beobachte unauffällig den Umkleideflur in {venue} und entlarve den Dieb."
+      }
+    }
+  },
+  {
+    "template_key": "hs_nsfw_minor_serial_stalker",
+    "genre_families": ["minor_high_school"],
+    "entity_type": "minor_event",
+    "event_subtype": "intrigue",
+    "is_nsfw": 1,
+    "can_spawn_bounty": true,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Serial Stalker Sighted Near {venue} Windows",
+        "description": "A hooded serial stalker has been spotted lurking beneath walkways near {venue} after dusk, leaving obsessive erotic notes and voyeuristic sketches on windowsills.",
+        "sfw_fallback": "A hooded prankster has been spotted lurking near {venue} after dusk, taping anonymous club critiques and caricatures onto hallway windowsills.",
+        "bounty_title": "Unmask the Nocturnal Stalker",
+        "bounty_objective": "Stake out the hedges outside {venue} after sundown and intercept the serial stalker."
+      },
+      "pl": {
+        "title": "Seryjny Podglądacz Widziany pod Oknami {venue}",
+        "description": "Zakapturzony prześladowca był widziany po zmroku pod oknami {venue}, gdzie zostawia na ramach okiennych obsesyjne, erotyczne liściki i szkice z ukrycia.",
+        "sfw_fallback": "Zakapturzony żartowniś krąży po zmroku przy {venue}, przyklejając anonimowe karykatury na oknach korytarza.",
+        "bounty_title": "Zdemaskuj Nocnego Podglądacza",
+        "bounty_objective": "Zaczaj się wieczorem przy żywopłocie obok {venue} i zatrzymaj natręta."
+      },
+      "ms": {
+        "title": "Penghendap Bersiri Dilihat Berhampiran Tingkap {venue}",
+        "description": "Seorang penghendap bersiri bertudung gelap kelihatan mengintai di bawah laluan {venue} selepas senja sambil meninggalkan nota berahi dan lakaran curi di ambang tingkap.",
+        "sfw_fallback": "Seorang pelawak bertudung gelap kelihatan berlegar di {venue} selepas senja sambil menampal poster sindiran kelab pada tingkap.",
+        "bounty_title": "Dedahkan Penghendap Malam",
+        "bounty_objective": "Intai kawasan semak di luar {venue} selepas matahari terbenam dan pintas penghendap itu."
+      },
+      "zh": {
+        "title": "{venue}窗外频现连环窥视跟踪狂",
+        "description": "入夜后屡有人撞见兜帽跟踪狂潜伏在{venue}窗下窥探，还在窗台留下写满露骨妄想的情书与偷绘素描，令人心生警惕。",
+        "sfw_fallback": "入夜后屡有人撞见兜帽恶作剧者在{venue}窗外徘徊，往走廊窗台张贴匿名社团讽刺漫画。",
+        "bounty_title": "抓捕夜间连环跟踪者",
+        "bounty_objective": "入夜后在{venue}外的灌木丛设伏，截住那名鬼祟的跟踪狂。"
+      },
+      "de": {
+        "title": "Serien-Stalker an den Fenstern von {venue} gesichtet",
+        "description": "Eine vermummte Gestalt schleicht nach Einbruch der Dunkelheit wiederholt um {venue} herum und hinterlässt anzügliche Briefe sowie heimliche Skizzen auf den Fensterbänken.",
+        "sfw_fallback": "Ein vermummter Unruhestifter schleicht nach Einbruch der Dunkelheit um {venue} herum und klebt anonyme Spottbilder an die Fenster.",
+        "bounty_title": "Den nächtlichen Stalker fassen",
+        "bounty_objective": "Leg dich nach Sonnenuntergang vor {venue} auf die Lauer und stelle den Stalker."
+      }
+    }
+  },
+  {
+    "template_key": "anom_minor_sigil_graffiti",
+    "genre_families": ["minor_anomaly_bureau"],
+    "entity_type": "minor_event",
+    "event_subtype": "intrigue",
+    "is_nsfw": 0,
+    "can_spawn_bounty": true,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Chalk Containment Ward at {venue}",
+        "description": "Luminescent alchemical chalk lines resembling amateur banishment circles have been sketched across the basement door tiles of {venue}.",
+        "bounty_title": "Cleanse Anomalous Ward Glyph",
+        "bounty_objective": "Neutralize the resonant chalk sigil at {venue} before it causes sensory distortions."
+      },
+      "pl": {
+        "title": "Kredowy Krąg Ochronny w {venue}",
+        "description": "Świecące alchemiczne linie przypominające amatorski krąg odpędzający narysowano na posadzce w piwnicy {venue}.",
+        "bounty_title": "Zneutralizuj Kredowy Glif",
+        "bounty_objective": "Zmyj rezonujący symbol ochronny w {venue}, zanim wywoła zakłócenia percepcji."
+      },
+      "ms": {
+        "title": "Garisan Bulatan Azimat di {venue}",
+        "description": "Contengan kapur alkimia yang bercahaya membentuk bulatan pendinding amatur ditemui pada jubin pintu bawah tanah {venue}.",
+        "bounty_title": "Padamkan Garisan Sigil",
+        "bounty_objective": "Neutralkan kapur bertenaga di {venue} sebelum ia mencetuskan gangguan deria."
+      },
+      "zh": {
+        "title": "{venue}地砖上的荧光秘术法阵",
+        "description": "{venue}地下室门前被人用发光的炼金粉笔涂画了拙劣的封锁符阵，空气中隐约有静电嗡鸣。",
+        "bounty_title": "清除异样粉笔符文",
+        "bounty_objective": "擦除并中和{venue}门前的微弱共鸣法阵，避免引发感知失真。"
+      },
+      "de": {
+        "title": "Kreidesiegel auf dem Boden in {venue}",
+        "description": "Leuchtende Kreidelinien eines laienhaften Bannkreises wurden vor der Kellertür von {venue} auf die Fliesen gezeichnet.",
+        "bounty_title": "Anomales Kreidesiegel entfernen",
+        "bounty_objective": "Neutralisiere das resonierende Glyphenmuster in {venue}, bevor es die Sensorik stört."
+      }
+    }
+  },
+  {
+    "template_key": "anom_minor_missing_gear",
+    "genre_families": ["minor_anomaly_bureau"],
+    "entity_type": "minor_event",
+    "event_subtype": "intrigue",
+    "is_nsfw": 0,
+    "can_spawn_bounty": true,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Displaced Telemetry Kit at {venue}",
+        "description": "A field agent's calibrated resonance sensor and frequency tuning fork vanished from the charging bay bench at {venue}.",
+        "bounty_title": "Recover Lost Resonance Sensor",
+        "bounty_objective": "Sweep the lockers and maintenance carts around {venue} to retrieve the sensitive detector."
+      },
+      "pl": {
+        "title": "Zaginiony Zestaw Telemetryczny w {venue}",
+        "description": "Skalibrowany czujnik rezonansu i kamerton polowy agenta zniknęły ze stacji ładującej w {venue}.",
+        "bounty_title": "Odzyskaj Czujnik Rezonansu",
+        "bounty_objective": "Przeszukaj szafki i wózki techniczne w {venue}, aby odnaleźć czuły detektor."
+      },
+      "ms": {
+        "title": "Kit Telemetri Hilang di {venue}",
+        "description": "Pengesan resonans dan talaan frekuensi milik ejen lapangan hilang dari meja pengecas di {venue}.",
+        "bounty_title": "Cari Semula Pengesan Resonans",
+        "bounty_objective": "Geledah loker dan troli penyelenggaraan di {venue} untuk mendapatkan kembali alat pengesan itu."
+      },
+      "zh": {
+        "title": "{venue}遗失的便携谐振仪",
+        "description": "特勤外勤员刚校准好的频率音叉与谐振感应探头在{venue}的充电底座旁不见了踪影。",
+        "bounty_title": "找回失落的感应套件",
+        "bounty_objective": "搜查{venue}周边的备品柜与维护推车，收回未登记外流的侦测设备。"
+      },
+      "de": {
+        "title": "Verlegtes Telemetrie-Set in {venue}",
+        "description": "Der kalibrierte Resonanzsensor eines Feldagenten samt Stimmgabel ist von der Ladestation in {venue} verschwunden.",
+        "bounty_title": "Resonanzsensor aufspüren",
+        "bounty_objective": "Durchsuche Schränke und Werkstattwagen in {venue}, um den Sensor zu sichern."
+      }
+    }
+  },
+  {
+    "template_key": "anom_minor_night_silhouette",
+    "genre_families": ["minor_anomaly_bureau"],
+    "entity_type": "minor_event",
+    "event_subtype": "phenomenon",
+    "is_nsfw": 0,
+    "can_spawn_bounty": false,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Shifting Shadow on {venue} Roof",
+        "description": "Surveillance feeds flag a tall, angular shadow pacing the perimeter roof ledge of {venue} that vanishes whenever thermal scans focus on it.",
+        "bounty_title": "Rooftop Feed Anomaly",
+        "bounty_objective": "Compare theories with bureau staff about the thermal-shy silhouette above {venue}."
+      },
+      "pl": {
+        "title": "Cień na Dachu {venue}",
+        "description": "Kamery monitoringu zarejestrowały kanciasty cień spacerujący po gzymsie {venue}, który znika przy próbie skanowania termowizyjnego.",
+        "bounty_title": "Anomalia na Dachu",
+        "bounty_objective": "Wymień spostrzeżenia z agentami o dziwnym cieniu nad {venue}."
+      },
+      "ms": {
+        "title": "Bayang Mencurigakan di Bumbung {venue}",
+        "description": "Kamera litar tertutup mengesan bayang tinggi berlegar di birai bumbung {venue} yang hilang setiap kali diimbas pengesan haba.",
+        "bounty_title": "Kelibat Kamera Bumbung",
+        "bounty_objective": "Bincangkan rakaman bayang misteri di atas {venue} bersama rakan setugas."
+      },
+      "zh": {
+        "title": "{venue}天台的游移暗影",
+        "description": "监控终端捕捉到一道瘦长的轮廓在{venue}的天台边缘游走，但热成像探头一对准便突兀消散。",
+        "bounty_title": "天台监控奇谈",
+        "bounty_objective": "与局内同僚聊聊{venue}天台热成像消失的诡异黑影。"
+      },
+      "de": {
+        "title": "Wandernder Schatten auf dem Dach von {venue}",
+        "description": "Die Videoüberwachung meldet eine kantige Silhouette auf der Dachkante von {venue}, die sich bei Wärmescans auflöst.",
+        "bounty_title": "Dachkanten-Sichtung",
+        "bounty_objective": "Sprich mit Kollegen über den seltsamen Schatten auf {venue}."
+      }
+    }
+  },
+  {
+    "template_key": "anom_minor_elevator_hiccup",
+    "genre_families": ["minor_anomaly_bureau"],
+    "entity_type": "minor_event",
+    "event_subtype": "phenomenon",
+    "is_nsfw": 0,
+    "can_spawn_bounty": false,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Phantom Floor Chime in {venue}",
+        "description": "The service elevator in {venue} occasionally dings for 'Floor Zero' between subterranean basements, opening its doors to reveal nothing but a polished brass mirror.",
+        "bounty_title": "Subterranean Ding",
+        "bounty_objective": "Observe the harmless elevator hiccup before technicians reset the hoist."
+      },
+      "pl": {
+        "title": "Widmowe Piętro w Windzie {venue}",
+        "description": "Winda towarowa w {venue} czasami dzwoni, anonsując 'Poziom Zero' między podziemiami, otwierając drzwi na gładkie mosiężne lustro.",
+        "bounty_title": "Dźwięk z Głębi",
+        "bounty_objective": "Zaobserwuj nieszkodliwy błąd windy przed przybyciem techników."
+      },
+      "ms": {
+        "title": "Loceng Tingkat Ghaib di {venue}",
+        "description": "Lif servis di {venue} sesekali berbunyi menandakan 'Tingkat Sifar' di bawah tanah, membuka pintu memperlihatkan cermin tembaga berkilat.",
+        "bounty_title": "Loceng Bawah Tanah",
+        "bounty_objective": "Lihat keanehan lif yang tidak berbahaya ini sebelum juruteknik tiba."
+      },
+      "zh": {
+        "title": "{venue}电梯的空响零层",
+        "description": "{venue}的后勤货梯偶尔会在下行至地底时传出清脆的报站提示音并短暂停顿，门扇滑开后只有擦拭得反光的黄铜壁板。",
+        "bounty_title": "驻足倾听梯厅异响",
+        "bounty_objective": "在维修工重置程序前，观察这处无害的空间回响现象。"
+      },
+      "de": {
+        "title": "Phantom-Etage im Aufzug von {venue}",
+        "description": "Der Lastenaufzug in {venue} meldet gelegentlich eine 'Etage Null' im Untergeschoss und öffnet die Türen vor einem blanken Messingspiegel.",
+        "bounty_title": "Aufzug-Gong im Tiefgeschoss",
+        "bounty_objective": "Beobachte das harmlose Aufzugsflackern vor der technischen Wartung."
+      }
+    }
+  },
+  {
+    "template_key": "anom_nsfw_minor_used_condom",
+    "genre_families": ["minor_anomaly_bureau"],
+    "entity_type": "minor_event",
+    "event_subtype": "scandal",
+    "is_nsfw": 1,
+    "can_spawn_bounty": false,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Bioluminescent Discard in {venue} Vault",
+        "description": "A used latex condom glowing with faint harmless bioluminescence sits knotted atop an empty lead crate on the floor of {venue}, evidence of a clandestine agent hookup.",
+        "sfw_fallback": "A ruptured glow-stick leaking faint harmless luminescence sits atop an empty lead crate behind {venue}, left behind after routine night inventory.",
+        "bounty_title": "Vault Rendezvous Traces",
+        "bounty_objective": "Observe the indiscreet remnants of an after-hours bureau encounter."
+      },
+      "pl": {
+        "title": "Świecące Znalezisko w Krypcie {venue}",
+        "description": "Zużyta prezerwatywa świecąca słabym, nieszkodliwym blaskiem leży na ołowianej skrzyni w {venue}, świadcząc o sekretnej schadzce agentów.",
+        "sfw_fallback": "Pęknięte światło chemiczne sączące słaby blask leży na skrzyni za {venue}, pozostawione po nocnym spisie magazynu.",
+        "bounty_title": "Ślady w Krypcie",
+        "bounty_objective": "Zauważ pozostałości po sekretnym spotkaniu personelu."
+      },
+      "ms": {
+        "title": "Sisa Bercahaya di Gudang {venue}",
+        "description": "Kondom terpakai yang memancarkan cahaya lembut terletak di atas peti plumbum belakang {venue}, bukti pertemuan intim ejen bertugas.",
+        "sfw_fallback": "Batang tiub cahaya yang bocor terletak di atas peti plumbum di {venue}, ditinggalkan selepas inventori lewat malam.",
+        "bounty_title": "Kesan Gudang Rahsia",
+        "bounty_objective": "Perhatikan sisa pertemuan sulit antara ejen bertugas."
+      },
+      "zh": {
+        "title": "{venue}保险库地板上的微光避孕套",
+        "description": "{venue}废弃铅箱旁遗落着一只打着结、泛着微弱荧光的用过乳胶避孕套，显然有两名探员昨夜在此偷欢避开了监控。",
+        "sfw_fallback": "{venue}废弃铅箱上遗落着一根破裂的微光荧光棒，残留着昨夜仓库清点盘库时的痕迹。",
+        "bounty_title": "金库深处的私密痕迹",
+        "bounty_objective": "打量特勤探员在值班夜私下幽会留下的不检点证据。"
+      },
+      "de": {
+        "title": "Biolumineszenter Fund im Gewölbe von {venue}",
+        "description": "Ein schwach leuchtendes benutztes Kondom liegt verknotet auf einer Bleikiste hinter {venue} – Zeugnis eines heimlichen Agententreffens.",
+        "sfw_fallback": "Ein ausgelaufenes Leuchtstäbchen liegt auf einer Kiste hinter {venue}, vergessen bei der nächtlichen Inventur.",
+        "bounty_title": "Spuren im Gewölbe",
+        "bounty_objective": "Nimm die Spuren des heimlichen Treffens wahr."
+      }
+    }
+  },
+  {
+    "template_key": "anom_nsfw_minor_mysterious_moaning",
+    "genre_families": ["minor_anomaly_bureau"],
+    "entity_type": "minor_event",
+    "event_subtype": "scandal",
+    "is_nsfw": 1,
+    "can_spawn_bounty": false,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Sensual Echoes in {venue} Decontamination Chamber",
+        "description": "Husky moaning and feverish sighs reverberate over the acoustic vents of the locked shower chamber in {venue}, where two senior analysts indulge during overtime.",
+        "sfw_fallback": "Clattering tools and echoing hums reverberate over the acoustic seals of the shower room in {venue}, where technicians calibrate pressure vents.",
+        "bounty_title": "Decontamination Echoes",
+        "bounty_objective": "Listen to the illicit sounds of colleagues letting off steam."
+      },
+      "pl": {
+        "title": "Zmysłowe Echa w Komorze {venue}",
+        "description": "Zmysłowe jęki i stłumione westchnienia roznoszą się po kabinie dekontaminacyjnej w {venue}, gdzie analitycy spędzają nadgodziny.",
+        "sfw_fallback": "Odgłosy narzędzi i syczenie zaworów dobiegają z komory w {venue}, gdzie technicy kalibrują instalację ciśnieniową.",
+        "bounty_title": "Echa Dekontaminacji",
+        "bounty_objective": "Usłysz odgłosy sekretnego rozładowywania stresu przez personel."
+      },
+      "ms": {
+        "title": "Gema Berahi di Bilik Dekontaminasi {venue}",
+        "description": "Desahan manja dan keluhan ghairah bergema dari balik pintu kedap udara di {venue}, tempat dua penganalisis melepaskan rindu saat kerja lebih masa.",
+        "sfw_fallback": "Bunyi dentukan alatan dan desiran paip bergema dari bilik di {venue}, tempat juruteknik menentukur injap tekanan.",
+        "bounty_title": "Gema Ruang Bersih",
+        "bounty_objective": "Dengarkan bunyi rahsia rakan setugas melepaskan tekanan kerja."
+      },
+      "zh": {
+        "title": "{venue}洗消隔间内的娇喘回声",
+        "description": "{venue}反锁的气密洗消间内传出清晰的急促呼吸与湿润娇喘，值守的特勤分析员正趁着加班间隙在厚重橡胶帘后尽情欢愉。",
+        "sfw_fallback": "{venue}洗消间内传出阵阵阀门调校与排气声，技术员正在连夜校准高压喷淋管道。",
+        "bounty_title": "洗消间的隐秘回音",
+        "bounty_objective": "站在门廊外，听听同事们加班之余私下宣泄激情的动静。"
+      },
+      "de": {
+        "title": "Sinnliche Laute in der Schleuse von {venue}",
+        "description": "Leidenschaftliches Stöhnen dringt durch die Dichtungen der Duschkammer in {venue}, in der zwei Analysten ihre Überstunden verbringen.",
+        "sfw_fallback": "Klappernde Werkzeuge hallen durch die Dichtungen der Kammer in {venue}, wo Techniker Ventile justieren.",
+        "bounty_title": "Echos aus der Schleuse",
+        "bounty_objective": "Höre den Geräuschen der heimlichen Auszeit zu."
+      }
+    }
+  },
+  {
+    "template_key": "anom_nsfw_minor_missing_panties",
+    "genre_families": ["minor_anomaly_bureau"],
+    "entity_type": "minor_event",
+    "event_subtype": "intrigue",
+    "is_nsfw": 1,
+    "can_spawn_bounty": true,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Missing Silk Panties at {venue} Quarters",
+        "description": "A field handler reports black silk panties and lace lingerie went missing from a locker basket inside {venue}'s private quarters during shift debriefings.",
+        "sfw_fallback": "A field handler reports their encrypted badge lanyard and access token went missing from their locker inside {venue}.",
+        "bounty_title": "Track the Quarters Pilferer",
+        "bounty_objective": "Question the supply orderlies at {venue} and recover the handler's stolen garments."
+      },
+      "pl": {
+        "title": "Zaginiona Jedwabna Bielizna w {venue}",
+        "description": "Oficer prowadzący zgłasza brak czarnej jedwabnej bielizny, która zniknęła z szafki w kwaterach przy {venue} podczas odprawy.",
+        "sfw_fallback": "Oficer zgłasza zniknięcie smyczy z identyfikatorem i tokenem dostępu z szafki w kwaterach przy {venue}.",
+        "bounty_title": "Znajdź Złodzieja z Kwater",
+        "bounty_objective": "Przesłuchaj ordynansów w {venue} i odzyskaj przywłaszczone przedmioty."
+      },
+      "ms": {
+        "title": "Seluar Dalam Sutera Lesap di {venue}",
+        "description": "Seorang pegawai perisik mengadu seluar dalam sutera hitam miliknya hilang dari loker peribadi di {venue} semasa taklimat.",
+        "sfw_fallback": "Seorang pegawai mengadu lencana enkripsi dan token akses miliknya hilang dari loker di {venue}.",
+        "bounty_title": "Jejak Pencuri Bilik Rehat",
+        "bounty_objective": "Soal siasat pekerja logistik di {venue} untuk memulangkan barangan yang hilang."
+      },
+      "zh": {
+        "title": "{venue}宿舍失窃的真丝内裤",
+        "description": "一名外勤指挥官在任务交接汇报期间，发现存放在{venue}单人寝宿储物篮里的黑色真丝内裤与蕾丝内衬不翼而飞。",
+        "sfw_fallback": "一名外勤指挥官在汇报期间，发现存放在{venue}储物格内的加密胸牌与通行磁钥不见了踪影。",
+        "bounty_title": "盘查宿舍区黑手",
+        "bounty_objective": "询问{venue}的值守勤务人员，找回指挥官被顺走的私人物件。"
+      },
+      "de": {
+        "title": "Fehlende Seidenhöschen in {venue}",
+        "description": "Ein Einsatzleiter meldet das Verschwinden schwarzer Seidenunterwäsche aus seinem Spind in den Privaträumen von {venue}.",
+        "sfw_fallback": "Ein Einsatzleiter vermisst sein Dienstabzeichen und den Sicherheitstoken aus dem Spind in {venue}.",
+        "bounty_title": "Spinddieb ausfindig machen",
+        "bounty_objective": "Befrage das Dienstpersonal in {venue} und bringe die Stücke zurück."
+      }
+    }
+  },
+  {
+    "template_key": "anom_nsfw_minor_serial_stalker",
+    "genre_families": ["minor_anomaly_bureau"],
+    "entity_type": "minor_event",
+    "event_subtype": "intrigue",
+    "is_nsfw": 1,
+    "can_spawn_bounty": true,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {},
+    "locales": {
+      "en": {
+        "title": "Serial Stalker Surveillance Binder in {venue}",
+        "description": "An unofficial binder compiled by a workplace serial stalker—filled with candid voyeuristic snapshots and intimate late-night observations of agents—was found behind a terminal in {venue}.",
+        "sfw_fallback": "An unauthorized audit file containing unsanctioned duty logs and break schedules was left behind a terminal in {venue}.",
+        "bounty_title": "Identify the Bureau Stalker",
+        "bounty_objective": "Inspect terminal login timestamps around {venue} to unmask whoever compiled the voyeuristic binder."
+      },
+      "pl": {
+        "title": "Teczka Seryjnego Podglądacza w {venue}",
+        "description": "Nieoficjalny segregator ze zdjęciami z ukrycia i intymnymi obserwacjami agentów został znaleziony za terminalem w {venue}.",
+        "sfw_fallback": "Nieautoryzowany plik z zapiskami grafików i przerw personelu został znaleziony za terminalem w {venue}.",
+        "bounty_title": "Zidentyfikuj Autora Teczki",
+        "bounty_objective": "Przejrzyj logi terminali w {venue}, aby odkryć tożsamość podglądacza."
+      },
+      "ms": {
+        "title": "Fail Penghendap Bersiri di {venue}",
+        "description": "Fail sulit berisi gambar curi dan catatan pemerhatian intim terhadap ejen bertugas ditinggalkan di belakang terminal {venue}.",
+        "sfw_fallback": "Fail audit tidak rasmi berisi jadual rondaan dan waktu rehat kakitangan ditinggalkan di belakang komputer {venue}.",
+        "bounty_title": "Kenal Pasti Penghendap Biro",
+        "bounty_objective": "Semak rekod masa masuk komputer di {venue} untuk mendedahkan dalang di sebaliknya."
+      },
+      "zh": {
+        "title": "{venue}终端机后的跟踪狂偷拍手记",
+        "description": "{venue}的一台未关机终端后遗落了一本自制剪报册，里面贴满了局内连环跟踪狂对探员的偷拍照片与详尽的私密夜间记录。",
+        "sfw_fallback": "{venue}的一台终端后遗落了一份未授权的巡检复核日志，详述了各项换岗时间与排班空当。",
+        "bounty_title": "排查窥视手记作者",
+        "bounty_objective": "比对{venue}终端的登入时间戳，揪出记录这一册手记的局内人员。"
+      },
+      "de": {
+        "title": "Stalker-Dossier am Terminal in {venue}",
+        "description": "Ein inoffizieller Hefter voller heimlicher Aufnahmen und intimer Notizen eines Serien-Stalkers über Einsatzkräfte wurde hinter einem Terminal in {venue} entdeckt.",
+        "sfw_fallback": "Ein unautorisierter Prüfbericht über Schichtzeiten und Pausen wurde hinter einem Terminal in {venue} entdeckt.",
+        "bounty_title": "Den Verfasser ermitteln",
+        "bounty_objective": "Prüfe die Anmeldezeiten am Terminal in {venue}, um die Identität des Stalkers zu klären."
+      }
+    }
+  }
+]

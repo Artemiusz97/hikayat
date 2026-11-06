@@ -89,7 +89,8 @@ def calculate_combat_attributes(
         "fire_res": 0, "shock_res": 0, "ice_res": 0,
         "poison_res": 0, "holy_res": 0, "dark_res": 0, "omni_res": 0,
         "physical_res": 0, "energy_res": 0,
-        "earth_res": 0, "water_res": 0, "wind_res": 0
+        "earth_res": 0, "water_res": 0, "wind_res": 0,
+        "electric_res": 0, "bio_res": 0, "aether_res": 0,
     }
     # Vitals & regeneration
     bonus_max_hp, bonus_max_mp = 0, 0
@@ -113,6 +114,8 @@ def calculate_combat_attributes(
                 has_combat_armor = True
                 break
 
+    has_anomalous_gear = False
+    anom_passives: Dict[str, Any] = {}
     if equipped_items:
         from mechanics.combat.equipment import parse_equipment_metadata
         from mechanics.combat.items.clothing import CLOTHING_TOPS, CLOTHING_BOTTOMS
@@ -122,6 +125,9 @@ def calculate_combat_attributes(
             if not isinstance(item, dict):
                 continue
             meta = parse_equipment_metadata(item)
+            is_anom_item = bool(meta.get("is_anomalous"))
+            if is_anom_item:
+                has_anomalous_gear = True
             slot_name = item.get("slot", "") or meta.get("slot", "")
             item_type_str = (item.get("item_type") or meta.get("item_type") or "").lower()
             arch_str = (meta.get("archetype") or "").lower()
@@ -131,7 +137,7 @@ def calculate_combat_attributes(
                 or arch_str in civilian_archs
             ) and slot_name != "Armor" and item_type_str != "armor"
 
-            if has_combat_armor and is_clothing_item:
+            if has_combat_armor and is_clothing_item and not is_anom_item:
                 clothing_suppressed = True
                 # Skip stats and social modifiers from layered civilian clothing while encased in combat armor
                 mods = {}
@@ -158,7 +164,7 @@ def calculate_combat_attributes(
                 mult_mdef += mods.get("mdef_pct", 0.0)
                 flat_acc += mods.get("acc", 0)
                 flat_macc += mods.get("macc", 0)
-                
+
                 # Evasion resolution: inspect mods, fallback to base_eva, then stats
                 eva_val = mods.get("eva")
                 if eva_val is None:
@@ -184,16 +190,17 @@ def calculate_combat_attributes(
 
                 for e_k in elem_atks:
                     elem_atks[e_k] += mods.get(e_k, 0)
-                for r_k in elem_res:
-                    elem_res[r_k] += mods.get(r_k, 0)
-                if "phys_res" in mods:
-                    elem_res["physical_res"] += mods.get("phys_res", 0)
+                if not is_anom_item:
+                    for r_k in elem_res:
+                        elem_res[r_k] += mods.get(r_k, 0)
+                    if "phys_res" in mods:
+                        elem_res["physical_res"] += mods.get("phys_res", 0)
 
                 bonus_max_hp += mods.get("max_hp", 0)
                 bonus_max_mp += mods.get("max_mp", 0)
                 hp_regen += mods.get("hp_regen", 0)
                 mp_regen += mods.get("mp_regen", 0)
-            
+
             if "block_chance" in meta:
                 block_chance += meta.get("block_chance", 0)
 
@@ -211,6 +218,23 @@ def calculate_combat_attributes(
                 gear_tags.add(str(trait).lower())
             if meta.get("archetype"):
                 gear_tags.add(str(meta["archetype"]).lower())
+
+        if has_anomalous_gear:
+            try:
+                from mechanics.combat.items.anomalous_gear import aggregate_equipped_anomalous_passives
+                anom_passives = aggregate_equipped_anomalous_passives(equipped_items)
+                flat_acc += int(anom_passives.get("bonus_acc", 0) or 0)
+                flat_eva += int(anom_passives.get("bonus_eva", 0) or 0)
+                for a_el, a_pct in (anom_passives.get("elemental_res_pct") or {}).items():
+                    rk = f"{a_el}_res"
+                    if rk in elem_res:
+                        elem_res[rk] = max(-50, min(75, elem_res[rk] + int(a_pct)))
+                    if a_el == "electric":
+                        elem_res["shock_res"] = max(-50, min(75, elem_res["shock_res"] + int(a_pct)))
+                    elif a_el == "bio":
+                        elem_res["poison_res"] = max(-50, min(75, elem_res["poison_res"] + int(a_pct)))
+            except Exception:
+                anom_passives = {}
     else:
         gear_tags = set()
 
@@ -222,7 +246,7 @@ def calculate_combat_attributes(
     for eff in status_effects:
         eff_str = str(eff).strip()
         eff_lower = eff_str.lower()
-        
+
         # Parse positive DT buff: "Iron Skin [+8 DT] [3 turns]" or "[4 DT]"
         dt_m = re.search(r"\[\+(\d+)\s*DT\]", eff_str, re.IGNORECASE)
         if dt_m:
@@ -371,7 +395,7 @@ def calculate_combat_attributes(
         from mechanics.combat.equipment import parse_equipment_metadata
         a_meta = parse_equipment_metadata(item)
         mods = a_meta.get("stat_modifiers") or {}
-        
+
         # Base DT from item metadata or stat modifiers
         item_base_dt = a_meta.get("base_dt", a_meta.get("dt_contribution", 0))
         if item_base_dt == 0:
@@ -379,11 +403,11 @@ def calculate_combat_attributes(
         item_base_dt += mods.get("dt_bonus", 0)
 
         total_base_dt += item_base_dt
-        
+
         # Type DT from metadata
         for dtype, dtval in (a_meta.get("type_dt") or {}).items():
             total_type_dt[dtype] = total_type_dt.get(dtype, 0) + dtval
-            
+
         # Magic DT from affixes
         if "magic_dt" in mods:
             total_type_dt["magical"] = total_type_dt.get("magical", 0) + mods["magic_dt"]
@@ -404,15 +428,19 @@ def calculate_combat_attributes(
             total_type_dt["energy"] = total_type_dt.get("energy", 0) + mods["ablative_coating"]
 
     # Collect gear-based DR% from *_res affixes and omni_res
-    _elem_channels = ("fire", "shock", "ice", "poison", "holy", "dark", "magical", "energy", "physical", "earth", "water", "wind")
+    _elem_channels = (
+        "fire", "shock", "ice", "poison", "holy", "dark", "magical", "energy",
+        "physical", "earth", "water", "wind", "electric", "bio", "aether",
+    )
     omni = elem_res.get("omni_res", 0) / 100.0
+    max_dr_cap = 0.75 if has_anomalous_gear else 0.85
     for ch in _elem_channels:
         res_key = f"{ch}_res"
         ch_res = elem_res.get(res_key, 0) / 100.0
         ch_omni = omni if ch != "physical" else 0.0
         ch_dr = ch_res + ch_omni
         if ch_dr != 0:
-            gear_dr[ch] = max(-0.25, min(0.85, ch_dr))
+            gear_dr[ch] = max(-0.50, min(max_dr_cap, ch_dr))
 
     # Incorporate consumable buff/debuff DT and DR
     total_base_dt += buff_dt
@@ -468,6 +496,11 @@ def calculate_combat_attributes(
         "clothing_suppressed": clothing_suppressed,
         "per": effective_per,
         "cha": effective_cha,
+        "anomalous_passives": anom_passives,
+        "elemental_amp": dict(anom_passives.get("elemental_amp") or {}),
+        "on_hit_debuffs": list(anom_passives.get("on_hit_debuffs") or []),
+        "turn_regen_pct": float(anom_passives.get("turn_regen_pct", 0.0) or 0.0),
+        "cursed_hp_drain_per_turn": int(anom_passives.get("cursed_hp_drain_per_turn", 0) or 0),
     }
     result.update(elem_atks)
     result.update(elem_res)
@@ -524,4 +557,3 @@ def format_combat_attributes_text(attrs: Dict[str, Any]) -> str:
         lines.append("🛡️ **Resistances:** " + " • ".join(res_parts))
 
     return "\n".join(lines)
-

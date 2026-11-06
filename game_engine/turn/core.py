@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .generation import get_narrative_requirements, log
 from .constants import *
 from mechanics.world.locations import *
@@ -77,7 +79,7 @@ def ensure_enemy_encounter_narrative(
         return result, ""
 
     raw_enemies = result.get("nearby_enemies")
-    if raw_enemies is None:
+    if not raw_enemies:
         raw_enemies = session.get("nearby_enemies") or []
     active_enemies = [
         m for m in (raw_enemies or [])
@@ -212,10 +214,23 @@ def ensure_enemy_encounter_narrative(
 
 
 async def resolve_turn(session: dict, party: list, actions: list, stream_callback=None, is_retry: bool = False) -> TurnOutcome:
+    try:
+        return await _resolve_turn_inner(session, party, actions, stream_callback=stream_callback, is_retry=is_retry)
+    finally:
+        if isinstance(session, dict):
+            session.pop("_ctx", None)
+
+
+async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_callback=None, is_retry: bool = False) -> TurnOutcome:
     import db
     from mechanics.system.time_engine import format_llm_time_context, calculate_action_time_cost, advance_time, apply_sleep_rest, is_sleep_action
     session_id_val = session.get('id')
-    ctx = TurnContext(session_id_val, session)
+    if session_id_val:
+        ctx = await db.adb(TurnContext.load_snapshot, session_id_val, session, party, actions)
+    else:
+        ctx = TurnContext(session_id_val, session, party=party, actions=actions)
+    if isinstance(session, dict):
+        session["_ctx"] = ctx
 
     pre_turn_enemy_names = {
         _get_enemy_base_name(m.get("name", "")).lower()
@@ -236,7 +251,7 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
     if not is_retry:
         if session_id_val:
             try:
-                prev_day, prev_min, _ = db.get_session_time(session_id_val)
+                prev_day, prev_min, _ = await db.adb(db.get_session_time, session_id_val)
             except Exception:
                 prev_day = int(session.get("current_day", 1) or 1)
                 prev_min = int(session.get("current_minute", 480) or 480)
@@ -498,7 +513,7 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
     )
     from mechanics.social.intimate_excitement import classify_intimate_act as _core_classify_act
 
-    _pre_phys = (db.get_session_physical_state(session.get("id")) if session.get("id") else None) or session.get("physical_state") or {}
+    _pre_phys = ((await adb(db.get_session_physical_state, session.get("id"))) if session.get("id") else None) or session.get("physical_state") or {}
     _pre_ic_str = str(_pre_phys.get("intimate_contact", "") if isinstance(_pre_phys, dict) else "")
     _cand_core_partners = list(new_partners or [])
     for _existing_dp in get_session_dialogue_partners(session):
@@ -566,7 +581,7 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
     active_quests_str = ""
     if not _in_intimate_for_core and not _in_aftercare_for_core:
-        story_quest_context, side_bounties_context = _build_quest_and_bounty_directives(session, ctx)
+        story_quest_context, side_bounties_context = _build_quest_and_bounty_directives(session, ctx, include_fow=False)
         if story_quest_context.strip():
             active_quests_str += f"### PRIMARY STORY QUEST\n{story_quest_context}\n\n"
         if side_bounties_context.strip():
@@ -588,7 +603,9 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
             or "(optional)" in inc_lbl_low
         )
         has_subdue_enemy_now = any(
-            isinstance(e, dict) and e.get("requires_non_lethal_subdue") and e.get("hp", 0) > 0
+            isinstance(e, dict)
+            and (e.get("requires_non_lethal_subdue") or e.get("is_anomalous_manifestation"))
+            and e.get("hp", 0) > 0
             for e in (session.get("nearby_enemies") or [])
         )
         if not inc_action_key:
@@ -610,15 +627,51 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                 inc_action_key = "pacify"
             elif inc_lbl_low.startswith("🔬 analyze & seal"):
                 inc_action_key = "analyze"
+            elif inc_lbl_low.startswith("🔍 scan anomaly dossier"):
+                inc_action_key = "reveal_dossier"
             elif inc_lbl_low.startswith("✨ use sealing ability"):
                 inc_action_key = "seal_ability"
-            elif inc_lbl_low.startswith("⚔️ engage anomalous breach"):
+            elif inc_lbl_low.startswith("⚔️ engage anomaly breach") or inc_lbl_low.startswith("⚔️ engage anomalous breach"):
                 inc_action_key = "attack"
+            elif inc_lbl_low.startswith("🏺 sever/seal") or "sever/seal" in inc_lbl_low:
+                inc_action_key = "sever_tether"
+            elif (is_inc_tagged or has_subdue_enemy_now) and "folklore counter-rite" in inc_lbl_low:
+                inc_action_key = "folklore_offering_rite"
+            elif (
+                first_inc_act.get("is_anomaly_inquiry")
+                or str(first_inc_act.get("approach") or "").startswith(("anomaly_inquiry", "anomaly_pattern", "question_trap"))
+                or inc_lbl_low.startswith((
+                    "💬 converse with", "💬 [origins", "🔍 [nature", "🧭 [motive",
+                    "👁️ study ", "👁️ [vocal", "🔍 [trigger", "🕯️ [courtesy",
+                    "💬 [riddle trap]", "🧠 [folklore evasion]",
+                ))
+            ):
+                inc_action_key = str(first_inc_act.get("incursion_action") or first_inc_act.get("approach") or "anomaly_inquiry")
+            elif session.get("dialogue_partner"):
+                _cand_freeform = str(
+                    first_inc_act.get("raw_text")
+                    or ("" if first_inc_act.get("_server_stamped") else (first_inc_act.get("text") or first_inc_act.get("label") or ""))
+                ).strip()
+                if _cand_freeform:
+                    try:
+                        from mechanics.world.anomalous_events import _resolve_active_non_hostile_anomaly_context
+                        from mechanics.world.folklore_mechanics import has_active_dialogue_trap, evaluate_dialogue_trap_response
+                        _dp_ctx = _resolve_active_non_hostile_anomaly_context(
+                            int(session["id"]),
+                            session=session,
+                            entity_name=str(session.get("dialogue_partner") or ""),
+                        )
+                        if _dp_ctx and has_active_dialogue_trap(_dp_ctx.get("blueprint")):
+                            if evaluate_dialogue_trap_response(_dp_ctx.get("blueprint"), player_text=_cand_freeform).get("matched"):
+                                inc_action_key = "question_trap_freeform"
+                    except Exception:
+                        pass
         if inc_action_key:
             try:
                 from mechanics.world.anomalous_events import (
                     resolve_non_hostile_incursion_action,
                     resolve_anomalous_combat_containment,
+                    resolve_anomaly_dialogue_inquiry,
                 )
                 party_uids_inc = [
                     p[0].get("user_id")
@@ -626,7 +679,24 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                     if p and isinstance(p[0], dict) and p[0].get("user_id")
                 ]
                 lead_inc_uid = party_uids_inc[0] if party_uids_inc else session.get("host_user_id")
-                if inc_action_key in ("subdue", "combat_persuade"):
+                _freeform_inc_txt = str(
+                    first_inc_act.get("raw_text")
+                    or ("" if first_inc_act.get("_server_stamped") else (first_inc_act.get("text") or first_inc_act.get("label") or ""))
+                ).strip()
+                if inc_action_key.startswith(("anomaly_inquiry", "anomaly_pattern", "question_trap")) or inc_action_key in ("converse", "study_pattern"):
+                    inc_res = resolve_anomaly_dialogue_inquiry(
+                        session_id=int(session["id"]),
+                        entity_name=str(first_inc_act.get("target_npc") or session.get("dialogue_partner") or ""),
+                        quest_id=str(first_inc_act.get("quest_id") or ""),
+                        sub_obj_id=first_inc_act.get("sub_obj_id"),
+                        incursion_id=str(first_inc_act.get("incursion_id") or ""),
+                        breach_id=str(first_inc_act.get("breach_id") or first_inc_act.get("incursion_id") or ""),
+                        inquiry_type=inc_action_key,
+                        player_text=_freeform_inc_txt,
+                        user_id=lead_inc_uid,
+                        session=session,
+                    )
+                elif inc_action_key in ("subdue", "combat_persuade", "sever_tether") or (inc_action_key == "folklore_offering_rite" and has_subdue_enemy_now):
                     inc_res = resolve_anomalous_combat_containment(
                         session_id=int(session["id"]),
                         user_id=lead_inc_uid,
@@ -644,24 +714,74 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                         action_type=inc_action_key,
                         stat_used=str(first_inc_act.get("stat") or ""),
                         pre_rolled_check=first_inc_act.get("check"),
+                        player_text=_freeform_inc_txt,
                     )
                 fresh_inc_sess = db.get_session(int(session["id"])) or {}
                 session["nearby_enemies"] = fresh_inc_sess.get("nearby_enemies", [])
+                session["current_npcs"] = fresh_inc_sess.get("current_npcs", session.get("current_npcs", []))
                 session["daily_incursions"] = fresh_inc_sess.get("daily_incursions", session.get("daily_incursions", []))
+                session["daily_breaches"] = fresh_inc_sess.get("daily_breaches", session.get("daily_breaches", []))
+                _unmasked_prev = str(inc_res.get("unmasked_from") or "").strip()
+                if _unmasked_prev:
+                    _um_low = _unmasked_prev.lower()
+                    new_partners[:] = [p for p in new_partners if str(p or "").strip().lower() != _um_low]
+                    if cast_plan is not None:
+                        cast_plan.dialogue_partners = [p for p in cast_plan.dialogue_partners if str(p or "").strip().lower() != _um_low]
+                        cast_plan.present_npcs = [p for p in cast_plan.present_npcs if str(p or "").strip().lower() != _um_low]
+                if inc_res.get("dialogue_partner"):
+                    dp_anom = str(inc_res["dialogue_partner"]).strip()
+                    session["dialogue_partner"] = dp_anom
+                    session["dialogue_partners"] = [dp_anom]
+                    if dp_anom not in new_partners:
+                        new_partners.append(dp_anom)
+                    if cast_plan is not None and dp_anom not in cast_plan.dialogue_partners:
+                        cast_plan.dialogue_partners.append(dp_anom)
+                elif inc_res.get("resolved") or inc_res.get("combat_started") or inc_res.get("escaped") or fresh_inc_sess.get("dialogue_partner") is None:
+                    if not fresh_inc_sess.get("dialogue_partner"):
+                        _prev_dp = str(session.get("dialogue_partner") or "").strip().lower()
+                        session["dialogue_partner"] = None
+                        session["dialogue_partners"] = []
+                        if _prev_dp:
+                            new_partners[:] = [p for p in new_partners if str(p or "").strip().lower() != _prev_dp]
+                            if cast_plan is not None:
+                                cast_plan.dialogue_partners = [p for p in cast_plan.dialogue_partners if str(p or "").strip().lower() != _prev_dp]
+                                cast_plan.present_npcs = [p for p in cast_plan.present_npcs if str(p or "").strip().lower() != _prev_dp]
+                if inc_res.get("directive"):
+                    _pre_turn_incursion_directive = str(inc_res["directive"])
                 if inc_res.get("message"):
                     _pre_turn_incursion_notice = str(inc_res["message"])
-                    _pre_turn_incursion_directive = (
-                        f"[ANOMALOUS CONTAINMENT OUTCOME DIRECTIVE]:\n"
-                        f"- {inc_res['message']}\n"
-                        f"- Narrate this containment/engagement outcome vividly in `outcome_narrative` and `next_narrative`."
-                    )
+                    if not _pre_turn_incursion_directive:
+                        _clean_inc_msg = re.sub(r"\s*\([A-Z]{3}(?:\s+check)?\s+\d+\s+vs\s+DC\s+\d+[^)]*\)", "", str(inc_res["message"]))
+                        _clean_inc_msg = re.sub(r"<=\s*\d+%\s*HP", "critically weakened", _clean_inc_msg)
+                        _clean_inc_msg = re.sub(r"\(?\b\d+\s*/\s*\d+\s*HP\b\)?", "", _clean_inc_msg)
+                        _clean_inc_msg = re.sub(r"\(\s*[^()]*?[+-]\d+\s*(?:DC|HP|MP|XP|G)\b[^()]*\)", "", _clean_inc_msg)
+                        _pre_turn_incursion_directive = (
+                            f"[ANOMALOUS CONTAINMENT OUTCOME DIRECTIVE]:\n"
+                            f"- {_clean_inc_msg}\n"
+                            f"- Narrate this containment/engagement outcome vividly in `outcome_narrative` and `next_narrative`.\n"
+                            f"- Do NOT echo raw DC integers, roll totals, or HP percentages in narrative prose."
+                        )
                 if inc_res.get("combat_started") or inc_res.get("subdued") or inc_res.get("resolved"):
                     _skip_precompute_for_incursion = True
+                    if inc_res.get("subdued") or inc_res.get("resolved"):
+                        try:
+                            from mechanics.combat import cleanup_anomalous_combat_session_state
+                            cleanup_anomalous_combat_session_state(session)
+                        except Exception:
+                            pass
                 elif inc_res.get("combat_continues") and isinstance(first_inc_act, dict):
-                    # Failed in-combat Persuade/Calm or premature Subdue: enemy counter-attacks WITHOUT player dealing lethal weapon damage!
+                    # Non-damage containment turn (Persuade/Calm/Tether/Rite or premature Subdue): enemy still acts,
+                    # but the player deals no lethal damage. Only FAILED attempts are stamped as a failed tier
+                    # (which grants the enemy its accuracy punish); a successful mid-combat tether seal stays a success.
+                    first_inc_act["incursion_non_damage_turn"] = True
                     first_inc_act["combat_tactical_archetype"] = "combat_parley"
-                    first_inc_act["tier"] = "fail"
-                    first_inc_act["success"] = False
+                    first_inc_act.pop("check", None)
+                    if inc_res.get("success"):
+                        first_inc_act["tier"] = "success"
+                        first_inc_act["success"] = True
+                    else:
+                        first_inc_act["tier"] = "fail"
+                        first_inc_act["success"] = False
             except Exception as _inc_err:
                 log.warning("Failed pre-turn anomalous incursion resolution: %s", _inc_err)
 
@@ -672,11 +792,15 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
     from mechanics.system.memory.budget import DynamicTokenBudget
     budget = DynamicTokenBudget.from_session(session, party, actions)
-    
-    import asyncio
-    asyncio.create_task(db.update_missing_lorebook_embeddings(session_id_val))
-    
-    hist_text, query_embedding = await _build_history_context(session, ctx, budget=budget)
+
+    hist_text = await _build_history_context(
+        session,
+        ctx,
+        budget=budget,
+        actions=actions,
+        effective_location=effective_location or "",
+        pre_turn_stage_npcs=pre_turn_stage_npcs if (stage_info.get("is_movement") or pre_turn_stage_npcs) else None,
+    )
     
     directive_note = ""
     if precomputed and precomputed.get("directive"):
@@ -785,12 +909,151 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                 is_non_hostile_entity_containment_waypoint,
             )
             from mechanics.world.waypoints.core import get_active_local_quest_hooks
-            _has_active_incursion_here = bool(get_active_incursion_at_location(int(session["id"]), _enc_loc, _enc_nid))
+            _has_active_incursion_here = bool(await adb(get_active_incursion_at_location, int(session["id"]), _enc_loc, _enc_nid))
             if not _has_active_incursion_here:
-                _local_q_hooks = get_active_local_quest_hooks(int(session["id"]), _enc_loc) or []
+                _local_q_hooks = (await adb(get_active_local_quest_hooks, int(session["id"]), _enc_loc)) or []
                 _has_active_incursion_here = any(is_non_hostile_entity_containment_waypoint(w) for w in _local_q_hooks)
+            if scenario_data.is_anomalous_high_school_scenario(scen_key) and not _has_active_incursion_here:
+                try:
+                    from mechanics.world.anomalous_events import check_or_roll_school_hours_anomalous_incident, get_dormant_after_hours_incursion_at_location
+                    _day_inc = await db.adb(
+                        check_or_roll_school_hours_anomalous_incident,
+                        int(session["id"]),
+                        int(session.get("current_day", 1) or 1),
+                        int(session.get("current_minute", 480) or 480),
+                    )
+                    if _day_inc:
+                        _has_active_incursion_here = True
+                    else:
+                        _dormant_inc = await db.adb(
+                            get_dormant_after_hours_incursion_at_location,
+                            int(session["id"]),
+                            _enc_loc,
+                            _enc_nid,
+                        )
+                        if _dormant_inc and _dormant_inc.get("foreshadow_clue"):
+                            directive_note += f"\n[ATMOSPHERE / FORESHADOWING]: {_dormant_inc['foreshadow_clue']}\n"
+                except Exception:
+                    pass
         except Exception:
             _has_active_incursion_here = False
+    # Deterministic Predetermined Quest Encounter Spawner (Climax Boss & Lead Combat Rosters)
+    if (
+        not is_in_combat(session)
+        and not _has_active_incursion_here
+        and not is_retry
+        and not _in_intimate_for_core
+        and not _in_aftercare_for_core
+        and scenario_data.is_mechanic_enabled(scen_key, "tactical_combat")
+        and session.get("id")
+        and _enc_loc
+    ):
+        try:
+            _enc_loc_low = _enc_loc.strip().lower()
+            _q_dossiers = db.get_session_quest_dossiers(int(session["id"]), status_stage="compiled") or []
+            for _qd in _q_dossiers:
+                _qid = str(_qd.get("quest_id") or "")
+                if not _qid:
+                    continue
+                _q_row = db.get_quest_by_id(int(session["id"]), _qid)
+                if not _q_row or str(_q_row.get("status") or "").lower() != "active":
+                    continue
+                _climax = _qd.get("climax_spec") or {}
+                _c_loc = str(_climax.get("location") or "").strip().lower()
+                if (
+                    _climax.get("is_unlocked")
+                    and not _climax.get("boss_defeated")
+                    and isinstance(_climax.get("boss_sheet"), dict)
+                    and _c_loc
+                    and (_c_loc in _enc_loc_low or _enc_loc_low in _c_loc)
+                ):
+                    _boss_unit = dict(_climax["boss_sheet"])
+                    try:
+                        from mechanics.narrative.dossier_compiler import hydrate_boss_sheet_from_quest_blueprint
+                        _boss_unit = hydrate_boss_sheet_from_quest_blueprint(_boss_unit, _q_row)
+                    except Exception:
+                        pass
+                    _boss_unit.setdefault("linked_quest_id", _qid)
+                    _reinf_units = []
+                    for _rf in (_climax.get("reinforcements") or []):
+                        if isinstance(_rf, dict) and int(_rf.get("hp", 1) or 1) > 0:
+                            _rf_copy = dict(_rf)
+                            _rf_copy.setdefault("linked_quest_id", _qid)
+                            _reinf_units.append(_rf_copy)
+                    _spawned_q_enemies = [_boss_unit] + _reinf_units
+                    _q_enc_meta = {"quest_id": _qid, "is_climax_boss": True}
+                    session["nearby_enemies"] = _spawned_q_enemies
+                    session["_active_quest_encounter"] = _q_enc_meta
+                    new_partners = []
+                    _in_dialogue_mode = False
+                    _names = ", ".join(m["name"] for m in _spawned_q_enemies if m.get("name"))
+                    party_names_str = ", ".join(
+                        c.get("name", "Hero")
+                        for c, _ in (party or [])
+                        if isinstance(c, dict) and c.get("name")
+                    ) or "the player"
+                    present_npc_names = [
+                        game_engine._get_npc_name(n)
+                        for n in (session.get("current_npcs") or [])
+                        if game_engine._get_npc_name(n) and game_engine._get_npc_name(n).lower() != "none"
+                    ]
+                    npc_react_clause = f" and present characters ({', '.join(present_npc_names)})" if present_npc_names else ""
+                    directive_note += (
+                        f"\n[MANDATORY QUEST ENCOUNTER DIRECTIVE]: Predetermined quest adversaries ({_names}) confront the party! "
+                        f"You MUST dramatically narrate their reveal and hostile confrontation in `outcome_narrative` and `next_narrative`, "
+                        f"and explicitly describe how {party_names_str}{npc_react_clause} react to the encounter. "
+                        f"DO NOT resolve the battle this turn; set the stage for combat!\n"
+                    )
+                    break
+                _matched_lead = False
+                for _ld in (_qd.get("leads_graph") or []):
+                    if not isinstance(_ld, dict):
+                        continue
+                    _ld_loc = str(_ld.get("target_location") or _ld.get("location") or "").strip().lower()
+                    if (
+                        _ld.get("encounter_roster")
+                        and not _ld.get("roster_cleared")
+                        and str(_ld.get("status") or "").lower() != "completed"
+                        and _ld_loc
+                        and (_ld_loc in _enc_loc_low or _enc_loc_low in _ld_loc)
+                    ):
+                        _spawned_lead = []
+                        for _le in (_ld.get("encounter_roster") or []):
+                            if isinstance(_le, dict):
+                                _le_copy = dict(_le)
+                                _le_copy.setdefault("hp", int(_le_copy.get("max_hp") or 24))
+                                _le_copy.setdefault("linked_quest_id", _qid)
+                                _spawned_lead.append(_le_copy)
+                        if _spawned_lead:
+                            _q_enc_meta = {"quest_id": _qid, "is_climax_boss": False, "lead_id": _ld.get("lead_id")}
+                            session["nearby_enemies"] = _spawned_lead
+                            session["_active_quest_encounter"] = _q_enc_meta
+                            new_partners = []
+                            _in_dialogue_mode = False
+                            _names = ", ".join(m["name"] for m in _spawned_lead if m.get("name"))
+                            party_names_str = ", ".join(
+                                c.get("name", "Hero")
+                                for c, _ in (party or [])
+                                if isinstance(c, dict) and c.get("name")
+                            ) or "the player"
+                            present_npc_names = [
+                                game_engine._get_npc_name(n)
+                                for n in (session.get("current_npcs") or [])
+                                if game_engine._get_npc_name(n) and game_engine._get_npc_name(n).lower() != "none"
+                            ]
+                            npc_react_clause = f" and present characters ({', '.join(present_npc_names)})" if present_npc_names else ""
+                            directive_note += (
+                                f"\n[MANDATORY QUEST ENCOUNTER DIRECTIVE]: Hostile guards/adversaries ({_names}) confront the party! "
+                                f"You MUST dramatically narrate their confrontation in `outcome_narrative` and `next_narrative`, "
+                                f"and explicitly describe how {party_names_str}{npc_react_clause} react to the encounter. "
+                                f"DO NOT resolve the battle this turn; set the stage for combat!\n"
+                            )
+                            _matched_lead = True
+                            break
+                if _matched_lead:
+                    break
+        except Exception:
+            pass
     if (
         not is_in_combat(session)
         and not _has_active_incursion_here
@@ -1071,26 +1334,44 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
     #   canon -> Z1b (cached; fixed cap, independent of scene mode)
     #   scene -> Z2  (per turn; "lore" budget)
     #   board -> Z3  (waypoints: "quest" budget, caseboard: "caseboard" budget)
-    world_bundle = game_engine._load_known_world(session['id'])
+    world_bundle = dict(ctx.world_bundle) if session.get('id') else game_engine._load_known_world(session['id'])
+    world_bundle["session"] = session
+    world_bundle["_ctx"] = ctx
     scene_loc = effective_location if effective_location else session.get('current_location', '')
     scene_npcs_for_prompt = pre_turn_stage_npcs if (stage_info.get("is_movement") or pre_turn_stage_npcs) else session.get('current_npcs', [])
-    raw_scene_ctx = game_engine._scene_context_text(
-        session['id'], scene_loc, current_npcs=scene_npcs_for_prompt,
-        history_text=hist_text, world=world_bundle
+    raw_scene_ctx = await db.adb(
+        game_engine._scene_context_text,
+        session['id'],
+        scene_loc,
+        scene_npcs_for_prompt,
+        4,
+        hist_text,
+        world_bundle,
     )
     trimmed_scene_ctx = budget.trim(raw_scene_ctx, "lore")
     quest_board_text = ""
     if not _in_intimate_for_core and not _in_aftercare_for_core:
-        wp_block, caseboard_block = game_engine._quest_board_parts(
-            session['id'], scene_loc, destination_location=movement_dest_str
+        wp_block, caseboard_block = await db.adb(
+            game_engine._quest_board_parts,
+            session['id'],
+            scene_loc,
+            movement_dest_str,
         )
         quest_board_text = "".join(
             f"{b}\n\n" for b in (budget.trim(wp_block, "quest"), budget.trim(caseboard_block, "caseboard")) if b
         )
         if quest_board_text:
             quest_board_text += "[CASEBOARD & WAYPOINT PRESENCE NOTE: NPCs named or referenced in clues, caseboard entries, or waypoints (e.g. clue sources, suspects, archivists) are background investigation records. They are NOT physically present in the current room unless explicitly listed in 'NPCs currently present'. NEVER narrate them acting, watching, or standing in this scene.]\n\n"
+        fow_dossier_block = await db.adb(
+            game_engine.build_fog_of_war_quest_prompt_block,
+            session['id'],
+            session,
+            bool(_in_intimate_for_core),
+        )
+        if fow_dossier_block:
+            quest_board_text += f"{budget.trim(fow_dossier_block, 'quest')}\n\n"
 
-    trimmed_history = budget.trim(hist_text, "history")
+    trimmed_history = hist_text
 
     trimmed_dialogue = budget.trim(dialogue_prompt_block, "dialogue")
 
@@ -1105,8 +1386,7 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
             recall_q = extract_deterministic_recall_query(a.get("label", ""), session_id=session["id"])
             if recall_q:
                 try:
-                    from db.memory import active_recall_search
-                    det_recalls = active_recall_search(session["id"], recall_q)
+                    det_recalls = db.active_recall_search(session["id"], recall_q)
                     if det_recalls:
                         a["active_recall"] = det_recalls
                         active_recall_blocks.extend(det_recalls)
@@ -1219,18 +1499,31 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
     zone_0 = prompt_layout.build_static_core(mode, "turn")
     zone_1 = prompt_layout.build_session_zone(session)
     zone_1b = prompt_layout.build_world_canon_zone(session, world=world_bundle)
+    _we_snap = session.get("_world_events_snapshot")
+    if _we_snap is None and session.get("id"):
+        try:
+            _we_snap = await db.adb(db.get_world_events_snapshot, int(session["id"]))
+        except Exception:
+            _we_snap = None
+    _we_nsfw = uses_nsfw_model(session.get("scenario"))
+    _we_lang = str(session.get("narration_language") or session.get("language") or "en")
+    from mechanics.world.world_events.formatting import format_macro_events_for_z2, format_rumors_for_z3
+    macro_events_z2 = format_macro_events_for_z2(_we_snap, lang=_we_lang, is_nsfw_enabled=_we_nsfw)
+    rumors_z3 = format_rumors_for_z3(_we_snap, lang=_we_lang, is_nsfw_enabled=_we_nsfw, current_location=str(scene_loc or ""))
     # Z2 ordered least -> most volatile; the clock changes every turn so it goes last.
     zone_2 = "\n".join(p for p in [
         f"CHARACTER SHEET(S):\n{game_engine._party_sheet_text(party)}",
         f"{prompt_layout.SCENE_CONTEXT_HEADER}\n{trimmed_scene_ctx}",
         enemies_str.strip(),
         f"PHYSICAL CONTINUITY ANCHOR:\n{phys_prompt_block}",
+        macro_events_z2,
         time_prompt_block,
     ] if p)
     
     user_prompt = (
         f"{active_quests_str}"
         f"{quest_board_text}"
+        f"{rumors_z3}"
         f"RECENT HISTORY:\n{trimmed_history}{active_recall_text}\n\n"
         f"ACTIONS:\n{actions_text}\n{simultaneity_note}\n{directive_note}\n\n"
         f"{trimmed_dialogue}"
@@ -1254,14 +1547,16 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                 on_narrative_token=stream_callback,
                 is_nsfw=is_nsfw_flag,
                 timeout=LLM_PASS2_TIMEOUT,
-                response_model=response_schema
+                response_model=response_schema,
+                system_zones=(zone_0, zone_1, zone_1b, zone_2),
             )
         else:
             result = await game_engine.call_llm_json(
                 final_system_prompt_list, user_prompt,
                 is_nsfw=is_nsfw_flag,
                 timeout=LLM_PASS2_TIMEOUT,
-                response_model=response_schema
+                response_model=response_schema,
+                system_zones=(zone_0, zone_1, zone_1b, zone_2),
             )
     except Exception as llm_err:
         log.warning(
@@ -1375,6 +1670,18 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
                     tick_status_timers(monster)
 
+                if monster.get("hp", 1) <= 0:
+                    # DoT kills must honour the 2-Stage Vessel Tether exactly like direct damage:
+                    # Stage 1 reforms at 25% HP; Stage 2 unsealed dispersal blocks Vault capture (60% rewards).
+                    try:
+                        from mechanics.world.folklore_mechanics import get_enemy_tether_state, try_resolve_zero_hp_tether
+                        if get_enemy_tether_state(monster):
+                            _dot_teth = try_resolve_zero_hp_tether(monster)
+                            if _dot_teth.get("outcome") == "unsealed_dispersion":
+                                monster["prevent_vault_capture"] = True
+                    except Exception:
+                        pass
+
                 if monster.get("hp", 1) > 0:
 
                     surviving_hostiles.append(monster)
@@ -1387,6 +1694,8 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                     if not monster.get("requires_non_lethal_subdue"):
                         tier = monster.get("tier_rank", 1)
                         mult = monster.get("xp_multiplier", 1.0)
+                        if monster.get("prevent_vault_capture"):
+                            mult = float(mult or 1.0) * 0.60
                         xp, gold = {1: (40, 15), 2: (75, 25), 3: (150, 60), 4: (260, 120), 5: (450, 250)}.get(tier, (75, 25))
                         dot_xp_gain += int(xp * mult)
                         dot_gold_gain += int(gold * mult)
@@ -1480,16 +1789,20 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                     if dot_nh_notices:
                         msg += "\n" + "\n".join(dot_nh_notices)
                 try:
-                    dot_inc_ids = {
-                        str(d.get("incursion_id"))
-                        for d in dot_dead_dicts
-                        if isinstance(d, dict) and d.get("incursion_id") and not d.get("requires_non_lethal_subdue")
-                    }
-                    if dot_inc_ids and session.get("id"):
+                    dot_inc_flags: dict = {}
+                    for d in dot_dead_dicts:
+                        if not isinstance(d, dict) or d.get("requires_non_lethal_subdue"):
+                            continue
+                        _d_inc = str(d.get("incursion_id") or d.get("breach_id") or "")
+                        if _d_inc:
+                            dot_inc_flags[_d_inc] = bool(dot_inc_flags.get(_d_inc) or d.get("prevent_vault_capture"))
+                    if dot_inc_flags and session.get("id"):
                         from mechanics.world.anomalous_events import mark_hostile_incursion_resolved_on_victory
                         lead_dot_uid = party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else session.get("host_user_id")
-                        for d_inc_id in dot_inc_ids:
-                            inc_done_res = mark_hostile_incursion_resolved_on_victory(int(session["id"]), d_inc_id, user_id=lead_dot_uid)
+                        for d_inc_id, d_prevent in dot_inc_flags.items():
+                            inc_done_res = mark_hostile_incursion_resolved_on_victory(
+                                int(session["id"]), d_inc_id, user_id=lead_dot_uid, prevent_vault_capture=d_prevent
+                            )
                             if inc_done_res and inc_done_res.get("message"):
                                 msg += f"\n{inc_done_res['message']}"
                 except Exception:
@@ -1731,6 +2044,13 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                     target_npc = dp_list[0] if dp_list else None
 
                 if target_npc:
+                    _is_anom_rel_skip = False
+                    try:
+                        from mechanics.world.anomalous_events import is_anomalous_scene_entity
+                        _is_anom_rel_skip = bool(is_anomalous_scene_entity(target_npc, session=session))
+                    except Exception:
+                        pass
+                if target_npc and not _is_anom_rel_skip:
                     rel_updates = result.setdefault("relationship_updates", [])
                     target_ru = next(
                         (ru for ru in rel_updates if isinstance(ru, dict) and str(ru.get("npc_name", "")).strip().lower() == target_npc.lower()),
@@ -1982,6 +2302,20 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
         if completed_appt_npc_ids:
             result["_completed_appointment_npc_ids"] = completed_appt_npc_ids
 
+        if session.get("id") and scenario_data.is_anomalous_incursions_scenario(scen_key):
+            try:
+                from mechanics.world.anomalous_events import sync_non_hostile_anomaly_scene_presence as _sync_nh_pre_cast
+                _tmp_anom_sess = dict(session, current_npcs=list(result.get("npcs_present") or []))
+                result["npcs_present"] = _sync_nh_pre_cast(
+                    int(session["id"]),
+                    session=_tmp_anom_sess,
+                    location_str=str(new_loc or ""),
+                    node_id=str(new_node_id or ""),
+                    persist_db=False,
+                )
+            except Exception:
+                pass
+
         if cast_plan is not None:
             cast_plan.present_npcs = list(result.get("npcs_present") or [])
             # If the player explicitly traveled to meet / speak with a named NPC and that NPC is present on arrival,
@@ -2068,6 +2402,10 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
 
         if session.get("cast_state"):
             result["_staged_cast_state"] = session["cast_state"]
+        if session.get("_active_quest_encounter"):
+            result["_active_quest_encounter"] = session["_active_quest_encounter"]
+        if session.get("nearby_enemies") and not result.get("nearby_enemies"):
+            result["nearby_enemies"] = session["nearby_enemies"]
         if stage_info.get("unlocked_edges") or stage_info.get("unlocked_nodes") or stage_info.get("consumed_key_items"):
             result["_staged_spatial_mutations"] = {
                 "unlocked_edges": stage_info.get("unlocked_edges") or [],
@@ -2264,59 +2602,67 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
             schedule_transition_choice=schedule_transition_choice,
             schedule_stay_choice=schedule_stay_choice,
         )
-        # Anomalous Incursions Chapter 11 Post-Game Epilogue & Endless Mode Choice Handling
-        if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        # Universal Chapter 11 Post-Game Epilogue & Endless Mode Choice Handling (All Scenarios)
+        _ep_intents = {
+            str(a.get("intent") or "").strip().lower()
+            for a in (actions or []) if isinstance(a, dict)
+        }
+        _is_epilogue_turn = bool(
+            session.get("epilogue_ready")
+            or res.get("epilogue_ready")
+            or int(session.get("chapter") or 1) >= 11
+            or ("epilogue_conclude_campaign" in _ep_intents)
+            or ("epilogue_endless_mode" in _ep_intents)
+        )
+        if _is_epilogue_turn:
+            from game_engine.quest_lifecycle import build_universal_epilogue_choices, resolve_epilogue_choice
             act_lbl_joined = " ".join(
                 str(a.get("label") or a.get("action") or "").lower()
                 for a in (actions or []) if isinstance(a, dict)
             )
-            if "continue in endless containment mode" in act_lbl_joined:
+            _chose_endless = (
+                "epilogue_endless_mode" in _ep_intents
+                or "continue in endless" in act_lbl_joined
+                or "endless sandbox mode" in act_lbl_joined
+            )
+            _chose_archive = (
+                "epilogue_conclude_campaign" in _ep_intents
+                or "conclude campaign (archive chronicle)" in act_lbl_joined
+                or "archive chronicle" in act_lbl_joined
+            )
+            if _chose_endless:
                 session["epilogue_ready"] = False
                 session["endless_mode_unlocked"] = True
                 if session.get("id"):
                     try:
-                        db.update_session(session["id"], extra={"epilogue_ready": False, "endless_mode_unlocked": True})
+                        resolve_epilogue_choice(int(session["id"]), "epilogue_endless_mode", db.infer_session_turn(session))
                     except Exception:
                         pass
                 endless_note = (
-                    "\n\n♾️ **[ENDLESS CONTAINMENT MODE UNLOCKED]**: Though the World-Ending Cataclysm has been averted, "
-                    "the metropolitan watch never truly ends. Daily Incursions, Faction Dispatches, Promotion Ranks, and "
-                    "Special Agent bonds remain open across all 20 districts."
+                    "\n\n♾️ **[ENDLESS SANDBOX MODE UNLOCKED]**: Though the overarching campaign climax has concluded, "
+                    "your journey continues freely across the living world with side contracts, relationships, and regional events."
                 )
                 res["next_narrative"] = (str(res.get("next_narrative") or "") + endless_note).strip()
-            elif "conclude campaign (archive chronicle)" in act_lbl_joined:
+            elif _chose_archive:
                 session["epilogue_ready"] = False
                 session["campaign_archived"] = True
+                session["chronicle_archived"] = True
                 if session.get("id"):
                     try:
-                        db.update_session(session["id"], status="completed", extra={"epilogue_ready": False, "campaign_archived": True})
+                        resolve_epilogue_choice(int(session["id"]), "epilogue_conclude_campaign", db.infer_session_turn(session))
                     except Exception:
                         pass
                 archive_note = (
-                    "\n\n🏁 **[CHRONICLE ARCHIVED — CAMPAIGN COMPLETE]**: Your operative dossier and victory over the World-Ending Anomaly "
-                    "have been permanently sealed into the highest annals of the containment archives."
+                    "\n\n🏁 **[CHRONICLE ARCHIVED — CAMPAIGN COMPLETE]**: Your party's deeds and legacy "
+                    "have been permanently sealed into the annals of the chronicle."
                 )
                 res["next_narrative"] = (str(res.get("next_narrative") or "") + archive_note).strip()
             elif session.get("epilogue_ready") or res.get("epilogue_ready"):
-                epilogue_opts = [
-                    {
-                        "label": "🏁 Conclude Campaign (Archive Chronicle)",
-                        "stat": "FREE",
-                        "requirement": 0,
-                        "mp_cost": 0,
-                        "intent": "epilogue_conclude_campaign",
-                    },
-                    {
-                        "label": "♾️ Continue in Endless Containment Mode",
-                        "stat": "FREE",
-                        "requirement": 0,
-                        "mp_cost": 0,
-                        "intent": "epilogue_endless_mode",
-                    },
-                ]
+                epilogue_opts = build_universal_epilogue_choices(scen_key)
                 existing_lbls = {str(c.get("label") or "") for c in hybrid_choices if isinstance(c, dict)}
                 hybrid_choices = [o for o in epilogue_opts if o["label"] not in existing_lbls] + hybrid_choices[:3]
 
+        if scenario_data.is_anomalous_incursions_scenario(scen_key):
             # Daily Anomalous Incursions & Quest Non-Hostile Containment Choices
             try:
                 from mechanics.world.anomalous_events import (
@@ -2326,20 +2672,61 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                     get_non_hostile_entity_temperament,
                     get_temperament_scene_hint,
                     build_non_hostile_narrative_choices,
+                    build_sapient_anomaly_dialogue_choices,
+                    sync_non_hostile_anomaly_scene_presence,
+                    is_anomalous_scene_entity,
                 )
+                if session.get("id"):
+                    eff_loc_sync = str(res.get("location") or session.get("current_location") or "")
+                    eff_nid_sync = str(res.get("current_node_id") or session.get("current_node_id") or "")
+                    synced_npcs = sync_non_hostile_anomaly_scene_presence(
+                        int(session["id"]),
+                        session=session,
+                        location_str=eff_loc_sync,
+                        node_id=eff_nid_sync,
+                        persist_db=True,
+                    )
+                    res["npcs_present"] = synced_npcs
                 cur_enemies_end = session.get("nearby_enemies") or []
                 lead_char_end = (party[0][0] if isinstance(party[0], (tuple, list)) else party[0]) if (party and party[0]) else None
-                if cur_enemies_end:
+                if res.get("has_exited_convo"):
+                    dp_end = ""
+                elif "dialogue_partner" in res:
+                    dp_end = str(res.get("dialogue_partner") or "").strip()
+                else:
+                    dp_end = str(session.get("dialogue_partner") or "").strip()
+                if not cur_enemies_end and dp_end and is_anomalous_scene_entity(dp_end, session=session, current_npcs=res.get("npcs_present")):
+                    hybrid_choices = build_sapient_anomaly_dialogue_choices(
+                        dp_end,
+                        session_id=int(session["id"]) if session.get("id") else None,
+                        session=session,
+                        char=lead_char_end if isinstance(lead_char_end, dict) else None,
+                    )
+                elif cur_enemies_end:
                     for e_sub in cur_enemies_end:
-                        if isinstance(e_sub, dict) and e_sub.get("requires_non_lethal_subdue") and int(e_sub.get("hp", 0) or 0) > 0:
+                        if isinstance(e_sub, dict) and (e_sub.get("requires_non_lethal_subdue") or e_sub.get("is_anomalous_manifestation")) and int(e_sub.get("hp", 0) or 0) > 0:
                             e_hp = int(e_sub.get("hp", 10) or 10)
                             e_max = max(1, int(e_sub.get("max_hp", 40) or 40))
-                            sub_pct = float(e_sub.get("subdue_threshold_pct") or 0.35)
+                            e_sap = str(e_sub.get("sapience") or ("sapient" if e_sub.get("requires_non_lethal_subdue") else "instinctual")).strip().lower()
+                            def_sub_pct = 0.50 if (not e_sub.get("requires_non_lethal_subdue") and e_sap == "instinctual") else 0.35
+                            sub_pct = float(e_sub.get("subdue_threshold_pct") or def_sub_pct)
                             ent_disp = e_sub.get("name", "Entity")
-                            persuade_dc = 6 if e_hp <= max(1, int(e_max * 0.50)) else 8
-                            persuade_lbl = f"🗣️ Persuade / Calm {ent_disp} (De-escalate)"
+                            is_tb_exp = bool(e_sub.get("taboo_exploited") or e_sub.get("taboo_seal_unlocked"))
+                            is_dos_rev = bool(
+                                e_sub.get("dossier_revealed")
+                                or (isinstance(e_sub.get("anomaly_blueprint"), dict) and e_sub["anomaly_blueprint"].get("dossier_revealed"))
+                            )
+                            is_compulsive_ready = bool(e_sap == "compulsive" and (is_dos_rev or is_tb_exp))
+                            persuade_dc = 6 if (e_hp <= max(1, int(e_max * 0.50)) or is_tb_exp) else 8
+                            if is_dos_rev:
+                                persuade_dc = max(4, persuade_dc - 2)
+                            persuade_lbl = (
+                                f"🗣️ Enact Counter-Rite / Calm {ent_disp}"
+                                if e_sap == "compulsive"
+                                else f"🗣️ Persuade / Calm {ent_disp} (De-escalate)"
+                            )
                             combat_nh_opts = []
-                            if e_hp <= max(1, int(e_max * sub_pct)):
+                            if e_hp <= max(1, int(e_max * sub_pct)) or bool(e_sub.get("is_breached")) or is_tb_exp:
                                 sub_lbl = f"🛡️ Subdue & Contain {ent_disp}"
                                 if not any(sub_lbl.lower() in str(c.get("label", "")).lower() for c in hybrid_choices if isinstance(c, dict)):
                                     combat_nh_opts.append({
@@ -2352,7 +2739,7 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                                         "incursion_id": e_sub.get("incursion_id", ""),
                                         "quest_id": e_sub.get("linked_quest_id", ""),
                                     })
-                            if not any(persuade_lbl.lower() in str(c.get("label", "")).lower() for c in hybrid_choices if isinstance(c, dict)):
+                            if (e_sub.get("requires_non_lethal_subdue") or e_sap == "sapient" or is_compulsive_ready) and not any(persuade_lbl.lower() in str(c.get("label", "")).lower() for c in hybrid_choices if isinstance(c, dict)):
                                 combat_nh_opts.append({
                                     "label": persuade_lbl,
                                     "stat": "CHA",
@@ -2394,6 +2781,8 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                             stage_index=int(nh_q_wp.get("stage_index", 2) or 2),
                             is_story_quest=bool(nh_q_wp.get("is_story_quest")),
                             contract_type=str(nh_q_wp.get("completion_trigger") or "skill_check"),
+                            session_id=int(session["id"]),
+                            include_converse=True,
                         )
                         existing_apps = {
                             str(c.get("approach") or "")
@@ -2410,7 +2799,7 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                                 c for c in hybrid_choices
                                 if isinstance(c, dict) and c.get("quest_id") == q_id_nh
                             ]
-                            hybrid_choices = (present_nh + missing_q_opts)[:4] + non_nh[:2]
+                            hybrid_choices = (present_nh + missing_q_opts)[:5] + non_nh[:2]
                         temp_hint_q = get_temperament_scene_hint(ent_nm_q, temp_q)
                         if ent_nm_q.lower() not in str(res.get("next_narrative") or "").lower():
                             res["next_narrative"] = (
@@ -2428,15 +2817,27 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                             ent_nm = active_inc["entity_name"]
                             pref_stat = str(active_inc.get("preferred_stat") or "INT").upper()
                             inc_opts = []
+                            if isinstance(active_inc.get("anomaly_blueprint"), dict) and not active_inc.get("dossier_revealed"):
+                                inc_opts.append({
+                                    "label": f"🔍 Scan Anomaly Dossier: {ent_nm} (Optional)",
+                                    "stat": "PER",
+                                    "requirement": 5,
+                                    "mp_cost": 0,
+                                    "intent": "anomalous_incursion_action",
+                                    "incursion_action": "reveal_dossier",
+                                    "incursion_id": inc_id,
+                                    "breach_id": inc_id,
+                                })
                             if active_inc.get("subtype") == "hostile_breach":
                                 inc_opts.append({
-                                    "label": f"⚔️ Engage Anomalous Breach: {ent_nm} (Optional)",
+                                    "label": f"⚔️ Engage Anomaly Breach: {ent_nm} (Optional)",
                                     "stat": "STR",
                                     "requirement": 6,
                                     "mp_cost": 0,
                                     "intent": "anomalous_incursion_action",
                                     "incursion_action": "attack",
                                     "incursion_id": inc_id,
+                                    "breach_id": inc_id,
                                 })
                             elif active_inc.get("subtype") == "non_hostile_entity":
                                 inc_opts.extend(
@@ -2445,6 +2846,9 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                                         mode="incursion",
                                         char=lead_char_end if isinstance(lead_char_end, dict) else None,
                                         incursion_id=inc_id,
+                                        breach_id=inc_id,
+                                        session_id=int(session["id"]),
+                                        include_converse=True,
                                     )
                                 )
                             else:
@@ -2456,6 +2860,7 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                                     "intent": "anomalous_incursion_action",
                                     "incursion_action": "analyze",
                                     "incursion_id": inc_id,
+                                    "breach_id": inc_id,
                                 })
                             # Offer Sacred/Sealing Ability option if operative knows any ability
                             lead_uid_ch = party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else session.get("host_user_id")
@@ -2470,6 +2875,7 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                                         "intent": "anomalous_incursion_action",
                                         "incursion_action": "seal_ability",
                                         "incursion_id": inc_id,
+                                        "breach_id": inc_id,
                                     })
                             existing_lbls_inc = {str(c.get("label") or "") for c in hybrid_choices if isinstance(c, dict)}
                             hybrid_choices = [o for o in inc_opts if o["label"] not in existing_lbls_inc] + hybrid_choices[:3]
@@ -2482,7 +2888,7 @@ async def resolve_turn(session: dict, party: list, actions: list, stream_callbac
                                     )
                                     extra_temp_note = " " + get_temperament_scene_hint(ent_nm, inc_temp)
                                 inc_callout = (
-                                    f"\n\n🌀 **[ACTIVE ANOMALOUS INCURSION — OPTIONAL]**: {active_inc.get('description', '')}{extra_temp_note} "
+                                    f"\n\n🌀 **[ACTIVE ANOMALY BREACH — OPTIONAL]**: {active_inc.get('description', '')}{extra_temp_note} "
                                     f"*(Manifestation: **{ent_nm}** — you may choose to engage/contain it for bonus rewards or bypass it safely.)*"
                                 )
                                 res["next_narrative"] = (str(res.get("next_narrative") or "") + inc_callout).strip()

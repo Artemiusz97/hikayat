@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import { 
   BookOpen, Users, Flag, Globe, Heart, Shield, 
@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { StatusEffectBadge } from './CharacterSheet';
 import { formatCleanLocation, cleanProseLocations } from '../../utils/locationFormat';
+import WorldPulseLoreSubTab from './WorldPulseLoreSubTab';
+import EncyclopediaSubTab from './EncyclopediaSubTab';
 
 const formatPersonEntity = (item) => {
   if (!item) return '';
@@ -51,6 +53,26 @@ const formatRace = (str) => {
     return `${specTitle} ${catTitle}`;
   }
   return formatTitle(clean);
+};
+
+export const getStandingBadgeClass = (standing) => {
+  const s = String(standing || '').toLowerCase();
+  if (['freshman', 'sophomore', 'junior', 'senior'].includes(s)) {
+    return 'bg-purple-950/40 text-purple-300 border-purple-800/40';
+  }
+  if (s === 'faculty') {
+    return 'bg-amber-950/40 text-amber-300 border-amber-800/40';
+  }
+  if (s === 'staff') {
+    return 'bg-emerald-950/40 text-emerald-300 border-emerald-800/40';
+  }
+  if (s === 'citizen') {
+    return 'bg-slate-900/60 text-slate-300 border-slate-700/50';
+  }
+  if (s === 'youth peer') {
+    return 'bg-teal-950/40 text-teal-300 border-teal-800/40';
+  }
+  return 'bg-purple-950/40 text-purple-300 border-purple-800/40';
 };
 
 const renderBulletPoints = (lines) => {
@@ -186,6 +208,106 @@ export const getRelationshipTier = (score, track = 'platonic', t = null) => {
   return { label, color, bg };
 };
 
+export const getFactionCategoryBadge = (faction, t) => {
+  const tag = faction?.category_tag || {};
+  const tagKey = tag.key || (faction?.is_school_club ? 'school_club' : (faction?.category || 'faction'));
+  const isSchool = Boolean(faction?.is_school_club || tag.is_school_club || tag.domain === 'school');
+
+  switch (tagKey) {
+    case 'student_council':
+      return {
+        label: t('codex.tag_student_council', 'Student Council'),
+        icon: '🏛️',
+        style: 'bg-purple-950/70 text-purple-300 border-purple-700/50',
+      };
+    case 'athletics':
+      return {
+        label: t('codex.tag_athletics', 'Varsity Athletics'),
+        icon: '🏆',
+        style: 'bg-amber-950/70 text-amber-300 border-amber-700/50',
+      };
+    case 'delinquents':
+      return {
+        label: t('codex.tag_delinquents', 'Campus Rebels'),
+        icon: '🔥',
+        style: 'bg-red-950/70 text-red-300 border-red-700/50',
+      };
+    case 'campus_circle':
+      return {
+        label: t('codex.tag_campus_circle', 'Campus Circle'),
+        icon: '✨',
+        style: 'bg-pink-950/70 text-pink-300 border-pink-700/50',
+      };
+    case 'discipline':
+      return {
+        label: t('codex.tag_discipline', 'Disciplinary Committee'),
+        icon: '⚖️',
+        style: 'bg-blue-950/70 text-blue-300 border-blue-700/50',
+      };
+    case 'school_club':
+      return {
+        label: t('codex.tag_school_club', 'School Club'),
+        icon: '🎓',
+        style: 'bg-cyan-950/70 text-cyan-300 border-cyan-700/50',
+      };
+    case 'public_agency':
+      return {
+        label: t('codex.tag_public_agency', 'Public Agency'),
+        icon: '🏢',
+        style: 'bg-blue-950/70 text-blue-300 border-blue-700/50',
+      };
+    case 'private_agency':
+      return {
+        label: t('codex.tag_private_agency', 'Private Agency'),
+        icon: '🛡️',
+        style: 'bg-indigo-950/70 text-indigo-300 border-indigo-700/50',
+      };
+    case 'monastic_order':
+      return {
+        label: t('codex.tag_monastic_order', 'Monastic Order'),
+        icon: '⛩️',
+        style: 'bg-amber-950/70 text-amber-300 border-amber-700/50',
+      };
+    case 'cult':
+      return {
+        label: t('codex.tag_cult', 'Occult Cult'),
+        icon: '👁️',
+        style: 'bg-purple-950/70 text-purple-300 border-purple-700/50',
+      };
+    case 'syndicate':
+      return {
+        label: t('codex.tag_syndicate', 'Syndicate'),
+        icon: '🗡️',
+        style: 'bg-slate-900/80 text-slate-300 border-slate-700/60',
+      };
+    case 'guild':
+      return {
+        label: t('codex.tag_guild', 'Guild'),
+        icon: '⚔️',
+        style: 'bg-emerald-950/70 text-emerald-300 border-emerald-700/50',
+      };
+    case 'order':
+      return {
+        label: t('codex.tag_order', 'Order'),
+        icon: '🛡️',
+        style: 'bg-blue-950/70 text-blue-300 border-blue-700/50',
+      };
+    default:
+      if (isSchool) {
+        return {
+          label: t('codex.tag_school_club', 'School Club'),
+          icon: '🎓',
+          style: 'bg-cyan-950/70 text-cyan-300 border-cyan-700/50',
+        };
+      }
+      return {
+        label: t('codex.tag_faction', 'Faction'),
+        icon: '🚩',
+        style: 'bg-slate-900/70 text-gray-300 border-slate-700/50',
+      };
+  }
+};
+
 const getReputationTier = (score, t = null) => {
   let tierKey = 'hostile_rival';
   let fallback = 'Hostile / Rival';
@@ -228,20 +350,69 @@ const CodexPanel = ({
   targetContactName,
   targetContactPulse,
   onJumpToSavedContact,
+  isStreaming = false,
+  processingTurn = false,
 }) => {
   const { t } = useTranslation();
-  const { contacts, factions, lorebook, commitments = [], loading, factionHqAction, refreshCodex, cancelCommitment } = codexHook;
-  const [subTab, setSubTab] = useState('contacts'); // 'contacts' | 'factions' | 'lore'
+  const { contacts, factions, agentDossier, lorebook, worldPulse, commitments = [], encyclopedia, loading, factionHqAction, refreshCodex, cancelCommitment, trackRumor } = codexHook;
+  const isAnomalousScenario = String(session?.scenario || '').toLowerCase().includes('anomalous');
+  const [subTab, setSubTab] = useState('contacts'); // 'contacts' | 'factions' | 'lore' | 'agenda' | 'encyclopedia'
+
+  useEffect(() => {
+    if (!isAnomalousScenario && subTab === 'encyclopedia') {
+      setSubTab('contacts');
+    }
+  }, [isAnomalousScenario, subTab]);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedNpc, setExpandedNpc] = useState(null);
   const [highlightedNpcKey, setHighlightedNpcKey] = useState(null);
   const [debugDossierTab, setDebugDossierTab] = useState('persona');
   const [expandedFaction, setExpandedFaction] = useState(null);
+  const [factionDomainFilter, setFactionDomainFilter] = useState('all'); // 'all' | 'school' | 'regular'
   const [loreFilter, setLoreFilter] = useState('all'); // 'all' | 'commitments'
   const [companionBusy, setCompanionBusy] = useState(null);
   const [factionBusy, setFactionBusy] = useState(null);
   const [cancellingCommitmentId, setCancellingCommitmentId] = useState(null);
   const [companionFeedback, setCompanionFeedback] = useState(null);
+  const [busyRumorId, setBusyRumorId] = useState(null);
+  const calibId = useId();
+  const [calAttr, setCalAttr] = useState(session?.player_3axis?.attribute || 'fire');
+  const [calArch, setCalArch] = useState(session?.player_3axis?.combat_archetype || 'vanguard');
+  const [calMed, setCalMed] = useState(session?.player_3axis?.ability_medium || 'direct_manifestation');
+
+  useEffect(() => {
+    const src3 = agentDossier?.character_3axis || session?.player_3axis;
+    if (src3?.attribute) setCalAttr(src3.attribute);
+    if (src3?.combat_archetype) setCalArch(src3.combat_archetype);
+    if (src3?.ability_medium) setCalMed(src3.ability_medium);
+  }, [
+    agentDossier?.character_3axis?.attribute,
+    agentDossier?.character_3axis?.combat_archetype,
+    agentDossier?.character_3axis?.ability_medium,
+    session?.player_3axis?.attribute,
+    session?.player_3axis?.combat_archetype,
+    session?.player_3axis?.ability_medium,
+  ]);
+
+  const handleTrackRumor = async (eventKey) => {
+    if (!eventKey || !trackRumor || busyRumorId) return;
+    setBusyRumorId(eventKey);
+    setCompanionFeedback(null);
+    try {
+      const data = await trackRumor(eventKey);
+      if (data?.world_pulse && onSessionUpdated && session) {
+        onSessionUpdated({ ...session, world_pulse: data.world_pulse });
+      }
+      setCompanionFeedback({
+        type: 'ok',
+        text: data?.quest?.title ? `Tracking lead: ${data.quest.title}` : 'Rumor investigation started.',
+      });
+    } catch (err) {
+      setCompanionFeedback({ type: 'error', text: err.message || 'Could not track rumor.' });
+    } finally {
+      setBusyRumorId(null);
+    }
+  };
   const cardRefs = useRef({});
 
   const partyNpcNames = new Set(
@@ -279,16 +450,27 @@ const CodexPanel = ({
     }
   };
 
-  const handleFactionOp = async (factionId, action) => {
+  const handleFactionOp = async (factionId, action, extraPayload = {}) => {
     if (!factionHqAction || factionBusy) return;
     setFactionBusy(`${factionId}:${action}`);
     setCompanionFeedback(null);
     try {
-      const data = await factionHqAction(factionId, action);
+      const data = await factionHqAction(factionId, action, extraPayload);
       if (data?.message) {
         setCompanionFeedback({ type: 'ok', text: data.message });
       }
-      if (action === 'rest' && onRefreshCharacter) {
+      if (action === 'calibrate' && data && onSessionUpdated) {
+        onSessionUpdated({
+          ...session,
+          player_3axis: {
+            attribute: data.attribute,
+            combat_archetype: data.combat_archetype,
+            ability_medium: data.ability_medium,
+          },
+          telemetry_calibrations_used: data.telemetry_calibrations_used ?? session?.telemetry_calibrations_used,
+        });
+      }
+      if ((action === 'rest' || action === 'calibrate') && onRefreshCharacter) {
         onRefreshCharacter();
       }
       if (action === 'quartermaster') {
@@ -394,9 +576,21 @@ const CodexPanel = ({
   const filteredFactions = factions.filter(f => {
     const q = searchQuery.toLowerCase();
     const name = (f.name || f.faction_id || '').toLowerCase();
-    const desc = (f.description || '').toLowerCase();
-    return name.includes(q) || desc.includes(q);
+    const desc = (f.description || f.notes || '').toLowerCase();
+    const matchesQuery = name.includes(q) || desc.includes(q);
+    if (!matchesQuery) return false;
+
+    if (factionDomainFilter === 'school') {
+      return Boolean(f.is_school_club || f.category_tag?.domain === 'school');
+    }
+    if (factionDomainFilter === 'regular') {
+      return !Boolean(f.is_school_club || f.category_tag?.domain === 'school');
+    }
+    return true;
   });
+
+  const hasSchoolFactions = factions.some(f => Boolean(f.is_school_club || f.category_tag?.domain === 'school'));
+  const hasRegularFactions = factions.some(f => !Boolean(f.is_school_club || f.category_tag?.domain === 'school'));
 
   // World lore entities (strictly non-person entries: world events, locations, factions, artifacts, history)
   const loreEntities = (lorebook.entities || []).filter(e => e.entity_type !== 'person');
@@ -503,12 +697,14 @@ const CodexPanel = ({
               ? t('codex.factions_count', { count: factions.length, defaultValue: `${factions.length} Factions` })
               : subTab === 'agenda'
               ? `${(commitments || []).length} Commitments`
+              : subTab === 'encyclopedia'
+              ? `[${encyclopedia?.discovered_count ?? 0}/${encyclopedia?.total_folklore_count ?? 50}]`
               : t('codex.lore_count', { count: filteredLore.length, defaultValue: `${filteredLore.length} Lore` })}
           </span>
         </div>
 
         {/* Subtabs Selector */}
-        <div className="flex bg-black/60 p-0.5 rounded-md border border-fantasy-border/60 gap-1">
+        <div className="flex flex-wrap bg-black/60 p-0.5 rounded-md border border-fantasy-border/60 gap-1">
           <button
             onClick={() => { setSubTab('contacts'); setSearchQuery(''); }}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1 rounded text-[11px] font-semibold uppercase tracking-wider transition-colors ${
@@ -556,6 +752,20 @@ const CodexPanel = ({
             <Calendar size={11} />
             <span>{t('codex.agenda', 'Agenda')}</span>
           </button>
+
+          {isAnomalousScenario && (
+            <button
+              onClick={() => { setSubTab('encyclopedia'); setSearchQuery(''); }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1 rounded text-[11px] font-semibold uppercase tracking-wider transition-colors ${
+                subTab === 'encyclopedia'
+                  ? 'bg-amber-950/60 text-amber-300 border border-amber-600/50'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <Scroll size={11} />
+              <span>{t('codex.encyclopedia', 'Encyclopedia')}</span>
+            </button>
+          )}
         </div>
 
         {/* Search Bar */}
@@ -637,10 +847,20 @@ const CodexPanel = ({
                   basic.deceased ||
                   String(npc.disposition || '').toLowerCase() === 'dead'
                 );
-                const isMerchant = /merchant|shopkeeper|vendor|apothecary|peddler|trader/i.test(basic.role || basic.occupation || npc.name || '');
+                const isMerchant = Boolean(
+                  npc.is_merchant ||
+                  basic.is_merchant ||
+                  /merchant|shopkeeper|vendor|apothecary|peddler|trader/i.test(basic.role || basic.occupation || npc.name || '')
+                );
                 const isNonCombatScen = ['high_school_drama', 'high_school', 'slice_of_life', 'cozy_cafe'].includes((session?.scenario || '').toLowerCase());
                 const isDetailedUnlocked = score >= 100 || isInParty || isDebugRevealed;
-                const isCombatDossierUnlocked = isDetailedUnlocked || Boolean(npc.same_faction_colleague);
+                const isCombatDossierUnlocked = Boolean(
+                  (npc.dossier_stage ?? 1) >= 2 ||
+                  score >= 15 ||
+                  isInParty ||
+                  isDebugRevealed ||
+                  npc.same_faction_colleague
+                );
                 const canRecruit = !isNonCombatScen && !isMerchant && !isCivilianTag && !isDeceased;
                 const traits = npc.unlocked_traits || [];
                 const rawDislikes = npc.dislikes || basic.dislikes || [];
@@ -751,7 +971,7 @@ const CodexPanel = ({
                             )}
                           </div>
                           <span className="text-[11px] text-gray-400 font-medium block truncate max-w-56">
-                            {npc.public_role || basic.public_role || basic.role || basic.occupation || (basic.faction ? `${basic.faction} Member` : 'Encountered')}
+                            {npc.public_role || basic.public_role || basic.role || basic.occupation || npc.standing || basic.standing || (basic.faction ? `${basic.faction} Member` : ((session?.scenario || '').toLowerCase().includes('school') ? 'Student' : 'Encountered'))}
                           </span>
                         </div>
                       </div>
@@ -802,9 +1022,9 @@ const CodexPanel = ({
                             Role: <strong className="text-gray-100">{npc.public_role || basic.public_role || basic.role || basic.occupation || npc.role}</strong>
                           </span>
                         )}
-                        {(basic.grade || npc.grade) && (
-                          <span className="px-1.5 py-0.5 rounded bg-purple-950/40 text-purple-300 border border-purple-800/40 text-[10.5px]">
-                            {formatTitle(basic.grade || npc.grade)}
+                        {(npc.standing || basic.standing || basic.grade || npc.grade) && (
+                          <span className={`px-1.5 py-0.5 rounded text-[10.5px] border ${getStandingBadgeClass(npc.standing || basic.standing || basic.grade || npc.grade)}`}>
+                            {formatTitle(npc.standing || basic.standing || basic.grade || npc.grade)}
                           </span>
                         )}
                         {(basic.club || npc.club) && (
@@ -981,6 +1201,21 @@ const CodexPanel = ({
                                 <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-200 border border-fantasy-border/50">
                                   Class: <strong className="text-white">{agentClass}</strong>
                                 </span>
+                                {(npc.attribute || basic.attribute) && (
+                                  <span className="px-1.5 py-0.5 rounded bg-cyan-950/60 text-cyan-200 border border-cyan-700/50 font-semibold">
+                                    🧬 {t(`awakened.attrs.${String(npc.attribute || basic.attribute).toLowerCase()}`, formatTitle(npc.attribute || basic.attribute))}
+                                  </span>
+                                )}
+                                {(npc.combat_archetype || basic.combat_archetype) && (
+                                  <span className="px-1.5 py-0.5 rounded bg-indigo-950/60 text-indigo-200 border border-indigo-700/50 font-semibold">
+                                    🛡️ {formatTitle(npc.combat_archetype || basic.combat_archetype)}
+                                  </span>
+                                )}
+                                {isCombatDossierUnlocked && (isDebugRevealed ? (npc.debug_ability_medium || npc.ability_medium) : npc.ability_medium) && (
+                                  <span className="px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-200 border border-purple-700/50 font-semibold">
+                                    ⚙️ {formatTitle(isDebugRevealed ? (npc.debug_ability_medium || npc.ability_medium) : npc.ability_medium)}
+                                  </span>
+                                )}
                                 <span className="px-1.5 py-0.5 rounded bg-red-950/40 text-red-300 border border-red-800/40 font-mono">
                                   ❤️ {cHp}/{cMaxHp} HP
                                 </span>
@@ -1020,7 +1255,7 @@ const CodexPanel = ({
                                             )}
                                           </span>
                                           <span className="text-[9.5px] font-mono text-cyan-300 shrink-0">
-                                            {ab.mp_cost ?? 10} MP
+                                            {ab.is_ultimate ? '3 Pips • 0 MP' : `${ab.mp_cost ?? 10} MP`}
                                           </span>
                                         </div>
                                         {ab.desc && (
@@ -1032,7 +1267,7 @@ const CodexPanel = ({
                                 </div>
                               ) : (
                                 <p className="text-[10px] text-gray-400 italic pt-1 border-t border-cyan-900/40">
-                                  🔒 {t('codex.abilities_locked_note', 'Reach Friend standing (100+ Affinity) or recruit into your party to reveal innate abilities.')}
+                                  🔒 {t('awakened.dossier_stage2_locked', 'Stage 2 Classified — Unlocks at Affinity 15+, Party Companion, or Same-Faction Colleague.')}
                                 </p>
                               )}
                             </div>
@@ -1056,7 +1291,7 @@ const CodexPanel = ({
                             </div>
                             <p className="text-[10.5px] text-gray-400 leading-snug">
                               {isDeceased
-                                ? t('codex.civilian_deceased_note', 'Perished permanently during an anomalous incursion due to lacking innate mana protection.')
+                                ? t('codex.civilian_deceased_note', 'Perished permanently during an anomaly breach due to lacking innate mana protection.')
                                 : t('codex.civilian_party_note', 'Mundane citizen with no mana or special abilities. Eligible as a Contact, but cannot be recruited into your field party.')}
                             </p>
                           </div>
@@ -1356,14 +1591,55 @@ const CodexPanel = ({
 
           {/* 2. FACTIONS TAB */}
           {subTab === 'factions' && (
-            filteredFactions.length === 0 ? (
-              <div className="text-center py-8 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
-                <Flag size={24} className="mx-auto mb-1.5 opacity-40" />
-                <p className="text-xs">{t('codex.factions_empty', 'No factions discovered yet.')}</p>
-              </div>
-            ) : (
-              filteredFactions.map(faction => {
-                const fid = faction.faction_id || faction.name;
+            <div className="space-y-2.5">
+              {hasSchoolFactions && hasRegularFactions && (
+                <div className="flex items-center gap-1.5 pb-1">
+                  <button
+                    type="button"
+                    onClick={() => setFactionDomainFilter('all')}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                      factionDomainFilter === 'all'
+                        ? 'bg-fantasy-accent text-black font-bold'
+                        : 'bg-black/50 text-gray-400 hover:text-gray-200 border border-fantasy-border/40'
+                    }`}
+                  >
+                    {t('codex.filter_all_factions', 'All')} ({factions.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFactionDomainFilter('school')}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
+                      factionDomainFilter === 'school'
+                        ? 'bg-cyan-500 text-black font-bold'
+                        : 'bg-black/50 text-cyan-400 hover:text-cyan-300 border border-cyan-800/40'
+                    }`}
+                  >
+                    <span>🎓</span>
+                    <span>{t('codex.filter_school_clubs', 'School Clubs')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFactionDomainFilter('regular')}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
+                      factionDomainFilter === 'regular'
+                        ? 'bg-indigo-500 text-white font-bold'
+                        : 'bg-black/50 text-indigo-400 hover:text-indigo-300 border border-indigo-800/40'
+                    }`}
+                  >
+                    <span>🏢</span>
+                    <span>{t('codex.filter_regular_factions', 'Agencies & Factions')}</span>
+                  </button>
+                </div>
+              )}
+              {filteredFactions.length === 0 ? (
+                <div className="text-center py-8 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
+                  <Flag size={24} className="mx-auto mb-1.5 opacity-40" />
+                  <p className="text-xs">{t('codex.factions_empty', 'No factions discovered yet.')}</p>
+                </div>
+              ) : (
+                filteredFactions.map(faction => {
+                  const fid = faction.faction_id || faction.name;
+                  const factionCategoryTag = getFactionCategoryBadge(faction, t);
                 const rep = faction.reputation ?? faction.reputation_score ?? 0;
                 const repTier = getReputationTier(rep, t);
                 const isExpanded = expandedFaction === fid;
@@ -1390,6 +1666,12 @@ const CodexPanel = ({
                         <h4 className="font-semibold text-xs text-gray-200 flex items-center gap-1.5 flex-wrap">
                           <Flag size={13} className="text-fantasy-accent shrink-0" />
                           <span>{faction.name || faction.faction_id}</span>
+                          {factionCategoryTag && (
+                            <span className={`text-[9.5px] px-1.5 py-0.2 rounded font-medium border flex items-center gap-1 shrink-0 ${factionCategoryTag.style}`}>
+                              <span>{factionCategoryTag.icon}</span>
+                              <span>{factionCategoryTag.label}</span>
+                            </span>
+                          )}
                           {isMember && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40 font-bold uppercase">
                               Rank {playerRank || 1} {faction.player_title ? `• ${faction.player_title}` : t('codex.member', 'Member')}
@@ -1586,6 +1868,82 @@ const CodexPanel = ({
                               <span>📋 Faction Bounties</span>
                             </button>
                           </div>
+
+                          {/* Tier 4+ HQ Telemetry Calibration (Anomalous Incursions) */}
+                          {isMember && Number(agentDossier?.promotion_tier || playerRank || 0) >= 4 && String(session?.scenario || '').toLowerCase().includes('anomalous') && (
+                            <div className="mt-2 p-2.5 rounded-lg bg-cyan-950/20 border border-cyan-800/50 space-y-2">
+                              <div>
+                                <span className="text-[10.5px] font-bold uppercase tracking-wider text-cyan-300 block">
+                                  🧬 {t('awakened.calibration_title', 'HQ Telemetry Calibration')}
+                                </span>
+                                <p id={`${calibId}-${faction.faction_id}-desc`} className="text-[10px] text-gray-400 leading-snug mt-0.5">
+                                  {t('awakened.calibration_desc', 'Tier 4+ Senior Operative privilege: Re-attune your 3-axis Resonance (500G + 1x Hume Core, max 1/arc).')}
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                                <div>
+                                  <label htmlFor={`${calibId}-${faction.faction_id}-attr`} className="block text-[9.5px] uppercase font-bold text-gray-400 mb-0.5">
+                                    {t('awakened.attribute_label', 'Attribute')}
+                                  </label>
+                                  <select
+                                    id={`${calibId}-${faction.faction_id}-attr`}
+                                    aria-describedby={`${calibId}-${faction.faction_id}-desc`}
+                                    value={calAttr}
+                                    onChange={(e) => setCalAttr(e.target.value)}
+                                    className="w-full bg-black/70 border border-cyan-800/60 rounded p-1 text-[10.5px] text-gray-200"
+                                  >
+                                    {['fire', 'water', 'wind', 'earth', 'ice', 'electric', 'bio', 'physical', 'aether'].map((ak) => (
+                                      <option key={ak} value={ak}>{t(`awakened.attrs.${ak}`, ak.toUpperCase())}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div>
+                                  <label htmlFor={`${calibId}-${faction.faction_id}-arch`} className="block text-[9.5px] uppercase font-bold text-gray-400 mb-0.5">
+                                    {t('awakened.archetype_label', 'Archetype')}
+                                  </label>
+                                  <select
+                                    id={`${calibId}-${faction.faction_id}-arch`}
+                                    aria-describedby={`${calibId}-${faction.faction_id}-desc`}
+                                    value={calArch}
+                                    onChange={(e) => setCalArch(e.target.value)}
+                                    className="w-full bg-black/70 border border-cyan-800/60 rounded p-1 text-[10.5px] text-gray-200"
+                                  >
+                                    {['vanguard', 'catalyst', 'breaker', 'warden'].map((rk) => (
+                                      <option key={rk} value={rk}>{t(`awakened.archetypes.${rk}`, rk.toUpperCase())}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div>
+                                  <label htmlFor={`${calibId}-${faction.faction_id}-med`} className="block text-[9.5px] uppercase font-bold text-gray-400 mb-0.5">
+                                    {t('awakened.medium_label', 'Medium')}
+                                  </label>
+                                  <select
+                                    id={`${calibId}-${faction.faction_id}-med`}
+                                    aria-describedby={`${calibId}-${faction.faction_id}-desc`}
+                                    value={calMed}
+                                    onChange={(e) => setCalMed(e.target.value)}
+                                    className="w-full bg-black/70 border border-cyan-800/60 rounded p-1 text-[10.5px] text-gray-200"
+                                  >
+                                    {['direct_manifestation', 'ordnance_imbuement', 'somatic_overdrive', 'autonomous_construct'].map((mk) => (
+                                      <option key={mk} value={mk}>{t(`awakened.mediums.${mk}`, mk)}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                disabled={Boolean(factionBusy)}
+                                onClick={() => handleFactionOp(faction.faction_id, 'calibrate', {
+                                  attribute: calAttr,
+                                  combat_archetype: calArch,
+                                  ability_medium: calMed,
+                                })}
+                                className="w-full py-1.5 px-2 rounded text-[11px] font-bold border bg-cyan-950/60 hover:bg-cyan-900/70 border-cyan-500/60 text-cyan-200 transition-all disabled:opacity-50"
+                              >
+                                🧬 {t('awakened.calibration_btn', 'Calibrate Resonance (500G + 1x Hume Core)')}
+                              </button>
+                            </div>
+                          )}
                         </div>
 
                       </div>
@@ -1593,46 +1951,23 @@ const CodexPanel = ({
                   </div>
                 );
               })
-            )
+            )}
+            </div>
           )}
 
 
           {/* 3. WORLD LORE TAB (strictly world events, places, factions, artifacts, history) */}
           {subTab === 'lore' && (
-            <div className="space-y-2.5">
-              {filteredLore.length === 0 ? (
-                <div className="text-center py-8 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
-                  <Globe size={24} className="mx-auto mb-1.5 opacity-40" />
-                  <p className="text-xs">{t('codex.no_lore', 'No world details documented yet.')}</p>
-                  <p className="text-[10px] text-gray-500 mt-1">Discover world events, locations, artifacts, and historical lore as your adventure unfolds.</p>
-                </div>
-              ) : (
-                filteredLore.map((ent, idx) => (
-                  <div 
-                    key={ent.id || idx}
-                    className="bg-black/50 border border-fantasy-border/60 rounded-lg p-3 space-y-1.5"
-                  >
-                    <div className="flex justify-between items-start gap-1">
-                      <h5 className="font-semibold text-xs text-gray-200">{ent.name}</h5>
-                      <span className="text-[9px] px-1.5 py-0.2 bg-black/60 text-gray-400 rounded uppercase font-bold border border-fantasy-border">
-                        {ent.entity_type || 'Lore'}
-                      </span>
-                    </div>
-
-                    {ent.description && (
-                      <p className="text-[11px] text-gray-400 leading-snug">{cleanProseLocations(ent.description)}</p>
-                    )}
-
-                    {ent.location && (
-                      <span className="text-[10px] text-gray-500 flex items-center gap-1">
-                        <MapPin size={10} />
-                        <span>{formatCleanLocation(ent.location)}</span>
-                      </span>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
+            <WorldPulseLoreSubTab
+              worldPulse={worldPulse || session?.world_pulse}
+              filteredLore={filteredLore}
+              searchQuery={searchQuery}
+              busyRumorId={busyRumorId}
+              onTrackRumor={handleTrackRumor}
+              isStreaming={isStreaming}
+              processingTurn={processingTurn}
+              session={session}
+            />
           )}
 
           {/* SUBTAB 4: AGENDA & COMMITMENTS */}
@@ -1785,6 +2120,13 @@ const CodexPanel = ({
                 })
               )}
             </div>
+          )}
+
+          {subTab === 'encyclopedia' && (
+            <EncyclopediaSubTab
+              encyclopedia={encyclopedia}
+              searchQuery={searchQuery}
+            />
           )}
 
         </div>

@@ -211,14 +211,90 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
             is_truncated = True
     session["is_truncated_generation"] = bool(session.get("is_truncated_generation") or is_truncated)
 
+    scen_key_hud = str(session.get("scenario") or "fantasy")
+    is_anom_hud = scenario_data.is_anomalous_incursions_scenario(scen_key_hud)
+    if is_anom_hud:
+        from mechanics.combat.awakened_resonance import init_enemy_stability_profile, get_actor_resonance_pips
+        session["ult_pips"] = get_actor_resonance_pips(session, uid)
+        session["max_ult_pips"] = 3
+        session["player_3axis"] = db.get_character_3axis(uid) if uid else None
+
+        # Sanitize enemy HUD view without mutating DB hidden_weakness
+        sanitized_enemies = []
+        for raw_e in (session.get("nearby_enemies") or []):
+            if not isinstance(raw_e, dict):
+                sanitized_enemies.append(raw_e)
+                continue
+            e_view = dict(raw_e)
+            if int(e_view.get("hp", 1) or 0) > 0 and e_view.get("max_stability") is None:
+                init_enemy_stability_profile(e_view)
+            base_weak_src = (
+                e_view.get("revealed_weaknesses")
+                if isinstance(e_view.get("revealed_weaknesses"), list)
+                else (e_view.get("weaknesses") or [])
+            )
+            disp_weak = [str(w) for w in base_weak_src if w]
+            hid_w = e_view.get("hidden_weakness")
+            if hid_w and str(hid_w) != "?":
+                is_hid_rev = bool(
+                    e_view.get("hidden_weakness_revealed")
+                    or (
+                        isinstance(e_view.get("revealed_weaknesses"), list)
+                        and str(hid_w) in [str(x) for x in e_view.get("revealed_weaknesses")]
+                    )
+                )
+                if is_hid_rev:
+                    if str(hid_w) not in disp_weak:
+                        disp_weak.append(str(hid_w))
+                else:
+                    disp_weak = [w for w in disp_weak if w != str(hid_w)]
+                    disp_weak.append("?")
+                    e_view["weaknesses"] = [str(w) for w in (e_view.get("weaknesses") or []) if str(w) != str(hid_w)]
+                    e_view["hidden_weakness"] = "?"
+            e_view["display_weaknesses"] = disp_weak
+            e_view["is_breached"] = bool(e_view.get("is_breached"))
+            e_view["breached_turns_left"] = int(e_view.get("breached_turns_left", 0) or 0)
+            from mechanics.world.folklore_mechanics import get_enemy_tether_state
+            ts = get_enemy_tether_state(e_view)
+            if ts:
+                is_sealed = bool(ts.get("sealed") or e_view.get("tether_sealed"))
+                e_view["tether_sealed"] = is_sealed
+                bp_rev = bool((e_view.get("anomaly_blueprint") or {}).get("dossier_revealed"))
+                if (
+                    e_view.get("dossier_revealed")
+                    or bp_rev
+                    or e_view.get("tether_reformed_once")
+                    or ts.get("reformed_once")
+                    or is_sealed
+                ):
+                    e_view["tether_vessel_name"] = str(ts.get("vessel_name") or "")
+            sanitized_enemies.append(e_view)
+        session["nearby_enemies"] = sanitized_enemies
+
+        # Active Construct status pill
+        construct_info = None
+        for cand_npc in list(session.get("current_npcs") or []) + list(session.get("party_npcs") or []) + list(session.get("_active_constructs") or []):
+            if isinstance(cand_npc, dict) and cand_npc.get("is_summon") and int(cand_npc.get("hp", 0) or 0) > 0:
+                q_act = cand_npc.get("queued_windup") or cand_npc.get("queued_construct_action")
+                construct_info = {
+                    "name": str(cand_npc.get("name") or "Construct"),
+                    "hp": int(cand_npc.get("hp", 0) or 0),
+                    "max_hp": max(1, int(cand_npc.get("max_hp", 1) or 1)),
+                    "windup_skill": (q_act.get("skill_name") or q_act.get("name")) if isinstance(q_act, dict) else None,
+                }
+                break
+        session["construct_status"] = construct_info
+
     if in_combat and uid:
         from mechanics.narrative.choice_generator import generate_categorized_combat_actions
         from mechanics.combat.spells import get_spell
+        from mechanics.combat.spells.awakened_kits import get_actor_spell
 
         char = db.get_character(uid)
         inv = db.get_inventory(uid) if char else []
         party = [(dict(char), inv)] if char else []
         learned_sids = db.get_learned_spells(uid) if char else []
+        skill_prog_hud = db.get_skill_progress(char) if char else {}
         location = session.get("current_location") or "area"
         scen_key = session.get("scenario") or "fantasy"
 
@@ -245,16 +321,24 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
 
             magic_list = list(raw_deck.get("magic") or [])
             existing_sids = {m.get("spell_id") for m in magic_list if isinstance(m, dict) and m.get("spell_id")}
+            ult_pips_now = int(session.get("ult_pips", 0) or 0)
             for sid in (learned_sids or []):
                 if sid not in existing_sids:
-                    sp = get_spell(sid)
+                    sp = get_actor_spell(sid, skill_prog_hud) or get_spell(sid)
                     if sp:
-                        mp_cost = int(sp.get("mp_cost", 6) or 0)
+                        is_ult_sp = bool(sp.get("is_ultimate") or sp.get("slot_tier") == "ultimate")
+                        mp_cost = 0 if (is_ult_sp and is_anom_hud) else int(sp.get("mp_cost", 6) or 0)
+                        pip_cost = 3 if (is_ult_sp and is_anom_hud) else 0
+                        can_aff = (ult_pips_now >= pip_cost) if (is_ult_sp and is_anom_hud) else (int((char or {}).get("mp", 0) or 0) >= mp_cost)
+                        cost_txt = f"{ult_pips_now}/3 Pips • 0 MP" if (is_ult_sp and is_anom_hud) else f"{mp_cost} MP"
                         magic_list.append({
-                            "label": f"{sp.get('emoji', '🔮')} {sp.get('name', sid)} ({mp_cost} MP)",
+                            "label": f"{sp.get('emoji', '🔮')} {sp.get('name', sid)} ({cost_txt})",
                             "stat": "INT",
                             "requirement": 5,
                             "mp_cost": mp_cost,
+                            "pip_cost": pip_cost,
+                            "is_ultimate": is_ult_sp,
+                            "can_afford": can_aff,
                             "choice_type": "combat",
                             "action_category": "magic",
                             "spell_id": sid,
@@ -290,9 +374,11 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
 
         session["combat_decks_by_target"] = decks_by_target
         session["combat_deck"] = first_deck
+        session["combat_actions"] = first_deck
     else:
         session["combat_decks_by_target"] = {}
         session["combat_deck"] = None
+        session["combat_actions"] = None
 
     # Dynamic Clothing Status & Present NPC Enrichment
     try:
@@ -347,6 +433,25 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
                         if l_name:
                             lore_characters[l_name] = l_ent
 
+        is_anom_sess = scenario_data.is_anomalous_incursions_scenario(session.get("scenario", ""))
+        agent_roster_names = None
+        if is_anom_sess:
+            raw_roster = session.get("anomalous_agent_roster")
+            if not isinstance(raw_roster, list) or not raw_roster:
+                if sess_id:
+                    try:
+                        from mechanics.social.agent_roster import ensure_anomalous_agent_roster
+                        raw_roster = ensure_anomalous_agent_roster(sess_id, str(session.get("scenario") or ""))
+                    except Exception:
+                        raw_roster = []
+                else:
+                    raw_roster = []
+            agent_roster_names = {
+                str(r.get("name") or "").strip().lower()
+                for r in raw_roster
+                if isinstance(r, dict) and r.get("name")
+            }
+
         def _enrich_npc_entry(npc_item):
             if isinstance(npc_item, str):
                 n_dict = {"name": npc_item.strip()}
@@ -361,15 +466,15 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
 
             matched_n_key = _match_actor_key(n_name, phys_actors)
             n_act_data = phys_actors.get(matched_n_key) or {}
-            c_rec = contacts_by_name.get(n_name.lower())
-            if not c_rec and contacts_by_name:
+            matched_contact = contacts_by_name.get(n_name.lower())
+            if not matched_contact and contacts_by_name:
                 m_c_key = _match_actor_key(n_name, contacts_by_name)
-                c_rec = contacts_by_name.get(m_c_key)
-            if not c_rec and lore_characters:
-                c_rec = lore_characters.get(n_name.lower())
-                if not c_rec:
-                    m_l_key = _match_actor_key(n_name, lore_characters)
-                    c_rec = lore_characters.get(m_l_key)
+                matched_contact = contacts_by_name.get(m_c_key)
+            matched_lore = lore_characters.get(n_name.lower()) if lore_characters else None
+            if not matched_lore and lore_characters:
+                m_l_key = _match_actor_key(n_name, lore_characters)
+                matched_lore = lore_characters.get(m_l_key)
+            c_rec = matched_contact or matched_lore
             c_appr = (c_rec.get("appearance") or {}) if isinstance(c_rec, dict) else {}
             n_gender = (c_appr.get("gender") if isinstance(c_appr, dict) else None) or (c_rec.get("gender") if isinstance(c_rec, dict) else None) or n_dict.get("gender") or "Female"
             n_dict["clothing_status"] = compute_clothing_summary_badge(n_act_data.get("clothing"), gender=n_gender)
@@ -467,12 +572,19 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
                 n_dict["excitement_climaxed"] = exc_climaxed
                 n_dict["excitement_active"] = True
 
-            if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
+            if is_anom_sess:
                 try:
                     from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag
                     anom_source = dict(c_rec) if isinstance(c_rec, dict) else {}
                     anom_source.update(n_dict)
-                    t_tag = classify_anomalous_npc_tag(anom_source, session_id=sess_id, scen_key=str(session.get("scenario") or ""))
+                    t_tag = classify_anomalous_npc_tag(
+                        anom_source,
+                        session_id=sess_id,
+                        scen_key=str(session.get("scenario") or ""),
+                        contact_record=matched_contact,
+                        lore_record=matched_lore,
+                        agent_roster_names=agent_roster_names,
+                    )
                     n_dict["anomalous_npc_tag"] = t_tag
                     n_dict["anomalous_tag_label"] = "Special Agent" if t_tag == "special_agent" else "Civilian"
                     n_dict["is_special_agent"] = (t_tag == "special_agent")
@@ -499,6 +611,13 @@ def _enrich_session_for_client(session: dict, user_id: int) -> dict:
             session["party_npcs"] = enriched_party_npcs
     except Exception as e:
         logger.debug(f"Could not enrich clothing status for session: {e}")
+
+    if session.get("id"):
+        try:
+            from mechanics.world.world_events.engine import build_client_world_pulse_payload
+            session["world_pulse"] = build_client_world_pulse_payload(int(session["id"]))
+        except Exception as e_wp:
+            logger.debug(f"Could not enrich world_pulse for session: {e_wp}")
 
     return session
 
@@ -651,8 +770,7 @@ async def resume_session_endpoint(req: ResumeSessionRequest):
         char = await adb(db.get_character, req.user_id)
     
     if char:
-        with db.get_conn() as conn:
-            conn.execute("UPDATE characters SET active_session_id=? WHERE id=?", (req.session_id, char["id"]))
+        await adb(db.set_character_active_session, char["id"], req.session_id)
     
     enriched = await adb(_enrich_session_for_client, dict(session_row), req.user_id)
     return {"success": True, "session": enriched}
@@ -715,15 +833,45 @@ async def start_adventure(req: StartAdventureRequest):
             from scenario_data import resolve_scenario_or_custom_key
             scenario_key = resolve_scenario_or_custom_key(req.tags)
 
-        await adb(db.reset_character_for_new_adventure, req.user_id, scenario_key)
+        await adb(db.reset_character_for_new_adventure, req.user_id, scenario_key, False)
 
         is_anomalous_scen = scenario_data.is_anomalous_incursions_scenario(scenario_key)
-        chosen_starting_faction = (req.starting_faction or "public_agency").strip() if is_anomalous_scen else ""
+        is_anom_hs = scenario_data.is_anomalous_high_school_scenario(scenario_key)
+        char_app = char.get("appearance") or {}
+        if isinstance(char_app, str):
+            try:
+                import json
+                char_app = json.loads(char_app)
+            except Exception:
+                char_app = {}
+        eff_origin = (getattr(req, "origin_mode", "") or char_app.get("origin_mode") or "").lower()
+        eff_student_grade = getattr(req, "student_grade", "") or char_app.get("student_grade") or "Sophomore"
+        if is_anom_hs and (eff_origin == "student" or (req.starting_faction or "").strip() in ("student_freelancer", "student")):
+            chosen_starting_faction = "student_freelancer"
+        else:
+            chosen_starting_faction = (req.starting_faction or "public_agency").strip() if is_anomalous_scen else ""
 
-        eff_char_class = req.char_class or (char.get("char_class") if is_anomalous_scen else "") or ("Anomaly Investigator" if is_anomalous_scen else "")
+        if is_anomalous_scen:
+            scen_templates = await adb(cd.get_class_templates, scenario_key, chosen_starting_faction) or {}
+        else:
+            scen_templates = await adb(cd.get_class_templates, scenario_key) or {}
+        safe_default_class = (
+            (next(iter(scen_templates.keys())) if scen_templates else "Public Safety Field Hunter") if is_anomalous_scen else (
+                "Student" if scenario_data.is_school_scenario(scenario_key) else (
+                    next(iter(scen_templates.keys())) if scen_templates else "Adventurer"
+                )
+            )
+        )
+        existing_char_class = char.get("char_class")
+        if req.char_class:
+            eff_char_class = req.char_class
+        elif not req.class_description and (not existing_char_class or existing_char_class not in scen_templates):
+            eff_char_class = safe_default_class
+        else:
+            eff_char_class = existing_char_class or safe_default_class
         if eff_char_class:
             eff_loadout = req.starter_loadout
-            if is_anomalous_scen and not eff_loadout:
+            if not eff_loadout:
                 eff_loadout = await adb(
                     cd.generate_starter_equipment_loadout,
                     scenario_key,
@@ -749,6 +897,9 @@ async def start_adventure(req: StartAdventureRequest):
                 req.weapon_description or "",
                 eff_loadout,
                 eff_starting_items,
+                req.attribute,
+                req.combat_archetype,
+                req.ability_medium,
             )
         
         if req.str_val is not None:
@@ -801,6 +952,8 @@ async def start_adventure(req: StartAdventureRequest):
                 req.user_id,
                 chosen_starting_faction,
                 char.get("name", ""),
+                eff_origin,
+                eff_student_grade,
             )
 
         char_row = await adb(db.get_character, req.user_id)
@@ -1043,6 +1196,12 @@ async def execute_action(req: ActionRequest):
 
                 async def on_token(token: str, field: str = "outcome_narrative"):
                     nonlocal last_flush, started_streaming, active_chunk_field
+                    if field == "__reset__":
+                        chunk_buffer.clear()
+                        active_chunk_field = "outcome_narrative"
+                        if started_streaming:
+                            await manager.broadcast(req.session_id, {"type": "STREAM_RESET"})
+                        return
                     if not started_streaming:
                         started_streaming = True
                         await manager.broadcast(req.session_id, {

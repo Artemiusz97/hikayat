@@ -28,7 +28,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Master Coffee Roaster & Café Owner",
         "grade": "Citizen",
         "gender": "male",
-        "club": "Town Commercial Guild",
+        "affiliation": "Town Commercial Guild",
+        "club": "",
         "clique": "Town Merchants",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_cafe",
@@ -46,7 +47,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Vocational Apprentice Barista",
         "grade": "Youth Peer",
         "gender": "female",
-        "club": "Culinary Vocational School",
+        "affiliation": "Culinary Vocational School",
+        "club": "",
         "clique": "Town Youth",
         "social_role_type": "student_peer",
         "primary_node_id": "loc_cafe",
@@ -62,7 +64,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Convenience Store Day Manager",
         "grade": "Citizen",
         "gender": "female",
-        "club": "Town Commercial Guild",
+        "affiliation": "Town Commercial Guild",
+        "club": "",
         "clique": "Town Merchants",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_convenience_store",
@@ -78,7 +81,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Convenience Store Night-Shift Clerk",
         "grade": "Citizen",
         "gender": "male",
-        "club": "Town Commercial Guild",
+        "affiliation": "Town Commercial Guild",
+        "club": "",
         "clique": "Night Owls",
         "social_role_type": "adult_service",
         "is_nocturnal_shift": True,
@@ -95,7 +99,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Arcade Floor Technician & Manager",
         "grade": "Citizen",
         "gender": "male",
-        "club": "Town Commercial Guild",
+        "affiliation": "Town Commercial Guild",
+        "club": "",
         "clique": "Town Merchants",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_arcade",
@@ -111,7 +116,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Karaoke Lounge Receptionist",
         "grade": "Citizen",
         "gender": "female",
-        "club": "Town Commercial Guild",
+        "affiliation": "Town Commercial Guild",
+        "club": "",
         "clique": "Town Merchants",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_karaoke",
@@ -127,7 +133,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Station Bookstore & Kiosk Proprietor",
         "grade": "Citizen",
         "gender": "female",
-        "club": "Town Commercial Guild",
+        "affiliation": "Town Commercial Guild",
+        "club": "",
         "clique": "Town Merchants",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_city_square",
@@ -143,7 +150,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Seaside Grill & Shaved-Ice Vendor",
         "grade": "Citizen",
         "gender": "male",
-        "club": "Town Commercial Guild",
+        "affiliation": "Town Commercial Guild",
+        "club": "",
         "clique": "Town Merchants",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_seaside_cafe",
@@ -159,7 +167,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Diner Head Chef & Proprietor",
         "grade": "Citizen",
         "gender": "male",
-        "club": "Town Commercial Guild",
+        "affiliation": "Town Commercial Guild",
+        "club": "",
         "clique": "Town Merchants",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_restaurant",
@@ -175,7 +184,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Streetwear Boutique Manager",
         "grade": "Citizen",
         "gender": "female",
-        "club": "Town Commercial Guild",
+        "affiliation": "Town Commercial Guild",
+        "club": "",
         "clique": "Town Merchants",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_clothing_store",
@@ -191,7 +201,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Luxury Fashion Stylist & Curator",
         "grade": "Citizen",
         "gender": "female",
-        "club": "Town Commercial Guild",
+        "affiliation": "Town Commercial Guild",
+        "club": "",
         "clique": "Town Merchants",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_brand_clothing_store",
@@ -207,7 +218,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Master Jeweler & Accessories Proprietor",
         "grade": "Citizen",
         "gender": "male",
-        "club": "Town Commercial Guild",
+        "affiliation": "Town Commercial Guild",
+        "club": "",
         "clique": "Town Merchants",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_accessories_store",
@@ -223,7 +235,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Curio & Gift Shop Proprietor",
         "grade": "Citizen",
         "gender": "female",
-        "club": "Town Commercial Guild",
+        "affiliation": "Town Commercial Guild",
+        "club": "",
         "clique": "Town Merchants",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_gift_store",
@@ -239,7 +252,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Night Market Skewer & Lantern Master",
         "grade": "Citizen",
         "gender": "male",
-        "club": "Town Commercial Guild",
+        "affiliation": "Town Commercial Guild",
+        "club": "",
         "clique": "Night Owls",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_night_market",
@@ -255,7 +269,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Nightclub Head Bartender",
         "grade": "Citizen",
         "gender": "female",
-        "club": "Downtown Nightlife Guild",
+        "affiliation": "Downtown Nightlife Guild",
+        "club": "",
         "clique": "Night Owls",
         "social_role_type": "adult_service",
         "nsfw_only": True,
@@ -273,7 +288,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Adult Boutique Proprietor",
         "grade": "Citizen",
         "gender": "male",
-        "club": "Downtown Nightlife Guild",
+        "affiliation": "Downtown Nightlife Guild",
+        "club": "",
         "clique": "Night Owls",
         "social_role_type": "adult_service",
         "nsfw_only": True,
@@ -293,7 +309,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Neighborhood Kōban Police Constable",
         "grade": "Citizen",
         "gender": "male",
-        "club": "Municipal Civic Services",
+        "affiliation": "Municipal Civic Services",
+        "club": "",
         "clique": "Civic Authority",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_city_square",
@@ -310,7 +327,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Night-Beat Patrol Officer",
         "grade": "Citizen",
         "gender": "female",
-        "club": "Municipal Civic Services",
+        "affiliation": "Municipal Civic Services",
+        "club": "",
         "clique": "Civic Authority",
         "social_role_type": "adult_service",
         "is_nocturnal_shift": True,
@@ -326,7 +344,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Municipal Route Bus Driver",
         "grade": "Citizen",
         "gender": "male",
-        "club": "Municipal Transit Authority",
+        "affiliation": "Municipal Transit Authority",
+        "club": "",
         "clique": "Civic Workers",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_city_square",
@@ -341,7 +360,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Express Scooter Delivery Courier",
         "grade": "Citizen",
         "gender": "female",
-        "club": "Town Logistics & Delivery",
+        "affiliation": "Town Logistics & Delivery",
+        "club": "",
         "clique": "Civic Workers",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_city_square",
@@ -358,7 +378,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Coastal Lifeguard Captain",
         "grade": "Citizen",
         "gender": "female",
-        "club": "Municipal Civic Services",
+        "affiliation": "Municipal Civic Services",
+        "club": "",
         "clique": "Civic Workers",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_sandy_beach",
@@ -373,7 +394,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Harbor Lighthouse Caretaker",
         "grade": "Citizen",
         "gender": "male",
-        "club": "Maritime Heritage Trust",
+        "affiliation": "Maritime Heritage Trust",
+        "club": "",
         "clique": "Civic Workers",
         "social_role_type": "adult_service",
         "is_nocturnal_shift": True,
@@ -389,7 +411,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Recreational Park Ranger & Warden",
         "grade": "Citizen",
         "gender": "female",
-        "club": "Forestry & Parks Service",
+        "affiliation": "Forestry & Parks Service",
+        "club": "",
         "clique": "Civic Workers",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_campsite",
@@ -404,7 +427,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Campus Night-Watch Security Officer",
         "grade": "Citizen",
         "gender": "male",
-        "club": "School Administration",
+        "affiliation": "School Administration",
+        "club": "",
         "clique": "Staff",
         "social_role_type": "adult_service",
         "is_nocturnal_shift": True,
@@ -422,7 +446,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Overworked Corporate Office Worker",
         "grade": "Citizen",
         "gender": "male",
-        "club": "Town Commuters",
+        "affiliation": "Town Commuters",
+        "club": "",
         "clique": "Commuters",
         "social_role_type": "adult_service",
         "is_nocturnal_shift": True,
@@ -438,7 +463,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Architectural Firm Office Commuter",
         "grade": "Citizen",
         "gender": "female",
-        "club": "Town Commuters",
+        "affiliation": "Town Commuters",
+        "club": "",
         "clique": "Commuters",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_city_square",
@@ -455,7 +481,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Retired Neighborhood Florist & Elder",
         "grade": "Citizen",
         "gender": "female",
-        "club": "Neighborhood Watch Association",
+        "affiliation": "Neighborhood Watch Association",
+        "club": "",
         "clique": "Local Residents",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_local_park",
@@ -470,7 +497,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Freelance Illustrator & Dog Walker",
         "grade": "Citizen",
         "gender": "male",
-        "club": "Local Residents",
+        "affiliation": "Local Residents",
+        "club": "",
         "clique": "Local Residents",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_local_park",
@@ -485,7 +513,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "University Cram-School Tutor",
         "grade": "Citizen",
         "gender": "female",
-        "club": "University Prep Circle",
+        "affiliation": "University Prep Circle",
+        "club": "",
         "clique": "Town Academics",
         "social_role_type": "adult_service",
         "primary_node_id": "loc_cafe",
@@ -500,7 +529,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Rival Academy Arcade Champion",
         "grade": "Youth Peer",
         "gender": "male",
-        "club": "St. Jude's Esports Rivals",
+        "affiliation": "St. Jude's Esports Rivals",
+        "club": "",
         "clique": "Town Youth",
         "social_role_type": "student_peer",
         "primary_node_id": "loc_arcade",
@@ -515,7 +545,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Plaza Indie Acoustic Busker",
         "grade": "Youth Peer",
         "gender": "female",
-        "club": "Street Music Collective",
+        "affiliation": "Street Music Collective",
+        "club": "",
         "clique": "Town Youth",
         "social_role_type": "student_peer",
         "primary_node_id": "loc_city_square",
@@ -530,7 +561,8 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Street Skater & Film Photographer",
         "grade": "Youth Peer",
         "gender": "male",
-        "club": "Urban Skate & Zine Crew",
+        "affiliation": "Urban Skate & Zine Crew",
+        "club": "",
         "clique": "Town Youth",
         "social_role_type": "student_peer",
         "primary_node_id": "loc_local_park",
@@ -714,7 +746,7 @@ def ensure_high_school_transit_plaza_seeded(session_id: int, scen_key: str = "hi
     if not nodes:
         return
     node_ids = {str(n.get("node_id") or "") for n in nodes}
-    if "loc_city_square" in node_ids or "loc_transit_plaza" in node_ids:
+    if "loc_city_square" in node_ids or "loc_transit_plaza" in node_ids or "loc_central_station" in node_ids:
         return
     parent_zone = "zone_downtown" if "zone_downtown" in node_ids else ("zone_commercial" if "zone_commercial" in node_ids else "")
     if not parent_zone:
@@ -912,6 +944,7 @@ def generate_town_roster(
     family_races: Optional[Dict[str, str]] = None,
     campus_directory: Optional[List[Dict[str, Any]]] = None,
     fmt_kwargs: Optional[Dict[str, str]] = None,
+    player_gender: str = "",
 ) -> List[Dict[str, Any]]:
     """
     Deterministically generates the Town Commercial, Civic & Youth Peer characters
@@ -922,6 +955,13 @@ def generate_town_roster(
 
     is_nsfw = scenario_data.is_nsfw_scenario(scen_key)
     used = used_names if used_names is not None else set()
+    if not player_gender and session_id:
+        try:
+            import db
+            player_gender = db.get_session_player_gender(session_id)
+        except Exception:
+            player_gender = ""
+    skew_female = scenario_data.should_skew_female_npcs(scen_key, player_gender)
     fmt = fmt_kwargs or get_town_format_kwargs(session_id, scen_key)
     sib_surnames = list(sibling_surnames or [])
     fam_races = dict(family_races or {})
@@ -931,7 +971,7 @@ def generate_town_roster(
     for idx, tmpl in enumerate(TOWN_CITIZEN_TEMPLATES):
         if tmpl.get("nsfw_only") and not is_nsfw:
             continue
-        g = tmpl["gender"]
+        g = ("female" if (idx % 3 != 2) else "male") if skew_female else tmpl["gender"]
         lin_idx = tmpl.get("family_lineage_idx")
         forced_surname = sib_surnames[lin_idx] if (lin_idx is not None and lin_idx < len(sib_surnames)) else ""
 
@@ -973,6 +1013,16 @@ def generate_town_roster(
                 rel_student = matching_students[0]
                 rel_student_name = rel_student["name"]
                 rel_label = tmpl.get("family_relation_to_student", "Relative")
+                if g == "female":
+                    if rel_label.lower() == "uncle":
+                        rel_label = "Aunt"
+                    elif "brother" in rel_label.lower():
+                        rel_label = rel_label.replace("brother", "sister").replace("Brother", "Sister")
+                elif g == "male":
+                    if rel_label.lower() == "aunt":
+                        rel_label = "Uncle"
+                    elif "sister" in rel_label.lower():
+                        rel_label = rel_label.replace("sister", "brother").replace("Sister", "Brother")
                 family_clause = f" Family: {rel_label} of {rel_student_name} ({rel_student['grade']})."
                 rel_student["town_relative_name"] = full_name
                 if "Town Kin:" not in rel_student.get("personality_summary", ""):
@@ -994,7 +1044,8 @@ def generate_town_roster(
             "race": char_race,
             "role": tmpl["role"],
             "grade": tmpl["grade"],  # "Citizen" or "Youth Peer"
-            "club": tmpl["club"],
+            "affiliation": tmpl.get("affiliation", ""),
+            "club": "",
             "clique": tmpl["clique"],
             "social_role_type": tmpl["social_role_type"],
             "is_nocturnal_shift": bool(tmpl.get("is_nocturnal_shift", False)),

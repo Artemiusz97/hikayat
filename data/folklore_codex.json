@@ -1,0 +1,3802 @@
+{
+  "version": "1.0",
+  "traditions": [
+    {
+      "key": "nusantara",
+      "label": "Nusantara / Malay Hikayat",
+      "emoji": "🌺"
+    },
+    {
+      "key": "japanese_yokai",
+      "label": "Japanese Yokai & Urban Legends",
+      "emoji": "🏮"
+    },
+    {
+      "key": "east_asian",
+      "label": "Chinese & East Asian Folklore",
+      "emoji": "📜"
+    },
+    {
+      "key": "european_slavic",
+      "label": "European, Celtic & Slavic Myth",
+      "emoji": "🌿"
+    },
+    {
+      "key": "mena_south_asian",
+      "label": "MENA & South Asian Folklore",
+      "emoji": "🏺"
+    },
+    {
+      "key": "americas_cryptid",
+      "label": "Americas & Global Cryptids",
+      "emoji": "🦉"
+    }
+  ],
+  "entries": [
+    {
+      "codex_id": "folk_pontianak",
+      "canonical_name": "Pontianak",
+      "subtitle": "The Frangipani Night Revenant",
+      "tradition_key": "nusantara",
+      "tradition": "Nusantara / Malay Hikayat",
+      "type": "entity",
+      "form": "spectral_apparition",
+      "form_label": "Spectral Apparition",
+      "physicality": "non_corporeal",
+      "sapience": "sapient",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 5,
+      "biomes": [
+        "nature",
+        "hospital",
+        "urban",
+        "shrine"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "wind",
+      "offensive_element": "wind",
+      "weaknesses": [
+        "fire",
+        "electric"
+      ],
+      "resistances": [
+        "wind",
+        "bio"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Stalker",
+        "hp_scale": 1.15,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.3,
+          "INT": 1.15,
+          "PER": 1.25,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A long-haired pallid woman in damp white burial linen hovering inches off the ground beneath night-blooming trees, concealing a hollow nape beneath raven-black tresses.",
+      "furry_appearance_override": "A pallid, white-furred flying-fox revenant draped in damp burial linen, hovering soundlessly with folded chiropteran wings and a concealed nape.",
+      "sensory_omen": "An intoxicating wave of sweet kemboja (frangipani) blossoms curdles suddenly into damp grave-loam as soft infant-like weeping drifts on the humid breeze.",
+      "gore_omen_override": "Sweet kemboja perfume turns to copper blood-stink as jagged talons extend and a wet cranial hollow gleams beneath her soaked hair.",
+      "lore_summary": "In Malay and Nusantara folklore, a vengeful spirit announcing her presence through frangipani scent and inverted weeping—loud cries mean she is far away, while faint whimpers mean she stands directly behind you. Driving an iron nail into the nape of her neck seals her wrath.",
+      "taboo_id": "taboo_iron_lime_ward",
+      "custom_taboo_rule": "Regenerates from mundane force and masks her true distance through inverted cries; recoils strictly from cold wrought iron at the nape and sharp kaffir lime.",
+      "custom_protocol": "Read her inverted acoustic distance, then fix a cold-iron nail ward or kaffir lime seal to lock her spectral core.",
+      "is_therian_native": false,
+      "is_visceral_horror": true,
+      "disguise_profile": {
+        "disguise_alias": "Weeping Woman Under the Frangipani",
+        "cover_desc": "A lone woman in white linen weeping softly beside the roadside curb."
+      },
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": {
+        "paradox_id": "pontianak_inverse_cry",
+        "rule_summary": "Faint weeping means Pontianak is right beside you; loud weeping means she is still far off.",
+        "observe_hint": "Her weeping just dropped to a whisper—that means she is directly behind your shoulder!"
+      },
+      "appeasement_tags": [
+        "iron_nail",
+        "kaffir_lime"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_toyol",
+      "canonical_name": "Toyol",
+      "subtitle": "The Jar-Bound Coin Pilferer",
+      "tradition_key": "nusantara",
+      "tradition": "Nusantara / Malay Hikayat",
+      "type": "entity",
+      "form": "humanoid_doppelganger",
+      "form_label": "Humanoid / Doppelganger",
+      "physicality": "corporeal",
+      "sapience": "compulsive",
+      "disposition": "passive",
+      "non_hostile_temperament": "mischievous",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 1,
+      "max_tier": 3,
+      "biomes": [
+        "urban",
+        "commercial",
+        "shrine"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "primary_element": "aether",
+      "offensive_element": null,
+      "weaknesses": [
+        "electric",
+        "fire"
+      ],
+      "resistances": [
+        "aether",
+        "bio"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Stalker",
+        "hp_scale": 0.85,
+        "stat_weights": {
+          "STR": 0.7,
+          "AGI": 1.4,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.3
+        }
+      },
+      "appearance": "A crouched, chalk-green childlike familiar with oversized glistening eyes and nimble fingers clutching pilfered half-amounts of cash.",
+      "furry_appearance_override": "A tiny, saucer-eyed nocturnal tarsier imp with chalk-pale fur and nimble coin-snatching paws.",
+      "sensory_omen": "Small footsteps patter across rafters while loose coins clink in neat halves and glass marbles roll by themselves across the threshold.",
+      "gore_omen_override": "Small footsteps patter across rafters while loose coins clink in neat halves and glass marbles roll by themselves across the threshold.",
+      "lore_summary": "A spirit-child familiar kept inside a ritual green glass jar in Southeast Asian folklore. Bound by childlike curiosity and compulsive counting, a Toyol forgets its theft mission completely if distracted with marbles, dried beans, or a scuttling crab.",
+      "taboo_id": "taboo_counting_compulsion",
+      "custom_taboo_rule": "Slippery against physical grabs and tethered to its keeper's jar; scattering marbles, beans, or coins triggers an irresistible counting trance.",
+      "custom_protocol": "Scatter counting beans or glass marbles across the floor to occupy the Toyol while sealing its green glass tether jar.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": {
+        "vessel_name": "Green Wax-Sealed Toyol Jar",
+        "sever_stat": "INT",
+        "tether_hint": "A faint umbilical thread leads back to a wax-stoppered green glass jar."
+      },
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "counting_beans",
+        "sweet_milk",
+        "coarse_salt"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_pelesit",
+      "canonical_name": "Pelesit",
+      "subtitle": "The Bottle-Tethered Grasshopper Familiar",
+      "tradition_key": "nusantara",
+      "tradition": "Nusantara / Malay Hikayat",
+      "type": "entity",
+      "form": "parasitic_colony",
+      "form_label": "Parasitic Swarm / Colony",
+      "physicality": "corporeal",
+      "sapience": "instinctual",
+      "disposition": "reactive",
+      "non_hostile_temperament": "volatile",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 1,
+      "max_tier": 3,
+      "biomes": [
+        "nature",
+        "urban",
+        "hospital",
+        "shrine"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "primary_element": "bio",
+      "offensive_element": "bio",
+      "weaknesses": [
+        "fire",
+        "aether"
+      ],
+      "resistances": [
+        "bio",
+        "wind"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Void Swarm",
+        "hp_scale": 0.9,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.35,
+          "INT": 1.0,
+          "PER": 1.2,
+          "CHA": 1.0,
+          "END": 0.85,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A sharp-headed, emerald-carapaced locust-grasshopper trailing faint red shadow-filaments, darting ahead of an unseen Polong resonance.",
+      "furry_appearance_override": "A cat-sized, emerald-chitinous mantis-hound familiar with razor mandibles and crimson antenna-wisps.",
+      "sensory_omen": "A piercing, metallic cricket-chirp drills from directly beneath the floorboards alongside the scent of singed rice husks.",
+      "gore_omen_override": "Razor-edged locust mandibles click wetly with crimson droplets as needle-thin ovipositor filaments probe the air.",
+      "lore_summary": "In Malay Hikayat lore, the Pelesit is an insectoid familiar kept in a small bottle and fed from its master's ring-finger to scout hosts before possession. Crushing the insect without sealing its keeper bottle only makes it reform.",
+      "taboo_id": "taboo_vessel_cork_seal",
+      "custom_taboo_rule": "Its roaming form is tethered to an unstoppered jar, bottle, or talismanic seal; striking the projection alone never ends its contract.",
+      "custom_protocol": "Locate the resonant vessel or forehead talisman and press a cinnabar-stamped seal over {anchor_fixture} to lock its contract.",
+      "is_therian_native": true,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": {
+        "vessel_name": "Stoppered Familiar Phial",
+        "sever_stat": "PER",
+        "tether_hint": "Its emerald carapace flickers in sync with a hidden glass phial."
+      },
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "iron_nail",
+        "kaffir_lime",
+        "coarse_salt"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_penanggalan",
+      "canonical_name": "Penanggalan",
+      "subtitle": "The Vinegar-Drifting Nocturnal Viscera",
+      "tradition_key": "nusantara",
+      "tradition": "Nusantara / Malay Hikayat",
+      "type": "entity",
+      "form": "anatomical_amalgam",
+      "form_label": "Anatomical Amalgam",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 3,
+      "max_tier": 5,
+      "biomes": [
+        "hospital",
+        "urban",
+        "nature"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "bio",
+      "offensive_element": "bio",
+      "weaknesses": [
+        "fire",
+        "ice"
+      ],
+      "resistances": [
+        "bio",
+        "wind"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.1,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.2,
+          "INT": 1.25,
+          "PER": 1.2,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A floating head trailing luminescent organs that twinkle like marsh-fireflies through the night air, reeking sharply of curing vinegar.",
+      "furry_appearance_override": "A detached, marsh-lit nocturnal civet head drifting silently on ghostly bioluminescent tendrils that smell sharply of pickled vinegar.",
+      "sensory_omen": "A biting tang of sour curing vinegar drifts down from the eaves as greenish bioluminescent sparks bob outside upper-floor windows.",
+      "gore_omen_override": "Glistening loops of bioluminescent stomach and lungs trail beneath a floating head dripping caustic, vinegar-reeking bile.",
+      "lore_summary": "Known across the archipelago as Penanggalan or Balan-balan, it detaches from its hollow body by night and must soak its trailing viscera in a vat of vinegar before dawn to shrink back inside. Thorny branches and sealed vinegar vats trap it helplessly.",
+      "taboo_id": "taboo_blood_scent_ward",
+      "custom_taboo_rule": "Enters a feeding frenzy upon detecting open bleeding or bio-toxic spores; never use biological toxins or unsealed lacerations.",
+      "custom_protocol": "Sanitize the air with consecrated salt, cauterizing heat, or astringent incense to blind its chemoreceptors.",
+      "is_therian_native": false,
+      "is_visceral_horror": true,
+      "disguise_profile": null,
+      "tether_profile": {
+        "vessel_name": "Vinegar-Cured Daytime Vessel Vat",
+        "sever_stat": "PER",
+        "tether_hint": "It must return to its hidden vinegar vat before dawn or wither!"
+      },
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "kaffir_lime",
+        "coarse_salt",
+        "iron_nail"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_hantu_raya",
+      "canonical_name": "Hantu Raya",
+      "subtitle": "The Ancestral Pact Double",
+      "tradition_key": "nusantara",
+      "tradition": "Nusantara / Malay Hikayat",
+      "type": "entity",
+      "form": "humanoid_doppelganger",
+      "form_label": "Humanoid / Doppelganger",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 3,
+      "max_tier": 5,
+      "biomes": [
+        "urban",
+        "industrial",
+        "shrine",
+        "nature"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "primary_element": "earth",
+      "offensive_element": "physical",
+      "weaknesses": [
+        "aether",
+        "electric"
+      ],
+      "resistances": [
+        "earth",
+        "physical"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Brute",
+        "hp_scale": 1.35,
+        "stat_weights": {
+          "STR": 1.45,
+          "AGI": 1.0,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.0,
+          "END": 1.35,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A towering, broad-shouldered guardian double wearing the borrowed likeness of an estate patriarch, radiating crushing gravitational mass.",
+      "furry_appearance_override": "A towering, obsidian-furred water-buffalo guardian spirit clad in heirloom silk sashes, radiating immense crushing weight.",
+      "sensory_omen": "Floorboards groan under tenfold invisible tonnage and the heavy scent of benzoin kemenyan smoke fills the room.",
+      "gore_omen_override": "Floorboards groan under tenfold invisible tonnage and the heavy scent of benzoin kemenyan smoke fills the room.",
+      "lore_summary": "The 'Great Spirit' of Malay folklore, bound by hereditary pact to perform superhuman labor and guard estates—often wearing its master's exact face when left uninherited.",
+      "taboo_id": "taboo_vessel_cork_seal",
+      "custom_taboo_rule": "Its roaming form is tethered to an unstoppered jar, bottle, or talismanic seal; striking the projection alone never ends its contract.",
+      "custom_protocol": "Locate the resonant vessel or forehead talisman and press a cinnabar-stamped seal over {anchor_fixture} to lock its contract.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": {
+        "disguise_alias": "Silent Estate Caretaker",
+        "cover_desc": "A stoic, unnaturally broad-shouldered caretaker standing motionless in the dim corridor."
+      },
+      "tether_profile": {
+        "vessel_name": "Kemenyan Heirloom Pact Censer",
+        "sever_stat": "CHA",
+        "tether_hint": "Its immense strength flows from a smoldering ancestral brass censer."
+      },
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "white_incense",
+        "glutinous_rice"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_orang_minyak",
+      "canonical_name": "Orang Minyak",
+      "subtitle": "The Slick Lampblack Prowler",
+      "tradition_key": "nusantara",
+      "tradition": "Nusantara / Malay Hikayat",
+      "type": "entity",
+      "form": "shadow_silhouette",
+      "form_label": "Two-Dimensional Shadow Silhouette",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "urban",
+        "commercial",
+        "transit"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "water",
+      "offensive_element": "bio",
+      "weaknesses": [
+        "electric",
+        "earth"
+      ],
+      "resistances": [
+        "water",
+        "physical"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Stalker",
+        "hp_scale": 1.0,
+        "stat_weights": {
+          "STR": 1.1,
+          "AGI": 1.45,
+          "INT": 1.0,
+          "PER": 1.15,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A human silhouette coated head-to-toe in iridescent, light-drinking black oil that slides effortlessly out of bare-handed grapples.",
+      "furry_appearance_override": "A sleek, black-oil-coated panther prowler whose light-drinking pelt slips out of any bare-handed grasp.",
+      "sensory_omen": "Greasy black handprints gleam high along window frames accompanied by the acrid smell of cursed lamp-oil.",
+      "gore_omen_override": "Greasy black handprints gleam high along window frames accompanied by the acrid smell of cursed lamp-oil.",
+      "lore_summary": "An oiled night-prowler of Malaysian urban folklore bound by an occult oath, impossible to hold with bare hands unless entangled in coarse cloth, batik, or dry ash.",
+      "taboo_id": "taboo_wet_footprint_erase",
+      "custom_taboo_rule": "Coated in cursed slick oil that deflects bare-handed grapples and physical tackles; dry ash, sand, or coarse cloth strips its slick ward.",
+      "custom_protocol": "Cast dry absorbent ash, coarse salt, or wrap heavy cloth across its slick silhouette to pin it for containment.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "coarse_salt"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_harimau_jadian",
+      "canonical_name": "Harimau Jadian",
+      "subtitle": "The Saka Were-Tiger Warden",
+      "tradition_key": "nusantara",
+      "tradition": "Nusantara / Malay Hikayat",
+      "type": "entity",
+      "form": "cryptid_therian",
+      "form_label": "Cryptid / Therian Beast",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "reactive",
+      "non_hostile_temperament": "volatile",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 5,
+      "biomes": [
+        "nature",
+        "shrine",
+        "urban"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "primary_element": "earth",
+      "offensive_element": "physical",
+      "weaknesses": [
+        "aether",
+        "wind"
+      ],
+      "resistances": [
+        "earth",
+        "bio",
+        "physical"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Brute",
+        "hp_scale": 1.25,
+        "stat_weights": {
+          "STR": 1.35,
+          "AGI": 1.25,
+          "INT": 1.0,
+          "PER": 1.25,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A regal, amber-eyed Malayan tiger of uncanny intelligence wearing a faint shimmer of woven songket thread around one foreleg, capable of shifting from human elder guise.",
+      "furry_appearance_override": "A regal, amber-eyed Malayan tiger of uncanny intelligence wearing a faint shimmer of woven songket thread around one foreleg, capable of shifting from human elder guise.",
+      "sensory_omen": "A sub-audible infrasonic tiger rumble vibrates your sternum before a single twig snaps, accompanied by sandalwood and wild rain-fern.",
+      "gore_omen_override": "A sub-audible infrasonic tiger rumble vibrates your sternum before a single twig snaps, accompanied by sandalwood and wild rain-fern.",
+      "lore_summary": "Known in Nusantara lore as Harimau Jadian or Harimau Keramat—either a sacred boundary guardian or a practitioner wearing a hereditary tiger mantle. Respectful boundary courtesy calms it; trespasser arrogance triggers lethal pounces.",
+      "taboo_id": "taboo_backward_retreat",
+      "custom_taboo_rule": "Interprets forward footsteps as a lethal duel challenge and turned backs as prey; never charge straight in or turn tail.",
+      "custom_protocol": "Approach and withdraw using deliberate backward-facing steps while bowing slightly to {anchor_fixture}.",
+      "is_therian_native": true,
+      "is_visceral_horror": false,
+      "disguise_profile": {
+        "disguise_alias": "Amber-Eyed Headband Elder",
+        "cover_desc": "A quiet elder in woven cloth watching the boundary path with unblinking amber eyes."
+      },
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "white_incense",
+        "glutinous_rice"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_hantu_galah",
+      "canonical_name": "Hantu Galah",
+      "subtitle": "The Bamboo-Tall Canopy Strider",
+      "tradition_key": "nusantara",
+      "tradition": "Nusantara / Malay Hikayat",
+      "type": "entity",
+      "form": "mimic_flora",
+      "form_label": "Carnivorous / Mimic Flora",
+      "physicality": "non_corporeal",
+      "sapience": "compulsive",
+      "disposition": "passive",
+      "non_hostile_temperament": "spook",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 1,
+      "max_tier": 3,
+      "biomes": [
+        "nature",
+        "urban",
+        "shrine"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "primary_element": "wind",
+      "offensive_element": null,
+      "weaknesses": [
+        "fire",
+        "earth"
+      ],
+      "resistances": [
+        "wind",
+        "water"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 0.95,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.0,
+          "INT": 1.0,
+          "PER": 1.3,
+          "CHA": 1.0,
+          "END": 1.2,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "Impossibly thin, towering limbs disguised as twin bamboo poles reaching into the upper canopy until you look straight up.",
+      "furry_appearance_override": "A stilt-legged, bamboo-thin gibbon-shade whose arms stretch thirty feet into the dark canopy.",
+      "sensory_omen": "Two parallel bamboo stalks stand where none grew a minute ago, creaking softly overhead whenever you walk between them.",
+      "gore_omen_override": "Two parallel bamboo stalks stand where none grew a minute ago, creaking softly overhead whenever you walk between them.",
+      "lore_summary": "A towering tree-pole spirit of Malay folklore that tricks night travelers into stepping between its stilt-like legs. Snapping a small twig backward without looking up breaks its looming illusion.",
+      "taboo_id": "taboo_unflinching_courtesy",
+      "custom_taboo_rule": "Feeds strictly on startled gasps, flinching, and panicked flight; sprinting or shouting empowers its scare-aura.",
+      "custom_protocol": "Maintain an unflinching deadpan expression, step politely aside, and recite a calm threshold courtesy ('After you') before closing the seal.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": {
+        "disguise_alias": "Leaning Twin Bamboo Poles",
+        "cover_desc": "Two unusually smooth bamboo poles overarching the narrow footpath."
+      },
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "white_incense"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_hantu_air",
+      "canonical_name": "Hantu Air",
+      "subtitle": "The Brackish Undertow Maw",
+      "tradition_key": "nusantara",
+      "tradition": "Nusantara / Malay Hikayat",
+      "type": "entity",
+      "form": "skeletal_leviathan",
+      "form_label": "Ossified / Skeletal Leviathan",
+      "physicality": "corporeal",
+      "sapience": "instinctual",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "coastal",
+        "industrial",
+        "nature"
+      ],
+      "times": [
+        "any",
+        "night"
+      ],
+      "primary_element": "water",
+      "offensive_element": "water",
+      "weaknesses": [
+        "electric",
+        "earth"
+      ],
+      "resistances": [
+        "water",
+        "ice"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Brute",
+        "hp_scale": 1.15,
+        "stat_weights": {
+          "STR": 1.3,
+          "AGI": 1.0,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.0,
+          "END": 1.25,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A shifting mass of river-silt, woven drift-hair, and pale amphibious jaws coiling beneath deceptively calm surface eddies.",
+      "furry_appearance_override": "A gill-frilled, crocodile-serpent river spirit camouflaged as a drifting log in brackish water.",
+      "sensory_omen": "Standing puddles flow uphill toward the nearest drain while warm river-silt bubbles with a rhythmic tug at your ankles.",
+      "gore_omen_override": "Standing puddles flow uphill toward the nearest drain while warm river-silt bubbles with a rhythmic tug at your ankles.",
+      "lore_summary": "Ancient water spirits inhabiting rivers, piers, and flooded culverts across Southeast Asia, seizing unwary waders who pollute or mock the water.",
+      "taboo_id": "taboo_hydro_conductor",
+      "custom_taboo_rule": "Propagates through standing water and high humidity; never douse it with water or aqueous solutions.",
+      "custom_protocol": "Drain surrounding conduits and calcify the damp floor with geomantic earth or high-voltage arcs.",
+      "is_therian_native": true,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "glutinous_rice",
+        "white_incense"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_nenek_kebayan",
+      "canonical_name": "Nenek Kebayan",
+      "subtitle": "The Liminal Apothecary Crone",
+      "tradition_key": "nusantara",
+      "tradition": "Nusantara / Malay Hikayat",
+      "type": "entity",
+      "form": "threshold_warden",
+      "form_label": "Liminal Threshold Warden",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "reactive",
+      "non_hostile_temperament": "mischievous",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "nature",
+        "shrine",
+        "commercial"
+      ],
+      "times": [
+        "dusk",
+        "night"
+      ],
+      "primary_element": "bio",
+      "offensive_element": "aether",
+      "weaknesses": [
+        "electric",
+        "ice"
+      ],
+      "resistances": [
+        "bio",
+        "aether"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.05,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.0,
+          "INT": 1.4,
+          "PER": 1.2,
+          "CHA": 1.35,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A bent, sharp-witted herbalist carrying a woven basket of luminous jungle roots between the mortal street and the unseen realm.",
+      "furry_appearance_override": "A silver-furred mousedeer matron leaning on a gnarled root-staff, carrying a basket of glowing forest herbs.",
+      "sensory_omen": "The warm fragrance of pandan leaves, betel nut, and wild jasmine drifts out of an alley that was bricked shut years ago.",
+      "gore_omen_override": "The warm fragrance of pandan leaves, betel nut, and wild jasmine drifts out of an alley that was bricked shut years ago.",
+      "lore_summary": "A famous liminal figure of Malay hikayat tales—neither purely benevolent nor purely evil—who tests travelers' manners and riddles at the border between worlds.",
+      "taboo_id": "taboo_ambiguous_reply",
+      "custom_taboo_rule": "Traps victims in an absolute 'Yes-or-No' / 'Red-or-Blue' binary choice; giving either direct answer fulfills its curse contract.",
+      "custom_protocol": "Deliver a non-committal, ambiguous third answer ('So-so', 'Neither', 'I am late') to stall its contract loop and seal {anchor_fixture}.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": {
+        "prompt_question": "'Grandchild, these jungle flowers bloom red by night and white by dawn—do you pick them for greed or for fear?'",
+        "trap_yes_label": "Answer 'For fortune and gain'",
+        "trap_no_label": "Answer 'Out of fear of the dark'",
+        "evasive_label": "Bow respectfully: 'Neither, Nek—I only admire your garden and seek safe passage'",
+        "evasive_keywords": [
+          "neither",
+          "nek",
+          "respect",
+          "safe passage",
+          "admire",
+          "polite",
+          "courtesy"
+        ],
+        "trap_keywords": [
+          "fortune",
+          "gain",
+          "greed",
+          "fear of the dark"
+        ],
+        "success_note": "Nenek Kebayan chuckles warmly at your polite hikayat manners and lowers her thorny ward!",
+        "fail_note": "Ill-mannered ambition displeased Nenek Kebayan, tangling the ground in cursed roots!"
+      },
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "sweet_milk",
+        "white_incense",
+        "kaffir_lime"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_saka_keris",
+      "canonical_name": "Keris Berpenunggu",
+      "subtitle": "The Unsheathing Saka Heirloom Blade",
+      "tradition_key": "nusantara",
+      "tradition": "Nusantara / Malay Hikayat",
+      "type": "object",
+      "form": "impossible_weapon_relic",
+      "form_label": "Anomalous Weapon / Ritual Relic",
+      "physicality": "corporeal",
+      "sapience": "compulsive",
+      "disposition": "reactive",
+      "non_hostile_temperament": "volatile",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 5,
+      "biomes": [
+        "shrine",
+        "commercial",
+        "urban"
+      ],
+      "times": [
+        "night",
+        "any"
+      ],
+      "primary_element": "fire",
+      "offensive_element": "fire",
+      "weaknesses": [
+        "water",
+        "ice"
+      ],
+      "resistances": [
+        "fire",
+        "physical"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Stalker",
+        "hp_scale": 1.0,
+        "stat_weights": {
+          "STR": 1.25,
+          "AGI": 1.35,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A seven-wave pamor meteorite-iron keris rattling autonomously inside its carved wooden sheath, humming when neglected.",
+      "furry_appearance_override": "A seven-wave pamor meteorite-iron keris rattling autonomously inside its carved wooden sheath, humming when neglected.",
+      "sensory_omen": "Rhythmic knocking sounds from inside a velvet display case alongside the tangy scent of kaffir lime and benzoin smoke.",
+      "gore_omen_override": "Rhythmic knocking sounds from inside a velvet display case alongside the tangy scent of kaffir lime and benzoin smoke.",
+      "lore_summary": "In Nusantara tradition, sacred heirloom keris blades housing an ancestral penunggu rattle inside their scabbards to warn of danger—or lash out if handled disrespectfully without lime-and-incense cleansing (mandi keris).",
+      "taboo_id": "taboo_iron_lime_ward",
+      "custom_taboo_rule": "Strikes wildly if seized bare-handed without ritual cleansing; responds peacefully to kaffir lime bathing and benzoin incense.",
+      "custom_protocol": "Cleanse the pamor blade with kaffir lime wash and pass it thrice over white incense before sheathing it in consecrated cloth.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "kaffir_lime",
+        "white_incense"
+      ],
+      "relic_gear_profile": {
+        "slot": "Weapon",
+        "weapon_archetype": "dagger",
+        "element": "fire",
+        "display_name": "Saka Pamor Keris"
+      }
+    },
+    {
+      "codex_id": "folk_bunian_sorok",
+      "canonical_name": "Kabut Sorok Bunian",
+      "subtitle": "The Hidden-Village Time Veil",
+      "tradition_key": "nusantara",
+      "tradition": "Nusantara / Malay Hikayat",
+      "type": "phenomenon",
+      "form": "illusory_market_mirage",
+      "form_label": "Illusory Bazaar / Mirage Zone",
+      "physicality": "non_corporeal",
+      "sapience": "sapient",
+      "disposition": "passive",
+      "non_hostile_temperament": "mischievous",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 1,
+      "max_tier": 4,
+      "biomes": [
+        "nature",
+        "shrine",
+        "transit"
+      ],
+      "times": [
+        "dusk",
+        "night"
+      ],
+      "primary_element": "aether",
+      "offensive_element": null,
+      "weaknesses": [
+        "electric",
+        "fire"
+      ],
+      "resistances": [
+        "aether",
+        "wind"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 0.95,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.0,
+          "INT": 1.3,
+          "PER": 1.0,
+          "CHA": 1.3,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A golden-lit twilight orchard and bustling invisible kampung overlapping an ordinary city park, where one hour inside equals a day outside.",
+      "furry_appearance_override": "A golden-lit twilight orchard and bustling invisible kampung overlapping an ordinary city park, where one hour inside equals a day outside.",
+      "sensory_omen": "Distant gamelan chimes and fragrant frangipani breeze replace street noise while your compass and phone clock freeze at 18:44.",
+      "gore_omen_override": "Distant gamelan chimes and fragrant frangipani breeze replace street noise while your compass and phone clock freeze at 18:44.",
+      "lore_summary": "Known across Malaysia and Nusantara as kena sorok—stepping across an unseen Orang Bunian veil where travelers can hear searchers inches away yet remain invisible unless they invert their shirt or decline phantom banquets.",
+      "taboo_id": "taboo_gift_refusal",
+      "custom_taboo_rule": "Offers phantom food, coins, or lost keepsakes to bind victims in spiritual debt; accepting or pocketing anything seals your doom.",
+      "custom_protocol": "Politely decline its proffered gift three times with open, empty palms before binding {anchor_fixture}.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "white_incense",
+        "iron_nail"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_kuchisake_onna",
+      "canonical_name": "Kuchisake-onna",
+      "subtitle": "The Slit-Mouthed Interrogator",
+      "tradition_key": "japanese_yokai",
+      "tradition": "Japanese Yokai & Urban Legends",
+      "type": "entity",
+      "form": "humanoid_doppelganger",
+      "form_label": "Humanoid / Doppelganger",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "reactive",
+      "non_hostile_temperament": "volatile",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 5,
+      "biomes": [
+        "transit",
+        "urban",
+        "commercial"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "primary_element": "wind",
+      "offensive_element": "physical",
+      "weaknesses": [
+        "earth",
+        "electric"
+      ],
+      "resistances": [
+        "wind",
+        "aether"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Stalker",
+        "hp_scale": 1.15,
+        "stat_weights": {
+          "STR": 1.15,
+          "AGI": 1.4,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.2,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A tall woman in a high-collared trenchcoat and white surgical mask clutching tailor's shears behind her back beneath flickering streetlights.",
+      "furry_appearance_override": "A tall, trenchcoat-clad vixen in a white surgical mask hiding gleaming tailor's shears behind her back.",
+      "sensory_omen": "Measured heels click to a stop beside you under a buzzing streetlamp as a muffled voice asks softly, 'Watashi, kirei?' ('Am I pretty?').",
+      "gore_omen_override": "Blood-rusted upholstery shears click open as she pulls away a soaked mask to bare a jagged grin slit from ear to ear.",
+      "lore_summary": "Japan's iconic urban legend: answering 'No' provokes immediate violence, while answering 'Yes' makes her unmask and ask 'Even like this?'. Only an ambiguous reply ('You look average / so-so') or scattering hard candies confounds her.",
+      "taboo_id": "taboo_ambiguous_reply",
+      "custom_taboo_rule": "Traps victims in an absolute 'Yes-or-No' / 'Red-or-Blue' binary choice; giving either direct answer fulfills its curse contract.",
+      "custom_protocol": "Deliver a non-committal, ambiguous third answer ('So-so', 'Neither', 'I am late') to stall its contract loop and seal {anchor_fixture}.",
+      "is_therian_native": false,
+      "is_visceral_horror": true,
+      "disguise_profile": {
+        "disguise_alias": "Masked Woman in Trenchcoat",
+        "cover_desc": "A solitary commuter in a beige coat and white flu mask standing by the crosswalk."
+      },
+      "tether_profile": null,
+      "dialogue_trap": {
+        "prompt_question": "'Tell me... am I pretty?'",
+        "trap_yes_label": "Answer 'Yes, you are pretty'",
+        "trap_no_label": "Answer 'No, get back!'",
+        "evasive_label": "Answer neutrally: 'You look average—so-so. Excuse me, I have an appointment.'",
+        "evasive_keywords": [
+          "so-so",
+          "average",
+          "normal",
+          "ordinary",
+          "appointment",
+          "busy",
+          "hard to say"
+        ],
+        "trap_keywords": [
+          "yes",
+          "pretty",
+          "no",
+          "ugly"
+        ],
+        "success_note": "Kuchisake-onna pauses in confusion at your 'so-so' answer, breaking her interrogation script!",
+        "fail_note": "Giving a direct Yes/No answer triggered Kuchisake-onna's shear lunge!"
+      },
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "sweet_milk",
+        "counting_beans"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_noppera_bo",
+      "canonical_name": "Noppera-bō",
+      "subtitle": "The Faceless Streetlamp Spook",
+      "tradition_key": "japanese_yokai",
+      "tradition": "Japanese Yokai & Urban Legends",
+      "type": "entity",
+      "form": "humanoid_doppelganger",
+      "form_label": "Humanoid / Doppelganger",
+      "physicality": "non_corporeal",
+      "sapience": "sapient",
+      "disposition": "passive",
+      "non_hostile_temperament": "spook",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 1,
+      "max_tier": 3,
+      "biomes": [
+        "transit",
+        "urban",
+        "commercial",
+        "hospital"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "primary_element": "aether",
+      "offensive_element": null,
+      "weaknesses": [
+        "electric",
+        "fire"
+      ],
+      "resistances": [
+        "aether",
+        "ice"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 0.85,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.2,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.3,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "An ordinary-looking night pedestrian whose face, when wiped with a sleeve, is as smooth and featureless as a peeled egg.",
+      "furry_appearance_override": "A rain-coat-clad badger-therian bystander who lowers its scarf to expose a completely smooth, blank muzzle devoid of eyes or mouth.",
+      "sensory_omen": "Quiet, muffled sobbing echoes beneath a lone streetlamp from a bystander standing with their back turned.",
+      "gore_omen_override": "Quiet, muffled sobbing echoes beneath a lone streetlamp from a bystander standing with their back turned.",
+      "lore_summary": "Classic Mujina/Noppera-bō odokashi yokai who exist purely for the theatrical delight of startling night walkers—often working in pairs so the person you flee to wipes off their own face too!",
+      "taboo_id": "taboo_unflinching_courtesy",
+      "custom_taboo_rule": "Feeds strictly on startled gasps, flinching, and panicked flight; sprinting or shouting empowers its scare-aura.",
+      "custom_protocol": "Maintain an unflinching deadpan expression, step politely aside, and recite a calm threshold courtesy ('After you') before closing the seal.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": {
+        "disguise_alias": "Sobbing Turned-Away Pedestrian",
+        "cover_desc": "A hunched figure in an overcoat crying quietly beneath the lamp with their face hidden."
+      },
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "fried_tofu",
+        "white_incense"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_kappa",
+      "canonical_name": "Kappa",
+      "subtitle": "The Dish-Crowned River Wrestler",
+      "tradition_key": "japanese_yokai",
+      "tradition": "Japanese Yokai & Urban Legends",
+      "type": "entity",
+      "form": "folklore_chimera",
+      "form_label": "Folklore Chimera",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "reactive",
+      "non_hostile_temperament": "mischievous",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 1,
+      "max_tier": 4,
+      "biomes": [
+        "coastal",
+        "nature",
+        "urban"
+      ],
+      "times": [
+        "dusk",
+        "night",
+        "any"
+      ],
+      "primary_element": "water",
+      "offensive_element": "water",
+      "weaknesses": [
+        "electric",
+        "earth"
+      ],
+      "resistances": [
+        "water",
+        "physical"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Brute",
+        "hp_scale": 1.1,
+        "stat_weights": {
+          "STR": 1.35,
+          "AGI": 1.0,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.1,
+          "END": 1.2,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A webbed, tortoise-shelled amphibious yokai with a water-filled depression (sara) gleaming atop its crown, eager for sumo challenges and cucumbers.",
+      "furry_appearance_override": "A webbed, tortoise-shelled amphibious yokai with a water-filled depression (sara) gleaming atop its crown, eager for sumo challenges and cucumbers.",
+      "sensory_omen": "River-water footprints slap along the embankment alongside the crisp smell of fresh sliced cucumber and wet reed-moss.",
+      "gore_omen_override": "River-water footprints slap along the embankment alongside the crisp smell of fresh sliced cucumber and wet reed-moss.",
+      "lore_summary": "Notorious Japanese water yokai of immense wrestling strength whose entire power resides in the sacred water held in its head-dish. Bound by strict etiquette, bowing deeply compels the Kappa to bow back and spill its dish.",
+      "taboo_id": "taboo_cucumber_courtesy",
+      "custom_taboo_rule": "Draws immense aquatic strength from the water pooled in its cranial dish or basin; grappling it head-on is suicidal.",
+      "custom_protocol": "Offer a carved cucumber or bow deeply so it politely returns the bow—spilling its cranial water—before sealing {anchor_fixture}.",
+      "is_therian_native": true,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "fresh_cucumber"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_yuki_onna",
+      "canonical_name": "Yuki-onna",
+      "subtitle": "The Zero-Kelvin Blizzard Bride",
+      "tradition_key": "japanese_yokai",
+      "tradition": "Japanese Yokai & Urban Legends",
+      "type": "entity",
+      "form": "spectral_apparition",
+      "form_label": "Spectral Apparition",
+      "physicality": "non_corporeal",
+      "sapience": "sapient",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 3,
+      "max_tier": 5,
+      "biomes": [
+        "nature",
+        "shrine",
+        "urban",
+        "coastal"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "ice",
+      "offensive_element": "ice",
+      "weaknesses": [
+        "fire",
+        "electric"
+      ],
+      "resistances": [
+        "ice",
+        "wind",
+        "water"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.2,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.2,
+          "INT": 1.4,
+          "PER": 1.0,
+          "CHA": 1.3,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A serene, snow-pale woman in an uncreased white kimono gliding over frost without leaving a single footprint.",
+      "furry_appearance_override": "A luminous snow-leopard spirit in a frost-woven white kimono gliding inches above the ice without leaving a pawprint.",
+      "sensory_omen": "Ambient temperature plummets below freezing in seconds as silent diamond-dust snow swirls indoors.",
+      "gore_omen_override": "Ambient temperature plummets below freezing in seconds as silent diamond-dust snow swirls indoors.",
+      "lore_summary": "The lethal Snow Woman of Japanese folklore who freezes stranded travelers with a single sigh, bound by oath-keeping taboos and aversion to hearth-fire.",
+      "taboo_id": "taboo_breath_hold",
+      "custom_taboo_rule": "Locks onto warm spoken breath and broken oaths to exhale lethal frost; kindling dry hearth-heat while masking your breath wards her off.",
+      "custom_protocol": "Ignite a steady thermal ward while holding your breath silent to collapse her localized whiteout.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": {
+        "disguise_alias": "Shoeless Woman in White Coat",
+        "cover_desc": "A pale traveler standing calmly in the cold without visible breath condensation."
+      },
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "white_incense"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_rokurokubi",
+      "canonical_name": "Rokurokubi",
+      "subtitle": "The Lamp-Oil Long-Necked Sleeper",
+      "tradition_key": "japanese_yokai",
+      "tradition": "Japanese Yokai & Urban Legends",
+      "type": "entity",
+      "form": "humanoid_doppelganger",
+      "form_label": "Humanoid / Doppelganger",
+      "physicality": "corporeal",
+      "sapience": "compulsive",
+      "disposition": "passive",
+      "non_hostile_temperament": "spook",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 1,
+      "max_tier": 3,
+      "biomes": [
+        "commercial",
+        "urban",
+        "hospital",
+        "shrine"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "wind",
+      "offensive_element": null,
+      "weaknesses": [
+        "earth",
+        "electric"
+      ],
+      "resistances": [
+        "wind",
+        "aether"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Stalker",
+        "hp_scale": 0.9,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.25,
+          "INT": 1.0,
+          "PER": 1.35,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A seemingly ordinary sleeper whose neck stretches like a serpentine silk ribbon around corners at midnight to lap up lamp-oil and spy on passersby.",
+      "furry_appearance_override": "A kimono-clad crane-spirit whose neck elongates impossibly down corridors past midnight to peer around doorframes.",
+      "sensory_omen": "Paper screens rustle softly overhead as oil lamps dim and a floating shadow snakes three rooms away from a sleeping silhouette.",
+      "gore_omen_override": "Paper screens rustle softly overhead as oil lamps dim and a floating shadow snakes three rooms away from a sleeping silhouette.",
+      "lore_summary": "A compulsive nocturnal yokai often unaware of its own condition by daylight, stretching its neck while its body slumbers to drink lamp oil and startle night owls.",
+      "taboo_id": "taboo_unflinching_courtesy",
+      "custom_taboo_rule": "Feeds strictly on startled gasps, flinching, and panicked flight; sprinting or shouting empowers its scare-aura.",
+      "custom_protocol": "Maintain an unflinching deadpan expression, step politely aside, and recite a calm threshold courtesy ('After you') before closing the seal.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": {
+        "disguise_alias": "Dozing Night-Shift Clerk",
+        "cover_desc": "A drowsy figure resting with folded arms behind a dim screen."
+      },
+      "tether_profile": {
+        "vessel_name": "Slumbering Torso Anchor",
+        "sever_stat": "PER",
+        "tether_hint": "Shifting its sleeping body a foot to the side prevents the stretched neck from snapping back freely!"
+      },
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "white_incense",
+        "fried_tofu"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_karakasa_kozo",
+      "canonical_name": "Karakasa-kozō",
+      "subtitle": "The One-Eyed Hopping Umbrella",
+      "tradition_key": "japanese_yokai",
+      "tradition": "Japanese Yokai & Urban Legends",
+      "type": "entity",
+      "form": "origami_effigy",
+      "form_label": "Paper / Shikigami Effigy",
+      "physicality": "corporeal",
+      "sapience": "compulsive",
+      "disposition": "passive",
+      "non_hostile_temperament": "spook",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 1,
+      "max_tier": 2,
+      "biomes": [
+        "shrine",
+        "urban",
+        "commercial",
+        "transit"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "primary_element": "wind",
+      "offensive_element": null,
+      "weaknesses": [
+        "fire",
+        "earth"
+      ],
+      "resistances": [
+        "wind",
+        "water"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Stalker",
+        "hp_scale": 0.8,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.35,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.25
+        }
+      },
+      "appearance": "A hundred-year-old oiled-paper umbrella hopping merrily on a single wooden geta-clog leg with one huge blinking eye and a long playful tongue.",
+      "furry_appearance_override": "A hundred-year-old oiled-paper umbrella hopping merrily on a single wooden geta-clog leg with one huge blinking eye and a long playful tongue.",
+      "sensory_omen": "A cheerful *karan-koron* single-clog hop echoes down the rain-slick alley right before an umbrella snaps open in your face.",
+      "gore_omen_override": "A cheerful *karan-koron* single-clog hop echoes down the rain-slick alley right before an umbrella snaps open in your face.",
+      "lore_summary": "A beloved tsukumogami spook-spirit with zero malice whose entire purpose in life is popping out on rainy nights to deliver a harmless damp lick and win a startled gasp.",
+      "taboo_id": "taboo_unflinching_courtesy",
+      "custom_taboo_rule": "Feeds strictly on startled gasps, flinching, and panicked flight; sprinting or shouting empowers its scare-aura.",
+      "custom_protocol": "Maintain an unflinching deadpan expression, step politely aside, and recite a calm threshold courtesy ('After you') before closing the seal.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": {
+        "disguise_alias": "Forgotten Oiled-Paper Umbrella",
+        "cover_desc": "An old bamboo-ribbed umbrella leaning suspiciously upright in an empty rack."
+      },
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "white_incense",
+        "sweet_milk"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_azukiarai",
+      "canonical_name": "Azukiarai",
+      "subtitle": "The Culvert Bean-Washing Spirit",
+      "tradition_key": "japanese_yokai",
+      "tradition": "Japanese Yokai & Urban Legends",
+      "type": "entity",
+      "form": "acoustic_predator",
+      "form_label": "Acoustic / Resonance Predator",
+      "physicality": "non_corporeal",
+      "sapience": "compulsive",
+      "disposition": "passive",
+      "non_hostile_temperament": "timid",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 1,
+      "max_tier": 3,
+      "biomes": [
+        "coastal",
+        "nature",
+        "industrial",
+        "shrine"
+      ],
+      "times": [
+        "dusk",
+        "night"
+      ],
+      "primary_element": "water",
+      "offensive_element": null,
+      "weaknesses": [
+        "electric",
+        "earth"
+      ],
+      "resistances": [
+        "water",
+        "wind"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 0.85,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.25,
+          "INT": 1.0,
+          "PER": 1.3,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A diminutive, round-eyed river spirit crouched over a bamboo sieve, obsessively rinsing red adzuki beans while singing a rhythmic two-line chant.",
+      "furry_appearance_override": "A damp-furred river-otter yokai hunched over a bamboo sieve, obsessively washing crimson beans in 4/4 time.",
+      "sensory_omen": "A rhythmic *shoki-shoki* bean-washing rasp echoes from the stream bank, tricking careless listeners into slipping over the edge.",
+      "gore_omen_override": "A rhythmic *shoki-shoki* bean-washing rasp echoes from the stream bank, tricking careless listeners into slipping over the edge.",
+      "lore_summary": "A shy, pattern-bound Japanese sound-yokai compelled to wash red beans by water's edge; rarely seen directly, scattering extra beans resets its counting cadence.",
+      "taboo_id": "taboo_counting_compulsion",
+      "custom_taboo_rule": "Bound by obsessive counting and sorting laws; physically blocking its route triggers violent kinetic backlash.",
+      "custom_protocol": "Scatter small coins, beads, or dried grains across the floor to force an obsessive counting reset while sealing its anchor.",
+      "is_therian_native": true,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "counting_beans",
+        "fresh_cucumber"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_kitsune",
+      "canonical_name": "Kitsune",
+      "subtitle": "The Star-Pearl Fox Illusionist",
+      "tradition_key": "japanese_yokai",
+      "tradition": "Japanese Yokai & Urban Legends",
+      "type": "entity",
+      "form": "cryptid_therian",
+      "form_label": "Cryptid / Therian Beast",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "reactive",
+      "non_hostile_temperament": "mischievous",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "shrine",
+        "nature",
+        "commercial",
+        "urban"
+      ],
+      "times": [
+        "dusk",
+        "night"
+      ],
+      "primary_element": "fire",
+      "offensive_element": "fire",
+      "weaknesses": [
+        "water",
+        "ice"
+      ],
+      "resistances": [
+        "fire",
+        "aether"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.05,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.25,
+          "INT": 1.35,
+          "PER": 1.0,
+          "CHA": 1.4,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A multi-tailed russet-and-gold fox spirit crowned with floating blue kitsunebi fox-fire and guarding a luminous Hoshi-no-tama star pearl.",
+      "furry_appearance_override": "A multi-tailed russet-and-gold fox spirit crowned with floating blue kitsunebi fox-fire and guarding a luminous Hoshi-no-tama star pearl.",
+      "sensory_omen": "Blue-white fox-fire wisps dance between red torii gates alongside the warm aroma of sweet soy-glazed fried tofu.",
+      "gore_omen_override": "Blue-white fox-fire wisps dance between red torii gates alongside the warm aroma of sweet soy-glazed fried tofu.",
+      "lore_summary": "Clever shape-shifting fox spirits of Inari tradition who weave elaborate illusions to test sincerity, fiercely protective of their Hoshi-no-tama star-ball and famously fond of abura-age (fried tofu).",
+      "taboo_id": "taboo_trickster_wager",
+      "custom_taboo_rule": "Delights in illusion swaps and playful wagers; swinging wildly with brute force causes it to swap places with a decoy.",
+      "custom_protocol": "Spot the counterfeit leaf-seam or humor its playful riddle wager to trick it into stepping inside the containment circle.",
+      "is_therian_native": true,
+      "is_visceral_horror": false,
+      "disguise_profile": {
+        "disguise_alias": "Fox-Mask Umbrella Traveler",
+        "cover_desc": "A graceful traveler whose cast shadow flickers with multiple brush-like tails."
+      },
+      "tether_profile": {
+        "vessel_name": "Hoshi-no-tama Star Pearl",
+        "sever_stat": "CHA",
+        "tether_hint": "Its illusions anchor to the glowing Hoshi-no-tama pearl orbiting its tail!"
+      },
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "fried_tofu"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_bake_danuki",
+      "canonical_name": "Bake-danuki",
+      "subtitle": "The Leaf-Money Kettle Trickster",
+      "tradition_key": "japanese_yokai",
+      "tradition": "Japanese Yokai & Urban Legends",
+      "type": "entity",
+      "form": "cryptid_therian",
+      "form_label": "Cryptid / Therian Beast",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "passive",
+      "non_hostile_temperament": "mischievous",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 1,
+      "max_tier": 3,
+      "biomes": [
+        "commercial",
+        "shrine",
+        "nature",
+        "urban"
+      ],
+      "times": [
+        "dusk",
+        "night"
+      ],
+      "primary_element": "earth",
+      "offensive_element": null,
+      "weaknesses": [
+        "wind",
+        "water"
+      ],
+      "resistances": [
+        "earth",
+        "aether"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 0.95,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.0,
+          "INT": 1.2,
+          "PER": 1.0,
+          "CHA": 1.35,
+          "END": 1.0,
+          "LUK": 1.4
+        }
+      },
+      "appearance": "A jovial straw-hatted raccoon-dog spirit drumming its belly like a taiko drum while disguising fallen leaves as crisp banknotes.",
+      "furry_appearance_override": "A jovial straw-hatted raccoon-dog spirit drumming its belly like a taiko drum while disguising fallen leaves as crisp banknotes.",
+      "sensory_omen": "A hollow *pon-poko* belly-drum beat echoes from behind a mirage food-stall as camellia leaves flutter out of your wallet.",
+      "gore_omen_override": "A hollow *pon-poko* belly-drum beat echoes from behind a mirage food-stall as camellia leaves flutter out of your wallet.",
+      "lore_summary": "Playful Japanese tanuki shapeshifters who disguise themselves as tea-kettles (Bunbuku Chagama) or street vendors, paying with leaf-money and delighting in harmless pranks.",
+      "taboo_id": "taboo_trickster_wager",
+      "custom_taboo_rule": "Delights in illusion swaps and playful wagers; swinging wildly with brute force causes it to swap places with a decoy.",
+      "custom_protocol": "Spot the counterfeit leaf-seam or humor its playful riddle wager to trick it into stepping inside the containment circle.",
+      "is_therian_native": true,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "fried_tofu",
+        "sweet_milk"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_aka_manto",
+      "canonical_name": "Aka Manto",
+      "subtitle": "The Red-or-Blue Stall Arbiter",
+      "tradition_key": "japanese_yokai",
+      "tradition": "Japanese Yokai & Urban Legends",
+      "type": "entity",
+      "form": "threshold_warden",
+      "form_label": "Liminal Threshold Warden",
+      "physicality": "non_corporeal",
+      "sapience": "compulsive",
+      "disposition": "reactive",
+      "non_hostile_temperament": "volatile",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "commercial",
+        "hospital",
+        "transit",
+        "urban"
+      ],
+      "times": [
+        "night",
+        "any"
+      ],
+      "primary_element": "aether",
+      "offensive_element": "aether",
+      "weaknesses": [
+        "electric",
+        "fire"
+      ],
+      "resistances": [
+        "aether",
+        "water"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Stalker",
+        "hp_scale": 1.1,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.25,
+          "INT": 1.3,
+          "PER": 1.0,
+          "CHA": 1.25,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A masked figure in a flowing crimson cloak manifesting in the last cubicle of empty washrooms and tiled corridors.",
+      "furry_appearance_override": "A white-masked jackal apparition draped in a heavy crimson mantle standing outside the final tiled doorway.",
+      "sensory_omen": "Fluorescent tubes buzz faintly in an empty washroom as a velvet voice asks from overhead: 'Do you want the red paper, or the blue paper?'",
+      "gore_omen_override": "Crimson cloak-hems trail across cracked porcelain tile as a masked voice whispers a lethal choice between red laceration or blue asphyxiation.",
+      "lore_summary": "A notorious Japanese school & station urban legend: choosing Red brings crimson slashes, choosing Blue brings suffocation, and choosing another color drags you below—only refusing both ('No paper needed') breaks the curse.",
+      "taboo_id": "taboo_ambiguous_reply",
+      "custom_taboo_rule": "Traps victims in an absolute 'Yes-or-No' / 'Red-or-Blue' binary choice; giving either direct answer fulfills its curse contract.",
+      "custom_protocol": "Deliver a non-committal, ambiguous third answer ('So-so', 'Neither', 'I am late') to stall its contract loop and seal {anchor_fixture}.",
+      "is_therian_native": false,
+      "is_visceral_horror": true,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": {
+        "prompt_question": "'Choose now—do you want the Red Paper, or the Blue Paper?'",
+        "trap_yes_label": "Choose the Red Paper",
+        "trap_no_label": "Choose the Blue Paper",
+        "evasive_label": "Refuse calmly: 'Neither, thank you—I don't need any paper'",
+        "evasive_keywords": [
+          "neither",
+          "no paper",
+          "don't need",
+          "none",
+          "no thank you",
+          "refuse"
+        ],
+        "trap_keywords": [
+          "red paper",
+          "blue paper",
+          "choose red",
+          "choose blue",
+          "yellow"
+        ],
+        "success_note": "Refusing both colored papers nullified Aka Manto's binary clause, forcing him to fade back!",
+        "fail_note": "Accepting a color choice triggered Aka Manto's crimson-and-blue curse!"
+      },
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "paper_talisman",
+        "coarse_salt"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_ungaikyo",
+      "canonical_name": "Ungaikyō",
+      "subtitle": "The Truth-Warping Bronze Mirror",
+      "tradition_key": "japanese_yokai",
+      "tradition": "Japanese Yokai & Urban Legends",
+      "type": "object",
+      "form": "haunted_furniture",
+      "form_label": "Haunted Heirloom / Furniture",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "reactive",
+      "non_hostile_temperament": "mischievous",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "shrine",
+        "commercial",
+        "urban"
+      ],
+      "times": [
+        "night",
+        "any"
+      ],
+      "primary_element": "aether",
+      "offensive_element": "aether",
+      "weaknesses": [
+        "electric",
+        "earth"
+      ],
+      "resistances": [
+        "aether",
+        "fire"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.0,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.0,
+          "INT": 1.35,
+          "PER": 1.35,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "An antique Meiji bronze mirror that projects monstrous puppet-reflections out of its glass while hiding its true core beneath cloudy patina.",
+      "furry_appearance_override": "An antique Meiji bronze mirror that projects monstrous puppet-reflections out of its glass while hiding its true core beneath cloudy patina.",
+      "sensory_omen": "Your reflection inside the tarnished glass blinks two seconds late and smiles on its own.",
+      "gore_omen_override": "Your reflection inside the tarnished glass blinks two seconds late and smiles on its own.",
+      "lore_summary": "A century-old mirror tsukumogami infused with nocturnal energy on the fifteenth night of the eighth month, trapping viewers inside distorted reflections unless shrouded in dark silk.",
+      "taboo_id": "taboo_mirror_shroud",
+      "custom_taboo_rule": "Multiplies and leaps between uncovered mirrors, puddles, and polished glass; never ignite bright flash-flares near reflective panes.",
+      "custom_protocol": "Drape dark cloth or matte spray over nearby glass and puddles to sever its reflection network around {anchor_fixture}.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "paper_talisman",
+        "white_incense"
+      ],
+      "relic_gear_profile": {
+        "slot": "Shield",
+        "element": "aether",
+        "display_name": "Ungaikyō Parallax Mirror"
+      }
+    },
+    {
+      "codex_id": "folk_kisaragi_platform",
+      "canonical_name": "Kisaragi Platform",
+      "subtitle": "The Unlisted Midnight Stop",
+      "tradition_key": "japanese_yokai",
+      "tradition": "Japanese Yokai & Urban Legends",
+      "type": "phenomenon",
+      "form": "spatial_geometry_loop",
+      "form_label": "Non-Euclidean Spatial Loop",
+      "physicality": "non_corporeal",
+      "sapience": "compulsive",
+      "disposition": "passive",
+      "non_hostile_temperament": "timid",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 5,
+      "biomes": [
+        "transit"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "aether",
+      "offensive_element": null,
+      "weaknesses": [
+        "electric",
+        "fire"
+      ],
+      "resistances": [
+        "aether",
+        "wind"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.1,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.0,
+          "INT": 1.4,
+          "PER": 1.3,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A desolate, unstaffed train platform bearing the weathered sign 'KISARAGI' under a starless violet sky where cell clocks drift out of sync and distant festival taiko drums echo down a one-way tunnel.",
+      "furry_appearance_override": "A desolate, unstaffed train platform bearing the weathered sign 'KISARAGI' under a starless violet sky where cell clocks drift out of sync and distant festival taiko drums echo down a one-way tunnel.",
+      "sensory_omen": "Twenty minutes pass without a station stop before the doors hiss open onto an unlisted concrete platform echoing with a distant one-legged drumbeat.",
+      "gore_omen_override": "Twenty minutes pass without a station stop before the doors hiss open onto an unlisted concrete platform echoing with a distant one-legged drumbeat.",
+      "lore_summary": "Inspired by the famous 2004 2channel urban legend of Kisaragi Station—a spirited-away (kamikakushi) rail pocket where following tunnel drums or boarding strangers' cars traps commuters deeper in non-Euclidean space.",
+      "taboo_id": "taboo_gift_refusal",
+      "custom_taboo_rule": "Never follow the distant festival drum into the dark tunnel or accept rides from faceless drivers; trace the rail line opposite the drumbeat.",
+      "custom_protocol": "Decline all phantom rides and anchor a calibrated Hume beacon onto the platform signboard to collapse the unlisted stop.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "paper_talisman",
+        "coarse_salt"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_jiangshi",
+      "canonical_name": "Jiangshi",
+      "subtitle": "The Cinnabar-Bound Breath Stalker",
+      "tradition_key": "east_asian",
+      "tradition": "Chinese & East Asian Folklore",
+      "type": "entity",
+      "form": "humanoid_doppelganger",
+      "form_label": "Humanoid / Doppelganger",
+      "physicality": "corporeal",
+      "sapience": "compulsive",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "shrine",
+        "hospital",
+        "transit",
+        "urban"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "earth",
+      "offensive_element": "ice",
+      "weaknesses": [
+        "fire",
+        "electric"
+      ],
+      "resistances": [
+        "earth",
+        "bio",
+        "physical"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Brute",
+        "hp_scale": 1.2,
+        "stat_weights": {
+          "STR": 1.35,
+          "AGI": 0.8,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.0,
+          "END": 1.4,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A rigor-stiff figure in Qing-style ceremonial robes with outstretched iron-hard fingernails and a torn yellow cinnabar talisman fluttering on its forehead.",
+      "furry_appearance_override": "A rigor-locked temple hound guardian in embroidered ceremonial robes with a torn yellow cinnabar talisman fluttering over its brow.",
+      "sensory_omen": "Rigid, rhythmic two-footed hops approach down the corridor, snapping instantly toward any warm exhaled breath.",
+      "gore_omen_override": "Rigid, rhythmic two-footed hops approach down the corridor, snapping instantly toward any warm exhaled breath.",
+      "lore_summary": "The 'stiff corpse' of Chinese folklore—blind to sight yet drawn unerringly to living qi and exhaled breath, calmed by yellow cinnabar talismans, glutinous rice (nuomi), and scattered coins.",
+      "taboo_id": "taboo_breath_hold",
+      "custom_taboo_rule": "Tracks targets strictly through warm exhaled CO2 and spoken breath; shouting or heavy sprinting draws instant homing strikes.",
+      "custom_protocol": "Hold your breath completely and mask warm exhalations behind a damp cloth or cooling mist while sealing {anchor_fixture}.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": {
+        "vessel_name": "Forehead Cinnabar Talisman & Corpse-Bell",
+        "sever_stat": "INT",
+        "tether_hint": "Pressing a fresh cinnabar talisman onto its brow freezes its rigor-locked limbs instantly!"
+      },
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "glutinous_rice",
+        "paper_talisman",
+        "counting_beans"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_huli_jing",
+      "canonical_name": "Huli Jing",
+      "subtitle": "The Scholar-Pavilions Nine-Fold Fox",
+      "tradition_key": "east_asian",
+      "tradition": "Chinese & East Asian Folklore",
+      "type": "entity",
+      "form": "cryptid_therian",
+      "form_label": "Cryptid / Therian Beast",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "reactive",
+      "non_hostile_temperament": "mischievous",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "commercial",
+        "shrine",
+        "urban",
+        "nature"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "primary_element": "aether",
+      "offensive_element": "fire",
+      "weaknesses": [
+        "electric",
+        "water"
+      ],
+      "resistances": [
+        "aether",
+        "fire"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.05,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.2,
+          "INT": 1.4,
+          "PER": 1.0,
+          "CHA": 1.45,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A refined silver-furred fox immortal draped in moonlit silk who tests scholars with classical couplets and bronze mirror illusions.",
+      "furry_appearance_override": "A refined silver-furred fox immortal draped in moonlit silk who tests scholars with classical couplets and bronze mirror illusions.",
+      "sensory_omen": "The fragrance of plum-blossom wine and antique inkstone fills an empty study room as candle flames turn silver-blue.",
+      "gore_omen_override": "The fragrance of plum-blossom wine and antique inkstone fills an empty study room as candle flames turn silver-blue.",
+      "lore_summary": "Immortal fox spirits of Strange Stories from a Chinese Studio (Liaozhai), oscillating between mischievous tutors and perilous seducers whose true form always shows in polished bronze mirrors.",
+      "taboo_id": "taboo_mirror_gaze",
+      "custom_taboo_rule": "Never meet its direct gaze or charge head-on; track its position strictly through reflections, camera feeds, or peripheral sight.",
+      "custom_protocol": "Angle a reflective surface or optical sensor to lock its parallax silhouette before activating the containment seal.",
+      "is_therian_native": true,
+      "is_visceral_horror": false,
+      "disguise_profile": {
+        "disguise_alias": "Midnight Calligraphy Scholar",
+        "cover_desc": "An elegant scholar reading a thread-bound volume beneath a single blue lantern."
+      },
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "fried_tofu",
+        "white_incense"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_huapi",
+      "canonical_name": "Huapi (Painted Skin)",
+      "subtitle": "The Silk-Brush Visage Weaver",
+      "tradition_key": "east_asian",
+      "tradition": "Chinese & East Asian Folklore",
+      "type": "entity",
+      "form": "humanoid_doppelganger",
+      "form_label": "Humanoid / Doppelganger",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 3,
+      "max_tier": 5,
+      "biomes": [
+        "urban",
+        "commercial",
+        "shrine"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "bio",
+      "offensive_element": "aether",
+      "weaknesses": [
+        "fire",
+        "aether"
+      ],
+      "resistances": [
+        "bio",
+        "water"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Stalker",
+        "hp_scale": 1.15,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.3,
+          "INT": 1.25,
+          "PER": 1.0,
+          "CHA": 1.4,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "An azure-skinned fiend hunched over an ink-brush, meticulously painting lifelike beauty onto a spread silk-parchment mantle before draping it on.",
+      "furry_appearance_override": "An emerald-scaled fiend painting a lifelike silver-furred mask onto a spread silk mantle with a fine horsehair brush.",
+      "sensory_omen": "The faint scratch of a fine sable ink-brush on taut parchment whispers from behind a locked screen alongside cinnabar pigment scent.",
+      "gore_omen_override": "A green-skinned fiend unzips a seamless human-parchment cloak from collar to heel, touching up crimson blush with an ink-brush.",
+      "lore_summary": "From Pu Songling's Liaozhai Zhiyi: a demon wearing a hand-painted skin mantle to blend seamlessly into city nightlife, vulnerable when its painted cloak or fly-whisk ward is struck.",
+      "taboo_id": "taboo_true_reflection_shatter",
+      "custom_taboo_rule": "Its visible body in open air is an invulnerable mirage while its true core hides inside a nearby reflection or portrait.",
+      "custom_protocol": "Pinpoint the slightly out-of-sync reflection in nearby glass or water and apply the containment seal directly to {anchor_fixture}'s mirrored core.",
+      "is_therian_native": false,
+      "is_visceral_horror": true,
+      "disguise_profile": {
+        "disguise_alias": "Portrait-Still Silk Stranger",
+        "cover_desc": "A strikingly composed stranger whose skin has the faint satin sheen of dry watercolor ink."
+      },
+      "tether_profile": {
+        "vessel_name": "Painted Silk Visage Mantle",
+        "sever_stat": "PER",
+        "tether_hint": "Searing or sealing its painted silk mantle strips away its anchor!"
+      },
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "paper_talisman",
+        "coarse_salt"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_gumiho",
+      "canonical_name": "Gumiho",
+      "subtitle": "The Marble-Fox of Misty Ridge",
+      "tradition_key": "east_asian",
+      "tradition": "Chinese & East Asian Folklore",
+      "type": "entity",
+      "form": "cryptid_therian",
+      "form_label": "Cryptid / Therian Beast",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 3,
+      "max_tier": 5,
+      "biomes": [
+        "nature",
+        "urban",
+        "shrine"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "ice",
+      "offensive_element": "aether",
+      "weaknesses": [
+        "fire",
+        "electric"
+      ],
+      "resistances": [
+        "ice",
+        "aether"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Stalker",
+        "hp_scale": 1.2,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.4,
+          "INT": 1.3,
+          "PER": 1.0,
+          "CHA": 1.35,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A nine-tailed white fox spirit holding a glowing sky-blue Yeowu Guisul knowledge-marble under its tongue amidst swirling mountain mist.",
+      "furry_appearance_override": "A nine-tailed white fox spirit holding a glowing sky-blue Yeowu Guisul knowledge-marble under its tongue amidst swirling mountain mist.",
+      "sensory_omen": "Nine overlapping shadows fan across the mist-wet pavement as a luminous blue bead gleams behind a polite smile.",
+      "gore_omen_override": "Nine overlapping shadows fan across the mist-wet pavement as a luminous blue bead gleams behind a polite smile.",
+      "lore_summary": "The ancient nine-tailed fox of Korean folklore who carries a mystical bead (Yeowu Guisul) containing deep cosmic knowledge and mortal vitality.",
+      "taboo_id": "taboo_mirror_gaze",
+      "custom_taboo_rule": "Never meet its direct gaze or charge head-on; track its position strictly through reflections, camera feeds, or peripheral sight.",
+      "custom_protocol": "Angle a reflective surface or optical sensor to lock its parallax silhouette before activating the containment seal.",
+      "is_therian_native": true,
+      "is_visceral_horror": false,
+      "disguise_profile": {
+        "disguise_alias": "White-Coat Mist Walker",
+        "cover_desc": "A pale coat-clad walker accompanied by a sudden bank of cold mountain fog."
+      },
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "fried_tofu",
+        "silver_reed"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_heibai_watch",
+      "canonical_name": "Heibai Wuchang Echo",
+      "subtitle": "The Tall-and-Short Ledger Wardens",
+      "tradition_key": "east_asian",
+      "tradition": "Chinese & East Asian Folklore",
+      "type": "entity",
+      "form": "threshold_warden",
+      "form_label": "Liminal Threshold Warden",
+      "physicality": "non_corporeal",
+      "sapience": "compulsive",
+      "disposition": "reactive",
+      "non_hostile_temperament": "volatile",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 3,
+      "max_tier": 5,
+      "biomes": [
+        "shrine",
+        "hospital",
+        "transit",
+        "urban"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "aether",
+      "offensive_element": "aether",
+      "weaknesses": [
+        "electric",
+        "fire"
+      ],
+      "resistances": [
+        "aether",
+        "earth",
+        "ice"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.25,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.0,
+          "INT": 1.35,
+          "PER": 1.0,
+          "CHA": 1.25,
+          "END": 1.35,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "Twin tall-white and short-black tall-hatted spectral bailiffs rattling iron chains and checking names in an ink ledger at midnight crossroads.",
+      "furry_appearance_override": "Twin tall white-crane and stout black-bear spectral bailiffs in tall inscribed hats rattling iron chains over an open ledger.",
+      "sensory_omen": "Heavy iron chains drag in slow, judicial rhythm as tall inscribed miters ('Peace Upon Sight') emerge from incense smoke.",
+      "gore_omen_override": "Heavy iron chains drag in slow, judicial rhythm as tall inscribed miters ('Peace Upon Sight') emerge from incense smoke.",
+      "lore_summary": "Manifestation of the Black and White Impermanence wardens who patrol crossroads by strict karmic ledger; respectful stillness and incense satisfy their inspection, while fleeing convicts the runner.",
+      "taboo_id": "taboo_unflinching_courtesy",
+      "custom_taboo_rule": "Feeds strictly on startled gasps, flinching, and panicked flight; sprinting or shouting empowers its scare-aura.",
+      "custom_protocol": "Maintain an unflinching deadpan expression, step politely aside, and recite a calm threshold courtesy ('After you') before closing the seal.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "white_incense",
+        "paper_talisman"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_shui_gui",
+      "canonical_name": "Shui Gui",
+      "subtitle": "The Replacement Water-Puller",
+      "tradition_key": "east_asian",
+      "tradition": "Chinese & East Asian Folklore",
+      "type": "entity",
+      "form": "shadow_silhouette",
+      "form_label": "Two-Dimensional Shadow Silhouette",
+      "physicality": "non_corporeal",
+      "sapience": "compulsive",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 1,
+      "max_tier": 4,
+      "biomes": [
+        "coastal",
+        "industrial",
+        "nature"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "primary_element": "water",
+      "offensive_element": "water",
+      "weaknesses": [
+        "electric",
+        "earth"
+      ],
+      "resistances": [
+        "water",
+        "ice"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Stalker",
+        "hp_scale": 1.0,
+        "stat_weights": {
+          "STR": 1.25,
+          "AGI": 1.0,
+          "INT": 1.0,
+          "PER": 1.25,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A sodden, dark-haired shadow rippling just beneath shallow water surfaces, extending cold hands to pull a 'substitute' (tishen) into its place.",
+      "furry_appearance_override": "A waterlogged river-hound shadow rippling beneath shallow puddles, reaching upward for a substitute.",
+      "sensory_omen": "A clear cry for help echoes from waist-deep water that suddenly looks bottomless when peered into.",
+      "gore_omen_override": "A clear cry for help echoes from waist-deep water that suddenly looks bottomless when peered into.",
+      "lore_summary": "Drowned spirits bound to the exact spot of their demise until they lure a living 'substitute' into the water—or are released through paper offerings and dry drainage.",
+      "taboo_id": "taboo_hydro_conductor",
+      "custom_taboo_rule": "Propagates through standing water and high humidity; never douse it with water or aqueous solutions.",
+      "custom_protocol": "Drain surrounding conduits and calcify the damp floor with geomantic earth or high-voltage arcs.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "white_incense",
+        "paper_talisman"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_crimson_palanquin",
+      "canonical_name": "Hong Jiazi (Bridal Palanquin)",
+      "subtitle": "The Footless Midnight Sedan Chair",
+      "tradition_key": "east_asian",
+      "tradition": "Chinese & East Asian Folklore",
+      "type": "object",
+      "form": "cursed_vehicle",
+      "form_label": "Cursed Transit / Vehicle",
+      "physicality": "corporeal",
+      "sapience": "compulsive",
+      "disposition": "reactive",
+      "non_hostile_temperament": "spook",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "transit",
+        "shrine",
+        "urban"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "fire",
+      "offensive_element": "aether",
+      "weaknesses": [
+        "water",
+        "electric"
+      ],
+      "resistances": [
+        "fire",
+        "earth"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Brute",
+        "hp_scale": 1.1,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.2,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.0,
+          "END": 1.35,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "An ornate crimson-and-gold wedding sedan chair carried briskly down empty streets by four paper-thin silhouettes whose feet never touch the asphalt.",
+      "furry_appearance_override": "An ornate crimson-and-gold wedding sedan chair carried briskly down empty streets by four paper-thin silhouettes whose feet never touch the asphalt.",
+      "sensory_omen": "Muffled suona wedding horns play in a haunting minor key as red silk curtains part by themselves beside the curb.",
+      "gore_omen_override": "Muffled suona wedding horns play in a haunting minor key as red silk curtains part by themselves beside the curb.",
+      "lore_summary": "A spectral ghost-marriage palanquin from traditional East Asian ghost tales; peeking behind the red curtain invites yourself aboard, whereas stepping aside with lowered eyes and paper coin lets the procession pass.",
+      "taboo_id": "taboo_unpaid_toll",
+      "custom_taboo_rule": "Bound by archaic threshold and toll laws; attacking or seizing it without offering a symbolic fare or bow invokes a crushing curse.",
+      "custom_protocol": "Present a symbolic coin, paper talisman, or formal declaration of passage before sealing its vessel.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "white_incense",
+        "paper_talisman"
+      ],
+      "relic_gear_profile": {
+        "slot": "Shoes",
+        "element": "fire",
+        "display_name": "Crimson Sedan Silk Striders"
+      }
+    },
+    {
+      "codex_id": "folk_ghost_market",
+      "canonical_name": "Guishi (Ghost Market)",
+      "subtitle": "The Dawn-Vanishing Lantern Bazaar",
+      "tradition_key": "east_asian",
+      "tradition": "Chinese & East Asian Folklore",
+      "type": "phenomenon",
+      "form": "illusory_market_mirage",
+      "form_label": "Illusory Bazaar / Mirage Zone",
+      "physicality": "non_corporeal",
+      "sapience": "sapient",
+      "disposition": "passive",
+      "non_hostile_temperament": "mischievous",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "commercial",
+        "urban",
+        "shrine"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "aether",
+      "offensive_element": null,
+      "weaknesses": [
+        "fire",
+        "electric"
+      ],
+      "resistances": [
+        "aether",
+        "water"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.0,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.0,
+          "INT": 1.35,
+          "PER": 1.0,
+          "CHA": 1.35,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "Rows of silent, green-lantern stalls filling a dead-end alley between 02:00 and 04:00 where silent vendors trade curios that turn to dry leaves or antiquities at rooster-crow.",
+      "furry_appearance_override": "Rows of silent, green-lantern stalls filling a dead-end alley between 02:00 and 04:00 where silent vendors trade curios that turn to dry leaves or antiquities at rooster-crow.",
+      "sensory_omen": "Hundreds of Silent bargains take place by green paper lantern-light without a single whispered word or footstep.",
+      "gore_omen_override": "Hundreds of Silent bargains take place by green paper lantern-light without a single whispered word or footstep.",
+      "lore_summary": "Traditional nocturnal 'Ghost Markets' where speaking aloud or shining bright flashlights onto a vendor's face breaks the truce of the market instantly.",
+      "taboo_id": "taboo_lantern_snuff",
+      "custom_taboo_rule": "Feeds on artificial floodlights and high-lumen beams to solidify its projections; shining direct spotlights doubles its reach.",
+      "custom_protocol": "Kill harsh overhead lights and navigate by low infrared or shuttered candlelight to collapse {anchor_fixture}.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "white_incense",
+        "counting_beans"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_boggart",
+      "canonical_name": "Boggart",
+      "subtitle": "The Hearth-Cabinet Spite Sprite",
+      "tradition_key": "european_slavic",
+      "tradition": "European, Celtic & Slavic Myth",
+      "type": "entity",
+      "form": "porcelain_automaton",
+      "form_label": "Porcelain / Ball-Jointed Automaton",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "passive",
+      "non_hostile_temperament": "mischievous",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 1,
+      "max_tier": 3,
+      "biomes": [
+        "urban",
+        "commercial",
+        "industrial"
+      ],
+      "times": [
+        "night",
+        "any"
+      ],
+      "primary_element": "earth",
+      "offensive_element": null,
+      "weaknesses": [
+        "wind",
+        "water"
+      ],
+      "resistances": [
+        "earth",
+        "physical"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Stalker",
+        "hp_scale": 0.9,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.3,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.35
+        }
+      },
+      "appearance": "A bristling, soot-smudged household brownie-turned-boggart peeking out from radiator grates and key cabinets with gleaming button eyes.",
+      "furry_appearance_override": "A scruffy, whisker-twitching polecat household sprite peering out from radiator grates with stolen keys.",
+      "sensory_omen": "Keys swap pockets, milk sours on the counter, and cupboard doors rattle in a cheeky rhythm whenever someone swears aloud.",
+      "gore_omen_override": "Keys swap pockets, milk sours on the counter, and cupboard doors rattle in a cheeky rhythm whenever someone swears aloud.",
+      "lore_summary": "British household spirits that turn from helpful brownies into relentless prankster boggarts when insulted or named boastfully—following families even into moving vans unless appeased with cream and honey cake.",
+      "taboo_id": "taboo_sweet_milk_hearth",
+      "custom_taboo_rule": "Grows spiteful and destructive when insulted, scolded, or thanked directly with boastful pride; direct threats enrage its domestic claim.",
+      "custom_protocol": "Set down an unboasted saucer of sweet milk, honey cake, or clean linen beside {anchor_fixture} and look away while sealing.",
+      "is_therian_native": true,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": {
+        "vessel_name": "Claimed Hearth Key-Hook",
+        "sever_stat": "CHA",
+        "tether_hint": "It anchors stubbornly to the building's main key-rack until formally appeased!"
+      },
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "sweet_milk",
+        "iron_nail"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_dullahan",
+      "canonical_name": "The Dullahan",
+      "subtitle": "The Headless Black-Coach Rider",
+      "tradition_key": "european_slavic",
+      "tradition": "European, Celtic & Slavic Myth",
+      "type": "entity",
+      "form": "threshold_warden",
+      "form_label": "Liminal Threshold Warden",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 3,
+      "max_tier": 5,
+      "biomes": [
+        "transit",
+        "urban",
+        "nature"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "aether",
+      "offensive_element": "aether",
+      "weaknesses": [
+        "electric",
+        "fire"
+      ],
+      "resistances": [
+        "aether",
+        "physical",
+        "ice"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Brute",
+        "hp_scale": 1.35,
+        "stat_weights": {
+          "STR": 1.4,
+          "AGI": 1.0,
+          "INT": 1.0,
+          "PER": 1.25,
+          "CHA": 1.0,
+          "END": 1.35,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A headless rider in black highway leather cradling a grinning, candle-bright head under one arm as locks burst open along his path.",
+      "furry_appearance_override": "A headless, black-armored destrier-knight cradling a glowing spectral hound-helm under one arm as every gate unlatches.",
+      "sensory_omen": "Every padlock on the block clicks open simultaneously while hoofbeats strike sparks without a horse in sight.",
+      "gore_omen_override": "A severed, grinning head glowing like stale phosphorescent cheese stares from the crook of a spine-whip-wielding rider's elbow.",
+      "lore_summary": "The unstoppable Irish herald of mortality who cannot be barred by any locked gate, hates being spied upon from behind curtains, yet recoils inexplicably from even the smallest flash of pure gold.",
+      "taboo_id": "taboo_unpaid_toll",
+      "custom_taboo_rule": "No lock holds him and spying from cover draws blind-lash; only presenting a glint of gold coin halts his advance.",
+      "custom_protocol": "Drop or hold aloft a genuine gold piece in plain sight without peeking furtively to force the Dullahan to wheel away.",
+      "is_therian_native": false,
+      "is_visceral_horror": true,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "silver_reed"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_rusalka",
+      "canonical_name": "Rusalka",
+      "subtitle": "The Willow-Bank Drowned Siren",
+      "tradition_key": "european_slavic",
+      "tradition": "European, Celtic & Slavic Myth",
+      "type": "entity",
+      "form": "spectral_apparition",
+      "form_label": "Spectral Apparition",
+      "physicality": "non_corporeal",
+      "sapience": "sapient",
+      "disposition": "reactive",
+      "non_hostile_temperament": "volatile",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "coastal",
+        "nature"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "primary_element": "water",
+      "offensive_element": "water",
+      "weaknesses": [
+        "fire",
+        "electric"
+      ],
+      "resistances": [
+        "water",
+        "ice",
+        "wind"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.05,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.2,
+          "INT": 1.25,
+          "PER": 1.0,
+          "CHA": 1.4,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A pale, river-haired maiden swinging from weeping willow boughs with wet comb in hand, singing hypnotic lullabies that induce breathless laughter.",
+      "furry_appearance_override": "A pale, silver-maned river-otter maiden combing wet tresses beneath weeping willow branches.",
+      "sensory_omen": "Water drips upward from overhanging tree limbs accompanied by silvery laughter and the bitter ward-scent of wild wormwood.",
+      "gore_omen_override": "Water drips upward from overhanging tree limbs accompanied by silvery laughter and the bitter ward-scent of wild wormwood.",
+      "lore_summary": "Slavic water nymphs of Rusalnaya Week who lure nocturnal walkers into delirious dances by the water, warded off by bitter wormwood herbs, iron pins, or offering a clean linen cloth.",
+      "taboo_id": "taboo_iron_lime_ward",
+      "custom_taboo_rule": "Regenerates rapidly from mundane bludgeoning and necrotic rot, recoiling only from cold wrought iron and sharp citrus/lime acidity.",
+      "custom_protocol": "Drive a cold-iron spike or anoint the seal perimeter with kaffir lime juice to lock {anchor_fixture} in corporeal stasis.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": {
+        "disguise_alias": "Barefoot Singer by the Embankment",
+        "cover_desc": "A damp-haired figure humming softly on the canal railing."
+      },
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "silver_reed",
+        "iron_nail"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_leshy",
+      "canonical_name": "Leshy",
+      "subtitle": "The Shifting-Height Woodland Lord",
+      "tradition_key": "european_slavic",
+      "tradition": "European, Celtic & Slavic Myth",
+      "type": "entity",
+      "form": "mimic_flora",
+      "form_label": "Carnivorous / Mimic Flora",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "reactive",
+      "non_hostile_temperament": "mischievous",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 5,
+      "biomes": [
+        "nature",
+        "shrine"
+      ],
+      "times": [
+        "any",
+        "dusk",
+        "night"
+      ],
+      "primary_element": "earth",
+      "offensive_element": "wind",
+      "weaknesses": [
+        "fire",
+        "ice"
+      ],
+      "resistances": [
+        "earth",
+        "bio",
+        "water"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.2,
+        "stat_weights": {
+          "STR": 1.2,
+          "AGI": 1.0,
+          "INT": 1.35,
+          "PER": 1.35,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A green-bearded woodland sovereign with shoes worn backward and no cast shadow, towering as tall as pines among trees yet shrinking grass-high in clearings.",
+      "furry_appearance_override": "A moss-antlered, emerald-eyed stag lord whose height shifts seamlessly from towering pine-crown to knee-high bramble.",
+      "sensory_omen": "Birdsong stops dead as trails loop back onto themselves and a shadowless figure's shoes point left-on-right.",
+      "gore_omen_override": "Birdsong stops dead as trails loop back onto themselves and a shadowless figure's shoes point left-on-right.",
+      "lore_summary": "The Slavic master of forests who leads boastful trespassers in endless circles ('the Leshy is leading you') until they wear their coat inside-out and swap their left and right boots.",
+      "taboo_id": "taboo_name_inversion",
+      "custom_taboo_rule": "Loops paths endlessly around arrogant walkers; wearing garments inside-out or reversing left-and-right step breaks his woodland glamour.",
+      "custom_protocol": "Invert your outer jacket or reverse your left-right boot cadence while offering salted bread or courtesy to the Leshy.",
+      "is_therian_native": true,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "coarse_salt",
+        "sweet_milk"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_banshee",
+      "canonical_name": "Bean Sídhe (Banshee)",
+      "subtitle": "The Silver-Comb Keening Herald",
+      "tradition_key": "european_slavic",
+      "tradition": "European, Celtic & Slavic Myth",
+      "type": "entity",
+      "form": "acoustic_predator",
+      "form_label": "Acoustic / Resonance Predator",
+      "physicality": "non_corporeal",
+      "sapience": "compulsive",
+      "disposition": "passive",
+      "non_hostile_temperament": "spook",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "shrine",
+        "hospital",
+        "coastal",
+        "urban"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "wind",
+      "offensive_element": "wind",
+      "weaknesses": [
+        "earth",
+        "electric"
+      ],
+      "resistances": [
+        "wind",
+        "ice",
+        "aether"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.0,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.0,
+          "INT": 1.0,
+          "PER": 1.3,
+          "CHA": 1.4,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A red-eyed fairy mourner in a grey-green cloak washing stained linen or drawing a silver comb through streaming white hair.",
+      "furry_appearance_override": "A silver-plumed barn-owl mourner in a mist-grey mantle keening softly while preening frost-white feathers.",
+      "sensory_omen": "A three-layered harmonic keen vibrates windowpanes without shattering them until someone foolishly snatches at her dropped silver comb.",
+      "gore_omen_override": "A three-layered harmonic keen vibrates windowpanes without shattering them until someone foolishly snatches at her dropped silver comb.",
+      "lore_summary": "The Irish fairy herald who does not cause death, only mourns it in ritual keening—dangerous only if interrupted disrespectfully or if a thief seizes her silver comb.",
+      "taboo_id": "taboo_gift_refusal",
+      "custom_taboo_rule": "Offers phantom food, coins, or lost keepsakes to bind victims in spiritual debt; accepting or pocketing anything seals your doom.",
+      "custom_protocol": "Politely decline its proffered gift three times with open, empty palms before binding {anchor_fixture}.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "silver_reed",
+        "sweet_milk"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_nuckelavee",
+      "canonical_name": "Nuckelavee",
+      "subtitle": "The Skinless Brine Centaur",
+      "tradition_key": "european_slavic",
+      "tradition": "European, Celtic & Slavic Myth",
+      "type": "entity",
+      "form": "anatomical_amalgam",
+      "form_label": "Anatomical Amalgam",
+      "physicality": "corporeal",
+      "sapience": "instinctual",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 4,
+      "max_tier": 5,
+      "biomes": [
+        "coastal",
+        "industrial"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "primary_element": "bio",
+      "offensive_element": "bio",
+      "weaknesses": [
+        "water",
+        "fire"
+      ],
+      "resistances": [
+        "bio",
+        "earth",
+        "physical"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Brute",
+        "hp_scale": 1.4,
+        "stat_weights": {
+          "STR": 1.45,
+          "AGI": 1.15,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.0,
+          "END": 1.4,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A horrific Orcadian sea-fiend fusing a fin-legged equine torso with a swaying, skinless rider whose yellow veins and black blood pulse visibly—utterly unable to cross fresh running water.",
+      "furry_appearance_override": "A horrific Orcadian sea-fiend fusing a fin-legged equine torso with a swaying, skinless rider whose yellow veins and black blood pulse visibly—utterly unable to cross fresh running water.",
+      "sensory_omen": "Salt-blight withers nearby greenery in seconds and a suffocating stench of burning kelp heralds heavy, wet hoofbeats.",
+      "gore_omen_override": "Raw crimson muscle and tar-black pulsing veins glisten across a skinless horse-and-rider amalgam exhaling pestilent sea-miasma.",
+      "lore_summary": "The most dreaded demon of Orkney folklore: emerging from the sea to blight crops with its breath, yet driven into helpless fury by pure, unsalted fresh running water or burning kelp smoke.",
+      "taboo_id": "taboo_thermal_feed",
+      "custom_taboo_rule": "Spreads toxic brine-blight and shrugs off iron; cannot cross a stream of pure fresh running water and despises fresh rain.",
+      "custom_protocol": "Open a clean freshwater hydrant or leap across an unbrackish water channel to trap the Nuckelavee inside a containment lock.",
+      "is_therian_native": true,
+      "is_visceral_horror": true,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "fresh_cucumber"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_changeling",
+      "canonical_name": "Changeling Stock",
+      "subtitle": "The Alder-Wood Cradle Double",
+      "tradition_key": "european_slavic",
+      "tradition": "European, Celtic & Slavic Myth",
+      "type": "entity",
+      "form": "porcelain_automaton",
+      "form_label": "Porcelain / Ball-Jointed Automaton",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "passive",
+      "non_hostile_temperament": "mischievous",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 1,
+      "max_tier": 3,
+      "biomes": [
+        "urban",
+        "hospital",
+        "nature"
+      ],
+      "times": [
+        "any",
+        "night"
+      ],
+      "primary_element": "earth",
+      "offensive_element": null,
+      "weaknesses": [
+        "fire",
+        "aether"
+      ],
+      "resistances": [
+        "earth",
+        "bio"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 0.85,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.0,
+          "INT": 1.4,
+          "PER": 1.0,
+          "CHA": 1.3,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "An uncanny, ancient-eyed double crafted from enchanted alder wood that acts mute until surprised into exclaiming its true thousand-year age.",
+      "furry_appearance_override": "An ancient-eyed leveret double carved from enchanted alder wood that feigns youth until tricked into speaking.",
+      "sensory_omen": "Faint woodland fiddle music plays whenever no one looks directly at the unnaturally watchful youth in the corner.",
+      "gore_omen_override": "Faint woodland fiddle music plays whenever no one looks directly at the unnaturally watchful youth in the corner.",
+      "lore_summary": "In Celtic and European fairy lore, a fairy substitute unmasked not by violence, but by cold iron or performing an absurd task—like brewing tea in half an eggshell—until it laughs and blurts out 'I have seen the acorn before the oak, yet never saw an eggshell brewery!'",
+      "taboo_id": "taboo_trickster_wager",
+      "custom_taboo_rule": "Delights in illusion swaps and playful wagers; swinging wildly with brute force causes it to swap places with a decoy.",
+      "custom_protocol": "Spot the counterfeit leaf-seam or humor its playful riddle wager to trick it into stepping inside the containment circle.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": {
+        "disguise_alias": "Unblinking Quiet Waif",
+        "cover_desc": "A preternaturally still youth watching the room with centuries-old eyes."
+      },
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "iron_nail",
+        "sweet_milk"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_hand_of_glory",
+      "canonical_name": "Hand of Glory",
+      "subtitle": "The Tallow-Wick Stasis Candelabra",
+      "tradition_key": "european_slavic",
+      "tradition": "European, Celtic & Slavic Myth",
+      "type": "object",
+      "form": "sealed_apothecary_vessel",
+      "form_label": "Sealed Apothecary Jar / Spirit Vessel",
+      "physicality": "corporeal",
+      "sapience": "non_sapient",
+      "disposition": "reactive",
+      "non_hostile_temperament": "volatile",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "commercial",
+        "urban",
+        "shrine"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "fire",
+      "offensive_element": "aether",
+      "weaknesses": [
+        "water",
+        "earth"
+      ],
+      "resistances": [
+        "fire",
+        "electric"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 0.95,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.0,
+          "INT": 1.35,
+          "PER": 1.3,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "An antique pickled-wax candelabra shaped like an outstretched hand burning with five motionless blue-green flames that freeze bystanders in waking sleep.",
+      "furry_appearance_override": "An antique pickled-wax candelabra shaped like an outstretched hand burning with five motionless blue-green flames that freeze bystanders in waking sleep.",
+      "sensory_omen": "Every security guard and clock within twenty paces freezes mid-breath under a cold green candle-glow that water fails to douse.",
+      "gore_omen_override": "Every security guard and clock within twenty paces freezes mid-breath under a cold green candle-glow that water fails to douse.",
+      "lore_summary": "The infamous occult burglar's relic of European grimoire lore: its wicked flames paralyze all onlookers and cannot be blown out with breath or water—only milk or blood extinguishes them.",
+      "taboo_id": "taboo_sweet_milk_hearth",
+      "custom_taboo_rule": "Water and wind cannot extinguish its stasis-flames; blowing on it flares the paralysis aura—douse strictly with milk.",
+      "custom_protocol": "Pour sweet milk over the tallow wicks to snuff all five stasis-flames simultaneously and seal the relic.",
+      "is_therian_native": false,
+      "is_visceral_horror": true,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "sweet_milk"
+      ],
+      "relic_gear_profile": {
+        "slot": "Accessory 1",
+        "element": "fire",
+        "display_name": "Snuffed Hand of Glory"
+      }
+    },
+    {
+      "codex_id": "folk_will_o_wisp",
+      "canonical_name": "Ignis Fatuus (Will-o-the-Wisp)",
+      "subtitle": "The Marsh-Lantern Pathbender",
+      "tradition_key": "european_slavic",
+      "tradition": "European, Celtic & Slavic Myth",
+      "type": "phenomenon",
+      "form": "phantom_procession",
+      "form_label": "Spectral Night Procession",
+      "physicality": "non_corporeal",
+      "sapience": "compulsive",
+      "disposition": "passive",
+      "non_hostile_temperament": "mischievous",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 1,
+      "max_tier": 3,
+      "biomes": [
+        "coastal",
+        "nature",
+        "industrial"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "primary_element": "fire",
+      "offensive_element": null,
+      "weaknesses": [
+        "earth",
+        "ice"
+      ],
+      "resistances": [
+        "fire",
+        "wind",
+        "water"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 0.85,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.4,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.3
+        }
+      },
+      "appearance": "Bobbing spheres of cold cyan marsh-flame hovering at lantern-height that retreat the exact distance you step toward them, bending footpaths toward deep water.",
+      "furry_appearance_override": "Bobbing spheres of cold cyan marsh-flame hovering at lantern-height that retreat the exact distance you step toward them, bending footpaths toward deep water.",
+      "sensory_omen": "A friendly-looking bobbing lantern hovers twenty paces ahead, keeping exact distance no matter how fast you sprint.",
+      "gore_omen_override": "A friendly-looking bobbing lantern hovers twenty paces ahead, keeping exact distance no matter how fast you sprint.",
+      "lore_summary": "Known across Europe as Will-o'-the-Wisp or Hinkypunk—chasing its light leads straight into sinkholes, while driving an iron knife into the earth makes the wisp huddle harmlessly around the hilt.",
+      "taboo_id": "taboo_iron_lime_ward",
+      "custom_taboo_rule": "Regenerates rapidly from mundane bludgeoning and necrotic rot, recoiling only from cold wrought iron and sharp citrus/lime acidity.",
+      "custom_protocol": "Drive a cold-iron spike or anoint the seal perimeter with kaffir lime juice to lock {anchor_fixture} in corporeal stasis.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "iron_nail"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_ghul",
+      "canonical_name": "Al-Ghūl",
+      "subtitle": "The Crossroads Mirage Voice-Shifter",
+      "tradition_key": "mena_south_asian",
+      "tradition": "MENA & South Asian Folklore",
+      "type": "entity",
+      "form": "humanoid_doppelganger",
+      "form_label": "Humanoid / Doppelganger",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "transit",
+        "nature",
+        "industrial",
+        "urban"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "earth",
+      "offensive_element": "fire",
+      "weaknesses": [
+        "water",
+        "aether"
+      ],
+      "resistances": [
+        "earth",
+        "bio"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Stalker",
+        "hp_scale": 1.15,
+        "stat_weights": {
+          "STR": 1.25,
+          "AGI": 1.25,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.2,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A desert-mirage shapeshifter kindling false campfire lights along dark highways, able to mimic any traveler's face except for its unalterable cloven hooves.",
+      "furry_appearance_override": "A hyena-hooved mirage shapeshifter kindling false signal fires along deserted highways.",
+      "sensory_omen": "A welcoming roadside fire flickers where none existed moments ago, though the stranger tending it hides cloven tracks in the dust.",
+      "gore_omen_override": "A welcoming roadside fire flickers where none existed moments ago, though the stranger tending it hides cloven tracks in the dust.",
+      "lore_summary": "In classical Arabian lore, the Ghūl lures solitary travelers off safe roads with illusory fires and familiar names; in legend, striking a Ghūl once fells it, whereas striking it a second time restores it to full vigor!",
+      "taboo_id": "taboo_kinetic_rebound",
+      "custom_taboo_rule": "Always check the feet to pierce its disguise, and beware wild double-strikes—repeating raw kinetic blows reknits its desert hide.",
+      "custom_protocol": "Inspect its cloven tracks to break its mirage and lock it in a single decisive aether-seal rather than frantic blows.",
+      "is_therian_native": true,
+      "is_visceral_horror": false,
+      "disguise_profile": {
+        "disguise_alias": "Stranded Motorist by Signal Flare",
+        "cover_desc": "A friendly traveler waving beside a warm orange flare at the road shoulder."
+      },
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "iron_nail",
+        "coarse_salt"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_vetala",
+      "canonical_name": "Vetāla",
+      "subtitle": "The Riddle-Bound Hanging Arbiter",
+      "tradition_key": "mena_south_asian",
+      "tradition": "MENA & South Asian Folklore",
+      "type": "entity",
+      "form": "humanoid_doppelganger",
+      "form_label": "Humanoid / Doppelganger",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "reactive",
+      "non_hostile_temperament": "mischievous",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 5,
+      "biomes": [
+        "shrine",
+        "hospital",
+        "nature"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "aether",
+      "offensive_element": "aether",
+      "weaknesses": [
+        "electric",
+        "fire"
+      ],
+      "resistances": [
+        "aether",
+        "bio"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.15,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.0,
+          "INT": 1.5,
+          "PER": 1.3,
+          "CHA": 1.4,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "An upside-down, ash-pale philosophical spirit roosting in banyan rafters who poses moral paradoxes and flies back to its tree the instant its captor speaks out of turn.",
+      "furry_appearance_override": "An upside-down, ash-silver fruit-bat philosopher roosting in the rafters, posing razor-sharp moral riddles.",
+      "sensory_omen": "Dry banyan leaves rustle upside-down as a cultured voice offers a moral riddle—warning that knowing the answer yet staying silent shatters the mind, while speaking breaks your carry-seal.",
+      "gore_omen_override": "Dry banyan leaves rustle upside-down as a cultured voice offers a moral riddle—warning that knowing the answer yet staying silent shatters the mind, while speaking breaks your carry-seal.",
+      "lore_summary": "Immortalized in the Sanskrit Vetala Panchavimshati (Vikram and the Vampire): a brilliant spirit bound by strict riddle etiquette between silence and truth.",
+      "taboo_id": "taboo_ambiguous_reply",
+      "custom_taboo_rule": "Traps victims in an absolute 'Yes-or-No' / 'Red-or-Blue' binary choice; giving either direct answer fulfills its curse contract.",
+      "custom_protocol": "Deliver a non-committal, ambiguous third answer ('So-so', 'Neither', 'I am late') to stall its contract loop and seal {anchor_fixture}.",
+      "is_therian_native": true,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": {
+        "prompt_question": "'Hunter: if you know justice and stay mute you forfeit honor, yet if you break silence you forfeit your bind—how do you answer my riddle?'",
+        "trap_yes_label": "Argue the riddle aloud at length",
+        "trap_no_label": "Refuse stubbornly out of pride",
+        "evasive_label": "Write the verdict in ash upon the seal without breaking vocal silence",
+        "evasive_keywords": [
+          "write",
+          "gesture",
+          "inscribe",
+          "ash",
+          "silent",
+          "nod",
+          "without speaking"
+        ],
+        "trap_keywords": [
+          "argue aloud",
+          "shout",
+          "refuse stubbornly"
+        ],
+        "success_note": "Inscribing the answer without breaking vocal silence impressed the Vetāla, winning its voluntary compliance!",
+        "fail_note": "Breaking vocal discipline let the Vetāla slip free back to its roost with a wry laugh!"
+      },
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "white_incense",
+        "sweet_milk"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_churel",
+      "canonical_name": "Churel",
+      "subtitle": "The Backward-Heeled Banyan Wraith",
+      "tradition_key": "mena_south_asian",
+      "tradition": "MENA & South Asian Folklore",
+      "type": "entity",
+      "form": "spectral_apparition",
+      "form_label": "Spectral Apparition",
+      "physicality": "non_corporeal",
+      "sapience": "sapient",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "species",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "nature",
+        "urban",
+        "hospital"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "bio",
+      "offensive_element": "bio",
+      "weaknesses": [
+        "fire",
+        "aether"
+      ],
+      "resistances": [
+        "bio",
+        "wind"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Stalker",
+        "hp_scale": 1.1,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.25,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.35,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A dazzling nocturnal figure beneath peepal or banyan shade whose true tell is her feet turned completely backward at the ankles.",
+      "furry_appearance_override": "A graceful jackal-shade beneath a peepal tree whose hind paws point completely backward at the ankles.",
+      "sensory_omen": "Fresh footprints in the dust point directly away from you even as soft anklets jingle closer.",
+      "gore_omen_override": "Fresh footprints in the dust point directly away from you even as soft anklets jingle closer.",
+      "lore_summary": "Across South Asian folklore, the Churel masks herself in captivating illusion at crossroads, betrayed only by her backward-facing heels and halted by scattered mustard seeds or iron.",
+      "taboo_id": "taboo_counting_compulsion",
+      "custom_taboo_rule": "Bound by obsessive counting and sorting laws; physically blocking its route triggers violent kinetic backlash.",
+      "custom_protocol": "Scatter small coins, beads, or dried grains across the floor to force an obsessive counting reset while sealing its anchor.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": {
+        "disguise_alias": "Silver-Anklet Crossroads Traveler",
+        "cover_desc": "A poised traveler standing in long skirts that conceal her ankles."
+      },
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": {
+        "paradox_id": "churel_reverse_tracks",
+        "rule_summary": "Backward Tracks: Footprints pointing away from you actually trace her direct approach toward you.",
+        "observe_hint": "Those footprints aren't retreating—her heels face backward, meaning she's walking straight toward you!"
+      },
+      "appeasement_tags": [
+        "counting_beans",
+        "iron_nail"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_qareen",
+      "canonical_name": "Qareen Double",
+      "subtitle": "The Whispering Smokeless Twin",
+      "tradition_key": "mena_south_asian",
+      "tradition": "MENA & South Asian Folklore",
+      "type": "entity",
+      "form": "shadow_silhouette",
+      "form_label": "Two-Dimensional Shadow Silhouette",
+      "physicality": "non_corporeal",
+      "sapience": "sapient",
+      "disposition": "reactive",
+      "non_hostile_temperament": "volatile",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 3,
+      "max_tier": 5,
+      "biomes": [
+        "urban",
+        "commercial",
+        "shrine",
+        "transit"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "primary_element": "fire",
+      "offensive_element": "fire",
+      "weaknesses": [
+        "water",
+        "earth"
+      ],
+      "resistances": [
+        "fire",
+        "wind",
+        "aether"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.15,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.0,
+          "INT": 1.4,
+          "PER": 1.3,
+          "CHA": 1.35,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A shimmering, smokeless-flame mirror double wearing the observer's exact posture and cadence, finishing sentences half a beat before they are spoken.",
+      "furry_appearance_override": "A shimmering, smokeless-flame mirror double wearing the observer's exact posture and cadence, finishing sentences half a beat before they are spoken.",
+      "sensory_omen": "Dry desert ozone shimmers without smoke as your own voice whispers private doubts from the opposite side of the glass.",
+      "gore_omen_override": "Dry desert ozone shimmers without smoke as your own voice whispers private doubts from the opposite side of the glass.",
+      "lore_summary": "Inspired by lore of the smokeless-fire companion double (Qareen)—knowing every habit of its counterpart, impossible to out-brawl physically, and subdued only through iron discipline and true-name restraint.",
+      "taboo_id": "taboo_true_name_silence",
+      "custom_taboo_rule": "Never answer its vocal mimicry with your real name or direct aggression; reply only in paradoxical riddles or white-noise frequencies.",
+      "custom_protocol": "Broadcast an inverted acoustic phase-loop or offer a decoy pseudonym while anchoring its vocal core.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "iron_nail",
+        "coarse_salt"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_brass_vessel",
+      "canonical_name": "Qumqum of Smokeless Brass",
+      "subtitle": "The Lead-Soldered Solomon Jar",
+      "tradition_key": "mena_south_asian",
+      "tradition": "MENA & South Asian Folklore",
+      "type": "object",
+      "form": "sealed_apothecary_vessel",
+      "form_label": "Sealed Apothecary Jar / Spirit Vessel",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "reactive",
+      "non_hostile_temperament": "mischievous",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 3,
+      "max_tier": 5,
+      "biomes": [
+        "coastal",
+        "commercial",
+        "shrine"
+      ],
+      "times": [
+        "any",
+        "night"
+      ],
+      "primary_element": "fire",
+      "offensive_element": "wind",
+      "weaknesses": [
+        "water",
+        "ice"
+      ],
+      "resistances": [
+        "fire",
+        "earth"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.1,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.0,
+          "INT": 1.4,
+          "PER": 1.0,
+          "CHA": 1.45,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A barnacle-crusted antique brass flask stopped with an engraved lead seal that promises extravagant wishes in a booming echo if pried loose.",
+      "furry_appearance_override": "A barnacle-crusted antique brass flask stopped with an engraved lead seal that promises extravagant wishes in a booming echo if pried loose.",
+      "sensory_omen": "The brass neck radiates desert heat underwater while billowy copper-scented smoke curls impatiently around the loosened lead stamp.",
+      "gore_omen_override": "The brass neck radiates desert heat underwater while billowy copper-scented smoke curls impatiently around the loosened lead stamp.",
+      "lore_summary": "Echoing the Fisherman and the Jinni from One Thousand and One Nights: prying open its lead seal unleashes towering smokeless wrath, whereas challenging its pride ('Could something so vast truly fit inside so small a jar?') tricks it right back inside.",
+      "taboo_id": "taboo_trickster_wager",
+      "custom_taboo_rule": "Never pry the lead seal by brute force; challenge its pride with a riddle of scale so it shrinks back inside the flask willingly.",
+      "custom_protocol": "Doubt aloud that so mighty a presence could ever fit inside such a tiny brass vessel, then slam the engraved lead seal shut.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "iron_nail",
+        "white_incense"
+      ],
+      "relic_gear_profile": {
+        "slot": "Accessory 1",
+        "element": "fire",
+        "display_name": "Lead-Stamped Brass Qumqum"
+      }
+    },
+    {
+      "codex_id": "folk_wendigo",
+      "canonical_name": "Gaunt Frost-Heart",
+      "subtitle": "The Insatiable Winter Voice-Mimic",
+      "tradition_key": "americas_cryptid",
+      "tradition": "Americas & Global Cryptids",
+      "type": "entity",
+      "form": "cryptid_therian",
+      "form_label": "Cryptid / Therian Beast",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 4,
+      "max_tier": 5,
+      "biomes": [
+        "nature",
+        "transit",
+        "industrial"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "ice",
+      "offensive_element": "ice",
+      "weaknesses": [
+        "fire",
+        "aether"
+      ],
+      "resistances": [
+        "ice",
+        "wind",
+        "physical"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Brute",
+        "hp_scale": 1.45,
+        "stat_weights": {
+          "STR": 1.4,
+          "AGI": 1.35,
+          "INT": 1.0,
+          "PER": 1.0,
+          "CHA": 1.0,
+          "END": 1.35,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A towering, emaciated figure of ash-grey hide and glacial bone with a heart of solid blue ice beating visibly behind frost-rimmed ribs, mimicking lost voices from the treeline.",
+      "furry_appearance_override": "A towering, emaciated figure of ash-grey hide and glacial bone with a heart of solid blue ice beating visibly behind frost-rimmed ribs, mimicking lost voices from the treeline.",
+      "sensory_omen": "Pine resin cracks with sudden sub-zero cold as a distorted, pitch-shifted voice calls for help using your own dispatcher's cadence.",
+      "gore_omen_override": "Frost-blackened tendons creak across a fifteen-foot gaunt frame as steaming tallow drips around a crystalline heart of solid ice.",
+      "lore_summary": "Born of extreme winter famine and greed in Northern Algonquian legend, growing larger the more it devours—unstoppable until its frozen heart of ice is melted with searing flame or silver-ash.",
+      "taboo_id": "taboo_true_name_silence",
+      "custom_taboo_rule": "Never answer its stolen distress calls in the dark, and mundane steel cannot kill it until thermal fire thaws its heart of ice.",
+      "custom_protocol": "Ignore its mimicked cries completely and focus intense thermal fire or cauterizing heat directly upon its frozen chest core.",
+      "is_therian_native": true,
+      "is_visceral_horror": true,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "silver_reed",
+        "white_incense"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_la_llorona",
+      "canonical_name": "La Llorona",
+      "subtitle": "The Weeping Canal Shade",
+      "tradition_key": "americas_cryptid",
+      "tradition": "Americas & Global Cryptids",
+      "type": "entity",
+      "form": "spectral_apparition",
+      "form_label": "Spectral Apparition",
+      "physicality": "non_corporeal",
+      "sapience": "compulsive",
+      "disposition": "reactive",
+      "non_hostile_temperament": "spook",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 4,
+      "biomes": [
+        "coastal",
+        "nature",
+        "urban",
+        "transit"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "water",
+      "offensive_element": "water",
+      "weaknesses": [
+        "electric",
+        "earth"
+      ],
+      "resistances": [
+        "water",
+        "ice",
+        "wind"
+      ],
+      "immunities": [
+        "physical",
+        "ballistic"
+      ],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.1,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.0,
+          "INT": 1.0,
+          "PER": 1.3,
+          "CHA": 1.35,
+          "END": 1.2,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A veiled mourning woman in waterlogged white lace drifting along concrete storm-canals and river bridges, wringing spectral hands.",
+      "furry_appearance_override": "A veiled white-wolf mourning shade in waterlogged lace drifting along misty riverbanks.",
+      "sensory_omen": "River-mist rises over dry pavement as an anguished wail echoes along the canal—sounding loudest when distant and whisper-soft when right beside you.",
+      "gore_omen_override": "River-mist rises over dry pavement as an anguished wail echoes along the canal—sounding loudest when distant and whisper-soft when right beside you.",
+      "lore_summary": "Latin America's iconic Weeping Woman of rivers and flood-channels, sharing the uncanny inverted-distance omen where a faint cry signals imminent proximity.",
+      "taboo_id": "taboo_hydro_conductor",
+      "custom_taboo_rule": "Propagates through standing water and high humidity; never douse it with water or aqueous solutions.",
+      "custom_protocol": "Drain surrounding conduits and calcify the damp floor with geomantic earth or high-voltage arcs.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": {
+        "paradox_id": "llorona_inverse_cry",
+        "rule_summary": "Inverted Wail: When her mourning cry sounds faint and far downriver, she stands within arm's reach.",
+        "observe_hint": "Her wail faded to a faint sigh—step back from the canal edge immediately, she is right here!"
+      },
+      "appeasement_tags": [
+        "white_incense",
+        "iron_nail"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_el_silbon",
+      "canonical_name": "El Silbón",
+      "subtitle": "The Seven-Note Whistling Sack-Walker",
+      "tradition_key": "americas_cryptid",
+      "tradition": "Americas & Global Cryptids",
+      "type": "entity",
+      "form": "acoustic_predator",
+      "form_label": "Acoustic / Resonance Predator",
+      "physicality": "corporeal",
+      "sapience": "compulsive",
+      "disposition": "hostile",
+      "non_hostile_temperament": "",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 3,
+      "max_tier": 5,
+      "biomes": [
+        "transit",
+        "nature",
+        "urban"
+      ],
+      "times": [
+        "night"
+      ],
+      "primary_element": "wind",
+      "offensive_element": "physical",
+      "weaknesses": [
+        "earth",
+        "fire"
+      ],
+      "resistances": [
+        "wind",
+        "bio"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Stalker",
+        "hp_scale": 1.2,
+        "stat_weights": {
+          "STR": 1.3,
+          "AGI": 1.35,
+          "INT": 1.0,
+          "PER": 1.3,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "An impossibly lanky shadow in a wide-brimmed hat carrying a rattling burlap sack over one shoulder while whistling the rising musical scale C-D-E-F-G-A-B.",
+      "furry_appearance_override": "A towering, reed-thin maned-wolf shadow in a wide hat carrying a rattling burlap sack while whistling a seven-note scale.",
+      "sensory_omen": "Seven crisp whistled notes (*do-re-mi-fa-sol-la-si*) drift down the street—deceptively faint when he looms directly behind the lamppost.",
+      "gore_omen_override": "Seven crisp whistled notes (*do-re-mi-fa-sol-la-si*) drift down the street—deceptively faint when he looms directly behind the lamppost.",
+      "lore_summary": "The feared Whistling Phantom of Venezuelan & Colombian Llanos folklore: if his seven-note whistle sounds loud, you are safe; if it sounds faint and distant, he is right behind you—repelled only by chili-pepper smoke, a whip-crack, or a barking hound.",
+      "taboo_id": "taboo_rhythm_sync",
+      "custom_taboo_rule": "Moves and parries in a locked 4/4 metronomic beat; attacking on-beat is automatically countered.",
+      "custom_protocol": "Clap or step on an irregular off-beat polyrhythm to desynchronize {anchor_fixture} before snapping the seal shut.",
+      "is_therian_native": false,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": {
+        "paradox_id": "silbon_inverse_whistle",
+        "rule_summary": "Inverted Whistle Scale: Loud whistling means El Silbón is blocks away; a faint whistle means he stands inches behind you.",
+        "observe_hint": "That seven-note whistle barely whispered—he is standing directly behind you!"
+      },
+      "appeasement_tags": [
+        "coarse_salt",
+        "kaffir_lime"
+      ],
+      "relic_gear_profile": null
+    },
+    {
+      "codex_id": "folk_mothman",
+      "canonical_name": "Point Pleasant Harbinger",
+      "subtitle": "The Red-Lensed Substation Omen",
+      "tradition_key": "americas_cryptid",
+      "tradition": "Americas & Global Cryptids",
+      "type": "entity",
+      "form": "cryptid_therian",
+      "form_label": "Cryptid / Therian Beast",
+      "physicality": "corporeal",
+      "sapience": "sapient",
+      "disposition": "passive",
+      "non_hostile_temperament": "spook",
+      "uniqueness": "singular",
+      "cooldown_days": 4,
+      "min_tier": 2,
+      "max_tier": 5,
+      "biomes": [
+        "industrial",
+        "transit",
+        "coastal",
+        "urban"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "primary_element": "electric",
+      "offensive_element": "electric",
+      "weaknesses": [
+        "earth",
+        "wind"
+      ],
+      "resistances": [
+        "electric",
+        "aether"
+      ],
+      "immunities": [],
+      "combat_profile": {
+        "archetype": "Caster",
+        "hp_scale": 1.15,
+        "stat_weights": {
+          "STR": 1.0,
+          "AGI": 1.4,
+          "INT": 1.25,
+          "PER": 1.45,
+          "CHA": 1.0,
+          "END": 1.0,
+          "LUK": 1.0
+        }
+      },
+      "appearance": "A seven-foot grey-winged nocturnal cryptid with no visible neck and twin self-luminous crimson eyes perched silently atop steel bridge girders and high-voltage pylons.",
+      "furry_appearance_override": "A seven-foot grey-winged nocturnal cryptid with no visible neck and twin self-luminous crimson eyes perched silently atop steel bridge girders and high-voltage pylons.",
+      "sensory_omen": "Radio receivers fill with rhythmic oscillating static and car batteries dim as twin reflector-red eyes flare without flapping a wing.",
+      "gore_omen_override": "Radio receivers fill with rhythmic oscillating static and car batteries dim as twin reflector-red eyes flare without flapping a wing.",
+      "lore_summary": "The famous 1966 Point Pleasant cryptid associated with structural premonitions and electromagnetic interference—rarely aggressive unless fired upon, functioning more as an ominous sentinel than a predator.",
+      "taboo_id": "taboo_voltage_parasite",
+      "custom_taboo_rule": "Siphons live electrical current and arc discharges; sever nearby breakers and never strike it with ungrounded electric current.",
+      "custom_protocol": "Drive a copper grounding spike into the substrate and isolate the anomaly inside an insulated Faraday lattice.",
+      "is_therian_native": true,
+      "is_visceral_horror": false,
+      "disguise_profile": null,
+      "tether_profile": null,
+      "dialogue_trap": null,
+      "omen_paradox": null,
+      "appeasement_tags": [
+        "silver_reed"
+      ],
+      "relic_gear_profile": null
+    }
+  ]
+}

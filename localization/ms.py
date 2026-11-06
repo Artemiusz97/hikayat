@@ -58,7 +58,7 @@ ITEM_ICON_KEYWORDS = {
     "food": ("makanan", "roti", "daging"),
     "health": ("nyawa", "kesihatan", "pemulihan", "penawar", "ubat"),
     "mana": ("mana", "ramuan mana"),
-    "potion": ("ramuan", "penawar", "ubat"),
+    "potion": ("ramuan", "penawar", "ubat", "limau purut", "garam berkat", "kemenyan", "timun", "tauhu", "tangkal", "azimat besi"),
     "quest": ("kunci", "peta", "surat", "artifak", "manuskrip"),
 }
 

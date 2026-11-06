@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useId } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Sparkles, Heart, Zap, Package, RotateCcw, Check } from 'lucide-react';
 
 const STAT_KEYS = [
@@ -63,7 +64,10 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
   const [customRace, setCustomRace] = useState('');
   const [raceDescription, setRaceDescription] = useState('');
 
+  const { t } = useTranslation();
+  const creatorResId = useId();
   const [showIntimate, setShowIntimate] = useState(false);
+  const [previewMediumSynergy, setPreviewMediumSynergy] = useState('');
   const [breastSize, setBreastSize] = useState('average');
   const [penisSize, setPenisSize] = useState('average');
   const [assetTexture, setAssetTexture] = useState('');
@@ -437,10 +441,35 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                     </div>
                   </div>
 
+                  <div className="mb-2.5 flex items-center justify-between gap-2 bg-cyan-950/15 border border-cyan-900/40 rounded px-2.5 py-1.5">
+                    <label htmlFor={`${creatorResId}-med-syn`} className="text-[10px] font-bold uppercase tracking-wider text-cyan-300">
+                      🧬 {t('awakened.synergy_badge', 'Medium Synergy')} Preview:
+                    </label>
+                    <select
+                      id={`${creatorResId}-med-syn`}
+                      value={previewMediumSynergy}
+                      onChange={(e) => setPreviewMediumSynergy(e.target.value)}
+                      className="bg-fantasy-dark border border-cyan-800/50 rounded px-2 py-0.5 text-[11px] text-gray-200"
+                    >
+                      <option value="">All Realms (No Filter)</option>
+                      <option value="direct_manifestation">{t('awakened.mediums.direct_manifestation', 'Direct Manifestation (INT / CHA)')}</option>
+                      <option value="ordnance_imbuement">{t('awakened.mediums.ordnance_imbuement', 'Ordnance Imbuement (PER / STR / AGI)')}</option>
+                      <option value="somatic_overdrive">{t('awakened.mediums.somatic_overdrive', 'Somatic Overdrive (STR / AGI / END)')}</option>
+                      <option value="autonomous_construct">{t('awakened.mediums.autonomous_construct', 'Autonomous Construct (INT / PER + END HP)')}</option>
+                    </select>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {STAT_KEYS.map((s) => {
                       const val = stats[s.key] ?? 1;
                       const isFocused = focusedStat === s.code;
+                      const synLookup = {
+                        direct_manifestation: ['INT', 'CHA'],
+                        ordnance_imbuement: ['PER', 'STR', 'AGI'],
+                        somatic_overdrive: ['STR', 'AGI', 'END'],
+                        autonomous_construct: ['INT', 'PER', 'END'],
+                      };
+                      const hasMedSyn = Boolean(previewMediumSynergy && (synLookup[previewMediumSynergy] || []).includes(s.code));
                       return (
                         <div
                           key={s.key}
@@ -458,6 +487,11 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                               <span className="text-[11px] text-gray-400 ml-1 truncate">
                                 {s.label}
                               </span>
+                              {hasMedSyn && (
+                                <span className="ml-1 text-[9px] px-1 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono uppercase">
+                                  ⚡
+                                </span>
+                              )}
                             </div>
                           </div>
 

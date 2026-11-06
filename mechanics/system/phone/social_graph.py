@@ -198,10 +198,18 @@ def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dic
     desc = target_rec.get("personality_summary", "")
 
     # Check eligibility (faculty/staff/adult citizens cannot be contacts in high school scenarios)
+    import scenario_data
     from mechanics import relationships
     grade_val = target_rec.get("grade", "")
     grade_low = str(grade_val).strip().lower()
-    if grade_low in ("faculty", "citizen"):
+    if scenario_data.is_anomalous_high_school_scenario(scen_key):
+        is_eligible = relationships.is_contact_eligible(
+            target_rec,
+            scenario=scen_key,
+            session_id=session_id,
+            grade=grade_val,
+        )
+    elif grade_low in ("faculty", "citizen"):
         is_eligible = False
     elif grade_low in ("freshman", "sophomore", "junior", "senior", "youth peer", "grade 9", "grade 10", "grade 11", "grade 12"):
         is_eligible = True
@@ -453,11 +461,22 @@ def discover_suggested_peer(session_id: int, user_id: int) -> dict:
     contact_ids = {c["npc_id"].lower() for c in contacts}
 
     roster = db.get_school_roster(session_id)
-    eligible_uncontacted = [
-        r for r in roster
-        if str(r.get("grade", "")).strip().lower() not in ("faculty", "citizen")
-        and r["npc_id"].lower() not in contact_ids
-    ]
+    session = db.get_session(session_id)
+    scen_key = session.get("scenario", "high_school_drama") if session else "high_school_drama"
+    import scenario_data
+    from mechanics import relationships
+    if scenario_data.is_anomalous_high_school_scenario(scen_key):
+        eligible_uncontacted = [
+            r for r in roster
+            if r["npc_id"].lower() not in contact_ids
+            and relationships.is_contact_eligible(r, scenario=scen_key, session_id=session_id)
+        ]
+    else:
+        eligible_uncontacted = [
+            r for r in roster
+            if str(r.get("grade", "")).strip().lower() not in ("faculty", "citizen")
+            and r["npc_id"].lower() not in contact_ids
+        ]
 
     chosen = None
     if eligible_uncontacted:

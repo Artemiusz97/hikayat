@@ -607,8 +607,31 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     )
 
     call_temp = 0.9 if intent in ("photo", "nsfw_photo", "video", "nsfw_video", "flirt") else 0.8
-    result = await mechanics.system.phone.call_llm_json(system_prompt, user_prompt, temperature=call_temp, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
-    reply_text = result.get("reply_text") or f"Hey {player_char.get('name', 'there')}! Got your message, let's catch up soon."
+    try:
+        result = await mechanics.system.phone.call_llm_json(system_prompt, user_prompt, temperature=call_temp, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
+    except Exception as e:
+        log.warning(f"[phone] Failed to generate dynamic contact reply: {e}")
+        result = {}
+    reply_text = result.get("reply_text")
+    if not reply_text:
+        if intent == "meetup":
+            if check_result.succeeded:
+                rend_cand = result.get("rendezvous_location", "")
+                if not rend_cand and known_locations:
+                    loc_item = known_locations[0]
+                    p_name = loc_item.get("primary_name", "")
+                    s_name = loc_item.get("sub_name", "")
+                    rend_cand = f"{p_name}" + (f" ({s_name})" if s_name else "")
+                    result["rendezvous_location"] = rend_cand
+                venue_str = rend_cand or "our favorite spot"
+                if is_romantic:
+                    reply_text = f"I'd love that! Why don't we meet at {venue_str} in a bit? 🌹"
+                else:
+                    reply_text = f"Sounds great! Let's meet at {venue_str} in a bit 👍"
+            else:
+                reply_text = "I'm a bit tied up right now, but let's definitely catch up another time! 😊"
+        else:
+            reply_text = f"Hey {player_char.get('name', 'there')}! Got your message, let's catch up soon."
 
     # Safeguard: if check succeeded and intent is an ask for photo/video, ensure bracketed media description is attached
     if check_result.succeeded and intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy", "photo", "video", "photo_ask", "ask_photo"):

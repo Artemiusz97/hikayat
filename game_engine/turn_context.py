@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 import db
 from mechanics.narrative.intent import classify_action_intent
@@ -17,8 +18,77 @@ class TurnContext:
         self._cache = {}
 
     def invalidate(self, key: str):
-        """Invalidates a specific cached key if a mid-turn DB write occurs."""
+        """Invalidates a specific cached key if a mid-turn DB write occurs, cascading coupled keys."""
         self._cache.pop(key, None)
+        if key in ("story_quest", "all_quests", "quests", "active_waypoints", "waypoints"):
+            self._cache.pop("story_quest", None)
+            self._cache.pop("all_quests", None)
+            self._cache.pop("active_waypoints", None)
+
+    @classmethod
+    def load_snapshot(
+        cls,
+        session_id: int,
+        session: dict,
+        party: list | None = None,
+        actions: list | None = None,
+        mp_already_spent: dict | None = None,
+    ) -> "TurnContext":
+        """Hydrate TurnContext in a single synchronous snapshot (designed for `await db.adb(...)`)."""
+        ctx = cls(session_id, session, party=party, actions=actions, mp_already_spent=mp_already_spent)
+        if not session_id:
+            return ctx
+
+        import game_engine
+
+        world_bundle = game_engine._load_known_world(session_id)
+        ctx._cache["world_bundle"] = world_bundle
+        ctx._cache["contacts"] = world_bundle.get("contacts") or []
+        ctx._cache["factions"] = world_bundle.get("factions") or []
+        ctx._cache["party_npcs"] = world_bundle.get("party_npcs") or []
+        ctx._cache["all_quests"] = db.get_session_quests(session_id)
+        ctx._cache["story_quest"] = db.get_active_story_quest(session_id)
+        ctx._cache["pending_appointments"] = db.get_phone_appointments(session_id, status="pending")
+        ctx._cache["arrived_appointments"] = db.get_phone_appointments(session_id, status="arrived")
+        ctx._cache["active_waypoints"] = db.get_all_session_active_waypoints(session_id)
+        ctx._cache["school_directory_map"] = db.get_school_directory_batch(session_id)
+
+        present_names = [
+            n.get("name", "") if isinstance(n, dict) else str(n)
+            for n in ((session or {}).get("current_npcs") or [])
+            if n
+        ]
+        ctx.npc_memories_by_name(present_names, per_npc_limit=5)
+        return ctx
+
+    @property
+    def world_bundle(self) -> dict:
+        if "world_bundle" not in self._cache:
+            import game_engine
+            self._cache["world_bundle"] = game_engine._load_known_world(self.session_id)
+        return self._cache["world_bundle"]
+
+    @property
+    def school_directory_map(self) -> dict[str, dict]:
+        if "school_directory_map" not in self._cache:
+            self._cache["school_directory_map"] = db.get_school_directory_batch(self.session_id)
+        return self._cache["school_directory_map"]
+
+    def npc_memories_by_name(self, npc_names: list[str] | None = None, per_npc_limit: int = 5) -> dict[str, list[dict]]:
+        mem_map: dict[str, list[dict]] = self._cache.setdefault("npc_memories_map", {})
+        fetched: set[str] = self._cache.setdefault("npc_memories_fetched", set())
+        clean_missing = [
+            str(n).strip()
+            for n in (npc_names or [])
+            if n and str(n).strip() and str(n).strip().lower() not in fetched
+        ]
+        if clean_missing and self.session_id:
+            batch = db.get_npc_memories_batch(self.session_id, clean_missing, per_npc_limit=per_npc_limit)
+            for nm in clean_missing:
+                key = nm.lower()
+                fetched.add(key)
+                mem_map[key] = batch.get(key, [])
+        return mem_map
 
     # --- DB Caches ---
 

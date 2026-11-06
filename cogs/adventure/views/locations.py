@@ -364,6 +364,7 @@ class SceneItemSelectDropdown(discord.ui.Select):
         self.sync = sync
         self.items = items
 
+        from mechanics.combat.items import format_clean_item_summary
         options = []
         seen = set()
         for item in items[:25]:
@@ -372,7 +373,7 @@ class SceneItemSelectDropdown(discord.ui.Select):
                 continue
             seen.add(name)
             icon = get_item_icon(name, item.get("item_type", ""), item.get("effect", ""))
-            desc = item.get("effect") or f"Type: {item.get('item_type', 'Item')}"
+            desc = format_clean_item_summary(item, fallback=f"Type: {item.get('item_type', 'Item')}")
             options.append(discord.SelectOption(
                 label=f"{name}"[:100],
                 value=str(item["id"]),

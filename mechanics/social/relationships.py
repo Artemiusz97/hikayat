@@ -45,13 +45,16 @@ _PEER_HIGH_SCHOOL_RE = [re.compile(p, re.IGNORECASE) for p in PEER_HIGH_SCHOOL_P
 
 
 def is_contact_eligible(
-    name: str = "",
+    name: str | dict = "",
     role: str = "",
     description: str = "",
     scenario: str = "fantasy",
     disposition: str = "",
     session_id: int = 0,
-    social_role_type: str = ""
+    social_role_type: str = "",
+    grade: str = "",
+    age_group: str = "",
+    is_adult_family: bool = False,
 ) -> bool:
     """
     Determines whether an NPC is eligible to be registered in the player's Contacts / Directory
@@ -59,38 +62,164 @@ def is_contact_eligible(
 
     In High School / Non-Combat genres:
     - Fellow students, classmates, student council members, club members, delinquents,
-      athletes, transfer students, and peer rivals ARE eligible.
-    - Teachers, faculty, principals, parents, convenience store clerks, janitors, and
+      athletes, transfer students, and peer rivals (teens) ARE eligible.
+    - Teachers, faculty, principals, convenience store clerks, janitors, and
       adult authority / service workers are STORY-ONLY figures (stored in Lorebook/narrative,
       but never registered as Phone contacts or given affinity meters).
+    - Exception: Household parents / guardians ARE permitted for family SMS curfew mechanics.
     """
-    grade = ""
+    raw_entity_dict = name if isinstance(name, dict) else None
     if isinstance(name, dict):
         d = name
+        if (
+            d.get("is_anomalous_entity")
+            or str(d.get("npc_type") or "").strip().lower() == "anomaly"
+            or str(d.get("anomalous_npc_tag") or "").strip().lower() == "anomaly_entity"
+            or (d.get("basic_info") or {}).get("is_anomalous_entity")
+            or str((d.get("basic_info") or {}).get("anomalous_npc_tag") or "").strip().lower() == "anomaly_entity"
+        ):
+            return False
         name = str(d.get("name", ""))
-        role = role or str(d.get("role", ""))
-        grade = str(d.get("grade", ""))
-        description = description or str(d.get("description", "") or d.get("notes", "") or d.get("background", ""))
+        role = role or str(d.get("role", "") or (d.get("basic_info") or {}).get("role", "") or (d.get("basic_info") or {}).get("occupation", ""))
+        grade = grade or str(d.get("grade", "") or (d.get("basic_info") or {}).get("grade", ""))
+        description = description or str(d.get("description", "") or d.get("notes", "") or d.get("background", "") or (d.get("basic_info") or {}).get("description", ""))
         scenario = scenario if scenario != "fantasy" else str(d.get("scenario", scenario))
         disposition = disposition or str(d.get("disposition", ""))
-        social_role_type = social_role_type or str(d.get("social_role_type", ""))
+        social_role_type = social_role_type or str(d.get("social_role_type", "") or (d.get("basic_info") or {}).get("social_role_type", ""))
+        age_group = age_group or str(d.get("age_group", "") or (d.get("basic_info") or {}).get("age_group", ""))
+        is_adult_family = is_adult_family or bool(d.get("is_adult_family") or (d.get("basic_info") or {}).get("is_adult_family") or d.get("household_role") in ("father", "mother", "guardian"))
+
+    if str(social_role_type or "").strip().lower() == "anomaly":
+        return False
+    role_low_chk = str(role or "").strip().lower()
+    if any(k in role_low_chk for k in ("non-hostile entity", "non-hostile object", "non-hostile phenomenon")):
+        return False
+    if session_id and name:
+        try:
+            import db as _db_rel
+            sess_chk = _db_rel.get_session(int(session_id))
+            if isinstance(sess_chk, dict):
+                from mechanics.world.anomalous_events import (
+                    is_anomalous_scene_entity,
+                    _resolve_active_non_hostile_anomaly_context,
+                )
+                if is_anomalous_scene_entity(name, session=sess_chk):
+                    return False
+                if _resolve_active_non_hostile_anomaly_context(int(session_id), session=sess_chk, entity_name=str(name)):
+                    return False
+        except Exception:
+            pass
 
     import namegen
     if namegen.is_collective_entity_name(name) or namegen.is_generic_role_name(name):
         return False
 
     import scenario_data
+    if scenario_data.is_anomalous_high_school_scenario(scenario):
+        from mechanics.social.roster_tags import derive_age_group, is_anomalous_high_school_contact_eligible
+        from mechanics.social.origin_mode import is_student_operative
+        from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag, TAG_SPECIAL_AGENT
+
+        player_age_grp = "teen"
+        if isinstance(raw_entity_dict, dict) and raw_entity_dict.get("player_age_group"):
+            player_age_grp = str(raw_entity_dict.get("player_age_group")).strip().lower()
+        elif session_id:
+            try:
+                import db as _db_ahs
+                sess_ahs = _db_ahs.get_session(int(session_id)) or {}
+                player_age_grp = "teen" if is_student_operative(sess_ahs) else "adult"
+            except Exception:
+                player_age_grp = "teen"
+
+        probe_ent = dict(raw_entity_dict) if isinstance(raw_entity_dict, dict) else {
+            "name": name,
+            "role": role,
+            "description": description,
+            "grade": grade,
+            "social_role_type": social_role_type,
+            "age_group": age_group,
+        }
+        if session_id and name and (not role or not grade):
+            try:
+                import db as _db_ahs2
+                for r_entry in (_db_ahs2.get_school_roster(int(session_id)) or []):
+                    if str(r_entry.get("name", "")).strip().lower() == str(name).strip().lower():
+                        role = role or str(r_entry.get("role") or "")
+                        grade = grade or str(r_entry.get("grade") or "")
+                        age_group = age_group or str(r_entry.get("age_group") or "")
+                        social_role_type = social_role_type or str(r_entry.get("social_role_type") or "")
+                        probe_ent = {**r_entry, **probe_ent, "role": role, "grade": grade}
+                        break
+            except Exception:
+                pass
+
+        npc_is_agent = bool(
+            probe_ent.get("is_special_agent")
+            or (probe_ent.get("basic_info") or {}).get("is_special_agent")
+            or classify_anomalous_npc_tag(probe_ent, session_id=int(session_id or 0), scen_key=scenario) == TAG_SPECIAL_AGENT
+        )
+        npc_age_grp = str(age_group or "").strip().lower()
+        if npc_age_grp not in ("teen", "adult"):
+            npc_age_grp = derive_age_group(
+                grade=grade,
+                role=role,
+                social_role_type=social_role_type,
+                scen_key=scenario,
+                is_family=is_adult_family,
+            )
+            if npc_is_agent and grade not in ("Freshman", "Sophomore", "Junior", "Senior", "Youth Peer", "Student") and not probe_ent.get("is_student_agent"):
+                if not any(k in str(grade or "").lower() for k in ("freshman", "sophomore", "junior", "senior", "student")):
+                    npc_age_grp = "adult"
+
+        srt_clean_ahs = str(social_role_type or "").lower().strip()
+        is_fam_ahs = bool(is_adult_family or srt_clean_ahs in ("family_relative", "parent"))
+        return is_anomalous_high_school_contact_eligible(
+            player_age_group=player_age_grp,
+            npc_age_group=npc_age_grp,
+            npc_is_special_agent=npc_is_agent,
+            is_household_family=is_fam_ahs,
+        )
+
     is_hs = scenario_data.has_tag(scenario, "high_school")
     
     if is_hs:
-        # Priority 1: Deterministic Enum Check
+        # Kinship exception: adult family members are allowed for household mechanics
         srt_clean = str(social_role_type or "").lower().strip()
-        if srt_clean in ("faculty_staff", "adult_service", "family_relative", "parent"):
+        if is_adult_family or srt_clean in ("family_relative", "parent"):
+            return True
+
+        if srt_clean in ("faculty_staff", "adult_service"):
             return False
         if srt_clean in ("student_peer", "peer", "contemporary", "classmate"):
             return True
 
-        # Look up grade/role/social_role_type from session, contacts, or school_directory
+        # Adult title/honorific fast-path on NPC name (e.g. "Dr. Vance", "Prof. Mori", "Mr. Sato")
+        if name and _NON_PEER_HIGH_SCHOOL_RE[0].search(str(name)):
+            return False
+
+        # Fast-path: Check explicit age_group if present on entity
+        if age_group.lower() == "adult":
+            return False
+        if age_group.lower() == "teen":
+            return True
+
+        # Fast-path: In-memory derivation before querying SQLite
+        from mechanics.social.roster_tags import derive_age_group, _STUDENT_ROLE_EXCEPTIONS, _STUDENT_GRADES
+        if grade or social_role_type:
+            derived_age = derive_age_group(grade=grade, role=role, social_role_type=social_role_type, scen_key=scenario, is_family=is_adult_family)
+            if derived_age == "adult":
+                return False
+            if derived_age == "teen":
+                return True
+        elif not session_id and role:
+            derived_age = derive_age_group(grade="", role=role, social_role_type=social_role_type, scen_key=scenario, is_family=is_adult_family)
+            if derived_age == "adult":
+                return False
+            r_low = str(role or "").strip().lower()
+            if any(k in r_low for k in _STUDENT_ROLE_EXCEPTIONS):
+                return True
+
+        # Look up grade/role/social_role_type from session, contacts, or school_directory if empty
         club = ""
         is_existing_contact = False
         if session_id:
@@ -107,7 +236,7 @@ def is_contact_eligible(
                             srt = n.get("social_role_type")
                             if srt:
                                 srt_low = str(srt).lower().strip()
-                                if srt_low in ("faculty_staff", "adult_service", "family_relative", "parent"):
+                                if srt_low in ("faculty_staff", "adult_service"):
                                     return False
                                 if srt_low in ("student_peer", "peer", "contemporary"):
                                     return True
@@ -123,7 +252,7 @@ def is_contact_eligible(
                     srt = b_inf.get("social_role_type")
                     if srt:
                         srt_low = str(srt).lower().strip()
-                        if srt_low in ("faculty_staff", "adult_service", "family_relative", "parent"):
+                        if srt_low in ("faculty_staff", "adult_service"):
                             return False
                         if srt_low in ("student_peer", "peer", "contemporary"):
                             return True
@@ -143,38 +272,13 @@ def is_contact_eligible(
             except Exception:
                 pass
 
-        grade_clean = str(grade or "").strip().lower()
-        if grade_clean in ("faculty", "citizen"):
+        if not grade and not any(rx.search(f"{role} {description}") for rx in _PEER_HIGH_SCHOOL_RE):
+            if any(rx.search(f"{name} {role}") for rx in _NON_PEER_HIGH_SCHOOL_RE):
+                return False
+
+        derived_age = derive_age_group(grade=grade, role=role, social_role_type=social_role_type, scen_key=scenario, is_family=is_adult_family)
+        if derived_age == "adult":
             return False
-        if grade_clean in ("freshman", "sophomore", "junior", "senior", "youth peer", "grade 9", "grade 10", "grade 11", "grade 12"):
-            return True
-
-        role_text = f"{name} {role} {grade} {club}".strip().lower()
-        combined_text = f"{role_text} {description}".strip().lower()
-        
-        # 1. Check for adult/faculty/service markers
-        has_non_peer_signal = any(rx.search(role_text) for rx in _NON_PEER_HIGH_SCHOOL_RE)
-        
-        # 2. Check for explicit student peer markers
-        has_peer_signal = any(rx.search(role_text) for rx in _PEER_HIGH_SCHOOL_RE) or any(rx.search(combined_text) for rx in _PEER_HIGH_SCHOOL_RE)
-
-        if has_non_peer_signal:
-            # Student Council / Class Rep / Club leaders are always recognized as peers
-            if "student council" in role_text or "class representative" in role_text or "class rep" in role_text:
-                return True
-            if has_peer_signal:
-                # If adult authority keywords (teacher, principal, parent, clerk, nurse, janitor, mr./mrs.) are present in role, it's adult
-                from game_engine.matching import matches_keyword_boundary
-                if matches_keyword_boundary(role_text, ("teacher", "professor", "principal", "parent", "mother", "father", "dad", "mom", "clerk", "cashier", "nurse", "janitor", "headmaster", "dean", "mr.", "mrs.", "dr.", "madame", "faculty")):
-                    return False
-                return True
-            return False
-
-        if has_peer_signal or is_existing_contact:
-            return True
-
-        # In High School Drama, any novel teenager / student archetype (e.g. "Goth Otaku", "Chess Prodigy", "Track Star", "Campus Streamer")
-        # that has NO adult/faculty keywords defaults cleanly to True (Eligible Student Contemporary).
         return True
 
     return True
@@ -987,9 +1091,32 @@ def collect_met_npc_names(
     met_names.discard("none")
     if player_char_name:
         met_names.discard(player_char_name.strip().lower())
+    # Anomalous entities (and their disguise aliases) are Folklore Codex subjects, never human Known Characters
+    for anom_nm in _collect_session_anomaly_names(session):
+        met_names.discard(anom_nm)
     return met_names
 
 
+def _collect_session_anomaly_names(session: dict) -> set:
+    names: set = set()
+    if not isinstance(session, dict):
+        return names
+    for n in (session.get("current_npcs") or []):
+        if isinstance(n, dict) and (n.get("is_anomalous_entity") or n.get("non_hostile_anomaly")) and n.get("name"):
+            names.add(str(n["name"]).strip().lower())
+    for inc in (session.get("daily_incursions") or session.get("daily_breaches") or []):
+        if not isinstance(inc, dict):
+            continue
+        bp = inc.get("anomaly_blueprint") if isinstance(inc.get("anomaly_blueprint"), dict) else {}
+        for cand in (
+            inc.get("entity_name"),
+            bp.get("name"),
+            bp.get("canonical_name"),
+            (bp.get("disguise_state") or {}).get("disguise_alias") if isinstance(bp.get("disguise_state"), dict) else None,
+        ):
+            if cand and str(cand).strip():
+                names.add(str(cand).strip().lower())
+    return names
 def _has_real_player_memories(mem_val: Any) -> bool:
     """Returns True ONLY if a memory field contains actual shared player memories (ignoring auto-seeded Past History lore)."""
     if not mem_val:
@@ -1085,6 +1212,15 @@ def is_unlocked_contact(
         return False
     b_info = _parse_contact_basic_info(contact)
     if contact.get("is_dispatch_channel") or b_info.get("is_dispatch_channel"):
+        return False
+    if (
+        contact.get("is_anomalous_entity")
+        or b_info.get("is_anomalous_entity")
+        or contact.get("anomalous_npc_tag") == "anomaly_entity"
+        or b_info.get("anomalous_npc_tag") == "anomaly_entity"
+        or str(contact.get("npc_type") or b_info.get("npc_type") or "").lower() == "anomaly"
+        or str(contact.get("social_role_type") or b_info.get("social_role_type") or "").lower() == "anomaly"
+    ):
         return False
     score = int(contact.get("relationship_score", 0) or 0)
     if (
@@ -1905,16 +2041,43 @@ def enrich_contact_dossier(
                 c_binfo_mut.setdefault("faction_id", anom_prof["faction_id"])
                 if anom_prof["faction_name"]:
                     c_binfo_mut.setdefault("faction", anom_prof["faction_name"])
-                # Expose innate abilities when unlocked (score >= 100), in party, debug, or same-faction colleague
-                if score >= 100 or in_party_companion or debug_reveal_all or same_faction_colleague:
+                c["attribute"] = anom_prof.get("attribute")
+                c["combat_archetype"] = anom_prof.get("combat_archetype")
+                c_binfo_mut.setdefault("attribute", anom_prof.get("attribute"))
+                c_binfo_mut.setdefault("combat_archetype", anom_prof.get("combat_archetype"))
+                has_intel = bool(
+                    c_binfo_mut.get("dossier_intel_unlocked")
+                    or c.get("dossier_intel_unlocked")
+                )
+                # 2-Stage Dossier: Stage 1 exposes Attribute + Archetype; Stage 2 (affinity >= 15, Intel, recruited, colleague, or debug) reveals Medium + 5-skill kit
+                stage_2_unlocked = bool(
+                    score >= 15
+                    or in_party_companion
+                    or debug_reveal_all
+                    or same_faction_colleague
+                    or has_intel
+                )
+                if stage_2_unlocked:
+                    c["dossier_stage"] = 2
+                    c["ability_medium"] = anom_prof.get("ability_medium")
+                    c["ability_medium_masked"] = False
                     c["innate_abilities"] = anom_prof["innate_abilities"]
                     c["innate_ability_details"] = anom_prof["innate_ability_details"]
+                    c_binfo_mut["ability_medium"] = anom_prof.get("ability_medium")
                 else:
+                    c["dossier_stage"] = 1
+                    c["ability_medium"] = None
+                    c["ability_medium_masked"] = True
                     c["innate_abilities"] = []
                     c["innate_ability_details"] = []
+                c["debug_ability_medium"] = anom_prof.get("ability_medium")
                 c["debug_innate_ability_details"] = anom_prof["innate_ability_details"]
             else:
                 c["same_faction_colleague"] = False
+                c["dossier_stage"] = 0
+                c["attribute"] = None
+                c["combat_archetype"] = None
+                c["ability_medium"] = None
                 c["innate_abilities"] = []
                 c["innate_ability_details"] = []
             c["basic_info"] = c_binfo_mut

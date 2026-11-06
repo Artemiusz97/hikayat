@@ -156,6 +156,9 @@ export const useGameSession = (user, character) => {
         setWaitingForParty(false);
         setProcessingTurn(false);
         setLastSyncTimestamp(data.sync_timestamp || Date.now());
+      } else if (data.type === 'STREAM_RESET') {
+        setStreamingNarrative('');
+        setStreamingState(prev => (prev ? { ...prev, outcomeText: '', nextText: '' } : null));
       } else if (data.type === 'STREAM_ERROR') {
         setIsStreaming(false);
         setStreamingNarrative(null);
@@ -219,6 +222,9 @@ export const useGameSession = (user, character) => {
           .filter(m => m && m.online)
           .map(m => m.user_id);
         setOnlineUserIds(online);
+      } else if (data.type === 'WORLD_PULSE_SYNC') {
+        setSession(prev => (prev ? { ...prev, world_pulse: data.world_pulse } : prev));
+        setLastSyncTimestamp(data.sync_timestamp || Date.now());
       } else if (data.type === 'STEALTH_STATE_UPDATED') {
         setSession(prev => {
           if (!prev) return prev;

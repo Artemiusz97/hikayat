@@ -56,17 +56,17 @@ ITEM_ICON_KEYWORDS = {
     "tea": ("tea", "matcha", "oolong", "jasmine", "herbal infusion"),
     "wine": ("wine", "chalice"),
     "beer": ("ale", "beer", "cider", "mead"),
-    "drink": ("soda", "fizz", "ramune", "smoothie", "juice", "drink", "cocktail", "water", "hydrator"),
+    "drink": ("soda", "fizz", "ramune", "smoothie", "juice", "drink", "cocktail", "water", "hydrator", "milk"),
     "food": (
         "bento", "ramen", "roast", "stew", "bread", "cake", "cookie", "tart", "pie",
-        "snack", "meal", "omakase", "wagyu", "sandwich", "melon pan", "ration", "food", "feast"
+        "snack", "meal", "omakase", "wagyu", "sandwich", "melon pan", "ration", "food", "feast", "cucumber", "tofu", "aburaage", "offering"
     ),
     "health": ("health", "hp", "heal", "bandage", "salve", "stimpack"),
     "mana": ("mana", "mp", "elixir", "ether"),
-    "potion": ("potion", "draught", "phial", "consumable"),
+    "potion": ("potion", "draught", "phial", "consumable", "kaffir lime", "blessed salt", "incense"),
     "quest": (
         "key", "map", "letter", "tome", "book", "scroll", "signet", "chip", "card",
-        "keycard", "deck", "terminal", "clipboard", "relic", "lantern", "quest", "key item"
+        "keycard", "deck", "terminal", "clipboard", "relic", "lantern", "quest", "key item", "talisman", "iron charm", "ward"
     ),
 }
 

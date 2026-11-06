@@ -17,6 +17,8 @@ def generate_random_equipment(
     private_agency_bonus: bool = False,
     force_anomalous: Optional[bool] = None,
     force_granted_spell: Optional[bool] = None,
+    quality_tier: Optional[str] = None,
+    enchantment_tier: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Generates a procedurally generated item with balanced stats, tags,
@@ -30,9 +32,31 @@ def generate_random_equipment(
         choose_anomalous_weapon_archetype,
         apply_anomalous_incursions_gear_rules,
     )
+    from mechanics.combat.equipment.tables import (
+        LEGACY_TIER_TO_DUAL_AXIS,
+        derive_legacy_tier,
+        QUALITY_STAT_MULTIPLIERS,
+        QUALITY_NAMES,
+        ENCHANTMENT_NAMES,
+    )
+    from mechanics.combat.equipment.metadata import (
+        roll_quality_tier,
+        roll_enchantment_tier,
+    )
+
     is_anom_scen = is_anomalous_scenario(scenario)
     is_non_combat = is_non_combat_scenario(scenario) and not is_anom_scen
-    item_tier = tier if tier in (1, 2, 3) else roll_tier()
+
+    if tier in (1, 2, 3) and (not quality_tier or not enchantment_tier):
+        def_q, def_e = LEGACY_TIER_TO_DUAL_AXIS.get(tier, ("regular", "none"))
+        q_tier = quality_tier or def_q
+        e_tier = enchantment_tier or def_e
+    else:
+        q_tier = quality_tier or roll_quality_tier()
+        e_tier = enchantment_tier or roll_enchantment_tier()
+
+    item_tier = tier if tier in (1, 2, 3) else derive_legacy_tier(q_tier, e_tier)
+    quality_mult = QUALITY_STAT_MULTIPLIERS.get(q_tier, 1.00)
 
     if is_non_combat:
         if slot == "Weapon":
@@ -78,6 +102,10 @@ def generate_random_equipment(
         metadata: Dict[str, Any] = {
             "name": name,
             "tier": item_tier,
+            "quality_tier": q_tier,
+            "enchantment_tier": e_tier,
+            "quality_name": QUALITY_NAMES.get(q_tier, "Standard"),
+            "enchantment_name": ENCHANTMENT_NAMES.get(e_tier, "Mundane"),
             "tier_name": TIER_NAMES[item_tier],
             "slot": slot,
             "item_type": item_type,
@@ -132,11 +160,13 @@ def generate_random_equipment(
     tier_mult = 1.0 if item_tier == 3 else (1.4 if item_tier == 2 else 2.0)
     stat_mods: Dict[str, Any] = {}
 
-    # 1. Inherent Base Archetype Stats (Main attributes)
+    # 1. Inherent Base Archetype Stats (Main attributes scaled by tier and quality)
     for k, v in base_data.items():
         if k.startswith("base_"):
             stat_name = k.replace("base_", "")
-            val = int(round(v * tier_mult))
+            val = int(round(v * tier_mult * quality_mult))
+            if stat_name in ("cha", "per", "str", "end", "agi", "int", "luck", "luk"):
+                val = max(-1, min(1, val))
             if val != 0:
                 stat_mods[stat_name] = val
 
@@ -147,8 +177,19 @@ def generate_random_equipment(
         stat_mods["acc"] = stat_mods.get("acc", 0) + (4 * (4 - item_tier))
         stat_mods["macc"] = stat_mods.get("macc", 0) + (4 * (4 - item_tier))
 
-    # 2. Roll Dynamic Random Bonus Attributes (1 for T3, 2-3 for T2, 3-5 for T1)
-    num_random_attrs = 1 if item_tier == 3 else (random.randint(2, 3) if item_tier == 2 else random.randint(3, 5))
+    # 2. Roll Dynamic Random Bonus Attributes (governed by enchantment_tier)
+    if e_tier == "tier_1":
+        num_random_attrs = random.randint(3, 5)
+        range_tier = 1
+    elif e_tier == "tier_2":
+        num_random_attrs = random.randint(2, 3)
+        range_tier = 2
+    elif e_tier == "tier_3":
+        num_random_attrs = 1
+        range_tier = 3
+    else:
+        num_random_attrs = 0
+        range_tier = 3
     
     # Filter candidate affixes based on equipment type
     candidate_affix_keys = list(RANDOM_AFFIX_POOL.keys())
@@ -161,18 +202,18 @@ def generate_random_equipment(
     elif item_type == "Shield":
         candidates = [k for k in candidate_affix_keys if RANDOM_AFFIX_POOL[k]["type"] in ("defensive", "resistance", "vitals")]
     else:  # Accessory
-        candidates = [k for k in candidate_affix_keys if k != "block_chance"]
+        candidates = [k for k in candidate_affix_keys if k not in ("block_chance", "dt_bonus")]
 
-    # Exclude omni_res on Tier 3
-    if item_tier == 3 and "omni_res" in candidates:
+    # Exclude omni_res on Tier 3 / Minor
+    if range_tier == 3 and "omni_res" in candidates:
         candidates.remove("omni_res")
 
-    selected_affix_keys = random.sample(candidates, min(num_random_attrs, len(candidates)))
+    selected_affix_keys = random.sample(candidates, min(num_random_attrs, len(candidates))) if num_random_attrs > 0 else []
     rolled_themes = []
 
     for a_key in selected_affix_keys:
         a_def = RANDOM_AFFIX_POOL[a_key]
-        range_key = f"t{item_tier}_range"
+        range_key = f"t{range_tier}_range"
         min_v, max_v = a_def.get(range_key, (1, 5))
         if max_v > 0:
             rolled_val = random.randint(min_v, max_v)
@@ -196,6 +237,10 @@ def generate_random_equipment(
         stat_mods["crit"] = stat_mods.get("crit", 0) + 8
 
     # 3. Attribute-Linked Procedural Naming Engine
+    for s_key in ("cha", "per", "str", "end", "agi", "int", "luck", "luk"):
+        if s_key in stat_mods and stat_mods[s_key] > 1:
+            stat_mods[s_key] = 1
+
     dominant_theme = random.choice(rolled_themes) if rolled_themes else "arcane"
     theme_dict = THEME_VOCABULARY.get(dominant_theme, THEME_VOCABULARY["arcane"])
 
@@ -222,6 +267,10 @@ def generate_random_equipment(
     metadata = {
         "name": name,
         "tier": item_tier,
+        "quality_tier": q_tier,
+        "enchantment_tier": e_tier,
+        "quality_name": QUALITY_NAMES.get(q_tier, "Standard"),
+        "enchantment_name": ENCHANTMENT_NAMES.get(e_tier, "Mundane"),
         "tier_name": TIER_NAMES[item_tier],
         "slot": slot,
         "item_type": item_type,
@@ -233,7 +282,7 @@ def generate_random_equipment(
     if item_type == "Weapon":
         metadata["mass"] = base_data.get("mass", "medium")
         metadata["handedness"] = base_data.get("handedness", "1H")
-        metadata["multiplier"] = base_data.get("multiplier", 1.0)
+        metadata["multiplier"] = round(base_data.get("multiplier", 1.0) * quality_mult, 2)
         metadata["crit_bonus"] = base_data.get("crit_bonus", 0)
         metadata["attack_types"] = list(base_data.get("attack_types", ["slash"]))
         metadata["attack_profiles"] = dict(base_data.get("attack_profiles", {}))
@@ -271,7 +320,7 @@ def generate_random_equipment(
             metadata["tags"].append("Versatile")
     elif item_type == "Shield":
         tier_mult = 1.0 if item_tier == 3 else (1.20 if item_tier == 2 else 1.45)
-        base_dt = int(round(base_data.get("base_dt", base_data.get("dt_contribution", 6)) * tier_mult))
+        base_dt = int(round(base_data.get("base_dt", base_data.get("dt_contribution", 6)) * tier_mult * quality_mult))
         type_dt = {k: int(round(v * tier_mult)) for k, v in base_data.get("type_dt", {}).items()}
         # Tier bonus
         if item_tier == 2:
@@ -290,7 +339,7 @@ def generate_random_equipment(
         metadata["tags"].append("Shield")
     elif item_type == "Armor":
         tier_mult = 1.0 if item_tier == 3 else (1.20 if item_tier == 2 else 1.45)
-        base_dt = int(round(base_data.get("base_dt", 0) * tier_mult))
+        base_dt = int(round(base_data.get("base_dt", 0) * tier_mult * quality_mult))
         type_dt = {k: int(round(v * tier_mult)) for k, v in base_data.get("type_dt", {}).items()}
         # Tier bonus for Armors
         if item_tier == 2:
@@ -345,15 +394,10 @@ def generate_random_equipment(
         metadata["protection_types"] = prots
         metadata["tags"].append(f"{metadata['armor_type'].title()} Armor")
     elif item_type == "Accessory":
-        tier_mult = 1.0 if item_tier == 3 else (1.20 if item_tier == 2 else 1.45)
-        base_dt = int(round(base_data.get("base_dt", 0) * tier_mult))
-        type_dt = {k: int(round(v * tier_mult)) for k, v in base_data.get("type_dt", {}).items()}
-        if "dt_bonus" in stat_mods:
-            base_dt += stat_mods["dt_bonus"]
-        if "magic_dt" in stat_mods:
-            type_dt["magical"] = type_dt.get("magical", 0) + stat_mods["magic_dt"]
-        metadata["base_dt"] = base_dt
-        metadata["type_dt"] = type_dt
+        metadata["mass"] = "light"
+        metadata["base_dt"] = 0
+        metadata["dt_contribution"] = 0
+        metadata["type_dt"] = {}
         metadata["tags"].append("Accessory")
 
     res_item = {
@@ -463,8 +507,9 @@ def format_equipment_card(metadata: Dict[str, Any]) -> str:
     }
     for elem, icon in elem_icons.items():
         atk_key = f"{elem}_atk"
-        if atk_key in stats and stats[atk_key] > 0:
-            stat_parts.append(f"{icon} {elem.title()} ATK +{stats[atk_key]}")
+        atk_val = float(stats.get(atk_key) or 0)
+        if atk_val > 0:
+            stat_parts.append(f"{icon} {elem.title()} ATK +{int(atk_val) if atk_val.is_integer() else atk_val}")
 
     # Elemental Conversion
     for elem in ("fire", "shock", "ice", "poison", "holy", "dark", "earth", "water", "wind", "energy"):

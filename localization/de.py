@@ -58,7 +58,7 @@ ITEM_ICON_KEYWORDS = {
     "food": ("essen", "proviant", "brot", "fleisch"),
     "health": ("heilung", "gesundheit", "lebenselixier", "verband", "salbe", "heiltrank", "*heiltrank"),
     "mana": ("mana", "manatrank", "*manatrank"),
-    "potion": ("trank", "*trank", "elixier", "*elixier", "phiole", "mixtur", "heiltrank"),
+    "potion": ("trank", "*trank", "elixier", "*elixier", "phiole", "mixtur", "heiltrank", "räucherwerk", "geweihtes salz", "kaffir-limette", "gurke", "tofu", "talisman", "eisenamulett"),
     "quest": ("schlüssel", "karte", "brief", "schriftrolle", "dokument", "relikt"),
 }
 

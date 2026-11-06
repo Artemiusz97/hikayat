@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Merchant Mechanic Module for Hikayat.
 
@@ -7,7 +8,7 @@ and Discord UI views (MerchantView, MerchantVoteView, BuySelectView, SellSelectV
 import json
 import logging
 import random
-import discord
+from typing import Optional, Dict, Any, List, Tuple, Union
 
 import db
 import namegen
@@ -216,6 +217,42 @@ MERCHANT_ARCHETYPES: dict[str, dict] = {
 }
 
 
+def _apply_world_event_shop_multiplier(ctx: dict, session: dict | None, is_phone_shop: bool = False) -> dict:
+    if is_phone_shop or not isinstance(session, dict) or not session.get("id"):
+        return ctx
+    try:
+        from mechanics.world.world_events.modifiers import compute_merchant_event_multiplier
+        snap = session.get("_world_events_snapshot") or db.get_world_events_snapshot(int(session["id"]))
+        loc_nid = str(session.get("current_node_id") or session.get("current_location_id") or "")
+        ev_mult = compute_merchant_event_multiplier(snap, location_node_id=loc_nid)
+        if ev_mult != 1.0 and not ctx.get("is_monastic_free_shop"):
+            base_m = float(ctx.get("price_multiplier", 1.0) or 1.0)
+            ctx["price_multiplier"] = round(max(0.5, min(2.0, base_m * ev_mult)), 3)
+            if ev_mult < 1.0:
+                ctx["is_event_discounted_shop"] = True
+    except Exception:
+        pass
+    return ctx
+
+
+
+def stamp_discounted_purchase_metadata(item_eff: str, price_paid: int) -> str:
+    """Embeds purchase_price_paid into item metadata/effect so resale cannot arbitrage festival discounts."""
+    eff_str = str(item_eff or "")
+    paid_int = max(0, int(price_paid))
+    for prefix in ("[ITEM_JSON]", "[GEAR_JSON]", "[CONSUMABLE_JSON]"):
+        if eff_str.startswith(prefix):
+            try:
+                meta_obj = json.loads(eff_str[len(prefix):])
+                if isinstance(meta_obj, dict):
+                    meta_obj["purchase_price_paid"] = paid_int
+                    return f"{prefix}{json.dumps(meta_obj)}"
+            except Exception:
+                pass
+            return eff_str
+    return f"[CONSUMABLE_JSON]{json.dumps({'description': eff_str, 'purchase_price_paid': paid_int})}"
+
+
 def get_anomalous_shop_faction_context(
     session: dict | None,
     location: str = "",
@@ -241,15 +278,18 @@ def get_anomalous_shop_faction_context(
         "pricing_badge": None,
     }
     if not session or is_phone_shop:
-        return ctx
+        return _apply_world_event_shop_multiplier(ctx, session, is_phone_shop=is_phone_shop)
     scen_key = session.get("scenario", "")
     if not scenario_data.is_anomalous_incursions_scenario(scen_key):
-        return ctx
+        return _apply_world_event_shop_multiplier(ctx, session, is_phone_shop=is_phone_shop)
+
 
     ctx["is_anomalous"] = True
     session_id = session.get("id")
     loc_str = str(location or session.get("current_location") or "").lower().strip()
     loc_id = str(session.get("current_node_id") or session.get("current_location_id") or "").lower().strip()
+    if location and (location.startswith("loc_") or location.startswith("sub_")):
+        loc_id = location.lower().strip()
 
     from mechanics.social.factions import get_anomalous_faction_state
     a_state = get_anomalous_faction_state(session_id, user_id=user_id) if session_id else {}
@@ -294,15 +334,26 @@ def get_anomalous_shop_faction_context(
         loc_id.startswith("sub_priv1_")
         or loc_id in ("loc_private_hq_1_armory", "loc_private_hq_1", "loc_private_hq_1_lobby")
         or "regional tower hq" in loc_str
+        or "corporate tower hq" in loc_str
         or "tower hq" in loc_str
+        or any(k in loc_str for k in (
+            "in-house r&d ordnance", "exo-weave & ballistic atelier",
+            "neural-cleanse suite", "skyline executive espresso",
+        ))
         or (priv1_hq_name and priv1_hq_name in loc_str)
     ):
         shop_arch = "private_agency_1"
     elif (
         loc_id.startswith("sub_priv2_")
         or loc_id in ("loc_private_hq_2_armory", "loc_private_hq_2", "loc_private_hq_2_lobby")
+        or "field office hq" in loc_str
+        or "office hq" in loc_str
         or "operations spire hq" in loc_str
         or "operations hq" in loc_str
+        or any(k in loc_str for k in (
+            "back-room gun cage", "surplus locker", "patching corner",
+            "first-aid cot", "drip-coffee kitchenette",
+        ))
         or (priv2_hq_name and priv2_hq_name in loc_str)
     ):
         shop_arch = "private_agency_2"
@@ -332,6 +383,12 @@ def get_anomalous_shop_faction_context(
     ):
         shop_arch = "public_agency"
 
+    elif (
+        loc_id == "sub_custodian_boiler_locker"
+        or any(k in loc_str for k in ("custodian's boiler-room locker", "boiler-room locker", "custodian's boiler"))
+    ):
+        shop_arch = "student_boiler_locker"
+
     ctx["shop_faction_archetype"] = shop_arch
 
     if shop_arch == "public_agency":
@@ -342,18 +399,30 @@ def get_anomalous_shop_faction_context(
         else:
             ctx["price_multiplier"] = 1.0
             ctx["pricing_badge"] = "🏛️ Public Agency Storefront (1.0x Standard Price for External Operatives)"
-    elif shop_arch in ("private_agency_1", "private_agency_2"):
+    elif shop_arch == "private_agency_1":
         ctx["private_agency_bonus"] = True
         if player_arch == shop_arch:
             ctx["price_multiplier"] = 1.35
-            ctx["pricing_badge"] = "🏢 Private Syndicate Armory (1.35x Markup • +20% Anomalous & High-Tier Stock)"
+            ctx["pricing_badge"] = "🏢 Corporate R&D Armory (1.35x Proprietary Markup • +20% Anomalous & Prototype Stock)"
         else:
             ctx["allowed"] = False
             ctx["access_denied_reason"] = (
-                "Private Syndicate Armory access is restricted exclusively to contracted operatives of this agency."
+                "Corporate R&D Armory requisition is restricted exclusively to operatives under conglomerate contract."
             )
             ctx["price_multiplier"] = 1.35
-            ctx["pricing_badge"] = "🔒 Private Syndicate Armory (Members Only)"
+            ctx["pricing_badge"] = "🔒 Corporate R&D Armory (Conglomerate Staff Only)"
+    elif shop_arch == "private_agency_2":
+        ctx["private_agency_bonus"] = True
+        if player_arch == shop_arch:
+            ctx["price_multiplier"] = 1.35
+            ctx["pricing_badge"] = "🏪 Agency Surplus & Broker Cage (1.35x Broker Markup • +20% Anomalous & Salvage Stock)"
+        else:
+            ctx["allowed"] = False
+            ctx["access_denied_reason"] = (
+                "The padlocked back-room gun cage and surplus locker are strictly for this local agency's contracted staff."
+            )
+            ctx["price_multiplier"] = 1.35
+            ctx["pricing_badge"] = "🔒 Agency Surplus & Broker Cage (Local Agency Staff Only)"
     elif shop_arch == "monastic_order":
         if player_arch == "monastic_order":
             max_daily = int(a_state.get("shrine_free_max_daily", 3) or 3)
@@ -375,8 +444,35 @@ def get_anomalous_shop_faction_context(
         else:
             ctx["price_multiplier"] = 1.0
             ctx["pricing_badge"] = "⛩️ Shrine Talisman & Curio Stand (Standard Visitor Pricing)"
+    elif shop_arch == "student_boiler_locker":
+        from mechanics.social.origin_mode import is_student_operative
+        from mechanics.social.factions import is_school_club_faction
+        if is_student_operative(session):
+            ctx["allowed"] = True
+            ctx["private_agency_bonus"] = True
+            max_club_rep = 0
+            if session_id:
+                try:
+                    for fac in (db.get_factions(session_id) or []):
+                        if is_school_club_faction(fac):
+                            max_club_rep = max(max_club_rep, int(fac.get("reputation_score") or 0))
+                except Exception:
+                    pass
+            club_disc_pct = min(25, max(0, int(round(max_club_rep * 25 / 85)))) if max_club_rep > 0 else 0
+            ctx["price_multiplier"] = round(max(0.75, 1.0 - (club_disc_pct / 100.0)), 2)
+            disc_str = f" • -{club_disc_pct}% Club Standing Discount" if club_disc_pct > 0 else " • 1.0x Base Price"
+            ctx["pricing_badge"] = f"🗝️ Custodian's Boiler-Room Locker (+20% Anomalous & Prototype Stock{disc_str})"
+        else:
+            ctx["allowed"] = False
+            ctx["access_denied_reason"] = (
+                "The Custodian's Boiler-Room Locker is an underground student-operative drop-box; adult agents are turned away at the boiler door."
+            )
+            ctx["price_multiplier"] = 1.0
+            ctx["pricing_badge"] = "🔒 Custodian's Boiler-Room Locker (Student Operatives Only)"
 
-    return ctx
+    return _apply_world_event_shop_multiplier(ctx, session)
+
+
 
 
 def compute_anomalous_resale_price(item_dict: dict, default_sell_price: int) -> int:
@@ -387,6 +483,7 @@ def compute_anomalous_resale_price(item_dict: dict, default_sell_price: int) -> 
     """
     if not item_dict or not isinstance(item_dict, dict):
         return default_sell_price
+
     from mechanics.combat.equipment import parse_equipment_metadata
     from mechanics.combat.items import parse_consumable_metadata
 
@@ -421,53 +518,84 @@ def compute_anomalous_resale_price(item_dict: dict, default_sell_price: int) -> 
     return default_sell_price
 
 
-def calculate_balanced_price(item_type: str, item_name: str, tier: int = 3, scen_key: str = "fantasy") -> int:
-    """
-    Calculates balanced base price according to item category and tier.
-    """
-    from mechanics.combat.items import parse_item_tier
-    t = tier or parse_item_tier({"name": item_name, "item_type": item_type})
+def mark_vault_requisition_claimed(session: dict | None, item_name: str) -> list[dict] | None:
+    """Marks a one-time Containment Vault requisition item as claimed in `session['anomalous_vault_requisitions']`."""
+    if not isinstance(session, dict):
+        return None
+    req_list = [dict(r) for r in (session.get("anomalous_vault_requisitions") or []) if isinstance(r, dict)]
+    bought_low = str(item_name or "").strip().lower()
+    if not bought_low:
+        return None
+    for r_item in req_list:
+        if str(r_item.get("name") or "").strip().lower() == bought_low and not r_item.get("requisitioned"):
+            r_item["requisitioned"] = True
+            session["anomalous_vault_requisitions"] = req_list
+            return req_list
+    return None
 
-    item_type_lower = (item_type or "").lower()
+
+def calculate_balanced_price(
+    item_type: str,
+    item_name: str,
+    tier: int = 3,
+    scen_key: str = "fantasy",
+    quality_tier: Optional[str] = None,
+    enchantment_tier: Optional[str] = None,
+    metadata: Optional[dict] = None
+) -> int:
+    """
+    Calculates balanced base price according to item category and compound dual-axis tiers:
+    Price = round(base_price * Quality_Multiplier) + Enchantment_Flat_Premium.
+    Maintains 100% backward compatibility when only legacy `tier: int` is provided.
+    """
+    from mechanics.combat.equipment.tables import (
+        QUALITY_PRICE_MULTIPLIERS,
+        ENCHANTMENT_PREMIUMS,
+        LEGACY_TIER_TO_DUAL_AXIS,
+        derive_legacy_tier,
+    )
+    from mechanics.combat.items import parse_item_tier
+
+    t = tier or parse_item_tier({"name": item_name, "item_type": item_type})
+    q_tier = quality_tier
+    e_tier = enchantment_tier
+
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except Exception:
+            metadata = None
+
+    if metadata and isinstance(metadata, dict):
+        q_tier = q_tier or metadata.get("quality_tier")
+        e_tier = e_tier or metadata.get("enchantment_tier")
+
+    if not q_tier or not e_tier:
+        def_q, def_e = LEGACY_TIER_TO_DUAL_AXIS.get(t, ("regular", "none"))
+        q_tier = q_tier or def_q
+        e_tier = e_tier or def_e
+
+    q_tier = str(q_tier).lower()
+    e_tier = str(e_tier).lower()
+
+    item_type_lower = (item_type or "").lower().strip()
 
     if item_type_lower in ("potion", "food", "consumable"):
-        if t == 1:
-            return random.randint(160, 320)
-        elif t == 2:
-            return random.randint(40, 75)
-        else:
-            return random.randint(10, 20)
-
+        base_p = 15
     elif item_type_lower in ("weapon", "shield", "armor", "head", "top", "bottom", "gloves", "shoes", "accessory", "clothing", "lingerie", "outerwear"):
-        if t == 1:
-            return random.randint(450, 950)
-        elif t == 2:
-            return random.randint(110, 240)
-        else:
-            return random.randint(25, 55)
-
+        base_p = 40
     elif item_type_lower == "spellbook":
-        if t == 1:
-            return 1200
-        elif t == 2:
-            return 300
-        else:
-            return 80
-
+        base_p = 80
     elif item_type_lower in ("gift", "novelty"):
-        if t == 1:
-            return random.randint(250, 480)
-        elif t == 2:
-            return random.randint(60, 120)
-        else:
-            return random.randint(15, 30)
+        base_p = 20
+    else:
+        base_p = 18
 
-    # General fallback
-    if t == 1:
-        return random.randint(200, 400)
-    elif t == 2:
-        return random.randint(50, 100)
-    return random.randint(10, 25)
+    # Compound scale: base price scaled by quality multiplier + flat enchantment premium
+    q_mult = QUALITY_PRICE_MULTIPLIERS.get(q_tier, 1.0)
+    e_prem = ENCHANTMENT_PREMIUMS.get(e_tier, 0)
+    final_price = int(round(base_p * q_mult)) + e_prem
+    return max(1, final_price)
 
 
 async def generate_merchant_shop(party: list, merchant_name: str, merchant_description: str,
@@ -576,13 +704,32 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
                     "tier": 2,
                 },
             ])
+            if scenario_data.is_anomalous_high_school_scenario(scen_key):
+                for _courier_slot in ("Weapon", "Armor", "Accessory 1"):
+                    _c_eq = _gen_eq(
+                        scenario=scen_key,
+                        slot=_courier_slot,
+                        tier=2,
+                        private_agency_bonus=(_courier_slot == "Weapon"),
+                    )
+                    if _c_eq:
+                        _c_eq["price"] = calculate_balanced_price(
+                            _c_eq.get("item_type", "Item"),
+                            _c_eq.get("name", ""),
+                            tier=_c_eq.get("tier", 2),
+                            scen_key=scen_key,
+                            metadata=_c_eq.get("metadata"),
+                        )
+                        _c_eq["quantity"] = 1
+                        procedural_stock.append(_c_eq)
+                procedural_stock.append(generate_procedural_potion(tier=2, genre=scen_key))
         elif merchant_type in ("blacksmith", "armorer", "weaponsmith", "quartermaster", "general_merchant", "weapon_merchant", "armor_merchant"):
             slots = ["Weapon", "Weapon", "Armor", "Shield", "Top", "Accessory 1", "Gloves", "Shoes"]
             random.shuffle(slots)
             for s in slots[:4]:
                 eq = _gen_eq(scenario=scen_key, slot=s, tier=random.choice(tier_choices), private_agency_bonus=priv_bonus)
                 if eq:
-                    eq["price"] = calculate_balanced_price(eq.get("item_type", "Item"), eq.get("name", ""), tier=eq.get("tier", 3), scen_key=scen_key)
+                    eq["price"] = calculate_balanced_price(eq.get("item_type", "Item"), eq.get("name", ""), tier=eq.get("tier", 3), scen_key=scen_key, metadata=eq.get("metadata"))
                     eq["quantity"] = 1
                     procedural_stock.append(eq)
         elif merchant_type == "potion_merchant":
@@ -625,14 +772,14 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
             for s, t in (("Top", 3), ("Bottom", 3), ("Top", 2), ("Bottom", 2)):
                 cl = _gen_clothing(scenario=scen_key, slot=s, tier=t)
                 if cl:
-                    cl["price"] = calculate_balanced_price("Clothing", cl.get("name", ""), tier=t, scen_key=scen_key)
+                    cl["price"] = calculate_balanced_price("Clothing", cl.get("name", ""), tier=t, scen_key=scen_key, metadata=cl.get("metadata"))
                     cl["quantity"] = 1
                     procedural_stock.append(cl)
         elif merchant_type == "brand_clothes_merchant":
             for s, t in (("Top", 2), ("Bottom", 2), ("Top", 1), ("Bottom", 1)):
                 cl = _gen_clothing(scenario=scen_key, slot=s, tier=t)
                 if cl:
-                    cl["price"] = calculate_balanced_price("Clothing", cl.get("name", ""), tier=t, scen_key=scen_key)
+                    cl["price"] = calculate_balanced_price("Clothing", cl.get("name", ""), tier=t, scen_key=scen_key, metadata=cl.get("metadata"))
                     cl["quantity"] = 1
                     procedural_stock.append(cl)
         elif merchant_type == "accessories_merchant":
@@ -640,7 +787,7 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
                 eq = _gen_eq(scenario=scen_key, slot="Accessory 1", tier=t, private_agency_bonus=False)
                 if eq:
                     eq["item_type"] = "Accessory"
-                    eq["price"] = calculate_balanced_price("Accessory", eq.get("name", ""), tier=t, scen_key=scen_key)
+                    eq["price"] = calculate_balanced_price("Accessory", eq.get("name", ""), tier=t, scen_key=scen_key, metadata=eq.get("metadata"))
                     eq["quantity"] = 1
                     procedural_stock.append(eq)
         elif merchant_type == "gift_merchant":
@@ -783,7 +930,7 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
             for s in slots[:3]:
                 eq = _gen_eq(scenario=scen_key, slot=s, tier=random.choice(tier_choices), private_agency_bonus=priv_bonus)
                 if eq:
-                    eq["price"] = calculate_balanced_price(eq.get("item_type", "Item"), eq.get("name", ""), tier=eq.get("tier", 3), scen_key=scen_key)
+                    eq["price"] = calculate_balanced_price(eq.get("item_type", "Item"), eq.get("name", ""), tier=eq.get("tier", 3), scen_key=scen_key, metadata=eq.get("metadata"))
                     eq["quantity"] = 1
                     procedural_stock.append(eq)
         result = {
@@ -817,7 +964,7 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
             tier = 2
 
         # Calculate balanced pricing
-        balanced_price = int(entry.get("price") or 0) or calculate_balanced_price(item_type, item_name, tier=tier, scen_key=scen_key)
+        balanced_price = int(entry.get("price") or 0) or calculate_balanced_price(item_type, item_name, tier=tier, scen_key=scen_key, metadata=entry.get("metadata"))
         try:
             quantity = max(1, min(9, int(entry.get("quantity", 1))))
         except (TypeError, ValueError):
@@ -938,6 +1085,60 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
                         private_agency_bonus=priv_bonus,
                     )
 
+    # Folklore Wards & Offerings stock for Anomalous Incursions shops (Shrines, Quartermasters, Urban Markets)
+    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        from mechanics.world.folklore_mechanics import build_folklore_shop_stock_items
+
+        shop_arch = str(shop_ctx.get("shop_faction_archetype") or "")
+        loc_low = str((session or {}).get("current_location") or "").lower()
+        m_name_low = str(merchant_name or "").lower()
+        if shop_arch == "monastic_order" or any(k in loc_low or k in m_name_low for k in ("shrine", "torii", "temple", "talisman")):
+            folklore_pool = "shrine"
+        elif shop_arch in ("public_agency", "private_agency_1", "private_agency_2") or merchant_type in ("quartermaster", "armory_merchant", "weapon_merchant"):
+            folklore_pool = "quartermaster"
+        elif merchant_type in (
+            "convenience_merchant",
+            "food_merchant",
+            "night_market_merchant",
+            "general_merchant",
+            "potion_merchant",
+            "gift_merchant",
+            "alchemist",
+        ) or is_phone_shop:
+            folklore_pool = "urban_market"
+        else:
+            folklore_pool = None
+
+        if folklore_pool:
+            f_items = build_folklore_shop_stock_items(folklore_pool)
+            existing_stock_names = {str(s.get("name", "")).lower() for s in stock if isinstance(s, dict)}
+            formatted_f_items = []
+            for f_spec in f_items:
+                if f_spec["name"].lower() in existing_stock_names:
+                    continue
+                formatted_f_items.append({
+                    "name": f_spec["name"],
+                    "type": "Consumable",
+                    "item_type": "Consumable",
+                    "description": f_spec["desc"],
+                    "desc": f_spec["desc"],
+                    "price": int(f_spec["price"]),
+                    "quantity": 3,
+                    "tier": 3,
+                    "effect": f_spec["effect"],
+                    "appeasement_tags": list(f_spec.get("appeasement_tags") or []),
+                })
+            if (
+                shop_ctx.get("shop_faction_archetype") == "monastic_order"
+                and shop_ctx.get("player_faction_archetype") == "monastic_order"
+                and formatted_f_items
+            ):
+                # Rotate 1 consecrated folklore ward into the 3-item daily monastic ration
+                day_idx = int((session or {}).get("current_day") or (session or {}).get("in_game_day") or 1) % len(formatted_f_items)
+                stock = stock[:2] + [formatted_f_items[day_idx]]
+            else:
+                stock.extend(formatted_f_items)
+
     # Monastic Shrine Order member daily stock cap (2-3 items/day, quantity 1 each)
     if (
         shop_ctx.get("shop_faction_archetype") == "monastic_order"
@@ -946,6 +1147,40 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
         stock = stock[:3]
         for s_it in stock:
             s_it["quantity"] = 1
+
+    # Public Agency Bureau Vault Requisition: unlock secured Object Anomalies at the HQ Tactical Armory
+    # Gated strictly to formal enlisted operatives of public_agency (freelancers & student operatives do not have vault clearance)
+    if (
+        shop_ctx.get("shop_faction_archetype") == "public_agency"
+        and shop_ctx.get("player_faction_archetype") == "public_agency"
+        and isinstance(session, dict)
+    ):
+        req_items = list(session.get("anomalous_vault_requisitions") or [])
+        if not req_items and session.get("id"):
+            try:
+                sess_db = db.get_session(int(session["id"])) or {}
+                req_items = list(sess_db.get("anomalous_vault_requisitions") or [])
+            except Exception:
+                req_items = []
+        existing_names = {str(s.get("name", "")).lower() for s in stock if isinstance(s, dict)}
+        for req_it in req_items:
+            if not isinstance(req_it, dict) or req_it.get("requisitioned"):
+                continue
+            if req_it.get("name") and str(req_it["name"]).lower() not in existing_names:
+                req_copy = dict(req_it)
+                base_p = int(req_copy.get("price") or calculate_balanced_price(
+                    req_copy.get("item_type", "Weapon"),
+                    req_copy["name"],
+                    tier=int(req_copy.get("tier", 2) or 2),
+                    scen_key=scen_key,
+                    metadata=req_copy.get("metadata"),
+                ))
+                req_copy["price"] = base_p
+                req_copy["requisition_price"] = max(1, int(round(base_p * 0.50)))
+                req_copy["quantity"] = 1
+                req_copy["is_vault_requisition"] = True
+                stock.insert(0, req_copy)
+                existing_names.add(str(req_copy["name"]).lower())
 
     llm_rumors = [str(r)[:300] for r in (result.get("rumors") or []) if str(r).strip()]
     if is_phone_shop or merchant_type == "online_merchant":
@@ -1139,7 +1374,7 @@ async def evaluate_items_for_sale(items: list) -> dict:
         prices = {}
         for i in items:
             t = parse_item_tier(i)
-            p = calculate_balanced_price(i.get("item_type", "Item"), i.get("name", ""), tier=t)
+            p = calculate_balanced_price(i.get("item_type", "Item"), i.get("name", ""), tier=t, metadata=i.get("metadata"))
             sell_p = compute_anomalous_resale_price(i, max(1, p // 3))
             prices[str(i["name"])] = sell_p
         return prices
@@ -1191,6 +1426,30 @@ def apply_merchant_encounter_result(session_id: int, encounter: dict | list | No
 
 def discounted_price(base_price: int, discount_pct: int) -> int:
     return max(1, round(base_price * (1 - discount_pct / 100)))
+
+
+def compute_effective_shop_item_price(
+    item: Dict[str, Any],
+    shop_ctx: Optional[Dict[str, Any]] = None,
+    discount_pct: int = 0,
+) -> int:
+    """Single source of truth for effective shop item purchase price across Web API and Discord."""
+    ctx = shop_ctx or {}
+    base_price = int(item.get("price", 15) or 15) if isinstance(item, dict) else 15
+    if ctx.get("is_monastic_free_shop"):
+        return 0
+    if isinstance(item, dict) and item.get("is_vault_requisition"):
+        req_p = item.get("requisition_price")
+        if req_p is not None:
+            return max(1, int(req_p))
+        return max(1, int(round(base_price * 0.50)))
+    if ctx.get("is_public_discounted_shop"):
+        return max(1, int(round(base_price * 0.50)))
+    mult = float(ctx.get("price_multiplier", 1.0) or 1.0)
+    if mult != 1.0:
+        marked_up = int(round(base_price * mult))
+        return discounted_price(marked_up, int(discount_pct or 0))
+    return discounted_price(base_price, int(discount_pct or 0))
 
 
 def sell_bonus_price(base_price: int, discount_pct: int) -> int:
@@ -1314,12 +1573,19 @@ async def generate_faction_quartermaster_shop(faction: dict, session: dict) -> d
     faction_name = faction.get("name", "Faction")
     category = faction.get("category", "guild")
     rep_score = faction.get("reputation_score", 0)
-    from mechanics.social.factions import get_faction_discount
+    from mechanics.social.factions import get_faction_discount, infer_anomalous_faction_archetype
     auto_discount = get_faction_discount(rep_score)
+    fac_arch = infer_anomalous_faction_archetype(faction) if scenario_data.is_anomalous_incursions_scenario(scen_key) else ""
+    theme_hint = ""
+    if fac_arch == "private_agency_1":
+        theme_hint = "Theme: Massive corporate conglomerate — sleek, serialized, proprietary weapons and armor developed in-house by corporate R&D.\n"
+    elif fac_arch == "private_agency_2":
+        theme_hint = "Theme: Humble small-business private agency — eclectic off-the-shelf, surplus, pawn-shop, and multi-vendor gear sourced from whatever supplier they could find.\n"
 
     user_prompt = (
         f"{scenario_data.scenario_prompt_block(scen_info)}\n"
         f"Faction: {faction_name} (Category: {category})\n"
+        f"{theme_hint}"
         f"Player Reputation: {rep_score:+d} (Discount: {auto_discount}%)\n"
         f"Generate exclusive member-only quartermaster stock for {faction_name}.\n"
         f"Respond with JSON matching exactly this schema:\n{FACTION_QUARTERMASTER_SCHEMA}"
@@ -1333,21 +1599,32 @@ async def generate_faction_quartermaster_shop(faction: dict, session: dict) -> d
     else:
         from mechanics.combat.items import generate_random_equipment as _gen_eq
         q_stock = []
+        from mechanics.social.factions import is_school_club_faction as _is_hs_club_qm_gen
+        _priv_gen_qm = fac_arch in ("private_agency_1", "private_agency_2") or (
+            scenario_data.is_anomalous_high_school_scenario(scen_key) and _is_hs_club_qm_gen(faction)
+        )
         for slot in ["Weapon", "Armor", "Accessory 1"]:
-            eq = _gen_eq(scenario=scen_key, slot=slot, tier=2)
+            eq = _gen_eq(scenario=scen_key, slot=slot, tier=2, private_agency_bonus=_priv_gen_qm)
             if eq:
-                eq["price"] = calculate_balanced_price(eq.get("item_type", "Item"), eq.get("name", ""), tier=eq.get("tier", 2), scen_key=scen_key)
+                eq["price"] = calculate_balanced_price(eq.get("item_type", "Item"), eq.get("name", ""), tier=eq.get("tier", 2), scen_key=scen_key, metadata=eq.get("metadata"))
                 eq["quantity"] = 1
                 q_stock.append(eq)
+        if fac_arch == "private_agency_1":
+            intro_str = f"The {faction_name} R&D ordnance officer scans your biometric badge and unlocks a backlit case of proprietary in-house gear."
+        elif fac_arch == "private_agency_2":
+            intro_str = f"The {faction_name} supply clerk unhooks a padlock on the chain-link cage and slides over crates of assorted surplus and brokered gear."
+        else:
+            intro_str = f"The {faction_name} quartermaster nods at you."
         result = {
-            "intro_narrative": f"The {faction_name} quartermaster nods at you.",
+            "intro_narrative": intro_str,
             "stock": q_stock,
         }
     from mechanics.combat.equipment import enrich_equipment_item
     from mechanics.combat.items.anomalous_gear import apply_anomalous_incursions_gear_rules
-    from mechanics.social.factions import infer_anomalous_faction_archetype
-    fac_arch = infer_anomalous_faction_archetype(faction) if scenario_data.is_anomalous_incursions_scenario(scen_key) else ""
-    priv_bonus_qm = fac_arch in ("private_agency_1", "private_agency_2")
+    from mechanics.social.factions import is_school_club_faction as _is_hs_club_qm
+    priv_bonus_qm = fac_arch in ("private_agency_1", "private_agency_2") or (
+        scenario_data.is_anomalous_high_school_scenario(scen_key) and _is_hs_club_qm(faction)
+    )
 
     stock = []
     for entry in result.get("stock", []) or []:
@@ -1389,8 +1666,64 @@ async def generate_faction_quartermaster_shop(faction: dict, session: dict) -> d
                     private_agency_bonus=priv_bonus_qm,
                 )
         stock.append(qm_item)
+    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        from mechanics.world.folklore_mechanics import build_folklore_shop_stock_items
+        qm_pool = "shrine" if fac_arch == "monastic_order" else "quartermaster"
+        f_qm_items = build_folklore_shop_stock_items(qm_pool)
+        existing_qm_f = {str(s.get("name", "")).lower() for s in stock if isinstance(s, dict)}
+        formatted_qm_f = []
+        for f_spec in f_qm_items:
+            if f_spec["name"].lower() in existing_qm_f:
+                continue
+            formatted_qm_f.append({
+                "name": f_spec["name"],
+                "type": "Consumable",
+                "item_type": "Consumable",
+                "description": f_spec["desc"],
+                "desc": f_spec["desc"],
+                "price": int(f_spec["price"]),
+                "quantity": 1 if fac_arch == "monastic_order" else 3,
+                "tier": 3,
+                "effect": f_spec["effect"],
+                "appeasement_tags": list(f_spec.get("appeasement_tags") or []),
+            })
+        if fac_arch == "monastic_order" and formatted_qm_f:
+            day_idx_qm = int((session or {}).get("current_day") or (session or {}).get("in_game_day") or 1) % len(formatted_qm_f)
+            stock = stock[:2] + [formatted_qm_f[day_idx_qm]]
+        else:
+            stock.extend(formatted_qm_f)
     if fac_arch == "monastic_order" and len(stock) > 3:
         stock = stock[:3]
+    from mechanics.social.factions import get_anomalous_faction_state
+    a_st = get_anomalous_faction_state(int(session.get("id", 0)), int(session.get("user_id", 0))) if session.get("id") else {}
+    player_arch = str(a_st.get("faction_archetype_key") or session.get("joined_faction") or "freelancer")
+    if fac_arch == "public_agency" and player_arch == "public_agency" and isinstance(session, dict):
+        req_items = list(session.get("anomalous_vault_requisitions") or [])
+        if not req_items and session.get("id"):
+            try:
+                sess_db = db.get_session(int(session["id"])) or {}
+                req_items = list(sess_db.get("anomalous_vault_requisitions") or [])
+            except Exception:
+                req_items = []
+        existing_qm_names = {str(s.get("name", "")).lower() for s in stock if isinstance(s, dict)}
+        for req_it in req_items:
+            if not isinstance(req_it, dict) or req_it.get("requisitioned"):
+                continue
+            if req_it.get("name") and str(req_it["name"]).lower() not in existing_qm_names:
+                req_copy = dict(req_it)
+                base_p = int(req_copy.get("price") or calculate_balanced_price(
+                    req_copy.get("item_type", "Weapon"),
+                    req_copy["name"],
+                    tier=int(req_copy.get("tier", 2) or 2),
+                    scen_key=scen_key,
+                    metadata=req_copy.get("metadata"),
+                ))
+                req_copy["price"] = base_p
+                req_copy["requisition_price"] = max(1, int(round(base_p * 0.50)))
+                req_copy["quantity"] = 1
+                req_copy["is_vault_requisition"] = True
+                stock.insert(0, req_copy)
+                existing_qm_names.add(str(req_copy["name"]).lower())
     return {
         "intro_narrative": str(result.get("intro_narrative", f"The {faction_name} quartermaster nods at you."))[:300],
         "stock": stock,
@@ -1399,352 +1732,25 @@ async def generate_faction_quartermaster_shop(faction: dict, session: dict) -> d
         "is_faction_quartermaster": True,
     }
 
-def build_merchant_embed(session_id: int, extra_note: str = None) -> discord.Embed:
-    session = db.get_session(session_id)
-    merchant = session["merchant"]
-    is_phone = merchant.get("is_phone_shop", False)
-    scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-    merchant_type = merchant.get("merchant_type", "general_merchant")
-    arch = MERCHANT_ARCHETYPES.get(merchant_type, MERCHANT_ARCHETYPES.get("general_merchant", {}))
-    arch_emoji = arch.get("emoji", "🛍️")
-    arch_title = arch.get("title", "The Merchant")
 
-    current_day, current_minute, _ = db.get_session_time(session_id)
-    next_day = current_day + 1
-
-    if is_phone:
-        from mechanics.system.phone import get_phone_branding
-        branding = get_phone_branding(scen_key)
-        embed = discord.Embed(
-            title=f"📦 {branding['shop_app_name']}",
-            description=merchant.get("intro_narrative", f"Welcome to {branding['shop_app_name']}! Browse items delivered straight to your inventory."),
-            color=branding["color"]
-        )
-        footer_text = f"Catalog restocks daily (Day {next_day}). Tap Close Store to exit."
-    elif merchant.get("is_faction_quartermaster"):
-        embed = discord.Embed(
-            title=f"🎖️ {merchant.get('flavor_name') or 'Faction Quartermaster'}",
-            description=merchant.get("intro_narrative", ""),
-            color=discord.Color.gold()
-        )
-        footer_text = f"Member-exclusive stock. Wares restock daily (Day {next_day})."
-    else:
-        embed = discord.Embed(
-            title=f"{arch_emoji} {merchant.get('flavor_name') or arch_title}",
-            description=merchant.get("intro_narrative", ""),
-            color=discord.Color.dark_gold()
-        )
-        footer_text = f"Wares restock daily (Day {next_day}). Buy/Sell any time."
-
-    if merchant.get("faction_discount_pct"):
-        embed.add_field(name="Faction Standing", value=f"{merchant['faction_discount_pct']}% off", inline=True)
-    if merchant.get("discount_pct"):
-        embed.add_field(name="Haggle Discount", value=f"{merchant['discount_pct']}%", inline=True)
-    embed.add_field(name="Haggle Attempts Left", value=f"{3 - merchant.get('haggle_attempts', 0)}/3", inline=True)
-    embed.add_field(name="🕒 Daily Restock", value=f"Start of **Day {next_day}**", inline=True)
-    if extra_note:
-        embed.add_field(name="Update", value=extra_note, inline=False)
-    embed.set_footer(text=footer_text)
-    return embed
-
-
-
-class BazaarStoreSelectDropdown(discord.ui.Select):
-    def __init__(self, cog, session_id: int, available_stores: list[dict]):
-        self.cog = cog
-        self.session_id = session_id
-        options = []
-        for store in available_stores[:25]:
-            options.append(discord.SelectOption(
-                label=store["title"][:100],
-                value=store["type"],
-                description=store.get("description", "")[:100],
-                emoji=store.get("emoji", "🛍️")
-            ))
-        super().__init__(placeholder="Choose a shop or merchant stall to visit...", min_values=1, max_values=1, options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        selected_type = self.values[0]
-        await self.cog.enter_merchant_shop(
-            interaction,
-            self.session_id,
-            initiator_id=interaction.user.id,
-            merchant_type=selected_type
-        )
-
-
-class BazaarStoreSelectView(discord.ui.View):
-    def __init__(self, cog, session_id: int, available_stores: list[dict]):
-        super().__init__(timeout=180)
-        self.cog = cog
-        self.session_id = session_id
-        self.add_item(BazaarStoreSelectDropdown(cog, session_id, available_stores))
-
-
-async def handle_talk_to_merchant(cog, session_id: int, interaction: discord.Interaction):
-    session = db.get_session(session_id)
-    if interaction.user.id not in session["turn_order"]:
-        await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
-        return
-
-    scen_key = session.get("scenario", "fantasy")
-    current_loc = session.get("current_location", "")
-    from mechanics.world.locations import get_available_merchant_types_for_location
-    available_stores = get_available_merchant_types_for_location(current_loc, scen_key=scen_key)
-
-    # Multi-store Bazaar / City Hub -> Show Bazaar Directory View
-    if len(available_stores) > 1:
-        view = BazaarStoreSelectView(cog, session_id, available_stores)
-        await interaction.response.send_message(
-            f"🏛️ **Marketplace Directory — {current_loc}**\nSelect a specialist shop or stall to browse their wares:",
-            view=view,
-            ephemeral=True
-        )
-        return
-
-    # Single store direct entry
-    single_type = available_stores[0]["type"] if available_stores else "general_merchant"
-
-    if len(session["turn_order"]) <= 1:
-        await cog.enter_merchant_shop(interaction, session_id, initiator_id=interaction.user.id, merchant_type=single_type)
-        return
-
-    merchant = session["merchant"]
-    prompt = f"**{merchant.get('flavor_name') or 'A merchant'}** is nearby. Approach them?"
-
-    async def on_unanimous(vote_interaction: discord.Interaction):
-        await cog.enter_merchant_shop(vote_interaction, session_id, initiator_id=interaction.user.id, merchant_type=single_type)
-
-    async def on_not_unanimous(vote_interaction: discord.Interaction):
-        await cog.attempt_merchant_detour(vote_interaction, session_id, initiator_id=interaction.user.id)
-
-    vote_view = MerchantVoteView(cog, session_id, session["turn_order"], prompt, on_unanimous, on_not_unanimous)
-    await interaction.response.edit_message(content=prompt, embed=None, view=vote_view)
-
-
-
-class MerchantVoteView(discord.ui.View):
-    def __init__(self, cog, session_id: int, member_ids: list, prompt: str,
-                 on_unanimous, on_not_unanimous):
-        super().__init__(timeout=120)
-        self.cog = cog
-        self.session_id = session_id
-        self.member_ids = member_ids
-        self.prompt = prompt
-        self.on_unanimous = on_unanimous
-        self.on_not_unanimous = on_not_unanimous
-        self.votes = {}
-
-        yes = discord.ui.Button(label="Yes", emoji="✅", style=discord.ButtonStyle.success)
-        yes.callback = self._make_vote_callback(True)
-        self.add_item(yes)
-        no = discord.ui.Button(label="No", emoji="❌", style=discord.ButtonStyle.danger)
-        no.callback = self._make_vote_callback(False)
-        self.add_item(no)
-
-    def _make_vote_callback(self, value: bool):
-        async def _callback(interaction: discord.Interaction):
-            if interaction.user.id not in self.member_ids:
-                await interaction.response.send_message("You're not part of this party.", ephemeral=True)
-                return
-            if interaction.user.id in self.votes:
-                await interaction.response.send_message("You've already voted.", ephemeral=True)
-                return
-            self.votes[interaction.user.id] = value
-
-            if value is False:
-                self.stop()
-                await self.on_not_unanimous(interaction)
-                return
-
-            remaining = [uid for uid in self.member_ids if uid not in self.votes]
-            if remaining:
-                mentions = ", ".join(f"<@{uid}>" for uid in remaining)
-                await interaction.response.edit_message(content=f"{self.prompt}\n\nWaiting on: {mentions}",
-                                                          view=self)
-                return
-
-            self.stop()
-            await self.on_unanimous(interaction)
-        return _callback
-
-    async def on_timeout(self):
-        for child in self.children:
-            child.disabled = True
-
-
-class BuySelectView(discord.ui.View):
-    def __init__(self, cog, session_id: int, stock: list, discount_pct: int):
-        super().__init__(timeout=180)
-        self.cog = cog
-        self.session_id = session_id
-        options = []
-        seen_values = set()
-        for idx, item in enumerate(stock[:25]):
-            price = discounted_price(item["price"], discount_pct)
-            t = item.get("tier", 3)
-            badge = "⚪" if t == 3 else ("🔷" if t == 2 else "👑")
-            name = str(item.get("name", "Item"))[:60]
-            val = name[:100]
-            if val in seen_values:
-                val = f"{name[:85]} #{idx+1}"[:100]
-            seen_values.add(val)
-            desc = (item.get("description") or "").strip()[:100] or None
-            qty = item.get("quantity", 1)
-            options.append(discord.SelectOption(
-                label=f"{badge} {name} — {price}g (x{qty} left)"[:100],
-                value=val,
-                description=desc,
-            ))
-        select = discord.ui.Select(placeholder="Choose an item to buy...", options=options)
-        select.callback = self._on_select
-        self.add_item(select)
-
-    async def _on_select(self, interaction: discord.Interaction):
-        item_name = interaction.data["values"][0]
-        await self.cog.buy_item(interaction, self.session_id, interaction.user.id, item_name)
-
-
-
-class SellSelectView(discord.ui.View):
-    def __init__(self, cog, session_id: int, priced_items: list):
-        super().__init__(timeout=180)
-        self.cog = cog
-        self.session_id = session_id
-        self.priced_by_id = {str(i["id"]): i for i in priced_items}
-        options = [
-            discord.SelectOption(label=f"{i['name']} — {i['price']}g"[:100], value=str(i["id"]))
-            for i in priced_items[:25]
-        ]
-        select = discord.ui.Select(placeholder="Choose an item to sell...", options=options)
-        select.callback = self._on_select
-        self.add_item(select)
-
-    async def _on_select(self, interaction: discord.Interaction):
-        item_id = interaction.data["values"][0]
-        entry = self.priced_by_id.get(item_id)
-        if not entry:
-            await interaction.response.send_message("That item is no longer available.", ephemeral=True)
-            return
-        await self.cog.sell_item(interaction, self.session_id, interaction.user.id,
-                                  int(item_id), entry["name"], entry["price"])
-
-
-class RumorView(discord.ui.View):
-    def __init__(self, cog, session_id: int, rumors: list):
-        super().__init__(timeout=300)
-        self.cog = cog
-        self.session_id = session_id
-        for idx, rumor in enumerate(rumors[:3]):
-            revealed = bool(rumor.get("revealed"))
-            label = f"Rumor {idx + 1}" + (" (known)" if revealed else "")
-            button = discord.ui.Button(label=label, emoji="👂", style=discord.ButtonStyle.secondary,
-                                        disabled=revealed, row=0)
-            button.callback = self._make_callback(idx)
-            self.add_item(button)
-        back = discord.ui.Button(label="Back to Shop", emoji="🔙", style=discord.ButtonStyle.primary, row=1)
-        back.callback = self._on_back
-        self.add_item(back)
-
-    def _make_callback(self, idx: int):
-        async def _callback(interaction: discord.Interaction):
-            await self.cog.reveal_rumor(interaction, self.session_id, interaction.user.id, idx)
-        return _callback
-
-    async def _on_back(self, interaction: discord.Interaction):
-        await self.cog.return_to_merchant_view(interaction, self.session_id)
-
-
-class MerchantView(discord.ui.View):
-    def __init__(self, cog, session_id: int, member_ids: list, is_phone_shop: bool = None):
-        super().__init__(timeout=1800)
-        self.cog = cog
-        self.session_id = session_id
-        self.member_ids = member_ids
-
-        if is_phone_shop is None:
-            sess = db.get_session(session_id)
-            is_phone_shop = bool(sess and sess.get("merchant", {}).get("is_phone_shop"))
-        self.is_phone_shop = is_phone_shop
-
-        buy = discord.ui.Button(label="Buy", emoji="🛒", style=discord.ButtonStyle.success)
-        buy.callback = self._on_buy
-        self.add_item(buy)
-
-        sell = discord.ui.Button(label="Sell", emoji="💰", style=discord.ButtonStyle.primary)
-        sell.callback = self._on_sell
-        self.add_item(sell)
-
-        haggle = discord.ui.Button(label="Haggle", emoji="🤝", style=discord.ButtonStyle.secondary)
-        haggle.callback = self._on_haggle
-        self.add_item(haggle)
-
-        if not self.is_phone_shop:
-            ask = discord.ui.Button(label="Ask", emoji="👂", style=discord.ButtonStyle.secondary)
-            ask.callback = self._on_ask
-            self.add_item(ask)
-
-        leave_label = "Close Store" if self.is_phone_shop else "Leave"
-        leave = discord.ui.Button(label=leave_label, emoji="🚪", style=discord.ButtonStyle.danger)
-        leave.callback = self._on_leave
-        self.add_item(leave)
-
-    def _in_party(self, user_id: int) -> bool:
-        return user_id in self.member_ids
-
-    async def _collective_action(self, interaction: discord.Interaction, action_label: str, on_execute):
-        if len(self.member_ids) <= 1:
-            await on_execute(interaction)
-            return
-        char = db.get_character(interaction.user.id)
-        prompt = f"**{char['name']}** wants to {action_label}. Does everyone agree?"
-
-        async def on_not_unanimous(vote_interaction: discord.Interaction):
-            await self.cog._merchant_consensus_failed(vote_interaction, self.session_id, action_label)
-
-        vote_view = MerchantVoteView(self.cog, self.session_id, self.member_ids, prompt,
-                                      on_execute, on_not_unanimous)
-        await interaction.response.send_message(content=prompt, view=vote_view)
-
-    async def _on_buy(self, interaction: discord.Interaction):
-        if not self._in_party(interaction.user.id):
-            await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
-            return
-        await self.cog.open_buy_menu(interaction, self.session_id)
-
-    async def _on_sell(self, interaction: discord.Interaction):
-        if not self._in_party(interaction.user.id):
-            await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
-            return
-        await self.cog.open_sell_menu(interaction, self.session_id)
-
-    async def _on_haggle(self, interaction: discord.Interaction):
-        if not self._in_party(interaction.user.id):
-            await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
-            return
-        initiator_id = interaction.user.id
-
-        async def execute(vote_interaction: discord.Interaction):
-            await self.cog.resolve_haggle(vote_interaction, self.session_id, initiator_id)
-
-        await self._collective_action(interaction, "haggle with the merchant", execute)
-
-    async def _on_ask(self, interaction: discord.Interaction):
-        if not self._in_party(interaction.user.id):
-            await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
-            return
-
-        async def execute(vote_interaction: discord.Interaction):
-            await self.cog._show_rumor_menu(vote_interaction, self.session_id)
-
-        await self._collective_action(interaction, "ask around for rumors", execute)
-
-    async def _on_leave(self, interaction: discord.Interaction):
-        if not self._in_party(interaction.user.id):
-            await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
-            return
-
-        async def execute(vote_interaction: discord.Interaction):
-            await self.cog.leave_merchant(vote_interaction, self.session_id)
-
-        await self._collective_action(interaction, "leave the shop", execute)
+# -----------------------------------------------------------------------------
+# FACADE & BACKWARD COMPATIBILITY
+# Dynamically re-export UI views extracted to cogs.adventure.views.merchant
+# -----------------------------------------------------------------------------
+def __getattr__(name: str):
+    if name in (
+        "BazaarStoreSelectDropdown",
+        "BazaarStoreSelectView",
+        "MerchantVoteView",
+        "BuySelectView",
+        "SellSelectView",
+        "RumorView",
+        "MerchantView",
+        "build_merchant_embed",
+        "handle_talk_to_merchant",
+    ):
+        import cogs.adventure.views.merchant as _merchant_views
+        val = getattr(_merchant_views, name)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

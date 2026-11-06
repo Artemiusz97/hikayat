@@ -80,9 +80,10 @@ class ConnectionManager:
             conns = self.active_connections.get(int(clean_sid), [])
         if not conns:
             return
+        safe_message = _to_json_safe(message)
         for conn in list(conns):
             try:
-                await conn["ws"].send_json(message)
+                await conn["ws"].send_json(safe_message)
             except Exception as e:
                 logger.error(f"Error broadcasting to user {conn['user_id']}: {e}")
 
@@ -90,14 +91,34 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-def _to_json_safe(val):
-    if isinstance(val, dict):
-        return {str(k): _to_json_safe(v) for k, v in val.items()}
-    if isinstance(val, (list, tuple)):
-        return [_to_json_safe(v) for v in val]
-    if hasattr(val, "__dict__") and not isinstance(val, type):
-        return _to_json_safe(vars(val))
-    return val
+_JSON_SAFE_TRANSIENT_KEYS = frozenset({"_ctx", "_target_turn", "_world_events_snapshot"})
+
+
+def _to_json_safe(val, _seen: set[int] | None = None):
+    if val is None or isinstance(val, (str, int, float, bool)):
+        return val
+    if _seen is None:
+        _seen = set()
+    val_id = id(val)
+    if val_id in _seen:
+        return None
+    _seen.add(val_id)
+    try:
+        if hasattr(val, "model_dump") and callable(val.model_dump) and not isinstance(val, type):
+            return _to_json_safe(val.model_dump(), _seen)
+        if isinstance(val, dict):
+            return {
+                str(k): _to_json_safe(v, _seen)
+                for k, v in val.items()
+                if str(k) not in _JSON_SAFE_TRANSIENT_KEYS and not str(k).startswith("__")
+            }
+        if isinstance(val, (list, tuple, set, frozenset)):
+            return [_to_json_safe(v, _seen) for v in val]
+        if hasattr(val, "__dict__") and not isinstance(val, type):
+            return _to_json_safe(vars(val), _seen)
+        return val
+    finally:
+        _seen.discard(val_id)
 
 
 def _serializable_action(action: dict) -> dict:
@@ -237,6 +258,13 @@ class CharacterCreateRequest(BaseModel):
     penis_size: Optional[str] = None
     asset_texture: Optional[str] = None
     starting_faction: Optional[str] = None
+    origin_mode: Optional[str] = None
+    student_grade: Optional[str] = None
+    attribute: Optional[str] = None
+    combat_archetype: Optional[str] = None
+    ability_medium: Optional[str] = None
+    origin_mode: Optional[str] = None
+    student_grade: Optional[str] = None
 
 
 class CharacterAppearanceUpdateRequest(BaseModel):
@@ -259,10 +287,15 @@ class PreviewGearRequest(BaseModel):
     starting_weapon: Optional[str] = ""
     force_dynamic: Optional[bool] = True
     starting_faction: Optional[str] = None
+    origin_mode: Optional[str] = None
+    student_grade: Optional[str] = None
 
 
 class RegenerateGearRequest(BaseModel):
     user_id: int
+    starting_faction: Optional[str] = None
+    origin_mode: Optional[str] = None
+    student_grade: Optional[str] = None
 
 
 class CharacterSwitchRequest(BaseModel):
@@ -328,6 +361,13 @@ class StartAdventureRequest(BaseModel):
     penis_size: Optional[str] = None
     asset_texture: Optional[str] = None
     starting_faction: Optional[str] = None
+    origin_mode: Optional[str] = None
+    student_grade: Optional[str] = None
+    attribute: Optional[str] = None
+    combat_archetype: Optional[str] = None
+    ability_medium: Optional[str] = None
+    origin_mode: Optional[str] = None
+    student_grade: Optional[str] = None
     appearance: Optional[Dict[str, Any]] = None
     slot: Optional[int] = 1
     character_id: Optional[int] = None
@@ -454,7 +494,12 @@ class DebugUpdateRequest(BaseModel):
 class FactionHQActionRequest(BaseModel):
     user_id: int
     faction_id: str
-    action: str  # "join" | "leave" | "rest" | "quartermaster" | "promote"
+    action: str  # "join" | "leave" | "rest" | "quartermaster" | "promote" | "calibrate"
+    attribute: Optional[str] = None
+    combat_archetype: Optional[str] = None
+    ability_medium: Optional[str] = None
+    origin_mode: Optional[str] = None
+    student_grade: Optional[str] = None
 
 
 class PhoneFeedActionRequest(BaseModel):
@@ -482,11 +527,31 @@ class BountyActionRequest(BaseModel):
     user_id: Optional[int] = None
     quest_id: str
     action: str = "accept"  # "accept" | "abandon"
+    haggle_advance: bool = False
 
 
 class ClueDeductionRequest(BaseModel):
     user_id: Optional[int] = None
     clue_a_id: int
-    clue_b_id: int
+    clue_b_id: Optional[int] = None
+
+
+class SuspectAccusationRequest(BaseModel):
+    user_id: Optional[int] = None
+    quest_id: str
+    suspect_name: str
+    mode: str = "private"  # "private" | "formal"
+
+
+class QuestTurnInRequest(BaseModel):
+    user_id: int
+    quest_id: str
+    disposition: str = "deliver"  # "deliver" | "side_switch" | "blackmail_client" | "keep" | "destroy" | "fence"
+
+
+class EpilogueChoiceRequest(BaseModel):
+    user_id: Optional[int] = None
+    choice_id: str = "endless"  # "archive" | "endless"
+
 
 

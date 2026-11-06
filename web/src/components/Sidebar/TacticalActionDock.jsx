@@ -33,7 +33,7 @@ const TacticalActionDock = ({
         (session?.monsters || []).some((m) => m && (m.hp ?? 1) > 0)
       );
 
-  const npcs = (session?.current_npcs || []).map((n) =>
+  const npcs = (session?.current_npcs || []).filter((n) => !(typeof n === 'object' && (n?.is_anomalous_entity || n?.npc_type === 'anomaly' || n?.anomalous_npc_tag === 'anomaly_entity'))).map((n) =>
     typeof n === 'string' ? n : n?.name
   ).filter(Boolean);
 

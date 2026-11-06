@@ -252,10 +252,12 @@ def parse_item_tier(item: Dict[str, Any]) -> int:
 
 def is_key_item(item: Dict[str, Any]) -> bool:
     """
-    Returns True if the item is a plot-critical Key Item, Quest item, or narrative artifact.
+    Returns True if the item is a plot-critical Key Item, Quest item, quest-locked MacGuffin, or narrative artifact.
     """
     if not item or not isinstance(item, dict):
         return False
+    if bool(item.get("is_quest_locked")):
+        return True
     item_type = (item.get("item_type") or "").strip().lower()
     if item_type in ("key item", "quest", "quest item", "narrative artifact", "narrative"):
         return True

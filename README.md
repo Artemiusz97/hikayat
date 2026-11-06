@@ -1,126 +1,116 @@
-# Hikayat (v2.7.0) — Living AI Tabletop RPG & Web Application
+# Hikayat (v2.8.0) — Living AI Tabletop RPG & Web Application
 
-[![Version](https://img.shields.io/badge/version-2.7.0-blue.svg)](releases/CHANGELOG-v2.7.0.md)
+[![Version](https://img.shields.io/badge/version-2.8.0-blue.svg)](releases/CHANGELOG-v2.8.0.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/react-18.2-61dafb.svg)](web/)
 
-Hikayat is a comprehensive, multi-genre LLM-driven Tabletop RPG engine powered by an intelligent dual-model architecture. It features a full-featured **Discord Bot interface** and a modern **React Web Application**, bringing living worlds, tactical party combat, persistent lore, deep social simulation, and procedural campaigns to life.
+Hikayat is a text-based role-playing game (RPG) where an AI language model generates the story and dialogue, while a deterministic Python game engine calculates the actual rules, rolls, and state changes. It can be played either as a Discord bot or as a web application in your browser.
 
 ---
 
-## 🛠️ 10 Unique Technical Implementations
-*(What sets Hikayat apart from traditional LLM-powered text RPGs)*
+## 🛠️ 10 Technical Innovations
+*(How the engine actually works under the hood)*
 
-### 1. Deterministic State Separation & Anti-Hallucination Pipeline (Phase 1–5 Directives)
-* **True Game State vs. Hallucinated Prose**: Traditional LLM-based text RPGs rely on the language model to guess HP, invent unearned inventory items, and simulate dice rolls in prose, inevitably leading to narrative drift and rule violations.
-* **Code-Driven Truth Directives**: In Hikayat, every dice check, combat damage calculation, inventory capacity check, status effect, and quest milestone is deterministically resolved in Python before generation. The LLM acts purely as a narrator bounded by immutable truth directives that prevent hallucinations.
+### 1. Deterministic Rule Engine vs. AI Narration (Phases 1–5 Pipeline)
+* **What problem it solves**: In typical AI dungeon masters, the language model invents dice rolls, changes character health arbitrarily, and forgets inventory constraints, leading to hallucinations and broken rules.
+* **How Hikayat works**: The game separates logic from storytelling. Every player action is first processed by Python code in `TurnService`: the engine calculates dice rolls, applies Fallout-style damage reduction, deducts item charges, and checks quest status. Only after the numbers are locked does the AI receive a prompt instructing it to describe what just happened without altering the math.
 
-### 2. Deterministic Cast & Dialogue Authority (`CastPlanner`)
-* **Phantom Character Elimination**: Scene attendance, active dialogue partners, bystanders, and departures are deterministically tracked in Python (`game_engine/npcs/cast_planner.py`).
-* **Quotation Scrape Immunity**: Conversation state is never polluted or resurrected by LLM quotation scraping. Narrator cast suggestions (arrive, depart, engage) are strictly validated against spatial contracts, and dialogue exits immediately close conversational loops across all present NPCs.
+### 2. Deterministic Stage Manager & Cast Tracking (`CastPlanner`)
+* **What problem it solves**: AI story games often suffer from "phantom NPCs"—characters who speak when they are not in the room, or disappear mid-conversation.
+* **How Hikayat works**: The engine maintains a stage state machine (`game_engine/npcs/cast_planner.py` and `presence.py`) that tracks who is physically present in the scene, who is speaking, and who is an onlooker. When a character leaves the area, their conversation thread is closed by code, preventing the AI from continuing to generate dialogue for absent characters.
 
-### 3. Multi-Edge Graph Pathfinding & 3-Tier Spatial Topology (`mechanics/world/locations/pathfinding.py`)
-* **Dijkstra Shortest-Path Traversal**: Models world geography via an SQLite graph of nodes and bidirectional edges with Dijkstra and BFS shortest-path routing.
-* **3-Tier Hierarchy & Access Gating**: Enforces granular micro-spatial positioning (*Zone ➔ Facility ➔ Room*) alongside access key/lockpicking gates, curfew stealth verifications, fog-of-war hidden node exclusion, combat flee displacement, and transit fare gating.
+### 3. Graph-Based World Map & Dijkstra Pathfinding (`locations/pathfinding.py`)
+* **What problem it solves**: Instead of letting the player teleport or describe traveling across impossible distances, the world needs realistic distances and movement costs.
+* **How Hikayat works**: World geography is stored in SQLite as nodes and connections across a 3-tier hierarchy (*Zone ➔ Facility ➔ Room*). When a player travels, the engine runs Dijkstra’s shortest-path algorithm to calculate transit time, stamina cost, travel fares, locked door requirements, and curfew checks before moving the player.
 
-### 4. Autonomous Stealth & Infiltration Simulation Engine (`mechanics/stealth/`)
-* **Mathematical Infiltration Dynamics**: Replaces hand-wavy narrative sneaking with a 4-stage alert state machine (`UNAWARE`, `SUSPICIOUS`, `SEARCHING`, `DETECTED`) and dynamic detection accumulation with natural decay over unobserved turns.
-* **Acoustic & Environmental Modeling**: Calculates armor acoustic noise penalties, companion noise drag, action noise, and ambient lighting modifiers to resolve opposed perception checks deterministically.
+### 4. Mathematical Alert State Machine for Stealth Gameplay (`mechanics/stealth/`)
+* **What problem it solves**: Stealth in text games usually relies on the AI guessing whether a guard notices you.
+* **How Hikayat works**: Stealth uses a mathematical alert state machine per NPC (`UNAWARE`, `SUSPICIOUS`, `SEARCHING`, `DETECTED`). The code calculates noise levels based on armor weight, companion footsteps, lighting conditions, and player action loudness to determine detection accumulation and alert decay deterministically over time.
 
-### 5. Dual-Model Architecture & Computational Offloading
-* **Decoupled Narration & Utility Work**: Separates high-latency, creative prose generation from mechanical background operations.
-* **Dedicated Utility Model (`LLM_UTILITY_MODEL`)**: Offloads background calculations (quest tracking, clue merging, shop restocking, item validation) to fast, lightweight models while reserving parameter-heavy models exclusively for rich prose.
+### 5. Multi-Engine Quest Architecture & Intelligence Dossiers (`game_engine/quest_agency.py`, `mechanics/narrative/dossier_compiler.py`)
+* **What problem it solves**: Quests in AI games easily lose focus, forget objectives, or conclude abruptly without resolving clues.
+* **How Hikayat works**: Quests are categorized into specific operational engines (Investigation, Bounty, Social Infiltration, Survival) and tracked in relational database tables (`quests`, `quest_dossiers`, `session_clues`). As players uncover evidence and interview witnesses, the system compiles structured forensic dossiers with verifiable leads and sub-objectives in SQLite.
 
-### 6. Dynamic Provider Routing, Fallback Cascade & Headroom Margins
-* **Automated Multi-Provider Failover**: High-availability resilience automatically shifts across candidate models on timeouts or rate-limits without interrupting the player's turn.
-* **Context-Aware NSFW Routing**: Mature scenarios are dynamically channeled to dedicated uncensored models (`NSFW_LLM_MODEL`) with isolated fallback chains.
-* **Reasoning Headroom Safeguards**: Enforces strict 3,500 token output headroom margins, completely preventing the JSON truncation errors common to modern reasoning models.
+### 6. World Pulse & Autonomous Background Simulation (`mechanics/world/world_events/`)
+* **What problem it solves**: Static RPG worlds feel frozen in place whenever the player is not actively looking at an area.
+* **How Hikayat works**: Alongside player turns, the engine simulates background rumors, weather shifts, faction skirmishes, political scandals, and economic crises across different map zones. Events have countdown timers and can escalate into larger emergencies if the player neglects them.
 
-### 7. Semantic Vector Memory Compaction & Context Token Budgeting
-* **Semantic Vector Retrieval**: Lorebook entries, historical character encounters, and location knowledge are indexed and retrieved via semantic embeddings (`mechanics/system/memory/`).
-* **Active Token Budgeting & Compaction**: Dynamically compacts older conversation turns into persistent contextual summaries, preserving long-term campaign continuity within strict token budgets.
+### 7. Vector Memory Compaction & Sliding Token Budgets (`mechanics/system/memory/`)
+* **What problem it solves**: Large language models have strict context limits and become slow or expensive as chat history grows.
+* **How Hikayat works**: The engine uses SQLite-based vector retrieval alongside a multi-tier memory system. Recent turns remain in high detail, while older events are automatically digested into condensed factual bullet points and indexed by embeddings. This allows multi-hundred-turn campaigns to maintain long-term memory without hitting context limits.
 
-### 8. Headless Omnichannel Turn Engine (`services/turn_service.py`)
-* **Presentation-Decoupled Game Loop**: The turn engine operates as a completely headless core.
-* **100% Platform Parity**: Both the Discord bot (slash commands, button decks, modal sheets) and the React Web SPA (REST endpoints, WebSockets) consume the exact same underlying service, ensuring synchronized state across platforms.
+### 8. Dual-Model Cascade & Output Headroom Management (`llm_client.py`)
+* **What problem it solves**: Creative prose generation is slow and expensive, while routine data tasks don't need a large model.
+* **How Hikayat works**: The engine divides workloads between two models: an expressive model for rich narrative prose, and a fast, lightweight utility model (`LLM_UTILITY_MODEL`) for background parsing, clue extraction, and choice generation. The client also includes automatic fallback to secondary API providers on rate limits and enforces a 3,500-token output headroom margin to prevent JSON truncation errors.
 
-### 9. 5-Language Internationalization & Anti-Drift Pronoun Engine
-* **5-Language Localization Engine (`localization/`, `web/src/locales/`)**: Real-time translation and canonicalization of item affixes, inventory lemmas, movement prefixes, combat choices, and dialogue intents across English (`en`), Polish (`pl`), Malay (`ms`), German (`de`), and Simplified Chinese (`zh`).
-* **Multi-Tier Pronoun Resolver**: Post-generation pronoun sanitizers and immutable gender directives ensure zero pronoun drift during long multi-party scenes.
+### 9. 5-Language Dictionary Canonicalization & Anti-Drift Pronoun Engine (`localization/`, `game_engine/pronoun_resolver.py`)
+* **What problem it solves**: Multi-language support often breaks formatting, and language models frequently mix up character pronouns during long scenes.
+* **How Hikayat works**: The game maps game actions, combat choices, and inventory terms through localized dictionary files in English, Polish, Malay, German, and Simplified Chinese. An automated pronoun scanner checks entity genders against database IDs to prevent language models from mistakenly swapping pronouns during complex multi-character scenes.
 
-### 10. SDXL Scene Rendering & Automated Visual Grounding (`services/image_service.py`)
-* **Prose-to-Art Pipeline**: Dynamically synthesizes environment, lighting, framing, and atmosphere tokens directly from narrative prose to generate high-fidelity SDXL scene artwork.
-* **Local Persistence & In-Game Sync**: Persists generated images to local storage with content-hash deduplication, negative prompt aesthetic conditioning, and automatic synchronization with the in-game Smartphone photo vault.
-
----
-
-## 🌟 10 Core Gameplay Features
-
-### 1. Dual Platforms: Discord Bot & Modern React Web SPA
-* **Discord Bot**: Interactive slash commands, button decks, modal sheets, and dynamic embed dialogues.
-* **Modern React Web UI (`web/src/`)**: Single-page application featuring interactive Tactical Battle Decks, live Story Feed, in-game Smartphone modal, Turn Outcome panel (`TurnOutcomePanel.jsx`), Party Widget, and redesigned Codex panels.
-* **FastAPI Modular Backend (`api/`, `services/`)**: High-performance REST endpoints and WebSockets for multiplayer synchronization and state streaming.
-
-### 2. Tactical Action Dock & Quick Belt Hotbar (`web/src/components/`)
-* **Persistent Command Dock (`TacticalActionDock.jsx`)**: Sidebar command deck providing instant one-click access to stealth stances, combat targeting, quick-use consumables, smartphone apps, gifting, and time advancement.
-* **Quick Belt Popover (`QuickBeltPopover.jsx`)**: Instant-access popover displaying belt potions, remedies, snacks, and consumables for immediate one-click usage without opening full inventory screens.
-
-### 3. Living World, Time Engine & Circadian Routine Schedules
-* **Minute-by-Minute Time Progression**: Persistent in-game clock advancing across 8 distinct time-of-day phases (Dawn, Morning, Afternoon, Dusk, Night, Late Night, etc.).
-* **Circadian NPC Schedules**: NPCs follow dynamic schedules across schools and facilities based on grade, club, and role.
-* **Rest & Time Manipulation**: Sleep mechanics, fatigue penalties, and deliberate time skipping via the interactive Time Skip modal (`TimeSkipModal.jsx`).
-
-### 4. Tactical Turn-Based Combat Decks & Counter-Play
-* **Code-Driven Tactical Battle Decks**: 7-slot combat choices (*Attack, Defend, Magic, Item, Flee, Tactician Moves*) with active enemy target switching and success probability indicators.
-* **Telegraphed Enemy Moves & Counter-Play**: Enemies telegraph incoming intents (charging, casting, defending, swarming), enabling strategic defensive guards, interruptions, and counter-attacks.
-* **Companion Combat AI**: Friendly companions participate actively in battles with autonomous tactical support, vital tracking, and dedicated combat event logging.
-* **Narrative Immersion Protocol**: Strict GM rules prevent raw HP numbers from leaking into prose, describing physical trauma and combat flow dynamically.
-
-### 5. In-Game Smartphone Ecosystem (`/phone`)
-* **Contextually Grounded Messaging**: In-universe digital hub featuring direct messaging with NPCs (`dm_grounding.py`), player-initiated texting (`player_dm.py`), date scheduling, and contacts directory.
-* **Media Vault & Apps**: Digital codex apps, camera captures, and media photo vault with persistent narrative captions.
-
-### 6. Deep Social Dynamics, Persona & Nuanced Relationships
-* **Rich NPC Depth & Memory**: NPCs feature persistent backgrounds, unique mannerisms, emotional moods, evolving dispositions, and contextual memory of player history.
-* **Genealogy & Canonical Families**: Preserves consistent family lineages (parents, siblings, spouses) and personal histories across encounters.
-* **Contextual Gifting & Milestones**: Gift giving with immediate affinity evaluation (`GiveGiftModal.jsx`), multi-track relationship progression (platonic, romantic, rivalry), and emotional disclosure gating.
-
-### 7. Tactical Infiltration & Opposed Stealth Gameplay
-* **Dynamic Covert Operations**: Sneak through restricted facilities, pick locks, bypass curfew patrols, and exploit shadows and silence penalties.
-* **Distractions & Evasion**: Create deliberate noise distractions to redirect guards, drop detection meters, or escape search perimeters.
-
-### 8. Modular Equipment & Elemental Magic Systems
-* **Expansive Weapon Arsenal**: Over 2,000 lines of specialized weaponry across historical, fantasy, sci-fi, and modern archetypes, acting as tactical damage multipliers with dual-wielding support.
-* **Layered Equipment & Armor**: Distinct slots for civilian attire, combat armor, headwear, shields, and accessories, with Fallout: New Vegas-style Damage Threshold (DT) mitigation.
-* **Elemental Magic Taxonomy**: Dedicated magic package with elemental tags, spell taxonomy, class-specific spell kits, and dynamic MP cost scaling.
-
-### 9. Living Factions System & Territorial Standings (`/factions`)
-* **Dynamic World Influence**: Living faction headquarters, rank progression, territorial control, and faction rivalries.
-* **Faction Contract Boards**: Procedural faction bounty boards with exclusive reputation perks, rank advancement, and faction-specific lore.
-
-### 10. Procedural 10-Chapter Campaign System
-* **Long-Term Procedural Goals**: Story campaigns progress through 10 progressive chapters driven by dynamically generated end goals and emergent narrative arcs.
-* **Dynamic Bounty Board & Quests**: Interactive `/quest` and `/bounty` views with sub-objectives, clue investigations, suspect evidence extraction, item loot rewards, and emergent climax waypoints.
+### 10. Headless Omnichannel Game Loop (`services/turn_service.py`)
+* **What problem it solves**: Supporting both a Discord bot and a web application usually means duplicating game logic or risking feature divergence.
+* **How Hikayat works**: The core game logic in `TurnService` is completely headless. Both the Discord bot (using slash commands, buttons, and modals) and the modern React web application (using REST endpoints and WebSockets) interact with the exact same Python service and database backend.
 
 ---
 
-## 🎮 How to Play
+## 🎮 10 Unique Gameplay Features
+*(What you actually experience as a player)*
 
-### Character Creation & Loadouts
-1. Use `/character create` to select your name, gender, race, backstory, and allocate your **SPECIAL stats** (Strength, Perception, Endurance, Charisma, Intelligence, Agility, Luck) via an interactive point-buy menu.
-2. Launch your adventure with `/adventure start` (Solo, Turn-Based Multiplayer, or Synchronized Co-Op).
-3. Select your scenario-specific starting class and weapon loadout interactively at the start of your journey.
+### 1. Play in Your Browser or on Discord
+* **What it looks like**: You can play either using Discord slash commands and button decks, or open the modern React web application in your browser.
+* **How it plays**: The web version provides a dark-fantasy interface with a live story feed, clickable choices, an inventory drawer, character status meters, and an interactive world map modal.
 
-### SPECIAL Stat System
-| Stat | Core Gameplay Effect |
-| :--- | :--- |
-| **Strength (STR)** | Melee damage multiplier, physical prowess, inventory capacity (+3 slots per point, baseline 30). |
-| **Perception (PER)** | Ranged accuracy, environmental awareness, finding hidden clues. |
-| **Endurance (END)** | Max HP, Max MP, innate Damage Threshold, fatigue resilience. |
-| **Charisma (CHA)** | Social checks, NPC disposition, merchant haggling discounts, romantic appeal. |
-| **Intelligence (INT)** | Magic power, XP gain multiplier (+6% XP per point), tactical insight. |
-| **Agility (AGI)** | Evasion, attack speed, stealth covert actions, turn initiative. |
-| **Luck (LUK)** | Critical success and mishap odds, high-tier loot drops. |
+### 2. Tactical Action Dock & Belt Hotbar (`web/src/components/`)
+* **What it looks like**: A persistent sidebar on the web screen with dedicated action buttons.
+* **How it plays**: You can click buttons to enter stealth mode, drink a potion from your belt hotbar, check the time, or examine the room immediately without typing text commands or opening separate menus.
+
+### 3. Turn-Based Tactical Combat with Telegraphed Enemy Moves
+* **What it looks like**: A structured 7-slot combat menu (*Attack, Defend, Magic, Item, Flee, Tactician, Switch Target*) with calculated hit and damage numbers.
+* **How it plays**: Enemies clearly display what they plan to do on the next turn (such as charging a heavy blow, casting a spell, or ducking into cover), allowing you to choose whether to block, counter-attack, dodge, or interrupt their action.
+
+### 4. Functional In-Game Smartphone (`/phone`)
+* **What it looks like**: An in-game smartphone interface with messaging, contacts, camera, and apps.
+* **How it plays**: Your character carries a phone that you can use to browse contacts, text NPCs, receive photos, schedule meetups, and read local town or school gossip feeds that update as the story develops.
+
+### 5. Real-Time Clock & Circadian NPC Schedules
+* **What it looks like**: An in-game clock advancing across 8 distinct daily phases (Dawn, Morning, Afternoon, Dusk, Night, etc.).
+* **How it plays**: Non-player characters follow daily schedules based on their jobs, grades, or factions. They commute to work, attend classes, eat at restaurants, and sleep at home. If you visit a shop after hours, the owner will not be there.
+
+### 6. Detailed Social Relationships & Family Trees
+* **What it looks like**: NPCs have documented family members, occupations, personal traits, and relationship levels.
+* **How it plays**: Interacting with an NPC builds relationship points across platonic, rivalry, professional, or romantic tracks. High affinity unlocks milestone dialogue choices and new quest leads.
+
+### 7. Interactive Folklore Codex & Occult Research (`EncyclopediaSubTab.jsx`)
+* **What it looks like**: An in-game encyclopedia tab detailing local legends, mythical beasts, and occult lore.
+* **How it plays**: Exploring old ruins or investigating urban myths unlocks entries in the codex. Studying monster weaknesses and ancient rituals gives your character concrete dialogue options and tactical bonuses when facing supernatural threats.
+
+### 8. World Pulse Regional Crises & Living Factions (`/factions`)
+* **What it looks like**: A live dashboard displaying ongoing faction skirmishes, resource shortages, and seasonal events.
+* **How it plays**: The game world is divided among competing factions. You can track their territorial influence, complete bounty contracts for specific groups, and change how different factions treat you.
+
+### 9. Layered Equipment & Damage Threshold Armor
+* **What it looks like**: An inventory system with 9 distinct equipment slots (Headwear, Armor, Clothing, Undergarments, Gloves, Shoes, Accessories, Weapons, Shields).
+* **How it plays**: Armor uses a Fallout-style Damage Threshold (DT) system: incoming damage is reduced by flat numbers before percentage resistances apply, making proper armor essential against heavy attacks.
+
+### 10. Micro-Spatial Investigation & Lockpicking
+* **What it looks like**: In-scene interactive objects (locked desks, secret safes, bookshelves, filing cabinets).
+* **How it plays**: Searching a room or picking a lock lets you gather forensic evidence and clues without penalizing your travel stamina or displacing you from the current scene.
+
+---
+
+## 🕹️ How to Play
+
+### Character Creation & SPECIAL Stats
+1. Launch character creation using `/character create` or the web character creator modal.
+2. Distribute points across the 7 core **SPECIAL** attributes:
+   * **Strength (STR)**: Melee damage and inventory weight limit (+3 slots per point).
+   * **Perception (PER)**: Ranged accuracy, environmental awareness, and spotting clues.
+   * **Endurance (END)**: Maximum Health (HP), Mana (MP), and innate damage threshold.
+   * **Charisma (CHA)**: Social skill checks, NPC disposition, and merchant discounts.
+   * **Intelligence (INT)**: Magic strength, tactical options, and XP gain multiplier (+6% XP per point).
+   * **Agility (AGI)**: Evasion, turn initiative, and stealth movement.
+   * **Luck (LUK)**: Critical hit chances, finding rare loot, and avoiding hazards.
+3. Start the adventure with `/adventure start` on Discord or by creating a session on the Web UI.
 
 ---
 
@@ -128,53 +118,28 @@ Hikayat is a comprehensive, multi-genre LLM-driven Tabletop RPG engine powered b
 
 ```
 hikayat/
-├── api/                        # FastAPI modular REST controllers
-│   ├── adventure.py            # Session management, turn resolution & save states
-│   ├── auth_characters.py      # Authentication & character roster management
-│   ├── codex_phone.py          # Lorebook, factions, contacts & smartphone API
-│   ├── inventory_merchant.py   # Inventory management & vendor trading
-│   └── settings_ws.py          # Real-time WebSocket streaming & user settings
-├── bin/                        # Auxiliary binaries and tunnel utilities
-│   └── tunnel.py               # Cloudflare tunnel orchestration
-├── cogs/                       # Discord Bot slash command cogs
-│   ├── adventure/              # /adventure game loop, views & battle decks
-│   ├── character.py            # /character creation, sheet & level up
-│   ├── contacts.py             # /contacts paginated profile viewer
-│   ├── debug.py                # /debug developer testing tools
-│   ├── factions.py             # /factions list & faction detail views
-│   ├── inventory.py            # /inventory equip & inspection
-│   └── settings.py             # /settings & /model status probe
-├── db/                         # Modular SQLite database access layer
-│   ├── characters.py           # Character persistence & stats
-│   ├── core.py                 # Schema initialization, WAL mode & pragmas
-│   ├── inventory.py            # Items, equipment slots & DT/DR queries
-│   ├── social.py               # Relationships, intimacy & phone messages
-│   └── world.py                # Locations, lorebook & factions
-├── game_engine/                # Core simulation & LLM orchestration
-│   ├── auditor.py              # Runtime state consistency & choice auditor
-│   ├── matching.py             # Fuzzy entity matching & collective crowd guard
-│   ├── state/                  # State reducers & state machines
-│   ├── turn/                   # Turn loop generation & outcome handling
-│   ├── context.py              # Known-world prompt assembly & token budget
-│   └── core.py                 # Narrative rules & schema constraints
-├── localization/               # Multi-language i18n subsystem (en, ms, pl)
-├── mechanics/                  # Domain-specific gameplay subsystems
-│   ├── combat/                 # Tactical decks, 2000+ line weapons arsenal, armor & spells
-│   ├── narrative/              # Anti-cliche filters, paragraph quotas & style supremacy
-│   ├── social/                 # Deterministic affinity engine, intimacy excitement & genealogy
-│   ├── system/                 # Time engine, grounded smartphone messaging & memory compaction
-│   └── world/                  # Location tree, spatial waypoints, mobility & World Forge seeder
-├── models/                     # Centralized Pydantic schemas & entity trackers
+├── api/                        # FastAPI REST endpoints (adventure, codex, inventory, world events)
+├── bin/                        # Auxiliary network & tunnel utilities
+├── cogs/                       # Discord Bot slash command cogs & interactive button views
+├── data/                       # Static game catalogs (classes, scenarios, locations, folklore)
+├── db/                         # Modular SQLite persistence layer (sessions, characters, world events)
+├── game_engine/                # Core turn pipeline, state reducers, cast planner & quest resolvers
+├── localization/               # Multi-language translation dictionaries (en, pl, ms, de, zh)
+├── mechanics/                  # Domain-specific simulation modules
+│   ├── combat/                 # Combat formulas, weapon tables, armor DT, spells & awakened resonance
+│   ├── narrative/              # Quest engines, dossiers, campaign spine, blueprints & intent parser
+│   ├── social/                 # Roster generation, relationship graph, affinity & genealogy
+│   ├── stealth/                # Mathematical alert state machine, noise formulas & escalation
+│   ├── system/                 # In-game smartphone, time engine & memory vector compaction
+│   └── world/                  # 3-tier spatial graph, Dijkstra pathfinding & world events simulation
+├── models/                     # Centralized Pydantic schemas & state models
 ├── releases/                   # Version changelogs & clean release archives
-├── scripts/                    # Maintenance, release packaging & gameplay simulation harnesses
-├── services/                   # Decoupled turn execution service
-├── tests/                      # Automated unit, integration, simulator & contract test suites
-├── web/                        # Unified modern React Single-Page Application
-│   ├── dist/                   # Production compiled assets (pre-built, served natively by FastAPI)
-│   ├── src/                    # ActionPanel, TurnOutcomePanel, StoryFeed, PhoneModal, CodexPanel, locales & i18n
-│   ├── package.json
-│   └── vite.config.js
-├── config.py                   # Environment configuration loader
+├── scripts/                    # Maintenance, release packaging & session cleanup utilities
+├── services/                   # Decoupled turn execution service (TurnService)
+├── web/                        # React Single-Page Application (Vite, Tailwind, i18n)
+│   ├── dist/                   # Compiled production frontend bundle (served by FastAPI)
+│   └── src/                    # ActionPanel, CodexPanel, StoryFeed, modals & themes
+├── config.py                   # Central configuration & environment loader
 ├── bot.py                      # Discord Bot entry point
 ├── server.py                   # FastAPI Web & WebSocket server entry point
 ├── requirements.txt            # Python dependencies
@@ -187,7 +152,7 @@ hikayat/
 
 ### 1. Prerequisites
 * Python 3.11+
-* Node.js 18+ (only needed if building/modifying the React frontend from source)
+* Node.js 18+ (only needed if building the React frontend from source)
 * A Discord Bot Token ([Discord Developer Portal](https://discord.com/developers/applications))
 * An API key for any OpenAI-compatible LLM endpoint
 
@@ -209,8 +174,8 @@ cp .env.example .env
 # Edit .env with your DISCORD_TOKEN, LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL
 ```
 
-### 3. Frontend Setup (Optional - Pre-built in `web/dist/`)
-The web application is already pre-compiled into `web/dist/` and runs out-of-the-box when you launch the server. If you wish to customize the frontend:
+### 3. Frontend Setup (Pre-built in `web/dist/`)
+The web application is already pre-compiled into `web/dist/` and runs out-of-the-box when you launch `server.py`. If you wish to build it yourself:
 ```bash
 cd web
 npm install
@@ -224,25 +189,11 @@ cd ..
   python bot.py
   # Or on Windows: run_bot.bat
   ```
-* **Launch Web Server & API**:
+* **Launch Web Server**:
   ```bash
   python server.py
   # Or on Windows: run_web.bat
   ```
-
----
-
-## 🧪 Testing
-
-Hikayat features a comprehensive automated test suite enforcing codebase contracts, DT/DR formulas, state reducers, and combat balance:
-
-```bash
-# Run the complete test suite
-pytest
-
-# Run architectural contract and invariant tests only
-pytest tests/test_codebase_contracts.py tests/test_mathematical_invariants.py
-```
 
 ---
 

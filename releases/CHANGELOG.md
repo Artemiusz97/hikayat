@@ -23,6 +23,7 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v2.8.0** | 2026-11-06 | Minor | Folklore Codex, World Pulse Background Simulation, Multi-Engine Quest Architecture, Forensic Dossiers, and Awakened Resonance. |
 | **v2.7.0** | 2026-10-28 | Minor | Cast Contract Authority, Dynamic Scenery & Lighting, Investigatory Spatial Immunity, Romance Choice Auto-Injection, Clean Headless Pruning & Production Release. |
 | **v2.6.0** | 2026-10-27 | Minor | Five Normalized World Models, Anomalous Incursions, Stealth Escalation, Town & Campus Rosters, Web Contacts & Theme Dock, Test Concurrency Hardening. |
 | **v2.5.0** | 2026-10-23 | Minor | Deterministic State Engine Phases 1–5, Stealth & Infiltration Package, Tactical Action Dock & Quick Belt, Graph Pathfinding & Access Gating, CI Concurrency Hardening. |
@@ -46,6 +47,32 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 ---
 
 ## Release Details
+
+### [v2.8.0] - 2026-11-06
+
+#### Added & Enhanced
+- **Folklore Codex & Occult Research Engine**:
+  - Structured mythical bestiary and occult lorebook (`mechanics/world/folklore_codex.py`, `data/folklore_codex.json`).
+  - Interactive Encyclopedia tab in the React Web UI (`EncyclopediaSubTab.jsx`) unlocking tactical weaknesses against supernatural threats.
+- **World Pulse & Background Event Simulation**:
+  - Global and regional event engine (`mechanics/world/world_events/`, `data/world_events_catalog.json`, `db/world_events.py`, `api/world_events.py`).
+  - Autonomous simulation of rumors, crises, scandals, and festivals with countdown timers and escalation rules.
+  - Interactive Discord menu views (`cogs/adventure/views/world_pulse.py`, `world_pulse_mixin.py`) and Web UI lore feeds (`WorldPulseLoreSubTab.jsx`).
+- **Multi-Engine Quest Architecture & Forensic Dossiers**:
+  - Operational quest engines (Investigation, Bounty, Social Infiltration, Survival) in `mechanics/narrative/quest_engines.py` and `data/quest_engines_catalog.json`.
+  - Structured suspect profiling, motive tracking, and clue verification in relational tables (`mechanics/narrative/dossier_compiler.py`, `db/dossiers.py`).
+  - Campaign Spine framework coordinating story arcs across procedural chapters (`mechanics/narrative/campaign_spine.py`).
+- **Awakened Resonance & Combat Overdrive**:
+  - Elemental attunement, combat stances, and tiered spell overcharging (`mechanics/combat/awakened_resonance.py`, `mechanics/combat/spells/awakened_kits.py`).
+- **Origin Modes & Specialized Roster Tags**:
+  - Character origin trajectories, starting affiliations, and dialogue predispositions (`mechanics/social/origin_mode.py`, `mechanics/social/roster_tags.py`).
+- **Procedural Anomaly Engine Expansion**:
+  - Procedural spatial rifts and reality-warping hazards (`mechanics/world/anomaly_engine.py`, `data/anomaly_procedural_pools.json`).
+- **Memory Tokenization & Context Budgeting**:
+  - Token-aware compaction and sliding-window memory digests (`mechanics/system/memory/tokenization.py`).
+- **Web UI Enhancements & Theme System**:
+  - Refactored ActionPanel, QuestLogPanel, CodexPanel, and EmbarkationModal.
+  - Custom vector favicons and expanded theme options.
 
 ### [v2.7.0] - 2026-10-28
 

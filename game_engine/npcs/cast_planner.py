@@ -11,6 +11,7 @@ Guarantees that:
 
 import json
 import logging
+import random
 import re
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Tuple, Set
@@ -49,15 +50,6 @@ def _matches_name_boundary(needle: str, text: str) -> bool:
     if not n_clean or not t_clean:
         return False
     return bool(re.search(r"(?<!\w)" + re.escape(n_clean) + r"(?!\w)", t_clean, re.IGNORECASE))
-
-
-def _is_action_check_succeeded(action: dict) -> bool:
-    chk = action.get("check")
-    if chk is None:
-        return bool(action.get("success", True))
-    if isinstance(chk, dict):
-        return bool(chk.get("succeeded", True))
-    return bool(getattr(chk, "succeeded", True))
 
 
 @dataclass
@@ -239,6 +231,59 @@ def plan_pre_turn(
                 new_current_npcs.append(n)
         current_npcs = new_current_npcs
 
+    # Private Room Shield & Crowd Suppression (Decision 4)
+    # When entering or situated in a private/restricted/discreet room, filter out non-eligible ambient bystanders.
+    effective_node_id = (stage_info.get("effective_node_id") if stage_info else None) or session.get("current_node_id")
+    if effective_node_id:
+        sess_id = session.get("id") or session.get("session_id")
+        if sess_id:
+            try:
+                node_obj = db.get_world_node(sess_id, effective_node_id)
+                if node_obj and str(node_obj.get("privacy_level") or "").lower() in ("private", "restricted", "discreet"):
+                    from mechanics.world.npc_schedule import is_npc_eligible_for_private_room
+                    shielded_npcs = []
+                    for n in current_npcs:
+                        n_nm = game_engine._get_npc_name(n)
+                        is_bystander = isinstance(n, dict) and str(n.get("stage_role") or "") == "room_bystander"
+                        if (
+                            not is_bystander
+                            or n_nm.strip().lower() in party_names
+                            or n_nm.strip().lower() in [p.strip().lower() for p in current_partners]
+                            or is_npc_eligible_for_private_room(n_nm, session, node_id=effective_node_id)
+                        ):
+                            shielded_npcs.append(n)
+                        else:
+                            logger.info("[CastPlanner] Suppressing ambient bystander '%s' in private room '%s'", n_nm, effective_node_id)
+                    current_npcs = shielded_npcs
+            except Exception:
+                pass
+
+    # 2b. Sync active Non-Hostile Anomaly presence into current_npcs in Anomalous Incursions
+    try:
+        import scenario_data
+        if scenario_data.is_anomalous_incursions_scenario(str(session.get("scenario") or "")):
+            from mechanics.world.anomalous_events import sync_non_hostile_anomaly_scene_presence
+            temp_sess_for_anom = dict(session, current_npcs=current_npcs)
+            current_npcs = sync_non_hostile_anomaly_scene_presence(
+                session.get("id") or session.get("session_id"),
+                session=temp_sess_for_anom,
+                location_str=str(new_loc or old_loc or ""),
+                node_id=str(effective_node_id or ""),
+                persist_db=False,
+            )
+            current_partners = [
+                p for p in current_partners
+                if not any(
+                    isinstance(n, dict)
+                    and n.get("is_anomalous_entity")
+                    and n.get("talkable") is False
+                    and game_engine._get_npc_name(n).strip().lower() == p.strip().lower()
+                    for n in current_npcs
+                )
+            ]
+    except Exception:
+        pass
+
     # 3. Schedule departures from Stage Manager
     if stage_info and stage_info.get("schedule_departed_npcs"):
         for sn in stage_info["schedule_departed_npcs"]:
@@ -289,6 +334,7 @@ def plan_pre_turn(
                 a.get("_pinned_dialogue_exit")
                 or a_lbl_low.startswith("leave conversation")
                 or a_lbl_low.startswith("end conversation")
+                or a_lbl_low.startswith("step back from observing")
             )
             is_dismiss = bool(
                 raw_dismiss_val
@@ -332,8 +378,14 @@ def plan_pre_turn(
                 intent_cat = r_intent.get("intent")
                 target_npc = str(a.get("target_npc") or r_intent.get("target_npc") or "").strip()
                 a_label = str(a.get("label") or a.get("text") or "")
-                if intent_cat in social_intents:
+                if (
+                    intent_cat in social_intents
+                    or a.get("is_anomaly_inquiry")
+                    or str(a.get("approach") or "").startswith(("anomaly_inquiry", "anomaly_pattern"))
+                ):
                     for n in current_npcs:
+                        if isinstance(n, dict) and n.get("is_anomalous_entity") and (n.get("talkable") is False and not n.get("pattern_observable")):
+                            continue
                         n_name = game_engine._get_npc_name(n).strip()
                         n_low = n_name.lower()
                         n_toks = namegen.get_unique_person_tokens(n_name, peer_names=current_npcs) if n_name else set()
@@ -709,8 +761,14 @@ def apply_cast_events(
                     if _is_role_phrase or namegen.is_generic_role_name(npc_name) or not namegen.is_valid_entity_name(npc_name):
                         arrival_meta.setdefault("descriptor", npc_name)
                         arrival_meta.setdefault("role", npc_name.title())
+                        c_gen = arrival_meta.get("gender", "")
+                        if not c_gen and sess_id:
+                            player_gen = db.get_session_player_gender(sess_id)
+                            from scenario_data import resolve_scenario_npc_gender
+                            c_gen = resolve_scenario_npc_gender(scen_key, player_gen, rng=random)
+                            arrival_meta["gender"] = c_gen
                         npc_name = namegen.generate_person_name(
-                            scenario=scen_key, gender=arrival_meta.get("gender", "")
+                            scenario=scen_key, gender=c_gen
                         )
                         npc_low = npc_name.lower()
                     unscheduled_named_arrivals += 1
@@ -791,6 +849,18 @@ def apply_cast_events(
                 continue
 
             matched_low = matched_name.lower()
+            matched_ent = next(
+                (n for n in updated_present if isinstance(n, dict) and game_engine._get_npc_name(n).strip().lower() == matched_low),
+                None,
+            )
+            if isinstance(matched_ent, dict) and matched_ent.get("is_anomalous_entity") and matched_ent.get("talkable") is False:
+                rej = {
+                    "type": "engage",
+                    "npc": matched_name,
+                    "reason": f"Anomalous entity '{matched_name}' is non-sapient/instinctual and cannot engage in verbal dialogue.",
+                }
+                rejections.append(rej)
+                continue
             last_disengage = disengaged_at_turn.get(matched_low, disengaged_at_turn.get(npc_low, -999))
             if (current_turn_index - last_disengage) < 2:
                 rej = {

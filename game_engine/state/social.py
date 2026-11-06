@@ -1,6 +1,8 @@
 from __future__ import annotations
 from typing import Dict, Any, List, Optional
 from .constants import *
+from .helpers import get_combined_narrative, is_check_success
+from .reducers import _evaluate_npc_milestones, _resolve_current_turn_1based
 import mechanics.narrative.event_handlers
 from mechanics.narrative.events import bus, LocationChangedEvent, NPCSpawnedEvent, NPCStatusChangedEvent, ItemGiftedEvent, ItemGainedEvent, FactionLeadershipChangedEvent, QuestCompletedEvent
 import json
@@ -189,6 +191,15 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 dps = get_session_dialogue_partners(session)
                 if dps:
                     target_npc_name = dps[0]
+
+            if target_npc_name and any(
+                isinstance(_an, dict)
+                and (_an.get("is_anomalous_entity") or _an.get("non_hostile_anomaly"))
+                and str(_an.get("name") or "").strip().lower() == str(target_npc_name).strip().lower()
+                for _an in (session.get("current_npcs") or [])
+            ):
+                # Anomalous entities never exchange phone numbers or join Smartphone Contacts
+                target_npc_name = None
 
             if target_npc_name:
                 if is_success:
@@ -448,7 +459,7 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
             )
             # Check Peer / Role Eligibility (e.g. students vs teachers/parents/clerks in high school)
             import mechanics.social.relationships as relationships
-            if not is_promoted_parent and not relationships.is_contact_eligible(name=n_name, role=n_role, description=n_desc, scenario=scen_key, session_id=session_id, social_role_type=n_srt):
+            if not is_promoted_parent and not relationships.is_contact_eligible(name=npc if isinstance(npc, dict) else n_name, role=n_role, description=n_desc, scenario=scen_key, session_id=session_id, social_role_type=n_srt):
                 continue
 
             # Contacts require Friend tier (score >= 100), active party membership, or explicit contact_added
@@ -527,7 +538,7 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                     continue
                 n_role = (npc.get("role") if isinstance(npc, dict) else "") or ""
                 n_desc = (npc.get("description") if isinstance(npc, dict) else "") or ""
-                if not relationships.is_contact_eligible(name=n_name, role=n_role, description=n_desc, scenario=scen_key):
+                if not relationships.is_contact_eligible(name=npc if isinstance(npc, dict) else n_name, role=n_role, description=n_desc, scenario=scen_key, session_id=session_id):
                     continue
                 if game_engine.is_dialogue_partner(n_name, [label]) or n_name.lower() in label_low:
                     if n_name not in target_npcs:
@@ -535,13 +546,13 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
   
             if not target_npcs and active_partners:
                 for ap in active_partners:
-                    if not relationships.is_contact_eligible(name=ap, scenario=scen_key):
+                    if not relationships.is_contact_eligible(name=ap, scenario=scen_key, session_id=session_id):
                         continue
                     if game_engine.is_dialogue_partner(ap, [label]) or ap.lower() in label_low:
                         if ap not in target_npcs:
                             target_npcs.append(ap)
                 if not target_npcs:
-                    target_npcs.extend([ap for ap in active_partners if relationships.is_contact_eligible(name=ap, scenario=scen_key)])
+                    target_npcs.extend([ap for ap in active_partners if relationships.is_contact_eligible(name=ap, scenario=scen_key, session_id=session_id)])
   
             for t_npc in target_npcs:
                 t_low = t_npc.lower().strip()
@@ -1274,7 +1285,7 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 new_general_memory=gen_mem,
                 narrative_text=narrative_text
             )
-            turn_num = len((session or {}).get("history") or []) + 1
+            turn_num = _resolve_current_turn_1based(session, outcome)
             cur_day_val = int((session or {}).get("current_day") or 1)
             cur_loc_val = str(outcome.get("location") or (session or {}).get("current_location") or "")
 
@@ -1630,8 +1641,6 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
             log.warning("Immediate affair discovery check failed: %s", _affair_err)
 
 
-from .reducers import _evaluate_npc_milestones
-from .core import get_combined_narrative, is_check_success
 
 
 def resolve_pre_turn_social_and_disclosures(

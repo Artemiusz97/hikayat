@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 import game_engine
 from .core import *
@@ -113,6 +114,11 @@ def _character_sheet_text(char: dict, inventory: list) -> str:
     ]
     if anatomy_line:
         lines.append(anatomy_line)
+    if char.get("attribute") and char.get("combat_archetype") and char.get("ability_medium"):
+        attr_lbl = str(char["attribute"]).replace("_", " ").title()
+        arch_lbl = str(char["combat_archetype"]).replace("_", " ").title()
+        med_lbl = str(char["ability_medium"]).replace("_", " ").title()
+        lines.append(f"[Awakened Resonance: {attr_lbl} | {arch_lbl} | {med_lbl}]")
     lines.extend([
         f"STR {str_val} | PER {char.get('per_', 5)} | END {char.get('end_', 5)} | CHA {char.get('cha', 5)} | "
         f"INT {char.get('int_', 5)} | AGI {char.get('agi', 5)} | LUK {char.get('luk', 5)}",
@@ -177,12 +183,21 @@ def _describe_tracked_entity(entity) -> str:
 
     return f"{name} ({', '.join(bits)})" if bits else name
 
-def _history_text(history: list, session_id: int | None = None, query_context: str = "", budget=None, query_embedding: list[float] = None) -> str:
+def _history_text(
+    history: list,
+    session_id: int | None = None,
+    query_context: str = "",
+    budget=None,
+    query_embedding: list[float] = None,
+    present_npcs: list[str] | None = None,
+    current_location: str = "",
+    active_quest_ids: list[str] | None = None,
+) -> str:
     """Build the hierarchical RECENT HISTORY prompt block.
 
     Tier 2 (top): Past-arc chapter digest bullets — permanent events from
-                   earlier arcs, summarised by the background digest worker.
-                   Uses FTS5 to surface contextually relevant past bullets.
+                   earlier arcs, summarised by the deterministic digest pipeline.
+                   Uses 2-signal entity/location/quest + FTS5 recall.
     Tier 1 (mid): Last RAW_HISTORY_LIMIT raw turns verbatim.
     Active commitments (bottom): Outstanding promises / pacts / debts / secrets.
     """
@@ -192,8 +207,19 @@ def _history_text(history: list, session_id: int | None = None, query_context: s
     # ---------- Tier 2: Chapter Digest ----------
     if session_id is not None:
         try:
-            digest_block = db.format_digest_prompt_block(session_id, query_context=query_context, max_recent=6, max_relevant=6, query_embedding=query_embedding)
+            digest_block = db.format_digest_prompt_block(
+                session_id,
+                query_context=query_context,
+                max_recent=6,
+                max_relevant=6,
+                query_embedding=query_embedding,
+                present_npcs=present_npcs,
+                current_location=current_location,
+                active_quest_ids=active_quest_ids,
+            )
             if digest_block:
+                if budget:
+                    digest_block = budget.trim(digest_block, "digest")
                 # Prepend a standing perspective caveat so the LLM knows digest events are not universal knowledge
                 digest_with_caveat = (
                     "[DIGEST PERSPECTIVE NOTE: Events below are archived history. "
@@ -296,6 +322,8 @@ def _history_text(history: list, session_id: int | None = None, query_context: s
 
     if recent:
         tier1_lines = "\n".join(recent)
+        if budget:
+            tier1_lines = budget.trim_keep_tail(tier1_lines, "history")
         if sections:
             sections.append("[RECENT TURNS (last session moments)]:\n" + tier1_lines)
         else:
@@ -304,7 +332,7 @@ def _history_text(history: list, session_id: int | None = None, query_context: s
         sections.append("(This is the beginning of the adventure.)")
 
     # ---------- Commitments Block ----------
-    if session_id is not None:
+    if session_id is not None and (not budget or budget.chars_for("commitments") > 0):
         try:
             active_commits = db.get_active_commitments(session_id, limit=8)
             if active_commits:
@@ -316,7 +344,11 @@ def _history_text(history: list, session_id: int | None = None, query_context: s
                     desc = c.get("description", "")
                     tgt_str = f" → {tgt}" if tgt else ""
                     c_lines.append(f"• [{ctype}] {src}{tgt_str}: {desc}")
-                sections.append("[ACTIVE COMMITMENTS & PROMISES]:\n" + "\n".join(c_lines))
+                commits_body = "\n".join(c_lines)
+                if budget:
+                    commits_body = budget.trim(commits_body, "commitments")
+                if commits_body:
+                    sections.append("[ACTIVE COMMITMENTS & PROMISES]:\n" + commits_body)
         except Exception:
             pass
 
@@ -500,17 +532,16 @@ def _scene_context_text(session_id: int, current_location: str,
 
     if lore["person"] or contacts or current_npcs:
         scene_npc_names = {e.get("name", "").lower().strip() for e in (current_npcs or []) if isinstance(e, dict)}
-        
+
         contacts_by_name = {c.get("name", "").lower().strip(): c for c in (contacts or []) if isinstance(c, dict) and c.get("name")}
-        school_dir = {}
-        try:
-            with db.get_conn() as _conn:
-                _rows = _conn.execute("SELECT name, gender, race, role, grade, club FROM school_directory WHERE session_id=?", (session_id,)).fetchall()
-                for _r in _rows:
-                    if _r["name"]:
-                        school_dir[_r["name"].lower().strip()] = dict(_r)
-        except Exception:
-            pass
+        bound_ctx = (world.get("_ctx") if isinstance(world, dict) else None) or (session.get("_ctx") if isinstance(session, dict) else None)
+        if bound_ctx is not None and hasattr(bound_ctx, "school_directory_map"):
+            school_dir = bound_ctx.school_directory_map
+        else:
+            try:
+                school_dir = db.get_school_directory_batch(session_id)
+            except Exception:
+                school_dir = {}
 
         combined_persons = []
         seen_names = set()
@@ -570,6 +601,12 @@ def _scene_context_text(session_id: int, current_location: str,
 
         present_persons = [p for p in combined_persons if p.get("name", "").lower().strip() in scene_npc_names]
         absent_persons = [p for p in combined_persons if p.get("name", "").lower().strip() not in scene_npc_names]
+
+        present_names_for_mem = [p["name"] for p in present_persons if p.get("name")]
+        if bound_ctx is not None and hasattr(bound_ctx, "npc_memories_by_name"):
+            batched_npc_memories = bound_ctx.npc_memories_by_name(present_names_for_mem, per_npc_limit=5)
+        else:
+            batched_npc_memories = db.get_npc_memories_batch(session_id, present_names_for_mem, per_npc_limit=5)
 
         # 1. Characters physically present in this room / scene get full dossiers
         present_entries = []
@@ -667,8 +704,7 @@ def _scene_context_text(session_id: int, current_location: str,
                 present_entries.append(f"{p['name']} [{tag_inner}]" + extra)
 
             # Subsystem 2: Inject Entity-Centric Memory Graph if the NPC is present in the scene
-            from db.memory import get_npc_memories
-            memories = get_npc_memories(session_id, p["name"])
+            memories = batched_npc_memories.get(p["name"].strip().lower(), [])
             if memories:
                 top_memories = sorted(memories[:5], key=lambda x: x.get('turn_index', 0))
                 mem_lines = [f"• {m['memory_fact']}" for m in top_memories]

@@ -6,7 +6,7 @@ import random
 import time
 import db
 import scenario_data
-import mechanics.system.phone
+from llm_client import call_llm_json
 from skill_check import resolve_check
 from .embeds import get_phone_branding
 
@@ -41,7 +41,7 @@ async def generate_gossip_feed_posts(session: dict, force_refresh: bool = False)
     sq_obj = sq.get("objective", "") if sq else ""
 
     school_hints = ""
-    if is_school_scenario(scen_key):
+    if is_school_scenario(scen_key) or scenario_data.is_anomalous_high_school_scenario(scen_key):
         from mechanics.social.school_roster import ensure_school_directory_exists
         roster = ensure_school_directory_exists(session)
         if roster:
@@ -79,9 +79,29 @@ async def generate_gossip_feed_posts(session: dict, force_refresh: bool = False)
         f"- Set `likes` to an integer between 3 and 85.\n"
         f"Respond with ONLY a single valid JSON object matching the schema exactly, no prose or code fences."
     )
+    try:
+        from db import adb
+        from llm_client import is_nsfw_configured
+        snap_we = session.get("_world_events_snapshot") or await adb(db.get_world_events_snapshot, session_id)
+        allow_nsfw = scenario_data.uses_nsfw_model(scen_key) and is_nsfw_configured()
+
+        from mechanics.world.world_events.formatting import extract_minor_events, resolve_event_description
+
+        pulse_lines = []
+        for _ev in (snap_we.get("active_macro_events") or [])[:2]:
+            pulse_lines.append(f"- WORLD EVENT: {_ev.get('title')} — {resolve_event_description(_ev, allow_nsfw)}")
+        for _rm in (snap_we.get("discovered_rumors") or [])[:2]:
+            pulse_lines.append(f"- TRENDING RUMOR: {_rm.get('title')} — {resolve_event_description(_rm, allow_nsfw)}")
+        minors = extract_minor_events(snap_we)
+        for _mn in (minors or [])[:2]:
+            pulse_lines.append(f"- LOCAL CHATTER: {_mn.get('title')} — {resolve_event_description(_mn, allow_nsfw)}")
+        if pulse_lines:
+            system_prompt += "\nACTIVE WORLD PULSE (Reference at least one naturally in timeline chatter):\n" + "\n".join(pulse_lines) + "\n"
+    except Exception:
+        pass
     user_prompt = f"Active Scenario: {scen_key}\nGenerate 4 fresh timeline posts for {branding['feed_app_name']}:\n{GOSSIP_FEED_SCHEMA}"
 
-    result = await mechanics.system.phone.call_llm_json(system_prompt, user_prompt, temperature=0.8, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
+    result = await call_llm_json(system_prompt, user_prompt, temperature=0.8, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
     posts = result.get("posts", [])
     if not posts:
         posts = [
@@ -241,9 +261,23 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
             f"Location: {loc}.\n"
             f"Output a JSON object with: {{\"clue\": \"string (1-2 sentences of valuable clue)\", \"source\": \"string (e.g. anonymous student post, leaked audio file, overheard locker room chat)\"}}"
         )
-        res = await mechanics.system.phone.call_llm_json(system_prompt, "Generate verified rumor lead:", temperature=0.7, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
+        res = await call_llm_json(system_prompt, "Generate verified rumor lead:", temperature=0.7, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
         clue_text = res.get("clue") or f"Unusual after-hours movement reported near {loc} connected to {sq_title}."
         source = res.get("source") or "Encrypted Forum Thread"
+        discovered_rm = None
+        world_pulse_payload = None
+        try:
+            from db import adb
+            from mechanics.world.world_events.engine import (
+                build_client_world_pulse_payload,
+                discover_hidden_rumor_from_feed,
+            )
+            discovered_rm = await adb(discover_hidden_rumor_from_feed, session_id, "phone_gossip_feed")
+            if discovered_rm:
+                clue_text = f"[{discovered_rm['title']}] {discovered_rm['description']}"
+                world_pulse_payload = await adb(build_client_world_pulse_payload, session_id)
+        except Exception:
+            discovered_rm = None
         log_gossip_clue_to_quest(session_id, clue_text)
 
         # Prepend verified lead post into feed
@@ -262,7 +296,7 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
         updated_feed = [lead_post] + [p for p in current_feed if p.get("content") != clue_text][:19]
         db.save_gossip_feed(session_id, updated_feed)
 
-        return {
+        out_res = {
             "success": True,
             "check": check,
             "clue": clue_text,
@@ -270,8 +304,12 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
             "charges_left": charges,
             "tier_label": check["tier_label"],
             "feed_post": lead_post,
-            "gossip_feed": updated_feed
+            "discovered_rumor": discovered_rm,
+            "gossip_feed": updated_feed,
         }
+        if world_pulse_payload is not None:
+            out_res["world_pulse"] = world_pulse_payload
+        return out_res
     else:
         fallbacks = [
             f"Someone posted a blurry photo claiming it was proof of secret activity, but comments proved it was just a freshman prank.",
@@ -383,4 +421,16 @@ def queue_witness_gossip_post(
     current_feed = db.get_gossip_feed(session_id, limit=20) or []
     updated_feed = [post] + [p for p in current_feed if p.get("id") != post["id"]][:19]
     db.save_gossip_feed(session_id, updated_feed)
+    try:
+        from mechanics.world.world_events.social_hooks import evaluate_witness_catch_scandal_gate
+        post["scandal_gate"] = evaluate_witness_catch_scandal_gate(
+            session_id=session_id,
+            witness_name=witness_name,
+            partner_name=partner_name,
+            location_display=location_display,
+            event_kind=event_kind,
+            is_high_profile=event_kind in ("affair_exposed", "secret_affair"),
+        )
+    except Exception:
+        post["scandal_gate"] = {"spawned_scandal": False}
     return post

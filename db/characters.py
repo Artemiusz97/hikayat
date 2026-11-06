@@ -1,4 +1,6 @@
+from __future__ import annotations
 import db
+import logging
 import asyncio
 import json
 import time
@@ -9,12 +11,16 @@ import sqlite3
 from config import DB_PATH
 import character_data as cd
 from .core import *
+log = logging.getLogger(__name__)
+
 from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
 
 def create_character(user_id: int, name: str, char_class: str = "Adventurer", class_description: str = "",
                      stats: dict = None, gold: int = cd.STARTING_GOLD, pending_stat_points: int = 0,
                      gender: str = "Male", scenario: str = "fantasy",
-                     race: str = "human", race_description: str = "", appearance: dict = None) -> dict:
+                     race: str = "human", race_description: str = "", appearance: dict = None,
+                     attribute: str | None = None, combat_archetype: str | None = None,
+                     ability_medium: str | None = None) -> dict:
     if stats is None:
         stats = {s: cd.BASE_STAT_VALUE for s in cd.STATS}
     existing = get_user_characters(user_id)
@@ -22,9 +28,15 @@ def create_character(user_id: int, name: str, char_class: str = "Adventurer", cl
         raise ValueError("Character creation limit reached (maximum 6 characters allowed per user).")
     from mechanics.social.races import normalize_race
     from mechanics.social.persona import normalize_appearance
+    from scenario_data import is_anomalous_incursions_scenario
     norm_race = normalize_race(race, scen_key=scenario, seed=name) if race else "human"
     hp = cd.calculate_max_hp(stats["END"])
     mp = cd.calculate_max_mp(stats["END"])
+
+    is_anom = is_anomalous_incursions_scenario(scenario)
+    attr_val = str(attribute).strip().lower() if (is_anom and attribute) else None
+    arch_val = str(combat_archetype).strip().lower() if (is_anom and combat_archetype) else None
+    med_val = str(ability_medium).strip().lower() if (is_anom and ability_medium) else None
 
     app_dict = dict(appearance or {})
     is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
@@ -37,6 +49,10 @@ def create_character(user_id: int, name: str, char_class: str = "Adventurer", cl
         if not app_dict.get("breast_size"):
             app_dict["breast_size"] = "Modest B-Cup"
     norm_app = normalize_appearance(app_dict, gender=gender, race=norm_race, scen_key=scenario, desc=class_description)
+    if app_dict.get("origin_mode"):
+        norm_app["origin_mode"] = app_dict["origin_mode"]
+    if app_dict.get("student_grade"):
+        norm_app["student_grade"] = app_dict["student_grade"]
     app_json = json.dumps(norm_app)
 
     with get_conn() as conn:
@@ -45,13 +61,21 @@ def create_character(user_id: int, name: str, char_class: str = "Adventurer", cl
             """INSERT INTO characters
                (user_id, is_active, name, char_class, class_description, gender, scenario, race, race_description, str_, per_, end_, cha, int_, agi, luk,
                 hp, max_hp, temp_hp, mp, max_mp, level, xp, pending_stat_points, gold, status_effects,
-                skill_progress, active_session_id, appearance_json, created_at)
-               VALUES (?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,1,0,?,?,'[]','{}',NULL,?,?)""",
+                skill_progress, active_session_id, appearance_json, attribute, combat_archetype, ability_medium, created_at)
+               VALUES (?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,1,0,?,?,'[]','{}',NULL,?,?,?,?,?)""",
             (user_id, name, char_class, class_description, gender, scenario, norm_race, race_description,
              stats["STR"], stats["PER"], stats["END"], stats["CHA"], stats["INT"], stats["AGI"], stats["LUK"],
-             hp, hp, mp, mp, pending_stat_points, gold, app_json, time.time()),
+             hp, hp, mp, mp, pending_stat_points, gold, app_json, attr_val, arch_val, med_val, time.time()),
         )
         char_id = cur.lastrowid
+    if is_anom and attr_val and arch_val and med_val:
+        try:
+            from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
+            innate = list(build_awakened_kit_ids(attr_val, arch_val, med_val))
+            db.set_skill_progress(user_id, {"innate_spells": innate, "equipped_granted_spells": [], "empowered_granted_spells": []})
+            db.set_learned_spells(user_id, innate)
+        except Exception as e:
+            log.warning("Failed seeding innate 3-axis spells in create_character for user %s: %s", user_id, e)
     return get_character_by_id(char_id)
 
 def apply_adventure_loadout(
@@ -63,6 +87,9 @@ def apply_adventure_loadout(
     weapon_description: str = "",
     gear_map: dict | None = None,
     starting_items: list | None = None,
+    attribute: str | None = None,
+    combat_archetype: str | None = None,
+    ability_medium: str | None = None,
 ) -> dict:
     """Applies a scenario-specific class, weapon, and generated starting equipment
     to the active character at adventure start. Clears previous temporary equipment
@@ -72,33 +99,46 @@ def apply_adventure_loadout(
         raise ValueError("No active character found for user.")
     char_id = char["id"]
 
+    from scenario_data import is_non_combat_scenario, is_anomalous_incursions_scenario
+    is_non_combat = is_non_combat_scenario(scenario)
+    is_anomalous = is_anomalous_incursions_scenario(scenario)
+
+    eff_attr = (str(attribute).strip().lower() if attribute else char.get("attribute")) if is_anomalous else None
+    eff_arch = (str(combat_archetype).strip().lower() if combat_archetype else char.get("combat_archetype")) if is_anomalous else None
+    eff_med = (str(ability_medium).strip().lower() if ability_medium else char.get("ability_medium")) if is_anomalous else None
+
     with get_conn() as conn:
         # Clear existing inventory/equipment for this character
         conn.execute(
             "DELETE FROM inventory WHERE character_id=? OR (character_id IS NULL AND user_id=?)",
             (char_id, user_id)
         )
-        # Update character's scenario, class, and description
+        # Update character's scenario, class, description, and 3-axis resonance (NULL for non-anomalous)
         conn.execute(
             """UPDATE characters
-               SET scenario=?, char_class=?, class_description=?, gold=?, hp=max_hp, mp=max_mp, status_effects='[]'
+               SET scenario=?, char_class=?, class_description=?, gold=?, hp=max_hp, mp=max_mp, status_effects='[]',
+                   attribute=?, combat_archetype=?, ability_medium=?
                WHERE id=?""",
-            (scenario, char_class, class_description, cd.STARTING_GOLD, char_id)
+            (scenario, char_class, class_description, cd.STARTING_GOLD, eff_attr, eff_arch, eff_med, char_id)
         )
 
     from mechanics.combat.equipment import parse_equipment_metadata
     from mechanics.combat.items.envelope import serialize_item
     from mechanics.combat.items.weapons import generate_random_equipment as gen_weapon
 
-    from scenario_data import is_non_combat_scenario, is_anomalous_incursions_scenario
-    is_non_combat = is_non_combat_scenario(scenario)
-    is_anomalous = is_anomalous_incursions_scenario(scenario)
-
     # 0. Seed 5 Fixed Innate Special Abilities for Anomalous Incursions before equipping gear
     if is_anomalous:
         try:
-            from mechanics.combat.spells.kits import get_anomalous_starting_innate_abilities
-            innate_spells = list(get_anomalous_starting_innate_abilities(char_class, scenario, class_description))
+            innate_spells: list[str] = []
+            if eff_attr and eff_arch and eff_med:
+                try:
+                    from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
+                    innate_spells = list(build_awakened_kit_ids(eff_attr, eff_arch, eff_med))
+                except ImportError:
+                    innate_spells = []
+            if not innate_spells:
+                from mechanics.combat.spells.kits import get_anomalous_starting_innate_abilities
+                innate_spells = list(get_anomalous_starting_innate_abilities(char_class, scenario, class_description))
             fresh_char = db.get_character(user_id) or char
             progress = db.get_skill_progress(fresh_char)
             progress["innate_spells"] = list(innate_spells)
@@ -131,6 +171,7 @@ def apply_adventure_loadout(
     # 2. Starting armor / clothing / accessories from gear_map
     equipped_weapon = False
     if gear_map:
+        from mechanics.combat.items.clothing import can_equip_item_in_scenario
         for slot, entry in gear_map.items():
             if not entry:
                 continue
@@ -172,10 +213,19 @@ def apply_adventure_loadout(
                 gear_type = entry.get("item_type") or default_type
                 gear_effect = entry.get("effect", "")
                 gear_slot_cost = entry.get("slot_cost", 1)
+                cand_dict = dict(entry)
+                cand_dict.setdefault("item_type", gear_type)
+                cand_dict.setdefault("effect", gear_effect)
+                if not can_equip_item_in_scenario(cand_dict, slot, scenario)[0]:
+                    continue
                 gear_id = db.add_item(user_id, gear_name, gear_type, gear_effect, gear_slot_cost)
-                db.equip_item(user_id, gear_id, slot)
-                if slot == "Weapon":
-                    equipped_weapon = True
+                if gear_id:
+                    try:
+                        db.equip_item(user_id, gear_id, slot)
+                        if slot == "Weapon":
+                            equipped_weapon = True
+                    except ValueError:
+                        db.remove_item(user_id, gear_id)
                 continue
             elif isinstance(entry, (tuple, list)) and len(entry) >= 2:
                 if slot == "Weapon":
@@ -199,8 +249,20 @@ def apply_adventure_loadout(
                     default_type = "Accessory"
                 else:
                     default_type = "Armor"
+                cand_dict = {
+                    "name": gear_name,
+                    "item_type": default_type,
+                    "effect": gear_effect,
+                    "slot_cost": gear_slot_cost,
+                }
+                if not can_equip_item_in_scenario(cand_dict, slot, scenario)[0]:
+                    continue
                 gear_id = db.add_item(user_id, gear_name, default_type, gear_effect, gear_slot_cost)
-                db.equip_item(user_id, gear_id, slot)
+                if gear_id:
+                    try:
+                        db.equip_item(user_id, gear_id, slot)
+                    except ValueError:
+                        db.remove_item(user_id, gear_id)
                 continue
 
 
@@ -299,6 +361,10 @@ def update_character_appearance(character_id: int, appearance_dict: dict) -> dic
         scen_key=char.get("scenario", "fantasy"),
         desc=char.get("class_description", "")
     )
+    if existing_app.get("origin_mode"):
+        norm_app["origin_mode"] = existing_app["origin_mode"]
+    if existing_app.get("student_grade"):
+        norm_app["student_grade"] = existing_app["student_grade"]
     with get_conn() as conn:
         conn.execute(
             "UPDATE characters SET appearance_json=? WHERE id=?",
@@ -315,6 +381,108 @@ def get_character(user_id: int):
             if row:
                 conn.execute("UPDATE characters SET is_active=1 WHERE id=?", (row["id"],))
         return _apply_debug_stat_override(dict(row)) if row else None
+
+def get_session_player_character(session_id_or_session: int | dict | None) -> dict | None:
+    """Retrieves the active player character associated with a session."""
+    if not session_id_or_session:
+        return None
+    session_id = None
+    character_id = None
+    host_user_id = None
+    if isinstance(session_id_or_session, dict):
+        session_id = session_id_or_session.get("id")
+        character_id = session_id_or_session.get("character_id")
+        host_user_id = session_id_or_session.get("host_user_id")
+    elif isinstance(session_id_or_session, (int, float)):
+        session_id = int(session_id_or_session)
+
+    if character_id:
+        char = get_character_by_id(character_id)
+        if char:
+            return char
+
+    if session_id:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT c.* FROM characters c JOIN sessions s ON (s.character_id = c.id OR c.active_session_id = s.id) WHERE s.id = ? LIMIT 1",
+                (session_id,)
+            ).fetchone()
+            if row:
+                return _apply_debug_stat_override(dict(row))
+
+    if host_user_id:
+        char = get_character(host_user_id)
+        if char:
+            return char
+
+    if session_id:
+        with get_conn() as conn:
+            s_row = conn.execute("SELECT character_id, host_user_id FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            if s_row:
+                if s_row["character_id"]:
+                    c = get_character_by_id(s_row["character_id"])
+                    if c:
+                        return c
+                if s_row["host_user_id"]:
+                    c = get_character(s_row["host_user_id"])
+                    if c:
+                        return c
+    return None
+
+def get_session_player_gender(session_id_or_session: int | dict | str | None) -> str:
+    """Returns the canonical gender string of the player character in a session, or empty string.
+
+    Optimized with fast in-memory extraction and single-query indexed projection,
+    handling NULL character_id and active_session_id links safely.
+    """
+    if not session_id_or_session:
+        return ""
+
+    # Fast in-memory check if dictionary
+    if isinstance(session_id_or_session, dict):
+        for k in ("player_gender", "character_gender", "gender"):
+            val = session_id_or_session.get(k)
+            if val and str(val).strip():
+                return str(val).strip()
+        char_obj = session_id_or_session.get("character")
+        if isinstance(char_obj, dict) and char_obj.get("gender"):
+            return str(char_obj["gender"]).strip()
+        session_id = session_id_or_session.get("id")
+    else:
+        try:
+            session_id = int(session_id_or_session)
+        except (ValueError, TypeError):
+            session_id = None
+
+    if session_id:
+        try:
+            with get_conn() as conn:
+                row = conn.execute(
+                    "SELECT c.gender FROM characters c "
+                    "JOIN sessions s ON (s.character_id = c.id OR c.active_session_id = s.id) "
+                    "WHERE s.id = ? AND c.gender IS NOT NULL AND c.gender != '' LIMIT 1",
+                    (session_id,)
+                ).fetchone()
+                if row and row["gender"]:
+                    return str(row["gender"]).strip()
+
+                # Fallback to host user active character
+                row2 = conn.execute(
+                    "SELECT c.gender FROM characters c "
+                    "JOIN sessions s ON s.host_user_id = c.user_id "
+                    "WHERE s.id = ? AND c.is_active = 1 AND c.gender IS NOT NULL AND c.gender != '' LIMIT 1",
+                    (session_id,)
+                ).fetchone()
+                if row2 and row2["gender"]:
+                    return str(row2["gender"]).strip()
+        except Exception as exc:
+            log.debug("Failed fast resolution of character gender for session %s: %s", session_id, exc)
+
+    # Safe fallback to full object resolution
+    char = get_session_player_character(session_id_or_session)
+    if char and char.get("gender"):
+        return str(char["gender"]).strip()
+    return ""
 
 def get_character_by_id(character_id: int):
     with get_conn() as conn:
@@ -346,6 +514,14 @@ def switch_character(user_id: int, character_id_or_name) -> dict | None:
         conn.execute("UPDATE characters SET is_active=0 WHERE user_id=?", (user_id,))
         conn.execute("UPDATE characters SET is_active=1 WHERE id=?", (target["id"],))
     return get_character_by_id(target["id"])
+
+def set_character_active_session(character_id: int, session_id: int | None) -> bool:
+    """Updates the active session ID for a character (Invariant 3)."""
+    if not character_id:
+        return False
+    with get_conn() as conn:
+        cur = conn.execute("UPDATE characters SET active_session_id=? WHERE id=?", (session_id, character_id))
+        return cur.rowcount > 0
 
 def delete_character(user_id: int, character_id: int = None) -> bool:
     with get_conn() as conn:
@@ -674,5 +850,53 @@ def get_discord_user(user_id: int) -> Optional[dict]:
 
 def delete_character_by_id(user_id: int, character_id: int) -> bool:
     return delete_character(user_id, character_id)
+
+
+def get_character_3axis(user_id: int) -> dict[str, Optional[str]]:
+    """Returns the active character's 3-axis awakened resonance fields (all None for non-anomalous characters)."""
+    char = get_character(user_id)
+    if not char:
+        return {"attribute": None, "combat_archetype": None, "ability_medium": None}
+    return {
+        "attribute": char.get("attribute") or None,
+        "combat_archetype": char.get("combat_archetype") or None,
+        "ability_medium": char.get("ability_medium") or None,
+    }
+
+
+def set_character_3axis(
+    user_id: int,
+    attribute: Optional[str] = None,
+    combat_archetype: Optional[str] = None,
+    ability_medium: Optional[str] = None,
+) -> bool:
+    """Updates the active character's 3-axis awakened resonance columns."""
+    char = get_character(user_id)
+    if not char:
+        return False
+    attr_val = str(attribute).strip().lower() if attribute else None
+    arch_val = str(combat_archetype).strip().lower() if combat_archetype else None
+    med_val = str(ability_medium).strip().lower() if ability_medium else None
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE characters
+               SET attribute = ?, combat_archetype = ?, ability_medium = ?
+               WHERE id = ?""",
+            (attr_val, arch_val, med_val, char["id"]),
+        )
+    if attr_val and arch_val and med_val:
+        try:
+            from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
+            from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
+            refreshed = get_character(user_id)
+            prog = db.get_skill_progress(refreshed)
+            innate = list(build_awakened_kit_ids(attr_val, arch_val, med_val))
+            prog["innate_spells"] = innate
+            db.set_skill_progress(user_id, prog)
+            db.set_learned_spells(user_id, innate + [s for s in (prog.get("equipped_granted_spells") or []) if s not in innate])
+            sync_equipped_anomalous_spells(user_id)
+        except Exception as e:
+            log.warning("Failed re-syncing innate 3-axis spells in set_character_3axis for user %s: %s", user_id, e)
+    return True
 
 

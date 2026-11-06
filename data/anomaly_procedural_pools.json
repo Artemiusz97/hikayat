@@ -1,0 +1,3097 @@
+{
+  "version": "2.0",
+  "forms_by_type": {
+    "entity": [
+      "humanoid_doppelganger",
+      "spectral_apparition",
+      "cryptid_therian",
+      "folklore_chimera",
+      "parasitic_colony",
+      "anatomical_amalgam",
+      "porcelain_automaton",
+      "shadow_silhouette",
+      "mimic_flora",
+      "origami_effigy",
+      "acoustic_predator",
+      "threshold_warden",
+      "skeletal_leviathan",
+      "astral_polyhedron"
+    ],
+    "object": [
+      "cursed_vehicle",
+      "haunted_furniture",
+      "possessed_media_device",
+      "impossible_weapon_relic",
+      "architectural_fixture",
+      "cursed_garment_mask",
+      "anomalous_vending_kiosk",
+      "sealed_apothecary_vessel",
+      "endless_book_scroll",
+      "clockwork_astrolabe"
+    ],
+    "phenomenon": [
+      "spatial_geometry_loop",
+      "memetic_sensory_hazard",
+      "localized_weather_anomaly",
+      "temporal_echo_zone",
+      "gravity_hume_distortion",
+      "phantom_procession",
+      "acoustic_dead_zone",
+      "illusory_market_mirage",
+      "chromatic_bleed_rift",
+      "mirror_corridor_fracture"
+    ]
+  },
+  "form_display_labels": {
+    "humanoid_doppelganger": "Humanoid / Doppelganger",
+    "spectral_apparition": "Spectral Apparition",
+    "cryptid_therian": "Cryptid / Therian Beast",
+    "folklore_chimera": "Folklore Chimera",
+    "parasitic_colony": "Parasitic Swarm / Colony",
+    "anatomical_amalgam": "Anatomical Amalgam",
+    "cursed_vehicle": "Cursed Transit / Vehicle",
+    "haunted_furniture": "Haunted Heirloom / Furniture",
+    "possessed_media_device": "Possessed Media / Broadcast Device",
+    "impossible_weapon_relic": "Anomalous Weapon / Ritual Relic",
+    "architectural_fixture": "Mimic Architectural Fixture",
+    "spatial_geometry_loop": "Non-Euclidean Spatial Loop",
+    "memetic_sensory_hazard": "Memetic / Cognito-Sensory Hazard",
+    "localized_weather_anomaly": "Localized Atmospheric Anomaly",
+    "temporal_echo_zone": "Temporal Echo Distortion",
+    "gravity_hume_distortion": "Gravitational / Hume Fracture",
+    "porcelain_automaton": "Porcelain / Ball-Jointed Automaton",
+    "shadow_silhouette": "Two-Dimensional Shadow Silhouette",
+    "mimic_flora": "Carnivorous / Mimic Flora",
+    "origami_effigy": "Paper / Shikigami Effigy",
+    "acoustic_predator": "Acoustic / Resonance Predator",
+    "threshold_warden": "Liminal Threshold Warden",
+    "skeletal_leviathan": "Ossified / Skeletal Leviathan",
+    "astral_polyhedron": "Non-Euclidean Astral Polyhedron",
+    "cursed_garment_mask": "Cursed Garment / Ritual Mask",
+    "anomalous_vending_kiosk": "Anomalous Vending / Dispenser Kiosk",
+    "sealed_apothecary_vessel": "Sealed Apothecary Jar / Spirit Vessel",
+    "endless_book_scroll": "Self-Writing Grimoire / Scroll",
+    "clockwork_astrolabe": "Impossible Clockwork / Astrolabe",
+    "phantom_procession": "Spectral Night Procession",
+    "acoustic_dead_zone": "Anechoic / Acoustic Dead Zone",
+    "illusory_market_mirage": "Illusory Bazaar / Mirage Zone",
+    "chromatic_bleed_rift": "Chromatic Spectrum Bleed",
+    "mirror_corridor_fracture": "Infinite Mirror-Corridor Fracture"
+  },
+  "non_corporeal_default_forms": [
+    "spectral_apparition",
+    "shadow_silhouette",
+    "astral_polyhedron",
+    "spatial_geometry_loop",
+    "memetic_sensory_hazard",
+    "localized_weather_anomaly",
+    "temporal_echo_zone",
+    "gravity_hume_distortion",
+    "phantom_procession",
+    "acoustic_dead_zone",
+    "illusory_market_mirage",
+    "chromatic_bleed_rift",
+    "mirror_corridor_fracture"
+  ],
+  "taboo_rules_catalog": [
+    {
+      "taboo_id": "taboo_mirror_gaze",
+      "name": "Indirect Reflection Protocol",
+      "taboo_rule": "Never meet its direct gaze or charge head-on; track its position strictly through reflections, camera feeds, or peripheral sight.",
+      "containment_protocol": "Angle a reflective surface or optical sensor to lock its parallax silhouette before activating the containment seal.",
+      "exploit_stats": [
+        "PER",
+        "INT"
+      ],
+      "violate_stats": [
+        "STR"
+      ],
+      "violate_elements": [],
+      "exploit_keywords": [
+        "mirror",
+        "reflection",
+        "peripheral",
+        "camera",
+        "sensor",
+        "avert gaze",
+        "indirect"
+      ],
+      "clue_hint": "Witnesses who looked directly into its aperture suffered immediate cognitive lock, whereas security cameras captured its true anchor point.",
+      "backlash_note": "Meeting the anomaly's direct gaze triggered a violent cognito-reflective backlash!"
+    },
+    {
+      "taboo_id": "taboo_true_name_silence",
+      "name": "Acoustic Non-Response Mandate",
+      "taboo_rule": "Never answer its vocal mimicry with your real name or direct aggression; reply only in paradoxical riddles or white-noise frequencies.",
+      "containment_protocol": "Broadcast an inverted acoustic phase-loop or offer a decoy pseudonym while anchoring its vocal core.",
+      "exploit_stats": [
+        "INT",
+        "CHA"
+      ],
+      "violate_stats": [],
+      "violate_elements": [
+        "wind"
+      ],
+      "exploit_keywords": [
+        "riddle",
+        "pseudonym",
+        "white noise",
+        "frequency",
+        "silence",
+        "decoy name",
+        "paradox"
+      ],
+      "clue_hint": "Audio logs show the anomaly steals vocal cords only after a victim acknowledges its call by name.",
+      "backlash_note": "Answering the anomaly's acoustic mimicry empowered its vocal resonance!"
+    },
+    {
+      "taboo_id": "taboo_thermal_feed",
+      "name": "Endothermic Starvation Protocol",
+      "taboo_rule": "Absorbs open flame and high-temperature plasma to multiply; never apply thermal or incendiary force.",
+      "containment_protocol": "Flood the perimeter with endothermic cryo-mist, pressurized water, or vacuum-seal foam to starve its heat sink.",
+      "exploit_stats": [
+        "INT",
+        "PER"
+      ],
+      "violate_stats": [],
+      "violate_elements": [
+        "fire"
+      ],
+      "exploit_keywords": [
+        "cryo",
+        "freeze",
+        "coolant",
+        "starve heat",
+        "extinguish",
+        "water",
+        "endothermic"
+      ],
+      "clue_hint": "Scorched walls around the breach are freezing cold to the touch—it feeds greedily on ambient heat and open fire.",
+      "backlash_note": "Thermal energy fed the anomaly's endothermic core, regenerating its mass!"
+    },
+    {
+      "taboo_id": "taboo_voltage_parasite",
+      "name": "Faraday Grounding Mandate",
+      "taboo_rule": "Siphons live electrical current and arc discharges; sever nearby breakers and never strike it with ungrounded electric current.",
+      "containment_protocol": "Drive a copper grounding spike into the substrate and isolate the anomaly inside an insulated Faraday lattice.",
+      "exploit_stats": [
+        "INT",
+        "AGI"
+      ],
+      "violate_stats": [],
+      "violate_elements": [
+        "electric"
+      ],
+      "exploit_keywords": [
+        "ground",
+        "faraday",
+        "breaker",
+        "insulate",
+        "copper",
+        "cut power",
+        "sever current"
+      ],
+      "clue_hint": "Every transformer within two blocks was drained dry seconds before the manifestation stabilized.",
+      "backlash_note": "Electrical discharge supercharged the anomaly's parasitic capacitor!"
+    },
+    {
+      "taboo_id": "taboo_kinetic_rebound",
+      "name": "Non-Newtonian Impulse Clause",
+      "taboo_rule": "Its shell hardens exponentially against brute-force kinetic impacts; avoid raw physical slams and high-caliber concussive fire.",
+      "containment_protocol": "Apply slow, steady harmonic resonance or elemental phase-disruption to dissolve its non-Newtonian lattice.",
+      "exploit_stats": [
+        "INT",
+        "PER",
+        "CHA"
+      ],
+      "violate_stats": [
+        "STR"
+      ],
+      "violate_elements": [
+        "physical"
+      ],
+      "exploit_keywords": [
+        "harmonic",
+        "slow",
+        "resonance",
+        "dissolve",
+        "frequency",
+        "phase",
+        "gentle"
+      ],
+      "clue_hint": "Ballistic gel tests show high-velocity slugs shatter harmlessly against its surface while slow tuning-fork vibrations pass right through.",
+      "backlash_note": "Brute kinetic impact rebounded off the anomaly's non-Newtonian shell!"
+    },
+    {
+      "taboo_id": "taboo_blood_scent_ward",
+      "name": "Hemostatic Quarantine Rule",
+      "taboo_rule": "Enters a feeding frenzy upon detecting open bleeding or bio-toxic spores; never use biological toxins or unsealed lacerations.",
+      "containment_protocol": "Sanitize the air with consecrated salt, cauterizing heat, or astringent incense to blind its chemoreceptors.",
+      "exploit_stats": [
+        "END",
+        "INT"
+      ],
+      "violate_stats": [],
+      "violate_elements": [
+        "bio"
+      ],
+      "exploit_keywords": [
+        "salt",
+        "incense",
+        "cauterize",
+        "sanitize",
+        "seal wound",
+        "purify",
+        "chemoreceptor"
+      ],
+      "clue_hint": "Traces of consecrated salt and sterile antiseptic completely masked the survivor's trail from the specimen.",
+      "backlash_note": "Bio-chemical residue triggered a predatory feeding surge in the anomaly!"
+    },
+    {
+      "taboo_id": "taboo_blink_lock",
+      "name": "Continuous Line-of-Sight Lock",
+      "taboo_rule": "Teleports and strikes only when unobserved or during sudden panic movements; never turn your back or sprint blindly.",
+      "containment_protocol": "Maintain unbroken alternating eye contact or strobe-flare illumination while sliding the containment tether into place.",
+      "exploit_stats": [
+        "PER",
+        "END"
+      ],
+      "violate_stats": [
+        "AGI"
+      ],
+      "violate_elements": [],
+      "exploit_keywords": [
+        "unbroken gaze",
+        "strobe",
+        "flare",
+        "watch",
+        "line of sight",
+        "steady",
+        "illuminate"
+      ],
+      "clue_hint": "Scrapes on the concrete stop abruptly whenever floodlights or unblinking observers hold it in frame.",
+      "backlash_note": "Breaking line-of-sight allowed the anomaly to phase-shift behind you!"
+    },
+    {
+      "taboo_id": "taboo_unpaid_toll",
+      "name": "Ritual Reciprocity Pact",
+      "taboo_rule": "Bound by archaic threshold and toll laws; attacking or seizing it without offering a symbolic fare or bow invokes a crushing curse.",
+      "containment_protocol": "Present a symbolic coin, paper talisman, or formal declaration of passage before sealing its vessel.",
+      "exploit_stats": [
+        "CHA",
+        "INT"
+      ],
+      "violate_stats": [
+        "STR"
+      ],
+      "violate_elements": [],
+      "exploit_keywords": [
+        "coin",
+        "toll",
+        "fare",
+        "offering",
+        "bow",
+        "talisman",
+        "reciprocity",
+        "token"
+      ],
+      "clue_hint": "An antique fare box beside the manifestation still clicks open whenever a brass coin or paper slip is presented.",
+      "backlash_note": "Violating the threshold toll without an offering triggered a crushing ritual penalty!"
+    },
+    {
+      "taboo_id": "taboo_hydro_conductor",
+      "name": "Desiccation & Drainage Protocol",
+      "taboo_rule": "Propagates through standing water and high humidity; never douse it with water or aqueous solutions.",
+      "containment_protocol": "Drain surrounding conduits and calcify the damp floor with geomantic earth or high-voltage arcs.",
+      "exploit_stats": [
+        "INT",
+        "PER"
+      ],
+      "violate_stats": [],
+      "violate_elements": [
+        "water"
+      ],
+      "exploit_keywords": [
+        "drain",
+        "desiccate",
+        "dry",
+        "earth",
+        "sand",
+        "calcify",
+        "valve"
+      ],
+      "clue_hint": "The manifestation cannot cross dry chalk lines or drained concrete channels.",
+      "backlash_note": "Moisture expanded the anomaly's hydro-conductive reach!"
+    },
+    {
+      "taboo_id": "taboo_counting_compulsion",
+      "name": "Arithmomania Distraction Clause",
+      "taboo_rule": "Bound by obsessive counting and sorting laws; physically blocking its route triggers violent kinetic backlash.",
+      "containment_protocol": "Scatter small coins, beads, or dried grains across the floor to force an obsessive counting reset while sealing its anchor.",
+      "exploit_stats": [
+        "INT",
+        "PER"
+      ],
+      "violate_stats": [
+        "STR"
+      ],
+      "violate_elements": [],
+      "exploit_keywords": [
+        "count",
+        "scatter",
+        "grain",
+        "bead",
+        "coin",
+        "distract",
+        "sort",
+        "loop",
+        "arithmomania"
+      ],
+      "clue_hint": "Surveillance footage shows the anomaly halting mid-stride for eleven minutes to count spilled transit tokens one by one.",
+      "backlash_note": "Physically obstructing the anomaly's compulsive route triggered a violent kinetic lash-back!"
+    },
+    {
+      "taboo_id": "taboo_unflinching_courtesy",
+      "name": "Deadpan Etiquette Mandate",
+      "taboo_rule": "Feeds strictly on startled gasps, flinching, and panicked flight; sprinting or shouting empowers its scare-aura.",
+      "containment_protocol": "Maintain an unflinching deadpan expression, step politely aside, and recite a calm threshold courtesy ('After you') before closing the seal.",
+      "exploit_stats": [
+        "CHA",
+        "END",
+        "PER"
+      ],
+      "violate_stats": [
+        "AGI"
+      ],
+      "violate_elements": [],
+      "exploit_keywords": [
+        "deadpan",
+        "unflinching",
+        "after you",
+        "bow",
+        "polite",
+        "courtesy",
+        "calm",
+        "etiquette"
+      ],
+      "clue_hint": "Passersby who screamed or bolted lost consciousness from sheer terror, while an unbothered janitor who nodded politely walked straight past it.",
+      "backlash_note": "Flinching and sudden panic fed the anomaly's startle-resonance!"
+    },
+    {
+      "taboo_id": "taboo_trickster_wager",
+      "name": "Counterfeit Tell & Fair-Play Clause",
+      "taboo_rule": "Delights in illusion swaps and playful wagers; swinging wildly with brute force causes it to swap places with a decoy.",
+      "containment_protocol": "Spot the counterfeit leaf-seam or humor its playful riddle wager to trick it into stepping inside the containment circle.",
+      "exploit_stats": [
+        "INT",
+        "CHA",
+        "PER"
+      ],
+      "violate_stats": [
+        "STR"
+      ],
+      "violate_elements": [],
+      "exploit_keywords": [
+        "counterfeit",
+        "leaf",
+        "wager",
+        "riddle",
+        "illusion",
+        "play along",
+        "spot tell",
+        "decoy",
+        "game"
+      ],
+      "clue_hint": "Every stolen banknote recovered near the site reverted into a damp camellia leaf the moment someone called out its backward serial number.",
+      "backlash_note": "Brute force shattered an illusory decoy while the trickster anomaly laughed from behind you!"
+    },
+    {
+      "taboo_id": "taboo_shadow_step",
+      "name": "Shadow-Separation Mandate",
+      "taboo_rule": "Anchors victims by stepping across their cast shadow; never stand beneath direct overhead backlighting or rush into its umbra.",
+      "containment_protocol": "Diffuse surrounding light sources so no sharp shadow touches {anchor_fixture} while locking the containment seal.",
+      "exploit_stats": [
+        "PER",
+        "AGI"
+      ],
+      "violate_stats": [
+        "STR"
+      ],
+      "violate_elements": [],
+      "exploit_keywords": [
+        "shadow",
+        "diffuse light",
+        "umbra",
+        "angle lamp",
+        "step clear",
+        "overhead"
+      ],
+      "clue_hint": "Victims were paralyzed without a single physical mark—each stood directly between a streetlamp and the manifestation's dark outline.",
+      "backlash_note": "Stepping within the anomaly's shadow-reach pinned your silhouette and triggered an umbral lash!"
+    },
+    {
+      "taboo_id": "taboo_breath_hold",
+      "name": "Apnea & Vital-Masking Clause",
+      "taboo_rule": "Tracks targets strictly through warm exhaled CO2 and spoken breath; shouting or heavy sprinting draws instant homing strikes.",
+      "containment_protocol": "Hold your breath completely and mask warm exhalations behind a damp cloth or cooling mist while sealing {anchor_fixture}.",
+      "exploit_stats": [
+        "END",
+        "PER"
+      ],
+      "violate_stats": [
+        "CHA"
+      ],
+      "violate_elements": [
+        "wind"
+      ],
+      "exploit_keywords": [
+        "hold breath",
+        "apnea",
+        "mask breath",
+        "inhale",
+        "silent breath",
+        "stifle"
+      ],
+      "clue_hint": "Blindfolded test mannequins went untouched until a warm air-vent cycled on, which the entity tore apart in seconds.",
+      "backlash_note": "Exhaling sharply gave away your vital warmth, drawing an immediate homing strike!"
+    },
+    {
+      "taboo_id": "taboo_threshold_invite",
+      "name": "Sovereign Threshold Denial",
+      "taboo_rule": "Cannot cross sealed lintels or chalked doorframes unless invited or pulled inside; never beckon it or retreat across an unwarded doorway.",
+      "containment_protocol": "Draw an unbroken chalk or salt threshold line and formally revoke right-of-entry before anchoring {anchor_fixture}.",
+      "exploit_stats": [
+        "CHA",
+        "INT"
+      ],
+      "violate_stats": [
+        "AGI"
+      ],
+      "violate_elements": [],
+      "exploit_keywords": [
+        "threshold",
+        "doorframe",
+        "lintel",
+        "revoke",
+        "chalk line",
+        "deny entry",
+        "uninvited"
+      ],
+      "clue_hint": "Claw gouges stop at the exact millimeter of the apartment's brass door-sill where the tenant refused to say 'come in'.",
+      "backlash_note": "Yielding the threshold without a formal denial granted the anomaly right-of-entry!"
+    },
+    {
+      "taboo_id": "taboo_iron_lime_ward",
+      "name": "Cold-Iron & Citrus Astringency Rite",
+      "taboo_rule": "Regenerates rapidly from mundane bludgeoning and necrotic rot, recoiling only from cold wrought iron and sharp citrus/lime acidity.",
+      "containment_protocol": "Drive a cold-iron spike or anoint the seal perimeter with kaffir lime juice to lock {anchor_fixture} in corporeal stasis.",
+      "exploit_stats": [
+        "INT",
+        "STR",
+        "PER"
+      ],
+      "violate_stats": [],
+      "violate_elements": [
+        "bio"
+      ],
+      "exploit_keywords": [
+        "iron",
+        "nail",
+        "spike",
+        "lime",
+        "citrus",
+        "cold iron",
+        "anoint"
+      ],
+      "clue_hint": "Rusted wrought-iron railings and crushed kaffir limes left sizzling burn-marks where the entity brushed past.",
+      "backlash_note": "Ignoring cold-iron warding allowed the anomaly's regenerative shroud to lash back!"
+    },
+    {
+      "taboo_id": "taboo_mirror_shroud",
+      "name": "Reflective Surface Blackout",
+      "taboo_rule": "Multiplies and leaps between uncovered mirrors, puddles, and polished glass; never ignite bright flash-flares near reflective panes.",
+      "containment_protocol": "Drape dark cloth or matte spray over nearby glass and puddles to sever its reflection network around {anchor_fixture}.",
+      "exploit_stats": [
+        "PER",
+        "AGI"
+      ],
+      "violate_stats": [],
+      "violate_elements": [
+        "electric"
+      ],
+      "exploit_keywords": [
+        "cover mirror",
+        "drape",
+        "shroud",
+        "cloth",
+        "matte",
+        "blackout glass"
+      ],
+      "clue_hint": "Every uncovered shopfront window within thirty meters showed the figure standing closer than the last.",
+      "backlash_note": "Uncovered reflections multiplied the anomaly's angles of attack!"
+    },
+    {
+      "taboo_id": "taboo_rhythm_sync",
+      "name": "Counter-Cadence Syncopation",
+      "taboo_rule": "Moves and parries in a locked 4/4 metronomic beat; attacking on-beat is automatically countered.",
+      "containment_protocol": "Clap or step on an irregular off-beat polyrhythm to desynchronize {anchor_fixture} before snapping the seal shut.",
+      "exploit_stats": [
+        "AGI",
+        "INT",
+        "CHA"
+      ],
+      "violate_stats": [
+        "STR"
+      ],
+      "violate_elements": [],
+      "exploit_keywords": [
+        "off-beat",
+        "syncopate",
+        "rhythm",
+        "cadence",
+        "polyrhythm",
+        "irregular beat",
+        "clap"
+      ],
+      "clue_hint": "Security audio reveals its strikes land at exact 1.25-second intervals, faltering whenever background construction hammered out of time.",
+      "backlash_note": "Moving on a predictable beat let the anomaly parry in perfect metronomic lockstep!"
+    },
+    {
+      "taboo_id": "taboo_lantern_snuff",
+      "name": "Luminescence Deprivation Rule",
+      "taboo_rule": "Feeds on artificial floodlights and high-lumen beams to solidify its projections; shining direct spotlights doubles its reach.",
+      "containment_protocol": "Kill harsh overhead lights and navigate by low infrared or shuttered candlelight to collapse {anchor_fixture}.",
+      "exploit_stats": [
+        "PER",
+        "AGI"
+      ],
+      "violate_stats": [],
+      "violate_elements": [
+        "fire",
+        "electric"
+      ],
+      "exploit_keywords": [
+        "kill lights",
+        "snuff",
+        "dim",
+        "darkness",
+        "infrared",
+        "extinguish lamp",
+        "shutter"
+      ],
+      "clue_hint": "Powering up the stadium floodlights caused its silhouette to tower forty feet high; when the fuse blew, it shrank to the size of a cat.",
+      "backlash_note": "Harsh illumination magnified the anomaly's phototropic projection!"
+    },
+    {
+      "taboo_id": "taboo_backward_retreat",
+      "name": "Reverse-Gait Departure Clause",
+      "taboo_rule": "Interprets forward footsteps as a lethal duel challenge and turned backs as prey; never charge straight in or turn tail.",
+      "containment_protocol": "Approach and withdraw using deliberate backward-facing steps while bowing slightly to {anchor_fixture}.",
+      "exploit_stats": [
+        "AGI",
+        "END"
+      ],
+      "violate_stats": [
+        "STR"
+      ],
+      "violate_elements": [],
+      "exploit_keywords": [
+        "step backward",
+        "reverse",
+        "walk backward",
+        "never turn back",
+        "measured retreat"
+      ],
+      "clue_hint": "Muddy shoeprints left by the lone unharmed Shrine warden pointed away from the altar even as he approached it.",
+      "backlash_note": "Forward aggression violated the reverse-gait taboo, provoking a vicious riposte!"
+    },
+    {
+      "taboo_id": "taboo_gift_refusal",
+      "name": "Cursed Hospitality Refusal",
+      "taboo_rule": "Offers phantom food, coins, or lost keepsakes to bind victims in spiritual debt; accepting or pocketing anything seals your doom.",
+      "containment_protocol": "Politely decline its proffered gift three times with open, empty palms before binding {anchor_fixture}.",
+      "exploit_stats": [
+        "CHA",
+        "END",
+        "INT"
+      ],
+      "violate_stats": [],
+      "violate_elements": [],
+      "exploit_keywords": [
+        "decline",
+        "refuse gift",
+        "empty palms",
+        "no thank you",
+        "reject offering",
+        "three times"
+      ],
+      "clue_hint": "Victims found in a trance all clutched illusory gold coins that turned to grave-rot in their pockets.",
+      "backlash_note": "Touching the anomaly's phantom offering bound you in an immediate debt-curse!"
+    },
+    {
+      "taboo_id": "taboo_bell_silence",
+      "name": "Metallic Resonance Mute",
+      "taboo_rule": "Shatters containment wards whenever brass, steel, or bells ring aloud; metallic clangs amplify its shockwaves.",
+      "containment_protocol": "Muffle all metal gear with cloth tape and bind {anchor_fixture} using braided hemp cord and wooden pegs.",
+      "exploit_stats": [
+        "AGI",
+        "INT"
+      ],
+      "violate_stats": [
+        "STR"
+      ],
+      "violate_elements": [
+        "physical"
+      ],
+      "exploit_keywords": [
+        "muffle",
+        "silence bell",
+        "cloth wrap",
+        "hemp cord",
+        "wooden",
+        "mute metal"
+      ],
+      "clue_hint": "A dropped steel wrench caused every window on the floor to implode, whereas wrapped wooden batons made no ripple at all.",
+      "backlash_note": "Ringing metal resonance amplified the anomaly's acoustic shockwave!"
+    },
+    {
+      "taboo_id": "taboo_sweet_milk_hearth",
+      "name": "Domestic Hearth Appeasement",
+      "taboo_rule": "Grows spiteful and destructive when insulted, scolded, or thanked directly with boastful pride; direct threats enrage its domestic claim.",
+      "containment_protocol": "Set down an unboasted saucer of sweet milk, honey cake, or clean linen beside {anchor_fixture} and look away while sealing.",
+      "exploit_stats": [
+        "CHA",
+        "INT"
+      ],
+      "violate_stats": [
+        "STR"
+      ],
+      "violate_elements": [
+        "fire"
+      ],
+      "exploit_keywords": [
+        "milk",
+        "honey",
+        "cake",
+        "hearth",
+        "saucer",
+        "humble",
+        "linen",
+        "appease"
+      ],
+      "clue_hint": "Households that cursed the racket woke up to smashed crockery, while a saucer of warm milk left on the floorboards calmed it instantly.",
+      "backlash_note": "Hostile disrespect toward the hearth spirit triggered a spiteful telekinetic barrage!"
+    },
+    {
+      "taboo_id": "taboo_cucumber_courtesy",
+      "name": "Cranial-Dish & Sumo Bow Protocol",
+      "taboo_rule": "Draws immense aquatic strength from the water pooled in its cranial dish or basin; grappling it head-on is suicidal.",
+      "containment_protocol": "Offer a carved cucumber or bow deeply so it politely returns the bow—spilling its cranial water—before sealing {anchor_fixture}.",
+      "exploit_stats": [
+        "CHA",
+        "INT",
+        "AGI"
+      ],
+      "violate_stats": [
+        "STR"
+      ],
+      "violate_elements": [
+        "water"
+      ],
+      "exploit_keywords": [
+        "cucumber",
+        "deep bow",
+        "spill dish",
+        "cranial",
+        "polite bow",
+        "kappa",
+        "courtesy bow"
+      ],
+      "clue_hint": "Old riverbank inscriptions note that the creature cannot resist returning a formal bow, even when doing so tips the water from its crown.",
+      "backlash_note": "Grappling the water-charged entity head-on met crushing hydraulic strength!"
+    },
+    {
+      "taboo_id": "taboo_wet_footprint_erase",
+      "name": "Trail-Scrubbing Quarantine",
+      "taboo_rule": "Regenerates and teleports along any wet footprints or condensation trails it has laid down; leaving its damp tracks intact lets it flank you.",
+      "containment_protocol": "Sweep dry ash, chalk, or absorbent lime across its wet tracks to sever the trail anchoring {anchor_fixture}.",
+      "exploit_stats": [
+        "PER",
+        "AGI"
+      ],
+      "violate_stats": [],
+      "violate_elements": [
+        "water"
+      ],
+      "exploit_keywords": [
+        "ash",
+        "sweep tracks",
+        "erase footprints",
+        "chalk",
+        "dry trail",
+        "scrub"
+      ],
+      "clue_hint": "The entity reappeared exclusively on wet heel-marks it had left minutes earlier; dry swept concrete blocked its return.",
+      "backlash_note": "Uncared-for wet tracks allowed the anomaly to slip instantly behind your guard!"
+    },
+    {
+      "taboo_id": "taboo_three_knocks_ignore",
+      "name": "Phantom Knock Non-Acknowledgement",
+      "taboo_rule": "Knocks or rings in sets of three to locate living minds; opening a door or calling out on the third knock lets it inside your guard.",
+      "containment_protocol": "Wait through three full knock cycles in stony silence, then tap a single grounding counter-knock on {anchor_fixture} to seal it.",
+      "exploit_stats": [
+        "END",
+        "PER"
+      ],
+      "violate_stats": [
+        "CHA"
+      ],
+      "violate_elements": [],
+      "exploit_keywords": [
+        "ignore knock",
+        "wait three",
+        "stony silence",
+        "counter-knock",
+        "do not open"
+      ],
+      "clue_hint": "Incident survivors kept bolt-locks untouched through three frantic knocking bursts; those who peeked through the keyhole vanished.",
+      "backlash_note": "Answering the third phantom knock opened an immediate breach vector!"
+    },
+    {
+      "taboo_id": "taboo_red_thread_sever",
+      "name": "Karmic Tether Filaments",
+      "taboo_rule": "Spins nearly invisible crimson fate-threads between targets and {anchor_fixture}; lunging blindly tangles limbs in razor-taut silk.",
+      "containment_protocol": "Spot the faint crimson filaments under angled light and snip them cleanly with consecrated shears or aether-edge before sealing.",
+      "exploit_stats": [
+        "PER",
+        "AGI"
+      ],
+      "violate_stats": [
+        "STR"
+      ],
+      "violate_elements": [],
+      "exploit_keywords": [
+        "red thread",
+        "filament",
+        "snip",
+        "sever cord",
+        "angled light",
+        "silk"
+      ],
+      "clue_hint": "UV forensic sweeps revealed hair-thin red threads strung chest-high across every hallway near the epicenter.",
+      "backlash_note": "Charging through unseen crimson tether-threads sliced and entangled your advance!"
+    },
+    {
+      "taboo_id": "taboo_true_reflection_shatter",
+      "name": "False-Body Decoy Rule",
+      "taboo_rule": "Its visible body in open air is an invulnerable mirage while its true core hides inside a nearby reflection or portrait.",
+      "containment_protocol": "Pinpoint the slightly out-of-sync reflection in nearby glass or water and apply the containment seal directly to {anchor_fixture}'s mirrored core.",
+      "exploit_stats": [
+        "PER",
+        "INT"
+      ],
+      "violate_stats": [
+        "STR"
+      ],
+      "violate_elements": [
+        "physical"
+      ],
+      "exploit_keywords": [
+        "mirrored core",
+        "out of sync",
+        "seal reflection",
+        "portrait",
+        "true image",
+        "glass core"
+      ],
+      "clue_hint": "Bullets passed harmlessly through the figure in the room, yet a crack across the wall mirror made it shriek in pain.",
+      "backlash_note": "Striking the open-air mirage wasted force and triggered a reflective counter-pulse!"
+    },
+    {
+      "taboo_id": "taboo_salt_perimeter",
+      "name": "Purified Salt & Rice Ring",
+      "taboo_rule": "Draws miasma from unclean ground to lash out when cornered; approaching without a purified boundary invites necrotic drain.",
+      "containment_protocol": "Cast an unbroken clockwise circle of coarse sea-salt and glutinous rice around {anchor_fixture} to constrict its miasma.",
+      "exploit_stats": [
+        "INT",
+        "END"
+      ],
+      "violate_stats": [],
+      "violate_elements": [
+        "bio"
+      ],
+      "exploit_keywords": [
+        "sea salt",
+        "rice circle",
+        "clockwise",
+        "purify ground",
+        "salt ring",
+        "warding circle"
+      ],
+      "clue_hint": "A spilled sack of coarse rock-salt at the grocer's threshold burned a smoking crescent into the entity's trailing hem.",
+      "backlash_note": "Stepping onto unpurified miasma ground drained your vitality!"
+    },
+    {
+      "taboo_id": "taboo_ambiguous_reply",
+      "name": "Non-Binary Evasion Clause",
+      "taboo_rule": "Traps victims in an absolute 'Yes-or-No' / 'Red-or-Blue' binary choice; giving either direct answer fulfills its curse contract.",
+      "containment_protocol": "Deliver a non-committal, ambiguous third answer ('So-so', 'Neither', 'I am late') to stall its contract loop and seal {anchor_fixture}.",
+      "exploit_stats": [
+        "CHA",
+        "INT"
+      ],
+      "violate_stats": [
+        "STR"
+      ],
+      "violate_elements": [],
+      "exploit_keywords": [
+        "so-so",
+        "average",
+        "neither",
+        "ambiguous",
+        "evasive",
+        "appointment",
+        "non-committal"
+      ],
+      "clue_hint": "Witnesses who shouted 'Yes' or 'No' were attacked instantly; a flustered student who muttered 'About average, excuse me' walked away unscathed.",
+      "backlash_note": "Giving a binary Yes/No answer fulfilled the anomaly's curse condition!"
+    },
+    {
+      "taboo_id": "taboo_name_inversion",
+      "name": "Backward Syllable Reversal",
+      "taboo_rule": "Mimics commands forward to invert them against the speaker; plain-spoken incantations backfire on the caster.",
+      "containment_protocol": "Recite the sealing cadence or street-sign syllables in reverse order to unravel {anchor_fixture}'s linguistic knot.",
+      "exploit_stats": [
+        "INT",
+        "CHA"
+      ],
+      "violate_stats": [],
+      "violate_elements": [
+        "aether"
+      ],
+      "exploit_keywords": [
+        "reverse order",
+        "backward",
+        "invert syllable",
+        "recite backward",
+        "mirror speech"
+      ],
+      "clue_hint": "Station signage inside the distortion reads right-to-left, and recorded prayers only calmed the spike when played in reverse.",
+      "backlash_note": "Forward-spoken phrasing was inverted back against your own nervous system!"
+    },
+    {
+      "taboo_id": "taboo_vessel_cork_seal",
+      "name": "Cinnabar Stopper & Talisman Bind",
+      "taboo_rule": "Its roaming form is tethered to an unstoppered jar, bottle, or talismanic seal; striking the projection alone never ends its contract.",
+      "containment_protocol": "Locate the resonant vessel or forehead talisman and press a cinnabar-stamped seal over {anchor_fixture} to lock its contract.",
+      "exploit_stats": [
+        "PER",
+        "INT"
+      ],
+      "violate_stats": [
+        "STR"
+      ],
+      "violate_elements": [],
+      "exploit_keywords": [
+        "vessel",
+        "jar",
+        "bottle",
+        "stopper",
+        "cinnabar",
+        "talisman",
+        "seal contract",
+        "cork"
+      ],
+      "clue_hint": "A faint umbilical shimmer trails from the entity's spine toward a hidden green glass vessel humming in the rafters.",
+      "backlash_note": "Attacking the projection while ignoring its unsealed tether vessel triggered a violent recoil!"
+    }
+  ],
+  "folklore_scp_motifs": [
+    {
+      "motif_id": "yokai_kuchisake",
+      "tradition": "East Asian Urban Yokai",
+      "preferred_types": [
+        "entity"
+      ],
+      "preferred_forms": [
+        "humanoid_doppelganger",
+        "spectral_apparition"
+      ],
+      "preferred_physicality": [
+        "corporeal",
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "sapient"
+      ],
+      "preferred_elements": [
+        "wind",
+        "aether",
+        "physical"
+      ],
+      "biomes": [
+        "transit",
+        "urban",
+        "commercial"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "titles": [
+        "Slit-Veiled Commuter",
+        "Crimson-Mask Interrogator",
+        "Rain-Coat Shear Phantom"
+      ],
+      "furry_titles": [
+        "Slit-Muzzle Vixen Stalker",
+        "Shear-Jawed Jackal Apparition",
+        "Masked Kitsune Interrogator"
+      ],
+      "base_omen": "The click of vintage heels echoes beneath flickering streetlamps alongside a muffled question from behind a surgical mask.",
+      "gore_omen": "Rusted upholstery shears drip dark arterial condensation as a split jawbone unhinges from ear to ear beneath a soaked trenchcoat.",
+      "furry_omen": "Rain-matted vulpine fur bristles beneath a high collar as a masked muzzle parts to reveal twin rows of razor-shearing fangs.",
+      "taboo_ids": [
+        "taboo_true_name_silence",
+        "taboo_unpaid_toll"
+      ]
+    },
+    {
+      "motif_id": "yokai_tsukumogami",
+      "tradition": "East Asian Tsukumogami Relic",
+      "preferred_types": [
+        "object"
+      ],
+      "preferred_forms": [
+        "haunted_furniture",
+        "impossible_weapon_relic",
+        "possessed_media_device"
+      ],
+      "preferred_physicality": [
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "sapient",
+        "compulsive",
+        "instinctual"
+      ],
+      "preferred_temperaments": [
+        "mischievous",
+        "spook",
+        "volatile"
+      ],
+      "preferred_elements": [
+        "fire",
+        "aether",
+        "earth",
+        "wind"
+      ],
+      "biomes": [
+        "shrine",
+        "commercial",
+        "urban"
+      ],
+      "times": [
+        "any",
+        "night"
+      ],
+      "titles": [
+        "Centennial Weeping Biwa",
+        "Hundred-Year Lacquer Cabinet",
+        "Self-Unsheathing Heirloom Wakizashi"
+      ],
+      "furry_titles": [
+        "Hundred-Year Wolf-Crest Glaive",
+        "Tengu-Carved Relic Loom",
+        "Fox-Mask Shrine Reliquary"
+      ],
+      "base_omen": "Aged lacquerware creaks with a heartbeat of its own, silk cords coiling likeliving tendons after a century of neglect.",
+      "gore_omen": "Veins of warm crimson sap pulse through cracked antique wood as bone-white teeth sprout along the relic's seams.",
+      "furry_omen": "Braided beast-hair tassels lash like living tails as carved claw-marks glow with century-old shrine resentment.",
+      "taboo_ids": [
+        "taboo_unpaid_toll",
+        "taboo_kinetic_rebound"
+      ]
+    },
+    {
+      "motif_id": "yokai_gashadokuro",
+      "tradition": "East Asian Ossuary Yokai",
+      "preferred_types": [
+        "entity"
+      ],
+      "preferred_forms": [
+        "anatomical_amalgam",
+        "folklore_chimera"
+      ],
+      "preferred_physicality": [
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "instinctual",
+        "non_sapient"
+      ],
+      "preferred_elements": [
+        "earth",
+        "ice",
+        "aether"
+      ],
+      "biomes": [
+        "shrine",
+        "hospital",
+        "industrial"
+      ],
+      "times": [
+        "night"
+      ],
+      "titles": [
+        "Chattering Ossuary Colossus",
+        "Starving Bone-Loom Amalgam",
+        "Grave-Silt Ribcage Juggernaut"
+      ],
+      "furry_titles": [
+        "Antlered Ossuary Behemoth",
+        "Hound-Skull Chattering Amalgam",
+        "Fanged Marrow Construct"
+      ],
+      "base_omen": "A deafening ringing fills the ears (`chin-chin`) as calcified skeletal fragments fuse together out of the shadows.",
+      "gore_omen": "Hundreds of splintered femurs and wet sinew cables grind together into a towering, marrow-weeping thoracic cage.",
+      "furry_omen": "Calcified wolf-skulls and towering stag antlers interlock with a deafening rattle of starving jaws.",
+      "taboo_ids": [
+        "taboo_unpaid_toll",
+        "taboo_blood_scent_ward"
+      ]
+    },
+    {
+      "motif_id": "yokai_yukionna",
+      "tradition": "East Asian Frost Spirit",
+      "preferred_types": [
+        "entity",
+        "phenomenon"
+      ],
+      "preferred_forms": [
+        "spectral_apparition",
+        "localized_weather_anomaly"
+      ],
+      "preferred_physicality": [
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "sapient"
+      ],
+      "preferred_elements": [
+        "ice",
+        "wind",
+        "water"
+      ],
+      "biomes": [
+        "nature",
+        "coastal",
+        "shrine",
+        "urban"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "titles": [
+        "Hoarfrost Kimono Wraith",
+        "Zero-Kelvin Whiteout Bride",
+        "Cryo-Sigh Apparition"
+      ],
+      "furry_titles": [
+        "Silver-Pelt Frost Kitsune",
+        "Blizzard-Mane Snow Leopard Wraith",
+        "Rime-Tailed Winter Spirit"
+      ],
+      "base_omen": "Breath freezes solid in mid-air as geometric ice crystals bloom across glass and a pale figure glides inches above the frost.",
+      "gore_omen": "Frostbitten blackened fingertips drift through a localized blizzard that flash-freezes exposed capillaries into brittle glass.",
+      "furry_omen": "Nine frost-rimmed tails trail through a localized whiteout as piercing ice-blue beast eyes gleam in the sleet.",
+      "taboo_ids": [
+        "taboo_thermal_feed",
+        "taboo_true_name_silence"
+      ]
+    },
+    {
+      "motif_id": "hikayat_pontianak",
+      "tradition": "Nusantara Hikayat Folklore",
+      "preferred_types": [
+        "entity"
+      ],
+      "preferred_forms": [
+        "spectral_apparition",
+        "humanoid_doppelganger"
+      ],
+      "preferred_physicality": [
+        "non_corporeal",
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "sapient"
+      ],
+      "preferred_elements": [
+        "wind",
+        "bio",
+        "aether"
+      ],
+      "biomes": [
+        "nature",
+        "hospital",
+        "urban",
+        "shrine"
+      ],
+      "times": [
+        "night"
+      ],
+      "titles": [
+        "Frangipani Mist Revenant",
+        "Weeping Canopy Banshee",
+        "Nape-Nail Night Wraith"
+      ],
+      "furry_titles": [
+        "Frangipani Flying-Fox Revenant",
+        "Weeping Civet-Shade Banshee",
+        "White-Fur Canopy Wraith"
+      ],
+      "base_omen": "An overpowering wave of sweet frangipani blossoms suddenly turns to damp grave-earth as distant crying sounds dangerously close—meaning she is already right beside you.",
+      "gore_omen": "Sweet kemboja perfume curdles into copper blood-stink as a pallid figure with a jagged cranial hollow extends iron-hard talons.",
+      "furry_omen": "Pale chiropteran wings fold beneath a shroud of frangipani petals as distant phantom weeping echoes from the canopy.",
+      "taboo_ids": [
+        "taboo_mirror_gaze",
+        "taboo_blood_scent_ward"
+      ]
+    },
+    {
+      "motif_id": "hikayat_penanggalan",
+      "tradition": "Nusantara Hikayat Folklore",
+      "preferred_types": [
+        "entity"
+      ],
+      "preferred_forms": [
+        "anatomical_amalgam",
+        "folklore_chimera"
+      ],
+      "preferred_physicality": [
+        "corporeal",
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "instinctual",
+        "sapient"
+      ],
+      "preferred_elements": [
+        "bio",
+        "fire",
+        "aether"
+      ],
+      "biomes": [
+        "hospital",
+        "urban",
+        "nature"
+      ],
+      "times": [
+        "night"
+      ],
+      "titles": [
+        "Luminescent Visceral Drifter",
+        "Vinegar-Scented Nocturnal Floater",
+        "Detached Spire Phantasm"
+      ],
+      "furry_titles": [
+        "Detached Tiger-Maw Luminescence",
+        "Floating Jackal-Head Wisp",
+        "Bioluminescent Fanged Drifter"
+      ],
+      "base_omen": "A sharp tang of pickled vinegar hangs in the humid air as a pale, bioluminescent silhouette drifts silently past the upper windows.",
+      "gore_omen": "Glistening loops of bioluminescent viscera trail beneath a detached, floating head that drips caustic, vinegar-reeking bile.",
+      "furry_omen": "A floating predator's head wreathed in ghostly green marsh-fire trails glowing spectral sinews through the night air.",
+      "taboo_ids": [
+        "taboo_blood_scent_ward",
+        "taboo_blink_lock"
+      ]
+    },
+    {
+      "motif_id": "hikayat_banaspati",
+      "tradition": "Nusantara Hikayat Folklore",
+      "preferred_types": [
+        "entity",
+        "phenomenon"
+      ],
+      "preferred_forms": [
+        "spectral_apparition",
+        "localized_weather_anomaly",
+        "folklore_chimera"
+      ],
+      "preferred_physicality": [
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "instinctual"
+      ],
+      "preferred_elements": [
+        "fire",
+        "wind"
+      ],
+      "biomes": [
+        "nature",
+        "industrial",
+        "shrine"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "titles": [
+        "Inverted Canopy Fire-Vortex",
+        "Cinder-Crown Banaspati",
+        "Upside-Down Ignition Wraith"
+      ],
+      "furry_titles": [
+        "Inverted Ember-Mane Hound",
+        "Cinder-Winged Pyre Bat",
+        "Blazing Canopy Tiger-Wisp"
+      ],
+      "base_omen": "Dry leaves ignite without smoke as an inverted sphere of roaring orange embers walks upside-down on tongues of living flame.",
+      "gore_omen": "A blistered, upside-down skull wreathed in white-hot tallow fire spits blistering cinders that char flesh on contact.",
+      "furry_omen": "An inverted, roaring beast of living plasma stalks across the ceiling on claws of blue-white fire.",
+      "taboo_ids": [
+        "taboo_thermal_feed",
+        "taboo_hydro_conductor"
+      ]
+    },
+    {
+      "motif_id": "hikayat_hantu_air",
+      "tradition": "Nusantara Hikayat Folklore",
+      "preferred_types": [
+        "entity",
+        "phenomenon"
+      ],
+      "preferred_forms": [
+        "folklore_chimera",
+        "localized_weather_anomaly",
+        "parasitic_colony"
+      ],
+      "preferred_physicality": [
+        "corporeal",
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "instinctual"
+      ],
+      "preferred_elements": [
+        "water",
+        "bio",
+        "ice"
+      ],
+      "biomes": [
+        "coastal",
+        "industrial",
+        "urban"
+      ],
+      "times": [
+        "any",
+        "night"
+      ],
+      "titles": [
+        "Undertow Silt Coiler",
+        "Brackish Whirlpool Eidolon",
+        "Drowned Jetty Tendril-Mass"
+      ],
+      "furry_titles": [
+        "Brackish Otter-Hydra Stalker",
+        "Abyssal Crocodile Silt-Lurker",
+        "Fin-Backed Undertow Beast"
+      ],
+      "base_omen": "Puddles flow uphill toward the storm drains, carrying the briny stench of deep river silt and rhythmic, bubbling whispers.",
+      "gore_omen": "Bloated, waterlogged tendrils of dark river-kelp and drowned cartilage surge from the drains to drag prey under.",
+      "furry_omen": "A sleek, gill-slitted amphibious predator rises from the brackish tide with glowing lure-whiskers.",
+      "taboo_ids": [
+        "taboo_hydro_conductor",
+        "taboo_voltage_parasite"
+      ]
+    },
+    {
+      "motif_id": "cryptid_wendigo_skinwalker",
+      "tradition": "Northwoods Cryptid Lore",
+      "preferred_types": [
+        "entity"
+      ],
+      "preferred_forms": [
+        "cryptid_therian",
+        "humanoid_doppelganger"
+      ],
+      "preferred_physicality": [
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "instinctual",
+        "sapient"
+      ],
+      "preferred_elements": [
+        "ice",
+        "wind",
+        "physical",
+        "bio"
+      ],
+      "biomes": [
+        "nature",
+        "urban",
+        "transit"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "titles": [
+        "Antlered Hoarfrost Stalker",
+        "Hollow-Pelt Voice Mimic",
+        "Gaunt Timberland Skin-Walker"
+      ],
+      "furry_titles": [
+        "Antlered Frost-Wolf Wendigo",
+        "Hollow-Pelt Wendigo Stag",
+        "Voice-Stealing Dire Coyote"
+      ],
+      "base_omen": "Velvet-draped antlers scrape against overhead girders as a tinny, distorted recording of a distressed bystander repeats from the treeline.",
+      "gore_omen": "Tattered rib-skin stretches tight over an elongated, frost-blackened cervine skull that weeps steaming crimson tallow.",
+      "furry_omen": "Towering, frost-encrusted Lupine-Stag hybrid limbs uncoil from the shadows as its jaws echo stolen radio voices.",
+      "taboo_ids": [
+        "taboo_true_name_silence",
+        "taboo_blood_scent_ward"
+      ]
+    },
+    {
+      "motif_id": "cryptid_mothman_omen",
+      "tradition": "Appalachian / Urban Cryptid",
+      "preferred_types": [
+        "entity"
+      ],
+      "preferred_forms": [
+        "cryptid_therian",
+        "spectral_apparition"
+      ],
+      "preferred_physicality": [
+        "corporeal",
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "sapient",
+        "instinctual"
+      ],
+      "preferred_elements": [
+        "electric",
+        "wind",
+        "aether"
+      ],
+      "biomes": [
+        "industrial",
+        "transit",
+        "urban",
+        "coastal"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "titles": [
+        "Red-Lensed Pylon Harbinger",
+        "High-Voltage Winged Omen",
+        "Substation Moth-Seraph"
+      ],
+      "furry_titles": [
+        "Crimson-Eyed Moth-Therian Harbinger",
+        "Static-Winged Nocturnal Strrix",
+        "Arc-Feathered Pylon Sentinel"
+      ],
+      "base_omen": "Streetlights hum at a tooth-aching pitch and compass needles spin wildly as twin car-taillight eyes flare atop a ten-foot wingspan.",
+      "gore_omen": "Compound eyes bleeding static-charged ichor stare from a thorax of fused transformer coils and leathery membrane.",
+      "furry_omen": "Thick, static-crackling moth-fur and radar-broad antennae silhouette against the high-voltage tower.",
+      "taboo_ids": [
+        "taboo_voltage_parasite",
+        "taboo_mirror_gaze"
+      ]
+    },
+    {
+      "motif_id": "scp_blink_mannequin",
+      "tradition": "SCP Containment Dossier",
+      "preferred_types": [
+        "object",
+        "entity"
+      ],
+      "preferred_forms": [
+        "architectural_fixture",
+        "haunted_furniture",
+        "humanoid_doppelganger"
+      ],
+      "preferred_physicality": [
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "compulsive",
+        "non_sapient",
+        "instinctual"
+      ],
+      "preferred_temperaments": [
+        "volatile",
+        "spook"
+      ],
+      "preferred_elements": [
+        "earth",
+        "physical",
+        "aether"
+      ],
+      "biomes": [
+        "commercial",
+        "hospital",
+        "urban",
+        "transit"
+      ],
+      "times": [
+        "any"
+      ],
+      "titles": [
+        "Blink-Locked Fiberglass Mannequin",
+        "Rebar-And-Concrete Sculpture #173",
+        "Quantum-Locked Showroom Automaton"
+      ],
+      "furry_titles": [
+        "Blink-Locked Taxidermy Jackal",
+        "Porcelain Kitsune Display Statue",
+        "Quantum-Locked Museum Wolf-Effigy"
+      ],
+      "base_omen": "The harsh scrape of ceramic and concrete against tile stops the exact millisecond your eyes snap toward the corner.",
+      "gore_omen": "Cracked fiberglass joints leak dried rust and spinal fluid, freezing mid-lunge with its porcelain fingers inches from your carotid.",
+      "furry_omen": "A articulated porcelain-and-rebar beast mannequin freezes mid-pounce whenever held in direct sight.",
+      "taboo_ids": [
+        "taboo_blink_lock",
+        "taboo_kinetic_rebound"
+      ]
+    },
+    {
+      "motif_id": "scp_cursed_vehicle",
+      "tradition": "Urban Legend / SCP Object",
+      "preferred_types": [
+        "object"
+      ],
+      "preferred_forms": [
+        "cursed_vehicle"
+      ],
+      "preferred_physicality": [
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "instinctual",
+        "non_sapient",
+        "sapient"
+      ],
+      "preferred_elements": [
+        "electric",
+        "fire",
+        "physical",
+        "aether"
+      ],
+      "biomes": [
+        "transit",
+        "urban",
+        "industrial",
+        "commercial"
+      ],
+      "times": [
+        "night",
+        "any"
+      ],
+      "titles": [
+        "Driverless Midnight Fare-Cab",
+        "Phantom Line-0 Subway Car",
+        "Self-Idling Rust Ambulance"
+      ],
+      "furry_titles": [
+        "Hound-Hooded Phantom Cruiser",
+        "Cerberus-Grille Midnight Hearse",
+        "Predatory Patrol Interceptor"
+      ],
+      "base_omen": "Headlights flick on behind tinted, empty windshields as a mechanical fare-meter ticks upward in time with your pulse.",
+      "gore_omen": "Locked doors seal with a wet pneumatic hiss as the upholstery parts to revealdigestive ribs beneath the leather seats.",
+      "furry_omen": "The radiator grille gnashes like articulated steel jaws as low, engine-revving growls vibrate through the asphalt.",
+      "taboo_ids": [
+        "taboo_unpaid_toll",
+        "taboo_voltage_parasite"
+      ]
+    },
+    {
+      "motif_id": "scp_possessed_media",
+      "tradition": "SCP Cognitohazard Archive",
+      "preferred_types": [
+        "object",
+        "phenomenon"
+      ],
+      "preferred_forms": [
+        "possessed_media_device",
+        "memetic_sensory_hazard"
+      ],
+      "preferred_physicality": [
+        "corporeal",
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "sapient",
+        "non_sapient"
+      ],
+      "preferred_elements": [
+        "electric",
+        "aether"
+      ],
+      "biomes": [
+        "commercial",
+        "urban",
+        "hospital",
+        "transit"
+      ],
+      "times": [
+        "any",
+        "night"
+      ],
+      "titles": [
+        "Unplugged Channel-Zero CRT",
+        "Cognitohazardous VHS Deck #1981",
+        "Self-Dialing Rotary Payphone"
+      ],
+      "furry_titles": [
+        "Vox-Vulpine Pirate Transceiver",
+        "Howling-Frequency CRT Terminal",
+        "Anubis-Wave Signal Projector"
+      ],
+      "base_omen": "Despite the severed power cord, snow-static blooms across the screen and a voice addresses you by your childhood nickname.",
+      "gore_omen": "Coaxial cables writhe like optic nerves as the speaker cone weeps warm plasma and projects a retina-searing fractal.",
+      "furry_omen": "Phosphor-green lupine eyes resolve inside the unplugged monitor static, mouthing words that bypass your eardrums.",
+      "taboo_ids": [
+        "taboo_voltage_parasite",
+        "taboo_mirror_gaze",
+        "taboo_true_name_silence"
+      ]
+    },
+    {
+      "motif_id": "scp_spatial_loop",
+      "tradition": "SCP Liminal / Spatial Anomaly",
+      "preferred_types": [
+        "phenomenon"
+      ],
+      "preferred_forms": [
+        "spatial_geometry_loop",
+        "temporal_echo_zone",
+        "gravity_hume_distortion"
+      ],
+      "preferred_physicality": [
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "non_sapient",
+        "compulsive",
+        "sapient"
+      ],
+      "preferred_temperaments": [
+        "timid",
+        "mischievous"
+      ],
+      "preferred_elements": [
+        "aether",
+        "wind",
+        "earth"
+      ],
+      "biomes": [
+        "transit",
+        "hospital",
+        "commercial",
+        "shrine",
+        "urban"
+      ],
+      "times": [
+        "any",
+        "night"
+      ],
+      "titles": [
+        "Kisaragi Non-Euclidean Platform",
+        "Recursive Stairwell Fracture",
+        "Inverted-Gravity Hume Sinkhole"
+      ],
+      "furry_titles": [
+        "Kitsune Torii Labyrinth Loop",
+        "Howling Escher Corridor",
+        "Beast-Shadow Temporal Echo"
+      ],
+      "base_omen": "Every exit door opens back into the exact same corridor three seconds in the past, while the ceiling slowly tilts ninety degrees.",
+      "gore_omen": "The walls breathe with a wet, peristaltic rhythm as spatial folds splice organic tissue into the wallpaper.",
+      "furry_omen": "Clawed footprints walk across the ceiling and walls in an impossible Möbius loop around the chamber.",
+      "taboo_ids": [
+        "taboo_blink_lock",
+        "taboo_unpaid_toll",
+        "taboo_kinetic_rebound"
+      ]
+    },
+    {
+      "motif_id": "scp_flesh_hive",
+      "tradition": "SCP Bio-Hazard Dossier",
+      "preferred_types": [
+        "entity",
+        "object"
+      ],
+      "preferred_forms": [
+        "parasitic_colony",
+        "anatomical_amalgam",
+        "architectural_fixture"
+      ],
+      "preferred_physicality": [
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "non_sapient",
+        "instinctual"
+      ],
+      "preferred_elements": [
+        "bio",
+        "earth",
+        "water"
+      ],
+      "biomes": [
+        "hospital",
+        "industrial",
+        "coastal",
+        "nature"
+      ],
+      "times": [
+        "any"
+      ],
+      "titles": [
+        "Sarkic Bio-Acoustic Colony",
+        "Mycelial Nerve-Cord Lattice",
+        "Assimilating Marrow-Spore Hive"
+      ],
+      "furry_titles": [
+        "Chitin-Pelt Swarm Chimera",
+        "Mycelial Hound-Pack Amalgam",
+        "Spore-Maned Parasitic Brood"
+      ],
+      "base_omen": "Ventilation shafts pulse with a warm, humid breath as bioluminescent filaments weave across the concrete like living capillaries.",
+      "gore_omen": "A writhing tapestry of grafted vocal cords and ossified ribs unfurls from the ductwork, exhaling aerosolized crimson spores.",
+      "furry_omen": "A multi-limbed pack of spore-fused therian hounds moves with a single synchronized hive-heartbeat.",
+      "taboo_ids": [
+        "taboo_blood_scent_ward",
+        "taboo_thermal_feed"
+      ]
+    },
+    {
+      "motif_id": "scp_impossible_weapon",
+      "tradition": "SCP Reliquary / Cursed Armament",
+      "preferred_types": [
+        "object"
+      ],
+      "preferred_forms": [
+        "impossible_weapon_relic"
+      ],
+      "preferred_physicality": [
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "sapient",
+        "non_sapient"
+      ],
+      "preferred_elements": [
+        "aether",
+        "fire",
+        "ice",
+        "electric",
+        "physical"
+      ],
+      "biomes": [
+        "shrine",
+        "industrial",
+        "urban",
+        "commercial"
+      ],
+      "times": [
+        "any"
+      ],
+      "titles": [
+        "Hume-Severing Obsidian Pendulum",
+        "Self-Aiming Clockwork Gauss Relic",
+        "Blood-Drinking Ceremonial Kris"
+      ],
+      "furry_titles": [
+        "Fang-Forged Astral Claw-Relic",
+        "Howling Obsidian Talons",
+        "Kitsune-Fire Ritual Naginata"
+      ],
+      "base_omen": "Suspended three inches above its pedestal, the artifact hums with a predatory resonance that tugs at the iron in your blood.",
+      "gore_omen": "Serrated bone-metal teeth along the weapon's spine twitch hungrily, weeping warm condensation that etches the floor.",
+      "furry_omen": "Carved beast-fangs along the hilt snap shut on empty air, projecting a spectral predator silhouette.",
+      "taboo_ids": [
+        "taboo_kinetic_rebound",
+        "taboo_unpaid_toll"
+      ]
+    },
+    {
+      "motif_id": "yokai_tanuki_illusionist",
+      "tradition": "East Asian Trickster Yokai",
+      "preferred_types": [
+        "entity",
+        "object"
+      ],
+      "preferred_forms": [
+        "folklore_chimera",
+        "cryptid_therian",
+        "haunted_furniture"
+      ],
+      "preferred_physicality": [
+        "corporeal",
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "sapient"
+      ],
+      "preferred_temperaments": [
+        "mischievous",
+        "timid"
+      ],
+      "preferred_elements": [
+        "wind",
+        "earth",
+        "aether"
+      ],
+      "biomes": [
+        "commercial",
+        "shrine",
+        "nature",
+        "urban",
+        "transit"
+      ],
+      "times": [
+        "dusk",
+        "night",
+        "any"
+      ],
+      "titles": [
+        "Leaf-Coin Tanuki Peddler",
+        "Mirage Tea-Kettle Trickster",
+        "Counterfeit Signage Shapeshifter"
+      ],
+      "furry_titles": [
+        "Straw-Hat Tanuki Illusionist",
+        "Nine-Leaf Kitsune Con-Artist",
+        "Bell-Belly Badger Trickster"
+      ],
+      "base_omen": "Loose change clinks playfully in empty air as autumn leaves swirl into counterfeit banknotes and nearby exit signs swap arrows with a muffled giggle.",
+      "gore_omen": "Stitched pelt-seams ripple with a wet chuckle as illusory coins melt into twitching, blood-veined camellia leaves across the counter.",
+      "furry_omen": "A ringed raccoon-dog tail flicks behind a shimmering mirage stall as a grinning muzzle tips a woven sedge hat.",
+      "taboo_ids": [
+        "taboo_trickster_wager",
+        "taboo_unpaid_toll"
+      ]
+    },
+    {
+      "motif_id": "hikayat_toyol_bunian_prankster",
+      "tradition": "Nusantara Hikayat Trickster Lore",
+      "preferred_types": [
+        "entity"
+      ],
+      "preferred_forms": [
+        "humanoid_doppelganger",
+        "spectral_apparition"
+      ],
+      "preferred_physicality": [
+        "non_corporeal",
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "sapient",
+        "compulsive"
+      ],
+      "preferred_temperaments": [
+        "mischievous",
+        "timid"
+      ],
+      "preferred_elements": [
+        "wind",
+        "aether",
+        "water"
+      ],
+      "biomes": [
+        "urban",
+        "commercial",
+        "nature",
+        "shrine"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "titles": [
+        "Marble-Rolling Threshold Imp",
+        "Whistling Canopy Mirage-Sprite",
+        "Coin-Stacking Midnight Prankster"
+      ],
+      "furry_titles": [
+        "Marble-Chasing Tarsier Imp",
+        "Whistling Mousedeer Trickster",
+        "Coin-Pocketing Civet Sprite"
+      ],
+      "base_omen": "Glass marbles clatter across the floor on their own while bootlaces untie themselves and small coins stack into neat, teasing spirals.",
+      "gore_omen": "Tiny, chalk-pale footprints glistening with green amniotic dew dart around scattered marbles as a shrill giggle echoes from the rafters.",
+      "furry_omen": "Huge, saucer-bright nocturnal tarsier eyes blink mischievously from the rafters while nimble paws juggle gleaming brass coins.",
+      "taboo_ids": [
+        "taboo_counting_compulsion",
+        "taboo_trickster_wager"
+      ]
+    },
+    {
+      "motif_id": "folklore_boggart_poltergeist",
+      "tradition": "Urban Poltergeist & Boggart Lore",
+      "preferred_types": [
+        "entity",
+        "object"
+      ],
+      "preferred_forms": [
+        "spectral_apparition",
+        "haunted_furniture",
+        "possessed_media_device"
+      ],
+      "preferred_physicality": [
+        "non_corporeal",
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "sapient",
+        "instinctual"
+      ],
+      "preferred_temperaments": [
+        "mischievous",
+        "volatile"
+      ],
+      "preferred_elements": [
+        "electric",
+        "wind",
+        "physical"
+      ],
+      "biomes": [
+        "commercial",
+        "industrial",
+        "hospital",
+        "urban"
+      ],
+      "times": [
+        "any",
+        "night"
+      ],
+      "titles": [
+        "Locker-Juggling Poltergeist",
+        "Key-Swapping Boggart",
+        "Vending-Chute Gremlin"
+      ],
+      "furry_titles": [
+        "Locker-Rattling Ferret Boggart",
+        "Wire-Juggling Magpie Gremlin",
+        "Key-Thieving Raccoon Poltergeist"
+      ],
+      "base_omen": "Drawers slam in a syncopated drumbeat while keys, pens, and soda cans orbit the ceiling light in a mocking carousel.",
+      "gore_omen": "Rusted surgical trays and shattered mirror shards whirl in a manic figure-eight as invisible fingernails drum a jaunty rhythm on the walls.",
+      "furry_omen": "A static-furred spectral mustelid cackles from inside a rattling locker, juggling stolen keyrings and glowing fuses.",
+      "taboo_ids": [
+        "taboo_trickster_wager",
+        "taboo_unpaid_toll"
+      ]
+    },
+    {
+      "motif_id": "yokai_karakasa_spook",
+      "tradition": "East Asian Odokashi Yokai",
+      "preferred_types": [
+        "entity",
+        "object"
+      ],
+      "preferred_forms": [
+        "folklore_chimera",
+        "haunted_furniture"
+      ],
+      "preferred_physicality": [
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "sapient",
+        "compulsive"
+      ],
+      "preferred_temperaments": [
+        "spook",
+        "mischievous"
+      ],
+      "preferred_elements": [
+        "wind",
+        "water",
+        "fire"
+      ],
+      "biomes": [
+        "shrine",
+        "urban",
+        "commercial",
+        "transit"
+      ],
+      "times": [
+        "night",
+        "dusk",
+        "any"
+      ],
+      "titles": [
+        "One-Eyed Hopping Karakasa",
+        "Paper-Lantern Startle Yokai",
+        "Tongue-Lolling Rain Relic"
+      ],
+      "furry_titles": [
+        "One-Eyed Tanuki-Ribbed Umbrella",
+        "Hopping Fox-Lantern Startler",
+        "Tengu-Sandal Alley Spook"
+      ],
+      "base_omen": "A single wooden clog thuds rhythmically around the blind corner before an oiled-paper umbrella pops open with a wide, delighted eye.",
+      "gore_omen": "Bloodshot scleral veins bulge inside oiled skin-parchment as a yard-long, Indigo-stained tongue unfurls inches from your cheek for the sheer thrill of your gasp.",
+      "furry_omen": "A furry, clawed monopod hops out from behind a wet lantern post, flaring painted beast-eyespots with a theatrical hiss.",
+      "taboo_ids": [
+        "taboo_unflinching_courtesy",
+        "taboo_blink_lock"
+      ]
+    },
+    {
+      "motif_id": "yokai_nopperabo_commuter",
+      "tradition": "East Asian Urban Legend",
+      "preferred_types": [
+        "entity"
+      ],
+      "preferred_forms": [
+        "humanoid_doppelganger",
+        "spectral_apparition"
+      ],
+      "preferred_physicality": [
+        "non_corporeal",
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "sapient",
+        "compulsive"
+      ],
+      "preferred_temperaments": [
+        "spook",
+        "timid"
+      ],
+      "preferred_elements": [
+        "aether",
+        "water",
+        "ice"
+      ],
+      "biomes": [
+        "transit",
+        "urban",
+        "commercial",
+        "hospital"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "titles": [
+        "Faceless Streetlamp Bystander",
+        "Blank-Visage Midnight Commuter",
+        "Porcelain-Smooth Sobbing Shade"
+      ],
+      "furry_titles": [
+        "Blank-Muzzle Fox Commuter",
+        "Featureless White-Stag Bystander",
+        "Smooth-Faced Hound Apparition"
+      ],
+      "base_omen": "A hunched bystander with shoulders shaking in quiet sobs slowly turns beneath the flickering lamp, wiping a hand across an egg-smooth, featureless face.",
+      "gore_omen": "Translucent, seam-stitched skin stretches seamlessly over empty orbital sockets, rippling outward where a mouth tries to laugh at your shock.",
+      "furry_omen": "A tall, rain-coat-clad lupine figure lowers its scarf beneath the neon sign to reveal a completely smooth, porcelain-blank muzzle.",
+      "taboo_ids": [
+        "taboo_unflinching_courtesy",
+        "taboo_mirror_gaze"
+      ]
+    },
+    {
+      "motif_id": "hikayat_betobeto_footstep_spook",
+      "tradition": "Nusantara & East Asian Roadside Lore",
+      "preferred_types": [
+        "entity",
+        "phenomenon"
+      ],
+      "preferred_forms": [
+        "spectral_apparition",
+        "memetic_sensory_hazard",
+        "folklore_chimera"
+      ],
+      "preferred_physicality": [
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "compulsive",
+        "instinctual"
+      ],
+      "preferred_temperaments": [
+        "spook",
+        "timid"
+      ],
+      "preferred_elements": [
+        "wind",
+        "earth",
+        "aether"
+      ],
+      "biomes": [
+        "transit",
+        "nature",
+        "urban",
+        "shrine"
+      ],
+      "times": [
+        "night",
+        "dusk"
+      ],
+      "titles": [
+        "Pacing Footstep Shadow",
+        "Stilt-Tall Bamboo Startler",
+        "Shroud-Hopping Alley Phantom"
+      ],
+      "furry_titles": [
+        "Click-Claw Footstep Shadow",
+        "Stilt-Limbed Civet Phantom",
+        "Night-Path Hound Echo"
+      ],
+      "base_omen": "Crisp, wet footsteps (`beto-beto`) match your exact stride half a pace behind your heel, halting the instant you freeze and looming overhead to savor your chill.",
+      "gore_omen": "Damp, graveyard-knotted burial linen rustles directly behind your ear while towering, jointless shadow-limbs bend down from the canopy.",
+      "furry_omen": "Clicking phantom claws pace inches behind your shadow, casting towering, bamboo-thin beast ears across the pavement whenever you glance back.",
+      "taboo_ids": [
+        "taboo_unflinching_courtesy",
+        "taboo_true_name_silence"
+      ]
+    },
+    {
+      "motif_id": "yokai_azukiarai_washer",
+      "tradition": "East Asian Compulsive Spirit",
+      "preferred_types": [
+        "entity"
+      ],
+      "preferred_forms": [
+        "folklore_chimera",
+        "spectral_apparition"
+      ],
+      "preferred_physicality": [
+        "corporeal",
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "compulsive"
+      ],
+      "preferred_temperaments": [
+        "timid",
+        "spook"
+      ],
+      "preferred_elements": [
+        "water",
+        "earth"
+      ],
+      "biomes": [
+        "coastal",
+        "nature",
+        "shrine",
+        "industrial"
+      ],
+      "times": [
+        "dusk",
+        "night",
+        "any"
+      ],
+      "titles": [
+        "Sluice-Gate Bean Counter",
+        "Shoki-Shoki Culvert Washer",
+        "Obsessive Pebble-Sorting Spirit"
+      ],
+      "furry_titles": [
+        "Bean-Washing River Otter Yokai",
+        "Pebble-Counting Badger Spirit",
+        "Culvert-Sifting Kappa Watcher"
+      ],
+      "base_omen": "A hypnotic, rhythmic rasping (`shoki, shoki`) echoes from the drainage channel as hunched hands obsessively wash and recount crimson beans in a bamboo sieve.",
+      "gore_omen": "Calcified molars and crimson seeds rattle rhythmically inside a rusted surgical basin, counted and recounted in an unbreakable trance.",
+      "furry_omen": "A hunched, damp-furred river-spirit rocks beside the culvert, obsessively sorting crimson beans in a woven sieve while humming a three-note loop.",
+      "taboo_ids": [
+        "taboo_counting_compulsion",
+        "taboo_hydro_conductor"
+      ]
+    },
+    {
+      "motif_id": "folklore_jiangshi_hopper",
+      "tradition": "East Asian Talismanic Corpse Lore",
+      "preferred_types": [
+        "entity"
+      ],
+      "preferred_forms": [
+        "humanoid_doppelganger",
+        "anatomical_amalgam"
+      ],
+      "preferred_physicality": [
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "compulsive"
+      ],
+      "preferred_temperaments": [
+        "volatile"
+      ],
+      "preferred_elements": [
+        "earth",
+        "ice",
+        "bio"
+      ],
+      "biomes": [
+        "shrine",
+        "hospital",
+        "transit",
+        "urban"
+      ],
+      "times": [
+        "night"
+      ],
+      "titles": [
+        "Talisman-Bound Cadence Hopper",
+        "Rigor-Locked Coin Counter",
+        "Paper-Sealed Night Walker"
+      ],
+      "furry_titles": [
+        "Ofuda-Sealed Wolf Revenant",
+        "Cadence-Bound Temple Guardian",
+        "Paper-Veiled Stag Hopper"
+      ],
+      "base_omen": "A faded yellow cinnabar talisman flutters over glazed eyes as rigid, outstretched arms advance in a strict metronomic hop tied to ambient breath.",
+      "gore_omen": "Desiccated, jade-gray tendons snap in rigid cadence beneath Qing-brocade tatters as frost-white nails twitch toward warm exhaled breath.",
+      "furry_omen": "A rigid, brass-bell-collared beast revenant with a cinnabar scroll over its brow hops forward in locked, mechanical intervals.",
+      "taboo_ids": [
+        "taboo_counting_compulsion",
+        "taboo_unpaid_toll"
+      ]
+    },
+    {
+      "motif_id": "scp_station_rule_attendant",
+      "tradition": "SCP Liminal Rule-Script Dossier",
+      "preferred_types": [
+        "entity",
+        "object"
+      ],
+      "preferred_forms": [
+        "humanoid_doppelganger",
+        "architectural_fixture"
+      ],
+      "preferred_physicality": [
+        "corporeal",
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "compulsive"
+      ],
+      "preferred_temperaments": [
+        "volatile",
+        "spook"
+      ],
+      "preferred_elements": [
+        "electric",
+        "aether",
+        "physical"
+      ],
+      "biomes": [
+        "transit",
+        "commercial",
+        "hospital",
+        "urban"
+      ],
+      "times": [
+        "night",
+        "any"
+      ],
+      "titles": [
+        "Line-Zero Etiquette Conductor",
+        "White-Gloved Turnstile Automaton",
+        "Chime-Bound Platform Inspector"
+      ],
+      "furry_titles": [
+        "White-Gloved Jackal Conductor",
+        "Chime-Bound Owl Ticket-Inspector",
+        "Brass-Buttoned Hound Attendant"
+      ],
+      "base_omen": "A four-note transit chime plays from nowhere as a stiff, white-gloved attendant repeats a single archaic boarding rule while clicking a brass puncher in 4/4 time.",
+      "gore_omen": "Porcelain jaw-hinges click open to a pre-recorded PA chime as brass ticket-shears snap shut at exact two-second intervals.",
+      "furry_omen": "An unblinking, uniformed beast conductor tilts its cap at a rigid forty-five-degree angle, repeating a single garbled station rule on loop.",
+      "taboo_ids": [
+        "taboo_unpaid_toll",
+        "taboo_unflinching_courtesy",
+        "taboo_counting_compulsion"
+      ]
+    },
+    {
+      "motif_id": "scp_porcelain_choir",
+      "tradition": "SCP Automaton Archive",
+      "preferred_types": [
+        "entity",
+        "object"
+      ],
+      "preferred_forms": [
+        "porcelain_automaton",
+        "haunted_furniture"
+      ],
+      "preferred_physicality": [
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "compulsive",
+        "sapient"
+      ],
+      "preferred_temperaments": [
+        "spook",
+        "volatile"
+      ],
+      "preferred_elements": [
+        "aether",
+        "physical",
+        "ice"
+      ],
+      "biomes": [
+        "commercial",
+        "hospital",
+        "urban",
+        "shrine"
+      ],
+      "times": [
+        "night",
+        "any"
+      ],
+      "titles": [
+        "Ball-Jointed Aria Mannequin",
+        "Kiln-Cracked Chorister",
+        "Clockwork Porcelain Understudy"
+      ],
+      "furry_titles": [
+        "Porcelain Jackal Automaton",
+        "Ball-Jointed Swan Songstress",
+        "Bisque-Mask Kitsune Doll"
+      ],
+      "base_omen": "Hairline glaze cracks click like castanets as a ball-jointed porcelain figure bows stiffly and hums a pitch-perfect, lungless soprano.",
+      "gore_omen": "Hollow bisque limbs leak warm embalming resin through hairline fractures as articulated porcelain teeth chatter a choir hymn.",
+      "furry_omen": "A life-sized porcelain fox-doll rotates its jointed ears a full 180 degrees with a dry ceramic grinding sound.",
+      "taboo_ids": [
+        "taboo_blink_lock",
+        "taboo_rhythm_sync",
+        "taboo_unflinching_courtesy"
+      ]
+    },
+    {
+      "motif_id": "scp_vending_paradox",
+      "tradition": "SCP Liminal Commerce Dossier",
+      "preferred_types": [
+        "object"
+      ],
+      "preferred_forms": [
+        "anomalous_vending_kiosk",
+        "possessed_media_device"
+      ],
+      "preferred_physicality": [
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "compulsive",
+        "sapient"
+      ],
+      "preferred_temperaments": [
+        "mischievous",
+        "volatile"
+      ],
+      "preferred_elements": [
+        "electric",
+        "ice",
+        "bio",
+        "aether"
+      ],
+      "biomes": [
+        "transit",
+        "commercial",
+        "hospital",
+        "urban"
+      ],
+      "times": [
+        "night",
+        "any"
+      ],
+      "titles": [
+        "Impossible Selection Dispenser #09",
+        "Memory-Coin Refreshment Kiosk",
+        "Alleyway Liquid-Concept Machine"
+      ],
+      "furry_titles": [
+        "Tanuki-Stamped Coin Dispenser",
+        "Midnight Fox- Shrine Kiosk",
+        "Claw-Slot Curio Vending Unit"
+      ],
+      "base_omen": "Fluorescent display buttons advertise impossible bottled concepts—'Yesterday's Rain', 'Static Sleep'—while the coin-return rattles hungrily.",
+      "gore_omen": "Warm, pulsing glass ampoules rattle down the dispensation chute as the coin slot exhales iron-scented steam.",
+      "furry_omen": "Painted beast-eyes on the illuminated kiosk panel track passersby while counterfeit leaf-coins jam the return tray.",
+      "taboo_ids": [
+        "taboo_unpaid_toll",
+        "taboo_gift_refusal",
+        "taboo_voltage_parasite"
+      ]
+    },
+    {
+      "motif_id": "scp_origami_swarm",
+      "tradition": "Occult Shikigami / Paper Anomaly",
+      "preferred_types": [
+        "entity",
+        "object"
+      ],
+      "preferred_forms": [
+        "origami_effigy",
+        "parasitic_colony",
+        "endless_book_scroll"
+      ],
+      "preferred_physicality": [
+        "corporeal",
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "compulsive",
+        "instinctual"
+      ],
+      "preferred_temperaments": [
+        "timid",
+        "mischievous"
+      ],
+      "preferred_elements": [
+        "wind",
+        "fire",
+        "aether"
+      ],
+      "biomes": [
+        "shrine",
+        "commercial",
+        "urban",
+        "transit"
+      ],
+      "times": [
+        "any",
+        "dusk"
+      ],
+      "titles": [
+        "Razor-Creased Shikigami Flock",
+        "Self-Folding Sutra Sentinel",
+        "Thousand-Crane Laceration Vortex"
+      ],
+      "furry_titles": [
+        "Origami Paper-Wolf Pack",
+        "Folded Tengu-Wing Effigy",
+        "Sutra-Paper Crane Chimera"
+      ],
+      "base_omen": "Dry parchment rustles against the wind as thousands of razor-stiff folded paper talismans assemble into a fluttering silhouette.",
+      "gore_omen": "Blood-ink calligraphy bleeds across skin-thin vellum cranes that slice paper-cuts deep into concrete pillars.",
+      "furry_omen": "Hundreds of interlocking paper talismans fold themselves into a prowling, razor-maned lupine effigy.",
+      "taboo_ids": [
+        "taboo_counting_compulsion",
+        "taboo_name_inversion",
+        "taboo_red_thread_sever"
+      ]
+    },
+    {
+      "motif_id": "scp_acoustic_void",
+      "tradition": "SCP Sensory Hazard Archive",
+      "preferred_types": [
+        "phenomenon",
+        "entity"
+      ],
+      "preferred_forms": [
+        "acoustic_dead_zone",
+        "acoustic_predator",
+        "shadow_silhouette"
+      ],
+      "preferred_physicality": [
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "instinctual",
+        "non_sapient"
+      ],
+      "preferred_elements": [
+        "wind",
+        "aether",
+        "ice"
+      ],
+      "biomes": [
+        "transit",
+        "industrial",
+        "hospital",
+        "urban"
+      ],
+      "times": [
+        "night",
+        "any"
+      ],
+      "titles": [
+        "Anechoic Decibel Eater",
+        "Zero-Hertz Corridor Predator",
+        "Whisper-Drinking Umbra"
+      ],
+      "furry_titles": [
+        "Anechoic Owl-Shadow Predator",
+        "Sound-Swallowing Bat Eidolon",
+        "Silent-Maw Umbral Stalker"
+      ],
+      "base_omen": "All city traffic, footsteps, and even your own heartbeat drop to absolute zero decibels as a flat black silhouette peels off the concrete.",
+      "gore_omen": "Eardrums flex inward under sudden vacuum pressure while stolen screams play backward from a two-dimensional wall shadow.",
+      "furry_omen": "A soundless, radar-eared shadow-beast glides across the brickwork, devouring every decibel within twenty paces.",
+      "taboo_ids": [
+        "taboo_breath_hold",
+        "taboo_true_name_silence",
+        "taboo_shadow_step"
+      ]
+    },
+    {
+      "motif_id": "scp_chromatic_mirage",
+      "tradition": "SCP Optical / Liminal Rift",
+      "preferred_types": [
+        "phenomenon"
+      ],
+      "preferred_forms": [
+        "chromatic_bleed_rift",
+        "illusory_market_mirage",
+        "mirror_corridor_fracture"
+      ],
+      "preferred_physicality": [
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "non_sapient",
+        "sapient"
+      ],
+      "preferred_temperaments": [
+        "mischievous",
+        "timid"
+      ],
+      "preferred_elements": [
+        "aether",
+        "electric",
+        "fire"
+      ],
+      "biomes": [
+        "commercial",
+        "urban",
+        "coastal",
+        "nature"
+      ],
+      "times": [
+        "dusk",
+        "night",
+        "any"
+      ],
+      "titles": [
+        "Ultraviolet Bazaar Mirage",
+        "Impossible Eighth-Color Bleed",
+        "Refractive Glass Labyrinth"
+      ],
+      "furry_titles": [
+        "Fox-Fire Mirage Arcade",
+        "Prismatic Moth-Scale Rift",
+        "Refractive Kitsune Promenade"
+      ],
+      "base_omen": "Neon reflections pool in mid-air in an unnamed iridescent hue, sketching storefront stalls that vanish when viewed head-on.",
+      "gore_omen": "Prismatic light bends through suspended droplets of vitreous humor, projecting a bruised, pulsing bazaar over the street.",
+      "furry_omen": "Lantern-lit market stalls staffed by shimmering, faceless beast-merchants flicker in and out of the rain-slick glass.",
+      "taboo_ids": [
+        "taboo_mirror_gaze",
+        "taboo_mirror_shroud",
+        "taboo_gift_refusal"
+      ]
+    },
+    {
+      "motif_id": "scp_clockwork_orrery",
+      "tradition": "Anomalous Chronometry Dossier",
+      "preferred_types": [
+        "object",
+        "phenomenon"
+      ],
+      "preferred_forms": [
+        "clockwork_astrolabe",
+        "temporal_echo_zone",
+        "sealed_apothecary_vessel"
+      ],
+      "preferred_physicality": [
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "compulsive",
+        "non_sapient"
+      ],
+      "preferred_temperaments": [
+        "volatile",
+        "timid"
+      ],
+      "preferred_elements": [
+        "electric",
+        "earth",
+        "aether"
+      ],
+      "biomes": [
+        "industrial",
+        "commercial",
+        "shrine",
+        "urban"
+      ],
+      "times": [
+        "any"
+      ],
+      "titles": [
+        "Retrograde Brass Astrolabe",
+        "Thirteen-Hour Pendulum Core",
+        "Chrono-Stasis Escapement Vessel"
+      ],
+      "furry_titles": [
+        "Ouroboros Brass Chronometer",
+        "Owl-Gear Temporal Astrolabe",
+        "Jackal-Weighted Pendulum Relic"
+      ],
+      "base_omen": "Raindrops hang motionless around spinning brass rings as nearby wristwatches tick backward in sharp, metallic jolts.",
+      "gore_omen": "Hair-thin brass gears mesh with pulsing arterial valves, rewinding spilled droplets of blood up from the floorboards.",
+      "furry_omen": "Engraved bronze beast-constellations orbit a floating pendulum that rewinds every footstep by three seconds.",
+      "taboo_ids": [
+        "taboo_rhythm_sync",
+        "taboo_bell_silence",
+        "taboo_kinetic_rebound"
+      ]
+    },
+    {
+      "motif_id": "scp_flora_mimic",
+      "tradition": "Cryptobotanical Bio-Dossier",
+      "preferred_types": [
+        "entity"
+      ],
+      "preferred_forms": [
+        "mimic_flora",
+        "threshold_warden",
+        "skeletal_leviathan"
+      ],
+      "preferred_physicality": [
+        "corporeal"
+      ],
+      "preferred_sapience": [
+        "instinctual",
+        "compulsive"
+      ],
+      "preferred_temperaments": [
+        "timid",
+        "volatile"
+      ],
+      "preferred_elements": [
+        "bio",
+        "earth",
+        "water"
+      ],
+      "biomes": [
+        "nature",
+        "coastal",
+        "hospital",
+        "urban"
+      ],
+      "times": [
+        "night",
+        "dusk",
+        "any"
+      ],
+      "titles": [
+        "Voice-Luring Lantern Creeper",
+        "Bone-Rooted Greenhouse Warden",
+        "Chlorophyll-Mimic Trellis"
+      ],
+      "furry_titles": [
+        "Briar-Maned Sylvan Stalker",
+        "Orchid-Maw Vine Chimera",
+        "Root-Antlered Thicket Warden"
+      ],
+      "base_omen": "Potted vines uncoil against gravity while pale, lantern-shaped blossoms imitate the muffled coughs of a trapped commuter.",
+      "gore_omen": "Thorny tendrils threaded through bleached ribcages bloom with fleshy, eye-centered orchids exhaling sweet anesthetic pollen.",
+      "furry_omen": "Bark-armored lupine limbs woven from living briars unfurl from the overgrown hedge with glowing amber sap-eyes.",
+      "taboo_ids": [
+        "taboo_blood_scent_ward",
+        "taboo_thermal_feed",
+        "taboo_salt_perimeter"
+      ]
+    },
+    {
+      "motif_id": "scp_astral_polyhedron",
+      "tradition": "Higher-Dimensional Hume Dossier",
+      "preferred_types": [
+        "entity",
+        "phenomenon"
+      ],
+      "preferred_forms": [
+        "astral_polyhedron",
+        "gravity_hume_distortion",
+        "phantom_procession"
+      ],
+      "preferred_physicality": [
+        "non_corporeal"
+      ],
+      "preferred_sapience": [
+        "sapient",
+        "compulsive"
+      ],
+      "preferred_temperaments": [
+        "volatile",
+        "spook"
+      ],
+      "preferred_elements": [
+        "aether",
+        "electric",
+        "ice"
+      ],
+      "biomes": [
+        "industrial",
+        "transit",
+        "shrine",
+        "urban"
+      ],
+      "times": [
+        "night",
+        "any"
+      ],
+      "titles": [
+        "Tesseract Choir Octahedron",
+        "Four-Dimensional Orbiting Lattice",
+        "Folded-Horizon Geometry Entity"
+      ],
+      "furry_titles": [
+        "Astral Seraph-Hound Lattice",
+        "Star-Faceted Gryphon Polyhedron",
+        "Prismatic Nine-Pointed Kitsune Core"
+      ],
+      "base_omen": "Airfolds inward along razor-crisp geometric seams as an impossible multi-faceted polyhedron rotates through solid concrete.",
+      "gore_omen": "Space pleats like folded wet parchment around a rotating crystalline core lined with hundreds of unblinking optic lenses.",
+      "furry_omen": "Crystalline star-facets assemble into a floating, multi-winged geometric beast humming in sub-audible chords.",
+      "taboo_ids": [
+        "taboo_mirror_gaze",
+        "taboo_name_inversion",
+        "taboo_kinetic_rebound"
+      ]
+    }
+  ],
+  "naming_grammars": {
+    "element_adjectives": {
+      "fire": [
+        "Cinder-Wreathed",
+        "Ash-Crowned",
+        "Tallow-Burning",
+        "Kiln-Scorched",
+        "Ember-Veiled"
+      ],
+      "water": [
+        "Brackish",
+        "Silt-Weeping",
+        "Tide-Drowned",
+        "Rain-Slick",
+        "Culvert-Born"
+      ],
+      "wind": [
+        "Gale-Shrouded",
+        "Draft-Hollow",
+        "Whistling",
+        "Barometric",
+        "Tempest-Spun"
+      ],
+      "earth": [
+        "Calcified",
+        "Salt-Crusted",
+        "Basalt-Ribbed",
+        "Grave-Loam",
+        "Concrete-Bound"
+      ],
+      "ice": [
+        "Rime-Bound",
+        "Hoarfrost",
+        "Zero-Kelvin",
+        "Glaze-Frozen",
+        "Sleet-Veiled"
+      ],
+      "electric": [
+        "Arc-Charged",
+        "Static-Laced",
+        "Ozone-Crowned",
+        "High-Voltage",
+        "Cathode-Lit"
+      ],
+      "bio": [
+        "Spore-Weeping",
+        "Mycelial",
+        "Vinegar-Stained",
+        "Miasma-Steeped",
+        "Amber-Sap"
+      ],
+      "physical": [
+        "Iron-Ribbed",
+        "Wire-Stitched",
+        "Porcelain-Jointed",
+        "Brass-Hinged",
+        "Razor-Creased"
+      ],
+      "aether": [
+        "Hume-Warped",
+        "Parallax",
+        "Non-Euclidean",
+        "Inverted",
+        "Threshold-Folded"
+      ]
+    },
+    "materials": [
+      "Porcelain",
+      "Brass",
+      "Salt",
+      "Mirror",
+      "Lacquer",
+      "Cinnabar",
+      "Tallow",
+      "Obsidian",
+      "Vellum",
+      "Velvet"
+    ],
+    "features": [
+      "Jawed",
+      "Eyed",
+      "Spined",
+      "Tongued",
+      "Veiled",
+      "Lantern",
+      "Masked",
+      "Bell",
+      "Thread",
+      "Crown"
+    ],
+    "gore_features": [
+      "Marrow",
+      "Arterial",
+      "Sinew",
+      "Ribcage",
+      "Suture",
+      "Vitreous",
+      "Cartilage",
+      "Viscera"
+    ],
+    "entity_roles": [
+      "Usher",
+      "Ferryman",
+      "Chorister",
+      "Warden",
+      "Peddler",
+      "Commuter",
+      "Bell-Ringer",
+      "Watchman",
+      "Mourner",
+      "Surveyor"
+    ],
+    "furry_roles": [
+      "Hound-Warden",
+      "Vixen-Usher",
+      "Stag-Watchman",
+      "Jackal-Ferryman",
+      "Owl-Surveyor",
+      "Tanuki-Peddler",
+      "Crow-Chorister"
+    ],
+    "ordinal_adjectives": [
+      "Thirteenth",
+      "Unlisted",
+      "Zero-Hour",
+      "Counterfeit",
+      "Unplugged",
+      "Backwards-Ticking",
+      "Midnight",
+      "Forgotten",
+      "Sealed"
+    ],
+    "object_fixtures": [
+      "Turnstile",
+      "Rotary Payphone",
+      "Lacquer Reliquary",
+      "Pendulum Cabinet",
+      "Fare-Box",
+      "Vending Chute",
+      "Dressing Mirror",
+      "Apothecary Jar",
+      "Silk Mask",
+      "Ledger Scroll"
+    ],
+    "phenomenon_nouns": [
+      "Static Choir",
+      "Upside-Down Drizzle",
+      "Lantern Procession",
+      "Anechoic Fog",
+      "Parallax Corridor",
+      "Mirage Arcade",
+      "Echoing Footsteps",
+      "Chromatic Tide"
+    ],
+    "thresholds": [
+      "Platform Zero",
+      "Third Landing",
+      "Dead-End Culvert",
+      "Crossroads Torii",
+      "Service Freight Lift",
+      "Flooded Underpass",
+      "Shutter Alley"
+    ],
+    "biome_labels": {
+      "transit": "Transit Line",
+      "hospital": "Ward-B",
+      "shrine": "Sanctuary",
+      "coastal": "Breakwater",
+      "nature": "Canopy",
+      "commercial": "Arcade",
+      "industrial": "Substation",
+      "urban": "Crossroads"
+    }
+  },
+  "sensory_omen_channels": {
+    "acoustic": {
+      "transit": [
+        "a muffled four-note station chime loops out of phase",
+        "unseen heels click in crisp 4/4 cadence along the yellow platform line"
+      ],
+      "hospital": [
+        "an unplugged cardiac monitor pips in rhythm with your pulse",
+        "rusted gurney wheels squeak slowly around a blind curtain"
+      ],
+      "shrine": [
+        "unrung bronze temple bells hum at a bone-deep frequency",
+        "wooden prayer plaques clatter together in dead-calm air"
+      ],
+      "coastal": [
+        "brackish tidewater gurgles backward up dry storm grates",
+        "a waterlogged harbour bell tolls from beneath the concrete pier"
+      ],
+      "nature": [
+        "cicadas cut out mid-chirp into sudden anechoic silence",
+        "dry bamboo stalks knock rhythmically without a breath of wind"
+      ],
+      "commercial": [
+        "an unplugged escalator purrs beneath dead mall chandeliers",
+        "antique cash-register bells chime by themselves behind shuttered glass"
+      ],
+      "industrial": [
+        "step-down transformers hum a dissonant human vowel chord",
+        "overhead crane chains sway and clink in strict pendulum intervals"
+      ],
+      "urban": [
+        "distant payphone receivers click off the hook one by one",
+        "wet footsteps pace half a stride behind your own shadow"
+      ]
+    },
+    "thermal_olfactory": {
+      "fire": [
+        "the air smells sharply of scorched tallow and dry incense ash",
+        "radiant kiln-heat ripples off cold brickwork"
+      ],
+      "water": [
+        "a sudden chill of river-silt and rain-soaked tatami fills your lungs",
+        "condensation beads upward across every vertical pane"
+      ],
+      "wind": [
+        "barometric pressure plunges until your ears pop sharply",
+        "a razor-cold draft smells of high-altitude ozone and dried leaves"
+      ],
+      "earth": [
+        "the scent of damp grave-chalk and crushed limestone hangs heavy",
+        "fine mortar dust vibrates upward off the floor"
+      ],
+      "ice": [
+        "exhaled breath crystallizes into falling geometric needles",
+        "hoarfrost ferns spiderweb rapidly across nearby metal"
+      ],
+      "electric": [
+        "copper fillings ache with sharp ionized ozone static",
+        "arm hairs stand rigid under an invisible Faraday charge"
+      ],
+      "bio": [
+        "sweet bruised frangipani curdles into sharp pickled vinegar",
+        "humid greenhouse spores cling thickly to the back of the throat"
+      ],
+      "physical": [
+        "the metallic tang of cold wrought iron and machine oil lingers",
+        "fine porcelain dust hangs motionless in the air"
+      ],
+      "aether": [
+        "gravity tilts three degrees sideways with a scent of old static paper",
+        "depth perception flattens as shadows detach by half an inch"
+      ]
+    },
+    "visual_gore_addons": [
+      "Hair-thin crimson condensation weeps from hairline seams along the surrounding fixtures.",
+      "Faint arterial frost traces vein-like fractals wherever its presence lingers."
+    ],
+    "visual_furry_addons": [
+      "Reflective tapetum-lucidum eyespots glint briefly from the distorted periphery.",
+      "Clawed tracks and shed guard-hairs materialize briefly in the ambient dust."
+    ]
+  },
+  "procedural_primitive_templates": {
+    "disguise_profiles": [
+      {
+        "compatible_types": [
+          "entity"
+        ],
+        "compatible_forms": [
+          "humanoid_doppelganger",
+          "spectral_apparition",
+          "porcelain_automaton",
+          "threshold_warden"
+        ],
+        "disguise_alias": "Lost Late-Night Commuter",
+        "cover_desc": "Appears at a glance like a damp-shouldered commuter studying a blank transit map beneath a flickering lamp.",
+        "unmask_cue": "When scrutinized closely, its joints articulate backward and its shadow stretches in the wrong direction!"
+      },
+      {
+        "compatible_types": [
+          "entity"
+        ],
+        "compatible_forms": [
+          "humanoid_doppelganger",
+          "cryptid_therian",
+          "folklore_chimera"
+        ],
+        "disguise_alias": "Hunched Roadside Peddler",
+        "cover_desc": "Presents as a quiet, hooded figure tending a folding crate of odd trinkets at the curb.",
+        "unmask_cue": "Beneath the lowered brim, the illusory human guise ripples away to expose its anomalous form!"
+      },
+      {
+        "compatible_types": [
+          "object",
+          "entity"
+        ],
+        "compatible_forms": [
+          "haunted_furniture",
+          "cursed_garment_mask",
+          "anomalous_vending_kiosk",
+          "architectural_fixture"
+        ],
+        "disguise_alias": "Unattended Curio Fixture",
+        "cover_desc": "Looks indistinguishable from an ordinary, slightly dated municipal or antique fixture.",
+        "unmask_cue": "Fine seams split open along its casing as an unmistakable Hume spike betrays its animate core!"
+      }
+    ],
+    "tether_profiles": [
+      {
+        "compatible_types": [
+          "entity"
+        ],
+        "vessel_name": "Wax-Sealed Spirit Phial",
+        "sever_stat": "INT",
+        "tether_hint": "A faint umbilical shimmer trails toward a wax-stoppered glass phial tucked nearby."
+      },
+      {
+        "compatible_types": [
+          "entity"
+        ],
+        "vessel_name": "Cinnabar Contract Talisman",
+        "sever_stat": "PER",
+        "tether_hint": "Its movements snap back toward a fluttering cinnabar paper seal anchoring it to this sector."
+      },
+      {
+        "compatible_types": [
+          "entity",
+          "object"
+        ],
+        "vessel_name": "Braided Heirloom Fetish",
+        "sever_stat": "CHA",
+        "tether_hint": "An archaic binding knot keeps reforming its silhouette until the fetish pact is formally severed."
+      }
+    ],
+    "dialogue_traps": [
+      {
+        "compatible_sapience": [
+          "sapient",
+          "compulsive"
+        ],
+        "prompt_question": "'Tell me honestly—can you see my face clearly right now?'",
+        "trap_yes_label": "Answer 'Yes, I see you clearly'",
+        "trap_no_label": "Answer 'No, I cannot see you'",
+        "evasive_label": "Reply evasively: 'The streetlight is flickering—everything looks indistinct tonight'",
+        "evasive_keywords": [
+          "flickering",
+          "indistinct",
+          "hard to tell",
+          "misty",
+          "so-so",
+          "neither",
+          "blurry",
+          "unsure"
+        ],
+        "trap_keywords": [
+          "yes",
+          "clearly",
+          "i see you",
+          "cannot see you",
+          "can't see you"
+        ],
+        "success_note": "Your non-committal answer stalled its binary recognition contract, dropping its guard!",
+        "fail_note": "Answering its binary trap directly fulfilled its recognition clause!"
+      },
+      {
+        "compatible_sapience": [
+          "sapient",
+          "compulsive"
+        ],
+        "prompt_question": "'Will you take the red ticket or the white ticket for the last train?'",
+        "trap_yes_label": "Accept the Red Ticket",
+        "trap_no_label": "Accept the White Ticket",
+        "evasive_label": "Show your own pass: 'Neither—I am only inspecting the platform'",
+        "evasive_keywords": [
+          "neither",
+          "inspecting",
+          "already have",
+          "no ticket",
+          "walking",
+          "none",
+          "pass"
+        ],
+        "trap_keywords": [
+          "red ticket",
+          "white ticket",
+          "take red",
+          "take white"
+        ],
+        "success_note": "Declining both cursed tickets broke the conductor's binary fare-loop!",
+        "fail_note": "Choosing either cursed ticket bound you to its phantom fare penalty!"
+      }
+    ],
+    "omen_paradoxes": [
+      {
+        "paradox_id": "inverse_acoustic_distance",
+        "rule_summary": "Inverse Acoustic Distance: Loud crying or footsteps mean the anomaly is still far off; faint, barely audible sounds mean it is directly beside you.",
+        "observe_hint": "Wait—its acoustics are inverted! As the sound fades to a whisper, frost blooms right beside your boot!"
+      },
+      {
+        "paradox_id": "reverse_shadow_bearing",
+        "rule_summary": "Reverse Shadow Bearing: Its visible silhouette projects across the room from its true physical anchor point.",
+        "observe_hint": "Careful—its optical glare points opposite its real Hume anchor behind the pillar!"
+      }
+    ],
+    "appeasement_pool": [
+      [
+        "coarse_salt",
+        "counting_beans"
+      ],
+      [
+        "white_incense",
+        "paper_talisman"
+      ],
+      [
+        "iron_nail",
+        "kaffir_lime"
+      ],
+      [
+        "sweet_milk",
+        "fried_tofu"
+      ]
+    ]
+  }
+}

@@ -18,16 +18,17 @@ Use this runbook when working on `services/turn_service.py`, `game_engine/`, `mo
    - **Idempotency Guard**: If `raw_pick` already carries a resolved `check` + `char`, `prepare_and_roll_action` coerces dict `check` back into `CheckResult` without double-rolling or double-charging MP.
 
 2. **Deterministic Phases 1–5 (`game_engine/turn/`, `game_engine/npcs/`, `game_engine/state/`)**
-   - **Phase 1 — Cast & Dialogue Authority (`DETERMINISTIC_CAST`)**:
+   *(Phase names below are conceptual labels for the pipeline, not code identifiers.)*
+   - **Phase 1 — Cast & Dialogue Authority**:
      - Managed by `game_engine/npcs/cast_planner.py` (`CastPlan`), `presence.py`, `stage_manager.py`, `dialogue_tracking.py`, and `reconciliation.py`.
      - Python owns `present_npcs`, `dialogue_partners`, `bystander_npcs`, and `departing_npcs`. Never resurrect departed NPCs via prose quotation scraping; `dialogue_exit` closes active loops immediately.
-   - **Phase 2 — Social, Intimacy & Physical State (`DETERMINISTIC_INTIMACY`)**:
+   - **Phase 2 — Social, Intimacy & Physical State**:
      - Pre-turn disclosures and witness checks (`resolve_pre_turn_social_and_disclosures`, `evaluate_pre_turn_witness_detection`).
      - Post-turn reductions in `game_engine/state/social.py` and `reducers.py` (`_reduce_social_and_milestones`, `_evaluate_npc_milestones`).
-   - **Phase 3 — Vitals, Economy, Combat & Inventory (`DETERMINISTIC_ECONOMY`)**:
+   - **Phase 3 — Vitals, Economy, Combat & Inventory**:
      - State reducers in `game_engine/state/reducers.py` + `mechanics/combat/` (`core.py`, `formulas.py`, `enemies.py`, `merchant.py`).
      - Emits domain events on `mechanics/narrative/events.py` (`bus`: `LocationChangedEvent`, `NPCSpawnedEvent`, `ItemGainedEvent`, `QuestCompletedEvent`, etc.).
-   - **Phase 4 — Spatial Movement & Access Gating (`DETERMINISTIC_MOVEMENT`)**:
+   - **Phase 4 — Spatial Movement & Access Gating**:
      - Dijkstra/BFS graph routing and gate validation in `mechanics/world/locations/` (`movement.py`, `pathfinding.py`, `access_gate.py`, `hierarchy.py`).
      - Stealth state updates (`UNAWARE`, `SUSPICIOUS`, `SEARCHING`, `DETECTED`) in `mechanics/stealth/`.
    - **Phase 5 — Bounded Narration & Post-Sanitizers**:
@@ -53,10 +54,7 @@ Hikayat persists complex social/world state in normalized SQLite tables rather t
    - Tracks posture, stance, composure, wetness, held props, and layered clothing/undergarment states per actor.
 
 ### Mandatory Lifecycle Hooks When Adding Normalized Tables/Columns
-Whenever you add or alter normalized session-scoped tables in `db/`:
-1. **Save/Load Slot Rewriting**: Register table/session-ID remapping in `db/saves.py` (`save_adventure_slot`, `load_adventure_slot`, `_rewrite_session_key_id`).
-2. **Turn Rollback & Retry Cleanup**: Update `db/sessions.py` (`rollback_session_normalized_state_after_turn`, `reset_session_for_opening_retry`) and `db/core.py` (`_delete_session_child_records_only`).
-3. **Schema Migration**: Add an idempotent migration helper in `db/core.py` invoked from `init_db()`, and re-export new public helpers in `db/__init__.py`.
+Any new or altered session-scoped table must be wired into save/load remapping, turn rollback, child-record purge, migration, and the `db/__init__.py` facade. Follow the `hikayat-db-lifecycle-checklist` skill step by step; it is the single source for this checklist.
 
 ---
 

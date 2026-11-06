@@ -4,6 +4,7 @@ Modular mechanic handling quest archetype taxonomies, icon mappings, bounty prom
 """
 
 import logging
+import re
 import uuid
 import db
 import scenario_data
@@ -297,6 +298,12 @@ QUEST_TYPE_ICONS = {
     "disruption": "💥",
     "assassination": "🗡️",
     "duel": "🗡️",
+    "rumor investigation": "👂",
+    "Rumor Investigation": "👂",
+    "damage control": "🔥",
+    "Damage Control": "🔥",
+    "loyalty quest": "🛡️",
+    "Loyalty Quest": "🛡️",
     
     # Modern / High School Drama Archetypes
     "gossip": "💬",
@@ -357,6 +364,16 @@ QUEST_TYPE_ICONS = {
 }
 
 
+def _safe_bounty_int(raw: object, default: int) -> int:
+    """Coerces LLM bounty numbers ("150", 150.0, "", "[integer]", "120 XP") to int, falling back to `default`."""
+    if isinstance(raw, bool):
+        return default
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    m = re.search(r"-?\d+", str(raw or ""))
+    return int(m.group(0)) if m else default
+
+
 def get_quest_type_icon(quest_type: str) -> str:
     """Returns the thematic Discord emoji for a given quest archetype."""
     q_lower = (quest_type or "").lower()
@@ -376,7 +393,7 @@ def get_archetypes_for_scenario(scenario: str = None) -> list[str]:
     # 1. Primary Scenario Archetypes (highest priority)
     if is_anomalous_incursions_scenario(scenario):
         archetypes.extend(ARCHETYPES_BY_SCENARIO.get("anomalous_incursions", []))
-    if is_school_scenario(scenario):
+    if is_school_scenario(scenario) or scenario_data.has_school_campus_mechanics(scenario):
         archetypes.extend(ARCHETYPES_BY_SCENARIO.get("modern", []))
     if has_tag(scenario, "fantasy") or has_tag(scenario, "isekai") or has_tag(scenario, "isekai_fantasy") or has_tag(scenario, "grimdark") or has_tag(scenario, "dark_fantasy"):
         archetypes.extend(ARCHETYPES_BY_SCENARIO.get("fantasy", []))
@@ -391,7 +408,7 @@ def get_archetypes_for_scenario(scenario: str = None) -> list[str]:
 
     # 3. Compatible General Archetypes
     general_pool = ARCHETYPES_BY_SCENARIO.get("general", [])
-    is_modern_school = is_school_scenario(scenario) or has_tag(scenario, "non_combat")
+    is_modern_school = (is_school_scenario(scenario) or has_tag(scenario, "non_combat")) and not scenario_data.is_anomalous_incursions_scenario(scenario)
     if is_modern_school:
         excluded = {
             "Arcane Ritual", "Sealing", "Cleansing", "Exorcism", "Assassination",
@@ -511,7 +528,7 @@ def resolve_or_seed_bounty_client(
         return client_npc, client_loc
 
     from mechanics.world.locations.seeds import is_school_scenario
-    if is_school_scenario(scen_key) and session:
+    if (is_school_scenario(scen_key) or scenario_data.has_school_campus_mechanics(scen_key)) and session:
         try:
             from mechanics.social.school_roster import ensure_school_directory_exists
             from mechanics.world.schedules import is_campus_node_or_location
@@ -645,8 +662,12 @@ def _build_anomalous_fallback_bounties(
     faction_name: str = "",
     seed_offset: int = 0,
 ) -> list[dict]:
-    """Builds 3 deterministic scenario-specific bounties for Anomalous Incursions with faction flavor bias."""
-    import namegen
+    """Builds 3 deterministic scenario-specific bounties for Anomalous Incursions with faction flavor bias and pre-generated AnomalyBlueprints."""
+    from mechanics.world.anomaly_engine import generate_anomaly_blueprint
+
+    sess = db.get_session(session_id) or {}
+    scen_key = str(sess.get("scenario") or "anomalous_incursions")
+    cur_min = int(sess.get("current_minute", 480) or 480)
 
     cand_locs = [c.replace(" -> ", " ➔ ") for c in (candidate_locations or []) if c]
     if not cand_locs:
@@ -667,25 +688,57 @@ def _build_anomalous_fallback_bounties(
         tgt_prose = format_clean_location_prose(tgt_loc, include_zone=True, preposition="in")
         tgt_short = format_clean_location_prose(tgt_loc, include_zone=False)
         sec_short = format_clean_location_prose(sec_loc, include_zone=False)
-        entity_name = namegen.generate_anomalous_entity_name(hash_val=int(session_id or 1) * 17 + seed_offset + i * 13)
+
+        is_nh = "non-hostile" in lbl.lower()
+        lbl_low = lbl.lower()
+        if "altered item" in lbl_low or "relic" in lbl_low:
+            force_tp = "object"
+        elif "phenomenon" in lbl_low or "distortion" in lbl_low:
+            force_tp = "phenomenon"
+        else:
+            force_tp = ("entity", "object", "phenomenon")[(int(session_id or 1) + seed_offset + i) % 3] if is_nh else "entity"
+
+        p_lvl = 1
+        try:
+            uids = db.get_session_participant_user_ids(session_id)
+            if uids:
+                c_row = db.get_character(uids[0])
+                p_lvl = int((c_row or {}).get("level", 1) or 1)
+        except Exception:
+            p_lvl = 1
+        tier_calc = max(1, min(5, 1 + p_lvl // 4))
+
+        bp = generate_anomaly_blueprint(
+            session_id=session_id,
+            seed_key=f"bnt_{board_key}_{seed_offset}_{i}",
+            scenario=scen_key,
+            location=tgt_loc,
+            current_minute=cur_min,
+            force_type=force_tp,
+            force_disposition="non_hostile" if is_nh else "hostile",
+            tier=tier_calc,
+        )
+        from mechanics.world.folklore_mechanics import get_public_anomaly_name
+        entity_name = get_public_anomaly_name(bp, dossier_revealed=False, fallback=bp["name"])
+        from mechanics.world.folklore_mechanics import is_blueprint_disguised
+        pub_form_lbl = "Uncanny Presence" if is_blueprint_disguised(bp, dossier_revealed=False) else str(bp.get("form_label") or "Manifestation")
+        pub_type = "unconfirmed" if is_blueprint_disguised(bp, dossier_revealed=False) else str(bp.get("type") or "entity")
 
         sponsor_prefix = f"[{faction_name}] " if faction_name and board_key != "freelance_app" else ""
         nh_temp = ""
-        is_nh = "non-hostile" in lbl.lower()
         if is_nh:
-            nh_temp = "timid" if ((int(session_id or 1) + seed_offset + i) % 2 == 0) else "volatile"
-            temp_cue = (
-                "Timid/elusive demeanor—startling it risks escape."
-                if nh_temp == "timid"
-                else "Volatile/territorial aura—provoking it risks combat."
-            )
+            from mechanics.world.anomalous_events import get_temperament_brief_cue
+            nh_temp = bp.get("non_hostile_temperament") or bp.get("temperament") or ("timid" if ((int(session_id or 1) + seed_offset + i) % 2 == 0) else "volatile")
+            bp["temperament"] = nh_temp
+            bp["non_hostile_temperament"] = nh_temp
+            temp_cue = get_temperament_brief_cue(nh_temp)
             title = f"{arch_meta['title_prefix']}: {entity_name}"[:58]
-            obj = f"{sponsor_prefix}Contain '{entity_name}' alive at {tgt_prose}. {temp_cue}"[:200]
+            obj = f"{sponsor_prefix}Contain '{entity_name}' ({pub_type}/{pub_form_lbl}) alive at {tgt_prose}. {temp_cue}"[:200]
             stage_1_lbl = f"Arrive at {tgt_short} and observe '{entity_name}'s temperament"
             stage_2_lbl = f"Encounter and contain non-hostile entity '{entity_name}' alive at {sec_short}"
-        elif "Entity" in lbl:
+        elif "Entity" in lbl or "Relic" in lbl or "Phenomenon" in lbl:
             title = f"{arch_meta['title_prefix']}: {entity_name}"[:58]
-            obj = f"{sponsor_prefix}{arch_meta['default_objective']} Target manifestation '{entity_name}' sighted at {tgt_prose}."[:200]
+            obj = f"{sponsor_prefix}{arch_meta['default_objective']} Target '{entity_name}' ({pub_form_lbl}) sighted at {tgt_prose}."[:200]
             stage_1_lbl = f"Arrive at {tgt_short} and establish perimeter scan"
             stage_2_lbl = f"Execute containment protocol for '{title}' at {sec_short}"
         else:
@@ -700,10 +753,12 @@ def _build_anomalous_fallback_bounties(
             "title": title,
             "objective": obj,
             "required_item": arch_meta.get("req_item", ""),
-            "reward_xp": 130 + (i * 20),
-            "reward_gold": 65 + (i * 20),
+            "reward_xp": 50 + (30 * tier_calc) + (i * 15),
+            "reward_gold": 40 + (25 * tier_calc) + (i * 15),
             "reward_item": "Trauma Medkit" if i == 0 else ("Cognitive Stabilizer Ampoule" if i == 1 else ""),
             "faction_rep_reward": 10,
+            "anomaly_blueprint": bp,
+            "entity_name": entity_name,
             "waypoints": [
                 {"stage_index": 1, "stage_label": stage_1_lbl, "target_location": tgt_loc, "completion_trigger": "arrival"},
                 {"stage_index": 2, "stage_label": stage_2_lbl, "target_location": sec_loc, "completion_trigger": "skill_check"},
@@ -711,7 +766,6 @@ def _build_anomalous_fallback_bounties(
         }
         if is_nh:
             entry_dict["non_hostile_temperament"] = nh_temp
-            entry_dict["entity_name"] = entity_name
         results.append(entry_dict)
     return results
 
@@ -763,7 +817,7 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
 
     school_hints = ""
     from mechanics.world.locations import is_school_scenario
-    if is_school_scenario(scen_key):
+    if is_school_scenario(scen_key) or scenario_data.has_school_campus_mechanics(scen_key):
         from mechanics.social.school_roster import ensure_school_directory_exists
         roster = ensure_school_directory_exists(session)
         if roster:
@@ -802,7 +856,7 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
             for p in prims:
                 candidate_locations.append(f"{z} -> {p}")
 
-    if is_school_scenario(scen_key):
+    if is_school_scenario(scen_key) or scenario_data.has_school_campus_mechanics(scen_key):
         school_zone = get_session_school_name(session_id, scen_key) if session_id else "Westlake Academy"
         athletics_zone = next((z for z in zones_dict if any(w in z.lower() for w in ["athletics", "grounds", "sports"])), "School Grounds & Athletics")
         commons_zone = next((z for z in zones_dict if any(w in z.lower() for w in ["commons", "plaza", "dining"])), "Student Commons & Central Plaza")
@@ -906,12 +960,13 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
         f"Respond with JSON matching exactly this schema:\n{BOUNTY_BOARD_SCHEMA}"
     )
 
-    _is_llm_mocked = hasattr(call_llm_json, "_mock_name")
-    if _is_llm_mocked:
+    bounties_raw = []
+    try:
         result = await call_llm_json(system_prompt, user_prompt, temperature=0.8,
                                       is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
-        bounties_raw = result.get("bounties", []) or []
-    else:
+        bounties_raw = (result.get("bounties", []) or []) if isinstance(result, dict) else []
+    except Exception as _bnt_err:
+        logger.warning("Dynamic notice board LLM generation failed: %s. Using fallback.", _bnt_err)
         bounties_raw = []
 
     if not bounties_raw:
@@ -1033,12 +1088,29 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
         )
 
         q_notes_gen = "board_source:freelance_app" if is_anom else ""
-        if is_anom and ("non-hostile" in str(q_type or "").lower() or b.get("non_hostile_temperament")):
-            from mechanics.world.anomalous_events import get_non_hostile_entity_temperament, extract_non_hostile_entity_name
-            nh_t = str(b.get("non_hostile_temperament") or get_non_hostile_entity_temperament(seed_key=b_id))
-            nh_e = str(b.get("entity_name") or extract_non_hostile_entity_name({"title": title_text, "objective": obj_text}))
-            q_notes_gen = f"{q_notes_gen}|non_hostile_temperament:{nh_t}|entity_name:{nh_e}"
+        if is_anom:
+            from mechanics.world.anomaly_engine import generate_anomaly_blueprint, serialize_blueprint_note
+            is_nh_b = ("non-hostile" in str(q_type or "").lower() or bool(b.get("non_hostile_temperament")))
+            bp_b = b.get("anomaly_blueprint")
+            if not isinstance(bp_b, dict):
+                bp_b = generate_anomaly_blueprint(
+                    session_id=session_id,
+                    location_str=loc,
+                    disposition="non_hostile" if is_nh_b else "hostile",
+                    seed_key=b_id,
+                    scen_key=str(scen_key or "anomalous_incursions"),
+                )
+            if is_nh_b:
+                from mechanics.world.anomalous_events import get_non_hostile_entity_temperament, extract_non_hostile_entity_name
+                from mechanics.world.folklore_mechanics import get_public_anomaly_name
+                nh_t = str(b.get("non_hostile_temperament") or bp_b.get("temperament") or get_non_hostile_entity_temperament(seed_key=b_id))
+                nh_e = str(b.get("entity_name") or get_public_anomaly_name(bp_b, dossier_revealed=False, fallback="") or extract_non_hostile_entity_name({"title": title_text, "objective": obj_text}))
+                q_notes_gen = f"{q_notes_gen}|non_hostile_temperament:{nh_t}|entity_name:{nh_e}"
+            q_notes_gen = f"{q_notes_gen}|dossier_revealed:0|{serialize_blueprint_note(bp_b)}"
 
+        from mechanics.narrative.dossier_compiler import compile_bounty_pitch_stub
+        from mechanics.narrative.quest_engines import resolve_quest_engine
+        _eng_b = resolve_quest_engine(q_type, obj_text)["engine"]
         db.upsert_quest(
             session_id=session_id,
             quest_id=b_id,
@@ -1048,8 +1120,8 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
             progress=f"0/{req_count} {req_item} Collected" if (blueprint_id == "ACQUISITION" and req_item) else "0/1 Target Sighted",
             current_clues="",
             status="Available",
-            reward_xp=int(b.get("reward_xp", 120)),
-            reward_gold=int(b.get("reward_gold", 35)),
+            reward_xp=_safe_bounty_int(b.get("reward_xp"), 120),
+            reward_gold=_safe_bounty_int(b.get("reward_gold"), 35),
             reward_stat_points=0,
             reward_item=str(b.get("reward_item", "") or "")[:60],
             quest_notes=q_notes_gen,
@@ -1060,6 +1132,23 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
             required_item_count=req_count,
             deadline_day=d_day,
             deadline_minute=d_min,
+            engine=_eng_b,
+            dossier_stage="pitch",
+        )
+        compile_bounty_pitch_stub(
+            session_id=session_id,
+            quest_id=b_id,
+            tag_or_archetype=q_type,
+            title=title_text,
+            public_pitch=obj_text,
+            client_npc=client_npc,
+            client_location=client_loc,
+            reward_gold=_safe_bounty_int(b.get("reward_gold"), 35),
+            reward_xp=_safe_bounty_int(b.get("reward_xp"), 120),
+            reward_item=str(b.get("reward_item", "") or "")[:60],
+            deadline_day=d_day,
+            deadline_minute=d_min,
+            scen_key=scen_key,
         )
 
         # Persist waypoints for this bounty
@@ -1195,25 +1284,30 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
         f"Respond with JSON matching exactly this schema:\n{FACTION_BOUNTY_SCHEMA}"
     )
 
-    _is_llm_mocked = hasattr(call_llm_json, "_mock_name")
     from mechanics.world.locations import format_clean_location_prose, clean_narrative_location_arrows
     loc_short = format_clean_location_prose(loc, include_zone=False)
     loc_prose = format_clean_location_prose(loc, include_zone=True, preposition="in")
-    if _is_llm_mocked:
+    bounties_raw = []
+    try:
         result = await call_llm_json(FACTION_BOUNTY_SYSTEM_PROMPT, user_prompt, temperature=0.8,
                                       is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
-        bounties_raw = result.get("bounties", []) or []
-    elif is_anom:
-        bounties_raw = _build_anomalous_fallback_bounties(
-            session_id=session_id,
-            board_key=f_arch or "public_agency",
-            default_loc=loc,
-            candidate_locations=candidate_locations,
-            faction_name=faction_name,
-            seed_offset=sum(ord(c) for c in str(faction_id or faction_name)),
-        )
-    else:
-        bounties_raw = [
+        bounties_raw = (result.get("bounties", []) or []) if isinstance(result, dict) else []
+    except Exception as _fac_err:
+        logger.warning("Dynamic faction bounty LLM generation failed: %s. Using fallback.", _fac_err)
+        bounties_raw = []
+
+    if not bounties_raw:
+        if is_anom:
+            bounties_raw = _build_anomalous_fallback_bounties(
+                session_id=session_id,
+                board_key=f_arch or "public_agency",
+                default_loc=loc,
+                candidate_locations=candidate_locations,
+                faction_name=faction_name,
+                seed_offset=sum(ord(c) for c in str(faction_id or faction_name)),
+            )
+        else:
+            bounties_raw = [
             {
                 "quest_type": "Faction Operation",
                 "title": f"Patrol for {faction_name}",
@@ -1266,7 +1360,7 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
         q_type = str(b.get("quest_type", "Faction Bounty"))
         obj_text = clean_narrative_location_arrows(str(b.get("objective", "Complete the faction task.")))[:200]
         title_text = clean_narrative_location_arrows(str(b.get("title")))[:60]
-        faction_rep_reward = max(5, min(20, int(b.get("faction_rep_reward", 10))))
+        faction_rep_reward = max(5, min(20, _safe_bounty_int(b.get("faction_rep_reward"), 10)))
 
         from mechanics.narrative.blueprints import get_blueprint_for_archetype, infer_required_item_and_count_from_text
         blueprint_id = get_blueprint_for_archetype(q_type, obj_text)
@@ -1298,11 +1392,28 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
         )
 
         q_notes = f"faction:{faction_id}|board_source:{f_arch}|rep_reward:{faction_rep_reward}" if (is_anom and f_arch) else f"faction:{faction_id}|rep_reward:{faction_rep_reward}"
-        if is_anom and ("non-hostile" in str(q_type or "").lower() or b.get("non_hostile_temperament")):
-            from mechanics.world.anomalous_events import get_non_hostile_entity_temperament, extract_non_hostile_entity_name
-            nh_t = str(b.get("non_hostile_temperament") or get_non_hostile_entity_temperament(seed_key=b_id))
-            nh_e = str(b.get("entity_name") or extract_non_hostile_entity_name({"title": title_text, "objective": obj_text}))
-            q_notes = f"{q_notes}|non_hostile_temperament:{nh_t}|entity_name:{nh_e}"
+        if is_anom:
+            from mechanics.world.anomaly_engine import generate_anomaly_blueprint, serialize_blueprint_note
+            is_nh_fb = ("non-hostile" in str(q_type or "").lower() or bool(b.get("non_hostile_temperament")))
+            bp_fb = b.get("anomaly_blueprint")
+            if not isinstance(bp_fb, dict):
+                bp_fb = generate_anomaly_blueprint(
+                    session_id=session_id,
+                    location_str=loc,
+                    disposition="non_hostile" if is_nh_fb else "hostile",
+                    seed_key=b_id,
+                    scen_key=str(scen_key or "anomalous_incursions"),
+                )
+            if is_nh_fb:
+                from mechanics.world.anomalous_events import get_non_hostile_entity_temperament, extract_non_hostile_entity_name
+                from mechanics.world.folklore_mechanics import get_public_anomaly_name
+                nh_t = str(b.get("non_hostile_temperament") or bp_fb.get("temperament") or get_non_hostile_entity_temperament(seed_key=b_id))
+                nh_e = str(b.get("entity_name") or get_public_anomaly_name(bp_fb, dossier_revealed=False, fallback="") or extract_non_hostile_entity_name({"title": title_text, "objective": obj_text}))
+                q_notes = f"{q_notes}|non_hostile_temperament:{nh_t}|entity_name:{nh_e}"
+            q_notes = f"{q_notes}|dossier_revealed:0|{serialize_blueprint_note(bp_fb)}"
+        from mechanics.narrative.dossier_compiler import compile_bounty_pitch_stub
+        from mechanics.narrative.quest_engines import resolve_quest_engine
+        _eng_fb = resolve_quest_engine(q_type, obj_text)["engine"]
         db.upsert_quest(
             session_id=session_id,
             quest_id=b_id,
@@ -1312,8 +1423,8 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
             progress=f"0/{req_count} {req_item} Collected" if (blueprint_id == "ACQUISITION" and req_item) else "0/1 Target Sighted",
             current_clues="",
             status="Available",
-            reward_xp=max(60, min(250, int(b.get("reward_xp", 120)))),
-            reward_gold=max(5, min(120, int(b.get("reward_gold", 30)))),
+            reward_xp=max(60, min(250, _safe_bounty_int(b.get("reward_xp"), 120))),
+            reward_gold=max(5, min(120, _safe_bounty_int(b.get("reward_gold"), 30))),
             reward_stat_points=0,
             reward_item=str(b.get("reward_item", "") or "")[:60],
             quest_notes=q_notes,
@@ -1324,6 +1435,23 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
             required_item_count=req_count,
             deadline_day=d_day,
             deadline_minute=d_min,
+            engine=_eng_fb,
+            dossier_stage="pitch",
+        )
+        compile_bounty_pitch_stub(
+            session_id=session_id,
+            quest_id=b_id,
+            tag_or_archetype=q_type,
+            title=title_text,
+            public_pitch=obj_text,
+            client_npc=client_npc,
+            client_location=client_loc,
+            reward_gold=max(5, min(120, _safe_bounty_int(b.get("reward_gold"), 30))),
+            reward_xp=max(60, min(250, _safe_bounty_int(b.get("reward_xp"), 120))),
+            reward_item=str(b.get("reward_item", "") or "")[:60],
+            deadline_day=d_day,
+            deadline_minute=d_min,
+            scen_key=scen_key,
         )
         from mechanics.world.waypoints import ensure_multi_stage_waypoints
         raw_waypoints = b.get("waypoints") or []
@@ -1475,6 +1603,9 @@ def build_consequence_followup_bounty(session_id: int, session: dict = None) -> 
         seed_str=b_id,
     )
 
+    from mechanics.narrative.dossier_compiler import compile_bounty_pitch_stub
+    from mechanics.narrative.quest_engines import resolve_quest_engine
+    _eng_fu = resolve_quest_engine(q_type, obj_text)["engine"]
     q_notes = f"followup_to:{parent_qid}"
     db.upsert_quest(
         session_id=session_id,
@@ -1493,6 +1624,22 @@ def build_consequence_followup_bounty(session_id: int, session: dict = None) -> 
         deadline_day=d_day,
         deadline_minute=d_min,
         quest_notes=q_notes,
+        engine=_eng_fu,
+        dossier_stage="pitch",
+    )
+    compile_bounty_pitch_stub(
+        session_id=session_id,
+        quest_id=b_id,
+        tag_or_archetype=q_type,
+        title=title,
+        public_pitch=obj_text,
+        client_npc=new_client,
+        client_location=cur_loc,
+        reward_gold=45,
+        reward_xp=150,
+        deadline_day=d_day,
+        deadline_minute=d_min,
+        scen_key=scen_key,
     )
 
     # Waypoints: 2 stages (Stage 1 arrival/investigate, Stage 2 confront/resolve)
@@ -1608,6 +1755,7 @@ def seed_contact_commission_if_eligible(session_id: int, session: dict = None) -
         seed_str=comm_id,
     )
 
+    from mechanics.narrative.dossier_compiler import compile_bounty_pitch_stub
     q_notes = "commission:1"
     db.upsert_quest(
         session_id=session_id,
@@ -1626,6 +1774,22 @@ def seed_contact_commission_if_eligible(session_id: int, session: dict = None) -
         deadline_day=d_day,
         deadline_minute=d_min,
         quest_notes=q_notes,
+        engine="SOCIAL_BROKERAGE",
+        dossier_stage="pitch",
+    )
+    compile_bounty_pitch_stub(
+        session_id=session_id,
+        quest_id=comm_id,
+        tag_or_archetype="SOCIAL_BROKERAGE",
+        title=title,
+        public_pitch=obj_text,
+        client_npc=c_name,
+        client_location=c_loc,
+        reward_gold=60,
+        reward_xp=180,
+        deadline_day=d_day,
+        deadline_minute=d_min,
+        scen_key=scen_key,
     )
 
     from mechanics.world.waypoints import ensure_multi_stage_waypoints
@@ -1737,6 +1901,9 @@ def replenish_daily_bounties_deterministic(
                 "reward_gold": ac["reward_gold"],
                 "req_item": ac.get("required_item", ""),
                 "stages": ac["waypoints"],
+                "anomaly_blueprint": ac.get("anomaly_blueprint"),
+                "non_hostile_temperament": ac.get("non_hostile_temperament", ""),
+                "entity_name": ac.get("entity_name", ""),
             }
             for ac in anom_cands
         ]
@@ -1814,6 +1981,27 @@ def replenish_daily_bounties_deterministic(
             is_story_quest=False,
             seed_str=b_id,
         )
+        from mechanics.narrative.dossier_compiler import compile_bounty_pitch_stub
+        from mechanics.narrative.quest_engines import resolve_quest_engine
+        _eng_rep = resolve_quest_engine(tmpl["quest_type"], tmpl["objective"])["engine"]
+        rep_q_notes = "board_source:freelance_app" if scenario_data.is_anomalous_incursions_scenario(scen_key) else ""
+        if scenario_data.is_anomalous_incursions_scenario(scen_key):
+            from mechanics.world.anomaly_engine import generate_anomaly_blueprint, serialize_blueprint_note
+            bp_rep = tmpl.get("anomaly_blueprint")
+            if not isinstance(bp_rep, dict):
+                bp_rep = generate_anomaly_blueprint(
+                    session_id=session_id,
+                    location_str=cur_loc,
+                    disposition="non_hostile" if "non-hostile" in str(tmpl.get("quest_type") or "").lower() else "hostile",
+                    seed_key=b_id,
+                    scen_key=str(scen_key or "anomalous_incursions"),
+                )
+            if tmpl.get("non_hostile_temperament"):
+                from mechanics.world.folklore_mechanics import get_public_anomaly_name
+                _rep_pub = tmpl.get("entity_name") or get_public_anomaly_name(bp_rep, dossier_revealed=False, fallback=str(bp_rep.get("name", "")))
+                _rep_pub = str(_rep_pub).replace("|", " ")
+                rep_q_notes = f"{rep_q_notes}|non_hostile_temperament:{tmpl['non_hostile_temperament']}|entity_name:{_rep_pub}"
+            rep_q_notes = f"{rep_q_notes}|dossier_revealed:0|{serialize_blueprint_note(bp_rep)}"
         db.upsert_quest(
             session_id=session_id,
             quest_id=b_id,
@@ -1825,7 +2013,7 @@ def replenish_daily_bounties_deterministic(
             status="Available",
             reward_xp=tmpl["reward_xp"],
             reward_gold=tmpl["reward_gold"],
-            quest_notes="board_source:freelance_app" if scenario_data.is_anomalous_incursions_scenario(scen_key) else "",
+            quest_notes=rep_q_notes,
             blueprint_id=tmpl["blueprint_id"],
             client_npc=client_name,
             client_location=client_loc,
@@ -1833,6 +2021,22 @@ def replenish_daily_bounties_deterministic(
             required_item_count=1 if tmpl["req_item"] else 0,
             deadline_day=d_day,
             deadline_minute=d_min,
+            engine=_eng_rep,
+            dossier_stage="pitch",
+        )
+        compile_bounty_pitch_stub(
+            session_id=session_id,
+            quest_id=b_id,
+            tag_or_archetype=tmpl["quest_type"],
+            title=tmpl["title"],
+            public_pitch=tmpl["objective"],
+            client_npc=client_name,
+            client_location=client_loc,
+            reward_gold=tmpl["reward_gold"],
+            reward_xp=tmpl["reward_xp"],
+            deadline_day=d_day,
+            deadline_minute=d_min,
+            scen_key=scen_key,
         )
         raw_wps = [dict(s) for s in tmpl["stages"]]
         wps = ensure_multi_stage_waypoints(
@@ -1971,22 +2175,42 @@ def dispatch_anomalous_mandatory_daily_bounty(
     fac_label = faction_name or "Command Dispatch"
     q_id = f"{prefix}{uuid.uuid4().hex[:6].upper()}"
     is_nh_mand = "non-hostile" in chosen_label.lower()
+    from mechanics.world.anomaly_engine import generate_anomaly_blueprint, serialize_blueprint_note
+    mand_p_lvl = 1
+    try:
+        p_uids = db.get_session_participant_user_ids(session_id)
+        if p_uids:
+            c_rec = db.get_character(p_uids[0])
+            mand_p_lvl = int((c_rec or {}).get("level", 1) or 1)
+    except Exception:
+        mand_p_lvl = 1
+    mand_tier = max(1, min(5, 1 + max((int(current_day or 1) - 1) // 3, mand_p_lvl // 4)))
+    bp_mand = generate_anomaly_blueprint(
+        session_id=session_id,
+        location_str=target_loc,
+        disposition="non_hostile" if is_nh_mand else "hostile",
+        seed_key=q_id,
+        scen_key=str(scen_key or "anomalous_incursions"),
+        tier=mand_tier,
+        tier_rank=mand_tier,
+    )
+    from mechanics.world.folklore_mechanics import get_public_anomaly_name, is_blueprint_disguised
+    entity_name = get_public_anomaly_name(bp_mand, dossier_revealed=False, fallback=str(bp_mand.get("name") or entity_name))
+    mand_form_lbl = "Uncanny Presence" if is_blueprint_disguised(bp_mand, dossier_revealed=False) else str(bp_mand.get("form_label") or "Anomaly")
     nh_mand_temp = ""
     if is_nh_mand:
-        from mechanics.world.anomalous_events import get_non_hostile_entity_temperament
-        nh_mand_temp = get_non_hostile_entity_temperament(seed_key=q_id)
-        mand_cue = (
-            "Timid/elusive—startling risks escape."
-            if nh_mand_temp == "timid"
-            else "Volatile/territorial—provoking risks combat."
-        )
+        from mechanics.world.anomalous_events import get_non_hostile_entity_temperament, get_temperament_brief_cue
+        nh_mand_temp = str(bp_mand.get("non_hostile_temperament") or bp_mand.get("temperament") or get_non_hostile_entity_temperament(seed_key=q_id))
+        bp_mand["temperament"] = nh_mand_temp
+        bp_mand["non_hostile_temperament"] = nh_mand_temp
+        mand_cue = f"Form: {mand_form_lbl}. {get_temperament_brief_cue(nh_mand_temp)}"
         objective = (
             f"[MANDATORY DAILY DISPATCH — {fac_label}] Contain '{entity_name}' alive at {target_prose} before 24:00. {mand_cue}"
         )[:200]
     else:
         objective = (
             f"[MANDATORY DAILY DISPATCH — {fac_label}] {meta['default_objective']} "
-            f"Respond to '{entity_name}' at {target_prose} before 24:00 today."
+            f"Respond to '{entity_name}' ({mand_form_lbl}) at {target_prose} before 24:00 today."
         )[:200]
     title = f"[Mandatory] {meta['title_prefix']}: {entity_name}"[:58]
     blueprint_id = get_blueprint_for_archetype(chosen_label, objective)
@@ -1997,10 +2221,14 @@ def dispatch_anomalous_mandatory_daily_bounty(
     q_notes = f"mandatory_daily:1|faction:{fac_id}|board_source:{arch}|rep_reward:15"
     if is_nh_mand:
         q_notes = f"{q_notes}|non_hostile_temperament:{nh_mand_temp}|entity_name:{entity_name}"
+    q_notes = f"{q_notes}|dossier_revealed:0|{serialize_blueprint_note(bp_mand)}"
 
     # Base gold (confiscated automatically at claim time for Public Agency / Monastic Order)
     base_gold = 95 if arch in ("private_agency_1", "private_agency_2") else 75
 
+    from mechanics.narrative.dossier_compiler import compile_quest_dossier
+    from mechanics.narrative.quest_engines import resolve_quest_engine
+    _eng_mand = resolve_quest_engine(chosen_label, objective)["engine"]
     db.upsert_quest(
         session_id=session_id,
         quest_id=q_id,
@@ -2022,6 +2250,23 @@ def dispatch_anomalous_mandatory_daily_bounty(
         required_item_count=1 if req_item else 0,
         deadline_day=day_num,
         deadline_minute=1439,
+        engine=_eng_mand,
+        dossier_stage="compiled",
+    )
+    compile_quest_dossier(
+        session_id=session_id,
+        quest_id=q_id,
+        tag_or_archetype=chosen_label,
+        title=title,
+        objective=objective,
+        family_tier="dispatch",
+        danger_tier=2,
+        client_npc=f"{fac_label} Dispatch Officer",
+        target_npc=entity_name,
+        preferred_location=target_loc,
+        required_item=req_item,
+        reward_gold=base_gold,
+        scen_key=scen_key,
     )
 
     stage_2_mand_lbl = (
@@ -2067,6 +2312,8 @@ def evaluate_anomalous_bounty_eligibility(
     session_id: int,
     user_id: int | None,
     quest: dict,
+    session: dict | None = None,
+    fac_state: dict | None = None,
 ) -> dict:
     """
     Evaluates whether the player's current Anomalous Incursions Faction Affiliation permits
@@ -2080,9 +2327,29 @@ def evaluate_anomalous_bounty_eligibility(
     """
     from mechanics.social.factions import get_anomalous_faction_state
 
-    fac_state = get_anomalous_faction_state(session_id, user_id=user_id)
+    if fac_state is None:
+        fac_state = get_anomalous_faction_state(session_id, user_id=user_id)
     player_arch = str(fac_state.get("faction_archetype_key") or "public_agency")
     board_src = parse_anomalous_quest_board_source(quest, session_id=session_id)
+
+    if board_src in ("school_club", "club", "council", "delinquents", "sports", "nsfw_club", "discipline"):
+        from mechanics.social.origin_mode import is_student_operative
+        sess_b = session if session is not None else (db.get_session(session_id) if session_id else {})
+        if is_student_operative(sess_b):
+            return {
+                "allowed": True,
+                "player_faction": player_arch,
+                "board_source": board_src,
+                "is_contract_work": False,
+                "reason": "Authorized school club assignment.",
+            }
+        return {
+            "allowed": False,
+            "player_faction": player_arch,
+            "board_source": board_src,
+            "is_contract_work": False,
+            "reason": "Adult Special Agents cannot accept internal High School student club assignments.",
+        }
 
     if board_src in ("cult_faction", "clandestine_faction"):
         return {
@@ -2146,7 +2413,7 @@ def should_confiscate_anomalous_combat_loot(
     - Returns `True` ONLY when:
       1. Scenario is `Anomalous Incursions` (or variant), AND
       2. Player belongs to `public_agency`, AND
-      3. Combat is NOT a Daily Anomalous Incursion or Random Encounter, AND
+      3. Combat is NOT a Daily Anomaly Breach or Random Encounter, AND
       4. Player is engaged on an Active Public Agency Bounty (`board_source == 'public_agency'` or `mandatory_daily:1`)
          or Main Story Quest (`is_story_quest == 1`), rather than a Freelance App commission.
     - Private Agencies, Monastic Shrine Order, and Freelancers ALWAYS return `False` (keep 100% combat spoils).
@@ -2165,9 +2432,9 @@ def should_confiscate_anomalous_combat_loot(
     if str(fac_state.get("faction_archetype_key") or "") != "public_agency":
         return False
 
-    # 1. Check if combat came from a Daily Incursion or Random Encounter (player keeps loot!)
+    # 1. Check if combat came from a Daily Anomaly Breach or Random Encounter (player keeps loot!)
     for e in (defeated_enemies or []):
-        if isinstance(e, dict) and (e.get("incursion_id") or e.get("is_random_encounter")):
+        if isinstance(e, dict) and (e.get("breach_id") or e.get("incursion_id") or e.get("is_random_encounter")):
             return False
     try:
         from mechanics.world.anomalous_events import get_active_incursion_at_location

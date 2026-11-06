@@ -79,3 +79,10 @@ icon/
 
 # Old db location
 hikayat.db
+
+
+# Desloppify state
+.desloppify/
+scorecard.png
+reports/
+_norton_/

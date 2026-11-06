@@ -349,8 +349,15 @@ def roll_tier() -> int:
     if r < 0.30: return 2
     return 3
 
-def generate_random_equipment(scenario: str = "fantasy", slot: str = "Accessory 1", tier: Optional[int] = None) -> Dict[str, Any]:
-    item_tier = tier if tier in (1, 2, 3) else roll_tier()
+def generate_random_equipment(
+    scenario: str = "fantasy",
+    slot: str = "Accessory 1",
+    tier: Optional[int] = None,
+    archetype: Optional[str] = None,
+    quality_tier: Optional[str] = None,
+    enchantment_tier: Optional[str] = None,
+    nsfw: bool = False,
+) -> Dict[str, Any]:
     scen_key = normalize_accessory_scenario(scenario)
     
     try:
@@ -358,20 +365,47 @@ def generate_random_equipment(scenario: str = "fantasy", slot: str = "Accessory 
         is_non_combat = is_non_combat_scenario(scenario) or scen_key == "high_school"
     except Exception:
         is_non_combat = scen_key == "high_school"
+
+    from mechanics.combat.equipment.tables import (
+        LEGACY_TIER_TO_DUAL_AXIS,
+        derive_legacy_tier,
+        QUALITY_PRICE_MULTIPLIERS,
+        ENCHANTMENT_PREMIUMS,
+        QUALITY_NAMES,
+        ENCHANTMENT_NAMES,
+        QUALITY_STAT_MULTIPLIERS,
+    )
+    from mechanics.combat.equipment.metadata import (
+        roll_quality_tier,
+        roll_enchantment_tier,
+    )
+
+    if tier in (1, 2, 3) and (not quality_tier or not enchantment_tier):
+        def_q, def_e = LEGACY_TIER_TO_DUAL_AXIS.get(tier, ("regular", "none"))
+        q_tier = quality_tier or def_q
+        e_tier = enchantment_tier or def_e
+    else:
+        q_tier = quality_tier or roll_quality_tier()
+        e_tier = enchantment_tier or ("none" if is_non_combat else roll_enchantment_tier())
+
+    item_tier = tier if tier in (1, 2, 3) else derive_legacy_tier(q_tier, e_tier)
         
     pool_dict = NON_COMBAT_ACCESSORY_ARCHETYPES if is_non_combat else ACCESSORY_ARCHETYPES
     
-    # Check if any archetypes match the requested slot
-    matching_archs = [a for a, d in pool_dict.items() if d.get("slot") == slot]
-    if matching_archs:
-        archetype = random.choice(matching_archs)
-    else:
-        archetype = random.choice(list(pool_dict.keys()))
+    # Check if any archetypes match the requested slot or if in non-combat allow any
+    chosen_archetype = archetype
+    if not chosen_archetype:
+        if is_non_combat:
+            matching_archs = list(pool_dict.keys())
+        else:
+            matching_archs = [a for a, d in pool_dict.items() if d.get("slot") == slot]
+        chosen_archetype = random.choice(matching_archs) if matching_archs else random.choice(list(pool_dict.keys()))
         
-    base_data = pool_dict[archetype]
+    base_data = pool_dict.get(chosen_archetype, pool_dict[list(pool_dict.keys())[0]])
     actual_slot = slot if slot.startswith("Accessory") else base_data.get("slot", "Accessory 1")
     
     tier_mult = 1.0 if item_tier == 3 else (1.20 if item_tier == 2 else 1.45)
+    quality_mult = QUALITY_STAT_MULTIPLIERS.get(q_tier, 1.0)
     
     # Non-armor accessories strictly have base_dt = 0 and type_dt = {}
     base_dt = 0
@@ -386,22 +420,23 @@ def generate_random_equipment(scenario: str = "fantasy", slot: str = "Accessory 
             # Filter out prohibited SPECIAL stats
             if raw_key in ("int", "luck", "str", "end", "agi"):
                 continue
-            scaled = int(round(v * tier_mult))
-            # SPECIAL stats strictly capped at +1 maximum per design rule
-            if raw_key in ("cha", "per") and scaled > 1:
-                scaled = 1
+            if raw_key in ("cha", "per"):
+                scaled = max(-1, min(1, int(round(v * tier_mult))))
+            else:
+                scaled = int(round(v * tier_mult * quality_mult))
             stat_mods[raw_key] = scaled
         elif isinstance(v, (int, float)):
             # Filter out prohibited SPECIAL stats
             if k in ("int", "luck", "str", "end", "agi"):
                 continue
-            scaled = round(v * tier_mult, 2) if isinstance(v, float) else int(round(v * tier_mult))
-            if k in ("cha", "per") and scaled > 1:
-                scaled = 1
+            if k in ("cha", "per"):
+                scaled = max(-1, min(1, int(round(v * tier_mult))))
+            else:
+                scaled = round(v * tier_mult * quality_mult, 2) if isinstance(v, float) else int(round(v * tier_mult * quality_mult))
             stat_mods[k] = scaled
 
     scen_affixes = SCENARIO_ACCESSORY_AFFIXES.get(scen_key, SCENARIO_ACCESSORY_AFFIXES["fantasy"])
-    genre_names = scen_affixes.get("archetype_names", {}).get(archetype, [archetype.replace("_", " ").title()])
+    genre_names = scen_affixes.get("archetype_names", {}).get(chosen_archetype, [chosen_archetype.replace("_", " ").title()])
     base_name = random.choice(genre_names)
     
     prefix_pool = scen_affixes.get(f"prefixes_t{item_tier}", ["Fine"])
@@ -413,15 +448,24 @@ def generate_random_equipment(scenario: str = "fantasy", slot: str = "Accessory 
     else:
         suffix = random.choice(suffix_pool)
         name = f"{prefix} {base_name} {suffix}"
+
+    base_price = 35
+    price = int(round(base_price * QUALITY_PRICE_MULTIPLIERS.get(q_tier, 1.0))) + ENCHANTMENT_PREMIUMS.get(e_tier, 0)
         
     metadata = {
         "name": name,
         "tier": item_tier,
+        "quality_tier": q_tier,
+        "enchantment_tier": e_tier,
+        "quality_name": QUALITY_NAMES.get(q_tier, "Standard"),
+        "enchantment_name": ENCHANTMENT_NAMES.get(e_tier, "Mundane"),
+        "tier_name": f"{QUALITY_NAMES.get(q_tier, 'Standard')} ({ENCHANTMENT_NAMES.get(e_tier, 'Mundane')})" if e_tier != "none" else QUALITY_NAMES.get(q_tier, "Standard"),
         "slot": actual_slot,
         "item_type": "Accessory",
-        "archetype": archetype,
+        "archetype": chosen_archetype,
         "base_dt": base_dt,
         "type_dt": type_dt,
+        "price": price,
         "tags": copy.deepcopy(base_data["tags"]),
         "stat_modifiers": stat_mods
     }
@@ -432,6 +476,7 @@ def generate_random_equipment(scenario: str = "fantasy", slot: str = "Accessory 
         "slot": actual_slot,
         "effect": serialize_item(metadata),
         "metadata": metadata,
+        "price": price,
         "slot_cost": 1
     }
 

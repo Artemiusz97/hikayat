@@ -18,7 +18,8 @@ def create_session(host_user_id: int, mode: str, capacity: int, verbosity: str,
                     result_display: str = "detailed", combat_ui_style: str = "battle_deck",
                     show_percentages: int = 1, language: str = "en",
                     narration_language: str = None,
-                    character_id: int = None, slot: int = 1) -> int:
+                    character_id: int = None, slot: int = 1,
+                    schema_epoch: int = 2) -> int:
     status = "active" if capacity <= 1 else "waiting"
     eff_narr_lang = narration_language or language or "en"
     with get_conn() as conn:
@@ -28,12 +29,12 @@ def create_session(host_user_id: int, mode: str, capacity: int, verbosity: str,
                                       current_location, nearby_enemies_json, current_npcs_json,
                                       verbosity, dialogue_mode, image_gen_enabled, choices_style, combat_ui_style,
                                       result_display, scenario, channel_id, host_user_id, created_at, updated_at,
-                                      show_percentages, language, narration_language, character_id, slot)
-               VALUES (?,?,?,?,0,'[]','[]','{}','','[]','[]',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                      show_percentages, language, narration_language, character_id, slot, schema_epoch)
+               VALUES (?,?,?,?,0,'[]','[]','{}','','[]','[]',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (mode, capacity, status, json.dumps([host_user_id]), verbosity,
              dialogue_mode, 1 if image_gen_enabled else 0, choices_style, combat_ui_style,
              result_display, scenario, channel_id, host_user_id, time.time(), time.time(),
-             1 if show_percentages else 0, language or eff_narr_lang, eff_narr_lang, character_id, slot),
+             1 if show_percentages else 0, language or eff_narr_lang, eff_narr_lang, character_id, slot, schema_epoch),
         )
         session_id = cur.lastrowid
         conn.execute("INSERT INTO session_members (session_id, user_id, joined_at) VALUES (?,?,?)",
@@ -98,6 +99,7 @@ def get_session(session_id: int):
         d["confession_cooldowns"] = json.loads(d.pop("confession_cooldowns_json", None) or "{}")
         d["phone_social_state"] = json.loads(d.pop("phone_social_state_json", None) or "{}")
         d["scenario"] = d.get("scenario") or "fantasy"
+        d["schema_epoch"] = int(d.get("schema_epoch") or 1)
         d["dialogue_partners"] = []
         raw_dp = d.get("dialogue_partner")
         if raw_dp:
@@ -133,6 +135,8 @@ def get_session(session_id: int):
                     d.update(extra_dict)
             except Exception:
                 pass
+        if "daily_incursions" in d and "daily_breaches" not in d:
+            d["daily_breaches"] = d["daily_incursions"]
         if "stealth_state" not in d or not isinstance(d["stealth_state"], dict):
             from mechanics.stealth import init_stealth_state
             d["stealth_state"] = init_stealth_state(False)
@@ -622,7 +626,12 @@ def current_turn_user_id(session: dict):
         return None
     return session["turn_order"][session["current_turn_index"] % len(session["turn_order"])]
 
-def reset_character_for_new_adventure(user_id: int, new_scenario: str = None):
+def reset_character_for_new_adventure(
+    user_id: int,
+    new_scenario: str = None,
+    regrant_loadout: bool = True,
+    scenario: str = None,
+):
     """Resets a character's transient adventure state when leaving or starting a new adventure.
     
     Cleared & Regenerated:
@@ -643,8 +652,10 @@ def reset_character_for_new_adventure(user_id: int, new_scenario: str = None):
     char_id = char["id"]
     max_hp = char["max_hp"]
     max_mp = char["max_mp"]
-    scenario = new_scenario or char.get("scenario", "fantasy")
+    scenario = new_scenario or scenario or char.get("scenario", "fantasy")
     char_class = char.get("char_class", "")
+    from scenario_data import is_anomalous_incursions_scenario
+    is_anom_scen = is_anomalous_incursions_scenario(scenario)
 
     with get_conn() as conn:
         # Wipe entire inventory (items + equipment, equipped flags are part of these rows)
@@ -653,15 +664,20 @@ def reset_character_for_new_adventure(user_id: int, new_scenario: str = None):
             (char_id, user_id)
         )
         # Reset vitals, gold, and status effects on the character row
-        conn.execute(
-            "UPDATE characters SET hp=?, mp=?, gold=?, status_effects='[]' WHERE id=?",
-            (max_hp, max_mp, cd.STARTING_GOLD, char_id)
-        )
+        if not is_anom_scen:
+            conn.execute(
+                "UPDATE characters SET hp=?, mp=?, gold=?, status_effects='[]', attribute=NULL, combat_archetype=NULL, ability_medium=NULL WHERE id=?",
+                (max_hp, max_mp, cd.STARTING_GOLD, char_id)
+            )
+        else:
+            conn.execute(
+                "UPDATE characters SET hp=?, mp=?, gold=?, status_effects='[]' WHERE id=?",
+                (max_hp, max_mp, cd.STARTING_GOLD, char_id)
+            )
 
     # Clear transient scenario-specific spell state on reset before re-granting loadout
     try:
-        from scenario_data import is_anomalous_incursions_scenario
-        if not is_anomalous_incursions_scenario(scenario):
+        if not is_anom_scen:
             prog = db.get_skill_progress(char)
             old_anom_spells = set(prog.get("innate_spells") or []) | set(prog.get("equipped_granted_spells") or [])
             if "innate_spells" in prog or "equipped_granted_spells" in prog or "empowered_granted_spells" in prog:
@@ -672,12 +688,25 @@ def reset_character_for_new_adventure(user_id: int, new_scenario: str = None):
             cur_learned = db.get_learned_spells(user_id) or []
             filtered_spells = [
                 sp_id for sp_id in cur_learned
-                if sp_id not in old_anom_spells and not str(sp_id).startswith("anom_")
+                if sp_id not in old_anom_spells and not str(sp_id).startswith(("anom_", "awk_"))
             ]
             if len(filtered_spells) != len(cur_learned):
                 db.set_learned_spells(user_id, filtered_spells)
     except Exception:
         pass
+    if not regrant_loadout:
+        return
+
+    from scenario_data import is_non_combat_scenario, is_school_scenario
+    if is_non_combat_scenario(scenario):
+        scen_classes = cd.get_class_templates(scenario) or {}
+        if char_class not in scen_classes:
+            char_class = (
+                "Student"
+                if is_school_scenario(scenario)
+                else (next(iter(scen_classes.keys())) if scen_classes else "Student")
+            )
+
     # Re-grant starting items and starter gear matching the character's class template
     starting_items = cd.get_starting_items(scenario, char_class)
     gear_map = cd.get_starter_gear_by_class(scenario, char_class, gender=char.get("gender", "Male"), race=char.get("race", "Human"))
@@ -693,13 +722,15 @@ def reset_character_for_new_adventure(user_id: int, new_scenario: str = None):
 def finish_session(session_id: int):
     # Collect all members before we clear their active_session_id
     members = get_session_members(session_id)
+    sess = get_session(session_id)
+    sess_scenario = sess.get("scenario") if sess else None
     with get_conn() as conn:
         conn.execute("UPDATE sessions SET status='finished', updated_at=? WHERE id=?",
                       (time.time(), session_id))
         conn.execute("UPDATE characters SET active_session_id=NULL WHERE active_session_id=?", (session_id,))
     # Reset each member's transient state so it doesn't bleed into the next adventure
     for uid in members:
-        reset_character_for_new_adventure(uid)
+        reset_character_for_new_adventure(uid, new_scenario=sess_scenario)
 
 def delete_session(session_id: int):
     """Permanently removes a session and all its associated child records."""
@@ -764,6 +795,17 @@ def prune_orphaned_and_finished_sessions(dry_run: bool = False, include_finished
                     cur = conn.execute(f"DELETE FROM {tbl} WHERE session_id IN ({placeholders})", chunk)
                     counts["deleted_by_table"][tbl] = counts["deleted_by_table"].get(tbl, 0) + cur.rowcount
 
+            for vtbl in ("session_digests_fts",):
+                try:
+                    if dry_run:
+                        cnt = conn.execute(f"SELECT count(*) FROM {vtbl} WHERE session_id IN ({placeholders})", chunk).fetchone()[0]
+                        counts["deleted_by_table"][vtbl] = counts["deleted_by_table"].get(vtbl, 0) + cnt
+                    else:
+                        cur = conn.execute(f"DELETE FROM {vtbl} WHERE session_id IN ({placeholders})", chunk)
+                        counts["deleted_by_table"][vtbl] = counts["deleted_by_table"].get(vtbl, 0) + cur.rowcount
+                except sqlite3.OperationalError:
+                    pass
+
             if dry_run:
                 cnt = conn.execute(f"SELECT count(*) FROM sessions WHERE id IN ({placeholders})", chunk).fetchone()[0]
                 counts["deleted_by_table"]["sessions"] = counts["deleted_by_table"].get("sessions", 0) + cnt
@@ -772,15 +814,18 @@ def prune_orphaned_and_finished_sessions(dry_run: bool = False, include_finished
                 counts["deleted_by_table"]["sessions"] = counts["deleted_by_table"].get("sessions", 0) + cur.rowcount
 
         # Also purge any child records whose session was already deleted directly
-        for tbl in SESSION_CHILD_TABLES:
-            if dry_run:
-                cnt = conn.execute(f"SELECT count(*) FROM {tbl} WHERE session_id NOT IN (SELECT id FROM sessions)").fetchone()[0]
-                if cnt > 0:
-                    counts["deleted_by_table"][tbl] = counts["deleted_by_table"].get(tbl, 0) + cnt
-            else:
-                cur = conn.execute(f"DELETE FROM {tbl} WHERE session_id NOT IN (SELECT id FROM sessions)")
-                if cur.rowcount > 0:
-                    counts["deleted_by_table"][tbl] = counts["deleted_by_table"].get(tbl, 0) + cur.rowcount
+        for tbl in tuple(SESSION_CHILD_TABLES) + ("session_digests_fts",):
+            try:
+                if dry_run:
+                    cnt = conn.execute(f"SELECT count(*) FROM {tbl} WHERE session_id NOT IN (SELECT id FROM sessions)").fetchone()[0]
+                    if cnt > 0:
+                        counts["deleted_by_table"][tbl] = counts["deleted_by_table"].get(tbl, 0) + cnt
+                else:
+                    cur = conn.execute(f"DELETE FROM {tbl} WHERE session_id NOT IN (SELECT id FROM sessions)")
+                    if cur.rowcount > 0:
+                        counts["deleted_by_table"][tbl] = counts["deleted_by_table"].get(tbl, 0) + cur.rowcount
+            except sqlite3.OperationalError:
+                pass
 
         return counts
 
@@ -813,6 +858,17 @@ def reset_session_for_opening_retry(session_id: int, user_id: int = 0) -> None:
                 extra_dict = {}
         prop_name = str(extra_dict.pop("opening_starting_prop_name", "") or "").strip()
         extra_dict.pop("stealth_state", None)
+        extra_dict.pop("player_resonance_pips", None)
+        extra_dict.pop("telemetry_calibrations_used", None)
+        extra_dict.pop("anomaly_field_log", None)
+        extra_dict.pop("retired_folklore_ids", None)
+        extra_dict.pop("folklore_cooldowns", None)
+        extra_dict.pop("contained_anomalies_log", None)
+        extra_dict.pop("anomalous_vault_log", None)
+        extra_dict.pop("anomalous_vault_requisitions", None)
+        extra_dict.pop("daily_incursions", None)
+        extra_dict.pop("daily_breaches", None)
+        extra_dict.pop("anomalous_faction_state", None)
         if prop_name and eff_uid:
             char_row = conn.execute(
                 "SELECT id FROM characters WHERE user_id=? AND is_active=1 ORDER BY id DESC LIMIT 1",
@@ -827,11 +883,16 @@ def reset_session_for_opening_retry(session_id: int, user_id: int = 0) -> None:
                 if inv_row:
                     conn.execute("DELETE FROM inventory WHERE id=?", (inv_row["id"],))
 
-        _delete_session_child_records_only(conn, session_id)
+        _delete_session_child_records_only(conn, session_id, preserve_members=True)
         conn.execute(
             """UPDATE sessions
                SET current_npcs_json='[]', nearby_enemies_json='[]', dialogue_partner=NULL,
                    physical_state_json='{}', current_node_id=NULL, focal_point='',
+                   event_pity_counter=0.0, rumor_pity_counter=0.0, minor_event_pity_counter=0.0,
+                   player_scandal_cooldown_until_day=0,
+                   recent_witness_catches_json='[]', npc_gossip_shared_today_json='{}',
+                   campaign_end_goals_json='[]',
+                   chapter_digest_json='[]', turn_count=0, last_digested_turn=0,
                    extra_json=?, updated_at=?
                WHERE id=?""",
             (json.dumps(extra_dict), time.time(), session_id),
@@ -839,20 +900,151 @@ def reset_session_for_opening_retry(session_id: int, user_id: int = 0) -> None:
 
 
 def rollback_session_normalized_state_after_turn(session_id: int, turn_number: int) -> dict:
-    """Atomically rolls back social_ties, intimate_events, and commitments_ledger created after turn_number."""
+    """Atomically rolls back social_ties, intimate_events, commitments_ledger, world_events, quest_dossiers, campaign_spines, npc_memories, and session_digests after turn_number."""
     if not session_id:
-        return {"ties_rolled_back": 0, "intimate_events_deleted": 0, "commitments_deleted": 0}
+        return {
+            "ties_rolled_back": 0,
+            "intimate_events_deleted": 0,
+            "commitments_deleted": 0,
+            "world_events_rolled_back": 0,
+            "dossiers_rolled_back": 0,
+            "spines_rolled_back": 0,
+            "npc_memories_deleted": 0,
+            "digests_deleted": 0,
+            "chronicles_deleted": 0,
+            "session_clues_deleted": 0,
+        }
     import mechanics.social.relationship_graph as rg
     from mechanics.social.persona.intimacy.ledger import delete_intimate_events_after_turn
+    from .world_events import rollback_world_events_after_turn
+    from .dossiers import rollback_quest_dossiers_after_turn, rollback_session_anomaly_logs_after_turn
+    from .memory import MAX_ROLLING_DIGEST_BULLETS, rebuild_session_digests_fts
 
+    t_num = int(turn_number)
     with get_conn() as conn:
-        ties_cnt = rg.rollback_ties_after_turn(session_id, turn_number, conn=conn)
-        intimate_cnt = delete_intimate_events_after_turn(session_id, turn_number, conn=conn)
+        we_res = rollback_world_events_after_turn(session_id, t_num, conn=conn)
+        dos_res = rollback_quest_dossiers_after_turn(session_id, t_num, conn=conn)
+        rollback_session_anomaly_logs_after_turn(session_id, t_num, conn=conn)
+        ties_cnt = rg.rollback_ties_after_turn(session_id, t_num, conn=conn)
+        intimate_cnt = delete_intimate_events_after_turn(session_id, t_num, conn=conn)
         cur_cm = conn.execute(
             "DELETE FROM commitments_ledger WHERE session_id = ? AND turn_created > ?",
-            (session_id, int(turn_number)),
+            (session_id, t_num),
         )
         cm_cnt = cur_cm.rowcount
+
+        cur_cl = conn.execute(
+            "DELETE FROM session_clues WHERE session_id = ? AND turn_created > ?",
+            (session_id, t_num),
+        )
+        cl_cnt = cur_cl.rowcount
+
+        conn.execute(
+            """DELETE FROM inventory
+               WHERE is_quest_locked = 1
+                 AND linked_quest_id != ''
+                 AND linked_quest_id NOT IN (SELECT quest_id FROM quests WHERE session_id = ?)
+                 AND (
+                     character_id IN (SELECT id FROM characters WHERE active_session_id = ? OR user_id IN (SELECT user_id FROM session_members WHERE session_id = ?))
+                     OR user_id IN (SELECT user_id FROM session_members WHERE session_id = ?)
+                 )""",
+            (session_id, session_id, session_id, session_id),
+        )
+        conn.execute(
+            """UPDATE inventory
+               SET is_quest_locked = 0, linked_quest_id = ''
+               WHERE is_quest_locked = 1
+                 AND linked_quest_id != ''
+                 AND (
+                     linked_quest_id IN (SELECT quest_id FROM quest_dossiers WHERE session_id = ? AND status_stage = 'pitch')
+                     OR linked_quest_id IN (SELECT quest_id FROM quests WHERE session_id = ? AND dossier_stage = 'pitch')
+                 )
+                 AND (
+                     character_id IN (SELECT id FROM characters WHERE active_session_id = ? OR user_id IN (SELECT user_id FROM session_members WHERE session_id = ?))
+                     OR user_id IN (SELECT user_id FROM session_members WHERE session_id = ?)
+                 )""",
+            (session_id, session_id, session_id, session_id, session_id),
+        )
+
+        cur_nm = conn.execute(
+            "DELETE FROM npc_memories WHERE session_id = ? AND turn_index > ?",
+            (session_id, t_num),
+        )
+        nm_cnt = cur_nm.rowcount
+
+        cur_ch = conn.execute(
+            "DELETE FROM session_chronicles WHERE session_id = ? AND (turn_end > ? OR (created_turn > 0 AND created_turn > ?))",
+            (session_id, t_num, t_num),
+        )
+        ch_cnt = cur_ch.rowcount
+
+        cur_dg = conn.execute(
+            "DELETE FROM session_digests WHERE session_id = ? AND turn_end > ?",
+            (session_id, t_num),
+        )
+        dg_cnt = cur_dg.rowcount
+
+        conn.execute(
+            "UPDATE session_digests SET compacted_count = 0, compacted_at_turn = 0, is_compacted = 0 WHERE session_id = ?",
+            (session_id,),
+        )
+        surv_chronicles = conn.execute(
+            "SELECT bullet_count, created_turn, turn_end FROM session_chronicles WHERE session_id = ? ORDER BY chapter_number ASC, id ASC",
+            (session_id,),
+        ).fetchall()
+        rem_to_mark = sum(max(0, int(sc["bullet_count"] or 15)) for sc in surv_chronicles)
+        last_compacted_turn = max(
+            [int(sc["created_turn"] or sc["turn_end"] or 0) for sc in surv_chronicles],
+            default=0,
+        )
+        if rem_to_mark > 0:
+            dg_rows = conn.execute(
+                "SELECT id, summary_bullets_json FROM session_digests WHERE session_id = ? ORDER BY turn_end ASC, id ASC",
+                (session_id,),
+            ).fetchall()
+            for dr in dg_rows:
+                if rem_to_mark <= 0:
+                    break
+                try:
+                    dr_bullets = json.loads(dr["summary_bullets_json"] or "[]")
+                except Exception:
+                    dr_bullets = []
+                if not isinstance(dr_bullets, list) or not dr_bullets:
+                    continue
+                take = min(rem_to_mark, len(dr_bullets))
+                is_comp = 1 if take >= len(dr_bullets) else 0
+                conn.execute(
+                    "UPDATE session_digests SET compacted_count = ?, compacted_at_turn = ?, is_compacted = ? WHERE id = ?",
+                    (take, last_compacted_turn, is_comp, dr["id"]),
+                )
+                rem_to_mark -= take
+
+        rebuild_session_digests_fts(conn, session_id)
+
+        rem_rows = conn.execute(
+            "SELECT summary_bullets_json, compacted_count FROM session_digests WHERE session_id = ? AND is_compacted = 0 ORDER BY turn_end ASC, id ASC",
+            (session_id,),
+        ).fetchall()
+        rem_bullets: list[str] = []
+        for rr in rem_rows:
+            try:
+                b_list = json.loads(rr["summary_bullets_json"] or "[]")
+                if isinstance(b_list, list):
+                    cc = int(rr["compacted_count"] or 0)
+                    for b in b_list[cc:]:
+                        if isinstance(b, str) and b.strip():
+                            rem_bullets.append(b.strip())
+            except Exception:
+                pass
+        conn.execute(
+            """UPDATE sessions
+               SET chapter_digest_json = ?,
+                   turn_count = MIN(COALESCE(turn_count, 0), ?),
+                   last_digested_turn = MIN(COALESCE(last_digested_turn, 0), ?),
+                   updated_at = ?
+               WHERE id = ?""",
+            (json.dumps(rem_bullets[-MAX_ROLLING_DIGEST_BULLETS:]), t_num, t_num, time.time(), session_id),
+        )
         c_rows = conn.execute("SELECT * FROM contacts WHERE session_id = ?", (session_id,)).fetchall()
         for cr in c_rows:
             cd_item = dict(cr)
@@ -862,10 +1054,111 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
                 cd_item["relations"] = {}
             mat = rg.materialize_relations(session_id, cd_item, conn=conn)
             conn.execute("UPDATE contacts SET relations_json = ? WHERE id = ?", (json.dumps(mat), cd_item["id"]))
+
+        snap_row = conn.execute(
+            "SELECT last_turn_snapshot_json, extra_json FROM sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        if snap_row and snap_row["last_turn_snapshot_json"]:
+            try:
+                snap_obj = json.loads(snap_row["last_turn_snapshot_json"] or "{}")
+                pre_t = snap_obj.get("pre_turn") if isinstance(snap_obj, dict) else None
+                if isinstance(pre_t, dict):
+                    if any(k in pre_t for k in ("event_pity_counter", "rumor_pity_counter", "minor_event_pity_counter")):
+                        conn.execute(
+                            """UPDATE sessions
+                               SET event_pity_counter = COALESCE(?, event_pity_counter),
+                                   rumor_pity_counter = COALESCE(?, rumor_pity_counter),
+                                   minor_event_pity_counter = COALESCE(?, minor_event_pity_counter),
+                                   updated_at = ?
+                               WHERE id = ?""",
+                            (
+                                float(pre_t["event_pity_counter"]) if pre_t.get("event_pity_counter") is not None else None,
+                                float(pre_t["rumor_pity_counter"]) if pre_t.get("rumor_pity_counter") is not None else None,
+                                float(pre_t["minor_event_pity_counter"]) if pre_t.get("minor_event_pity_counter") is not None else None,
+                                time.time(),
+                                session_id,
+                            ),
+                        )
+                    if "enemies" in pre_t or "nearby_enemies" in pre_t:
+                        pre_enemies = pre_t.get("enemies") if "enemies" in pre_t else pre_t.get("nearby_enemies")
+                        if isinstance(pre_enemies, list):
+                            conn.execute(
+                                "UPDATE sessions SET nearby_enemies_json = ?, updated_at = ? WHERE id = ?",
+                                (json.dumps(pre_enemies, default=str), time.time(), session_id),
+                            )
+                    if (
+                        "player_resonance_pips" in pre_t
+                        or "telemetry_calibrations_used" in pre_t
+                        or ("daily_incursions" in pre_t and pre_t.get("daily_incursions") is not None and int(pre_t.get("pre_turn_count", -1)) == t_num)
+                    ):
+                        try:
+                            cur_extra = json.loads(snap_row["extra_json"] or "{}")
+                        except Exception:
+                            cur_extra = {}
+                        if not isinstance(cur_extra, dict):
+                            cur_extra = {}
+                        if "player_resonance_pips" in pre_t:
+                            raw_pre_pips = pre_t.get("player_resonance_pips")
+                            cur_extra["player_resonance_pips"] = (
+                                dict(raw_pre_pips) if isinstance(raw_pre_pips, dict) else int(raw_pre_pips or 0)
+                            )
+                        if "telemetry_calibrations_used" in pre_t and isinstance(pre_t["telemetry_calibrations_used"], dict):
+                            cur_extra["telemetry_calibrations_used"] = dict(pre_t["telemetry_calibrations_used"])
+                        if "daily_incursions" in pre_t and pre_t.get("daily_incursions") is not None and int(pre_t.get("pre_turn_count", -1)) == t_num:
+                            cur_extra["daily_incursions"] = list(pre_t["daily_incursions"])
+                            cur_extra["daily_breaches"] = list(pre_t["daily_incursions"])
+                        conn.execute(
+                            "UPDATE sessions SET extra_json = ?, updated_at = ? WHERE id = ?",
+                            (json.dumps(cur_extra, default=str), time.time(), session_id),
+                        )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
     return {
         "ties_rolled_back": ties_cnt,
         "intimate_events_deleted": intimate_cnt,
         "commitments_deleted": cm_cnt,
+        "world_events_rolled_back": we_res.get("total_rolled_back", 0),
+        "dossiers_rolled_back": dos_res.get("dossiers_rolled_back", 0),
+        "spines_rolled_back": dos_res.get("spines_rolled_back", 0),
+        "npc_memories_deleted": nm_cnt,
+        "digests_deleted": dg_cnt,
+        "chronicles_deleted": ch_cnt,
+        "session_clues_deleted": cl_cnt,
     }
+
+
+def get_session_characters(session_id: int) -> list[dict]:
+    """Batch-loads all active party member characters for a session in a single JOIN query (no N+1)."""
+    if not session_id:
+        return []
+    from .characters import _apply_debug_stat_override
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT c.*
+               FROM characters c
+               JOIN session_members sm ON c.user_id = sm.user_id
+               WHERE sm.session_id = ? AND c.is_active = 1
+               ORDER BY sm.joined_at ASC, c.id ASC""",
+            (session_id,),
+        ).fetchall()
+        if not rows:
+            rows = conn.execute(
+                """SELECT c.*
+                   FROM characters c
+                   JOIN sessions s ON (s.character_id = c.id OR c.active_session_id = s.id OR (s.host_user_id = c.user_id AND c.is_active = 1))
+                   WHERE s.id = ?
+                   ORDER BY c.is_active DESC, c.id DESC
+                   LIMIT 1""",
+                (session_id,),
+            ).fetchall()
+    seen_ids: set[int] = set()
+    out: list[dict] = []
+    for r in rows:
+        d = _apply_debug_stat_override(dict(r))
+        if d and d.get("id") not in seen_ids:
+            seen_ids.add(int(d["id"]))
+            out.append(d)
+    return out
 
 

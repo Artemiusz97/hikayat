@@ -670,12 +670,222 @@ body::before {
   box-shadow: 0 0 18px -4px oklch(0.85 0.16 88 / 0.55);
 }
 
+
+/* ---- Liquid Crystal (Light): Glacial Prismatic Glass -------------------- */
+[data-theme='crystal'] {
+  --panel-a: 0.95;
+  --app-bg:
+    radial-gradient(90rem 50rem at 15% -10%, oklch(0.88 0.09 215 / 0.9), transparent 60%),
+    radial-gradient(75rem 45rem at 95% 115%, oklch(0.89 0.08 235 / 0.85), transparent 60%),
+    radial-gradient(50rem 35rem at 50% 50%, oklch(1 0 0 / 0.75), transparent 70%),
+    linear-gradient(180deg, oklch(0.93 0.035 220) 0%, oklch(0.88 0.045 224) 100%);
+}
+
+[data-theme='crystal'] body::before {
+  inset: -20vmax;
+  contain: strict;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  background:
+    radial-gradient(38vmax 38vmax at 25% 25%, oklch(0.85 0.12 215 / 0.45), transparent 65%),
+    radial-gradient(32vmax 32vmax at 75% 75%, oklch(0.87 0.10 240 / 0.4), transparent 65%),
+    radial-gradient(28vmax 28vmax at 50% 85%, oklch(0.90 0.08 195 / 0.3), transparent 70%);
+  animation: hk-liquid-crystal-drift 32s var(--ease-in-out) infinite alternate;
+}
+
+[data-theme='crystal'] body::after {
+  inset: -15vmax;
+  contain: strict;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  background:
+    radial-gradient(45vmax 25vmax at 50% 45%, oklch(1 0 0 / 0.5), transparent 70%),
+    radial-gradient(30vmax 30vmax at 85% 15%, oklch(0.86 0.13 255 / 0.25), transparent 60%),
+    radial-gradient(25vmax 25vmax at 15% 80%, oklch(0.88 0.11 200 / 0.3), transparent 65%);
+  animation: hk-liquid-crystal-drift 24s var(--ease-in-out) infinite alternate-reverse;
+}
+
+[data-theme='crystal'] .bg-fantasy-panel,
+[data-theme='crystal'] [class*='bg-fantasy-panel/'],
+[data-theme='crystal'] .hk-surface {
+  border-color: oklch(0.82 0.035 222);
+  box-shadow:
+    0 1px 2px oklch(var(--shadow) / 0.08),
+    0 8px 24px -6px oklch(var(--shadow) / 0.12);
+}
+
+[data-theme='crystal'] .bg-fantasy-accent,
+[data-theme='crystal'] .hk-btn-primary {
+  background-image:
+    linear-gradient(180deg, oklch(1 0 0 / 0.4) 0%, oklch(1 0 0 / 0.08) 48%, transparent 52%),
+    linear-gradient(180deg, oklch(0.52 0.18 222), oklch(0.44 0.19 222));
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.9),
+    inset 0 -1px 2px oklch(0.3 0.1 222 / 0.4),
+    0 6px 18px -6px oklch(0.48 0.18 222 / 0.55);
+  color: oklch(0.995 0 0);
+  text-shadow: 0 1px 1px oklch(0.25 0.08 222 / 0.4);
+}
+
+/* ---- Obsidian Fluid (Dark): Smoked Volcanic Glass ---------------------- */
+[data-theme='obsidian'] {
+  --panel-a: 0.95;
+  --app-bg:
+    radial-gradient(90rem 55rem at 15% -15%, oklch(0.24 0.09 195 / 0.45), transparent 60%),
+    radial-gradient(75rem 45rem at 90% 115%, oklch(0.20 0.08 260 / 0.4), transparent 60%),
+    radial-gradient(45rem 30rem at 50% 50%, oklch(0.35 0.12 210 / 0.15), transparent 70%),
+    linear-gradient(180deg, oklch(0.09 0.02 260) 0%, oklch(0.055 0.015 260) 100%);
+}
+
+[data-theme='obsidian'] body::before {
+  inset: -20vmax;
+  contain: strict;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  background:
+    radial-gradient(36vmax 36vmax at 25% 25%, oklch(0.32 0.12 195 / 0.28), transparent 65%),
+    radial-gradient(32vmax 32vmax at 75% 80%, oklch(0.28 0.11 270 / 0.24), transparent 65%),
+    radial-gradient(26vmax 26vmax at 45% 90%, oklch(0.35 0.14 220 / 0.2), transparent 70%);
+  animation: hk-liquid-obsidian-drift 38s var(--ease-in-out) infinite alternate;
+}
+
+[data-theme='obsidian'] body::after {
+  inset: -15vmax;
+  contain: strict;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  background:
+    radial-gradient(44vmax 26vmax at 60% 40%, oklch(0.78 0.17 195 / 0.14), transparent 65%),
+    radial-gradient(30vmax 30vmax at 15% 85%, oklch(0.68 0.15 280 / 0.15), transparent 70%),
+    radial-gradient(24vmax 24vmax at 80% 20%, oklch(0.72 0.16 230 / 0.12), transparent 65%);
+  animation: hk-liquid-obsidian-drift 28s var(--ease-in-out) infinite alternate-reverse;
+}
+
+[data-theme='obsidian'] .bg-fantasy-panel,
+[data-theme='obsidian'] [class*='bg-fantasy-panel/'],
+[data-theme='obsidian'] .hk-surface {
+  border-color: oklch(0.26 0.042 260);
+  box-shadow:
+    0 2px 4px oklch(var(--shadow) / 0.4),
+    0 12px 32px -8px oklch(var(--shadow) / 0.6);
+}
+
+[data-theme='obsidian'] .bg-fantasy-accent,
+[data-theme='obsidian'] .hk-btn-primary {
+  background-image:
+    linear-gradient(180deg, oklch(1 0 0 / 0.35) 0%, oklch(1 0 0 / 0.06) 48%, transparent 52%),
+    linear-gradient(180deg, oklch(0.82 0.16 195), oklch(0.70 0.18 195));
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.75),
+    inset 0 -1px 3px oklch(0.3 0.1 195 / 0.5),
+    0 6px 20px -6px oklch(0.78 0.17 195 / 0.65);
+  color: oklch(0.05 0.01 260);
+  text-shadow: 0 1px 0 oklch(1 0 0 / 0.3);
+}
+
+[data-theme='obsidian'] .text-fantasy-accent {
+  text-shadow: 0 0 14px oklch(var(--accent) / 0.45);
+}
+
+/* ---- Progressive Enhancement: Hardware Liquid Matte Glass ---- */
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  [data-theme='crystal'] {
+    --panel-a: 0.68;
+  }
+  [data-theme='crystal'] .bg-fantasy-panel,
+  [data-theme='crystal'] [class*='bg-fantasy-panel/'],
+  [data-theme='crystal'] .hk-surface {
+    background-image: linear-gradient(135deg, oklch(1 0 0 / 0.55) 0%, oklch(1 0 0 / 0.18) 40%, oklch(0.92 0.03 220 / 0.08) 100%);
+    box-shadow:
+      inset 0 1px 0 0 oklch(1 0 0 / 0.95),
+      inset 0 0 0 1px oklch(1 0 0 / 0.35),
+      0 12px 32px -8px oklch(0.35 0.08 230 / 0.22);
+    -webkit-backdrop-filter: blur(22px) saturate(165%) brightness(1.02);
+    backdrop-filter: blur(22px) saturate(165%) brightness(1.02);
+    border-color: oklch(1 0 0 / 0.5);
+  }
+
+  [data-theme='crystal'] .hk-popover {
+    background-color: oklch(var(--panel) / 0.85);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    backdrop-filter: blur(20px) saturate(160%);
+    box-shadow:
+      inset 0 1px 0 0 oklch(1 0 0 / 0.9),
+      inset 0 0 0 1px oklch(1 0 0 / 0.3),
+      0 16px 36px -10px oklch(var(--shadow) / 0.25);
+  }
+
+  [data-theme='obsidian'] {
+    --panel-a: 0.65;
+  }
+  [data-theme='obsidian'] .bg-fantasy-panel,
+  [data-theme='obsidian'] [class*='bg-fantasy-panel/'],
+  [data-theme='obsidian'] .hk-surface {
+    background-image: linear-gradient(135deg, oklch(1 0 0 / 0.14) 0%, oklch(1 0 0 / 0.03) 45%, oklch(0 0 0 / 0.4) 100%);
+    box-shadow:
+      inset 0 1px 0 0 oklch(1 0 0 / 0.32),
+      inset 0 0 0 1px oklch(1 0 0 / 0.10),
+      0 16px 40px -10px oklch(0.015 0.02 260 / 0.75);
+    -webkit-backdrop-filter: blur(24px) saturate(155%) brightness(1.04);
+    backdrop-filter: blur(24px) saturate(155%) brightness(1.04);
+    border-color: oklch(1 0 0 / 0.15);
+  }
+
+  [data-theme='obsidian'] .hk-popover {
+    background-color: oklch(var(--panel) / 0.85);
+    -webkit-backdrop-filter: blur(22px) saturate(150%);
+    backdrop-filter: blur(22px) saturate(150%);
+    box-shadow:
+      inset 0 1px 0 0 oklch(1 0 0 / 0.25),
+      inset 0 0 0 1px oklch(1 0 0 / 0.08),
+      0 16px 40px -10px oklch(var(--shadow) / 0.8);
+  }
+}
+
+/* Keyframes for liquid ambient flow */
+@keyframes hk-liquid-crystal-drift {
+  0% { transform: translate3d(-3%, -2%, 0) rotate(0deg); }
+  50% { transform: translate3d(2%, 1%, 0) rotate(3deg) scale(1.02); }
+  100% { transform: translate3d(3%, 2%, 0) rotate(6deg); }
+}
+
+@keyframes hk-liquid-obsidian-drift {
+  0% { transform: translate3d(-2%, -3%, 0) rotate(0deg); }
+  50% { transform: translate3d(1%, 2%, 0) rotate(-3deg) scale(1.03); }
+  100% { transform: translate3d(3%, 2%, 0) rotate(-6deg); }
+}
+
+@media (prefers-contrast: more) {
+  [data-theme='crystal'] { --panel-a: 0.92; }
+  [data-theme='obsidian'] { --panel-a: 0.90; }
+  [data-theme='crystal'] .bg-fantasy-panel,
+  [data-theme='crystal'] [class*='bg-fantasy-panel/'],
+  [data-theme='obsidian'] .bg-fantasy-panel,
+  [data-theme='obsidian'] [class*='bg-fantasy-panel/'] {
+    border-width: 2px;
+  }
+}
+
+@media (forced-colors: active) {
+  [data-theme='crystal'] .bg-fantasy-panel,
+  [data-theme='crystal'] [class*='bg-fantasy-panel/'],
+  [data-theme='obsidian'] .bg-fantasy-panel,
+  [data-theme='obsidian'] [class*='bg-fantasy-panel/'] {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+}
+
 /* ==========================================================================
    Reduced motion – case by case
    ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
   body::before,
   body::after,
+  [data-theme='crystal'] body::before,
+  [data-theme='crystal'] body::after,
+  [data-theme='obsidian'] body::before,
+  [data-theme='obsidian'] body::after,
   [data-theme='midas'] .font-rpg,
   [data-theme='midas'] .hk-display,
   [data-theme='midas'] .text-fantasy-accent:not(svg):not([class*='bg-']):not(:has(svg)) {

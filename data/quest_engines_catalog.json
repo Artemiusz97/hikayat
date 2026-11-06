@@ -1,0 +1,445 @@
+{
+  "engines": {
+    "MYSTERY_CASE": {
+      "legacy_blueprint": "INVESTIGATION",
+      "climax_gate_mode": "secret",
+      "is_elimination_strict": false,
+      "turn_in_default": "in_field",
+      "labels": {
+        "en": "Mystery & Investigation",
+        "pl": "Tajemnica i Śledztwo",
+        "ms": "Misteri & Penyiasatan",
+        "zh": "悬疑调查",
+        "de": "Mysterium & Ermittlung"
+      },
+      "pitch_templates": {
+        "en": {"title": "The {zone} Cold File", "pitch": "{client} needs discreet eyes on {venue} after unsettling anomalies surfaced."},
+        "pl": {"title": "Zimne Akta: {zone}", "pitch": "{client} potrzebuje dyskretnego śledztwa w miejscu {venue}."},
+        "ms": {"title": "Fail Sulit {zone}", "pitch": "{client} memerlukan siasatan sulit di {venue}."},
+        "zh": {"title": "{zone}悬案卷宗", "pitch": "{client}委托你在{venue}展开秘密调查。"},
+        "de": {"title": "Die Akte {zone}", "pitch": "{client} benötigt diskrete Ermittlungen rund um {venue}."}
+      },
+      "lead_templates": [
+        {"role": "forensics", "stats": ["PER", "INT", "ITEM"], "labels": {"en": "Inspect physical traces at {venue}", "pl": "Zbadaj ślady w {venue}", "ms": "Periksa bukti fizikal di {venue}", "zh": "勘查{venue}的现场痕迹", "de": "Untersuche Spuren in {venue}"}},
+        {"role": "informant", "stats": ["CHA", "BRIBE", "AGI"], "labels": {"en": "Question {informant} about unrecorded movements", "pl": "Przesłuchaj osobę {informant}", "ms": "Soal {informant} tentang pergerakan rahsia", "zh": "向{informant}打探隐秘动向", "de": "Befrage {informant} zu verdächtigen Vorgängen"}}
+      ]
+    },
+    "HEIST_BREACH": {
+      "legacy_blueprint": "HEIST_INFILTRATION",
+      "climax_gate_mode": "open",
+      "is_elimination_strict": false,
+      "turn_in_default": "direct_client",
+      "labels": {
+        "en": "Heist & Infiltration",
+        "pl": "Skok i Infiltracja",
+        "ms": "Penyusupan & Rompakan",
+        "zh": "潜入窃取",
+        "de": "Einbruch & Infiltration"
+      },
+      "pitch_templates": {
+        "en": {"title": "Silent Breach at {venue}", "pitch": "{client} is paying well to slip past security at {venue} and secure a sealed target."},
+        "pl": {"title": "Cichy Włam: {venue}", "pitch": "{client} płaci za ominięcie ochrony w {venue} i przejęcie ładunku."},
+        "ms": {"title": "Pencerobohan Senyap {venue}", "pitch": "{client} menawarkan upah lumayan untuk menyusup masuk ke {venue}."},
+        "zh": {"title": "暗夜潜入：{venue}", "pitch": "{client}重金聘人潜入{venue}夺取封存目标。"},
+        "de": {"title": "Lautloser Zugriff: {venue}", "pitch": "{client} zahlt gut für das Überwinden der Sicherheit in {venue}."}
+      },
+      "lead_templates": [
+        {"role": "security_recon", "stats": ["AGI", "PER", "INT"], "labels": {"en": "Map patrol blind spots and lockwarding at {venue}", "pl": "Rozpoznaj patrole i zamki w {venue}", "ms": "Kenal pasti laluan rondaan di {venue}", "zh": "摸清{venue}的巡逻盲区与门禁", "de": "Kundschafte Wachrouten in {venue} aus"}},
+        {"role": "insider_key", "stats": ["CHA", "BRIBE", "LUK"], "labels": {"en": "Lift or buy credentials from {informant}", "pl": "Zdobądź przepustkę od {informant}", "ms": "Dapatkan kunci akses daripada {informant}", "zh": "从{informant}处获取通行凭证", "de": "Beschaffe Zugangsdaten von {informant}"}}
+      ]
+    },
+    "HUNT_CONTAINMENT": {
+      "legacy_blueprint": "NEUTRALIZATION",
+      "climax_gate_mode": "open",
+      "is_elimination_strict": true,
+      "turn_in_default": "in_field",
+      "labels": {
+        "en": "Hunt & Containment",
+        "pl": "Łowy i Neutralizacja",
+        "ms": "Pemburuan & Pembendungan",
+        "zh": "猎杀收容",
+        "de": "Jagd & Eindämmung"
+      },
+      "pitch_templates": {
+        "en": {"title": "Warrant on the {zone} Threat", "pitch": "{client} posted an urgent neutralization warrant near {venue}."},
+        "pl": {"title": "List Gończy: {zone}", "pitch": "{client} wystawił pilne zlecenie neutralizacji w pobliżu {venue}."},
+        "ms": {"title": "Waran Buruan {zone}", "pitch": "{client} mengeluarkan waran pembendungan segera berhampiran {venue}."},
+        "zh": {"title": "{zone}紧急讨伐令", "pitch": "{client}发布了针对{venue}周边威胁的讨伐委托。"},
+        "de": {"title": "Jagdbefehl in {zone}", "pitch": "{client} hat ein dringendes Kopfgeld nahe {venue} ausgeschrieben."}
+      },
+      "lead_templates": [
+        {"role": "track_spoor", "stats": ["PER", "END", "INT"], "labels": {"en": "Track fresh signs and isolate lair approaches near {venue}", "pl": "Wytrop ślady w pobliżu {venue}", "ms": "Jejak tanda sasaran berhampiran {venue}", "zh": "追踪{venue}附近的猎物踪迹", "de": "Verfolge frische Fährten nahe {venue}"}},
+        {"role": "vanguard_cull", "stats": ["STR", "AGI", "ITEM"], "labels": {"en": "Thin out vanguard lookouts before the main clash", "pl": "Wyeliminuj czujki przed starciem", "ms": "Lumpuhkan pengawal hadapan sebelum pertempuran utama", "zh": "在决战前削弱外围哨卫", "de": "Schalte Vorposten vor dem Hauptkampf aus"}}
+      ]
+    },
+    "ACQUISITION_EXCHANGE": {
+      "legacy_blueprint": "ACQUISITION",
+      "climax_gate_mode": "open",
+      "is_elimination_strict": false,
+      "turn_in_default": "direct_client",
+      "labels": {
+        "en": "Acquisition & Exchange",
+        "pl": "Pozyskanie i Wymiana",
+        "ms": "Pemerolehan & Pertukaran",
+        "zh": "采买交割",
+        "de": "Beschaffung & Übergabe"
+      },
+      "pitch_templates": {
+        "en": {"title": "Consignment for {client}", "pitch": "{client} requires a rare consignment recovered from {venue} and delivered intact."},
+        "pl": {"title": "Przesyłka dla: {client}", "pitch": "{client} zleca odzyskanie rzadkiego przedmiotu z {venue}."},
+        "ms": {"title": "Kiriman Khas {client}", "pitch": "{client} memerlukan barangan nadir dari {venue} dihantar dengan selamat."},
+        "zh": {"title": "{client}的特许征集", "pitch": "{client}急需从{venue}寻回一件稀有货物并完好交割。"},
+        "de": {"title": "Frachtauftrag für {client}", "pitch": "{client} verlangt die Bergung eines seltenen Objekts aus {venue}."}
+      },
+      "lead_templates": [
+        {"role": "appraise_source", "stats": ["INT", "PER", "CHA"], "labels": {"en": "Verify provenance and storage cache with {informant}", "pl": "Sprawdź pochodzenie ładunku z {informant}", "ms": "Sahkan lokasi simpanan bersama {informant}", "zh": "向{informant}核实货源与藏匿处", "de": "Prüfe Herkunft und Lagerort mit {informant}"}},
+        {"role": "extract_item", "stats": ["AGI", "STR", "BRIBE"], "labels": {"en": "Secure the consignment at {venue}", "pl": "Przejmij ładunek w {venue}", "ms": "Dapatkan barangan sasaran di {venue}", "zh": "在{venue}取得目标货物", "de": "Sichere den Gegenstand in {venue}"}}
+      ]
+    },
+    "SOCIAL_BROKERAGE": {
+      "legacy_blueprint": "SOCIAL_MANIPULATION",
+      "climax_gate_mode": "secret",
+      "is_elimination_strict": false,
+      "turn_in_default": "in_field",
+      "labels": {
+        "en": "Social Brokerage & Intrigue",
+        "pl": "Intryga i Dyplomacja",
+        "ms": "Rundingan & Intrik Sosial",
+        "zh": "斡旋博弈",
+        "de": "Diplomatie & Intrige"
+      },
+      "pitch_templates": {
+        "en": {"title": "Quiet Leverage in {zone}", "pitch": "{client} needs delicate persuasion or leverage applied at {venue} without public fallout."},
+        "pl": {"title": "Ciche Wpływy: {zone}", "pitch": "{client} potrzebuje delikatnej dyplomacji w {venue} bez skandalu."},
+        "ms": {"title": "Pengaruh Halus di {zone}", "pitch": "{client} memerlukan rundingan bijak di {venue} tanpa kekecohan awam."},
+        "zh": {"title": "{zone}暗流斡旋", "pitch": "{client}需要你在{venue}悄然施压达成协议，避免公开风波。"},
+        "de": {"title": "Diskreter Einfluss in {zone}", "pitch": "{client} wünscht feinfühlige Verhandlungen in {venue} ohne Aufsehen."}
+      },
+      "lead_templates": [
+        {"role": "gather_leverage", "stats": ["CHA", "PER", "BRIBE"], "labels": {"en": "Draw out private motives via {informant}", "pl": "Poznaj sekrety przez {informant}", "ms": "Korek rahsia peribadi melalui {informant}", "zh": "通过{informant}摸清对方底牌", "de": "Erfahre Hintergründe über {informant}"}},
+        {"role": "stage_setting", "stats": ["INT", "CHA", "LUK"], "labels": {"en": "Arrange favorable terms before confronting {target}", "pl": "Przygotuj grunt pod rozmowę z {target}", "ms": "Susun syarat rundingan sebelum bertemu {target}", "zh": "在与{target}摊牌前布局筹码", "de": "Schaffe günstige Bedingungen gegenüber {target}"}}
+      ]
+    },
+    "CRISIS_DEFENSE": {
+      "legacy_blueprint": "SITE_DEFENSE_RITUAL",
+      "climax_gate_mode": "open",
+      "is_elimination_strict": false,
+      "turn_in_default": "in_field",
+      "labels": {
+        "en": "Crisis Defense & Escort",
+        "pl": "Obrona Kryzysowa i Eskorta",
+        "ms": "Pertahanan Krisis & Pengiring",
+        "zh": "危机护卫",
+        "de": "Krisenabwehr & Eskorte"
+      },
+      "pitch_templates": {
+        "en": {"title": "Hold the Line at {venue}", "pitch": "{client} warns that {venue} faces imminent pressure—fortify or extract the endangered party."},
+        "pl": {"title": "Obrona Pozycji: {venue}", "pitch": "{client} ostrzega przed zagrożeniem w {venue} — zabezpiecz miejsce lub ewakuuj cel."},
+        "ms": {"title": "Pertahankan {venue}", "pitch": "{client} memberi amaran ancaman di {venue} — perkukuh pertahanan atau selamatkan mangsa."},
+        "zh": {"title": "死守防线：{venue}", "pitch": "{client}示警{venue}危在旦夕，需立即加固防线或护送受困者撤离。"},
+        "de": {"title": "Stellung Halten: {venue}", "pitch": "{client} meldet akute Gefahr bei {venue} – sichere den Ort oder evakuiere Schutzbefohlene."}
+      },
+      "lead_templates": [
+        {"role": "fortify_wards", "stats": ["INT", "END", "STR"], "labels": {"en": "Reinforce chokepoints and emergency wards at {venue}", "pl": "Wzmocnij punkty obronne w {venue}", "ms": "Perkukuh benteng kecemasan di {venue}", "zh": "加固{venue}的防线与应急障壁", "de": "Verstärke Engpässe und Schutzvorkehrungen in {venue}"}},
+        {"role": "rally_allies", "stats": ["CHA", "PER", "ITEM"], "labels": {"en": "Coordinate evacuation lanes with {informant}", "pl": "Skonsultuj drogę ewakuacji z {informant}", "ms": "Selaraskan laluan keselamatan bersama {informant}", "zh": "与{informant}协调撤离路线", "de": "Koordiniere Evakuierungswege mit {informant}"}}
+      ]
+    },
+    "RIVALRY_SHOWDOWN": {
+      "legacy_blueprint": "CONTEST_RIVALRY",
+      "climax_gate_mode": "open",
+      "is_elimination_strict": false,
+      "turn_in_default": "in_field",
+      "labels": {
+        "en": "Rivalry & Showdown",
+        "pl": "Rywalizacja i Pojedynek",
+        "ms": "Persaingan & Pertembungan",
+        "zh": "宿敌对决",
+        "de": "Rivalität & Showdown"
+      },
+      "pitch_templates": {
+        "en": {"title": "Challenge at {venue}", "pitch": "{target} issued a high-stakes challenge at {venue}, backed by {client}'s wager."},
+        "pl": {"title": "Wyzwanie w: {venue}", "pitch": "{target} rzuca wyzwanie o wysoką stawkę w {venue}."},
+        "ms": {"title": "Cabaran di {venue}", "pitch": "{target} melontarkan cabaran berisiko tinggi di {venue}."},
+        "zh": {"title": "{venue}宿命约战", "pitch": "{target}在{venue}立下高赌注战书，{client}已押下重注。"},
+        "de": {"title": "Herausforderung in {venue}", "pitch": "{target} fordert ein Kräftemessen mit hohem Einsatz in {venue}."}
+      },
+      "lead_templates": [
+        {"role": "study_technique", "stats": ["PER", "INT", "AGI"], "labels": {"en": "Analyze {target}'s tell and signature style", "pl": "Przeanalizuj styl walki osoby {target}", "ms": "Kaji kelemahan gaya {target}", "zh": "洞悉{target}的习惯破绽与招牌技法", "de": "Analysiere die Technik und Schwächen von {target}"}},
+        {"role": "secure_arena_edge", "stats": ["CHA", "END", "LUK"], "labels": {"en": "Win crowd momentum or referee terms via {informant}", "pl": "Zdobądź przychylność widowni przez {informant}", "ms": "Raih sokongan gelanggang melalui {informant}", "zh": "借{informant}争取主场声势与规则优势", "de": "Sichere dir Rückhalt und faire Regeln über {informant}"}}
+      ]
+    },
+    "INTIMATE_LIAISON": {
+      "legacy_blueprint": "INTIMATE_ENCOUNTER",
+      "climax_gate_mode": "open",
+      "is_elimination_strict": false,
+      "turn_in_default": "in_field",
+      "uses_nsfw_routing": true,
+      "labels": {
+        "en": "Intimate Liaison & Rendezvous",
+        "pl": "Intymna Schadzka",
+        "ms": "Pertemuan Intim Sulit",
+        "zh": "私密幽会",
+        "de": "Intimes Rendezvous"
+      },
+      "pitch_templates": {
+        "en": {"title": "Velvet Rendezvous with {target}", "pitch": "Draw {target} into a mutually thrilling private liaison away from prying eyes at {venue}."},
+        "pl": {"title": "Aksamitna Schadzka: {target}", "pitch": "Zaaranżuj dyskretne, namiętne spotkanie z osobą {target} w {venue}."},
+        "ms": {"title": "Janji Temu Sulit bersama {target}", "pitch": "Aturkan pertemuan peribadi penuh kemesraan bersama {target} di {venue}."},
+        "zh": {"title": "与{target}的绯色密会", "pitch": "避开耳目，在{venue}与{target}共度心照不宣的私密时刻。"},
+        "de": {"title": "Vertrauliches Rendezvous mit {target}", "pitch": "Arrangiere ein leidenschaftliches, diskretes Treffen mit {target} in {venue}."}
+      },
+      "lead_templates": [
+        {"role": "build_tension", "stats": ["CHA", "PER", "ITEM"], "labels": {"en": "Kindle mutual chemistry and unspoken tension with {target}", "pl": "Rozbudź wzajemne napięcie z {target}", "ms": "Bina keserasian dan tarikan bersama {target}", "zh": "与{target}升温暧昧默契与情绪张力", "de": "Wecke knisternde Vertrautheit mit {target}"}},
+        {"role": "secure_privacy", "stats": ["AGI", "INT", "BRIBE"], "labels": {"en": "Secure an undisturbed, discreet setting at {venue}", "pl": "Zadbaj o pełną dyskrecję w {venue}", "ms": "Pastikan ruang peribadi bebas gangguan di {venue}", "zh": "确保{venue}私密无人打扰", "de": "Sorge für ungestörte Diskretion in {venue}"}}
+      ]
+    }
+  },
+  "tag_to_engine": {
+    "investigation": "MYSTERY_CASE",
+    "investigate anomalous phenomenon": "MYSTERY_CASE",
+    "temporal_loop_anchor": "MYSTERY_CASE",
+    "rune archaeology": "MYSTERY_CASE",
+    "archaeology": "MYSTERY_CASE",
+    "dungeon mapping": "MYSTERY_CASE",
+    "dungeon": "MYSTERY_CASE",
+    "derelict boarding": "MYSTERY_CASE",
+    "derelict": "MYSTERY_CASE",
+    "toxic zone": "MYSTERY_CASE",
+    "toxic": "MYSTERY_CASE",
+    "radiation": "MYSTERY_CASE",
+    "signal triangulation": "MYSTERY_CASE",
+    "signal": "MYSTERY_CASE",
+    "radio": "MYSTERY_CASE",
+    "spatial distortion mapping": "MYSTERY_CASE",
+    "urban legend dare": "MYSTERY_CASE",
+    "urban legend": "MYSTERY_CASE",
+    "dare": "MYSTERY_CASE",
+    "mystery": "MYSTERY_CASE",
+    "detective": "MYSTERY_CASE",
+    "sleuthing": "MYSTERY_CASE",
+    "espionage": "MYSTERY_CASE",
+    "hedonist intrigue": "MYSTERY_CASE",
+
+    "heist_infiltration": "HEIST_BREACH",
+    "campus infiltration": "HEIST_BREACH",
+    "infiltrate syndicate": "HEIST_BREACH",
+    "infiltration": "HEIST_BREACH",
+    "infiltrate": "HEIST_BREACH",
+    "exam heist": "HEIST_BREACH",
+    "cyberware heist": "HEIST_BREACH",
+    "heist": "HEIST_BREACH",
+    "sabotage": "HEIST_BREACH",
+    "disruption": "HEIST_BREACH",
+    "netrunning": "HEIST_BREACH",
+    "black market": "HEIST_BREACH",
+    "theft": "HEIST_BREACH",
+    "override": "HEIST_BREACH",
+    "disrupt cult ritual / clandestine auction": "HEIST_BREACH",
+    "disrupt cult ritual": "HEIST_BREACH",
+    "clandestine auction": "HEIST_BREACH",
+    "cult_ritual_disruption": "HEIST_BREACH",
+    "syndicate_black_market_interception": "HEIST_BREACH",
+    "bondage escape": "HEIST_BREACH",
+
+    "neutralization": "HUNT_CONTAINMENT",
+    "assassination": "HUNT_CONTAINMENT",
+    "monster hunting": "HUNT_CONTAINMENT",
+    "extermination": "HUNT_CONTAINMENT",
+    "bounty hunting": "HUNT_CONTAINMENT",
+    "mutant hunt": "HUNT_CONTAINMENT",
+    "beast hunt": "HUNT_CONTAINMENT",
+    "mutant": "HUNT_CONTAINMENT",
+    "elimination": "HUNT_CONTAINMENT",
+    "hunting": "HUNT_CONTAINMENT",
+    "hunt": "HUNT_CONTAINMENT",
+    "slay": "HUNT_CONTAINMENT",
+    "eliminate hostile anomalous entity": "HUNT_CONTAINMENT",
+    "rogue_entity_termination": "HUNT_CONTAINMENT",
+    "apocalyptic boss confrontation": "HUNT_CONTAINMENT",
+
+    "acquisition": "ACQUISITION_EXCHANGE",
+    "resource run": "ACQUISITION_EXCHANGE",
+    "gathering": "ACQUISITION_EXCHANGE",
+    "alchemy": "ACQUISITION_EXCHANGE",
+    "crafting": "ACQUISITION_EXCHANGE",
+    "off-campus errand": "ACQUISITION_EXCHANGE",
+    "errand": "ACQUISITION_EXCHANGE",
+    "delivery": "ACQUISITION_EXCHANGE",
+    "courier": "ACQUISITION_EXCHANGE",
+    "relic discovery": "ACQUISITION_EXCHANGE",
+    "tech extraction": "ACQUISITION_EXCHANGE",
+    "data extraction": "ACQUISITION_EXCHANGE",
+    "radiation scavenging": "ACQUISITION_EXCHANGE",
+    "scavenging": "ACQUISITION_EXCHANGE",
+    "salvage": "ACQUISITION_EXCHANGE",
+    "supply": "ACQUISITION_EXCHANGE",
+    "resource": "ACQUISITION_EXCHANGE",
+    "retrieve altered item / cursed relic": "ACQUISITION_EXCHANGE",
+    "retrieve altered item": "ACQUISITION_EXCHANGE",
+    "cursed relic": "ACQUISITION_EXCHANGE",
+    "cursed_relic_retrieval": "ACQUISITION_EXCHANGE",
+    "aphrodisiac": "ACQUISITION_EXCHANGE",
+    "aphrodisiac run": "ACQUISITION_EXCHANGE",
+    "lust alchemy": "ACQUISITION_EXCHANGE",
+
+    "social_manipulation": "SOCIAL_BROKERAGE",
+    "gossip control": "SOCIAL_BROKERAGE",
+    "gossip": "SOCIAL_BROKERAGE",
+    "rumor": "SOCIAL_BROKERAGE",
+    "election campaigning": "SOCIAL_BROKERAGE",
+    "campaigning": "SOCIAL_BROKERAGE",
+    "election": "SOCIAL_BROKERAGE",
+    "matchmaking": "SOCIAL_BROKERAGE",
+    "secret admirer": "SOCIAL_BROKERAGE",
+    "blackmail": "SOCIAL_BROKERAGE",
+    "arbitration": "SOCIAL_BROKERAGE",
+    "tribunal": "SOCIAL_BROKERAGE",
+    "diplomacy": "SOCIAL_BROKERAGE",
+    "trade route": "SOCIAL_BROKERAGE",
+    "faction operation": "SOCIAL_BROKERAGE",
+    "cognitohazard & urban legend suppression": "SOCIAL_BROKERAGE",
+    "urban legend suppression": "SOCIAL_BROKERAGE",
+    "urban_legend_debunking": "SOCIAL_BROKERAGE",
+    "masquerade revelry": "SOCIAL_BROKERAGE",
+    "masquerade": "SOCIAL_BROKERAGE",
+    "revelry": "SOCIAL_BROKERAGE",
+
+    "site_defense_ritual": "CRISIS_DEFENSE",
+    "escort_rescue": "CRISIS_DEFENSE",
+    "academic rescue": "CRISIS_DEFENSE",
+    "convoy escort": "CRISIS_DEFENSE",
+    "convoy": "CRISIS_DEFENSE",
+    "find person": "CRISIS_DEFENSE",
+    "rescue": "CRISIS_DEFENSE",
+    "escort": "CRISIS_DEFENSE",
+    "beast taming": "CRISIS_DEFENSE",
+    "familiar binding": "CRISIS_DEFENSE",
+    "familiar": "CRISIS_DEFENSE",
+    "siege defense": "CRISIS_DEFENSE",
+    "siege": "CRISIS_DEFENSE",
+    "survival": "CRISIS_DEFENSE",
+    "defense": "CRISIS_DEFENSE",
+    "arcane ritual": "CRISIS_DEFENSE",
+    "ritual": "CRISIS_DEFENSE",
+    "sealing": "CRISIS_DEFENSE",
+    "rift cleansing": "CRISIS_DEFENSE",
+    "cleansing": "CRISIS_DEFENSE",
+    "holy exorcism": "CRISIS_DEFENSE",
+    "exorcism": "CRISIS_DEFENSE",
+    "rogue ai containment": "CRISIS_DEFENSE",
+    "rogue ai": "CRISIS_DEFENSE",
+    "base fortification": "CRISIS_DEFENSE",
+    "fortification": "CRISIS_DEFENSE",
+    "safe zone": "CRISIS_DEFENSE",
+    "secure non-hostile anomalous entity": "CRISIS_DEFENSE",
+    "non_hostile_entity_pacification": "CRISIS_DEFENSE",
+    "contain anomalous phenomenon": "CRISIS_DEFENSE",
+    "spatial_rift_sealing": "CRISIS_DEFENSE",
+    "sensory_anomaly_purge": "CRISIS_DEFENSE",
+    "find missing person (spirited away)": "CRISIS_DEFENSE",
+    "spirited away": "CRISIS_DEFENSE",
+    "missing_agent_rescue": "CRISIS_DEFENSE",
+    "quarantine perimeter defense": "CRISIS_DEFENSE",
+    "cognitohazard_quarantine": "CRISIS_DEFENSE",
+    "high-sensitivity esper / witness escort": "CRISIS_DEFENSE",
+    "esper escort": "CRISIS_DEFENSE",
+    "anomalous_autopsy_escort": "CRISIS_DEFENSE",
+    "captive rescue": "CRISIS_DEFENSE",
+    "bondage": "CRISIS_DEFENSE",
+
+    "contest_rivalry": "RIVALRY_SHOWDOWN",
+    "honor duel": "RIVALRY_SHOWDOWN",
+    "duel": "RIVALRY_SHOWDOWN",
+    "club showdown": "RIVALRY_SHOWDOWN",
+    "club": "RIVALRY_SHOWDOWN",
+    "showdown": "RIVALRY_SHOWDOWN",
+    "arcade rivalry": "RIVALRY_SHOWDOWN",
+    "arcade": "RIVALRY_SHOWDOWN",
+    "rogue operative / rival hunter interception": "RIVALRY_SHOWDOWN",
+    "rogue operative": "RIVALRY_SHOWDOWN",
+    "rival hunter": "RIVALRY_SHOWDOWN",
+
+    "intimate_encounter": "INTIMATE_LIAISON",
+    "intimate_liaison": "INTIMATE_LIAISON",
+    "seduction": "INTIMATE_LIAISON",
+    "allure": "INTIMATE_LIAISON",
+    "domination": "INTIMATE_LIAISON",
+    "subjugation": "INTIMATE_LIAISON",
+    "brothel": "INTIMATE_LIAISON",
+    "courtesan": "INTIMATE_LIAISON",
+    "lust": "INTIMATE_LIAISON",
+    "courtship": "INTIMATE_LIAISON",
+    "paramour": "INTIMATE_LIAISON",
+    "harem": "INTIMATE_LIAISON",
+    "secret affair": "INTIMATE_LIAISON",
+    "rendezvous": "INTIMATE_LIAISON"
+  },
+  "hybrid_nsfw_keywords": [
+    "aphrodisiac",
+    "aphrodisiac run",
+    "lust alchemy",
+    "captive rescue",
+    "bondage",
+    "bondage escape",
+    "masquerade",
+    "masquerade revelry",
+    "revelry",
+    "hedonist intrigue"
+  ],
+  "twists": {
+    "client_culprit": {
+      "en": "{client} orchestrated the incident to cover their own tracks—exposing or blackmailing them flips the contract.",
+      "pl": "{client} sam zaaranżował incydent, by zatrzeć ślady — ujawnienie lub szantaż odwraca kontrakt.",
+      "ms": "{client} sebenarnya dalang insiden ini bagi menutup jejak sendiri — dedahkan atau ugut mereka.",
+      "zh": "{client}正是掩盖痕迹的幕后始作俑者——揭发或反手敲诈将彻底扭转委托。",
+      "de": "{client} hat den Vorfall selbst inszeniert, um Spuren zu verwischen – Enthüllung oder Erpressung wendet das Blatt."
+    },
+    "framed_target": {
+      "en": "{target} was framed by {accomplice}; siding with {target} unlocks a counter-strike.",
+      "pl": "{target} został wrobiony przez osobę {accomplice}; sojusz z {target} otwiera kontratak.",
+      "ms": "{target} telah diperangkap oleh {accomplice}; berpihak kepada {target} membuka jalan balas.",
+      "zh": "{target}实为遭{accomplice}栽赃陷害；倒戈联手{target}可发起反击。",
+      "de": "{target} wurde von {accomplice} belastet; ein Bündnis mit {target} ermöglicht den Gegenschlag."
+    },
+    "cursed_payload": {
+      "en": "The sought prize carries a volatile seal placed by {accomplice}, tempting illicit buyers.",
+      "pl": "Poszukiwany obiekt nosi niestabilną pieczęć nałożoną przez {accomplice}.",
+      "ms": "Barangan sasaran menyimpan meterai berbahaya milik {accomplice}, menarik pembeli gelap.",
+      "zh": "目标物附有{accomplice}布下的危险封印，黑市买主正暗中觊觎。",
+      "de": "Das Zielobjekt trägt ein instabiles Siegel von {accomplice}, begehrt auf dem Schwarzmarkt."
+    },
+    "double_agent": {
+      "en": "{informant} is secretly feeding your movements to {target}'s inner circle.",
+      "pl": "{informant} potajemnie przekazuje twoje ruchy ludziom {target}.",
+      "ms": "{informant} secara rahsia membocorkan pergerakan anda kepada kem {target}.",
+      "zh": "{informant}暗中向{target}的核心圈通风报信。",
+      "de": "{informant} gibt deine Schritte heimlich an {target} weiter."
+    }
+  },
+  "world_scars": {
+    "security_crackdown": {
+      "modifiers": {"dc_modifiers": {"AGI": 2, "CHA": 1}, "stealth_modifier": 2, "price_multiplier": 1.15},
+      "en": {"title": "Heightened Patrol Crackdown", "description": "Unresolved fallout tightened checkpoints and inflated black-market prices across {venue}.", "remediation_title": "Clear Crackdown Heat at {venue}"},
+      "pl": {"title": "Zaostrzone Patrole", "description": "Nierozwiązany kryzys zaostrzył kontrole i podniósł ceny wokół {venue}.", "remediation_title": "Złagodź Obławę w {venue}"},
+      "ms": {"title": "Kawalan Keselamatan Diperketat", "description": "Kegagalan operasi meningkatkan rondaan dan harga pasaran sekitar {venue}.", "remediation_title": "Redakan Tekanan Rondaan di {venue}"},
+      "zh": {"title": "戒严搜捕升级", "description": "任务失利导致{venue}周边哨卡森严、物价上涨。", "remediation_title": "平息{venue}的戒严风波"},
+      "de": {"title": "Verschärfte Sicherheitskontrollen", "description": "Nachwirkungen erhöhen Wachpräsenz und Preise rund um {venue}.", "remediation_title": "Entschärfe die Razzia bei {venue}"}
+    },
+    "gossip_scandal": {
+      "modifiers": {"dc_modifiers": {"CHA": 2}, "price_multiplier": 1.05, "arousal_multiplier": 0.85},
+      "en": {"title": "Whispers & Scandal Fallout", "description": "Salacious rumors around {venue} have put locals on guard and strained reputations.", "remediation_title": "Quash the {venue} Scandal"},
+      "pl": {"title": "Echo Skandalu", "description": "Plotki wokół {venue} nadszarpnęły reputację i usztywniły rozmówców.", "remediation_title": "Wycisz Skandal w {venue}"},
+      "ms": {"title": "Gelombang Gosip & Skandal", "description": "Khabar angin hangat di {venue} menjejaskan reputasi dan kepercayaan.", "remediation_title": "Padamkan Skandal {venue}"},
+      "zh": {"title": "绯闻风波发酵", "description": "围绕{venue}的流言蜚语令众人戒心骤起、声誉受损。", "remediation_title": "平息{venue}的流言风波"},
+      "de": {"title": "Skandalgerüchte im Umlauf", "description": "Tuscheleien rund um {venue} belasten den Ruf und erschweren Gespräche.", "remediation_title": "Beende den Skandal um {venue}"}
+    },
+    "unchecked_threat": {
+      "modifiers": {"dc_modifiers": {"PER": 1, "END": 1}, "stealth_modifier": 1, "price_multiplier": 1.2},
+      "en": {"title": "Emboldened Regional Threat", "description": "An uncontained threat near {venue} disrupts supply lines and rattles the district.", "remediation_title": "Purge Lingering Threat at {venue}"},
+      "pl": {"title": "Rozzuchwalone Zagrożenie", "description": "Niezneutralizowane zagrożenie przy {venue} paraliżuje okolicę.", "remediation_title": "Usuń Zagrożenie w {venue}"},
+      "ms": {"title": "Ancaman Wilayah Memuncak", "description": "Ancaman yang gagal dibendung di {venue} mengganggu bekalan kawasan.", "remediation_title": "Hapuskan Ancaman Tertunggak di {venue}"},
+      "zh": {"title": "区域隐患坐大", "description": "{venue}附近未除的威胁正扰乱补给、动摇人心。", "remediation_title": "肃清{venue}的盘踞隐患"},
+      "de": {"title": "Erstarkte Bedrohung", "description": "Eine ungebremste Gefahr nahe {venue} stört Versorgung und Sicherheit.", "remediation_title": "Beseitige die Gefahr bei {venue}"}
+    }
+  }
+}

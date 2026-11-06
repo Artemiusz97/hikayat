@@ -30,6 +30,16 @@ CLOTHING_TOPS: Dict[str, Dict[str, Any]] = {
         "social_modifiers": {"cha": 1, "eva": 1},
         "social_flags": ["neat"]
     },
+    "cardigan": {
+        "style": "preppy",
+        "social_modifiers": {"cha": 1, "eva": 1},
+        "social_flags": ["comfortable", "academic"]
+    },
+    "school_vest": {
+        "style": "academic_uniform",
+        "social_modifiers": {"cha": 1, "eva": 1},
+        "social_flags": ["neat", "academic"]
+    },
     "jacket": {
         "style": "streetwear",
         "social_modifiers": {"cha": 1, "eva": 2},
@@ -115,11 +125,26 @@ CLOTHING_TOPS: Dict[str, Dict[str, Any]] = {
         "style": "futuristic",
         "social_modifiers": {"cha": 1, "eva": 1, "energy_res": 4},
         "social_flags": ["luminous", "high_tech", "flamboyant"]
+    },
+    "cropped_uniform_top": {
+        "style": "revealing",
+        "social_modifiers": {"cha": 1, "eva": 2},
+        "social_flags": ["provocative", "revealing", "rebellious"]
+    },
+    "unbuttoned_blouse": {
+        "style": "revealing",
+        "social_modifiers": {"cha": 1, "eva": 2},
+        "social_flags": ["provocative", "revealing", "alluring"]
     }
 }
 
 CLOTHING_BOTTOMS: Dict[str, Dict[str, Any]] = {
     # Existing core bottoms
+    "micro_pleated_skirt": {
+        "style": "revealing",
+        "social_modifiers": {"cha": 1, "eva": 2},
+        "social_flags": ["provocative", "revealing", "short_hem"]
+    },
     "trousers": {
         "style": "formal",
         "social_modifiers": {"cha": 1, "eva": 1},
@@ -202,6 +227,23 @@ CLOTHING_BOTTOMS: Dict[str, Dict[str, Any]] = {
         "social_flags": ["sleek", "edgy", "glossy"]
     }
 }
+
+SCHOOL_EXCLUSIVE_ARCHETYPES: frozenset[str] = frozenset({
+    "school_uniform_top",
+    "cropped_uniform_top",
+    "school_vest",
+    "micro_pleated_skirt",
+    "cardigan",
+    "unbuttoned_blouse",
+})
+
+NON_SCHOOL_CLOTHING_TOPS: tuple[str, ...] = tuple(
+    k for k in CLOTHING_TOPS.keys() if k not in SCHOOL_EXCLUSIVE_ARCHETYPES
+)
+
+NON_SCHOOL_CLOTHING_BOTTOMS: tuple[str, ...] = tuple(
+    k for k in CLOTHING_BOTTOMS.keys() if k not in SCHOOL_EXCLUSIVE_ARCHETYPES
+)
 
 # -----------------------------------------------------------------------------
 # SCENARIO-SPECIFIC CLOTHING VOCABULARY & CUTS
@@ -504,42 +546,47 @@ SCENARIO_CLOTHING_AFFIXES: Dict[str, Dict[str, Any]] = {
     },
     "high_school": {
         "archetype_names": {
-            # Tops
-            "casual_shirt": ["Graphic Tee", "Polo Shirt", "Button-Down Casual Shirt", "Flannel Shirt"],
-            "blouse": ["Pressed Sailor Blouse", "Chiffon Blouse", "Ruffled Collar Shirt"],
-            "school_uniform_top": ["School Blazer & Shirt", "Junior Sailor Top", "School Cardigan"],
-            "jacket": ["Varsity Letterman Jacket", "Denim Jacket", "Tracksuit Zip-Up", "Bomber Jacket"],
-            "hoodie": ["Oversized Pastel Hoodie", "Campus Logo Hoodie", "Cozy Fleece Pullover"],
-            "robe": ["Dorm Bathrobe", "Occult Club Robe", "Festival Yukata"],
-            "tunic": ["Art Club Smock", "Longline Tunic Shirt"],
-            "waistcoat": ["Prep School Sweater Vest", "Uniform Plaid Waistcoat", "Argyle Knitted Vest"],
-            "corset": ["Fashion Belt Bodice", "Gothic Lolita Underbust Stays", "Festival Ribbon Corset"],
-            "tailcoat": ["Orchestra Conductor Tails", "Prom Formal Tuxedo Coat", "Drama Club Tailcoat"],
-            "duster_coat": ["Longline Rainy-Day Trench", "Vintage Thrifted Duster", "Detective Club Overcoat"],
-            "shawl": ["Schoolgirl Knit Capelet", "Winter Wool Shawl", "Pastel Shoulder Wrap"],
-            "tank_top": ["Gym Class Tank Top", "Summer Ribbed Crop Top", "Track & Field Singlet"],
-            "sweater": ["Cable-Knit School Cardigan", "Oversized Cream Pullover", "Pastel V-Neck Knit"],
-            "leather_jacket": ["Rebel Biker Leather Jacket", "Thrifted Moto Jacket", "Rock Band Studded Jacket"],
-            "blazer": ["Academy Crest Blazer", "Navy Prep Blazer", "Classic Navy Uniform Blazer"],
-            "techwear_anorak": ["Rainy Day Windbreaker", "Hiking Club Anorak", "Urban Streetwear Pullover"],
-            "bodysuit_top": ["Ballet Dance Leotard", "Swim Team Rashguard", "Gymnastics Compression Top"],
-            "holo_jacket": ["Festival LED Windbreaker", "Cyber-Harajuku Glow Jacket", "Pop Idol Concert Coat"],
-            # Bottoms
-            "trousers": ["Chino Pants", "Pleated School Trousers", "Casual Khakis"],
-            "skirt": ["Pleated Plaid Skirt", "Tennis Skirt", "Denim Mini Skirt", "A-Line School Skirt"],
-            "shorts": ["Athletic Gym Shorts", "Denim Shorts", "Bicycle Shorts"],
-            "slacks": ["Pressed Uniform Slacks", "Neat Dress Slacks"],
-            "jeans": ["Skinny Blue Jeans", "Ripped Denim Jeans", "Straight-Leg Jeans"],
-            "breeches": ["Equestrian Club Jodhpurs", "Retro Knickerbockers", "Costume Drama Breeches"],
-            "bustle_skirt": ["Lolita Tiered Frill Skirt", "Festival Maid Costume Bustle", "Gothic Lolita Skirt"],
-            "culottes": ["Pleated High-Waist Culottes", "Flowing Wide-Leg Pants", "Summer Linen Culottes"],
-            "bloomers": ["Retro Gym Bloomers", "Lolita Lace Under-Shorts", "Cozy Pajama Bloomers"],
-            "cargo_pants": ["Skater Baggy Cargo Pants", "Street-Style Pocket Pants", "Canvas Utility Chinos"],
-            "sweatpants": ["Varsity Track Sweatpants", "Oversized Cotton Joggers", "Gym Fleece Sweats"],
-            "leggings": ["Yoga Dance Tights", "Opaque School Tights", "Athletic Stretch Leggings"],
-            "kilt": ["Punk Pleated Wrap Kilt", "School Tartan Kilt", "Festival Scottish Kilt"],
-            "techwear_joggers": ["Street-Chic Buckled Joggers", "Harajuku Tech Pants", "Skater Utility Trousers"],
-            "syn_leather_pants": ["Rock Club Faux-Leather Pants", "Moto Street Leathers", "Goth Skinny Leather Pants"]
+            # Tops (Whitelisted School & Athletic Garments - Zero Casualwear)
+            "cardigan": ["School Knit Cardigan", "Academy Uniform Cardigan", "Pressed Student Cardigan", "Woolen School Cardigan"],
+            "school_vest": ["Prep School Sweater Vest", "Uniform Plaid Waistcoat", "Academic Argyle Vest", "School V-Neck Vest"],
+            "casual_shirt": ["Collared School Shirt", "Polo Uniform Shirt", "Button-Down Academy Shirt", "Pressed Uniform Polo"],
+            "blouse": ["Pressed Sailor Blouse", "Chiffon School Blouse", "Ruffled Collar School Shirt", "Peter Pan Collar Uniform Blouse"],
+            "school_uniform_top": ["School Blazer & Shirt", "Junior Sailor Uniform Top", "School Cardigan Uniform", "Academy Uniform Shirt"],
+            "jacket": ["Varsity Letterman Jacket", "PE Tracksuit Jacket", "School Athletic Windbreaker", "School Sports Training Jacket"],
+            "hoodie": ["School Fleece Pullover", "Campus Track Hoodie"],
+            "robe": ["Graduation Robe", "Occult Club Smock"],
+            "tunic": ["Art Club Smock", "Uniform Tunic Vest"],
+            "waistcoat": ["Prep School Sweater Vest", "Uniform Plaid Waistcoat", "Academic Argyle Vest"],
+            "corset": ["Gothic Academy Waist Cincher", "Uniform Bodice Vest"],
+            "tailcoat": ["Orchestra Conductor Blazer", "Prom Tuxedo Blazer"],
+            "duster_coat": ["Campus Trenchcoat", "School Raincoat"],
+            "shawl": ["School Knit Shawl", "Uniform Shoulder Wrap"],
+            "tank_top": ["Gym Class Uniform Tank", "PE Track Singlet", "School Athletic Singlet"],
+            "sweater": ["Cable-Knit School Cardigan", "School V-Neck Uniform Sweater", "Academy Knit Pullover", "Uniform Vest & Cardigan"],
+            "leather_jacket": ["Varsity Leather-Sleeve Jacket", "Club Leader Jacket"],
+            "blazer": ["Academy Crest Blazer", "Navy Uniform Blazer", "Classic School Blazer", "Tailored Prep Blazer"],
+            "techwear_anorak": ["School Athletic Windbreaker", "Campus Rain Anorak"],
+            "bodysuit_top": ["Ballet Dance Leotard", "Swim Team Uniform Rashguard"],
+            "holo_jacket": ["Science Club Safety Smock", "School Lab Jacket"],
+            "cropped_uniform_top": ["Cropped Uniform Shirt", "Cropped Sailor Top", "Shortened Uniform Cardigan"],
+            "unbuttoned_blouse": ["Unbuttoned Uniform Blouse", "Plunging Uniform Shirt", "Open-Collar School Top"],
+            # Bottoms (Whitelisted School & Athletic Garments)
+            "trousers": ["Pleated School Trousers", "School Uniform Trousers", "Navy Uniform Pants"],
+            "skirt": ["Pleated Plaid Skirt", "A-Line School Uniform Skirt", "Classic Navy Pleated Skirt", "School Sailor Skirt"],
+            "shorts": ["PE Athletic Shorts", "Track Gym Shorts", "School Training Shorts"],
+            "slacks": ["Pressed Uniform Slacks", "Neat School Slacks", "Tailored School Slacks"],
+            "jeans": ["Navy Uniform Slacks", "Tailored Campus Chinos"],
+            "breeches": ["Academy Equestrian Breeches", "Formal Uniform Trousers"],
+            "bustle_skirt": ["Formal Academy Pleated Skirt", "Uniform Pleated Long Skirt"],
+            "culottes": ["School Uniform Culottes", "Academy Pleated Divided Skirt"],
+            "bloomers": ["School PE Gym Bloomers", "Academy Athletic Shorts"],
+            "cargo_pants": ["PE Uniform Utility Pants", "Campus Track Pants"],
+            "sweatpants": ["PE Track Pants", "School Athletic Sweatpants", "Varsity Warm-Up Pants"],
+            "leggings": ["School Uniform Opaque Tights", "PE Athletic Leggings"],
+            "kilt": ["Academy Tartan Pleated Wrap", "School Tartan Uniform Kilt"],
+            "techwear_joggers": ["School Track Trousers", "PE Utility Joggers"],
+            "syn_leather_pants": ["Formal Uniform Slacks", "Tailored Academy Trousers"],
+            "micro_pleated_skirt": ["Micro Pleated Plaid Skirt", "High-Slit Uniform Skirt", "Mini Sailor Skirt"]
         },
         "prefixes": {
             3: ["Clean", "Campus", "Everyday", "Neat", "Casual", "Standard-Issue", "Comfy"],
@@ -566,7 +613,7 @@ def can_equip_armor_in_scenario(scenario: str) -> bool:
     from scenario_data import is_non_combat_scenario
     return not is_non_combat_scenario(scenario)
 
-def can_equip_item_in_scenario(item: Dict[str, Any], slot: str, scenario: str) -> tuple[bool, str]:
+def can_equip_item_in_scenario(item: Any, slot: str, scenario: str) -> tuple[bool, str]:
     """
     Validates whether an item can be equipped in the specified slot under the given scenario.
     In non-combat scenarios (Slice of Life / High School Drama):
@@ -584,30 +631,68 @@ def can_equip_item_in_scenario(item: Dict[str, Any], slot: str, scenario: str) -
             "Only civilian clothing (`Top`/`Bottom`) and accessories can be worn here."
         )
 
+    if isinstance(item, (tuple, list)):
+        item_dict: Dict[str, Any] = {
+            "name": str(item[0]) if len(item) > 0 else "",
+            "effect": str(item[1]) if len(item) > 1 else "",
+            "item_type": slot,
+        }
+    elif isinstance(item, dict):
+        item_dict = item
+    else:
+        item_dict = {"name": str(item or ""), "effect": "", "item_type": slot}
+
     # For Head, Gloves, Shoes: validate item archetype / metadata
     from mechanics.combat.equipment import parse_equipment_metadata
-    meta = parse_equipment_metadata(item) if item else {}
-    arch = meta.get("archetype", "")
-    base_dt = meta.get("base_dt", 0)
-    armor_type = meta.get("armor_type", "")
+    meta = parse_equipment_metadata(item_dict) if item_dict else {}
+    arch = str(meta.get("archetype") or "").strip().lower()
+    base_dt = meta.get("base_dt", 0) or 0
+    armor_type = str(meta.get("armor_type") or "").strip().lower()
+    item_name = str(item_dict.get("name") or meta.get("name") or "").strip().lower()
 
     if slot == "Head":
         from mechanics.combat.items.headwear import NON_COMBAT_HEADWEAR_ARCHETYPES
-        if (arch and arch not in NON_COMBAT_HEADWEAR_ARCHETYPES) or base_dt > 0:
+        if arch and arch not in ("", "unknown"):
+            is_combat = (arch not in NON_COMBAT_HEADWEAR_ARCHETYPES) or base_dt > 0 or armor_type in ("medium", "heavy")
+        else:
+            combat_head_keywords = (
+                "helm", "greathelm", "sallet", "bascinet", "armet", "kabuto",
+                "tactical visor", "gas mask", "combat helmet", "ballistic", "faceplate", "coif", "war helm",
+            )
+            is_combat = base_dt > 0 or armor_type in ("medium", "heavy") or any(k in item_name for k in combat_head_keywords)
+        if is_combat:
             return False, (
                 "🚫 Combat helmets and tactical headgear cannot be equipped in a slice-of-life setting.\n"
                 "Only civilian headwear (caps, hoods, formal hats, beanies, berets) can be worn here."
             )
     elif slot == "Gloves":
         from mechanics.combat.items.gloves import NON_COMBAT_GLOVE_ARCHETYPES
-        if (arch and arch not in NON_COMBAT_GLOVE_ARCHETYPES) or armor_type == "heavy" or base_dt > 0:
+        if arch and arch not in ("", "unknown"):
+            is_combat = (arch not in NON_COMBAT_GLOVE_ARCHETYPES) or armor_type == "heavy" or base_dt > 0
+        else:
+            combat_glove_keywords = (
+                "gauntlet", "cestus", "plated glove", "armored glove",
+                "steel mitt", "iron cestus", "power fist", "spiked glove",
+            )
+            is_combat = base_dt > 0 or armor_type == "heavy" or any(k in item_name for k in combat_glove_keywords)
+        if is_combat:
             return False, (
                 "🚫 Heavy combat gauntlets cannot be equipped in a slice-of-life setting.\n"
                 "Only civilian or light gloves can be worn here."
             )
     elif slot == "Shoes":
         from mechanics.combat.items.shoes import NON_COMBAT_SHOE_ARCHETYPES
-        if (arch and arch not in NON_COMBAT_SHOE_ARCHETYPES) or armor_type == "heavy" or base_dt > 0:
+        if arch and arch not in ("", "unknown"):
+            is_combat = (arch not in NON_COMBAT_SHOE_ARCHETYPES) or armor_type == "heavy" or base_dt > 0
+        else:
+            combat_shoe_keywords = (
+                "sabaton", "greave", "combat boot", "war boot", "iron boot", "steel boot",
+                "spiked boot", "plated boot", "armored boot", "tactical boot", "trench boot",
+                "steel-toe", "steel toe", "steel-cap", "steel-plated", "iron-tip", "iron-toed",
+                "magnetic boot", "grav-anchor", "combat high-top",
+            )
+            is_combat = base_dt > 0 or armor_type == "heavy" or any(k in item_name for k in combat_shoe_keywords)
+        if is_combat:
             return False, (
                 "🚫 Combat boots and heavy greaves cannot be equipped in a slice-of-life setting.\n"
                 "Only civilian footwear (sneakers, sandals, formal shoes, oxfords) can be worn here."
@@ -659,36 +744,71 @@ def generate_random_clothing(
     archetype: Optional[str] = None,
     gender: Optional[str] = None,
     race: Optional[str] = None,
+    allow_revealing: bool = False,
+    quality_tier: Optional[str] = None,
+    enchantment_tier: Optional[str] = None,
+    is_faculty: bool = False,
+    is_nsfw: bool = False,
 ) -> Dict[str, Any]:
-    item_tier = tier if tier in (1, 2, 3) else roll_tier()
+    from mechanics.combat.equipment.tables import (
+        LEGACY_TIER_TO_DUAL_AXIS,
+        derive_legacy_tier,
+        QUALITY_AFFINITY_BONUS,
+        QUALITY_NAMES,
+        ENCHANTMENT_NAMES,
+    )
+    from mechanics.combat.equipment.metadata import (
+        roll_quality_tier,
+        roll_enchantment_tier,
+    )
+
     scen_key = normalize_clothing_scenario(scenario)
     affix_data = SCENARIO_CLOTHING_AFFIXES.get(scen_key, SCENARIO_CLOTHING_AFFIXES["fantasy"])
     is_male = str(gender or "").strip().lower() == "male"
     is_female = str(gender or "").strip().lower() == "female"
     has_tail = is_tailed_race(race)
 
+    if tier in (1, 2, 3) and (not quality_tier or not enchantment_tier):
+        def_q, def_e = LEGACY_TIER_TO_DUAL_AXIS.get(tier, ("regular", "none"))
+        q_tier = quality_tier or def_q
+        e_tier = enchantment_tier or def_e
+    else:
+        q_tier = quality_tier or roll_quality_tier()
+        e_tier = enchantment_tier or ("none" if scen_key == "high_school" else roll_enchantment_tier())
+
+    item_tier = tier if tier in (1, 2, 3) else derive_legacy_tier(q_tier, e_tier)
+
     chosen_archetype = archetype
     if slot == "Top":
-        if chosen_archetype not in CLOTHING_TOPS:
+        if chosen_archetype not in CLOTHING_TOPS or (scen_key != "high_school" and chosen_archetype in SCHOOL_EXCLUSIVE_ARCHETYPES):
             if scen_key == "high_school":
-                chosen_archetype = random.choice([
-                    "school_uniform_top", "blazer", "sweater", "waistcoat", "blouse", "casual_shirt"
-                ])
+                if is_faculty:
+                    chosen_archetype = random.choice(["blazer", "school_vest", "cardigan"]) if is_male else random.choice(["blazer", "blouse", "cardigan"])
+                elif (is_nsfw or allow_revealing) and random.random() < 0.40 and not is_male:
+                    chosen_archetype = random.choice(["cropped_uniform_top", "unbuttoned_blouse"])
+                else:
+                    chosen_archetype = random.choice([
+                        "school_uniform_top", "blazer", "sweater", "waistcoat", "blouse", "cardigan", "school_vest"
+                    ])
             else:
-                chosen_archetype = random.choice(list(CLOTHING_TOPS.keys()))
+                chosen_archetype = random.choice(NON_SCHOOL_CLOTHING_TOPS)
         base_data = CLOTHING_TOPS[chosen_archetype]
     else:
-        if chosen_archetype not in CLOTHING_BOTTOMS:
+        if chosen_archetype not in CLOTHING_BOTTOMS or (scen_key != "high_school" and chosen_archetype in SCHOOL_EXCLUSIVE_ARCHETYPES):
             if scen_key == "high_school":
-                if is_female:
+                if is_faculty:
+                    chosen_archetype = random.choice(["trousers", "slacks"]) if is_male else random.choice(["slacks", "skirt"])
+                elif (is_nsfw or allow_revealing) and random.random() < 0.40 and is_female:
+                    chosen_archetype = "micro_pleated_skirt"
+                elif is_female:
                     chosen_archetype = random.choice(["skirt", "slacks", "trousers"])
                 else:
                     chosen_archetype = random.choice(["trousers", "slacks"])
             else:
-                chosen_archetype = random.choice(list(CLOTHING_BOTTOMS.keys()))
-                if is_male and chosen_archetype == "skirt":
+                chosen_archetype = random.choice(NON_SCHOOL_CLOTHING_BOTTOMS)
+                if is_male and chosen_archetype in ("skirt", "micro_pleated_skirt"):
                     chosen_archetype = random.choice(["trousers", "slacks"])
-        elif is_male and chosen_archetype == "skirt":
+        elif is_male and chosen_archetype in ("skirt", "micro_pleated_skirt"):
             chosen_archetype = "trousers"
         base_data = CLOTHING_BOTTOMS[chosen_archetype]
 
@@ -701,20 +821,18 @@ def generate_random_clothing(
 
     # Calculate modifiers: standard regular clothes give at most +1 to SPECIAL stats (strictly CHA or PER).
     # NON-ARMOR WEARABLES DO NOT GRANT DT (base_dt: 0, type_dt: {}).
-    # Enchanted (Tier 2) and Masterwork (Tier 1) can grant slightly refined social/eva bonuses.
     mods = dict(base_data["social_modifiers"])
     tier_name = TIER_NAMES.get(item_tier, "Standard")
     prefixes = affix_data.get("prefixes", {})
     suffixes = affix_data.get("suffixes", {})
 
     if item_tier == 2:
-        # Tier 2 (Enchanted / Stylish): EVA +1 bonus; SPECIAL strictly capped at +1
         mods["eva"] = mods.get("eva", 0) + 1
         if "cha" in mods and mods["cha"] > 0:
             mods["cha"] = 1
         if "per" in mods and mods["per"] > 0:
             mods["per"] = 1
-        p_list = prefixes.get(2, ["Enchanted"])
+        p_list = prefixes.get(2, ["Tailored"])
         pref = random.choice(p_list)
         s_list = suffixes.get(2, [])
         if s_list and random.random() < 0.60:
@@ -722,7 +840,6 @@ def generate_random_clothing(
         else:
             name = f"{pref} {base_name}"
     elif item_tier == 1:
-        # Tier 1 (Masterwork / Haute Couture): EVA +2 bonus; SPECIAL capped strictly at +1 (CHA / PER)
         mods["eva"] = mods.get("eva", 0) + 2
         if "cha" in mods and mods["cha"] > 0:
             mods["cha"] = 1
@@ -736,7 +853,6 @@ def generate_random_clothing(
         else:
             name = f"{pref} {base_name}"
     else:
-        # Tier 3 (Standard): ~40% chance of standard flavor prefix, otherwise clean base name; CHA strictly <= 1
         if "cha" in mods and mods["cha"] > 1:
             mods["cha"] = 1
         if "per" in mods and mods["per"] > 1:
@@ -763,11 +879,19 @@ def generate_random_clothing(
             if "tail-slotted" in name.lower():
                 name = name.replace("Tail-Slotted ", "").replace("tail-slotted ", "").replace("Tail-slotted ", "")
 
-    social_affinity_bonus = 4 if item_tier == 1 else (2 if item_tier == 2 else 0)
+    social_affinity_bonus = QUALITY_AFFINITY_BONUS.get(q_tier, 0)
+    if item_tier == 1 and social_affinity_bonus < 4:
+        social_affinity_bonus = 4
+    elif item_tier == 2 and social_affinity_bonus < 2:
+        social_affinity_bonus = 2
 
     metadata = {
         "name": name,
         "tier": item_tier,
+        "quality_tier": q_tier,
+        "enchantment_tier": e_tier,
+        "quality_name": QUALITY_NAMES.get(q_tier, "Standard"),
+        "enchantment_name": ENCHANTMENT_NAMES.get(e_tier, "Mundane"),
         "tier_name": tier_name,
         "slot": slot,
         "item_type": "Clothing",
@@ -857,11 +981,13 @@ def format_clothing_card(metadata: Dict[str, Any]) -> str:
     mods_parts = []
     # SPECIAL stats
     for k in ("cha", "per", "eva", "acc"):
-        v = social_mods.get(k, 0)
-        if v > 0:
-            mods_parts.append(f"+{v} {k.upper()}")
-        elif v < 0:
-            mods_parts.append(f"{v} {k.upper()}")
+        v_num = float(social_mods.get(k) or 0)
+        if v_num > 0:
+            v_disp = int(v_num) if v_num.is_integer() else v_num
+            mods_parts.append(f"+{v_disp} {k.upper()}")
+        elif v_num < 0:
+            v_disp = int(v_num) if v_num.is_integer() else v_num
+            mods_parts.append(f"{v_disp} {k.upper()}")
     # Damage reduction percentages (DR%)
     res_tuples = (
         ("physical_res", "Phys DR"), ("energy_res", "Energy DR"), ("fire_res", "Fire DR"),
@@ -870,8 +996,10 @@ def format_clothing_card(metadata: Dict[str, Any]) -> str:
         ("water_res", "Water DR"), ("wind_res", "Wind DR")
     )
     for r_k, r_label in res_tuples:
-        if social_mods.get(r_k, 0) > 0:
-            mods_parts.append(f"+{social_mods[r_k]}% {r_label}")
+        r_val = float(social_mods.get(r_k) or 0)
+        if r_val > 0:
+            r_disp = int(r_val) if r_val.is_integer() else r_val
+            mods_parts.append(f"+{r_disp}% {r_label}")
 
     mods_str = ", ".join(mods_parts) or "None"
 

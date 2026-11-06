@@ -231,6 +231,16 @@ def are_choices_semantically_redundant(
     if (app1 in special_approaches or app2 in special_approaches) and app1 != app2:
         return False
 
+    inc1 = str(c1.get("incursion_action") or "").strip().lower()
+    inc2 = str(c2.get("incursion_action") or "").strip().lower()
+    if (inc1 or inc2) and inc1 != inc2:
+        return False
+
+    trap1 = str(c1.get("trap_choice_kind") or "").strip().lower()
+    trap2 = str(c2.get("trap_choice_kind") or "").strip().lower()
+    if (trap1 or trap2) and trap1 != trap2:
+        return False
+
     # 4. Same special social milestone intent targeting the same person (e.g. duplicate recruitment / contact / confession)
     int1 = str(c1.get("intent") or "").strip().lower()
     int2 = str(c2.get("intent") or "").strip().lower()
@@ -516,8 +526,21 @@ def _get_player_inventory_items(char: dict = None, session_id: int = None) -> se
     return items
 
 
+def is_malformed_choice_label(label: Any) -> bool:
+    """Returns True if a choice label contains malformed LaTeX formatting or leaked schema/prompt metadata."""
+    if not label:
+        return True
+    s = str(label).strip()
+    if not s or len(s) < 2:
+        return True
+    from models.llm_schemas import _MALFORMED_CHOICE_LABEL_RE
+    return bool(_MALFORMED_CHOICE_LABEL_RE.search(s))
+
+
 def infer_choice_stat_and_dc(label: str, default_stat: str = "CHA", default_dc: int = 6, char: dict = None) -> tuple[str, int]:
     """Infers an appropriate RPG stat and requirement (DC 5-8, or DC 10-15 for intimate prying) based on choice text."""
+    if not label or is_malformed_choice_label(label):
+        return ("NONE", 0)
     lbl = str(label or "").lower()
 
     # Intimate disclosure inquiry check (prying into private Level 3 intimate profile / secrets)
@@ -572,6 +595,23 @@ def is_exempt_free_action(choice: dict, in_dialogue_mode: bool = False, context 
     """
     if not isinstance(choice, dict):
         return False
+
+    _is_anom_stamped = bool(
+        choice.get("is_anomaly_inquiry")
+        or choice.get("incursion_action")
+        or choice.get("trap_choice_kind")
+        or (choice.get("_server_stamped") and choice.get("sapience"))
+        or str(choice.get("approach") or "").startswith(("nh_", "anomaly_", "question_trap"))
+    )
+    if _is_anom_stamped:
+        return choice.get("stat") in ("NONE", "FREE") and int(choice.get("requirement") or 0) <= 0
+    if (
+        (choice.get("_server_stamped") or choice.get("_npc_speak_choice") or choice.get("_pinned_dialogue_exit"))
+        and choice.get("stat") in ("NONE", "FREE")
+        and int(choice.get("requirement") or 0) <= 0
+        and not choice.get("is_quest_action")
+    ):
+        return True
 
     raw_label = str(choice.get("label") or choice.get("text") or choice.get("action") or "").strip()
     lbl = raw_label.lower()
@@ -683,6 +723,8 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
         for c in choices[:25]:
             if isinstance(c, str):
                 label_str = str(c).strip()
+                if not label_str or is_malformed_choice_label(label_str):
+                    continue
                 stat, req_v = infer_choice_stat_and_dc(label_str, char=char)
                 if label_str.startswith("[") and "]" in label_str:
                     prefix = label_str[1:label_str.index("]")].upper()
@@ -701,6 +743,8 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
 
             raw_label = c.get("label") or c.get("text") or c.get("action")
             label_str = str(raw_label).strip() if raw_label is not None else ""
+            if not label_str or is_malformed_choice_label(label_str):
+                continue
             label_lower = label_str.lower()
 
             stat = c.get("stat")
@@ -757,8 +801,18 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
             has_climax_prefix = "⚡" in label_str or "[story climax]" in label_lower
             has_story_prefix = "⭐" in label_str or "[story quest]" in label_lower or "sq-" in str(c.get("quest_id", "")).lower()
             has_bounty_prefix = "🎯" in label_str or "[bounty]" in label_lower
-            clean_label_str = _strip_leading_emojis(label_str)
-            if not clean_label_str or clean_label_str.lower() in ("act", "action", "choice", "none", "null"):
+            _preserve_anom_brackets = bool(
+                c.get("is_anomaly_inquiry")
+                or c.get("incursion_action")
+                or c.get("trap_choice_kind")
+                or (c.get("_server_stamped") and c.get("sapience"))
+                or str(c.get("approach") or "").startswith(("nh_", "anomaly_", "question_trap"))
+            )
+            if _preserve_anom_brackets and not (has_climax_prefix or has_story_prefix or has_bounty_prefix):
+                clean_label_str = label_str.strip()
+            else:
+                clean_label_str = _strip_leading_emojis(label_str)
+            if not clean_label_str or clean_label_str.lower() in ("act", "action", "choice", "none", "null") or is_malformed_choice_label(clean_label_str):
                 clean_label_str = getattr(cls, 'STAT_FALLBACK_LABELS', DEFAULT_STAT_FALLBACK_LABELS).get(stat, 'Take action')
             elif is_party_recruit:
                 try:
@@ -854,8 +908,8 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 "dismisses_npc": bool(c.get("dismisses_npc", False)),
                 "target_node_id": str(c.get("target_node_id") or "") if (_is_server_stamped or not session_id) else "",
                 "target_location": str(c.get("target_location") or ""),
-                "quest_id": c.get("quest_id", "") if _verified_quest else "",
-                "sub_obj_id": c.get("sub_obj_id") if _verified_quest else None,
+                "quest_id": c.get("quest_id", "") if (_verified_quest or _is_server_stamped or not session_id) else "",
+                "sub_obj_id": c.get("sub_obj_id") if (_verified_quest or _is_server_stamped or not session_id) else None,
                 "_raw_sub_obj_id": c.get("sub_obj_id") if (_is_server_stamped or not session_id) else None,
                 "stage_index": c.get("stage_index") if _verified_quest else None,
                 "contract_type": c.get("contract_type", "") if _verified_quest else "",
@@ -866,6 +920,10 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 "combat_tactical_archetype", "item_name", "item", "item_consumed",
                 "skip_minutes", "sleep_mode", "approach", "gold_cost", "dc_mod",
                 "_priority_slot", "clue_pair_ids", "is_phase2_choice",
+                "incursion_action", "incursion_id", "breach_id", "offering_item_name",
+                "trap_choice_kind", "is_anomaly_inquiry", "_npc_speak_choice",
+                "_pinned_dialogue_exit", "sapience", "dossier_revealed",
+                "taboo_exploited_stat",
             ):
                 if _extra_k in c and c[_extra_k] is not None:
                     entry_dict[_extra_k] = c[_extra_k]
@@ -1713,6 +1771,9 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 if not n:
                     continue
                 if isinstance(n, dict):
+                    # Anomalies get bespoke containment / pattern-study choices, never human "Speak with" prompts
+                    if n.get("is_anomalous_entity") or n.get("non_hostile_anomaly") or n.get("uncanny_presence"):
+                        continue
                     n_name = (n.get("name") or "").strip()
                     status_list = n.get("status_effects") or []
                     status_str = " ".join(str(s.get("name", s) if isinstance(s, dict) else s) for s in status_list).lower()
@@ -2235,7 +2296,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
             import scenario_data as _sd_cc3
             if _sd_cc3.is_anomalous_incursions_scenario(scenario):
                 from game_engine.matching import matches_keyword_boundary
-                from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag, TAG_CIVILIAN
+                from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag, TAG_SPECIAL_AGENT
                 filtered_anom_rec = []
                 for c in cleaned:
                     c_lbl_low = str(c.get("label", "") if isinstance(c, dict) else "").lower()
@@ -2252,7 +2313,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                                     break
                             if not t_n and len(partners_list) == 1:
                                 t_n = partners_list[0]
-                        if t_n and classify_anomalous_npc_tag(t_n, session_id=session_id, scen_key=scenario) == TAG_CIVILIAN:
+                        if t_n and classify_anomalous_npc_tag(t_n, session_id=session_id, scen_key=scenario) != TAG_SPECIAL_AGENT:
                             continue
                     filtered_anom_rec.append(c)
                 cleaned = filtered_anom_rec
@@ -2594,12 +2655,22 @@ def build_hybrid_turn_choices(
             priority_buttons.append(_to_choice_dict(schedule_transition_choice, "NONE", 0))
         if schedule_stay_choice is not None and not in_active_dialogue_turn and len(priority_buttons) < 2:
             priority_buttons.append(_to_choice_dict(schedule_stay_choice, "CHA", 11))
-        if new_partners and session_id and eff_node_id and len(priority_buttons) < 2:
+        if new_partners and session_id and eff_node_id:
             try:
                 from mechanics.world.locations.access_gate import get_privacy_nudge_choice
                 priv_choice = get_privacy_nudge_choice(session_id, eff_node_id, new_partners[0], session, actions=actions)
                 if priv_choice:
-                    priority_buttons.insert(0, _to_choice_dict(priv_choice, "NONE", 0))
+                    ch_stat = getattr(priv_choice, "stat", "CHA") or "CHA"
+                    ch_req = int(getattr(priv_choice, "requirement", 8) or 8)
+                    priv_dict = _to_choice_dict(priv_choice, ch_stat, ch_req)
+                    priv_dict["_priority_slot"] = False
+                    priv_dict["_band"] = 2
+                    priv_dict["_privacy_nudge"] = True
+                    priv_dict["is_privacy_nudge"] = True
+                    if in_active_dialogue_turn:
+                        priority_buttons.append(priv_dict)
+                    else:
+                        cleaned.append(priv_dict)
             except Exception:
                 pass
 
@@ -2667,7 +2738,17 @@ def build_hybrid_turn_choices(
                 lore_ent = next((p for p in lore_people if p.get("name", "").lower() == p_lower), {})
                 t_role = str(lore_ent.get("role") or lore_ent.get("occupation") or b_info_c.get("role") or b_info_c.get("occupation") or "").lower()
                 t_desc = str(lore_ent.get("description") or b_info_c.get("description") or "").lower()
-                if not is_contact_eligible(name=partner, role=t_role, description=t_desc, scenario=scen_key):
+                t_grade = str(lore_ent.get("grade") or b_info_c.get("grade") or "")
+                t_srt = str(lore_ent.get("social_role_type") or b_info_c.get("social_role_type") or "")
+                if not is_contact_eligible(
+                    name=partner,
+                    role=t_role,
+                    grade=t_grade,
+                    description=t_desc,
+                    scenario=scen_key,
+                    social_role_type=t_srt,
+                    session_id=session_id,
+                ):
                     continue
                 if is_unlocked_contact(existing_c) or p_lower in party_names_lower:
                     continue

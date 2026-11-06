@@ -832,7 +832,7 @@ def has_quest_note_flag(quest_notes: str | None, flag_key: str) -> bool:
     if not quest_notes or not flag_key:
         return False
     notes_str = str(quest_notes)
-    tokens = [t.strip().lower() for t in re.split(r'[|\n,]+', notes_str) if t.strip()]
+    tokens = [t.strip().lower() for t in re.split(r'[|\n]+', notes_str) if t.strip()]
     f_key = flag_key.strip().lower()
     for tok in tokens:
         if tok == f_key or tok.startswith(f"{f_key}:"):
@@ -849,7 +849,7 @@ def append_quest_note_flag(quest_notes: str | None, flag_key: str, flag_val: str
     if not quest_notes:
         return new_flag
     notes_str = str(quest_notes).strip()
-    tokens = [t.strip() for t in re.split(r'[|\n,]+', notes_str) if t.strip()]
+    tokens = [t.strip() for t in re.split(r'[|\n]+', notes_str) if t.strip()]
     filtered = [t for t in tokens if not (t.lower() == f_key or t.lower().startswith(f"{f_key}:"))]
     filtered.append(new_flag)
     return "|".join(filtered)
@@ -990,14 +990,10 @@ def format_quest_comms_message(
 
 def get_max_campaign_chapters(scen_key: str = "fantasy") -> int:
     """
-    Returns the total number of campaign chapters for the scenario:
-    - Anomalous Incursions (and its 3 variants): 11 Chapters (Ch 1-10 Cataclysm + Ch 11 Epilogue/Resolution)
-    - All other scenarios: 10 Chapters
+    Universal 11-Chapter Campaign Arc across all scenarios:
+    Chapters 1-10 Story Climax + Chapter 11 Universal Playable Epilogue.
     """
-    import scenario_data
-    if scenario_data.is_anomalous_incursions_scenario(scen_key):
-        return 11
-    return 10
+    return 11
 
 
 def ensure_world_ending_anomaly_blueprint(

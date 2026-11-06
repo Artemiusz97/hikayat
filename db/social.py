@@ -879,11 +879,24 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
     import mechanics.social.relationships as relationships
     n_role = (basic_info.get("role") if isinstance(basic_info, dict) else "") or ""
     n_desc = (basic_info.get("description") if isinstance(basic_info, dict) else "") or ""
+    n_grade = (basic_info.get("grade") if isinstance(basic_info, dict) else "") or ""
+    n_srt = (basic_info.get("social_role_type") if isinstance(basic_info, dict) else "") or ""
+    n_age_group = (basic_info.get("age_group") if isinstance(basic_info, dict) else "") or ""
     is_promoted_adult_family = (
         str(household_role or "").strip().lower() in ("father", "mother")
         or bool(isinstance(basic_info, dict) and basic_info.get("is_adult_family"))
     )
-    if not is_promoted_adult_family and not relationships.is_contact_eligible(name=name, role=n_role, description=n_desc, scenario=scen, session_id=session_id):
+    if not is_promoted_adult_family and not relationships.is_contact_eligible(
+        name=name,
+        role=n_role,
+        description=n_desc,
+        scenario=scen,
+        session_id=session_id,
+        grade=n_grade,
+        social_role_type=n_srt,
+        age_group=n_age_group,
+        is_adult_family=is_promoted_adult_family,
+    ):
         return {}
 
     now = time.time()
@@ -3794,5 +3807,48 @@ def record_phone_daily_interaction(session_id: int, npc_id: str, current_day: in
             )
 
     return get_phone_daily_limits(session_id, clean_npc_id, current_day)
+
+
+def delete_contact(session_id: int, contact_id_or_npc_id: int | str) -> bool:
+    """Deletes a contact safely while clearing any soft implicated_contact_id references in world_events."""
+    with UnitOfWork() as conn:
+        if isinstance(contact_id_or_npc_id, int) or str(contact_id_or_npc_id).isdigit():
+            row = conn.execute(
+                "SELECT id FROM contacts WHERE session_id = ? AND id = ?",
+                (int(session_id), int(contact_id_or_npc_id)),
+            ).fetchone()
+        else:
+            clean_key = str(contact_id_or_npc_id or "").strip().lower()
+            row = conn.execute(
+                "SELECT id FROM contacts WHERE session_id = ? AND (LOWER(npc_id) = ? OR LOWER(name) = ?)",
+                (int(session_id), clean_key, clean_key),
+            ).fetchone()
+        if not row:
+            return False
+        cid = int(row["id"])
+        conn.execute(
+            "UPDATE world_events SET implicated_contact_id = NULL WHERE session_id = ? AND implicated_contact_id = ?",
+            (int(session_id), cid),
+        )
+        cur = conn.execute("DELETE FROM contacts WHERE session_id = ? AND id = ?", (int(session_id), cid))
+        return cur.rowcount > 0
+
+
+def get_school_directory_batch(session_id: int) -> dict[str, dict]:
+    """Fetch all school_directory entries for a session keyed by lowercase name in 1 query."""
+    if not session_id:
+        return {}
+    result: dict[str, dict] = {}
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT name, gender, race, role, grade, club FROM school_directory WHERE session_id = ?",
+            (int(session_id),),
+        ).fetchall()
+        for r in rows:
+            if r["name"]:
+                result[str(r["name"]).strip().lower()] = dict(r)
+    return result
+
+
 
 

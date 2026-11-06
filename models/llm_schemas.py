@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 from typing import List, Optional, Dict, Literal, Any, Union
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
@@ -71,6 +72,64 @@ class DictAccessibleModel(BaseModel):
         return getattr(self, item, default)
 
 
+AgeGroup = Literal["teen", "adult"]
+
+
+class CharacterBadges(DictAccessibleModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    standing: str = ""           # "Freshman" | "Sophomore" | "Junior" | "Senior" | "Faculty" | "Staff" | "Citizen" | "Youth Peer"
+    primary_role: str = ""       # Grounded public title ("Chemistry Teacher", "Student", "Flustered Cyclist")
+    club: str = ""               # Formal club ("Broadcasting Club")
+    clique: str = ""             # Social clique ("Athletes", "Musicians")
+    badges: List[str] = Field(default_factory=list) # Visual badge pills in strict precedence order
+    age_group: AgeGroup = "teen" # "teen" | "adult"
+
+    # Typed Boolean Flags for UI & Business Logic
+    is_student: bool = False
+    is_faculty: bool = False
+    is_staff: bool = False
+    is_citizen: bool = False
+    is_merchant: bool = False
+    is_special_agent: bool = False
+    is_contact: bool = False
+    is_in_party: bool = False
+    is_blocked: bool = False
+
+
+_MALFORMED_CHOICE_LABEL_RE = re.compile(
+    r"(?:"
+    r"\\?(?:text|mathbf|mathrm|textnormal|ext)\s*\{"  # LaTeX tokens: \text{, text{, ext{
+    r"|\b(?:stat|requirement|mp_cost)\s*:\s*['\"]?[a-zA-Z0-9]+['\"]?"  # Schema syntax leaks
+    r"|\b(?:must\s+require\s+a\s+skill\s+check|dedicated\s+conversational\s+exit)\b"  # Leaked prompt rules
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _filter_valid_choices_list(v: Any) -> List[Any]:
+    if not v or not isinstance(v, list):
+        return []
+    cleaned = []
+    for item in v:
+        if isinstance(item, str):
+            s = item.strip()
+            if s and not _MALFORMED_CHOICE_LABEL_RE.search(s):
+                cleaned.append({"label": s})
+        elif isinstance(item, (dict, BaseModel)):
+            if isinstance(item, dict):
+                valid_keys = [str(k).strip() for k in item.keys() if str(k).strip()]
+                lbl = str(item.get("label") or "").strip()
+                if not valid_keys or not lbl or _MALFORMED_CHOICE_LABEL_RE.search(lbl):
+                    continue
+            elif hasattr(item, "label"):
+                lbl = str(getattr(item, "label", "") or "").strip()
+                if not lbl or _MALFORMED_CHOICE_LABEL_RE.search(lbl):
+                    continue
+            cleaned.append(item)
+    return cleaned
+
+
 class Choice(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
     label: str = Field(..., description="Concise, max 6-8 words")
@@ -81,6 +140,16 @@ class Choice(DictAccessibleModel):
     triggers_loot_roll: bool = Field(default=False)
     intent: str = Field(default="general_action")
     sub_intent: Optional[str] = Field(default="")
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def coerce_label(cls, v: Any) -> str:
+        if v is None:
+            return "Take action"
+        s = str(v).strip()
+        if not s or _MALFORMED_CHOICE_LABEL_RE.search(s):
+            return "Take action"
+        return s
     target_npc: Optional[str] = Field(default="")
     target_node_id: Optional[str] = Field(default="")
     target_location: Optional[str] = Field(default="")
@@ -444,19 +513,7 @@ class NarrationOutcome(DictAccessibleModel):
     @field_validator("next_choices", mode="before")
     @classmethod
     def coerce_next_choices(cls, v: Any) -> List[Any]:
-        if not v or not isinstance(v, list):
-            return []
-        cleaned = []
-        for item in v:
-            if isinstance(item, str) and item.strip():
-                cleaned.append({"label": item.strip()})
-            elif isinstance(item, (dict, BaseModel)):
-                if isinstance(item, dict):
-                    valid_keys = [str(k).strip() for k in item.keys() if str(k).strip()]
-                    if not valid_keys or not str(item.get("label") or "").strip():
-                        continue
-                cleaned.append(item)
-        return cleaned
+        return _filter_valid_choices_list(v)
 
 
 class CosmeticActorPose(BaseModel):
@@ -505,19 +562,7 @@ class DeterministicTurnNarration(DictAccessibleModel):
     @field_validator("next_choices", mode="before")
     @classmethod
     def coerce_next_choices(cls, v: Any) -> List[Any]:
-        if not v or not isinstance(v, list):
-            return []
-        cleaned = []
-        for item in v:
-            if isinstance(item, str) and item.strip():
-                cleaned.append({"label": item.strip()})
-            elif isinstance(item, (dict, BaseModel)):
-                if isinstance(item, dict):
-                    valid_keys = [str(k).strip() for k in item.keys() if str(k).strip()]
-                    if not valid_keys or not str(item.get("label") or "").strip():
-                        continue
-                cleaned.append(item)
-        return cleaned
+        return _filter_valid_choices_list(v)
 
     @field_validator("actor_poses", mode="before")
     @classmethod
@@ -738,19 +783,7 @@ class TurnOutcome(DictAccessibleModel):
     @field_validator("next_choices", mode="before")
     @classmethod
     def coerce_next_choices(cls, v: Any) -> List[Any]:
-        if not v or not isinstance(v, list):
-            return []
-        cleaned = []
-        for item in v:
-            if isinstance(item, str) and item.strip():
-                cleaned.append({"label": item.strip()})
-            elif isinstance(item, (dict, BaseModel)):
-                if isinstance(item, dict):
-                    valid_keys = [str(k).strip() for k in item.keys() if str(k).strip()]
-                    if not valid_keys or not str(item.get("label") or "").strip():
-                        continue
-                cleaned.append(item)
-        return cleaned
+        return _filter_valid_choices_list(v)
 
     @field_validator("npcs_present", "nearby_enemies", mode="before")
     @classmethod
@@ -1039,12 +1072,138 @@ class CampaignEndGoal(BaseModel):
     title: str
     description: str
 
+
+class PitchStub(DictAccessibleModel):
+    """Lightweight Stage-1 Bounty board entry before player commitment."""
+    model_config = ConfigDict(extra="allow")
+    quest_id: str = ""
+    title: str = ""
+    engine: str = "MYSTERY_CASE"
+    public_pitch: str = ""
+    client_npc: str = ""
+    client_location: str = ""
+    origin_location: str = ""
+    reward_gold: int = 25
+    reward_xp: int = 100
+    reward_item: str = ""
+    danger_tier: int = 1
+    deadline_day: Optional[int] = None
+    deadline_minute: Optional[int] = None
+    uses_nsfw_routing: bool = False
+
+
+class DossierLeadNode(DictAccessibleModel):
+    model_config = ConfigDict(extra="allow")
+    lead_id: str = ""
+    title: str = ""
+    role: str = "recon"
+    target_npc: str = ""
+    target_location: str = ""
+    approaches: List[Dict[str, Any]] = Field(default_factory=list)
+    encounter_roster: List[Dict[str, Any]] = Field(default_factory=list)
+    status: str = "active"  # active | completed | bypassed | locked
+    is_discovered: bool = True
+
+    @field_validator("approaches", "encounter_roster", mode="before")
+    @classmethod
+    def _coerce_lists(cls, v: Any) -> List[Dict[str, Any]]:
+        if not v or not isinstance(v, list):
+            return []
+        return [item for item in v if isinstance(item, dict)]
+
+
+class DossierClueEdge(DictAccessibleModel):
+    model_config = ConfigDict(extra="allow")
+    clue_key: str = ""
+    clue_id: Optional[int] = None
+    title: str = ""
+    lead_text: str = ""
+    paired_with: List[Any] = Field(default_factory=list)
+    conclusion: str = ""
+    unlocks_climax: bool = False
+    reveals_twist: bool = False
+    is_red_herring: bool = False
+
+
+class QuestDossierSchema(DictAccessibleModel):
+    """Full predetermined Stage-2 QuestDossier schema with dual dict/attr access."""
+    model_config = ConfigDict(extra="allow")
+    quest_id: str = ""
+    engine: str = "MYSTERY_CASE"
+    family_tier: str = "bounty"
+    danger_tier: int = 1
+    status_stage: str = "compiled"
+    compiled_at_turn: int = 0
+    pitch_stub: Dict[str, Any] = Field(default_factory=dict)
+    cast_bindings: Dict[str, Any] = Field(default_factory=dict)
+    leads_graph: List[DossierLeadNode] = Field(default_factory=list)
+    clue_graph: List[DossierClueEdge] = Field(default_factory=list)
+    climax_spec: Dict[str, Any] = Field(default_factory=dict)
+    twist_spec: Dict[str, Any] = Field(default_factory=dict)
+    tangible_item: Dict[str, Any] = Field(default_factory=dict)
+    contract_economy: Dict[str, Any] = Field(default_factory=dict)
+    turn_in_rules: Dict[str, Any] = Field(default_factory=dict)
+    outcomes_matrix: Dict[str, Any] = Field(default_factory=dict)
+
+
+class MicroDossierSchema(DictAccessibleModel):
+    """Compact 1-2 beat dossier for RMR- Rumors and MNR- Minor Events."""
+    model_config = ConfigDict(extra="allow")
+    quest_id: str = ""
+    engine: str = "MYSTERY_CASE"
+    family_tier: str = "rumor"
+    status_stage: str = "compiled"
+    compiled_at_turn: int = 0
+    leads_graph: List[DossierLeadNode] = Field(default_factory=list)
+    outcomes_matrix: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DossierEnrichment(DictAccessibleModel):
+    """Bounded utility-LLM flavor enrichment payload (never overrides deterministic graph topology)."""
+    model_config = ConfigDict(extra="ignore")
+    title: str = ""
+    objective_flavor: str = ""
+    lead_titles: List[str] = Field(default_factory=list)
+    twist_summary: str = ""
+    climax_hook: str = ""
+
+    @field_validator("title", "objective_flavor", "twist_summary", "climax_hook", mode="before")
+    @classmethod
+    def _coerce_str(cls, v: Any) -> str:
+        return str(v or "").strip()
+
+    @field_validator("lead_titles", mode="before")
+    @classmethod
+    def _coerce_str_list(cls, v: Any) -> List[str]:
+        if not v or not isinstance(v, list):
+            return []
+        return [str(x).strip() for x in v if str(x or "").strip()]
+
+
+class CampaignSpineEnrichment(DictAccessibleModel):
+    """Bounded utility-LLM flavor enrichment for macro 11-chapter CampaignSpine."""
+    model_config = ConfigDict(extra="ignore")
+    mastermind_name: str = ""
+    mastermind_title: str = ""
+    mastermind_goal: str = ""
+    omen_sign: str = ""
+
+    @field_validator("mastermind_name", "mastermind_title", "mastermind_goal", "omen_sign", mode="before")
+    @classmethod
+    def _coerce_spine_str(cls, v: Any) -> str:
+        return str(v or "").strip()
+
 class OpeningScene(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
     scene_title: str = Field(default="")
     entity_audit: EntityAudit = Field(default_factory=EntityAudit)
     narrative: str = Field(default="")
     choices: List[Choice] = Field(default_factory=list)
+
+    @field_validator("choices", mode="before")
+    @classmethod
+    def coerce_opening_choices(cls, v: Any) -> List[Any]:
+        return _filter_valid_choices_list(v)
     campaign_end_goals: List[CampaignEndGoal] = Field(default_factory=list)
     story_quest_title: Optional[str] = Field(default=None)
     story_quest_objective: Optional[str] = Field(default=None)

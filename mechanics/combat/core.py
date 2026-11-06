@@ -232,6 +232,24 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
     sess_id_cbt = int(session.get("id") or 0) if isinstance(session, dict) else 0
     scen_cbt = str(session.get("scenario") or "fantasy") if isinstance(session, dict) else "fantasy"
     lead_lvl_cbt = int(acting_char_data.get("level", 1) or 1)
+    if is_anom_combat:
+        from mechanics.combat.awakened_resonance import (
+            apply_stability_and_break,
+            compute_attribute_matchup_modifiers,
+            compute_stability_shred,
+            ensure_autonomous_construct,
+            get_starting_encounter_pips,
+            init_enemy_stability_profile,
+            tick_enemy_breach_recovery,
+            update_encounter_pips,
+        )
+        from mechanics.combat.spells.awakened_kits import (
+            derive_default_3axis,
+            get_awakened_basic_strike,
+            normalize_anomalous_attribute,
+        )
+        for _em in enemies:
+            init_enemy_stability_profile(_em)
 
     friendly_npcs = []
     seen_ally_names: set[str] = set()
@@ -271,6 +289,9 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                 p_comp["hp"] = min(prof["max_hp"], max(p_comp.get("hp", prof["hp"]), prof["hp"]))
                 p_comp["max_mp"] = prof["max_mp"]
                 p_comp["mp"] = min(prof["max_mp"], max(p_comp.get("mp", prof["mp"]), prof["mp"]))
+            p_comp.setdefault("attribute", prof.get("attribute"))
+            p_comp.setdefault("combat_archetype", prof.get("combat_archetype"))
+            p_comp.setdefault("ability_medium", prof.get("ability_medium"))
         else:
             if not p_comp.get("stats") or not isinstance(p_comp.get("stats"), dict):
                 p_comp["stats"] = build_companion_stat_sheet(p_comp.get("level", 1), p_comp.get("archetype", "Companion"))
@@ -323,6 +344,9 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                 npc["agent_class"] = prof_n["agent_class"]
                 npc["innate_abilities"] = prof_n["innate_abilities"]
                 npc["weapon_profile"] = prof_n["weapon_profile"]
+                npc["attribute"] = prof_n.get("attribute")
+                npc["combat_archetype"] = prof_n.get("combat_archetype")
+                npc["ability_medium"] = prof_n.get("ability_medium")
                 friendly_npcs.append(npc)
                 seen_ally_names.add(n_nm.lower())
             elif prof_n["anomalous_npc_tag"] == TAG_CIVILIAN:
@@ -350,10 +374,42 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
 
     slain_civilians: list[dict] = []
 
-    # Living Allies pool (all players with hp > 0 + all friendly companions with hp > 0)
+    # Living Allies pool (all players with hp > 0 + all friendly companions with hp > 0 + combat constructs)
     living_allies = [p for p in player_chars if p.get("hp", 1) > 0] + [c for c in friendly_npcs if c.get("hp", 1) > 0]
     if not living_allies and player_chars:
         living_allies = [player_chars[0]]
+
+    active_constructs: list[dict] = []
+    if is_anom_combat and isinstance(session, dict):
+        for c_unit in [dict(c) for c in (session.get("_active_constructs") or []) if isinstance(c, dict)]:
+            c_skey = c_unit.get("summoner_key") or c_unit.get("owner_id") or c_unit.get("name")
+            if not any(n.get("is_summon") and (n.get("summoner_key") or n.get("owner_id") or n.get("name")) == c_skey for n in current_npcs):
+                current_npcs.append(c_unit)
+            if int(c_unit.get("hp", 0) or 0) > 0 and not any(a.get("is_summon") and (a.get("summoner_key") or a.get("owner_id") or a.get("name")) == c_skey for a in living_allies):
+                living_allies.append(c_unit)
+            active_constructs.append(c_unit)
+        for p_ch in player_chars:
+            if str(p_ch.get("ability_medium") or "").strip().lower() == "autonomous_construct":
+                owner_key = str(p_ch.get("id") or p_ch.get("name") or "player")
+                owner_uid = p_ch.get("user_id") or p_ch.get("id")
+                already_tracked = any(
+                    isinstance(c, dict)
+                    and c.get("is_summon")
+                    and (
+                        c.get("summoner_key") == owner_key
+                        or (owner_uid is not None and c.get("owner_id") == owner_uid)
+                    )
+                    for c in (current_npcs + living_allies)
+                )
+                spawned = ensure_autonomous_construct(
+                    p_ch,
+                    living_allies,
+                    force_resummon=(not already_tracked and not session.get("_construct_initialized_this_combat")),
+                    current_npcs=current_npcs,
+                )
+                if spawned and spawned not in active_constructs:
+                    active_constructs.append(spawned)
+        session["_construct_initialized_this_combat"] = True
 
     combat_log = []
     player_damage_by_name = {p.get("name", "Hero"): 0 for p in player_chars}
@@ -395,10 +451,12 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                         combat_log.append(f"💥 **DEATH THROES!** **{m['name']}** violently detonated! Dealt **{burst_dmg} explosive damage** to **{p_name}**!")
 
     def _apply_damage_to_enemy(m, dmg):
-        """Applies damage to an enemy with Temp HP absorption & Boss Phase 2 death & threshold intercept."""
+        """Applies damage to an enemy with Breach Vulnerability, Temp HP absorption & Boss Phase 2 Breach Priority."""
+        if is_anom_combat and m.get("is_breached") and not m.get("_breached_this_round") and dmg > 0:
+            dmg = max(1, int(round(dmg * 1.35)))
         temp_hp = m.get("temp_hp", 0)
         actual_dmg = dmg
-        if temp_hp > 0:
+        if temp_hp > 0 and not m.get("_pierce_temp_hp_this_hit"):
             if temp_hp >= dmg:
                 m["temp_hp"] = temp_hp - dmg
                 return dmg
@@ -409,14 +467,25 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
         max_hp = m.get("max_hp", 100)
         curr_hp = m.get("hp", max_hp)
         tier_rank = m.get("tier_rank", 1)
-        is_boss = tier_rank >= 5
+        is_boss = bool(tier_rank >= 5 or m.get("is_boss"))
         phase_triggered = m.get("phase_2_triggered", False)
 
         new_hp = curr_hp - actual_dmg
 
-        # Boss Phase 2 Intercept: triggers when crossing the 50% threshold or facing lethal damage
+        # Boss Phase 2 Intercept with Anomalous Breach Window Priority
         if is_boss and not phase_triggered and (new_hp < max_hp * 0.5):
+            if is_anom_combat and (m.get("_will_breach_this_hit") or m.get("is_breached")):
+                was_delayed = bool(m.get("delayed_phase_2"))
+                m["delayed_phase_2"] = True
+                m["hp"] = max(1, new_hp)
+                if not was_delayed:
+                    combat_log.append(
+                        f"⚡ **BREACH OVERRIDES PHASE 2!** **{m['name']}**'s Stability shatters before it can surge — Phase 2 delayed for 1 Breach round!"
+                    )
+                return dmg
             m["phase_2_triggered"] = True
+            if is_anom_combat and int(m.get("max_stability", 0) or 0) > 0:
+                m["stability"] = int(m.get("max_stability", 200))
             heal_amt = int(max_hp * 0.2)
             transition_hp = max(int(max_hp * 0.5), new_hp) + heal_amt
             m["hp"] = min(max_hp, max(1, transition_hp))
@@ -437,6 +506,17 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
 
         m["hp"] = max(0, new_hp)
         if m["hp"] <= 0:
+            if is_anom_combat:
+                from mechanics.world.folklore_mechanics import get_enemy_tether_state, try_resolve_zero_hp_tether
+                if get_enemy_tether_state(m):
+                    teth_res = try_resolve_zero_hp_tether(m)
+                    if teth_res.get("outcome") == "reformed":
+                        combat_log.append(teth_res["message"])
+                        return dmg
+                    elif teth_res.get("outcome") == "unsealed_dispersion":
+                        m["xp_multiplier"] = round(float(m.get("xp_multiplier", 1.0)) * float(teth_res.get("xp_mult", 0.60)), 2)
+                        m["prevent_vault_capture"] = True
+                        combat_log.append(teth_res["message"])
             _register_kill(m)
         elif m.get("requires_non_lethal_subdue"):
             sub_pct = float(m.get("subdue_threshold_pct") or 0.35)
@@ -465,6 +545,16 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
     if any(t in player_attrs.get("tags", []) for t in ("precision", "optics", "hud", "smart_link")):
         player_attrs["acc"] += 5
 
+    anom_passives: dict = dict(player_attrs.get("anomalous_passives") or {})
+    if is_anom_combat and not anom_passives:
+        try:
+            from mechanics.combat.items.anomalous_gear import aggregate_equipped_anomalous_passives
+            anom_passives = aggregate_equipped_anomalous_passives(player_equip)
+            if anom_passives.get("elemental_amp"):
+                player_attrs["elemental_amp"] = dict(anom_passives["elemental_amp"])
+        except Exception:
+            anom_passives = {}
+
     action = actions[0] if actions else {"choice_type": "MELEE_ATTACK", "label": "Attack"}
     from mechanics.stealth import is_actor_hidden, is_actor_combat_vanished, set_actor_combat_vanished, clear_all_combat_vanished
     is_hidden_now = bool(is_actor_hidden(session, acting_user_id) or action.get("is_stealth") or action.get("stance") == "stealth")
@@ -482,6 +572,87 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
     c_type = action.get("choice_type", "MELEE_ATTACK")
     stat_name = action.get("stat", "STR")
     req_val = action.get("requirement", 10)
+
+    # Awakened Resonance player state setup
+    p_attr, p_arch, p_med = ("physical", "vanguard", "direct_manifestation")
+    pips_map: dict[str, int] = {}
+    uid_pip_key = str(acting_user_id or acting_char_name)
+    turn_hit_landed = False
+    turn_triggered_break = False
+    turn_extra_pips = 0
+    turn_cast_ultimate = False
+
+    if is_anom_combat:
+        def_a, def_ar, def_m = derive_default_3axis(
+            char_class=str(acting_char_data.get("char_class") or ""),
+            seed=acting_char_name,
+        )
+        p_attr = normalize_anomalous_attribute(acting_char_data.get("attribute") or def_a, fallback=def_a)
+        p_arch = str(acting_char_data.get("combat_archetype") or def_ar).strip().lower()
+        p_med = str(acting_char_data.get("ability_medium") or def_m).strip().lower()
+        if isinstance(session, dict):
+            raw_pm = session.get("player_resonance_pips")
+            if isinstance(raw_pm, dict):
+                pips_map = dict(raw_pm)
+            elif isinstance(raw_pm, (int, float)):
+                pips_map = {uid_pip_key: max(0, min(3, int(raw_pm)))}
+            else:
+                pips_map = {}
+            if uid_pip_key not in pips_map:
+                pips_map[uid_pip_key] = get_starting_encounter_pips(int(acting_char_data.get("level", 1) or 1))
+
+    def _pre_mark_anomalous_hit(m_obj: dict, base_shred: int, atk_attr: str) -> tuple[int, str]:
+        if not is_anom_combat:
+            return 0, "physical"
+        norm_atk_a = normalize_anomalous_attribute(atk_attr, fallback=p_attr)
+        cat_bonus = 0.25 if any("Harmony" in str(s) for s in acting_char_data.get("status_effects", [])) else 0.0
+        shred_val = compute_stability_shred(base_shred, norm_atk_a, p_arch, p_attr, m_obj, catalyst_bonus=cat_bonus)
+        if not m_obj.get("is_breached") and int(m_obj.get("max_stability", 0) or 0) > 0:
+            if int(m_obj.get("stability", 100)) - shred_val <= 0:
+                m_obj["_will_breach_this_hit"] = True
+        if norm_atk_a == "aether":
+            m_obj["_pierce_temp_hp_this_hit"] = True
+        return shred_val, norm_atk_a
+
+    def _post_resolve_anomalous_hit(m_obj: dict, shred_val: int, norm_atk_a: str) -> None:
+        nonlocal turn_hit_landed, turn_triggered_break, turn_extra_pips, total_enemy_damage
+        if not is_anom_combat:
+            return
+        m_obj.pop("_will_breach_this_hit", None)
+        m_obj.pop("_pierce_temp_hp_this_hit", None)
+        turn_hit_landed = True
+        if m_obj.get("hp", 0) <= 0:
+            return
+        atk_power = max(player_attrs.get("matk", 20), player_attrs.get("atk", 20))
+        br_res = apply_stability_and_break(m_obj, shred_val, norm_atk_a, atk_power, combat_log)
+        if br_res["triggered_break"]:
+            m_obj["_breached_this_round"] = True
+            turn_triggered_break = True
+            turn_extra_pips += int(br_res.get("bonus_pips", 0) or 0)
+            if br_res.get("mp_refund", 0) > 0:
+                mp_ref = int(br_res["mp_refund"])
+                acting_char_data["mp"] = min(acting_char_data.get("max_mp", 100), acting_char_data.get("mp", 0) + mp_ref)
+                player_mp_change_by_name[acting_char_name] = player_mp_change_by_name.get(acting_char_name, 0) + mp_ref
+            if br_res.get("squad_heal", 0) > 0:
+                sh_amt = int(br_res["squad_heal"])
+                acting_char_data["hp"] = min(acting_char_data.get("max_hp", 100), acting_char_data.get("hp", 0) + sh_amt)
+                player_heal_by_name[acting_char_name] = player_heal_by_name.get(acting_char_name, 0) + sh_amt
+            other_foes = [f for f in enemies if f is not m_obj and f.get("hp", 0) > 0]
+            if splash := int(br_res.get("aoe_splash_damage", 0) or 0):
+                if other_foes:
+                    for of in other_foes:
+                        _apply_damage_to_enemy(of, splash)
+                        total_enemy_damage += splash
+                    combat_log.append(f"🌪️ **Vacuum Shear (AoE Splash):** Dealt **{splash} damage** to secondary foes!")
+            elif chain := int(br_res.get("chain_damage", 0) or 0):
+                if other_foes:
+                    _apply_damage_to_enemy(other_foes[0], chain)
+                    total_enemy_damage += chain
+                    combat_log.append(f"⚡ **Grid Overload (Chain Arc):** Arced to **{other_foes[0]['name']}** for **{chain} damage**!")
+        elif br_res.get("super_break_damage", 0) > 0:
+            sb = int(br_res["super_break_damage"])
+            _apply_damage_to_enemy(m_obj, sb)
+            total_enemy_damage += sb
 
     # Dynamic target resolver: prioritize requested target entity, then label match, then first living
     req_target = str(action.get("target_entity") or action.get("target_npc") or action.get("target_enemy") or action.get("target") or "").strip().lower()
@@ -514,8 +685,78 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
         enemy_attrs.update({
             "weaknesses": target_enemy.get("weaknesses", []),
             "resistances": target_enemy.get("resistances", []),
-            "immunities": target_enemy.get("immunities", [])
+            "immunities": target_enemy.get("immunities", []),
+            "physicality": target_enemy.get("physicality", "corporeal"),
         })
+
+        # Evaluate Folklore/SCP Taboo interaction on anomalous targets (skip on non-damage containment turns to prevent duplicate trigger)
+        if is_anom_combat and not action.get("incursion_non_damage_turn") and not action.get("is_subdue_contain") and (target_enemy.get("taboo") or isinstance(target_enemy.get("anomaly_blueprint"), dict)):
+            try:
+                from mechanics.world.anomaly_engine import evaluate_taboo_interaction
+                bp_eval = target_enemy.get("anomaly_blueprint") if isinstance(target_enemy.get("anomaly_blueprint"), dict) else {
+                    "name": target_enemy.get("name", "Anomaly"),
+                    "taboo": target_enemy.get("taboo") or {},
+                }
+                act_cat_low = str(action.get("action_category") or "").lower()
+                is_non_attack_tactic = (
+                    c_type in ("DEFENSIVE_GUARD", "DIPLOMACY_TAUNT", "WEAKNESS_EXPLOIT", "EVADE_TACTICAL_FLEE", "STEALTH_VANISH")
+                    or act_cat_low in ("tactics", "flee", "item", "consumable")
+                    or bool(action.get("is_subdue_contain"))
+                    or bool(action.get("is_taboo_exploit"))
+                    or str(action.get("incursion_action") or "").lower() in ("subdue", "combat_persuade", "exploit_taboo", "sever_tether", "folklore_offering_rite")
+                )
+                if is_non_attack_tactic:
+                    elem_eval = str(action.get("element") or "").lower()
+                elif action.get("spell_id"):
+                    from mechanics.combat.spells import get_spell as _get_sp_tb
+                    sp_id_tb = action.get("spell_id")
+                    if action.get("is_basic_strike") or str(sp_id_tb or "").startswith("awk_basic_"):
+                        sp_tb = get_awakened_basic_strike(p_attr, p_med, equipped_weapon=weapon_item)
+                    else:
+                        sp_tb = _get_sp_tb(sp_id_tb)
+                    sp_disc_tb = str((sp_tb or {}).get("discipline") or "attack").lower()
+                    if sp_disc_tb in ("heal", "buff", "support", "shield", "cleanse"):
+                        elem_eval = str(action.get("element") or "").lower()
+                    else:
+                        elem_eval = str(
+                            action.get("element")
+                            or (sp_tb or {}).get("damage_type")
+                            or (sp_tb or {}).get("element")
+                            or ""
+                        ).lower()
+                else:
+                    elem_eval = str(
+                        action.get("element")
+                        or player_weapon.get("anomalous_element")
+                        or p_attr
+                        or ""
+                    ).lower()
+                taboo_res = evaluate_taboo_interaction(
+                    bp_eval,
+                    action=action,
+                    stat_used=stat_name,
+                    element_used=elem_eval,
+                    action_text=str(action.get("label") or ""),
+                )
+                if taboo_res.get("exploited"):
+                    target_enemy["taboo_exploited"] = True
+                    target_enemy["taboo_seal_unlocked"] = True
+                    req_val = max(2, int(req_val) - 3)
+                    enemy_attrs["def"] = max(1, int(enemy_attrs.get("def", 15)) - 6)
+                    enemy_attrs["mdef"] = max(1, int(enemy_attrs.get("mdef", 15)) - 6)
+                    combat_log.append(f"🔓 **Taboo Exploited!** {taboo_res['message']} (**[🛡️ Subdue & Contain]** seal unlocked!)")
+                elif taboo_res.get("violated"):
+                    v_eff = taboo_res.get("violation_effect") or {}
+                    combat_log.append(f"⚠️ **Taboo Violated!** {taboo_res['message']}")
+                    if v_eff.get("type") == "heal_enemy":
+                        h_e = max(4, int(target_enemy.get("max_hp", 80) * 0.12))
+                        target_enemy["hp"] = min(target_enemy.get("max_hp", 80), target_enemy.get("hp", 10) + h_e)
+                    else:
+                        b_dmg = int(v_eff.get("value", 8) or 8)
+                        acting_char_data["hp"] = max(1, acting_char_data.get("hp", 50) - b_dmg)
+                        player_damage_by_name[acting_char_name] = player_damage_by_name.get(acting_char_name, 0) + b_dmg
+            except Exception:
+                pass
         
         # Roll Player Success Tier
         if "check" in action:
@@ -528,8 +769,14 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
             res = resolve_check(actor_stat, req_val, player_luk_val)
             tier = res.tier
 
+        # 0. PRE-RESOLVED ANOMALOUS CONTAINMENT / TETHER / RITE TURN (Non-Damage)
+        if action.get("incursion_non_damage_turn"):
+            combat_log.append(
+                f"🛡️ **{acting_char_name}** focused on containment procedures against **{target_enemy['name']}** without dealing lethal damage!"
+            )
+
         # 1. MAGIC & SPELLS RESOLUTION
-        if (
+        elif (
             c_type in ("MAGIC_SPELL", "MAGIC_ATTACK")
             or action.get("action_category") == "magic"
             or "spell_id" in action
@@ -537,7 +784,10 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
         ):
             spell_id = action.get("spell_id")
             from mechanics.combat.spells import get_spell, calculate_spell_damage
-            spell = get_spell(spell_id) if spell_id else None
+            if is_anom_combat and (action.get("is_basic_strike") or str(spell_id or "").startswith("awk_basic_")):
+                spell = get_awakened_basic_strike(p_attr, p_med, equipped_weapon=weapon_item)
+            else:
+                spell = get_spell(spell_id) if spell_id else None
             
             # Deduct MP
             mp_cost = spell.get("mp_cost", action.get("mp_cost", 0)) if spell else action.get("mp_cost", 0)
@@ -560,6 +810,14 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
 
                 discipline = spell.get("discipline", "attack")
                 target_type = spell.get("target_type", "single")
+                if is_anom_combat:
+                    if spell.get("is_ultimate"):
+                        turn_cast_ultimate = True
+                    if spell.get("resummons_construct") and p_med == "autonomous_construct":
+                        re_c = ensure_autonomous_construct(acting_char_data, living_allies, force_resummon=True, current_npcs=current_npcs)
+                        if re_c and re_c not in active_constructs:
+                            active_constructs.append(re_c)
+                        combat_log.append(f"🤖 **{acting_char_name}** re-deployed **{re_c['name']}** via Heavy Resonance!")
 
                 crit_bonus = spell.get("crit_bonus", 0.0)
                 glance_floor = spell.get("glance_floor", 0.35)
@@ -572,11 +830,18 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                     m_attrs.update({
                         "weaknesses": m.get("weaknesses", []),
                         "resistances": m.get("resistances", []),
-                        "immunities": m.get("immunities", [])
+                        "immunities": m.get("immunities", []),
+                        "physicality": m.get("physicality", "corporeal"),
                     })
+                    sp_dmg_t = str(spell.get("damage_type") or spell.get("source_element") or "magical").lower()
+                    if str(m.get("physicality") or "").lower() == "non_corporeal" and sp_dmg_t in ("physical", "ballistic", "slash", "blunt", "thrust"):
+                        return 0, m_armor, m_attrs
                     elem_mult = get_elemental_multiplier(
-                        {spell.get("damage_type", "magical"): 1.0}, m_armor, m_attrs
+                        {sp_dmg_t: 1.0}, m_armor, m_attrs
                     )
+                    amp_map = player_attrs.get("elemental_amp") or {}
+                    if isinstance(amp_map, dict) and sp_dmg_t in amp_map:
+                        elem_mult *= (1.0 + max(0.0, float(amp_map[sp_dmg_t])))
                     base_dmg = calculate_spell_damage(
                         player_attrs.get("matk", 20), eff_spell, elem_mult,
                         defender_attrs=m_attrs,
@@ -620,7 +885,12 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                                 continue
                             raw_dmg, _, m_attrs = _apply_spell_to_enemy(m)
                             dmg = _resolve_hit_tier(raw_dmg, tier)
+                            _shred_aoe, _attr_aoe = _pre_mark_anomalous_hit(
+                                m, int(spell.get("stability_shred", 20) or 20), spell.get("awakened_attribute") or spell.get("source_element") or p_attr
+                            )
                             _apply_damage_to_enemy(m, dmg)
+                            if dmg > 0:
+                                _post_resolve_anomalous_hit(m, _shred_aoe, _attr_aoe)
                             total_enemy_damage += dmg
                             glance_tag = " *(Glancing blast!)*" if is_glancing else ""
                             if first:
@@ -646,7 +916,12 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                             bounce_mult = (1.0 - decay_rate) ** bounce_idx  # 1.0, 0.75, 0.50
                             raw_dmg, _, m_attrs = _apply_spell_to_enemy(m, damage_mult=bounce_mult)
                             dmg = _resolve_hit_tier(raw_dmg, tier, is_chain_bounce=(bounce_idx > 0))
+                            _shred_ch, _attr_ch = _pre_mark_anomalous_hit(
+                                m, int(spell.get("stability_shred", 20) or 20), spell.get("awakened_attribute") or spell.get("source_element") or p_attr
+                            )
                             _apply_damage_to_enemy(m, dmg)
+                            if dmg > 0:
+                                _post_resolve_anomalous_hit(m, _shred_ch, _attr_ch)
                             total_enemy_damage += dmg
                             if bounce_idx == 0:
                                 combat_log.append(
@@ -663,19 +938,35 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
 
                     # ── SINGLE-TARGET ─────────────────────────────────────────
                     else:
-                        elem_mult = get_elemental_multiplier(
-                            {spell.get("damage_type", "magical"): 1.0}, enemy_armor, enemy_attrs
-                        )
-                        m_dmg = calculate_spell_damage(
-                            player_attrs.get("matk", 20), spell, elem_mult,
-                            defender_attrs=enemy_attrs,
-                            armor_type_dt=enemy_armor.get("type_dt", {}),
-                            armor_base_dt=enemy_armor.get("base_dt", 0)
-                        )
-                        m_dmg = _resolve_hit_tier(m_dmg, tier)
+                        sp_dmg_st = str(spell.get("damage_type") or spell.get("source_element") or "magical").lower()
+                        if str(target_enemy.get("physicality") or "").lower() == "non_corporeal" and sp_dmg_st in ("physical", "ballistic", "slash", "blunt", "thrust"):
+                            m_dmg = 0
+                            combat_log.append(
+                                f"🛡️ **{target_enemy['name']}** is **Non-Corporeal** — physical resonance from **{spell['name']}** phased harmlessly through it (0 damage)!"
+                            )
+                        else:
+                            elem_mult = get_elemental_multiplier(
+                                {sp_dmg_st: 1.0}, enemy_armor, enemy_attrs
+                            )
+                            amp_map_st = player_attrs.get("elemental_amp") or {}
+                            if isinstance(amp_map_st, dict) and sp_dmg_st in amp_map_st:
+                                elem_mult *= (1.0 + max(0.0, float(amp_map_st[sp_dmg_st])))
+                            m_dmg = calculate_spell_damage(
+                                player_attrs.get("matk", 20), eff_spell, elem_mult,
+                                defender_attrs=enemy_attrs,
+                                armor_type_dt=enemy_armor.get("type_dt", {}),
+                                armor_base_dt=enemy_armor.get("base_dt", 0)
+                            )
+                            m_dmg = _resolve_hit_tier(m_dmg, tier)
 
                         if m_dmg > 0:
+                            _shred_st, _attr_st = _pre_mark_anomalous_hit(
+                                target_enemy,
+                                int(spell.get("stability_shred", 20) or 20),
+                                spell.get("attack_attribute") or spell.get("awakened_attribute") or spell.get("source_element") or p_attr,
+                            )
                             _apply_damage_to_enemy(target_enemy, m_dmg)
+                            _post_resolve_anomalous_hit(target_enemy, _shred_st, _attr_st)
                             total_enemy_damage += m_dmg
                             crit_tag = " *(Critical hit!)*" if tier == "crit_success" else ""
                             combat_log.append(
@@ -711,13 +1002,29 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                             combat_log.append(f"✨ **Twinned** echo triggers! **{target_enemy['name']}** struck for **{echo_dmg} damage**!")
 
                     # Cleansing: remove 1 debuff from caster
-                    if "cleansing" in spell_affixes and acting_char_data.get("status_effects"):
+                    if ("cleansing" in spell_affixes or spell.get("cleanses_debuff")) and acting_char_data.get("status_effects"):
                         cleansed = acting_char_data["status_effects"].pop(0)
                         combat_log.append(f"✨ **{acting_char_name}** cleansed **{cleansed}**!")
+                    if is_anom_combat and spell.get("party_temp_hp_shield"):
+                        sh_v = int(spell["party_temp_hp_shield"])
+                        acting_char_data["temp_hp"] = max(int(acting_char_data.get("temp_hp", 0) or 0), sh_v)
+                    if is_anom_combat and p_med == "autonomous_construct" and not spell.get("is_ultimate"):
+                        c_unit = next((c for c in living_allies if c.get("is_autonomous_construct") and c.get("hp", 0) > 0), None)
+                        if c_unit is not None:
+                            c_unit["queued_windup"] = {
+                                "name": f"{spell['name']} Overdrive",
+                                "damage": max(12, int(round(c_unit.get("atk", 15) * 1.35))),
+                                "attr": p_attr,
+                                "_queued_this_round": True,
+                            }
 
 
 
                 elif discipline == "support":
+                    if spell.get("temp_hp_shield"):
+                        acting_char_data["temp_hp"] = max(int(acting_char_data.get("temp_hp", 0) or 0), int(spell["temp_hp_shield"]))
+                    if spell.get("mono_attribute_buff"):
+                        acting_char_data.setdefault("status_effects", []).append(f"Harmony ({spell['mono_attribute_buff'].title()}) [2 turns]")
                     if "heal_amount" in spell:
                         heal_val = int(round(spell["heal_amount"] * emp_mult))
                         if tier == "crit_success":
@@ -900,7 +1207,53 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                 w_str = f"Weaknesses: {', '.join(weak_list)}" if weak_list else "No weaknesses"
                 i_str = f" | Immunities: {', '.join(imm_list)}" if imm_list else ""
                 acting_char_data.setdefault("status_effects", []).append("Weakpoint Analyzed [+15% ACC] [2 turns]")
-                combat_log.append(f"👁️ **{acting_char_name}** scanned **{target_enemy['name']}**! {w_str} | {r_str}{i_str}.")
+                scan_extra = ""
+                if target_enemy.get("taboo") or isinstance(target_enemy.get("anomaly_blueprint"), dict):
+                    target_enemy["dossier_revealed"] = True
+                    if isinstance(target_enemy.get("anomaly_blueprint"), dict):
+                        from mechanics.world.folklore_mechanics import unmask_blueprint_disguise
+                        unmasked_bp, unmask_msg = unmask_blueprint_disguise(target_enemy["anomaly_blueprint"])
+                        unmasked_bp["dossier_revealed"] = True
+                        target_enemy["anomaly_blueprint"] = unmasked_bp
+                        if unmask_msg:
+                            target_enemy["name"] = str(unmasked_bp.get("canonical_name") or unmasked_bp.get("name") or target_enemy["name"])
+                            target_enemy["is_disguised"] = False
+                            scan_extra += f" | {unmask_msg}"
+                        if sess_id_cbt:
+                            try:
+                                db.record_session_anomaly_field_log(int(sess_id_cbt), unmasked_bp, stage="verified")
+                                if unmasked_bp.get("codex_id"):
+                                    db.record_folklore_codex_progress(
+                                        db.get_session_participant_user_ids(int(sess_id_cbt)) or ([acting_user_id] if acting_user_id else []),
+                                        str(unmasked_bp["codex_id"]),
+                                        stage="verified",
+                                    )
+                            except Exception:
+                                pass
+                        # Persist the scan's dossier reveal back to the linked breach / quest so fleeing or
+                        # re-engaging never resets the anomaly to an unrevealed, disguised state.
+                        if sess_id_cbt and (target_enemy.get("incursion_id") or target_enemy.get("breach_id") or target_enemy.get("linked_quest_id")):
+                            try:
+                                from mechanics.world.anomalous_events import reveal_anomaly_dossier
+                                _scan_inc = str(target_enemy.get("incursion_id") or target_enemy.get("breach_id") or "")
+                                reveal_anomaly_dossier(
+                                    session_id=int(sess_id_cbt),
+                                    quest_id=str(target_enemy.get("linked_quest_id") or ""),
+                                    incursion_id=_scan_inc,
+                                    breach_id=_scan_inc,
+                                )
+                            except Exception:
+                                pass
+                    tb_scan = (
+                        target_enemy.get("taboo")
+                        or (target_enemy.get("anomaly_blueprint") or {}).get("taboo")
+                        or {}
+                    )
+                    rule_txt = tb_scan.get("rule_text") or tb_scan.get("taboo_rule") or ""
+                    hint_txt = tb_scan.get("exploit_hint") or tb_scan.get("containment_protocol") or ""
+                    if isinstance(tb_scan, dict) and (rule_txt or hint_txt):
+                        scan_extra += f" | 📜 Taboo: {rule_txt} ({hint_txt})"
+                combat_log.append(f"👁️ **{acting_char_name}** scanned **{target_enemy['name']}**! {w_str} | {r_str}{i_str}.{scan_extra}")
             else:
                 combat_log.append(f"👁️ **{acting_char_name}** scanned **{target_enemy['name']}**, but could not expose a clear weakness.")
 
@@ -967,11 +1320,42 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                         f"🗣️ **{acting_char_name}** attempted to calm **{target_enemy['name']}**, "
                         f"but its agitated resonance lashed back!"
                     )
+            elif (
+                target_enemy.get("is_anomalous_manifestation")
+                and str(target_enemy.get("sapience") or "").lower() in ("instinctual", "non_sapient")
+                and not target_enemy.get("taboo_seal_unlocked")
+            ):
+                combat_log.append(
+                    f"🗣️ **{acting_char_name}** attempted to parley with **{target_enemy['name']}**, "
+                    f"but the {target_enemy.get('sapience', 'non-sapient')} anomaly cannot be reasoned with verbally!"
+                )
+            elif (
+                target_enemy.get("is_anomalous_manifestation")
+                and str(target_enemy.get("sapience") or "").lower() == "compulsive"
+                and not (
+                    target_enemy.get("dossier_revealed")
+                    or (target_enemy.get("anomaly_blueprint") or {}).get("dossier_revealed")
+                    or target_enemy.get("taboo_seal_unlocked")
+                )
+            ):
+                # Pattern-bound anomalies only yield to the verified counter-rite (same gate as containment actions)
+                combat_log.append(
+                    f"🗣️ **{acting_char_name}** tried to talk **{target_enemy['name']}** down, but its compulsive loop "
+                    f"ignores words until its folklore pattern is understood!"
+                )
+            elif _enemy_has_unsealed_tether(target_enemy):
+                combat_log.append(
+                    f"🏺 **{target_enemy['name']}** wavers at **{acting_char_name}**'s words, but its bound vessel keeps "
+                    f"re-anchoring it—seal the tether before it can be contained!"
+                )
             elif tier == "crit_success" or (tier == "success" and enemy_tier_rank <= 3 and enemy_hp_pct <= 0.50):
                 surrendered_enemies.append(target_enemy["name"])
                 fled_enemies.append(target_enemy["name"])
                 target_enemy["hp"] = 0
                 target_enemy["surrendered"] = True
+                if target_enemy.get("is_anomalous_manifestation"):
+                    target_enemy["contained_via_parley"] = True
+                    surrendered_enemy_dicts.append(dict(target_enemy))
                 combat_log.append(
                     f"🏳️ **{acting_char_name}** broke **{target_enemy['name']}**'s will to fight! "
                     f"**{target_enemy['name']}** dropped their weapon and surrendered!"
@@ -1097,7 +1481,12 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
 
             if tier in ("crit_success", "success") and m_dmg > 0:
                 total_enemy_damage += m_dmg
+                _basic_info = get_awakened_basic_strike(p_attr, p_med, equipped_weapon=weapon_item) if is_anom_combat else {}
+                _shred_m, _attr_m = _pre_mark_anomalous_hit(
+                    target_enemy, int(_basic_info.get("stability_shred", 12) or 12), _basic_info.get("attack_attribute", p_attr)
+                )
                 _apply_damage_to_enemy(target_enemy, m_dmg)
+                _post_resolve_anomalous_hit(target_enemy, _shred_m, _attr_m)
 
                 tags_log = []
                 if tactical_res.get("dual_wield") or action_stance == "dual_wield" or action.get("dual_wield"):
@@ -1134,8 +1523,160 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                 acting_char_data.setdefault("status_effects", []).append("Staggered [1 turn]")
                 combat_log.append(f"🛡️ **{target_enemy['name']}**'s heavy tank armor countered the blow! **{acting_char_name}** is Staggered!")
 
-    # --- PHASE 2: FRIENDLY ALLIES (Automated Companions & Party Members) ---
-    living_companions = [a for a in living_allies if a.get("name") != acting_char_name and a.get("hp", 0) > 0]
+        # Anomalous Wearable On-Hit Debuff Procs
+        if is_anom_combat and turn_hit_landed and target_enemy and target_enemy.get("hp", 0) > 0:
+            for db_proc in (anom_passives.get("on_hit_debuffs") or []):
+                if isinstance(db_proc, dict) and db_proc.get("status"):
+                    if random.random() < float(db_proc.get("chance", 0.20)):
+                        try_inflict_status(target_enemy, enemy_attrs, f"{db_proc['status']} [2 turns]", combat_log)
+
+    if is_anom_combat and isinstance(session, dict):
+        pips_map[uid_pip_key] = update_encounter_pips(
+            pips_map.get(uid_pip_key, 0),
+            hit_landed=turn_hit_landed,
+            triggered_break_this_turn=turn_triggered_break,
+            cast_ultimate=turn_cast_ultimate,
+            extra_break_pips=turn_extra_pips,
+        )
+        session["player_resonance_pips"] = pips_map
+
+    # Additional synchronized player actions (co-op sync turns or multi-action batches)
+    for extra_act in (actions[1:] if isinstance(actions, list) and len(actions) > 1 else []):
+        if not isinstance(extra_act, dict):
+            continue
+        living_for_extra = [m for m in enemies if m.get("hp", 0) > 0]
+        if not living_for_extra:
+            break
+        ex_foe = living_for_extra[0]
+        raw_ex_target = extra_act.get("target_enemy") or extra_act.get("combat_target") or extra_act.get("target")
+        if isinstance(raw_ex_target, dict) and raw_ex_target.get("hp", 0) > 0:
+            ex_foe = raw_ex_target
+        elif isinstance(raw_ex_target, str) and raw_ex_target.strip():
+            ex_t_low = raw_ex_target.strip().lower()
+            ex_foe = next((m for m in living_for_extra if str(m.get("name") or "").lower() == ex_t_low), ex_foe)
+        elif isinstance(extra_act.get("target_index"), int) and 0 <= extra_act["target_index"] < len(enemies):
+            cand_foe = enemies[extra_act["target_index"]]
+            if isinstance(cand_foe, dict) and cand_foe.get("hp", 0) > 0:
+                ex_foe = cand_foe
+        ex_char = extra_act.get("char") if isinstance(extra_act.get("char"), dict) else acting_char_data
+        ex_name = ex_char.get("name", acting_char_name)
+        ex_uid = extra_act.get("user_id") or ex_char.get("user_id") or acting_user_id
+        ex_attrs = (
+            calculate_combat_attributes(ex_char, scenario=session.get("scenario", "fantasy") if isinstance(session, dict) else "fantasy")
+            if isinstance(ex_char, dict) and ex_char is not acting_char_data
+            else player_attrs
+        )
+        ex_tier = extra_act.get("tier") or (
+            extra_act["check"].tier if "check" in extra_act and hasattr(extra_act["check"], "tier") else "success"
+        )
+        if ex_tier in ("crit_success", "success"):
+            ex_dmg = max(8, int(ex_attrs.get("atk", 20)))
+            if ex_tier == "crit_success":
+                ex_dmg = int(round(ex_dmg * 1.5))
+            if is_anom_combat:
+                ex_attr = normalize_anomalous_attribute(ex_char.get("attribute") or p_attr, fallback=p_attr)
+                ex_arch = str(ex_char.get("combat_archetype") or p_arch).strip().lower()
+                ex_cat_bonus = 0.25 if any("Harmony" in str(s) for s in ex_char.get("status_effects", [])) else 0.0
+                _sh_ex = compute_stability_shred(12, ex_attr, ex_arch, ex_attr, ex_foe, catalyst_bonus=ex_cat_bonus)
+                if not ex_foe.get("is_breached") and int(ex_foe.get("max_stability", 0) or 0) > 0:
+                    if int(ex_foe.get("stability", 100)) - _sh_ex <= 0:
+                        ex_foe["_will_breach_this_hit"] = True
+                if ex_attr == "aether":
+                    ex_foe["_pierce_temp_hp_this_hit"] = True
+                _apply_damage_to_enemy(ex_foe, ex_dmg)
+                ex_foe.pop("_will_breach_this_hit", None)
+                ex_foe.pop("_pierce_temp_hp_this_hit", None)
+                ex_triggered_break = False
+                ex_extra_pips = 0
+                if ex_foe.get("hp", 0) > 0:
+                    ex_atk_power = max(ex_attrs.get("matk", 20), ex_attrs.get("atk", 20))
+                    ex_br = apply_stability_and_break(ex_foe, _sh_ex, ex_attr, ex_atk_power, combat_log)
+                    if ex_br.get("triggered_break"):
+                        ex_foe["_breached_this_round"] = True
+                        ex_triggered_break = True
+                        ex_extra_pips = int(ex_br.get("bonus_pips", 0) or 0)
+                        if ex_br.get("mp_refund", 0) > 0 and isinstance(ex_char, dict):
+                            mp_ref = int(ex_br["mp_refund"])
+                            ex_char["mp"] = min(ex_char.get("max_mp", 100), ex_char.get("mp", 0) + mp_ref)
+                            player_mp_change_by_name[ex_name] = player_mp_change_by_name.get(ex_name, 0) + mp_ref
+                        if ex_br.get("squad_heal", 0) > 0 and isinstance(ex_char, dict):
+                            sh_amt = int(ex_br["squad_heal"])
+                            ex_char["hp"] = min(ex_char.get("max_hp", 100), ex_char.get("hp", 0) + sh_amt)
+                            player_heal_by_name[ex_name] = player_heal_by_name.get(ex_name, 0) + sh_amt
+                        ex_other_foes = [f for f in enemies if f is not ex_foe and f.get("hp", 0) > 0]
+                        if ex_splash := int(ex_br.get("aoe_splash_damage", 0) or 0):
+                            if ex_other_foes:
+                                for of in ex_other_foes:
+                                    _apply_damage_to_enemy(of, ex_splash)
+                                    total_enemy_damage += ex_splash
+                                combat_log.append(f"🌪️ **Synchronized Vacuum Shear (AoE Splash):** Dealt **{ex_splash} damage** to secondary foes!")
+                        elif ex_chain := int(ex_br.get("chain_damage", 0) or 0):
+                            if ex_other_foes:
+                                _apply_damage_to_enemy(ex_other_foes[0], ex_chain)
+                                total_enemy_damage += ex_chain
+                                combat_log.append(f"⚡ **Synchronized Grid Overload (Chain Arc):** Arced to **{ex_other_foes[0]['name']}** for **{ex_chain} damage**!")
+                    elif ex_br.get("super_break_damage", 0) > 0:
+                        sb = int(ex_br["super_break_damage"])
+                        _apply_damage_to_enemy(ex_foe, sb)
+                        total_enemy_damage += sb
+                ex_pip_key = str(ex_uid or ex_name)
+                pips_map[ex_pip_key] = update_encounter_pips(
+                    pips_map.get(ex_pip_key, 0),
+                    hit_landed=True,
+                    triggered_break_this_turn=ex_triggered_break,
+                    cast_ultimate=False,
+                    extra_break_pips=ex_extra_pips,
+                )
+                if isinstance(session, dict):
+                    session["player_resonance_pips"] = pips_map
+            else:
+                _apply_damage_to_enemy(ex_foe, ex_dmg)
+            total_enemy_damage += ex_dmg
+            combat_log.append(f"⚔️ **{ex_name}** attacked **{ex_foe['name']}**: Dealt **{ex_dmg} damage**.")
+
+    # --- PHASE 2: FRIENDLY ALLIES (Automated Companions, Autonomous Constructs & Party Members) ---
+    if is_anom_combat:
+        for c_unit in [a for a in living_allies if a.get("is_autonomous_construct") and a.get("hp", 0) > 0]:
+            windup = c_unit.get("queued_windup")
+            if not windup:
+                continue
+            if windup.get("_queued_this_round"):
+                windup.pop("_queued_this_round", None)
+                combat_log.append(f"⚙️ **{c_unit['name']}** charges **{windup['name']}** for next turn!")
+                continue
+            engageable_c = [
+                e for e in enemies
+                if e.get("hp", 0) > 0 and not (
+                    e.get("requires_non_lethal_subdue") and (
+                        e.get("is_breached")
+                        or e.get("hp", 100) <= 1
+                        or (e.get("hp", 100) / max(1, e.get("max_hp", 100))) <= float(e.get("subdue_threshold_pct") or 0.35)
+                    )
+                )
+            ]
+            c_unit["queued_windup"] = None
+            if engageable_c:
+                t_foe = engageable_c[0]
+                w_dmg = int(windup.get("damage", 16))
+                _apply_damage_to_enemy(t_foe, w_dmg)
+                total_enemy_damage += w_dmg
+                if t_foe.get("hp", 0) > 0 and int(t_foe.get("max_stability", 0) or 0) > 0:
+                    c_shred = compute_stability_shred(15, str(windup.get("attr") or "aether"), "vanguard", str(windup.get("attr") or "aether"), t_foe)
+                    c_br = apply_stability_and_break(t_foe, c_shred, str(windup.get("attr") or "aether"), w_dmg, combat_log)
+                    if c_br.get("triggered_break"):
+                        t_foe["_breached_this_round"] = True
+                    elif c_br.get("super_break_damage", 0) > 0:
+                        sb = int(c_br["super_break_damage"])
+                        _apply_damage_to_enemy(t_foe, sb)
+                        total_enemy_damage += sb
+                combat_log.append(
+                    f"🤖 **{c_unit['name']}** executed queued **{windup['name']}** on **{t_foe['name']}**: Dealt **{w_dmg} damage**!"
+                )
+
+    living_companions = [
+        a for a in living_allies
+        if a.get("name") != acting_char_name and a.get("hp", 0) > 0 and not a.get("is_autonomous_construct")
+    ]
     for comp in living_companions:
         living_enemies = [m for m in enemies if m.get("hp", 0) > 0]
         if not living_enemies:
@@ -1151,7 +1692,22 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                 combat_log=combat_log,
             )
             continue
-        target_m = random.choice(living_enemies)
+        if is_anom_combat:
+            safe_pool = [
+                e for e in living_enemies
+                if not (
+                    e.get("requires_non_lethal_subdue") and (
+                        e.get("is_breached")
+                        or e.get("hp", 100) <= 1
+                        or (e.get("hp", 100) / max(1, e.get("max_hp", 100))) <= float(e.get("subdue_threshold_pct") or 0.35)
+                    )
+                )
+            ]
+            if not safe_pool:
+                continue
+            target_m = random.choice(safe_pool)
+        else:
+            target_m = random.choice(living_enemies)
         comp_stats = comp.get("stats", {})
         comp_name = comp.get("name", "Companion")
 
@@ -1204,9 +1760,12 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                         combat_log.append(f"🏃💨 **{enemy['name']}**'s morale broke! They dropped their weapon and fled the battlefield!")
                         continue
                         
-            # Check for Crowd-Control Turn Suppression
+            # Check for Crowd-Control Turn Suppression & Fresh Anomalous Breach Stagger
+            if is_anom_combat and enemy.get("is_breached") and enemy.get("_breached_this_round"):
+                combat_log.append(f"⚡ **{enemy['name']}** is **ANOMALY BREACHED** and staggered this turn!")
+                continue
             enemy_effects = [str(s).lower() for s in enemy.get("status_effects", [])]
-            cc_keywords = ("stunned", "staggered", "frozen", "paralyzed", "asleep", "sleep", "surprised")
+            cc_keywords = ("stunned", "staggered", "frozen", "paralyzed", "asleep", "sleep", "surprised", "petrified")
             active_cc = next((s for s in enemy_effects if any(k in s for k in cc_keywords)), None)
             
             if active_cc:
@@ -1232,9 +1791,12 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
 
             visible_targets = [a for a in active_targets if not _is_ally_vanished(a)]
             target_pool = visible_targets if visible_targets else active_targets
+            construct_decoys = [a for a in target_pool if a.get("is_autonomous_construct") and a.get("hp", 0) > 0]
 
-            # Archetype-Aware Targeting (Using normalized _get_entity_stat)
-            if enemy_arch in ("Stalker", "Assassin", "Chrome Cyberhound"):
+            # Archetype-Aware Targeting (with 60% Autonomous Construct decoy aggro draw)
+            if construct_decoys and random.random() < 0.60:
+                chosen_target = construct_decoys[0]
+            elif enemy_arch in ("Stalker", "Assassin", "Chrome Cyberhound"):
                 chosen_target = min(target_pool, key=lambda t: t.get("hp", 100))
             elif enemy_arch in ("Caster", "Psionic Alien", "Netrunner Spec-Op"):
                 # Caster targets lowest LUK
@@ -1438,6 +2000,18 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                             intent_note = " *(Telegraphed Ambush!)*"
                     combat_log.append(f"💥 **{enemy['name']}** attacked **{target_name}**: Dealt **{e_dmg} damage**{intent_note}.")
 
+                    # Reactive Anomalous Wearable On-Hit / Retaliation Debuff Procs
+                    if is_anom_combat and e_dmg > 0 and enemy.get("hp", 0) > 0 and target_attrs.get("on_hit_debuffs"):
+                        for _r_deb in (target_attrs.get("on_hit_debuffs") or []):
+                            if isinstance(_r_deb, dict) and random.random() < float(_r_deb.get("proc_chance", 0.0) or 0.0):
+                                _r_ail = str(_r_deb.get("ailment") or "Staggered")
+                                _r_eff_str = f"{_r_ail} [2 turns]"
+                                if not any(_r_ail.lower() in str(s).lower() for s in enemy.get("status_effects", [])):
+                                    enemy.setdefault("status_effects", []).append(_r_eff_str)
+                                    combat_log.append(
+                                        f"⚡ **Anomalous Retaliation Ward:** **{target_name}**'s gear inflicted **{_r_ail}** on **{enemy['name']}**!"
+                                    )
+
                     # Temporary cosmetic garment degradation if fighting unarmored
                     has_combat_armor = bool(t_equipped.get("Armor")) or (target_attrs.get("base_dt", 0) > 2)
                     if not has_combat_armor:
@@ -1577,6 +2151,18 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                 else:
                     pass # Fled from fight (or contained via anomalous parley), no generic combat loot.
             elif m.get("hp", 0) <= 0:
+                if is_anom_combat and m["name"] not in dead_enemies:
+                    from mechanics.world.folklore_mechanics import get_enemy_tether_state, try_resolve_zero_hp_tether
+                    if get_enemy_tether_state(m):
+                        teth_res = try_resolve_zero_hp_tether(m)
+                        if teth_res.get("outcome") == "reformed":
+                            combat_log.append(teth_res["message"])
+                            surviving_enemies.append(m)
+                            continue
+                        elif teth_res.get("outcome") == "unsealed_dispersion":
+                            m["xp_multiplier"] = round(float(m.get("xp_multiplier", 1.0)) * float(teth_res.get("xp_mult", 0.60)), 2)
+                            m["prevent_vault_capture"] = True
+                            combat_log.append(teth_res["message"])
                 if m["name"] not in dead_enemies:
                     dead_enemies.append(m["name"])
                     dead_enemy_dicts.append(dict(m))
@@ -1621,8 +2207,42 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                 intents = ["Preparing to swarm", "Multiplying rapidly"]
             m["intent"] = random.choice(intents)
 
+    if is_anom_combat:
+        for _sm in surviving_enemies:
+            if _sm.get("_breached_this_round"):
+                _sm.pop("_breached_this_round", None)
+            elif _sm.get("is_breached"):
+                tick_enemy_breach_recovery(_sm, combat_log)
+        if surviving_enemies and not fled_battle and anom_passives:
+            reg_pct = float(anom_passives.get("turn_regen_pct", 0.0) or 0.0)
+            if reg_pct > 0 and acting_char_data.get("hp", 0) > 0:
+                reg_hp = max(1, int(round(acting_char_data.get("max_hp", 100) * reg_pct)))
+                reg_mp = max(1, int(round(acting_char_data.get("max_mp", 50) * reg_pct)))
+                acting_char_data["hp"] = min(acting_char_data.get("max_hp", 100), acting_char_data.get("hp", 1) + reg_hp)
+                acting_char_data["mp"] = min(acting_char_data.get("max_mp", 50), acting_char_data.get("mp", 0) + reg_mp)
+                player_heal_by_name[acting_char_name] = player_heal_by_name.get(acting_char_name, 0) + reg_hp
+                combat_log.append(f"✨ **Anomalous Vitality Pulse:** Restored **+{reg_hp} HP** and **+{reg_mp} MP**.")
+            curse_drain = int(anom_passives.get("cursed_hp_drain_per_turn", 0) or 0)
+            if curse_drain > 0 and acting_char_data.get("hp", 0) > 1:
+                actual_drain = min(acting_char_data.get("hp", 1) - 1, curse_drain)
+                if actual_drain > 0:
+                    acting_char_data["hp"] -= actual_drain
+                    player_damage_by_name[acting_char_name] = player_damage_by_name.get(acting_char_name, 0) + actual_drain
+                    combat_log.append(f"🩸 **Cursed Relic Drain:** Parasitic resonance drained **-{actual_drain} HP**.")
+
     session["nearby_enemies"] = surviving_enemies
     session["current_npcs"] = current_npcs
+    if is_anom_combat and isinstance(session, dict):
+        if not surviving_enemies or fled_battle:
+            cleanup_anomalous_combat_session_state(session)
+        else:
+            for c_alive in living_allies:
+                if isinstance(c_alive, dict) and c_alive.get("is_autonomous_construct") and c_alive not in current_npcs:
+                    current_npcs.append(c_alive)
+            session["current_npcs"] = current_npcs
+            session["_active_constructs"] = [
+                c for c in living_allies if c.get("is_autonomous_construct")
+            ]
 
     if active_party_npcs and isinstance(session, dict):
         combat_over = bool(not surviving_enemies or fled_battle)
@@ -1710,8 +2330,75 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
         "attackers_against_player": attackers_against_player,
         "acting_char_name": acting_char_name,
         "player_stats": acting_char_data,
-        "current_npcs": current_npcs
+        "current_npcs": current_npcs,
+        "player_resonance_pips": session.get("player_resonance_pips", {}) if isinstance(session, dict) else {},
     }
+
+
+def _enemy_has_unsealed_tether(enemy: dict) -> bool:
+    """True when an anomaly is still anchored by an unsealed Vessel Tether (no Vault capture until sealed)."""
+    if not isinstance(enemy, dict) or enemy.get("tether_sealed") or enemy.get("taboo_exploited"):
+        return False
+    try:
+        from mechanics.world.folklore_mechanics import get_enemy_tether_state
+        ts = get_enemy_tether_state(enemy)
+    except Exception:
+        return False
+    return bool(ts and not ts.get("sealed"))
+
+
+def _record_non_incursion_anomaly_kills(session: dict, party: Optional[list], dead_dicts: list) -> None:
+    """
+    Records Folklore Codex / field-log / retirement progress for hostile anomalies defeated in combat that are
+    NOT tied to a Daily Breach (handled by `mark_hostile_incursion_resolved_on_victory`) and NOT objects
+    (handled by `handle_secured_object_anomaly_conversion`). Unsealed tether dispersals only count as a sighting.
+    """
+    sess_id = int(session.get("id") or 0)
+    if not sess_id:
+        return
+    party_uids = [
+        int(p[0]["user_id"])
+        for p in (party or [])
+        if p and isinstance(p[0], dict) and p[0].get("user_id")
+    ]
+    for d in (dead_dicts or []):
+        if not isinstance(d, dict) or d.get("requires_non_lethal_subdue"):
+            continue
+        if d.get("incursion_id") or d.get("breach_id"):
+            continue
+        bp = d.get("anomaly_blueprint") if isinstance(d.get("anomaly_blueprint"), dict) else {}
+        if not bp or str(d.get("anomaly_type") or bp.get("type") or "").lower() == "object":
+            continue
+        if not (bp.get("blueprint_id") or bp.get("codex_id")):
+            continue
+        dispersed = bool(d.get("prevent_vault_capture") or d.get("tether_dispersed_unsealed"))
+        stage = "sighted" if dispersed else "contained"
+        try:
+            db.record_session_anomaly_field_log(
+                sess_id,
+                bp,
+                stage=stage,
+                location=str(session.get("current_location") or ""),
+                resolution_method="Neutralized in Combat" if not dispersed else "Dispersed (Unsealed Tether)",
+            )
+            codex_id = str(bp.get("codex_id") or "")
+            if codex_id:
+                p_uids = db.get_session_participant_user_ids(sess_id)
+                for u in party_uids:
+                    if u not in p_uids:
+                        p_uids.append(u)
+                db.record_folklore_codex_progress(p_uids, codex_id, stage=stage)
+                if not dispersed:
+                    db.retire_or_cooldown_folklore_in_session(
+                        sess_id,
+                        codex_id,
+                        uniqueness=str(bp.get("uniqueness") or "species"),
+                        current_day=int(session.get("current_day") or 1),
+                        cooldown_days=int(bp.get("cooldown_days") or 4),
+                    )
+        except Exception as rec_err:  # noqa: BLE001 - codex bookkeeping must never break combat reconciliation
+            import logging
+            logging.getLogger(__name__).warning("Folklore codex kill record failed for %s: %s", d.get("name"), rec_err)
 
 
 def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict, party: list = None) -> dict:
@@ -1724,10 +2411,17 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
     elif "choices" in llm_outcome and "next_choices" not in llm_outcome:
         llm_outcome["next_choices"] = llm_outcome["choices"]
 
-    # Session enemies and NPCs were already mutated by precompute_combat_turn
+    # Session enemies, NPCs, and Resonance Pips were mutated by precompute_combat_turn (or passed in precomputed)
+    if isinstance(precomputed, dict):
+        if "surviving_enemies" in precomputed:
+            session["nearby_enemies"] = precomputed["surviving_enemies"]
+        if "player_resonance_pips" in precomputed:
+            session["player_resonance_pips"] = precomputed["player_resonance_pips"]
     enemies = session.get("nearby_enemies", [])
     llm_outcome["nearby_enemies"] = enemies
     llm_outcome["npcs_present"] = session.get("current_npcs", [])
+    if "player_resonance_pips" in session:
+        llm_outcome["player_resonance_pips"] = session["player_resonance_pips"]
 
     if isinstance(precomputed, list):
         actions = precomputed
@@ -1864,6 +2558,17 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
                     parley_contained_messages.append(
                         f"🗣️ Contained **{p_name}** alive via combat de-escalation and logged to {v_fac}!"
                     )
+                elif p_ent.get("is_anomalous_manifestation"):
+                    from mechanics.world.anomalous_events import resolve_anomalous_combat_containment
+                    c_res = resolve_anomalous_combat_containment(
+                        session_id=sess_id_int,
+                        target_enemy=p_ent,
+                        user_id=lead_uid,
+                        party_user_ids=party_uids_rec or ([lead_uid] if lead_uid else []),
+                        resolution_method="Live Capture (Mid-Combat Parley)",
+                    )
+                    if c_res and c_res.get("message"):
+                        parley_contained_messages.append(str(c_res["message"]))
         except Exception:
             pass
 
@@ -1929,21 +2634,53 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
                             llm_outcome["_combat_resolved_notice"] += f"\n🔍 **Evidence Recovered:** {_ev_res['title']}"
         except Exception:
             pass
-        # Resolve any linked Hostile Daily Anomalous Incursion (excluding killed non-hostile entities)
+        # Resolve any linked Hostile Daily Anomaly Breach (excluding killed non-hostile entities)
         try:
             dead_dicts = precomputed.get("dead_enemy_dicts") or []
-            inc_ids = {
-                str(d.get("incursion_id"))
-                for d in dead_dicts
-                if isinstance(d, dict) and d.get("incursion_id") and not d.get("requires_non_lethal_subdue")
-            }
-            if inc_ids and isinstance(session, dict) and session.get("id"):
+            inc_map = {}
+            for d in dead_dicts:
+                if isinstance(d, dict) and (d.get("incursion_id") or d.get("breach_id")) and not d.get("requires_non_lethal_subdue"):
+                    iid = str(d.get("incursion_id") or d.get("breach_id"))
+                    inc_map[iid] = bool(d.get("prevent_vault_capture") or d.get("tether_dispersed_unsealed"))
+            if inc_map and isinstance(session, dict) and session.get("id"):
                 from mechanics.world.anomalous_events import mark_hostile_incursion_resolved_on_victory
                 lead_uid_inc = party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else session.get("host_user_id")
-                for inc_id_done in inc_ids:
-                    inc_done_res = mark_hostile_incursion_resolved_on_victory(int(session["id"]), inc_id_done, user_id=lead_uid_inc)
+                for inc_id_done, skip_vault in inc_map.items():
+                    inc_done_res = mark_hostile_incursion_resolved_on_victory(
+                        int(session["id"]),
+                        inc_id_done,
+                        user_id=lead_uid_inc,
+                        prevent_vault_capture=skip_vault,
+                    )
                     if inc_done_res and inc_done_res.get("message"):
                         llm_outcome["_combat_resolved_notice"] += f"\n{inc_done_res['message']}"
+            if isinstance(session, dict) and session.get("id"):
+                from mechanics.world.anomalous_events import handle_secured_object_anomaly_conversion
+                lead_uid_obj = party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else session.get("host_user_id")
+                scen_obj = str(session.get("scenario") or "anomalous_incursions")
+                for d_obj in dead_dicts:
+                    if not isinstance(d_obj, dict) or d_obj.get("requires_non_lethal_subdue"):
+                        continue
+                    if d_obj.get("incursion_id") or d_obj.get("breach_id"):
+                        continue
+                    if d_obj.get("prevent_vault_capture") or d_obj.get("tether_dispersed_unsealed"):
+                        continue
+                    bp_obj = d_obj.get("anomaly_blueprint") if isinstance(d_obj.get("anomaly_blueprint"), dict) else {}
+                    a_type_obj = str(d_obj.get("anomaly_type") or bp_obj.get("type") or "").lower()
+                    if a_type_obj == "object":
+                        conv_out = handle_secured_object_anomaly_conversion(
+                            session_id=int(session["id"]),
+                            user_id=lead_uid_obj,
+                            blueprint=bp_obj or {"name": d_obj.get("name", "Anomalous Object"), "type": "object", "form": d_obj.get("anomaly_form", "impossible_weapon_relic"), "primary_element": d_obj.get("primary_element", "aether")},
+                            scen_key=scen_obj,
+                            entity_name=str(d_obj.get("name") or "Anomalous Object"),
+                        )
+                        if conv_out and conv_out.get("notice"):
+                            llm_outcome["_combat_resolved_notice"] += f"\n{conv_out['notice']}"
+            # Non-incursion hostile folklore kills (quest/bounty climax bosses, wild encounters) still update the
+            # session field log, account-wide Folklore Codex (party credit), and singular retirement / species cooldown.
+            if isinstance(session, dict) and session.get("id"):
+                _record_non_incursion_anomaly_kills(session, party, dead_dicts)
         except Exception:
             pass
 
@@ -1985,27 +2722,32 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
                     c["label"] = f"{lbl} (Alternate Approach)"
                 seen_labels.add(c["label"])
 
-        # Inject Non-Lethal Persuade/Calm (always) & Subdue & Contain (<= 35% HP) for agitated non-hostile entities
+        # Inject Non-Lethal Persuade/Calm & Subdue & Contain for agitated non-hostile entities AND Born-Hostile Anomalies
         for e_sub in enemies:
-            if isinstance(e_sub, dict) and e_sub.get("requires_non_lethal_subdue") and int(e_sub.get("hp", 0) or 0) > 0:
+            if isinstance(e_sub, dict) and (e_sub.get("requires_non_lethal_subdue") or e_sub.get("is_anomalous_manifestation")) and int(e_sub.get("hp", 0) or 0) > 0:
                 e_hp = int(e_sub.get("hp", 10) or 10)
                 e_max = max(1, int(e_sub.get("max_hp", 40) or 40))
-                sub_pct = float(e_sub.get("subdue_threshold_pct") or 0.35)
+                e_sap = str(e_sub.get("sapience") or "").strip().lower()
+                is_born_h = bool(not e_sub.get("requires_non_lethal_subdue") and e_sub.get("is_anomalous_manifestation"))
+                default_sub_pct = 0.50 if (is_born_h and e_sap == "instinctual") else 0.35
+                sub_pct = float(e_sub.get("subdue_threshold_pct") or default_sub_pct)
                 ent_disp = e_sub.get("name", "Entity")
-                persuade_dc = 6 if e_hp <= max(1, int(e_max * 0.50)) else 8
-                persuade_lbl = f"🗣️ Persuade / Calm {ent_disp} (De-escalate)"
-                if not any(persuade_lbl.lower() in str(ch.get("label", "")).lower() for ch in llm_choices if isinstance(ch, dict)):
-                    llm_choices.insert(0, {
-                        "label": persuade_lbl,
-                        "stat": "CHA",
-                        "requirement": persuade_dc,
-                        "mp_cost": 0,
-                        "intent": "anomalous_incursion_action",
-                        "incursion_action": "combat_persuade",
-                        "incursion_id": e_sub.get("incursion_id", ""),
-                        "quest_id": e_sub.get("linked_quest_id", ""),
-                    })
-                if e_hp <= max(1, int(e_max * sub_pct)):
+                can_persuade = bool(e_sub.get("requires_non_lethal_subdue") or e_sap == "sapient")
+                if can_persuade:
+                    persuade_dc = 6 if (e_hp <= max(1, int(e_max * 0.50)) or bool(e_sub.get("taboo_exploited"))) else 8
+                    persuade_lbl = f"🗣️ Persuade / Calm {ent_disp} (De-escalate)"
+                    if not any(persuade_lbl.lower() in str(ch.get("label", "")).lower() for ch in llm_choices if isinstance(ch, dict)):
+                        llm_choices.insert(0, {
+                            "label": persuade_lbl,
+                            "stat": "CHA",
+                            "requirement": persuade_dc,
+                            "mp_cost": 0,
+                            "intent": "anomalous_incursion_action",
+                            "incursion_action": "combat_persuade",
+                            "incursion_id": e_sub.get("incursion_id", ""),
+                            "quest_id": e_sub.get("linked_quest_id", ""),
+                        })
+                if e_hp <= max(1, int(e_max * sub_pct)) or bool(e_sub.get("is_breached")) or bool(e_sub.get("taboo_exploited")):
                     subdue_lbl = f"🛡️ Subdue & Contain {ent_disp}"
                     if not any(subdue_lbl.lower() in str(ch.get("label", "")).lower() for ch in llm_choices if isinstance(ch, dict)):
                         llm_choices.insert(0, {
@@ -2018,6 +2760,51 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
                             "incursion_id": e_sub.get("incursion_id", ""),
                             "quest_id": e_sub.get("linked_quest_id", ""),
                         })
+                # Inject Folklore Vessel/Master Tether Seal & Offering Counter-Rite when applicable
+                try:
+                    from mechanics.world.folklore_mechanics import (
+                        find_matching_offering_in_inventory,
+                        get_enemy_tether_state,
+                    )
+                    ts_cbt = get_enemy_tether_state(e_sub)
+                    if ts_cbt and not ts_cbt.get("sealed") and not e_sub.get("tether_sealed"):
+                        bp_e = e_sub.get("anomaly_blueprint") if isinstance(e_sub.get("anomaly_blueprint"), dict) else {}
+                        if (
+                            e_sub.get("tether_reformed_once")
+                            or ts_cbt.get("reformed_once")
+                            or e_sub.get("dossier_revealed")
+                            or bp_e.get("dossier_revealed")
+                        ):
+                            vessel_nm = str(ts_cbt.get("vessel_name") or "Binding Vessel")
+                            sever_lbl = f"🏺 Sever/Seal {vessel_nm} ({ent_disp})"
+                            if not any(sever_lbl.lower() in str(ch.get("label", "")).lower() for ch in llm_choices if isinstance(ch, dict)):
+                                llm_choices.insert(0, {
+                                    "label": sever_lbl,
+                                    "stat": str(ts_cbt.get("sever_stat") or "INT"),
+                                    "requirement": 7,
+                                    "mp_cost": 0,
+                                    "intent": "anomalous_incursion_action",
+                                    "incursion_action": "sever_tether",
+                                    "incursion_id": e_sub.get("incursion_id", ""),
+                                    "quest_id": e_sub.get("linked_quest_id", ""),
+                                })
+                    off_match = find_matching_offering_in_inventory(lead_uid, e_sub.get("anomaly_blueprint"))
+                    if off_match:
+                        off_lbl = f"🎁 Folklore Counter-Rite: Present {off_match['item_name']} ({ent_disp})"
+                        if not any(off_lbl.lower() in str(ch.get("label", "")).lower() for ch in llm_choices if isinstance(ch, dict)):
+                            llm_choices.insert(0, {
+                                "label": off_lbl,
+                                "stat": "INT",
+                                "requirement": 5,
+                                "mp_cost": 0,
+                                "intent": "anomalous_incursion_action",
+                                "incursion_action": "folklore_offering_rite",
+                                "offering_item_name": off_match["item_name"],
+                                "incursion_id": e_sub.get("incursion_id", ""),
+                                "quest_id": e_sub.get("linked_quest_id", ""),
+                            })
+                except Exception:
+                    pass
                 llm_outcome["next_choices"] = llm_choices
                 llm_outcome["choices"] = llm_choices
 
@@ -2308,6 +3095,25 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
         db.set_session_party_npcs(session_id, updated_npcs)
 
     return llm_outcome
+
+
+def cleanup_anomalous_combat_session_state(session: dict) -> None:
+    """Purges autonomous constructs, summons, resonance pips, and vanished stealth states when combat ends or is subdued."""
+    if not isinstance(session, dict):
+        return
+    session["_active_constructs"] = []
+    session.pop("_construct_initialized_this_combat", None)
+    session["player_resonance_pips"] = {}
+    session["current_npcs"] = [
+        n for n in session.get("current_npcs", [])
+        if not (isinstance(n, dict) and (n.get("is_summon") or n.get("is_autonomous_construct")))
+    ]
+    try:
+        from mechanics.combat.stealth_tether import clear_all_combat_vanished
+        clear_all_combat_vanished(session)
+    except Exception:
+        pass
+
 
 
 

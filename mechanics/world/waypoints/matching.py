@@ -571,8 +571,14 @@ def does_action_target_waypoint(
     waypoint = db.get_active_waypoint(session_id, quest_id, sub_obj_id)
     if not waypoint:
         return None
+    is_rumor_inq_act = (
+        is_quest_action
+        and str(quest_id).startswith(("MNR-", "RMR-"))
+        and (str(action_quest_id) == str(quest_id))
+    )
     if waypoint.get("completion_trigger") not in ("skill_check", "inspect_prop", "talk_to_npc", "resource_progress", "defeat_target", "action"):
-        return None
+        if not is_rumor_inq_act:
+            return None
     target_node = waypoint.get("target_node_id")
     target_loc = resolve_effective_waypoint_location(session_id, waypoint)
     static_target_loc = waypoint.get("static_target_location") or waypoint.get("target_location", "")
@@ -598,6 +604,8 @@ def does_action_target_waypoint(
     if not matched and static_target_loc:
         matched = check_location_matches_waypoint(current_location, static_target_loc)
     if not matched and target_npc and can_waypoint_match_via_npc_presence(target_npc, waypoint=waypoint) and is_waypoint_npc_present_in_scene(session_id, target_npc):
+        matched = True
+    elif not matched and is_rumor_inq_act:
         matched = True
     elif not matched and not curr_node and not target_loc and not target_npc:
         matched = True

@@ -105,7 +105,21 @@ def handle_faction_leadership_changed(event: FactionLeadershipChangedEvent):
     db.update_session(event.session_id, extra={"pending_promotion": None})
 
 def handle_quest_completed(event: QuestCompletedEvent):
+    if not getattr(event, "persist_db", True):
+        event.result = {"claimed": False, "dry_run": True}
+        return
     event.result = db.claim_quest_reward(event.session_id, event.quest_id, event.party_uids)
+    if event.result and event.result.get("claimed"):
+        try:
+            from mechanics.world.world_events import on_quest_or_bounty_completed
+            on_quest_or_bounty_completed(
+                event.session_id,
+                event.quest_id,
+                quest_type=str(event.result.get("quest_type") or "bounty"),
+                is_story_quest=bool(event.result.get("is_story_quest")),
+            )
+        except Exception as e:
+            log.warning(f"Error handling world event completion for quest {event.quest_id}: {e}")
 
 # Register Handlers
 bus.subscribe(LocationChangedEvent, handle_location_changed)

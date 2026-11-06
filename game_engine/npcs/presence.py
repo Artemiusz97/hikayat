@@ -247,7 +247,7 @@ def has_implied_hostile_combat_prose(narrative_text: str, entity_name: str = "")
         return False
     # Strip spoken dialogue quotes and system callout banners
     unquoted = re.sub(r'["\u201c][^\n"\u201d]*["\u201d]', " ", str(narrative_text))
-    unquoted = re.sub(r"🌀\s*\*\*\[ACTIVE ANOMALOUS INCURSION.*$", "", unquoted, flags=re.MULTILINE)
+    unquoted = re.sub(r"🌀\s*\*\*\[ACTIVE (?:ANOMALY BREACH|ANOMALOUS INCURSION).*$", "", unquoted, flags=re.MULTILINE)
     unquoted = re.sub(r"🕊️\s*\*\*\[NON-HOSTILE ENTITY ENCOUNTER\].*$", "", unquoted, flags=re.MULTILINE)
 
     for m in _IMPLIED_COMBAT_ATTACK_RE.finditer(unquoted):
@@ -276,19 +276,33 @@ def _is_explicit_player_attack_action(actions: list | None) -> bool:
     """Returns True if the player's action explicitly initiates a physical/combat attack."""
     if not actions or not isinstance(actions, list):
         return False
-    peaceful_markers = ("persuade", "calm", "outwit", "use environment", "pacify", "subdue", "analyze", "de-escalate")
-    attack_verbs = ("attack", "strike", "slash", "shoot", "open fire", "engage anomalous breach", "ambush", "assault")
+    peaceful_markers = (
+        "persuade", "calm", "outwit", "use environment", "pacify", "subdue",
+        "analyze", "de-escalate", "folklore_offering_rite", "folklore counter-rite",
+        "riddle trap", "folklore evasion", "sever/seal", "study ",
+    )
+    attack_verbs = ("attack", "strike", "slash", "shoot", "open fire", "engage anomaly breach", "engage anomalous breach", "ambush", "assault")
+    non_attack_strike_idioms = ("strike up", "strike a match", "strike a deal", "strike a pose", "strike a bargain", "strike out")
     for a in actions:
         if not isinstance(a, dict):
             continue
         intent = str(a.get("intent") or "").strip().lower()
         inc_act = str(a.get("incursion_action") or "").strip().lower()
         lbl = str(a.get("label") or a.get("action") or a.get("text") or "").strip().lower()
-        if any(pm in lbl for pm in peaceful_markers) or inc_act in ("persuade", "calm", "outwit", "environment", "pacify", "subdue", "combat_persuade", "analyze", "seal_ability"):
+        if any(pm in lbl for pm in peaceful_markers) or inc_act in (
+            "persuade", "calm", "outwit", "environment", "pacify", "subdue",
+            "combat_persuade", "analyze", "seal_ability", "folklore_offering_rite",
+            "sever_tether", "reveal_dossier", "converse", "study_pattern",
+            "anomaly_inquiry", "question_trap_yes", "question_trap_no", "question_trap_evasive",
+        ):
             continue
         if intent in ("attack", "combat_attack") or inc_act == "attack":
             return True
-        if any( re.search(rf"\b{re.escape(av)}\b", lbl) for av in attack_verbs ):
+        lbl_eval = lbl
+        for idiom in non_attack_strike_idioms:
+            if idiom in lbl_eval:
+                lbl_eval = lbl_eval.replace(idiom, " ")
+        if any(re.search(rf"\b{re.escape(av)}\b", lbl_eval) for av in attack_verbs):
             return True
     return False
 
@@ -350,7 +364,7 @@ def reconcile_implied_hostile_encounter(
         if not active_inc:
             loc_low = eff_loc.lower()
             nid_low = eff_nid.lower()
-            for inc in (session.get("daily_incursions") or []):
+            for inc in (session.get("daily_incursions") or session.get("daily_breaches") or []):
                 if not isinstance(inc, dict) or inc.get("resolved"):
                     continue
                 inc_nid = str(inc.get("node_id") or "").strip().lower()
@@ -367,24 +381,37 @@ def reconcile_implied_hostile_encounter(
             cat_tag = str(active_inc.get("category_tag") or "spatial_warp")
 
             if subtype == "hostile_breach" and (prose_has_attack or player_attacked or has_implied_hostile_combat_prose(combined_nar, ent_name)):
-                enemy_obj = generate_scenario_enemy(
-                    scenario=scen_key,
-                    location=eff_loc or active_inc.get("location", "City"),
-                    chapter=int(session.get("current_chapter", session.get("chapter", 1)) or 1),
-                    custom_name=ent_name,
-                    custom_archetype="Spatial Stalker" if cat_tag == "spatial_warp" else "Cognitohazard Caster",
-                    exact_tier=3,
-                )
+                chap_lvl = max(1, int(session.get("current_chapter", session.get("chapter", 1)) or 1))
+                if isinstance(active_inc.get("anomaly_blueprint"), dict):
+                    from mechanics.world.anomaly_engine import instantiate_enemy_from_blueprint
+                    enemy_obj = instantiate_enemy_from_blueprint(
+                        active_inc["anomaly_blueprint"],
+                        level=chap_lvl,
+                        tier_rank=3,
+                        incursion_id=inc_id,
+                    )
+                    if ent_name and not active_inc["anomaly_blueprint"].get("codex_id"):
+                        enemy_obj["name"] = ent_name
+                else:
+                    enemy_obj = generate_scenario_enemy(
+                        scenario=scen_key,
+                        location=eff_loc or active_inc.get("location", "City"),
+                        chapter=chap_lvl,
+                        custom_name=ent_name,
+                        custom_archetype="Spatial Stalker" if cat_tag == "spatial_warp" else "Cognitohazard Caster",
+                        exact_tier=3,
+                    )
                 enemy_obj["incursion_id"] = inc_id
+                enemy_obj["breach_id"] = inc_id
                 enemies = [enemy_obj]
                 session["nearby_enemies"] = enemies
                 result["nearby_enemies"] = enemies
-                for inc in (session.get("daily_incursions") or []):
+                for inc in (session.get("daily_incursions") or session.get("daily_breaches") or []):
                     if isinstance(inc, dict) and inc.get("incursion_id") == inc_id:
                         inc["agitated"] = True
                 if sid_int:
                     try:
-                        db.update_session(sid_int, nearby_enemies=enemies, extra={"daily_incursions": session.get("daily_incursions") or []})
+                        db.update_session(sid_int, nearby_enemies=enemies, extra={"daily_incursions": session.get("daily_incursions") or [], "daily_breaches": session.get("daily_incursions") or []})
                     except Exception:
                         pass
                 return result
@@ -392,17 +419,23 @@ def reconcile_implied_hostile_encounter(
             if subtype == "non_hostile_entity":
                 strikes = int(active_inc.get("strikes", 0) or 0)
                 max_strikes = int(active_inc.get("max_strikes", 2) or 2)
-                if player_attacked or strikes >= max_strikes:
+                temp_inc = str(
+                    active_inc.get("temperament")
+                    or ((active_inc.get("anomaly_blueprint") or {}).get("temperament") if isinstance(active_inc.get("anomaly_blueprint"), dict) else "")
+                    or "volatile"
+                ).strip().lower()
+                if player_attacked or (strikes >= max_strikes and temp_inc == "volatile"):
                     spawn_agitated_non_hostile_entity(
                         session_id=sid_int,
                         entity_name=ent_name,
                         location=eff_loc or active_inc.get("location", "City"),
                         category_tag=cat_tag,
                         incursion_id=inc_id,
+                        breach_id=inc_id,
                         session=session,
                     )
                     result["nearby_enemies"] = list(session.get("nearby_enemies") or [])
-                    for inc in (session.get("daily_incursions") or []):
+                    for inc in (session.get("daily_incursions") or session.get("daily_breaches") or []):
                         if isinstance(inc, dict) and inc.get("incursion_id") == inc_id:
                             inc["agitated"] = True
                     return result
@@ -448,7 +481,16 @@ def reconcile_implied_hostile_encounter(
                     all_wps = db.get_quest_waypoints(sid_int, qid, so_id) or []
                     if is_non_hostile_entity_containment_waypoint(wp, all_wps=all_wps, sub_obj=so_dict, quest=q):
                         q_strikes = int(q.get("strikes", 0) or 0)
-                        if player_attacked or q_strikes >= 2:
+                        q_max_strikes = int(q.get("max_strikes", 2) or 2)
+                        temp_q = "volatile"
+                        try:
+                            from mechanics.world.anomalous_events import _extract_quest_anomaly_blueprint
+                            _bp_q_chk = _extract_quest_anomaly_blueprint(q, sub_obj=so_dict)
+                            if isinstance(_bp_q_chk, dict) and _bp_q_chk.get("temperament"):
+                                temp_q = str(_bp_q_chk["temperament"]).strip().lower()
+                        except Exception:
+                            pass
+                        if player_attacked or (q_strikes >= q_max_strikes and temp_q == "volatile"):
                             ent_nm_q = extract_non_hostile_entity_name(wp, sub_obj=so_dict)
                             spawn_agitated_non_hostile_entity(
                                 session_id=sid_int,
@@ -1063,6 +1105,19 @@ def _distribute_fallback_locations(session_id: int, scen_key: str, sub_waypoints
                 else:
                     prim = t_loc.strip()
                 if prim:
-                    wp["stage_label"] = f"Travel to and scout {prim}"
+                    existing_label = str(wp.get("stage_label") or "").strip().lower()
+                    generic_defaults = {
+                        "",
+                        "travel to location",
+                        "travel to target",
+                        "travel to the objective area",
+                        "travel to the quest objective threshold",
+                        "travel to the scene and locate the initial leads",
+                        "scout the perimeter and identify an entry point",
+                        "rendezvous with your client at the meeting point",
+                        f"travel to and scout {prim.lower()}",
+                    }
+                    if existing_label in generic_defaults or existing_label.startswith("travel to and scout the objective"):
+                        wp["stage_label"] = f"Travel to and scout {prim}"
 
     return sub_waypoints

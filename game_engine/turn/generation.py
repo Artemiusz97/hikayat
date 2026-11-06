@@ -173,7 +173,23 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
 
     # Retrieve randomized starting hook and archetype (Hub Launchpad, In Media Res, or Delve Threshold)
 
-    hook_context = scenario_data.get_dynamic_starting_hook(scenario, session_id=session["id"], char_name=first_char_name)
+    anom_starting_fac = session.get("anomalous_starting_faction") or session.get("starting_faction")
+    anom_starting_loc = session.get("anomalous_starting_location") or session.get("current_location")
+    if not anom_starting_fac and scenario_data.is_anomalous_incursions_scenario(scen_key):
+        try:
+            from mechanics.social.factions import get_anomalous_faction_state
+            fac_st = get_anomalous_faction_state(session.get("id"), user_id=session.get("host_user_id"))
+            anom_starting_fac = fac_st.get("faction_archetype_key")
+        except Exception:
+            anom_starting_fac = "public_agency"
+
+    hook_context = scenario_data.get_dynamic_starting_hook(
+        scenario,
+        session_id=session["id"],
+        char_name=first_char_name,
+        faction_key=anom_starting_fac,
+        preferred_location=anom_starting_loc,
+    )
 
     arch_key = hook_context.get("archetype", "hub_launchpad")
 
@@ -182,8 +198,8 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
     hook_text = hook_context.get("hook_text", "")
 
     suggested_loc = hook_context.get("suggested_location", "")
-    if scenario_data.is_anomalous_incursions_scenario(scen_key) and session.get("anomalous_starting_location"):
-        suggested_loc = str(session["anomalous_starting_location"])
+
+
 
     arch_directive = hook_context.get("directive", "")
 
@@ -461,7 +477,8 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
 
     zone_0 = prompt_layout.build_static_core(mode, "opening")
     zone_1 = prompt_layout.build_session_zone(session)
-    system_prompt = prompt_layout.assemble_system_prompt(zone_0, zone_1)
+    zone_1b = prompt_layout.build_world_canon_zone(session)
+    system_prompt = prompt_layout.assemble_system_prompt(zone_0, zone_1, zone_1b)
 
     user_prompt = (
         f"{temporal_mandate}"
@@ -482,7 +499,8 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         system_prompt, user_prompt,
         is_nsfw=scenario_data.uses_nsfw_model(session.get("scenario")),
         response_model=OpeningScene,
-        required_any_keys=[["narrative", "next_narrative", "outcome_narrative"]]
+        required_any_keys=[["narrative", "next_narrative", "outcome_narrative"]],
+        system_zones=(zone_0, zone_1, zone_1b),
     )
 
     # Safety coercion: llm_client now returns dicts, but guard against Pydantic objects leaking through
@@ -651,22 +669,20 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
             elif suggested_loc:
                 session["current_location"] = suggested_loc
 
-            _is_sq_mocked = (
-                hasattr(game_engine.generate_story_quest, "_mock_name")
-                or hasattr(game_engine.generate_story_quest, "assert_called")
-                or hasattr(game_engine.call_llm_json, "_mock_name")
-                or hasattr(game_engine.call_llm_json, "assert_called")
-            )
-            if _is_sq_mocked:
-                sq_data = await game_engine.generate_story_quest(session["id"], session, chapter_num=1, starting_hook_context=starting_hook_ctx)
-            else:
+            try:
+                sq_data = await game_engine.generate_story_quest(
+                    session["id"], session, chapter_num=1, starting_hook_context=starting_hook_ctx
+                )
+            except Exception as _sq_err:
+                log.warning("generate_story_quest for Chapter 1 failed: %s. Using contextual generator.", _sq_err)
                 sq_data = game_engine.create_contextual_story_quest_data(
                     session["id"], session, chapter_num=1, starting_hook_context=starting_hook_ctx
                 )
-                if res_deep.get("story_quest_title"):
-                    sq_data["title"] = str(res_deep["story_quest_title"]).strip()
-                if res_deep.get("story_quest_objective"):
-                    sq_data["objective"] = str(res_deep["story_quest_objective"]).strip()
+
+            if res_deep.get("story_quest_title") and sq_data:
+                sq_data["title"] = str(res_deep["story_quest_title"]).strip()
+            if res_deep.get("story_quest_objective") and sq_data:
+                sq_data["objective"] = str(res_deep["story_quest_objective"]).strip()
 
             sq_title = sq_data.get("title") or "Story Quest #1: The Discovery"
 
@@ -762,7 +778,16 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
             except Exception as e2:
                 logging.getLogger(__name__).error("Failed to insert emergency contextual story quest: %s", e2)
 
-
+    try:
+        await adb(
+            game_engine.compile_campaign_spine_at_turn_zero,
+            int(session["id"]),
+            str(session.get("scenario") or "fantasy"),
+            str(session.get("narration_language") or session.get("language") or "en"),
+        )
+    except Exception as _spine_err:
+        import logging
+        logging.getLogger(__name__).warning("compile_campaign_spine_at_turn_zero failed (non-fatal): %s", _spine_err)
 
     if isinstance(res_deep, dict):
 
@@ -1163,10 +1188,13 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
     )
 
     try:
+        from llm_client import GM_SHARED_RULES
+        classifier_sys_prompt = f"{GM_SHARED_RULES}\n\n{SYSTEM_PROMPT}"
         result = await game_engine.call_llm_json(
-            SYSTEM_PROMPT, user_prompt, temperature=0.4,
+            classifier_sys_prompt, user_prompt, temperature=0.4,
             max_tokens=800, retries=2, is_nsfw=scenario_data.uses_nsfw_model(session.get("scenario")),
-            use_utility=True, response_model=ActionClassification
+            use_utility=True, response_model=ActionClassification,
+            system_zones=(GM_SHARED_RULES, SYSTEM_PROMPT),
         )
         if getattr(result, "model_dump", None):
             res_dict = result.model_dump(exclude_unset=True)
@@ -1313,20 +1341,17 @@ async def generate_custom_starter_gear(char_class: str, class_description: str, 
 
 
     llm_result = {}
-    _is_llm_mocked = hasattr(game_engine.call_llm_json, "_mock_name") or hasattr(game_engine.call_llm_json, "assert_called")
-
-    if _is_llm_mocked:
-        try:
-            llm_result = await game_engine.call_llm_json(
-                CUSTOM_STARTER_GEAR_SYSTEM_PROMPT,
-                user_prompt,
-                temperature=0.85,
-                max_tokens=1200,
-                is_nsfw=is_nsfw,
-                use_utility=True,
-            )
-        except Exception as exc:
-            log.warning("generate_custom_starter_gear LLM call failed (%s). Using archetype fallback.", exc)
+    try:
+        llm_result = await game_engine.call_llm_json(
+            CUSTOM_STARTER_GEAR_SYSTEM_PROMPT,
+            user_prompt,
+            temperature=0.85,
+            max_tokens=1200,
+            is_nsfw=is_nsfw,
+            use_utility=True,
+        )
+    except Exception as exc:
+        log.warning("generate_custom_starter_gear LLM call failed (%s). Using archetype fallback.", exc)
 
 
 

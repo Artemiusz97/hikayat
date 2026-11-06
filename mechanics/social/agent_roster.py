@@ -189,138 +189,138 @@ PUBLIC_AGENCY_BLUEPRINTS: List[Dict[str, Any]] = [
 PRIVATE_AGENCY_1_BLUEPRINTS: List[Dict[str, Any]] = [
     {
         "agent_tier": 5,
-        "role": "Chief Executive & Tactical Director",
-        "agent_class": "Corporate Strike Contractor",
+        "role": "Chief Executive & R&D Portfolio Director",
+        "agent_class": "Executive Containment Specialist",
         "division": "Executive Board",
-        "hq_room": "Executive Contract & Tactical Dispatch Wing",
+        "hq_room": "Executive Contract & Telemetry Floor",
         "hq_node_id": "sub_priv1_dispatch",
         "city_hangout": "Sovereign Hills & Sky-Estates ➔ Sky-High Penthouse Lounge ➔ 80th-Floor Infinity Pool & Cocktail Deck",
         "hangout_node_id": "sub_sky_infinity_bar",
-        "summary": "Treats anomaly neutralization as a high-margin defence portfolio; expects flawless execution and immaculate suits.",
+        "summary": "Treats anomaly neutralization as a multi-billion-credit defence portfolio; oversees the skyscraper's proprietary R&D labs in immaculate bespoke suits.",
     },
     {
         "agent_tier": 4,
-        "role": "Lead Hazard Termination Commander",
-        "agent_class": "Corporate Strike Contractor",
+        "role": "Lead Corporate Strike Commander",
+        "agent_class": "Corporate Strike Operator",
         "division": "Apex Strike Wing",
-        "hq_room": "VR Tactical & Resonance Calibration Range",
+        "hq_room": "Holographic VR Kill-House & Calibration Deck",
         "hq_node_id": "sub_priv1_training",
         "city_hangout": "International Airport & Airfield ➔ First-Class Executive Sky-Lounge & Capsule Hotel ➔ Panoramic Tarmac-View Champagne Bar",
         "hangout_node_id": "sub_ap_runway_bar",
-        "summary": "High-priced mercenary veteran who grades every anomalous entity by ammunition expenditure and hazard bonuses.",
+        "summary": "High-priced corporate veteran who drills squads on serialized in-house smart weapons and grades every breach by quarterly ROI.",
     },
     {
         "agent_tier": 3,
-        "role": "Senior Relic Acquisition Specialist",
-        "agent_class": "Anomalous Relic Hunter",
-        "division": "Asset Recovery",
-        "hq_room": "Proprietary Relic R&D & Appraisal Division",
+        "role": "Senior In-House R&D Prototype Lead",
+        "agent_class": "In-House R&D Prototype Tester",
+        "division": "Proprietary R&D Lab",
+        "hq_room": "In-House Anomalous R&D & Fabrication Lab",
         "hq_node_id": "sub_priv1_research",
         "city_hangout": "Sovereign Hills & Sky-Estates ➔ The Crimson Masquerade Auction House ➔ Candlelit Amphitheater & Caged Stage",
         "hangout_node_id": "sub_auction_amphitheater",
-        "summary": "Specializes in extracting high-tier altered artifacts from collapsing rifts before public containment teams arrive.",
+        "summary": "Field-tests experimental conglomerate weapons and harvests high-tier anomaly cores for proprietary corporate patents.",
     },
     {
         "agent_tier": 3,
-        "role": "Senior Ballistic Resonance Sniper",
-        "agent_class": "Corporate Strike Contractor",
-        "division": "Overwatch Unit",
-        "hq_room": "Syndicate Tactical Armory & Requisition Depot",
+        "role": "Senior Telemetry Gauss Marksman",
+        "agent_class": "Proprietary Telemetry Marksman",
+        "division": "Skyline Overwatch Unit",
+        "hq_room": "In-House R&D Ordnance & Prototype Vault",
         "hq_node_id": "sub_priv1_armory",
         "city_hangout": "City Center ➔ Sunken Plaza Galleria ➔ Glass Skywalk Dining Terrace",
         "hangout_node_id": "sub_plaza_terrace",
-        "summary": "Cool-headed sharpshooter who calculates wind shear and dimensional refraction across three city blocks.",
+        "summary": "Cool-headed corporate sharpshooter linked to tower satellite telemetry who calculates dimensional refraction across three city blocks.",
     },
     {
         "agent_tier": 2,
-        "role": "Contract Combat Specialist",
-        "agent_class": "Corporate Strike Contractor",
-        "division": "Rapid Response",
-        "hq_room": "Bespoke Ballistic Outfitter & Tailoring Atelier",
+        "role": "Corporate Aegis Breach Specialist",
+        "agent_class": "Corporate Aegis Heavy Vanguard",
+        "division": "Rapid Asset Protection",
+        "hq_room": "Proprietary Exo-Weave & Ballistic Atelier",
         "hq_node_id": "sub_priv1_outfitter",
         "city_hangout": "Downtown ➔ Neon Shopping Arcade & Mall ➔ Streetwear & Designer Apparel Boutique",
         "hangout_node_id": "sub_fashion_boutique",
-        "summary": "Spends bounty payouts on bespoke kevlar tailoring and experimental elemental weapon mods.",
+        "summary": "Models the corporation's latest bespoke aramid techwear and crushes hostile manifestations behind an in-house alloy shield.",
     },
     {
         "agent_tier": 1,
-        "role": "Junior Contract Hunter",
-        "agent_class": "Anomalous Relic Hunter",
-        "division": "Field Acquisitions",
-        "hq_room": "Corporate Security Lobby & Entrance",
+        "role": "Junior Corporate Retainer Operative",
+        "agent_class": "Corporate Strike Operator",
+        "division": "Corporate Intake Unit",
+        "hq_room": "Corporate Atrium & Biometric Lobby",
         "hq_node_id": "sub_priv1_entrance",
         "city_hangout": "Downtown ➔ 24-Hour Arcade & Billiards Hall ➔ Upstairs Smoke-Hazy Billiards Lounge",
         "hangout_node_id": "sub_billiards_lounge",
-        "summary": "Ambitious freelancer who signed an exclusive private retainer to pay off massive family medical debts.",
+        "summary": "Ambitious recruit who signed a strict corporate NDA and equipment lease to pay off massive family medical debts.",
     },
 ]
 
 PRIVATE_AGENCY_2_BLUEPRINTS: List[Dict[str, Any]] = [
     {
         "agent_tier": 5,
-        "role": "Managing Partner & Chief Appraiser",
-        "agent_class": "Anomalous Relic Hunter",
-        "division": "Syndicate Partners",
-        "hq_room": "Sub-Basement Corporate Containment & Quarantine Vault",
-        "hq_node_id": "sub_priv2_vault",
-        "city_hangout": "Sovereign Hills & Sky-Estates ➔ Elysium Private Country Club ➔ Members-Only Brandy & Cigar Parlour",
-        "hangout_node_id": "sub_elysium_cigar_room",
-        "summary": "Charismatic venture capitalist of the paranormal world who auctions neutralized anomaly cores to R&D conglomerates.",
+        "role": "Agency Owner & Chief Case Dispatcher",
+        "agent_class": "Storefront Case Investigator",
+        "division": "Front Office Management",
+        "hq_room": "Corkboard Case Room & Dispatch Bullpen",
+        "hq_node_id": "sub_priv2_dispatch",
+        "city_hangout": "Suburban Residential District ➔ 24-Hour Corner Convenience Store ➔ Window Eat-In Counter Nook",
+        "hangout_node_id": "sub_subkonbini_nook",
+        "summary": "Scrappy small-business owner juggling commercial office rent, vendor invoices, and local anomaly contracts over lukewarm drip coffee.",
     },
     {
         "agent_tier": 4,
-        "role": "Field Operations Commander",
-        "agent_class": "Corporate Strike Contractor",
-        "division": "Containment Recovery",
-        "hq_room": "Executive Contract & Tactical Dispatch Wing",
-        "hq_node_id": "sub_priv2_dispatch",
+        "role": "Senior Field Contractor & Gun-Cage Boss",
+        "agent_class": "Surplus Ordnance Breacher",
+        "division": "Field Contracting",
+        "hq_room": "Padlocked Back-Room Gun Cage & Surplus Locker",
+        "hq_node_id": "sub_priv2_armory",
         "city_hangout": "City Docks & Harbor ➔ Automated Container Pier 12 ➔ Towering Gantry Crane Operator Cab",
         "hangout_node_id": "sub_pier_gantry",
-        "summary": "Pragmatic commander who favors heavy elemental weaponry and aggressive perimeter sweeps.",
+        "summary": "Grizzled blue-collar veteran who sources police trade-in shotguns and surplus Kevlar from three different harbor wholesalers.",
     },
     {
         "agent_tier": 3,
-        "role": "Senior Occult Appraiser & Tactician",
-        "agent_class": "Occult Forensics Analyst",
-        "division": "Relic Valuation Lab",
-        "hq_room": "Proprietary Relic R&D & Appraisal Division",
+        "role": "Back-Room Gadgeteer & Curio Appraiser",
+        "agent_class": "Aftermarket Ward Tinkerer",
+        "division": "Workbench Appraisal",
+        "hq_room": "Cluttered Appraisal Bench & Secondhand Lab",
         "hq_node_id": "sub_priv2_research",
         "city_hangout": "City Center ➔ Sanctuary Antiquities & Licensed Wards ➔ Appraisal Desk & Leyline Map Table",
         "hangout_node_id": "sub_curio_appraisal",
-        "summary": "Can tell an authentic cursed relic from a mundane forgery by the metallic taste of the air around it.",
+        "summary": "Keeps the agency's secondhand oscilloscopes and mail-order EMF meters running with solder, copper wire, and sheer stubbornness.",
     },
     {
         "agent_tier": 3,
-        "role": "Senior Close-Quarters Eliminator",
-        "agent_class": "Tactical Breacher",
-        "division": "Shock Extraction",
-        "hq_room": "VR Tactical & Resonance Calibration Range",
+        "role": "Senior Close-Quarters Trouble-Shooter",
+        "agent_class": "Hired-Gun Perimeter Guard",
+        "division": "Cellar & Alley Sweeps",
+        "hq_room": "Soundproofed Cellar Firing Lane & Sandbag Pit",
         "hq_node_id": "sub_priv2_training",
         "city_hangout": "The Lower Wards & Tenements ➔ Underground Boxing & Fight Pit ➔ Chain-Link Ring & Betting Bleachers",
         "hangout_node_id": "sub_fight_cage",
-        "summary": "Prefers high-frequency melee blades over firearms because blades never jam inside a magnetic anomaly.",
+        "summary": "Swears by hardware-store sledgehammers and mail-order machetes because cheap melee steel never jams inside a magnetic rift.",
     },
     {
         "agent_tier": 2,
-        "role": "Licensed Bounty Operative",
-        "agent_class": "Anomalous Relic Hunter",
-        "division": "Urban Hunting",
-        "hq_room": "Skyline Executive Espresso Bar & Canteen",
+        "role": "Full-Time Case Investigator",
+        "agent_class": "Contract Trouble-Shooter",
+        "division": "Neighborhood Cases",
+        "hq_room": "Fluorescent Breakroom & Drip-Coffee Kitchenette",
         "hq_node_id": "sub_priv2_canteen",
         "city_hangout": "Downtown ➔ Basement Jazz & Cocktail Bar ➔ Main Cocktail Lounge & Quartet Stage",
         "hangout_node_id": "sub_jazz_lounge",
-        "summary": "Tracks nocturnal anomalies through the entertainment district while maintaining a flashy socialite cover.",
+        "summary": "Works double shifts in a thrifted trenchcoat chasing modest commercial bounties that the big corporate towers ignore.",
     },
     {
         "agent_tier": 1,
-        "role": "Associate Field Contractor",
-        "agent_class": "Corporate Strike Contractor",
-        "division": "Urban Hunting",
-        "hq_room": "Executive Security Lobby & Entrance",
+        "role": "Part-Time Receptionist & Junior Hunter",
+        "agent_class": "Contract Trouble-Shooter",
+        "division": "Front Desk & Intake",
+        "hq_room": "Walk-Up Commercial Foyer & Reception Desk",
         "hq_node_id": "sub_priv2_entrance",
         "city_hangout": "Downtown ➔ Neon Shopping Arcade & Mall ➔ Neon Atrium Food Court",
         "hangout_node_id": "sub_food_court",
-        "summary": "Constantly refreshes the bounty dispatch board looking for lucrative co-op contracts.",
+        "summary": "Answers the frosted-glass door buzzer between field calls and patches up surplus vests on the office sewing machine.",
     },
 ]
 
@@ -583,10 +583,322 @@ AGENT_QUIRKS: List[str] = [
 ]
 
 
+FACTION_ATTRIBUTE_WEIGHT_POOLS: Dict[str, Tuple[str, ...]] = {
+    "monastic_order": ("aether", "wind", "water", "aether", "wind", "water", "ice", "fire"),
+    "cult_faction": ("aether", "bio", "fire", "aether", "bio", "fire"),
+    "public_agency": ("physical", "electric", "fire", "earth", "ice", "water", "wind", "aether", "bio"),
+    "private_agency_1": ("electric", "aether", "ice", "physical", "fire", "earth"),
+    "private_agency_2": ("physical", "fire", "earth", "wind", "electric", "bio"),
+    "clandestine_faction": ("bio", "physical", "electric", "aether", "ice", "wind"),
+    "freelancer": ("physical", "electric", "wind", "fire", "aether", "ice", "water", "earth", "bio"),
+}
+
+# ---------------------------------------------------------------------------
+# 16 Pre-Generated Student Special Agent Blueprints for Anomalous High School
+# - 4 per grade (Freshman, Sophomore, Junior, Senior)
+# - 8 Independent Club Freelancers (1 per school club)
+# - 8 Junior Agency-Affiliated Student Operatives (2 per major agency)
+# ---------------------------------------------------------------------------
+STUDENT_SPECIAL_AGENT_BLUEPRINTS: List[Dict[str, Any]] = [
+    # --- 8 Independent Club Freelancer Student Operatives ---
+    {
+        "agent_tier": 3,
+        "grade": "Senior",
+        "role": "Honor-Roll Student & Freelance Operative",
+        "agent_class": "Honor Roll Student",
+        "faction_id": "freelancer",
+        "club": "Student Council",
+        "clique": "Academics",
+        "primary_node_id": "loc_senior_class",
+        "secondary_node_id": "loc_student_council",
+        "city_hangout": "{session_school} ➔ Student Union & Cultural Arts Wing ➔ Student Council Office",
+        "summary": "Immaculate student council honor student who reviews budget spreadsheets by day and takes high-risk Public Agency containment bounties after the 15:00 bell.",
+    },
+    {
+        "agent_tier": 2,
+        "grade": "Junior",
+        "role": "Varsity Track Regular & Rift Runner",
+        "agent_class": "Athletic Regular",
+        "faction_id": "freelancer",
+        "club": "Athletic Directorate",
+        "clique": "Athletes",
+        "primary_node_id": "loc_junior_class",
+        "secondary_node_id": "loc_martial_arts_dojo",
+        "city_hangout": "{session_school} ➔ Main Gymnasium & Athletic Complex ➔ Martial Arts Dojo",
+        "summary": "Varsity athlete who hides a live-steel wakizashi in a taped-up shinai bag and uses after-school cardio runs to patrol suburban rift perimeters.",
+    },
+    {
+        "agent_tier": 2,
+        "grade": "Sophomore",
+        "role": "Stagehand Regular & Illusion Breaker",
+        "agent_class": "Class Sharpshooter",
+        "faction_id": "freelancer",
+        "club": "Drama & Theater Union",
+        "clique": "Theater",
+        "primary_node_id": "loc_sophomore_class",
+        "secondary_node_id": "loc_auditorium",
+        "city_hangout": "{session_school} ➔ Student Union & Cultural Arts Wing ➔ Auditorium Stage",
+        "summary": "Unassuming backstage lighting tech who packs a folding takedown carbine in a violin case and hunts mirror-rift entities for freelance tuition money.",
+    },
+    {
+        "agent_tier": 2,
+        "grade": "Junior",
+        "role": "Robotics Lab Regular & Coil Tech",
+        "agent_class": "After-School Tinkerer",
+        "faction_id": "freelancer",
+        "club": "Science & Robotics Club",
+        "clique": "Gamers",
+        "primary_node_id": "loc_junior_class",
+        "secondary_node_id": "loc_science_lab",
+        "city_hangout": "{session_school} ➔ Main Academic Building & Classrooms ➔ Chemistry & Science Lab",
+        "summary": "Solders custom EMF dampeners and gauss capacitors behind the chemistry fume hoods whenever the faculty advisor steps out.",
+    },
+    {
+        "agent_tier": 3,
+        "grade": "Senior",
+        "role": "Library Archivist & Ward Scribe",
+        "agent_class": "Quiet Bookworm",
+        "faction_id": "freelancer",
+        "club": "Occult & Folklore Society",
+        "clique": "Loner",
+        "primary_node_id": "loc_senior_class",
+        "secondary_node_id": "loc_old_storage_3b",
+        "city_hangout": "{session_school} ➔ Abandoned Old Campus Wing ➔ Old Storage Room 3-B",
+        "summary": "Soft-spoken folklore archivist who keeps a consecrated silver athame tucked between pre-war town registries and catalogs campus spatial anomalies.",
+    },
+    {
+        "agent_tier": 2,
+        "grade": "Sophomore",
+        "role": "Back-Row Truant & Alley Breacher",
+        "agent_class": "Back-Row Rebel",
+        "faction_id": "freelancer",
+        "club": "Campus Delinquents",
+        "clique": "Rebels",
+        "primary_node_id": "loc_sophomore_class",
+        "secondary_node_id": "sub_custodian_boiler_locker",
+        "city_hangout": "{session_school} ➔ Abandoned Old Campus Wing ➔ Custodian's Boiler-Room Locker",
+        "summary": "Sleeps through morning lectures with a scarred leather jacket over their shoulders, then clears tenement crawlers with a sawed-off scattergun at dusk.",
+    },
+    {
+        "agent_tier": 1,
+        "grade": "Freshman",
+        "role": "Campus Radio Aide & Signal Spotter",
+        "agent_class": "Honor Roll Student",
+        "faction_id": "freelancer",
+        "club": "Journalism & Media",
+        "clique": "Media",
+        "primary_node_id": "loc_freshman_class",
+        "secondary_node_id": "loc_broadcast_room",
+        "city_hangout": "{session_school} ➔ Student Union & Cultural Arts Wing ➔ Campus Broadcast & Newspaper Room",
+        "summary": "First-year broadcast technician who triangulates cognitohazard numbers stations on the school radio array and sells coordinates to Public Agency dispatch.",
+    },
+    {
+        "agent_tier": 1,
+        "grade": "Freshman",
+        "role": "Sketchbook Regular & Resonance Spotter",
+        "agent_class": "Quiet Bookworm",
+        "faction_id": "freelancer",
+        "club": "Fine Arts Guild",
+        "clique": "Artists",
+        "primary_node_id": "loc_freshman_class",
+        "secondary_node_id": "loc_art_studio",
+        "city_hangout": "{session_school} ➔ Student Union & Cultural Arts Wing ➔ Art Studio",
+        "summary": "Charcoal-stained freshman whose automatic sketches accurately predict dimensional fracture lines hours before instruments register a spike.",
+    },
+    # --- 8 Junior Agency-Affiliated Student Operatives ---
+    {
+        "agent_tier": 2,
+        "grade": "Senior",
+        "role": "Bureau Youth Cadet & Campus Liaison",
+        "agent_class": "Honor Roll Student",
+        "faction_id": "public_agency",
+        "club": "Student Council",
+        "clique": "Academics",
+        "primary_node_id": "loc_senior_class",
+        "secondary_node_id": "loc_hq_training_range",
+        "city_hangout": "Public Anomaly Investigation Agency HQ ➔ Psychometric Training & Calibration Range",
+        "summary": "Senior honor student holding a provisional Bureau youth badge; monitors academy resonance levels during class and reports to HQ after 15:00.",
+    },
+    {
+        "agent_tier": 1,
+        "grade": "Sophomore",
+        "role": "Bureau Junior Field Scout",
+        "agent_class": "Athletic Regular",
+        "faction_id": "public_agency",
+        "club": "Athletic Directorate",
+        "clique": "Athletes",
+        "primary_node_id": "loc_sophomore_class",
+        "secondary_node_id": "loc_hq_main_lobby",
+        "city_hangout": "Public Anomaly Investigation Agency HQ ➔ Main Lobby & Security Hub",
+        "summary": "Sophomore sprinter recruited into the Bureau's youth auxiliary after surviving a commuter-train distortion incident.",
+    },
+    {
+        "agent_tier": 2,
+        "grade": "Senior",
+        "role": "Corporate Sponsored Test Scholar",
+        "agent_class": "After-School Tinkerer",
+        "faction_id": "private_agency_1",
+        "club": "Science & Robotics Club",
+        "clique": "Academics",
+        "primary_node_id": "loc_senior_class",
+        "secondary_node_id": "sub_priv1_training",
+        "city_hangout": "{session_school} ➔ Main Academic Building & Classrooms ➔ Chemistry & Science Lab",
+        "summary": "Elite scholarship student on a corporate R&D stipend who field-tests compact smart-optics and telemetry carbines on evening anomaly sweeps.",
+    },
+    {
+        "agent_tier": 1,
+        "grade": "Freshman",
+        "role": "Corporate Junior Telemetry Cadet",
+        "agent_class": "Class Sharpshooter",
+        "faction_id": "private_agency_1",
+        "club": "Journalism & Media",
+        "clique": "Popular",
+        "primary_node_id": "loc_freshman_class",
+        "secondary_node_id": "sub_priv1_entrance",
+        "city_hangout": "{session_school} ➔ Student Commons & Campus Cafeteria ➔ Central Courtyard",
+        "summary": "Prep-school prodigy under a strict corporate NDA who calibrates satellite ballistic links between homeroom periods.",
+    },
+    {
+        "agent_tier": 2,
+        "grade": "Junior",
+        "role": "Storefront Agency Part-Time Hunter",
+        "agent_class": "Back-Row Rebel",
+        "faction_id": "private_agency_2",
+        "club": "Campus Delinquents",
+        "clique": "Rebels",
+        "primary_node_id": "loc_junior_class",
+        "secondary_node_id": "sub_priv2_dispatch",
+        "city_hangout": "{session_school} ➔ Main Academic Building & Classrooms ➔ School Rooftop",
+        "summary": "Scrappy junior who works after-school shifts at the storefront agency bullpen to help pay family rent, carrying a battered police trade-in shotgun.",
+    },
+    {
+        "agent_tier": 1,
+        "grade": "Freshman",
+        "role": "Storefront Apprentice Gadgeteer",
+        "agent_class": "After-School Tinkerer",
+        "faction_id": "private_agency_2",
+        "club": "Science & Robotics Club",
+        "clique": "Gamers",
+        "primary_node_id": "loc_freshman_class",
+        "secondary_node_id": "sub_priv2_research",
+        "city_hangout": "{session_school} ➔ Student Commons & Campus Cafeteria ➔ Shaded Vending Machine Pavilion",
+        "summary": "First-year tinkerer who repairs secondhand EMF meters for the storefront agency in exchange for surplus ward ammunition.",
+    },
+    {
+        "agent_tier": 2,
+        "grade": "Junior",
+        "role": "Shrine Heir & High School Exorcist",
+        "agent_class": "Quiet Bookworm",
+        "faction_id": "monastic_order",
+        "club": "Occult & Folklore Society",
+        "clique": "Loner",
+        "primary_node_id": "loc_junior_class",
+        "secondary_node_id": "loc_et_torii_approach",
+        "city_hangout": "Woods & Mountain Reserve ➔ Eastern Grand Temple & Sanctuary ➔ Grand Torii Gate & Omikuji Talisman Stand",
+        "summary": "Heir to a mountain exorcist lineage who attends high school in a standard uniform while carrying ancestral sealing talismans in their bookbag.",
+    },
+    {
+        "agent_tier": 1,
+        "grade": "Sophomore",
+        "role": "Novice Shrine Sword-Acolyte",
+        "agent_class": "Athletic Regular",
+        "faction_id": "monastic_order",
+        "club": "Fine Arts Guild",
+        "clique": "Artists",
+        "primary_node_id": "loc_sophomore_class",
+        "secondary_node_id": "loc_et_zen_tea_garden",
+        "city_hangout": "{session_school} ➔ Student Union & Cultural Arts Wing ➔ Botanical Glasshouse & Garden",
+        "summary": "Disciplined sophomore calligraphy student who practices sacred blade forms at dawn and wards campus stairwells after dusk.",
+    },
+]
+
+
+def _resolve_agent_3axis_for_faction(
+    faction_id: str,
+    local_idx: int,
+    agent_class: str,
+    role: str,
+    seed_str: str,
+) -> Tuple[str, str, str]:
+    import hashlib
+    from mechanics.combat.spells.awakened_kits import (
+        ABILITY_MEDIUMS,
+        ANOMALOUS_ATTRIBUTES,
+        COMBAT_ARCHETYPES,
+        derive_default_3axis,
+    )
+
+    h = int(hashlib.md5(seed_str.encode("utf-8")).hexdigest()[:8], 16)
+    f_hash = int(hashlib.md5(faction_id.encode("utf-8")).hexdigest()[:8], 16)
+    pool = FACTION_ATTRIBUTE_WEIGHT_POOLS.get(faction_id, ANOMALOUS_ATTRIBUTES)
+    attr = pool[(local_idx + (h % len(pool))) % len(pool)]
+
+    _, def_arch, def_med = derive_default_3axis(agent_class, role, seed=seed_str)
+    if local_idx < len(COMBAT_ARCHETYPES):
+        arch = COMBAT_ARCHETYPES[(local_idx + (f_hash % len(COMBAT_ARCHETYPES))) % len(COMBAT_ARCHETYPES)]
+    else:
+        arch = def_arch if def_arch in COMBAT_ARCHETYPES else COMBAT_ARCHETYPES[h % len(COMBAT_ARCHETYPES)]
+
+    med = def_med if def_med in ABILITY_MEDIUMS else ABILITY_MEDIUMS[(h // 7) % len(ABILITY_MEDIUMS)]
+    return attr, arch, med
+
+
+def _upgrade_legacy_agent_roster_3axis(
+    roster: List[Dict[str, Any]],
+    session_id: int = 0,
+) -> Tuple[List[Dict[str, Any]], bool]:
+    from mechanics.combat.spells.awakened_kits import (
+        ABILITY_MEDIUMS,
+        ANOMALOUS_ATTRIBUTES,
+        COMBAT_ARCHETYPES,
+        build_awakened_kit_ids,
+    )
+
+    modified = False
+    faction_counters: Dict[str, int] = {}
+    for ag in roster:
+        if not isinstance(ag, dict):
+            continue
+        fid = str(ag.get("faction_id") or "public_agency").strip()
+        local_idx = faction_counters.get(fid, 0)
+        faction_counters[fid] = local_idx + 1
+
+        cur_attr = ag.get("attribute")
+        cur_arch = ag.get("combat_archetype")
+        cur_med = ag.get("ability_medium")
+        cur_abs = ag.get("innate_abilities") or []
+        valid_abs = len(cur_abs) == 5 and all(isinstance(x, str) and x.startswith("awk_") for x in cur_abs)
+        if (
+            cur_attr in ANOMALOUS_ATTRIBUTES
+            and cur_arch in COMBAT_ARCHETYPES
+            and cur_med in ABILITY_MEDIUMS
+            and valid_abs
+        ):
+            continue
+
+        npc_id = str(ag.get("npc_id") or ag.get("name") or f"agent_{local_idx}")
+        agent_class = str(ag.get("agent_class") or "Operative")
+        role = str(ag.get("role") or "")
+        attr, arch, med = _resolve_agent_3axis_for_faction(
+            fid,
+            local_idx,
+            agent_class,
+            role,
+            seed_str=f"{session_id}:{npc_id}:{agent_class}",
+        )
+        ag["attribute"] = attr
+        ag["combat_archetype"] = arch
+        ag["ability_medium"] = med
+        ag["innate_abilities"] = build_awakened_kit_ids(attr, arch, med)
+        modified = True
+    return roster, modified
+
+
 def generate_anomalous_special_agents_roster(
     session_id: int,
     scen_key: str = "anomalous_incursions",
     factions: Optional[List[Dict[str, Any]]] = None,
+    player_gender: str = "",
 ) -> List[Dict[str, Any]]:
     """
     Deterministically generates the 44 Named Special Agents across the 6 Fixed Factions:
@@ -601,6 +913,14 @@ def generate_anomalous_special_agents_roster(
     from mechanics.combat.spells.kits import get_anomalous_starting_innate_abilities
     from mechanics.social.races import normalize_race
     from mechanics.social.persona import normalize_appearance
+    from scenario_data import should_skew_female_npcs
+
+    if not player_gender and session_id:
+        try:
+            player_gender = db.get_session_player_gender(session_id)
+        except Exception:
+            player_gender = ""
+    skew_female = should_skew_female_npcs(scen_key, player_gender)
 
     # Resolve faction names from DB or starter generator
     fac_map: Dict[str, Dict[str, Any]] = {}
@@ -662,7 +982,10 @@ def generate_anomalous_special_agents_roster(
             hq_location = raw_hq if (raw_hq and not raw_hq.startswith(("loc_", "zone_", "sub_"))) else faction_name
 
         for local_idx, bp in enumerate(blueprints):
-            gender = "female" if (global_idx % 2 == 0) else "male"
+            if skew_female:
+                gender = "female" if (global_idx % 3 != 2) else "male"
+            else:
+                gender = "female" if (global_idx % 2 == 0) else "male"
             agent_tier = int(bp.get("agent_tier", 1))
             tier_meta = next((t for t in ANOMALOUS_PROMOTION_TIERS if t["tier"] == agent_tier), ANOMALOUS_PROMOTION_TIERS[0])
             rank_title = tier_meta["title"]
@@ -723,12 +1046,15 @@ def generate_anomalous_special_agents_roster(
             quirk = AGENT_QUIRKS[(seed_base + global_idx * 13 + 5) % len(AGENT_QUIRKS)]
 
             agent_class = bp["agent_class"]
-            innate_abilities = get_anomalous_starting_innate_abilities(
+            from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
+            ag_attr, ag_arch, ag_med = _resolve_agent_3axis_for_faction(
+                faction_id,
+                local_idx,
                 agent_class,
-                scenario=scen_key,
-                class_description=bp.get("role", ""),
-                seed=f"{session_id}:{npc_id}:{agent_class}",
+                bp.get("role", ""),
+                seed_str=f"{session_id}:{npc_id}:{agent_class}",
             )
+            innate_abilities = build_awakened_kit_ids(ag_attr, ag_arch, ag_med)
 
             hq_node_id = str(bp.get("hq_node_id") or "").strip()
             hangout_node_id = str(bp.get("hangout_node_id") or "").strip()
@@ -759,8 +1085,8 @@ def generate_anomalous_special_agents_roster(
 
             outfit_by_faction = {
                 "public_agency": f"Standard-issue {faction_name} dark charcoal field trenchcoat with a silver containment badge",
-                "private_agency_1": f"Bespoke ballistic executive suit bearing the {faction_name} crest",
-                "private_agency_2": f"Tactical urban harness over designer streetwear with {faction_name} insignia",
+                "private_agency_1": f"Sleek proprietary corporate ballisticweave suit bearing serialized {faction_name} R&D insignia",
+                "private_agency_2": f"Pragmatic off-the-rack utility jacket over a mismatched surplus Kevlar vest with a laminated {faction_name} ID tag",
                 "monastic_order": f"Traditional purified hakama and haori layered with braided warding cords of the {faction_name}",
                 "cult_faction": "Dark hooded urban overcoat lined with geometric occult stitching",
                 "clandestine_faction": "Matte-black covert operator jacket with concealed relic holsters",
@@ -799,9 +1125,16 @@ def generate_anomalous_special_agents_roster(
                 "personality_summary": personality_summary,
                 "mannerisms": quirk,
                 "speech_style": "Crisp, professional field vernacular with dry urban wit.",
+                "attribute": ag_attr,
+                "combat_archetype": ag_arch,
+                "ability_medium": ag_med,
                 "innate_abilities": innate_abilities,
                 "appearance": appearance,
+                "age_group": "adult",
+                "standing": f"Tier {agent_tier} ({rank_title})",
+                "social_role_type": "special_agent",
                 "is_special_agent": True,
+                "is_student_agent": False,
                 "anomalous_npc_tag": "special_agent",
                 "is_hydrated": 0,
             })
@@ -833,27 +1166,302 @@ def generate_anomalous_special_agents_roster(
     return roster
 
 
-def ensure_anomalous_agent_roster(session_id: int, scen_key: str = "") -> List[Dict[str, Any]]:
+def generate_student_special_agents_roster(
+    session_id: int,
+    scen_key: str = "anomalous_high_school",
+    factions: Optional[List[Dict[str, Any]]] = None,
+    player_gender: str = "",
+    used_names: Optional[set[str]] = None,
+) -> List[Dict[str, Any]]:
     """
-    Ensures the 44 Special Agents are generated and synced into:
-    1. `session['extra']['anomalous_agent_roster']`
-    2. `school_directory` (for fast facility ambient lookup and codex directory fallback)
+    Deterministically generates the 16 Dedicated Student Special Agents for
+    `anomalous_high_school` and its variants:
+    - 4 per grade (`Freshman`, `Sophomore`, `Junior`, `Senior`)
+    - 8 Independent Club Freelancers (`faction_id="freelancer"`, 1 per school club)
+    - 8 Junior Agency-Affiliated Student Operatives (`2 per major agency`)
+    """
+    from mechanics.social.factions import ANOMALOUS_PROMOTION_TIERS, infer_anomalous_faction_archetype
+    from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
+    from mechanics.social.races import normalize_race
+    from mechanics.social.persona import normalize_appearance
+    from scenario_data import should_skew_female_npcs
+
+    if not player_gender and session_id:
+        try:
+            player_gender = db.get_session_player_gender(session_id)
+        except Exception:
+            player_gender = ""
+    skew_female = should_skew_female_npcs(scen_key, player_gender)
+
+    fac_map: Dict[str, Dict[str, Any]] = {}
+    if not factions and session_id:
+        try:
+            factions = db.get_factions(session_id) or []
+        except Exception:
+            factions = []
+    if not factions:
+        factions = namegen.get_scenario_starter_factions(scen_key, hash_val=int(session_id or 1))
+    for f in (factions or []):
+        arch = str(f.get("faction_archetype_key") or infer_anomalous_faction_archetype(f) or f.get("faction_id") or "").strip()
+        if arch:
+            fac_map[arch] = f
+
+    try:
+        from mechanics.world.locations import get_session_school_name, format_node_hierarchy, resolve_session_location_tokens
+        school_name = get_session_school_name(session_id, scen_key) or "Westlake High School"
+    except Exception:
+        school_name = "Westlake High School"
+        format_node_hierarchy = None
+        resolve_session_location_tokens = None
+
+    seed_base = int(session_id or 101) * 131 + 709
+    seen_names: set[str] = set(used_names) if used_names else set()
+    student_agents: List[Dict[str, Any]] = []
+
+    grade_room_names = {
+        "Freshman": f"{school_name} ➔ Main Academic Building & Classrooms ➔ Freshman Classroom 1-A",
+        "Sophomore": f"{school_name} ➔ Main Academic Building & Classrooms ➔ Sophomore Classroom 2-A",
+        "Junior": f"{school_name} ➔ Main Academic Building & Classrooms ➔ Junior Classroom 3-B",
+        "Senior": f"{school_name} ➔ Main Academic Building & Classrooms ➔ Senior Classroom 4-A",
+    }
+
+    for idx, bp in enumerate(STUDENT_SPECIAL_AGENT_BLUEPRINTS):
+        if skew_female:
+            gender = "female" if (idx % 3 != 2) else "male"
+        else:
+            gender = "female" if (idx % 2 == 0) else "male"
+
+        faction_id = str(bp.get("faction_id") or "freelancer").strip()
+        grade = str(bp.get("grade") or "Sophomore").strip()
+        agent_tier = int(bp.get("agent_tier", 1))
+        tier_meta = next((t for t in ANOMALOUS_PROMOTION_TIERS if t["tier"] == agent_tier), ANOMALOUS_PROMOTION_TIERS[0])
+        rank_title = tier_meta["title"]
+
+        if faction_id == "freelancer":
+            faction_name = "Independent Student Operative"
+        else:
+            fac_info = fac_map.get(faction_id, {})
+            faction_name = str(fac_info.get("name") or faction_id.replace("_", " ").title())
+
+        culture_weights = MONASTIC_ORDER_CULTURE_WEIGHTS if faction_id == "monastic_order" else None
+        full_name = ""
+        for attempt in range(35):
+            item_seed = seed_base + idx * 67 + attempt * 113
+            cand = namegen.generate_person_name(
+                scen_key,
+                gender=gender,
+                culture_weights=culture_weights,
+                seed=item_seed,
+            )
+            if cand and cand.lower() not in seen_names:
+                full_name = cand
+                seen_names.add(cand.lower())
+                if used_names is not None:
+                    used_names.add(cand.lower())
+                break
+        if not full_name:
+            full_name = f"Student Operative {idx + 1}"
+            seen_names.add(full_name.lower())
+            if used_names is not None:
+                used_names.add(full_name.lower())
+
+        npc_id = full_name.lower().replace(" ", "_").replace(".", "")
+        char_race = normalize_race("", scen_key, seed=f"{session_id}:student_agent:{npc_id}")
+
+        drive = AGENT_DRIVES[(seed_base + idx * 7) % len(AGENT_DRIVES)]
+        friction = AGENT_FRICTIONS[(seed_base + idx * 11 + 3) % len(AGENT_FRICTIONS)]
+        quirk = AGENT_QUIRKS[(seed_base + idx * 13 + 5) % len(AGENT_QUIRKS)]
+
+        agent_class = str(bp.get("agent_class") or "Honor Roll Student")
+        ag_attr, ag_arch, ag_med = _resolve_agent_3axis_for_faction(
+            faction_id,
+            idx,
+            agent_class,
+            bp.get("role", ""),
+            seed_str=f"{session_id}:student_agent:{npc_id}:{agent_class}",
+        )
+        innate_abilities = build_awakened_kit_ids(ag_attr, ag_arch, ag_med)
+
+        prim_nid = str(bp.get("primary_node_id") or "loc_sophomore_class").strip()
+        sec_nid = str(bp.get("secondary_node_id") or "loc_courtyard").strip()
+        primary_facility = grade_room_names.get(grade, f"{school_name} ➔ Main Academic Building & Classrooms ➔ Sophomore Classroom 2-A")
+        secondary_facility = str(bp.get("city_hangout") or "").replace("{session_school}", school_name)
+        try:
+            if resolve_session_location_tokens:
+                secondary_facility = resolve_session_location_tokens(session_id or 0, secondary_facility, scen_key)
+            if session_id and format_node_hierarchy:
+                if prim_nid:
+                    fmt_p = format_node_hierarchy(session_id, prim_nid)
+                    if fmt_p and not fmt_p.startswith(("loc_", "zone_", "sub_")):
+                        primary_facility = fmt_p
+                if sec_nid:
+                    fmt_s = format_node_hierarchy(session_id, sec_nid)
+                    if fmt_s and not fmt_s.startswith(("loc_", "zone_", "sub_")):
+                        secondary_facility = fmt_s
+        except Exception:
+            pass
+
+        club_name = str(bp.get("club") or "Student Council").strip()
+        personality_summary = (
+            f"{bp['summary']} ({grade} at {school_name} | {club_name} | {faction_name} — {rank_title}, Tier {agent_tier}). "
+            f"Drive: {drive} Flaw: {friction} Mannerism: {quirk}"
+        )
+
+        appearance = normalize_appearance(
+            {"outfit_style": f"Tailored {school_name} student blazer uniform with concealed tactical holster harness"},
+            gender=gender,
+            race=char_race,
+            scen_key=scen_key,
+            desc=bp["summary"],
+        )
+
+        student_agents.append({
+            "session_id": session_id,
+            "npc_id": npc_id,
+            "name": full_name,
+            "gender": gender,
+            "race": char_race,
+            "role": bp["role"],
+            "agent_class": agent_class,
+            "agent_tier": agent_tier,
+            "promotion_tier": agent_tier,
+            "rank_title": rank_title,
+            "faction_id": faction_id,
+            "faction_archetype_key": faction_id,
+            "faction_name": faction_name,
+            "division": club_name,
+            "grade": grade,
+            "student_grade": grade,
+            "standing": grade,
+            "age_group": "teen",
+            "social_role_type": "student_peer",
+            "club": club_name,
+            "clique": bp.get("clique", "Academics"),
+            "primary_facility": primary_facility,
+            "secondary_facility": secondary_facility,
+            "primary_node_id": prim_nid,
+            "secondary_node_id": sec_nid,
+            "sibling_name": "",
+            "personality_summary": personality_summary,
+            "mannerisms": quirk,
+            "speech_style": "Youthful student cadence sharpened by field-operative situational awareness.",
+            "attribute": ag_attr,
+            "combat_archetype": ag_arch,
+            "ability_medium": ag_med,
+            "innate_abilities": innate_abilities,
+            "appearance": appearance,
+            "is_special_agent": True,
+            "is_student_agent": True,
+            "is_student_operative": True,
+            "anomalous_npc_tag": "special_agent",
+            "is_hydrated": 0,
+        })
+
+    return student_agents
+
+
+def _build_merged_anomalous_high_school_directory(
+    session_id: int,
+    scen_key: str,
+    agent_roster: List[Dict[str, Any]],
+    player_gender: str = "",
+) -> List[Dict[str, Any]]:
+    """
+    Merges the Civilian Campus & Town Directory (`generate_campus_directory`) with the 60 Special Agents
+    (44 Adult Special Agents + 16 Student Special Agents) for `anomalous_high_school`.
+    Ensures civilian records carry explicit `age_group` ("adult" vs "teen"), `standing`, and `anomalous_npc_tag="civilian"`.
+    """
+    from mechanics.social.school_roster import generate_campus_directory
+    civilians = generate_campus_directory(session_id, scen_key=scen_key, player_gender=player_gender)
+    agent_names_low = {str(a.get("name") or "").strip().lower() for a in agent_roster}
+    agent_ids_low = {str(a.get("npc_id") or "").strip().lower() for a in agent_roster}
+
+    merged: List[Dict[str, Any]] = []
+    for idx, civ in enumerate(civilians):
+        item = dict(civ)
+        c_name = str(item.get("name") or "").strip()
+        c_id = str(item.get("npc_id") or "").strip().lower()
+        if c_name.lower() in agent_names_low or c_id in agent_ids_low:
+            for attempt in range(25):
+                alt_name = namegen.generate_person_name(
+                    scen_key, gender=item.get("gender", "female"), seed=int(session_id or 1) * 173 + idx * 43 + attempt * 71
+                )
+                if item.get("grade") == "Faculty":
+                    prefix = c_name.split()[0] if "." in c_name.split()[0] or c_name.split()[0] in ("Coach", "Nurse", "Dean", "Principal", "Chef", "Madame") else "Ms."
+                    alt_name = f"{prefix} {alt_name}"
+                alt_id = alt_name.lower().replace(" ", "_").replace(".", "")
+                if alt_name.lower() not in agent_names_low and alt_id not in agent_ids_low:
+                    item["name"] = alt_name
+                    item["npc_id"] = alt_id
+                    break
+        grade_str = str(item.get("grade") or "Student").strip()
+        is_adult_civ = grade_str in ("Faculty", "Citizen")
+        item["age_group"] = "adult" if is_adult_civ else "teen"
+        item["standing"] = grade_str
+        item["is_special_agent"] = False
+        item["is_student_agent"] = False
+        item["anomalous_npc_tag"] = "civilian"
+        merged.append(item)
+
+    merged.extend(agent_roster)
+    return merged
+
+
+def ensure_anomalous_agent_roster(session_id: int | dict | str | None, scen_key: str = "", player_gender: str = "") -> List[Dict[str, Any]]:
+    """
+    Ensures the Special Agents roster is generated and synced into:
+    1. `session['extra']['anomalous_agent_roster']` (44 agents in `anomalous_incursions`; 60 in `anomalous_high_school`)
+    2. `school_directory` (44 agents in `anomalous_incursions`; 148+ merged Civilians + Special Agents in `anomalous_high_school`)
     3. `factions` table (`leadership_roster` and `members` for each of the 6 Fixed Factions)
     4. `lorebook` (`entity_type='person'`) for faction leaders and same-faction colleagues
     """
     if not session_id:
         return []
 
-    sess = db.get_session(session_id) or {}
+    if isinstance(session_id, dict):
+        sess = session_id
+        session_id_val = sess.get("id")
+    else:
+        try:
+            session_id_val = int(session_id)
+        except (ValueError, TypeError):
+            return []
+        sess = db.get_session(session_id_val) or {}
+
+    if not session_id_val:
+        return []
+
+    session_id = session_id_val
     if not scen_key:
         scen_key = str(sess.get("scenario") or "anomalous_incursions")
     if not scenario_data.is_anomalous_incursions_scenario(scen_key):
         return []
 
+    is_hybrid_hs = scenario_data.is_anomalous_high_school_scenario(scen_key)
+    expected_agent_count = 60 if is_hybrid_hs else 44
+
     existing_roster = sess.get("anomalous_agent_roster") or (
         sess.get("extra", {}).get("anomalous_agent_roster") if isinstance(sess.get("extra"), dict) else None
     )
-    if isinstance(existing_roster, list) and len(existing_roster) == 44:
+    if isinstance(existing_roster, list) and len(existing_roster) == expected_agent_count:
+        existing_roster, was_upgraded = _upgrade_legacy_agent_roster_3axis(existing_roster, session_id=session_id)
+        if was_upgraded:
+            db.update_session(session_id, extra={"anomalous_agent_roster": existing_roster})
+        if is_hybrid_hs:
+            try:
+                cur_dir = db.get_school_roster(session_id) or []
+                if len(cur_dir) < 140:
+                    merged_dir = _build_merged_anomalous_high_school_directory(
+                        session_id, scen_key, existing_roster, player_gender=player_gender
+                    )
+                    db.save_school_roster(session_id, merged_dir)
+            except Exception:
+                pass
+        elif was_upgraded:
+            try:
+                db.save_school_roster(session_id, existing_roster)
+            except Exception:
+                pass
         prune_unmet_preseeded_special_agents(session_id)
         return existing_roster
 
@@ -868,14 +1476,30 @@ def ensure_anomalous_agent_roster(session_id: int, scen_key: str = "") -> List[D
     player_faction_arch = str(fac_state.get("faction_archetype_key") or "public_agency").strip()
 
     factions = db.get_factions(session_id) or []
-    roster = generate_anomalous_special_agents_roster(session_id, scen_key=scen_key, factions=factions)
+    roster = generate_anomalous_special_agents_roster(session_id, scen_key=scen_key, factions=factions, player_gender=player_gender)
+    if is_hybrid_hs:
+        used_names = {str(a.get("name") or "").strip().lower() for a in roster}
+        student_agents = generate_student_special_agents_roster(
+            session_id,
+            scen_key=scen_key,
+            factions=factions,
+            player_gender=player_gender,
+            used_names=used_names,
+        )
+        roster.extend(student_agents)
 
     # 1. Persist in session extra
     db.update_session(session_id, extra={"anomalous_agent_roster": roster})
 
     # 2. Save in school_directory table for facility-based ambient presence & directory lookup
     try:
-        db.save_school_roster(session_id, roster)
+        if is_hybrid_hs:
+            merged_dir = _build_merged_anomalous_high_school_directory(
+                session_id, scen_key, roster, player_gender=player_gender
+            )
+            db.save_school_roster(session_id, merged_dir)
+        else:
+            db.save_school_roster(session_id, roster)
     except Exception:
         pass
 
@@ -901,7 +1525,6 @@ def ensure_anomalous_agent_roster(session_id: int, scen_key: str = "") -> List[D
         # Sort highest tier first
         fac_agents_sorted = sorted(fac_agents, key=lambda x: int(x.get("agent_tier", 1)), reverse=True)
         leadership_roster = []
-        members_list = []
         from mechanics.combat.spells.registry import get_spell
         for ag in fac_agents_sorted:
             ability_names = []
@@ -917,21 +1540,19 @@ def ensure_anomalous_agent_roster(session_id: int, scen_key: str = "") -> List[D
                 "name": ag["name"],
                 "agent_class": ag["agent_class"],
                 "agent_tier": int(ag["agent_tier"]),
+                "attribute": ag.get("attribute"),
+                "combat_archetype": ag.get("combat_archetype"),
+                "ability_medium": ag.get("ability_medium"),
                 "innate_abilities": ability_names,
                 "is_player": False,
                 "is_vacant": False,
             })
-            members_list.append(ag["name"])
 
-        leader_name = fac_agents_sorted[0]["name"] if fac_agents_sorted else ""
         try:
             db.upsert_faction(
                 session_id=session_id,
                 name=f_name,
-                leader=leader_name,
-                members=members_list,
                 leadership_roster=leadership_roster,
-                faction_id=fid,
             )
         except Exception:
             pass
@@ -1022,7 +1643,7 @@ def prune_unmet_preseeded_special_agents(session_id: int) -> int:
                 has_msg = False
                 try:
                     msg_row = conn.execute(
-                        "SELECT 1 FROM phone_messages WHERE session_id=? AND (LOWER(npc_id)=? OR LOWER(npc_id)=?) LIMIT 1",
+                        "SELECT 1 FROM phone_messages WHERE session_id=? AND (LOWER(contact_npc_id)=? OR LOWER(contact_npc_id)=?) LIMIT 1",
                         (session_id, npc_id_low, name_low),
                     ).fetchone()
                     has_msg = bool(msg_row)
@@ -1090,6 +1711,9 @@ def hydrate_faction_colleagues_to_contacts(session_id: int, faction_archetype_ke
                     "agent_class": ag["agent_class"],
                     "agent_tier": ag["agent_tier"],
                     "rank_title": ag["rank_title"],
+                    "attribute": ag.get("attribute"),
+                    "combat_archetype": ag.get("combat_archetype"),
+                    "ability_medium": ag.get("ability_medium"),
                     "faction": ag["faction_name"],
                     "faction_id": ag["faction_id"],
                     "division": ag["division"],
@@ -1180,6 +1804,18 @@ def evaluate_anomalous_companion_recruitment(
         hydrate_anomalous_npc_profile,
     )
     npc_tag = classify_anomalous_npc_tag(matched_contact, session_id=sess_id, scen_key=scen_key)
+    if (
+        npc_tag == "anomaly_entity"
+        or matched_contact.get("is_anomalous_entity")
+        or str(matched_contact.get("npc_type") or "").lower() == "anomaly"
+    ):
+        return {
+            "allowed": False,
+            "cost": 0,
+            "anomalous_npc_tag": "anomaly_entity",
+            "is_anomaly_blocked": True,
+            "reason": f"{npc_name} is an Anomalous Entity and cannot be recruited as a human party companion.",
+        }
     if npc_tag == TAG_CIVILIAN:
         return {
             "allowed": False,
@@ -1256,6 +1892,79 @@ def evaluate_anomalous_companion_recruitment(
         "stats": hydrated["stats"],
         "weapon_profile": hydrated["weapon_profile"],
     }
+
+    # Schedule-Aware Companion Gate for Anomalous High School (Weekdays 08:00-15:00)
+    if scenario_data.is_anomalous_high_school_scenario(scen_key):
+        from mechanics.social.origin_mode import is_school_hours, is_student_operative
+        from mechanics.world.world_schedule import is_campus_node_or_location
+        curr_day = int(session.get("current_day") or 1)
+        curr_min = int(session.get("current_minute") or 480)
+        if sess_id and ("current_day" not in session or "current_minute" not in session):
+            try:
+                curr_day, curr_min, _ = db.get_session_time(sess_id)
+            except Exception:
+                pass
+        if is_school_hours(curr_day, curr_min):
+            loc_str = str(session.get("location") or "")
+            node_id = str(session.get("current_node_id") or "")
+            is_on_campus = is_campus_node_or_location(
+                location_str=loc_str, node_id=node_id, session_id=sess_id, scen_key=scen_key
+            )
+            active_campus_rift = None
+            try:
+                from mechanics.world.anomalous_events import get_active_incursion_at_location
+                active_campus_rift = get_active_incursion_at_location(sess_id, loc_str or "zone_school_campus")
+            except Exception:
+                active_campus_rift = None
+
+            is_student_ag = bool(
+                (special_agent or {}).get("is_student_agent")
+                or basic_info.get("is_student_agent")
+                or matched_contact.get("is_student_agent")
+                or str((special_agent or {}).get("age_group") or basic_info.get("age_group") or matched_contact.get("age_group") or "").lower() == "teen"
+                or str((special_agent or {}).get("grade") or basic_info.get("grade") or matched_contact.get("grade") or "") in ("Freshman", "Sophomore", "Junior", "Senior")
+            )
+            if not active_campus_rift:
+                if is_student_ag and not is_on_campus:
+                    return {
+                        "allowed": False,
+                        "cost": 0,
+                        "anomalous_npc_tag": TAG_SPECIAL_AGENT,
+                        "is_school_hours_blocked": True,
+                        "reason": (
+                            f"{npc_name} is attending classes on campus until 15:00. "
+                            f"Student Operatives can only deploy off-campus after 15:00 dismissal or during an active Campus Anomaly breach."
+                        ),
+                    }
+                if not is_student_ag and is_on_campus and is_student_operative(session):
+                    return {
+                        "allowed": False,
+                        "cost": 0,
+                        "anomalous_npc_tag": TAG_SPECIAL_AGENT,
+                        "is_school_hours_blocked": True,
+                        "reason": (
+                            f"Adult Operative {npc_name} waits off-campus during weekday lecture hours (08:00–15:00) "
+                            f"unless an active Campus Anomaly breach is underway."
+                        ),
+                    }
+
+        # Same School Club Camaraderie: Student PC recruiting a Student Special Agent in the same joined club
+        agent_club = str((special_agent or {}).get("club") or basic_info.get("club") or matched_contact.get("club") or "").strip()
+        player_club = str(session.get("joined_faction") or "").strip()
+        if not player_club and session.get("id"):
+            try:
+                from mechanics.social.factions import get_anomalous_faction_state
+                fac_state = get_anomalous_faction_state(int(session["id"]), int(session.get("user_id", 0)))
+                player_club = str(fac_state.get("joined_club_name") or "").strip()
+            except Exception:
+                player_club = ""
+        if agent_club and player_club and agent_club.lower() == player_club.lower() and affinity_score >= 40:
+            return {
+                "allowed": True,
+                "cost": 0,
+                "reason": f"Clubmate & fellow Student Operative {npc_name} ({agent_club}) joined your squad for 0G.",
+                **base_companion_payload,
+            }
 
     # Case 0: Independent / Freelance Special Agent (can be hired for cash OR recruited via Friend 100+ affinity)
     if agent_faction_id in ("", "freelancer"):
@@ -1512,7 +2221,7 @@ def get_anomalous_facility_ambient_agents(
         if matched:
             eligible.append(ag)
 
-    # Check if there is an active Daily Anomalous Incursion here for field responder convergence
+    # Check if there is an active Daily Anomaly Breach here for field responder convergence
     active_inc = None
     try:
         from mechanics.world.anomalous_events import get_active_incursion_at_location
@@ -1546,7 +2255,7 @@ def get_anomalous_facility_ambient_agents(
     scored = sorted(eligible, key=_score_agent, reverse=True)
     selected = list(scored[:limit])
 
-    # Field Incursion Convergence: 45% chance a field operative responds to an active Daily Incursion site
+    # Field Breach Convergence: 45% chance a field operative responds to an active Daily Anomaly Breach site
     if active_inc and len(selected) < limit:
         conv_roll = int(hashlib.md5(f"inc_{session_id}_{safe_day}_{current_location}".encode("utf-8")).hexdigest(), 16) % 100
         if conv_roll < 45:

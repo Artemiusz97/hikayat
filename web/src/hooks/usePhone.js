@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { apiCall } from '../api/client';
+import { isValidSessionId } from '../utils/session';
 
 export const usePhone = (sessionId, user) => {
   const [phoneData, setPhoneData] = useState(null);
@@ -11,7 +12,10 @@ export const usePhone = (sessionId, user) => {
   const [sendingChat, setSendingChat] = useState(false);
 
   const fetchPhoneState = useCallback(async () => {
-    if (!sessionId || !user) return;
+    if (!isValidSessionId(sessionId) || !user) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       const data = await apiCall(`/api/phone/${sessionId}?user_id=${user.user_id}`);
@@ -28,7 +32,7 @@ export const usePhone = (sessionId, user) => {
   }, [fetchPhoneState]);
 
   const loadChatMessages = async (npcId) => {
-    if (!sessionId || !npcId) return;
+    if (!isValidSessionId(sessionId) || !npcId) return;
     setActiveChatNpc(npcId);
     setLoadingChat(true);
     try {
@@ -47,7 +51,7 @@ export const usePhone = (sessionId, user) => {
 
   const sendMessage = async (npcId, messageText, intent = 'chat') => {
     const cleanText = (messageText || '__auto__').trim();
-    if (!sessionId || !npcId || !user || !cleanText || sendingChat) return null;
+    if (!isValidSessionId(sessionId) || !npcId || !user || !cleanText || sendingChat) return null;
     setSendingChat(true);
     try {
       const data = await apiCall(`/api/phone/${sessionId}/messages/${encodeURIComponent(npcId)}`, {
@@ -77,7 +81,7 @@ export const usePhone = (sessionId, user) => {
   };
 
   const refreshFeed = async () => {
-    if (!sessionId || !user) return null;
+    if (!isValidSessionId(sessionId) || !user) return null;
     const data = await apiCall(`/api/phone/${sessionId}/feed/refresh`, {
       method: 'POST',
       body: JSON.stringify({
@@ -96,7 +100,7 @@ export const usePhone = (sessionId, user) => {
   };
 
   const scourFeed = async () => {
-    if (!sessionId || !user) return null;
+    if (!isValidSessionId(sessionId) || !user) return null;
     const data = await apiCall(`/api/phone/${sessionId}/feed/scour`, {
       method: 'POST',
       body: JSON.stringify({
@@ -114,7 +118,7 @@ export const usePhone = (sessionId, user) => {
   };
 
   const discoverPeer = async (queryName = '') => {
-    if (!sessionId || !user) return null;
+    if (!isValidSessionId(sessionId) || !user) return null;
     return await apiCall(`/api/phone/${sessionId}/peerpulse/discover`, {
       method: 'POST',
       body: JSON.stringify({
@@ -125,7 +129,7 @@ export const usePhone = (sessionId, user) => {
   };
 
   const sendFriendRequest = async (profile) => {
-    if (!sessionId || !user || !profile) return null;
+    if (!isValidSessionId(sessionId) || !user || !profile) return null;
     const data = await apiCall(`/api/phone/${sessionId}/peerpulse/friend-request`, {
       method: 'POST',
       body: JSON.stringify({
@@ -162,7 +166,7 @@ export const usePhone = (sessionId, user) => {
   };
 
   const cancelCommitment = async (commitmentId, reason = 'player_cancelled') => {
-    if (!sessionId || !commitmentId) return null;
+    if (!isValidSessionId(sessionId) || !commitmentId) return null;
     const data = await apiCall(`/api/commitments/${sessionId}/${commitmentId}/cancel`, {
       method: 'POST',
       body: JSON.stringify({
@@ -217,4 +221,3 @@ export const usePhone = (sessionId, user) => {
     closeChat: () => { setActiveChatNpc(null); setChatMessages([]); setDailyLimits(null); }
   };
 };
-

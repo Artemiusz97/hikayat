@@ -9,7 +9,6 @@ Generates 4 non-repetitive combat choices based on:
  - Slot 4: Defensive / utility action
 Formats: <EMOJI> <STAT> <PCT>% <action text>  (max 100 chars)
 """
-import random
 import db
 from mechanics.combat import calculate_opposed_dc
 
@@ -138,56 +137,10 @@ def _dc_to_pct(dc: int) -> int:
     pct = (21 - dc) * 5
     return max(5, min(95, pct))
 
-def _pick_icon(action_type: str, used: set) -> str:
-    pool = ATTACK_ICONS.get(action_type, ["⚔️"])
-    unused = [i for i in pool if i not in used]
-    chosen = random.choice(unused) if unused else random.choice(pool)
-    used.add(chosen)
-    return chosen
-
 def _get_stat_val(char: dict, stat_name: str) -> int:
     """Get player stat value from character dict using DB naming convention."""
     key = f"{stat_name.lower()}_" if stat_name in ("STR", "PER", "END", "INT") else stat_name.lower()
     return int(char.get(key, 5))
-
-def _truncate_label(label: str, max_len: int = 98) -> str:
-    if len(label) <= max_len:
-        return label
-    return label[:max_len - 1] + "…"
-
-def _get_weapon_info(char: dict, inventory: list) -> tuple[str, str, str]:
-    """
-    Returns (weapon_name, weapon_type_key, weapon_display).
-    Looks at equipped items first, then falls back to class name.
-    """
-    import db
-    try:
-        equipment = db.get_equipment(char.get("user_id", 0))
-        weapon_item = equipment.get("Weapon")
-        if weapon_item and weapon_item.get("name"):
-            wname = weapon_item["name"]
-            wname_lower = wname.lower()
-            for key in WEAPON_ATTACK_TEMPLATES:
-                if key in wname_lower:
-                    return wname, key, wname
-            return wname, "generic", wname
-    except Exception:
-        pass
-    return "Bare Fists", "fists", "Bare Fists"
-
-def _get_class_ability(char: dict, scenario: str, enemy_name: str) -> tuple[str, str, str]:
-    """Returns (stat_name, action_type, label_text) for the class ability slot."""
-    char_class_lower = (char.get("char_class") or "").lower()
-    for key, (stat, atype, tmpl) in CLASS_ABILITY_TEMPLATES.items():
-        if key in char_class_lower:
-            weapon, _, _ = _get_weapon_info(char, [])
-            text = tmpl.format(weapon_or_ability=weapon, enemy=enemy_name)
-            return stat, atype, text
-    # Scenario fallback
-    stat, atype, tmpl = SCENARIO_FALLBACK_ABILITIES.get(
-        scenario.lower(), ("INT", "magic", "Strike: Force power into {enemy}")
-    )
-    return stat, atype, tmpl.format(enemy=enemy_name)
 
 def generate_categorized_combat_actions(party: list, monster: dict, location: str = "area", scenario: str = "fantasy", session: Optional[dict] = None) -> dict:
     """
@@ -541,11 +494,60 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
             "label_detail": "Strike from unseen angle: +50% surprise damage, 50% armor pierce, and high critical rate"
         })
 
-    # 2. MAGIC & SPELLS CATEGORY
+    from scenario_data import is_anomalous_incursions_scenario
+    is_anom_combat = is_anomalous_incursions_scenario(scenario or "")
+    if is_anom_combat:
+        from mechanics.combat.spells.awakened_kits import (
+            get_awakened_basic_strike,
+            get_actor_spell,
+            normalize_anomalous_attribute,
+        )
+        from mechanics.combat.awakened_resonance import resolve_medium_scaling_stat
+
+        locked_attr = normalize_anomalous_attribute(char.get("attribute") or "physical", fallback="physical")
+        locked_med = str(char.get("ability_medium") or "direct_manifestation").strip().lower()
+        basic_strike = get_awakened_basic_strike(
+            locked_attr,
+            locked_med,
+            equipped_weapon=weapon_meta if weapon_item else None,
+        )
+        basic_stat, _, _ = resolve_medium_scaling_stat(
+            char,
+            locked_med,
+            equipped_weapon=weapon_meta if weapon_item else None,
+        )
+        attacks.insert(
+            0,
+            {
+                "label": f"{basic_strike['emoji']} {basic_strike['name']} ({hit_pct}% • 0 MP • +1 Pip)",
+                "stat": basic_stat,
+                "requirement": 0,
+                "hit_chance": hit_pct,
+                "mp_cost": 0,
+                "pip_gain": 1,
+                "stability_shred": 12,
+                "is_awakened_basic": True,
+                "awakened_basic_id": basic_strike["id"],
+                "damage_type": basic_strike["damage_type"],
+                "choice_type": "MELEE_SLASHING_PIERCING",
+                "attack_type": attack_types[0] if attack_types else "slash",
+                "action_category": "attack",
+                "label_detail": f"0 MP Awakened Basic Strike: shreds 12 Stability and generates +1 Resonance Pip ({basic_strike['attack_attribute'].title()})",
+            },
+        )
+
+    # 2. MAGIC & SPELLS / AWAKENED ABILITIES CATEGORY
     magic = []
     from mechanics.combat.spells import get_spell, get_starter_spells, format_spell_choice_label
+    from mechanics.combat.spells.awakened_kits import get_actor_spell as _get_actor_spell_safe
     user_id = char.get("user_id")
     learned_spells = db.get_learned_spells(user_id) if user_id else []
+    skill_prog = db.get_skill_progress(char) if char else {}
+    if is_anom_combat:
+        from mechanics.combat.awakened_resonance import get_actor_resonance_pips
+        ult_pips = get_actor_resonance_pips(session, user_id)
+    else:
+        ult_pips = 0
 
     # If character has no learned spells yet, populate starter spell kit scaled by INT
     if not learned_spells:
@@ -556,7 +558,7 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
             db.set_learned_spells(user_id, learned_spells)
 
     for spell_id in learned_spells:
-        spell = get_spell(spell_id)
+        spell = _get_actor_spell_safe(spell_id, skill_prog) or get_spell(spell_id)
         if not spell:
             continue
         disc = spell.get("discipline", "attack")
@@ -573,20 +575,52 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
         else:
             hit_chance = m_hit_pct
 
-        stat_type = "INT" if disc not in ("support",) else "END"
+        if is_anom_combat:
+            from mechanics.combat.awakened_resonance import resolve_medium_scaling_stat as _res_stat
+            if disc in ("support",):
+                stat_type = "END"
+            else:
+                stat_type, _, _ = _res_stat(
+                    char,
+                    str(spell.get("medium") or char.get("ability_medium") or "direct_manifestation"),
+                    equipped_weapon=weapon_meta if weapon_item else None,
+                )
+        else:
+            stat_type = "INT" if disc not in ("support",) else "END"
 
-        label = format_spell_choice_label(spell, hit_chance, char.get("mp", 0))
+        is_ult = bool(spell.get("is_ultimate") or spell.get("slot_tier") == "ultimate")
+        if is_ult and is_anom_combat:
+            mp_cost_val = 0
+            pip_cost_val = int(spell.get("pip_cost", 3) or 3)
+            can_afford = ult_pips >= pip_cost_val
+            filled = min(pip_cost_val, max(0, ult_pips))
+            dots = ("●" * filled) + ("○" * max(0, pip_cost_val - filled))
+            pip_status = "3/3 Pips • READY" if can_afford else f"{dots} {ult_pips}/{pip_cost_val} Pips"
+            label = f"{spell.get('emoji', '🌟')} {spell['name']} ({hit_chance}% • {pip_status} • 0 MP)"
+        else:
+            mp_cost_val = int(spell.get("mp_cost", 0) or 0)
+            pip_cost_val = 0
+            can_afford = int(char.get("mp", 0) or 0) >= mp_cost_val
+            emp_suffix = " [+20% Relic Sync]" if spell.get("duplicate_empowered") else ""
+            label = format_spell_choice_label(spell, hit_chance, char.get("mp", 0)) + emp_suffix
+
         magic.append({
             "label": label,
             "stat": stat_type,
             "requirement": 0,
             "hit_chance": hit_chance,
-            "mp_cost": spell.get("mp_cost", 0),
+            "mp_cost": mp_cost_val,
+            "pip_cost": pip_cost_val,
+            "is_ultimate": is_ult,
+            "can_afford": can_afford,
+            "slot_tier": spell.get("slot_tier", ""),
+            "duplicate_empowered": bool(spell.get("duplicate_empowered")),
             "spell_id": spell["id"],
             "choice_type": "MAGIC_SPELL",
             "action_category": "magic",
             "is_chain": target_type == "chain",
-            "discipline": disc
+            "discipline": disc,
+            "label_detail": spell.get("description", ""),
         })
 
 
@@ -664,14 +698,22 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
         })
 
     # Non-Hostile Agitated Entity Containment Tactics (Persuade/Calm at any HP + Subdue at <= 35% HP)
-    if monster.get("requires_non_lethal_subdue"):
+    if monster.get("requires_non_lethal_subdue") or monster.get("is_anomalous_manifestation"):
         m_cur_hp = int(monster.get("hp", 10) or 10)
         m_max_hp = max(1, int(monster.get("max_hp", 40) or 40))
-        sub_pct = float(monster.get("subdue_threshold_pct") or 0.35)
-        persuade_dc = 6 if m_cur_hp <= max(1, int(m_max_hp * 0.50)) else 8
+        sub_pct = float(monster.get("subdue_threshold_pct") or (0.50 if (not monster.get("requires_non_lethal_subdue") and str(monster.get("sapience") or "").lower() == "instinctual") else 0.35))
+        persuade_dc = 6 if (m_cur_hp <= max(1, int(m_max_hp * 0.50)) or monster.get("taboo_exploited")) else 8
         persuade_pct = _dc_to_pct(persuade_dc)
-        tactics.insert(0, {
-            "label": f"🗣️ Persuade / Calm {monster_name} (De-escalate)",
+        _mon_sap = str(monster.get("sapience") or "sapient").lower()
+        _mon_bp = monster.get("anomaly_blueprint") if isinstance(monster.get("anomaly_blueprint"), dict) else {}
+        _mon_dossier_rev = bool(monster.get("dossier_revealed") or _mon_bp.get("dossier_revealed"))
+        _is_compulsive_rite = _mon_sap == "compulsive" and _mon_dossier_rev and not monster.get("requires_non_lethal_subdue")
+        if monster.get("requires_non_lethal_subdue") or _mon_sap == "sapient" or _is_compulsive_rite: tactics.insert(0, {
+            "label": (
+                f"🗣️ Enact Counter-Rite / Calm {monster_name}"
+                if _is_compulsive_rite
+                else f"🗣️ Persuade / Calm {monster_name} (De-escalate)"
+            ),
             "stat": "CHA",
             "requirement": persuade_dc,
             "hit_chance": persuade_pct,
@@ -684,20 +726,95 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
             "quest_id": monster.get("linked_quest_id", ""),
             "label_detail": "Non-lethally calm and contain the agitated entity alive without dealing lethal damage",
         })
-        if 0 < m_cur_hp <= max(1, int(m_max_hp * sub_pct)):
+        is_breached_subdue = bool(monster.get("is_breached") or monster.get("taboo_exploited") or monster.get("taboo_seal_unlocked"))
+        bp_mon = monster.get("anomaly_blueprint") if isinstance(monster.get("anomaly_blueprint"), dict) else {}
+        taboo_mon = monster.get("taboo") if isinstance(monster.get("taboo"), dict) else (bp_mon.get("taboo") if isinstance(bp_mon.get("taboo"), dict) else {})
+        if (
+            taboo_mon
+            and not monster.get("taboo_exploited")
+            and (monster.get("dossier_revealed") or bp_mon.get("dossier_revealed"))
+        ):
+            tb_stats = [str(s).upper() for s in (taboo_mon.get("exploit_stats") or []) if s]
+            tb_stat = tb_stats[0] if tb_stats else "INT"
+            tb_dc = 6
             tactics.insert(0, {
-                "label": f"🛡️ Subdue & Contain {monster_name}",
+                "label": f"🔓 Exploit Taboo: {taboo_mon.get('name') or 'Containment Protocol'} ({tb_stat})",
+                "stat": tb_stat,
+                "requirement": tb_dc,
+                "hit_chance": _dc_to_pct(tb_dc),
+                "mp_cost": 0,
+                "is_taboo_exploit": True,
+                "choice_type": "WEAKNESS_EXPLOIT",
+                "action_category": "tactics",
+                "intent": "anomalous_incursion_action",
+                "incursion_action": "exploit_taboo",
+                "incursion_id": monster.get("incursion_id", ""),
+                "quest_id": monster.get("linked_quest_id", ""),
+                "label_detail": str(taboo_mon.get("containment_protocol") or "Exploit verified taboo to unlock non-lethal containment"),
+            })
+        try:
+            from mechanics.world.folklore_mechanics import find_matching_offering_in_inventory, get_enemy_tether_state
+            ts_mon = get_enemy_tether_state(monster)
+            if ts_mon and not ts_mon.get("sealed") and not monster.get("tether_sealed"):
+                if (
+                    monster.get("tether_reformed_once")
+                    or ts_mon.get("reformed_once")
+                    or monster.get("dossier_revealed")
+                    or bp_mon.get("dossier_revealed")
+                ):
+                    vessel_nm = str(ts_mon.get("vessel_name") or "Binding Vessel")
+                    sev_stat = str(ts_mon.get("sever_stat") or "INT")
+                    tactics.insert(0, {
+                        "label": f"🏺 Sever/Seal {vessel_nm} ({monster_name})",
+                        "stat": sev_stat,
+                        "requirement": 7,
+                        "hit_chance": _dc_to_pct(7),
+                        "mp_cost": 0,
+                        "choice_type": "WEAKNESS_EXPLOIT",
+                        "action_category": "tactics",
+                        "intent": "anomalous_incursion_action",
+                        "incursion_action": "sever_tether",
+                        "incursion_id": monster.get("incursion_id", ""),
+                        "quest_id": monster.get("linked_quest_id", ""),
+                        "label_detail": f"Sever or seal {vessel_nm} so {monster_name} cannot reform at 1 HP",
+                    })
+            lead_uid_cg = char.get("user_id") if isinstance(char, dict) else None
+            off_match = find_matching_offering_in_inventory(lead_uid_cg, bp_mon or monster) if lead_uid_cg else None
+            if off_match:
+                tactics.insert(0, {
+                    "label": f"🎁 Folklore Counter-Rite: Present {off_match['item_name']} ({monster_name})",
+                    "stat": "INT",
+                    "requirement": 5,
+                    "hit_chance": _dc_to_pct(5),
+                    "mp_cost": 0,
+                    "choice_type": "DIPLOMACY_TAUNT",
+                    "action_category": "tactics",
+                    "intent": "anomalous_incursion_action",
+                    "incursion_action": "folklore_offering_rite",
+                    "offering_item_name": off_match["item_name"],
+                    "incursion_id": monster.get("incursion_id", ""),
+                    "quest_id": monster.get("linked_quest_id", ""),
+                    "label_detail": f"Present {off_match['item_name']} to appease and pacify {monster_name}",
+                })
+        except Exception:
+            pass
+        if m_cur_hp > 0 and (m_cur_hp <= max(1, int(m_max_hp * sub_pct)) or is_breached_subdue or m_cur_hp == 1):
+            subdue_reason = "ANOMALY BREACHED!" if is_breached_subdue else "<= 35% HP"
+            tactics.insert(0, {
+                "label": f"🛡️ Subdue & Contain {monster_name}" + (" [BREACH OPEN]" if is_breached_subdue else ""),
                 "stat": "FREE",
                 "requirement": 0,
                 "hit_chance": 100,
                 "mp_cost": 0,
+                "is_subdue_contain": True,
+                "subdue_highlighted": True,
                 "choice_type": "DEFENSIVE_GUARD",
                 "action_category": "tactics",
                 "intent": "anomalous_incursion_action",
                 "incursion_action": "subdue",
                 "incursion_id": monster.get("incursion_id", ""),
                 "quest_id": monster.get("linked_quest_id", ""),
-                "label_detail": "Safely capture and seal the weakened entity (<= 35% HP) alive",
+                "label_detail": f"Safely capture and seal the weakened entity ({subdue_reason}) alive",
             })
 
     # 4. FLEE CATEGORY

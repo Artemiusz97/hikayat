@@ -1,4 +1,6 @@
+from __future__ import annotations
 from .constants import *
+from .helpers import get_combined_narrative, is_check_success
 import mechanics.narrative.event_handlers
 from mechanics.narrative.events import bus, LocationChangedEvent, NPCSpawnedEvent, NPCStatusChangedEvent, ItemGiftedEvent, ItemGainedEvent, FactionLeadershipChangedEvent, QuestCompletedEvent
 import json
@@ -16,6 +18,22 @@ import game_engine
 import db
 import config
 import scenario_data
+
+def _resolve_current_turn_1based(session: dict | None, outcome: dict | None = None) -> int:
+    """Resolve 1-based monotonic gameplay turn number (0 is reserved for character backstory)."""
+    if isinstance(outcome, dict) and outcome.get("_target_turn"):
+        return max(1, int(outcome["_target_turn"]))
+    if isinstance(session, dict):
+        if session.get("_target_turn"):
+            return max(1, int(session["_target_turn"]))
+        tc = int(session.get("turn_count") or 0)
+        hist_actions = sum(
+            1 for item in (session.get("history") or [])
+            if not (isinstance(item, dict) and item.get("type") == "scene")
+        )
+        return max(tc, hist_actions) + 1
+    return 1
+
 
 def _evaluate_npc_milestones(
     npc_name: str,
@@ -325,7 +343,7 @@ def _evaluate_npc_milestones(
         if not has_kissed and mapped_act == "kiss" and session and session.get("id"):
             try:
                 mems = db.get_npc_memories(session["id"], npc_name)
-                if any("kiss" in str(m.get("summary", "")).lower() or "kiss" in str(m.get("event", "")).lower() for m in mems):
+                if any("kiss" in str(m.get("memory_fact") or m.get("summary") or m.get("event") or "").lower() for m in mems):
                     has_kissed = True
             except Exception:
                 pass
@@ -543,7 +561,6 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
     import scenario_data
     from mechanics.system.phone import scenario_has_smartphone
     from mechanics.social.intimate_excitement import is_intimate_action_label
-    from .core import is_check_success
 
     if isinstance(mp_already_spent, bool) or mp_already_spent is None:
         mp_already_spent = {}
@@ -1213,6 +1230,7 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
                 bus.publish(evt)
                 bounty_reward = evt.result
                 if bounty_reward and bounty_reward.get("claimed"):
+                    bounty_reward.setdefault("quest_id", qid)
                     if "_quest_reward_notices" not in outcome:
                         outcome["_quest_reward_notices"] = []
                     outcome["_quest_reward_notices"].append(bounty_reward)
@@ -1224,6 +1242,7 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
                 bus.publish(evt)
                 bounty_reward = evt.result
                 if bounty_reward and bounty_reward.get("claimed"):
+                    bounty_reward.setdefault("quest_id", qid)
                     if "_quest_reward_notices" not in outcome:
                         outcome["_quest_reward_notices"] = []
                     outcome["_quest_reward_notices"].append(bounty_reward)
@@ -1306,7 +1325,15 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
   
         # Pure movement/travel turns without explicit quest binding only advance arrival waypoints,
         # never skill check / investigation / dialogue / interaction waypoints!
-        if not (is_movement_act and not is_quest_act):
+        # Strike-free sapient/compulsive anomaly lore/pattern inquiries also never complete containment skill-check stages!
+        is_anomaly_inquiry_act = any(
+            a.get("is_anomaly_inquiry")
+            or str(a.get("approach") or "").startswith(("anomaly_inquiry", "anomaly_pattern"))
+            or str(a.get("incursion_action") or "").startswith(("anomaly_inquiry", "anomaly_pattern"))
+            or str(a.get("incursion_action") or "") in ("converse", "study_pattern")
+            for a in actions if isinstance(a, dict)
+        )
+        if not (is_movement_act and not is_quest_act) and not is_anomaly_inquiry_act:
             for q in active_quests:
                 qid = q["quest_id"]
                 if (qid, None) not in advanced_this_turn:
@@ -1335,6 +1362,7 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
                                         bus.publish(evt)
                                         bounty_reward = evt.result
                                         if bounty_reward and bounty_reward.get("claimed"):
+                                            bounty_reward.setdefault("quest_id", qid)
                                             if "_quest_reward_notices" not in outcome:
                                                 outcome["_quest_reward_notices"] = []
                                             outcome["_quest_reward_notices"].append(bounty_reward)
@@ -1497,6 +1525,13 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
     if isinstance(present_npcs, list) and isinstance(updated_phys.get("actors"), dict):
         from mechanics.social.physical_state import _match_actor_key
         for npc in present_npcs:
+            if isinstance(npc, dict) and (
+                npc.get("is_anomalous_entity")
+                or str(npc.get("npc_type") or "").lower() == "anomaly"
+                or str(npc.get("social_role_type") or "").lower() == "anomaly"
+                or str(npc.get("anomalous_npc_tag") or "").lower() == "anomaly_entity"
+            ):
+                continue
             n_name = None
             if isinstance(npc, dict) and npc.get("name"):
                 n_name = npc["name"]
@@ -1573,6 +1608,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                     partner = raw_ic_p
 
         player_name = "Hero"
+        p_char = None
         if party and isinstance(party, list) and party[0]:
             p_char = party[0][0] if isinstance(party[0], (tuple, list)) else party[0]
             if isinstance(p_char, dict) and p_char.get("name"):
@@ -1755,7 +1791,6 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
 
             sess_dict = session or (db.get_session(session_id) if session_id else {}) or {}
 
-            from .core import is_check_success
             action_succeeded = True
             for a in (actions or []):
                 if isinstance(a, dict):
@@ -2957,7 +2992,6 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                     # B. Breaking free / slipping out of restraint on check success, or companion cutting bonds
                     elif any(w in act_text for w in ("break free", "slip out", "struggle", "cut", "untie", "free bonds", "companion_free")):
                         a_check = a.get("check")
-                        from .core import is_check_success
                         if any(w in act_text for w in ("companion", "cut", "untie", "help")) or is_check_success(a_check, default_if_none=True):
                             updated_phys["actors"][lead_key].pop("tether", None)
                             updated_phys["actors"][lead_key]["tether_type"] = "none"
@@ -3230,7 +3264,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
     broken_ids = outcome.get("broken_commitments")
     if fulfilled_ids or broken_ids:
         from mechanics.system.commitments_engine import get_commitment, fulfill_commitment, flake_commitment
-        arb_turn = len(session.get("history") or []) + 1 if isinstance(session, dict) else 0
+        arb_turn = _resolve_current_turn_1based(session, outcome)
         for cid in (fulfilled_ids or []):
             if isinstance(cid, int) and cid > 0:
                 cm_row = get_commitment(session_id, cid)
@@ -3271,9 +3305,8 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
     # ── Resolve NPC Episodic Memory from Slim Narrator Schema ────────────────
     episodic_mem = outcome.get("episodic_memory")
     if episodic_mem and isinstance(episodic_mem, str) and episodic_mem.strip():
-        from db.memory import add_npc_memory
         from mechanics.world.mobility import get_session_dialogue_partners
-        current_turn = len(session.get("history") or []) if isinstance(session, dict) else 0
+        current_turn = _resolve_current_turn_1based(session, outcome)
         mem_targets = list(outcome.get("dialogue_partners") or (get_session_dialogue_partners(session) if isinstance(session, dict) else []) or [])
         if not mem_targets and outcome.get("dialogue_partner"):
             mem_targets = [str(outcome["dialogue_partner"]).strip()]
@@ -3285,7 +3318,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                     break
         for n_name in mem_targets[:2]:
             if n_name and str(n_name).strip():
-                add_npc_memory(
+                db.add_npc_memory(
                     session_id=session_id,
                     npc_name=str(n_name).strip(),
                     turn_index=current_turn,
@@ -3300,15 +3333,13 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
     # ── Resolve NPC Episodic Memories ────────────────────────────────────────
     npc_memories = outcome.get("npc_memories")
     if npc_memories and isinstance(npc_memories, list):
-        from db.memory import add_npc_memory
-        from db.social import update_contact_open_thread
-        current_turn = len(session.get("history") or [])
+        current_turn = _resolve_current_turn_1based(session, outcome)
         for m in npc_memories:
             if isinstance(m, dict) and m.get("npc_name") and m.get("memory_fact"):
                 n_name = m["npc_name"].strip()
                 emo = str(m.get("emotional_tone") or "").strip()
                 thrd = str(m.get("open_thread") or "").strip()
-                add_npc_memory(
+                db.add_npc_memory(
                     session_id=session_id,
                     npc_name=n_name,
                     turn_index=current_turn,
@@ -3320,7 +3351,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                     open_thread=thrd,
                 )
                 if thrd or emo:
-                    update_contact_open_thread(session_id=session_id, npc_id=n_name, open_thread=thrd, emotional_tone=emo)
+                    db.update_contact_open_thread(session_id=session_id, npc_id=n_name, open_thread=thrd, emotional_tone=emo)
 
 def _reduce_entities_and_gifts(session_id: int, session: dict, outcome: dict, party: list, actions: list, is_combat: bool, scen_key: str):
     """Extracted Phase 2B Reducer for New Entities, Gifts, and Passive Regen."""
@@ -3385,6 +3416,19 @@ def _reduce_entities_and_gifts(session_id: int, session: dict, outcome: dict, pa
         ent_name = str(entity.get("name", "") or "").strip()
         if not ent_name or ent_name.lower() == "none":
             continue
+        if (
+            entity.get("is_anomalous_entity")
+            or str(entity.get("npc_type") or "").lower() == "anomaly"
+            or str(entity.get("anomalous_npc_tag") or "").lower() == "anomaly_entity"
+        ):
+            ent_type = "anomaly"
+        elif scenario_data.is_anomalous_incursions_scenario(scen_key):
+            try:
+                from mechanics.world.anomalous_events import is_anomalous_scene_entity
+                if is_anomalous_scene_entity(ent_name, session=session, current_npcs=outcome.get("npcs_present") if isinstance(outcome, dict) else None):
+                    ent_type = "anomaly"
+            except Exception:
+                pass
         import namegen
         if not namegen.is_valid_entity_name(ent_name) or namegen.is_collective_entity_name(ent_name):
             continue
@@ -3517,4 +3561,3 @@ def _reduce_media_capture(session_id: int, session: dict, party: list, outcome: 
                             items_gained_by_user.setdefault(user_id, []).append(f"{media_label} (Saved to Photo Vault)")
 
 
-from .core import get_combined_narrative

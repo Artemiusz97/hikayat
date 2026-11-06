@@ -1,3 +1,4 @@
+from __future__ import annotations
 import game_engine
 """
 Game engine: turns character/session/lorebook state into LLM prompts, and

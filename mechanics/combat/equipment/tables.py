@@ -21,8 +21,75 @@ from mechanics.combat.items.clothing import CLOTHING_TOPS, CLOTHING_BOTTOMS
 from mechanics.combat.items.envelope import serialize_item
 
 # -----------------------------------------------------------------------------
-# 2. RARITY & TIER DEFINITIONS
+# 2. RARITY & TIER DEFINITIONS (DUAL-AXIS & LEGACY)
 # -----------------------------------------------------------------------------
+
+ENCHANTMENT_TIERS: Tuple[str, ...] = ("none", "tier_3", "tier_2", "tier_1")
+QUALITY_TIERS: Tuple[str, ...] = ("worn", "regular", "high_quality", "masterwork")
+
+QUALITY_NAMES: Dict[str, str] = {
+    "worn": "Worn",
+    "regular": "Standard",
+    "high_quality": "High Quality",
+    "masterwork": "Masterwork",
+}
+
+ENCHANTMENT_NAMES: Dict[str, str] = {
+    "none": "Mundane",
+    "tier_3": "Minor Enchantment",
+    "tier_2": "Major Enchantment",
+    "tier_1": "Legendary Enchantment",
+}
+
+QUALITY_STAT_MULTIPLIERS: Dict[str, float] = {
+    "worn": 0.80,
+    "regular": 1.00,
+    "high_quality": 1.15,
+    "masterwork": 1.30,
+}
+QUALITY_MULTIPLIERS = QUALITY_STAT_MULTIPLIERS
+
+QUALITY_PRICE_MULTIPLIERS: Dict[str, float] = {
+    "worn": 0.50,
+    "regular": 1.00,
+    "high_quality": 1.80,
+    "masterwork": 3.00,
+}
+QUALITY_PRICING_MULTIPLIERS = QUALITY_PRICE_MULTIPLIERS
+MERCHANT_QUALITY_MULTIPLIERS = QUALITY_PRICE_MULTIPLIERS
+
+ENCHANTMENT_PREMIUMS: Dict[str, int] = {
+    "none": 0,
+    "tier_3": 100,
+    "tier_2": 350,
+    "tier_1": 1200,
+}
+ENCHANTMENT_PRICE_PREMIUMS = ENCHANTMENT_PREMIUMS
+ENCHANTMENT_FLAT_PREMIUMS = ENCHANTMENT_PREMIUMS
+MERCHANT_ENCHANTMENT_PREMIUMS = ENCHANTMENT_PREMIUMS
+
+QUALITY_AFFINITY_BONUS: Dict[str, int] = {
+    "worn": 0,
+    "regular": 0,
+    "high_quality": 2,
+    "masterwork": 4,
+}
+
+LEGACY_TIER_TO_DUAL_AXIS: Dict[int, Tuple[str, str]] = {
+    1: ("masterwork", "tier_1"),
+    2: ("high_quality", "tier_2"),
+    3: ("regular", "none"),
+}
+
+def derive_legacy_tier(quality_tier: str = "regular", enchantment_tier: str = "none") -> int:
+    """Derives backward-compatible legacy aggregate tier (1..3) from dual axes."""
+    q = str(quality_tier or "").lower()
+    e = str(enchantment_tier or "").lower()
+    if e == "tier_1" or q == "masterwork":
+        return 1
+    if e == "tier_2" or q == "high_quality":
+        return 2
+    return 3
 
 TIER_NAMES = {
     3: "Standard",

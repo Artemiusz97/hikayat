@@ -337,18 +337,18 @@ def get_location_scout_description(session_id: int, location_str: str, scen_key:
 
 
     sub_names = []
+    prop_names = []
     matched_sub = None
 
     if matched_primary:
+        sub_names = [sub.get("name") for sub in matched_primary.get("sub_locations", []) if sub.get("name")]
         for sub in matched_primary.get("sub_locations", []):
             sub_nm = sub.get("name", "") if isinstance(sub, dict) else ""
             if s_name and sub_nm and (sub_nm.lower() == s_name.lower() or s_name.lower() in sub_nm.lower() or sub_nm.lower() in s_name.lower()):
                 matched_sub = sub
+                if isinstance(matched_sub.get("props"), list) and matched_sub["props"]:
+                    prop_names = [str(pr) for pr in matched_sub["props"] if isinstance(pr, str) and pr]
                 break
-        if matched_sub and isinstance(matched_sub.get("props"), list) and matched_sub["props"]:
-            sub_names = [str(pr) for pr in matched_sub["props"] if isinstance(pr, str) and pr]
-        else:
-            sub_names = [sub.get("name") for sub in matched_primary.get("sub_locations", []) if sub.get("name")]
     else:
         for z in zone_list:
             for p in z.get("primary_locations", []):
@@ -356,10 +356,12 @@ def get_location_scout_description(session_id: int, location_str: str, scen_key:
                     sub_nm = sub.get("name", "") if isinstance(sub, dict) else ""
                     if sub_nm and p_name and (sub_nm.lower() == p_name.lower() or p_name.lower() in sub_nm.lower() or sub_nm.lower() in p_name.lower()):
                         matched_sub = sub
+                        matched_primary = p
                         if not matched_zone:
                             matched_zone = z
                         if isinstance(sub.get("props"), list) and sub["props"]:
-                            sub_names = [str(pr) for pr in sub["props"] if isinstance(pr, str) and pr]
+                            prop_names = [str(pr) for pr in sub["props"] if isinstance(pr, str) and pr]
+                        sub_names = [s.get("name") for s in p.get("sub_locations", []) if s.get("name")]
                         break
                 if matched_sub:
                     break
@@ -408,10 +410,12 @@ def get_location_scout_description(session_id: int, location_str: str, scen_key:
 
 
     if sub_names:
-
         clean_subs = ", ".join(f"**{s}**" for s in sub_names[:5])
+        lines.append(f"• **Key Sections & Rooms**: {clean_subs}")
 
-        lines.append(f"• **Key Sections & Layout**: {clean_subs}")
+    if prop_names:
+        clean_props = ", ".join(f"*{pr}*" for pr in prop_names[:4])
+        lines.append(f"• **In-Room Features & Objects**: {clean_props}")
 
 
 
@@ -1001,7 +1005,7 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
 
     def _collect_specialist_stores(target_lower: str) -> list[dict]:
         found = []
-        if any(k in target_lower for k in ["regional tower hq", "operations spire hq", "tower hq", "operations hq", "syndicate anomalous armory", "syndicate tactical armory", "requisition shop", "requisition depot"]):
+        if any(k in target_lower for k in ["regional tower hq", "operations spire hq", "tower hq", "operations hq", "syndicate anomalous armory", "syndicate tactical armory", "requisition shop", "requisition depot", "boiler-room locker", "custodian's boiler"]):
             found.append({"type": "weapon_merchant", **MERCHANT_ARCHETYPES["weapon_merchant"]})
             found.append({"type": "armor_merchant", **MERCHANT_ARCHETYPES["armor_merchant"]})
             found.append({"type": "potion_merchant", **MERCHANT_ARCHETYPES["potion_merchant"]})
@@ -1031,7 +1035,7 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
                 found.append({"type": "magic_merchant", **MERCHANT_ARCHETYPES["magic_merchant"]})
             if not any(s["type"] == "potion_merchant" for s in found):
                 found.append({"type": "potion_merchant", **MERCHANT_ARCHETYPES["potion_merchant"]})
-        if any(k in target_lower for k in ["omikuji", "talisman stand", "carnival midway", "gift emporium", "duty-free", "campus bookstore", "bookstore", "curio"]):
+        if any(k in target_lower for k in ["omikuji", "talisman stand", "carnival midway", "gift emporium", "duty-free", "campus bookstore", "bookstore", "curio", "campus co-op", "co-op"]):
             if not any(s["type"] == "gift_merchant" for s in found):
                 found.append({"type": "gift_merchant", **MERCHANT_ARCHETYPES["gift_merchant"]})
         if any(k in target_lower for k in ["bakery", "tavern", "inn", "saloon", "canteen", "mess hall", "food stall", "diner", "espresso", "roastery", "ramen", "izakaya", "cafe", "café", "konbini", "convenience", "fish market", "carnival midway", "night market", "street food", "tea house", "garden terrace", "duty-free", "black bazaar"]):
@@ -1164,6 +1168,7 @@ def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
             "boutique", "bakery", "stall", "canteen", "diner", "roastery", "izakaya",
             "ramen", "espresso", "tea house", "bookstore", "duty-free", "midway",
             "omikuji", "talisman stand", "pawn", "black market", "auction house",
+            "boiler-room locker", "custodian's boiler", "campus co-op", "co-op",
         )
         if any(re.search(rf"\b{re.escape(k)}\b", leaf_lower) for k in explicit_shop_nouns):
             return True

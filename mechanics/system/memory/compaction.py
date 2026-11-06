@@ -1,9 +1,6 @@
-import asyncio
+from __future__ import annotations
 import json
 import logging
-import llm_client
-import db
-from mechanics.system.memory.digest import MAX_DIGEST_BULLETS
 
 log = logging.getLogger("hikayat.memory.compaction")
 
@@ -37,63 +34,66 @@ def build_deterministic_chronicle(bullets_to_compact: list[str], chapter_number:
     }
 
 
+def run_deterministic_tier3_compaction(session_id: int) -> bool:
+    """Compatibility wrapper delegating persistence orchestration to Layer 3 (`db.run_deterministic_tier3_compaction`)."""
+    import db as _db
+    return _db.run_deterministic_tier3_compaction(session_id)
+
+
 async def _run_tier3_compaction(session_id: int, use_deterministic: bool = True):
+    import db as _db
+
+    if use_deterministic:
+        _db.run_deterministic_tier3_compaction(session_id)
+        return
+
     if session_id in _active_compactions:
         return
-        
+
     _active_compactions.add(session_id)
     try:
-        bullets = db.get_chapter_digest(session_id)
-        # Threshold for compaction: e.g., 24 bullets
+        bullets = _db.get_chapter_digest(session_id)
         if len(bullets) < 24:
             return
-            
-        # Extract the oldest 15 bullets for compaction
+
         bullets_to_compact = bullets[:15]
-        existing = db.get_session_chronicles(session_id)
+        existing = _db.get_session_chronicles(session_id)
         chapter_number = len(existing) + 1
 
-        from unittest.mock import AsyncMock, MagicMock
-        is_llm_mocked = isinstance(getattr(llm_client, "call_llm_json", None), (AsyncMock, MagicMock))
-
-        if use_deterministic and not is_llm_mocked:
+        bullet_text = "\n".join(f"- {b}" for b in bullets_to_compact)
+        prompt = f"Distill the following arc bullets into a Chronicle summary:\n\n{bullet_text}"
+        try:
+            import llm_client as _llm_client
+            raw_result = await _llm_client.call_llm_json(
+                system_prompt=SAGA_SYSTEM_PROMPT,
+                user_prompt=prompt,
+                temperature=0.2,
+                max_tokens=600,
+                retries=1,
+                use_utility=True,
+            )
+            result = json.loads(raw_result) if isinstance(raw_result, str) else (raw_result if isinstance(raw_result, dict) else {})
+        except Exception:
             result = build_deterministic_chronicle(bullets_to_compact, chapter_number=chapter_number)
-        else:
-            bullet_text = "\n".join(f"- {b}" for b in bullets_to_compact)
-            prompt = f"Distill the following arc bullets into a Chronicle summary:\n\n{bullet_text}"
-            try:
-                raw_result = await llm_client.call_llm_json(
-                    system_prompt=SAGA_SYSTEM_PROMPT,
-                    user_prompt=prompt,
-                    temperature=0.2,
-                    max_tokens=600,
-                    retries=1,
-                    use_utility=True,
-                )
-                result = json.loads(raw_result) if isinstance(raw_result, str) else (raw_result if isinstance(raw_result, dict) else {})
-            except Exception:
-                result = build_deterministic_chronicle(bullets_to_compact, chapter_number=chapter_number)
-        
+
         act_title = result.get("act_title", f"Chronicle of Chapter {chapter_number}")
         summary_narrative = result.get("summary_narrative", "")
         key_consequences = result.get("key_consequences", [])
-        
+
         if summary_narrative:
-            # Figure out chapter number (just count existing chronicles + 1)
-            existing = db.get_session_chronicles(session_id)
+            existing = _db.get_session_chronicles(session_id)
             chapter_number = len(existing) + 1
-            
-            db.add_session_chronicle(
+
+            _db.add_session_chronicle(
                 session_id=session_id,
                 chapter_number=chapter_number,
                 act_title=act_title,
                 summary_narrative=summary_narrative,
-                consequences=key_consequences
+                consequences=key_consequences,
             )
-            
-            # Remove the compacted bullets from the active tier 2 digest
-            db.remove_oldest_chapter_digest_bullets(session_id, len(bullets_to_compact))
-            
+
+            _db.remove_oldest_chapter_digest_bullets(session_id, len(bullets_to_compact))
+
             log.info(f"Successfully compacted {len(bullets_to_compact)} bullets into Saga Chronicle Chapter {chapter_number}: {act_title}")
     except Exception as exc:
         log.error(f"Failed to run Tier 3 Saga Compaction: {exc}")
@@ -102,12 +102,8 @@ async def _run_tier3_compaction(session_id: int, use_deterministic: bool = True)
 
 
 def schedule_tier3_compaction_if_needed(session_id: int):
-    """Schedules an async compaction task if the session digest is getting bloated."""
-    bullets = db.get_chapter_digest(session_id)
+    """Run deterministic compaction synchronously when Tier 2 digest reaches threshold."""
+    import db as _db
+    bullets = _db.get_chapter_digest(session_id)
     if len(bullets) >= 24:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(_run_tier3_compaction(session_id))
-        except RuntimeError:
-            pass  # no event loop running
+        _db.run_deterministic_tier3_compaction(session_id)

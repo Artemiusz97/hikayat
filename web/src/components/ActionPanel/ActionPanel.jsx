@@ -397,6 +397,15 @@ const ActionPanel = ({
                   const name = typeof npc === 'string' ? npc : (npc?.name || 'Unknown');
                   const isPartner = dialoguePartners.has(name.toLowerCase().trim());
                   const clothing = typeof npc === 'object' ? npc?.clothing_status : null;
+                  const anomTag = typeof npc === 'object' ? (npc?.anomalous_npc_tag || npc?.basic_info?.anomalous_npc_tag) : null;
+                  const isAnomaly = Boolean(
+                    typeof npc === 'object' && (
+                      npc?.is_anomalous_entity ||
+                      npc?.npc_type === 'anomaly' ||
+                      npc?.social_role_type === 'anomaly' ||
+                      anomTag === 'anomaly_entity'
+                    )
+                  );
                   const statusEffects = (typeof npc === 'object' && Array.isArray(npc?.status_effects) ? npc.status_effects : []).filter(eff => {
                     const str = (typeof eff === 'string' ? eff : (eff?.name || '')).trim();
                     const low = str.toLowerCase();
@@ -431,36 +440,64 @@ const ActionPanel = ({
 
                   const excMeter = actorExc?.meter !== undefined && actorExc?.meter !== null ? Number(actorExc.meter) : null;
                   const isExcActive = Boolean(actorExc?.active || physExc?.active || (excMeter !== null && excMeter > 0));
-                  const showExcitement = isExcActive && excMeter !== null;
+                  const showExcitement = !isAnomaly && isExcActive && excMeter !== null;
 
                   return (
                     <div key={`${name}-${idx}`} className="inline-flex items-center gap-1 shrink-0">
                       <button
                         type="button"
-                        onClick={() => onSelectContact && onSelectContact(name)}
+                        onClick={() => !isAnomaly && onSelectContact && onSelectContact(name)}
                         className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium transition-all shrink-0 ${
                           isPartner
                             ? 'bg-purple-950/70 border-purple-500/70 text-purple-200 hover:border-purple-400 shadow-sm'
+                            : isAnomaly
+                            ? 'bg-amber-950/50 border-amber-700/60 text-amber-200 cursor-default'
                             : 'bg-black/60 border-neutral-800 text-gray-300 hover:border-fantasy-accent/60 hover:text-white'
                         }`}
-                        title={onSelectContact ? `View ${name} in Codex` : name}
+                        title={
+                          isAnomaly
+                            ? `${name}${npc?.role ? ` — ${npc.role}` : ''}`
+                            : (onSelectContact ? `View ${name} in Codex` : name)
+                        }
                       >
-                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isPartner ? 'bg-purple-400 animate-pulse' : 'bg-emerald-400/80'}`} />
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            isPartner
+                              ? 'bg-purple-400 animate-pulse'
+                              : isAnomaly
+                              ? 'bg-amber-400 animate-pulse'
+                              : 'bg-emerald-400/80'
+                          }`}
+                        />
                         <span className="truncate max-w-[110px] sm:max-w-[140px]">{name}</span>
-                        {isPartner && (
-                          <span className="text-[8.5px] font-mono uppercase px-1 rounded bg-purple-900/90 text-purple-300 font-bold leading-tight">
-                            {t('actions.talking')}
+                        {isAnomaly && (npc?.is_disguised || npc?.uncanny_presence) && (
+                          <span className="text-[8.5px] font-mono uppercase px-1 rounded bg-purple-950/90 text-purple-200 border border-purple-500/60 font-bold leading-tight">
+                            🎭 {t('scene.uncanny_presence', 'Uncanny Presence')}
                           </span>
                         )}
-                        <span className={`text-[8.5px] font-mono font-semibold px-1 rounded bg-black/60 border border-neutral-700/60 leading-tight ${tier.color}`}>
-                          {score > 0 ? `+${score}` : score}
-                        </span>
+                        {isAnomaly && !(npc?.is_disguised || npc?.uncanny_presence) && (
+                          <span className="text-[8.5px] font-mono uppercase px-1 rounded bg-amber-950/90 text-amber-300 border border-amber-600/60 font-bold leading-tight">
+                            👁️ {t('codex.anomaly_entity', 'Anomaly')}
+                          </span>
+                        )}
+                        {isPartner && (
+                          <span className="text-[8.5px] font-mono uppercase px-1 rounded bg-purple-900/90 text-purple-300 font-bold leading-tight">
+                            {isAnomaly && (npc?.sapience === 'compulsive' || npc?.pattern_observable)
+                              ? t('scene.observing', 'Observing')
+                              : t('actions.talking')}
+                          </span>
+                        )}
+                        {!isAnomaly && (
+                          <span className={`text-[8.5px] font-mono font-semibold px-1 rounded bg-black/60 border border-neutral-700/60 leading-tight ${tier.color}`}>
+                            {score > 0 ? `+${score}` : score}
+                          </span>
+                        )}
                         {showExcitement && (
                           <span className="text-[8.5px] font-mono font-bold px-1 rounded bg-rose-950/80 border border-pink-700/60 text-pink-200 leading-tight">
                             💋 {excMeter}%
                           </span>
                         )}
-                        {clothing && (
+                        {!isAnomaly && clothing && (
                           <span className="text-[8.5px] font-mono px-1 rounded bg-black/60 text-gray-300 border border-neutral-700/60 leading-tight">
                             {clothing}
                           </span>
@@ -514,30 +551,66 @@ const ActionPanel = ({
                         <span>
                           🎯 {activeTargetObj.name} ({activeTargetObj.hp ?? activeTargetObj.max_hp ?? 100}/{activeTargetObj.max_hp ?? 100})
                         </span>
+                        {activeTargetObj.tether_vessel_name && (
+                          <span className="text-[9.5px] px-1 rounded bg-amber-950/80 border border-amber-600/50 text-amber-300">
+                            {activeTargetObj.tether_sealed
+                              ? `⛓️ ${t('codex.tether_sealed', 'Tether Sealed')}`
+                              : `🏺 ${activeTargetObj.tether_vessel_name}`}
+                          </span>
+                        )}
                       </button>
                     )}
 
-                    <div className="flex items-center gap-1 bg-black/60 p-0.5 rounded-lg border border-fantasy-border">
-                      {[
-                        { id: 'attacks', label: `⚔️ ${t('combat.attack')}` },
-                        { id: 'spells', label: `🔮 ${t('combat.magic')}${deckSpells.length ? ` (${deckSpells.length})` : ''}` },
-                        { id: 'tactics', label: `🧠 ${t('combat.tactics')}` },
-                        { id: 'choices', label: `📜 ${t('nav.quests')}` }
-                      ].map((tab) => (
-                        <button
-                          key={tab.id}
-                          type="button"
-                          onClick={() => setCombatTab(tab.id)}
-                          className={`px-2 py-0.5 rounded text-[11px] font-bold transition-colors ${
-                            combatTab === tab.id
-                              ? 'bg-red-900/60 text-amber-300 border border-amber-500/50'
-                              : 'text-gray-400 hover:text-gray-200'
-                          }`}
-                        >
-                          {tab.label}
-                        </button>
-                      ))}
-                    </div>
+                    {(() => {
+                      const isAnomDeck = Boolean(session?.max_ult_pips || String(session?.scenario || '').toLowerCase().includes('anomalous'));
+                      const rawPips = session?.ult_pips ?? (typeof session?.player_resonance_pips === 'object' ? Object.values(session?.player_resonance_pips || {})[0] : session?.player_resonance_pips);
+                      const ultPips = Math.max(0, Math.min(3, Number(rawPips) || 0));
+                      const pipDots = `${'●'.repeat(ultPips)}${'○'.repeat(3 - ultPips)}`;
+                      return (
+                        <>
+                          <div role="tablist" aria-label="Combat Action Categories" className="flex items-center gap-1 bg-black/60 p-0.5 rounded-lg border border-fantasy-border">
+                            {[
+                              { id: 'attacks', label: `⚔️ ${t('combat.attack')}` },
+                              {
+                                id: 'spells',
+                                label: isAnomDeck
+                                  ? `🧬 ${t('awakened.abilities_tab', 'Abilities')}${deckSpells.length ? ` (${deckSpells.length})` : ''}`
+                                  : `🔮 ${t('combat.magic')}${deckSpells.length ? ` (${deckSpells.length})` : ''}`,
+                              },
+                              { id: 'tactics', label: `🧠 ${t('combat.tactics')}` },
+                              { id: 'choices', label: `📜 ${t('nav.quests')}` },
+                            ].map((tab) => (
+                              <button
+                                key={tab.id}
+                                type="button"
+                                role="tab"
+                                aria-selected={combatTab === tab.id}
+                                onClick={() => setCombatTab(tab.id)}
+                                className={`px-2 py-0.5 rounded text-[11px] font-bold transition-colors ${
+                                  combatTab === tab.id
+                                    ? 'bg-red-900/60 text-amber-300 border border-amber-500/50'
+                                    : 'text-gray-400 hover:text-gray-200'
+                                }`}
+                              >
+                                {tab.label}
+                              </button>
+                            ))}
+                          </div>
+                          {isAnomDeck && (
+                            <span
+                              title={t('awakened.ult_pips_label', 'Resonance Pips')}
+                              className={`px-2 py-0.5 rounded-full text-[10.5px] font-mono font-bold border ${
+                                ultPips >= 3
+                                  ? 'bg-purple-950/80 border-purple-400 text-purple-200 animate-pulse'
+                                  : 'bg-black/70 border-cyan-800/60 text-cyan-300'
+                              }`}
+                            >
+                              {ultPips >= 3 ? `🌟 ${t('awakened.ult_ready', 'ULT READY')} [${pipDots}]` : `[${pipDots}] ${ultPips}/3`}
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
 
                   <div className="flex items-center gap-1.5">
@@ -657,7 +730,11 @@ const ActionPanel = ({
                             className={`group flex items-center justify-between gap-1.5 md:gap-2 px-2.5 md:px-3 py-1 md:py-1.5 rounded-md md:rounded-lg border transition-all disabled:opacity-40 text-left ${
                               isPending
                                 ? 'bg-amber-950/70 border-amber-400 ring-2 ring-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.35)] !opacity-100'
-                                : 'bg-black/50 border-red-900/60 hover:border-amber-400 hover:bg-red-950/30'
+                                : item.subdue_highlighted
+                                  ? 'bg-emerald-950/70 border-emerald-400 ring-1 ring-emerald-400/50 hover:bg-emerald-900/60 text-emerald-100'
+                                  : (item.is_ultimate && canAfford)
+                                    ? 'bg-purple-950/60 border-purple-400 ring-1 ring-purple-400/50 hover:bg-purple-900/50'
+                                    : 'bg-black/50 border-red-900/60 hover:border-amber-400 hover:bg-red-950/30'
                             }`}
                           >
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-950/50 border border-red-800/40 text-[9.5px] md:text-[10px] font-mono font-bold uppercase text-amber-300 shrink-0">
@@ -679,10 +756,20 @@ const ActionPanel = ({
                                   <span>{t('actions.resolving', 'Resolving...')}</span>
                                 </span>
                               )}
-                              {mpCost > 0 && !isPending && (
-                                <span className="text-blue-400 font-mono flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-950/50 border border-blue-800/40">
-                                  <Zap size={10} /> {mpCost}
+                              {item.is_ultimate && !isPending ? (
+                                <span className={`font-mono flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border ${
+                                  canAfford
+                                    ? 'bg-purple-950/80 text-purple-200 border-purple-400/70 font-bold'
+                                    : 'bg-neutral-900/80 text-gray-400 border-neutral-700/60'
+                                }`}>
+                                  🌟 {item.pip_cost || 3} Pips • 0 MP
                                 </span>
+                              ) : (
+                                mpCost > 0 && !isPending && (
+                                  <span className="text-blue-400 font-mono flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-950/50 border border-blue-800/40">
+                                    <Zap size={10} aria-hidden="true" /> {mpCost}
+                                  </span>
+                                )
                               )}
                               {showPercentages && pct !== undefined && pct !== null && !isPending && (
                                 <span className={`px-1.5 py-0.5 rounded border font-mono text-[9.5px] md:text-[10px] font-bold ${getOddsBadgeClass(pct)}`}>

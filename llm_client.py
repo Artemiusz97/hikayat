@@ -65,6 +65,7 @@ _telemetry_totals: dict[str, Any] = {
     "total_prompt_tokens": 0,
     "total_completion_tokens": 0,
     "total_cached_prompt_tokens": 0,
+    "cache_reported_prompt_tokens": 0,
     "cache_reported_calls": 0,
     "total_latency_ms": 0.0,
 }
@@ -134,6 +135,7 @@ def record_llm_telemetry(
     
     if cached_tokens is not None:
         _telemetry_totals["total_cached_prompt_tokens"] += cached_tokens
+        _telemetry_totals["cache_reported_prompt_tokens"] += prompt_tokens
         _telemetry_totals["cache_reported_calls"] += 1
         
     _recent_calls.append({
@@ -166,15 +168,11 @@ def get_llm_telemetry() -> dict:
     
     rep_calls = _telemetry_totals["cache_reported_calls"]
     cache_reporting = "reported" if rep_calls > 0 else "not reported"
-    # To compute hit ratio accurately we should ideally only count prompt tokens from calls that reported,
-    # but the prompt asks for `(cached ÷ prompt tokens, counting only calls that reported)`
-    # Since we only have `total_prompt_tokens` across all calls, if all calls report it's the same.
-    # We will compute it as total_cached / total_prompt, or just estimate. 
-    # Actually, we can just use total_cached_prompt_tokens / total_prompt_tokens if total_prompt_tokens > 0.
+    rep_prompt_tokens = int(_telemetry_totals.get("cache_reported_prompt_tokens", 0) or 0)
     cache_hit_ratio = 0.0
-    if rep_calls > 0 and _telemetry_totals["total_prompt_tokens"] > 0:
-        cache_hit_ratio = round(_telemetry_totals["total_cached_prompt_tokens"] / _telemetry_totals["total_prompt_tokens"], 3)
-    
+    if rep_calls > 0 and rep_prompt_tokens > 0:
+        cache_hit_ratio = round(_telemetry_totals["total_cached_prompt_tokens"] / rep_prompt_tokens, 3)
+
     return {
         "total_calls": total,
         "successful_calls": _telemetry_totals["successful_calls"],
@@ -182,6 +180,7 @@ def get_llm_telemetry() -> dict:
         "total_prompt_tokens": _telemetry_totals["total_prompt_tokens"],
         "total_completion_tokens": _telemetry_totals["total_completion_tokens"],
         "total_cached_prompt_tokens": _telemetry_totals["total_cached_prompt_tokens"],
+        "cache_reported_prompt_tokens": rep_prompt_tokens,
         "cache_reported_calls": rep_calls,
         "cache_reporting": cache_reporting,
         "cache_hit_ratio": cache_hit_ratio,
@@ -782,10 +781,46 @@ class StreamingNarrativeExtractor:
                 else:
                     await self._emit(char)
 
-def _build_messages(system_prompt: str | list, user_prompt: str) -> list[dict]:
+def _supports_explicit_cache_control(base_url: str, model_name: str) -> bool:
+    """Return True strictly for OpenRouter/Anthropic Claude routes that accept Anthropic ephemeral cache_control blocks."""
+    b_low = str(base_url or "").lower()
+    m_low = str(model_name or "").lower()
+    return ("openrouter" in b_low or "anthropic" in b_low) and "claude" in m_low
+
+
+def _build_messages(
+    system_prompt: str | list,
+    user_prompt: str,
+    *,
+    base_url: str = "",
+    model_name: str = "",
+    system_zones: tuple[str, ...] | list[str] | None = None,
+) -> list[dict]:
     if isinstance(system_prompt, list):
         parts = [m.get("content", "") if isinstance(m, dict) else str(m) for m in system_prompt]
         system_prompt = "\n\n".join(p for p in parts if p)
+
+    if system_zones and _supports_explicit_cache_control(base_url, model_name):
+        zones = [z for z in system_zones if isinstance(z, str) and z.strip()]
+        if len(zones) >= 3:
+            sys_content: str | list = [
+                {"type": "text", "text": "\n\n".join(zones[:-2]), "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": zones[-2], "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": zones[-1]},
+            ]
+            return [{"role": "system", "content": sys_content}, {"role": "user", "content": user_prompt}]
+        if len(zones) == 2:
+            sys_content = [
+                {"type": "text", "text": zones[0], "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": zones[1]},
+            ]
+            return [{"role": "system", "content": sys_content}, {"role": "user", "content": user_prompt}]
+        if len(zones) == 1:
+            sys_content = [
+                {"type": "text", "text": zones[0], "cache_control": {"type": "ephemeral"}},
+            ]
+            return [{"role": "system", "content": sys_content}, {"role": "user", "content": user_prompt}]
+
     return [{"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}]
 
@@ -794,7 +829,8 @@ async def call_llm_json_stream(system_prompt: str | list, user_prompt: str,
                                temperature: float | None = None, max_tokens: int = 4096,
                                retries: int = 1, is_nsfw: bool = False, use_utility: bool = False,
                                timeout: float | None = None,
-                               response_model: Type[BaseModel] | None = None) -> dict:
+                               response_model: Type[BaseModel] | None = None,
+                               system_zones: tuple[str, ...] | list[str] | None = None) -> dict:
     """
     Streams the LLM response. Uses StreamingNarrativeExtractor to emit clean
     narrative tokens in real-time. Once the stream completes, returns the full parsed JSON dict.
@@ -804,13 +840,38 @@ async def call_llm_json_stream(system_prompt: str | list, user_prompt: str,
         temperature = NSFW_LLM_TEMPERATURE if is_nsfw else LLM_TEMPERATURE
 
     req_timeout = timeout if timeout is not None else LLM_REQUEST_TIMEOUT
+    emitted_partial_stream = False
+
+    async def _notify_stream_reset() -> None:
+        nonlocal emitted_partial_stream
+        if not emitted_partial_stream or not on_narrative_token:
+            return
+        emitted_partial_stream = False
+        try:
+            reset_fn = getattr(on_narrative_token, "reset", None)
+            if callable(reset_fn):
+                res = reset_fn()
+                if hasattr(res, "__await__"):
+                    await res
+            elif getattr(on_narrative_token, "_accepts_field", False):
+                await on_narrative_token("", "__reset__")
+        except Exception:
+            pass
 
     async with _semaphore:
         candidates = get_candidate_models(is_nsfw=is_nsfw, use_utility=use_utility)
         for client, model_name in candidates:
             for attempt in range(retries + 1):
-                messages = _build_messages(system_prompt, user_prompt)
-                
+                await _notify_stream_reset()
+                base_url = str(getattr(client, "base_url", ""))
+                messages = _build_messages(
+                    system_prompt,
+                    user_prompt,
+                    base_url=base_url,
+                    model_name=model_name,
+                    system_zones=system_zones,
+                )
+
                 kwargs = {
                     "model": model_name,
                     "temperature": temperature,
@@ -820,8 +881,7 @@ async def call_llm_json_stream(system_prompt: str | list, user_prompt: str,
                     "messages": messages,
                     "timeout": req_timeout,
                 }
-                
-                base_url = str(getattr(client, "base_url", ""))
+
                 cache_key = (base_url, model_name)
                 known_cap = _MODEL_CAPABILITIES.get(cache_key) or _MODEL_CAPABILITIES.get(model_name)
                 supports_json_mode = known_cap.get("json_mode", _model_supports_json_mode(base_url, model_name)) if known_cap else _model_supports_json_mode(base_url, model_name)
@@ -910,6 +970,8 @@ async def call_llm_json_stream(system_prompt: str | list, user_prompt: str,
                                             stripped_continuation_fence = True
                                     full_text += text_to_add
                                     await extractor.process_chunk(text_to_add)
+                                    if extractor.has_emitted_in_current or extractor.emitted_fields:
+                                        emitted_partial_stream = True
                                 if chunk.choices[0].finish_reason:
                                     final_finish_reason = chunk.choices[0].finish_reason
                             if getattr(chunk, "usage", None):
@@ -989,13 +1051,15 @@ async def call_llm_json_stream(system_prompt: str | list, user_prompt: str,
                         await _backoff_sleep(attempt, error=locals().get("last_stream_err"))
     
     # If we get here, stream attempts failed. 
-    # Fallback completely to standard batch mode using the existing function.
+    # Reset any partial streamed tokens before falling back to batch mode.
+    await _notify_stream_reset()
     log.warning("Streaming failed for all attempts, falling back to batch mode `call_llm_json`.")
     return await call_llm_json(
         system_prompt=system_prompt, user_prompt=user_prompt,
         temperature=temperature, max_tokens=max_tokens, retries=0, 
         is_nsfw=is_nsfw, use_utility=use_utility, timeout=timeout,
-        response_model=response_model
+        response_model=response_model,
+        system_zones=system_zones,
     )
 
 async def call_llm_json(system_prompt: str | list, user_prompt: str,
@@ -1003,7 +1067,8 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
                          retries: int = 1, is_nsfw: bool = False, use_utility: bool = False,
                          timeout: float | None = None,
                          required_any_keys: list[list[str]] | None = None,
-                         response_model: Type[BaseModel] | None = None) -> dict:
+                         response_model: Type[BaseModel] | None = None,
+                         system_zones: tuple[str, ...] | list[str] | None = None) -> dict:
     """Call the LLM and parse a JSON object out of the response with automatic retries and failover.
 
     Iterates through candidate models (primary -> fallbacks). If a candidate model fails
@@ -1022,9 +1087,15 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
                 t0 = time.perf_counter()
                 try:
                     req_max_tokens = max(max_tokens, 3500)
-                    
-                    messages = _build_messages(system_prompt, user_prompt)
-                    
+                    base_url = str(getattr(client, "base_url", ""))
+                    messages = _build_messages(
+                        system_prompt,
+                        user_prompt,
+                        base_url=base_url,
+                        model_name=model_name,
+                        system_zones=system_zones,
+                    )
+
                     kwargs = {
                         "model": model_name,
                         "temperature": temperature,
@@ -1035,7 +1106,6 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
                         "timeout": req_timeout,
                     }
 
-                    base_url = str(getattr(client, "base_url", ""))
                     cache_key = (base_url, model_name)
                     known_cap = _MODEL_CAPABILITIES.get(cache_key) or _MODEL_CAPABILITIES.get(model_name)
                     supports_json_mode = known_cap.get("json_mode", _model_supports_json_mode(base_url, model_name)) if known_cap else _model_supports_json_mode(base_url, model_name)

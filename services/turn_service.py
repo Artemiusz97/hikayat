@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import asyncio
@@ -36,9 +37,12 @@ class TurnResponse(BaseModel):
     session: Dict[str, Any]
     outcome: Dict[str, Any]          # Always a dict — outcome is coerced before storing here
     action: Dict[str, Any]
+    actions: List[Dict[str, Any]] = []
     items_gained_by_user: Dict[Any, List[str]]   # {user_id: [item_name, ...]}
     xp_gained: int
     levels_gained: List[int]
+    xp_by_user: Dict[Any, int] = {}
+    levels_by_user: Dict[Any, List[int]] = {}
     new_char: Dict[str, Any]
 
 
@@ -92,6 +96,12 @@ class TurnService:
             char = dict(char_row)
         else:
             char = dict(char)
+
+        if isinstance(session, dict) and session.get("id") and "_world_events_snapshot" not in session:
+            try:
+                session["_world_events_snapshot"] = await adb(db.get_world_events_snapshot, int(session["id"]))
+            except Exception:
+                session["_world_events_snapshot"] = {}
 
         # Normalize payload fields from Web or Discord
         choice_index = raw_pick.get("choice_index")
@@ -246,6 +256,27 @@ class TurnService:
             except Exception:
                 pass
 
+        # ── Awakened Resonance 3-Pip Ultimate Gate & 0-MP Basic Strike ───────
+        chosen_spell_id = str(chosen.get("spell_id") or "").strip()
+        if chosen.get("is_basic_strike") or chosen_spell_id.startswith("awk_basic_"):
+            mp_cost = 0
+            mp_spent = 0
+        elif chosen_spell_id and isinstance(session, dict):
+            import scenario_data as _ts_sd
+            if _ts_sd.is_anomalous_incursions_scenario(session.get("scenario", "")):
+                from mechanics.combat.spells.registry import get_spell as _ts_get_spell
+                from mechanics.combat.awakened_resonance import get_starting_encounter_pips
+                _ts_sp = _ts_get_spell(chosen_spell_id)
+                if isinstance(_ts_sp, dict) and _ts_sp.get("is_ultimate") and int(_ts_sp.get("pip_cost", 0) or 0) > 0:
+                    mp_cost = 0
+                    mp_spent = 0
+                    req_pips = int(_ts_sp.get("pip_cost", 3))
+                    pips_map = session.get("player_resonance_pips") if isinstance(session.get("player_resonance_pips"), dict) else {}
+                    uid_key = str(user_id)
+                    cur_pips = int(pips_map[uid_key]) if uid_key in pips_map else get_starting_encounter_pips(int(char.get("level", 1) or 1))
+                    if cur_pips < req_pips and not is_custom and enforce_explicit_mp:
+                        raise PermissionError(f"Not enough Resonance Pips for Signature Ultimate ({cur_pips}/{req_pips} Pips)!")
+
         # ── MP Validation & Improvisation Rule (staged for atomic commit) ─────
         if mp_cost > 0:
             if char.get("mp", 0) < mp_cost:
@@ -364,6 +395,39 @@ class TurnService:
                                 req_val += 3
                         except Exception:
                             pass
+
+        if isinstance(session, dict) and session.get("id") and stat not in ("NONE", "FREE", "ITEM") and req_val > 0:
+            try:
+                from mechanics.world.world_events.modifiers import (
+                    compute_event_dc_modifier,
+                    compute_rumor_defensive_dc,
+                )
+                _we_snap_dc = session.get("_world_events_snapshot")
+                req_val += compute_event_dc_modifier(
+                    _we_snap_dc,
+                    stat=stat,
+                    location_node_id=str(session.get("current_node_id") or ""),
+                    is_stealth=is_stealth_req,
+                )
+                if stat == "CHA" and target_candidates:
+                    req_val += compute_rumor_defensive_dc(_we_snap_dc, target=target_candidates)
+            except Exception as _we_dc_err:
+                log.debug("World event DC modifier skipped: %s", _we_dc_err)
+
+        if isinstance(chosen, dict) and (chosen.get("intent") == "break_the_news" or chosen.get("_is_break_the_news")):
+            try:
+                from mechanics.world.world_events.social_hooks import record_break_the_news_gossip
+                _btn_npc = str(explicit_target or (target_candidates[0] if target_candidates else "")).strip()
+                if _btn_npc and isinstance(session, dict) and session.get("id"):
+                    await adb(
+                        record_break_the_news_gossip,
+                        int(session["id"]),
+                        int(session.get("current_day") or 1),
+                        _btn_npc,
+                        str(chosen.get("event_key") or ""),
+                    )
+            except Exception as _btn_err:
+                log.debug("record_break_the_news_gossip skipped: %s", _btn_err)
 
         if stat not in ("NONE", "FREE", "ITEM") and req_val > 0:
             req_val = max(1, req_val)
@@ -703,7 +767,14 @@ class TurnService:
         return action
 
     @staticmethod
-    async def resolve_action(session_id: int, user_id: int, action: Dict[str, Any], mode: str = "solo", stream_callback=None) -> TurnResponse:
+    async def resolve_action(
+        session_id: int,
+        user_id: int,
+        action: Dict[str, Any],
+        mode: str = "solo",
+        stream_callback=None,
+        actions: Optional[List[Dict[str, Any]]] = None,
+    ) -> TurnResponse:
         """
         Unifies the turn resolution process across Discord and Web API using non-blocking DB access.
         """
@@ -719,7 +790,18 @@ class TurnService:
                 inv = await adb(db.get_inventory, uid)
                 party.append((dict(c), inv))
 
-        if mode == "sync" and len(party) > 1:
+        if actions is not None:
+            actions = list(actions)
+            if actions and not action:
+                action = actions[0]
+            mp_already_spent = {
+                (a.get("user_id") or (a.get("char") or {}).get("user_id", user_id)): a.get("mp_spent", 0)
+                for a in actions
+                if isinstance(a, dict) and a.get("_mp_already_deducted")
+            }
+            if mode == "sync":
+                await adb(db.update_session, session_id, pending_picks_json="{}")
+        elif mode == "sync" and len(party) > 1:
             picks = session.get("pending_picks", {})
             picks[str(user_id)] = action
             await adb(db.update_session, session_id, pending_picks_json=json.dumps(picks, default=str))
@@ -730,7 +812,7 @@ class TurnService:
             # Everyone locked in
             actions = list(picks.values())
             mp_already_spent = {
-                a.get("user_id", user_id): a.get("mp_spent", 0)
+                (a.get("user_id") or (a.get("char") or {}).get("user_id", user_id)): a.get("mp_spent", 0)
                 for a in actions
                 if a.get("_mp_already_deducted")
             }
@@ -796,38 +878,100 @@ class TurnService:
             if isinstance(a, dict) and isinstance(a.get("_prev_stealth_state"), dict):
                 prev_st_rollback = a.get("_prev_stealth_state")
                 break
+        # Compute 1-based monotonic gameplay turn number before snapshot & resolve_turn
+        _hist_actions_cnt = sum(
+            1 for _h in (session.get("history") or [])
+            if not (isinstance(_h, dict) and _h.get("type") == "scene")
+        )
+        pre_turn_count_val = int(session.get("turn_count") or 0)
+        target_turn = max(pre_turn_count_val, _hist_actions_cnt) + 1
+        pre_turn_daily_incursions_snapshot = copy.deepcopy(
+            session.get("daily_incursions") if "daily_incursions" in session else session.get("daily_breaches")
+        )
+        # Snapshot every tracked key unconditionally (None when absent) so a hard failure on the FIRST turn
+        # that creates one of these keys clears it on rollback instead of committing partial anomaly state.
+        pre_turn_anomaly_extra_snapshot = {
+            _ek: copy.deepcopy(session.get(_ek))
+            for _ek in (
+                "anomaly_field_log",
+                "retired_folklore_ids",
+                "folklore_cooldowns",
+                "contained_anomalies_log",
+                "anomalous_vault_log",
+                "anomalous_vault_requisitions",
+                "anomalous_faction_state",
+                "last_school_hours_incident_day",
+                "dialogue_partners",
+            )
+        }
+        pre_turn_dialogue_partner = session.get("dialogue_partner")
+
         snapshot = {
             "turn_id": turn_id,
             "status": "pending",
+            "target_turn": target_turn,
             "fallback_reason": None,
             "retry_attempts": 0,
             "mode": mode,
             "actions": [_serialize_action(a) for a in actions],
             "pre_turn": {
+                "pre_turn_count": pre_turn_count_val,
                 "location": session.get("current_location", ""),
                 "current_node_id": session.get("current_node_id", ""),
                 "focal_point": session.get("focal_point", ""),
                 "narrative": session.get("narrative", ""),
                 "scene_title": session.get("scene_title", ""),
-                "npcs": list(session.get("current_npcs") or []),
-                "enemies": list(session.get("nearby_enemies") or []),
+                "npcs": copy.deepcopy(list(session.get("current_npcs") or [])),
+                "enemies": copy.deepcopy(list(session.get("nearby_enemies") or [])),
+                "daily_incursions": copy.deepcopy(pre_turn_daily_incursions_snapshot),
                 "stealth_state": prev_st_rollback,
+                "player_resonance_pips": (
+                    copy.deepcopy(session["player_resonance_pips"])
+                    if isinstance(session.get("player_resonance_pips"), dict)
+                    else int(session.get("player_resonance_pips") or 0)
+                ),
+                "telemetry_calibrations_used": copy.deepcopy(session.get("telemetry_calibrations_used") or {}),
+                "event_pity_counter": float(session.get("event_pity_counter") or 0.0),
+                "rumor_pity_counter": float(session.get("rumor_pity_counter") or 0.0),
+                "minor_event_pity_counter": float(session.get("minor_event_pity_counter") or 0.0),
             },
             "applied": {}
         }
         await adb(db.set_turn_snapshot, session_id, snapshot)
 
+        if isinstance(session, dict):
+            session["_target_turn"] = target_turn
+            try:
+                session["_world_events_snapshot"] = await adb(db.get_world_events_snapshot, session_id)
+            except Exception:
+                session["_world_events_snapshot"] = {}
+
         # Resolve the turn with the LLM — resolve_turn now always returns a dict
+        pre_turn_nearby_enemies_snapshot = copy.deepcopy(list(session.get("nearby_enemies") or []))
         try:
             outcome = await game_engine.resolve_turn(session, party, actions, stream_callback=stream_callback)
             if isinstance(outcome, dict) and isinstance(session, dict) and "stealth_state" not in outcome:
                 outcome["stealth_state"] = session.get("stealth_state")
         except BaseException as e:
-            if prev_st_rollback is not None:
-                try:
-                    await adb(db.update_session, session_id, stealth_state=prev_st_rollback)
-                except Exception:
-                    pass
+            if isinstance(session, dict):
+                session.pop("_target_turn", None)
+            try:
+                rollback_kwargs: Dict[str, Any] = {
+                    "nearby_enemies": pre_turn_nearby_enemies_snapshot,
+                    "current_npcs": snapshot["pre_turn"]["npcs"],
+                    "dialogue_partner": pre_turn_dialogue_partner,
+                }
+                if prev_st_rollback is not None:
+                    rollback_kwargs["stealth_state"] = prev_st_rollback
+                extra_restore: Dict[str, Any] = dict(pre_turn_anomaly_extra_snapshot)
+                if pre_turn_daily_incursions_snapshot is not None:
+                    extra_restore["daily_incursions"] = pre_turn_daily_incursions_snapshot
+                    extra_restore["daily_breaches"] = pre_turn_daily_incursions_snapshot
+                if extra_restore:
+                    rollback_kwargs["extra"] = extra_restore
+                await adb(db.update_session, session_id, **rollback_kwargs)
+            except Exception:
+                pass
             if isinstance(e, Exception):
                 log.error("Hard failure during resolve_turn for session %s: %s", session_id, e, exc_info=True)
             snapshot["status"] = "failed_hard"
@@ -839,10 +983,69 @@ class TurnService:
             await adb(db.set_turn_snapshot, session_id, snapshot)
             raise e
 
+        if isinstance(outcome, dict):
+            outcome["_target_turn"] = target_turn
+
         # Apply mechanics (includes quest & waypoint updates via _reduce_quests_and_waypoints)
-        items_gained = await adb(game_engine.apply_outcome, session_id, party, outcome, mp_already_spent, actions=actions)
+        try:
+            items_gained = await adb(game_engine.apply_outcome, session_id, party, outcome, mp_already_spent, actions=actions)
+        finally:
+            if isinstance(outcome, dict):
+                outcome.pop("_target_turn", None)
+            if isinstance(session, dict):
+                session.pop("_target_turn", None)
         if not isinstance(items_gained, dict):
             items_gained = {}
+
+        # Post-turn World Event & Rumor Resolution + Mid-Rumor Companion/Romance Loyalty Promotion
+        if isinstance(outcome, dict):
+            try:
+                from mechanics.world.world_events import handle_mid_rumor_npc_promotion, on_quest_or_bounty_completed
+                _completed_qids = set()
+                for _qu in (outcome.get("quest_updates") or []):
+                    if isinstance(_qu, dict) and str(_qu.get("status") or "").strip().lower() == "completed" and _qu.get("quest_id"):
+                        _qid = str(_qu["quest_id"])
+                        _completed_qids.add(_qid)
+                        await adb(
+                            on_quest_or_bounty_completed,
+                            session_id,
+                            _qid,
+                            quest_type=str(_qu.get("quest_type") or "bounty"),
+                            is_story_quest=bool(_qu.get("is_story_quest")),
+                        )
+                for _rn in (outcome.get("_quest_reward_notices") or []):
+                    if isinstance(_rn, dict) and _rn.get("claimed") and _rn.get("quest_id"):
+                        _qid = str(_rn["quest_id"])
+                        if _qid not in _completed_qids:
+                            _completed_qids.add(_qid)
+                            await adb(
+                                on_quest_or_bounty_completed,
+                                session_id,
+                                _qid,
+                                quest_type=str(_rn.get("quest_type") or "bounty"),
+                                is_story_quest=bool(_rn.get("is_story_quest")),
+                            )
+                for _ru in (outcome.get("relationship_updates") or []):
+                    if isinstance(_ru, dict) and _ru.get("name"):
+                        _trk = str(_ru.get("track") or "").strip().lower()
+                        _new_sc = int(_ru.get("new_score") if _ru.get("new_score") is not None else (_ru.get("score") or 0))
+                        if _trk in ("romantic", "romance", "lover", "spouse") or _new_sc >= 70:
+                            await adb(handle_mid_rumor_npc_promotion, session_id, npc_name=str(_ru["name"]))
+            except Exception as _we_post_err:
+                log.warning("World event post-turn hooks failed (non-fatal): %s", _we_post_err)
+
+            # Campaign Epilogue Choice, Zero-Plot-Armor NPC Fallout, Combat & Partner-Verified Intimate Hooks
+            try:
+                await adb(
+                    game_engine.resolve_post_turn_dossier_hooks,
+                    session_id,
+                    session,
+                    outcome,
+                    actions,
+                    user_id,
+                )
+            except Exception as _qd_post_err:
+                log.warning("Quest dossier post-turn hooks failed (non-fatal): %s", _qd_post_err)
 
         # Re-tag quest choices now that arrival/skill_check waypoint progression has unlocked next stages
         from mechanics.social.physical_state import is_erotic_intimate_contact as _ts_is_erotic
@@ -910,14 +1113,16 @@ class TurnService:
             except Exception as e:
                 log.warning("apply_merchant_encounter_result failed (non-fatal): %s", e)
 
-        # Calculate XP
+        # Calculate XP across all acting party members
         xp_gained = 0
-        levels_gained = []
+        levels_gained: List[int] = []
+        xp_by_user: Dict[Any, int] = {}
+        levels_by_user: Dict[Any, List[int]] = {}
         char = await adb(db.get_character, user_id)
 
         deduction_xp_bonus = int(outcome.get("_deduction_xp_bonus") or 0) if isinstance(outcome, dict) else 0
         for a in actions:
-            uid = a.get("user_id", user_id)
+            uid = a.get("user_id") or (a.get("char") or {}).get("user_id", user_id)
             char_for_xp = await adb(db.get_character, uid)
             if not char_for_xp:
                 continue
@@ -943,10 +1148,12 @@ class TurnService:
 
             total_xp = base_xp + bonus_xp
             lvls = await adb(db.add_xp, uid, total_xp)
+            xp_by_user[uid] = total_xp
+            levels_by_user[uid] = list(lvls or [])
 
             if uid == user_id:
                 xp_gained = total_xp
-                levels_gained = lvls
+                levels_gained = list(lvls or [])
 
         # Build history entry
         outcome_only_nar = str(outcome.get("outcome_narrative") or "").strip()
@@ -1018,11 +1225,19 @@ class TurnService:
         has_dialogue = bool(outcome.get("dialogue_partners") or outcome.get("dialogue_partner"))
         dyn_limit = 12 if has_dialogue else 4
         new_hist = game_engine.push_history(raw_hist, history_entry, limit=dyn_limit)
-        await adb(db.update_session, session_id, history_json=json.dumps(new_hist, default=str))
+        await adb(
+            db.update_session,
+            session_id,
+            history_json=json.dumps(new_hist, default=str),
+            turn_count=target_turn,
+        )
+        from mechanics.world.world_events import build_client_world_pulse_payload as _build_wp_payload
 
         fresh_session = await adb(db.get_session, session_id)
         new_char = await adb(db.get_character, user_id)
 
+        if isinstance(fresh_session, dict):
+            fresh_session["world_pulse"] = await adb(_build_wp_payload, session_id)
         if user_id not in items_gained:
             items_gained[user_id] = []
 
@@ -1030,7 +1245,7 @@ class TurnService:
         snapshot["applied"] = {
             "character_outcomes": outcome.get("character_outcomes", []),
             "items_gained": items_gained,
-            "xp_gained": {uid: xp_gained if uid == user_id else 0 for uid in set([a.get("user_id", user_id) for a in actions])},
+            "xp_gained": dict(xp_by_user),
             "location": outcome.get("location", ""),
             "current_node_id": outcome.get("current_node_id") or fresh_session.get("current_node_id", ""),
             "focal_point": outcome.get("focal_point") or fresh_session.get("focal_point", ""),
@@ -1048,37 +1263,88 @@ class TurnService:
             "intimate_update": outcome.get("intimate_update"),
             "_physical_state": outcome.get("_physical_state"),
             "_refractory_recovered_notice": outcome.get("_refractory_recovered_notice"),
+            "event_pity_counter": float((fresh_session or {}).get("event_pity_counter") or 0.0),
+            "rumor_pity_counter": float((fresh_session or {}).get("rumor_pity_counter") or 0.0),
+            "minor_event_pity_counter": float((fresh_session or {}).get("minor_event_pity_counter") or 0.0),
         }
 
         await adb(db.set_turn_snapshot, session_id, snapshot)
+
+        async def _run_finalize_memory_after_prose(final_hist: list, final_outcome: dict) -> None:
+            try:
+                from mechanics.system.memory.digest import is_arc_boundary_event
+                _arc_boundary = is_arc_boundary_event(
+                    session if isinstance(session, dict) else {},
+                    actions,
+                    final_outcome if isinstance(final_outcome, dict) else {},
+                )
+                _present_npc_names = [
+                    n_nm for npc in ((final_outcome or {}).get("npcs_present") or outcome.get("npcs_present") or [])
+                    for n_nm in [game_engine._get_npc_name(npc)]
+                    if n_nm and n_nm.lower() != "none"
+                ]
+                _active_qids = [
+                    str(qu.get("quest_id") or qu.get("title") or "").strip()
+                    for qu in ((final_outcome or {}).get("quest_updates") or outcome.get("quest_updates") or [])
+                    if isinstance(qu, dict) and (qu.get("quest_id") or qu.get("title"))
+                ]
+                await adb(
+                    db.finalize_turn_memory,
+                    session_id,
+                    target_turn,
+                    final_hist,
+                    _present_npc_names,
+                    str((final_outcome or {}).get("location") or outcome.get("location") or session.get("current_location") or ""),
+                    _active_qids,
+                    _arc_boundary,
+                )
+            except Exception as _mem_err:
+                log.warning("Post-turn finalize_turn_memory failed for session %s: %s", session_id, _mem_err)
 
         base_response = TurnResponse(
             success=True,
             session=fresh_session,
             outcome=outcome,
             action=action,
+            actions=actions,
             items_gained_by_user=items_gained,
             xp_gained=xp_gained,
             levels_gained=levels_gained,
-            new_char=new_char
+            xp_by_user=xp_by_user,
+            levels_by_user=levels_by_user,
+            new_char=new_char,
         )
-        
+
         if outcome.get("_is_fallback_narrative"):
             log.info(f"Auto-recovery triggered for session {session_id} due to empty prose.")
             try:
                 recovered_response = await TurnService.retry_narration(session_id, user_id, stream_callback=stream_callback)
-                # Inherit the actual mechanical rewards from the base turn, since retry_narration zeros them out for UI
+                recovered_hist = list((recovered_response.session or {}).get("history") or new_hist)
+                await _run_finalize_memory_after_prose(recovered_hist, recovered_response.outcome)
+                refreshed_sess = await adb(db.get_session, session_id)
+                if isinstance(refreshed_sess, dict):
+                    refreshed_sess["world_pulse"] = await adb(_build_wp_payload, session_id)
+                    recovered_response.session = refreshed_sess
+                recovered_response.actions = actions
                 recovered_response.items_gained_by_user = items_gained
                 recovered_response.xp_gained = xp_gained
                 recovered_response.levels_gained = levels_gained
+                recovered_response.xp_by_user = xp_by_user
+                recovered_response.levels_by_user = levels_by_user
                 return recovered_response
             except Exception as e:
                 log.warning("Auto-recovery narration pass failed: %s", e)
+                await _run_finalize_memory_after_prose(new_hist, outcome)
                 snapshot["fallback_reason"] = "empty_prose"
                 await adb(db.set_turn_snapshot, session_id, snapshot)
                 base_response.outcome["fallback_reason"] = "empty_prose"
                 return base_response
-                
+
+        await _run_finalize_memory_after_prose(new_hist, outcome)
+        refreshed_base_sess = await adb(db.get_session, session_id)
+        if isinstance(refreshed_base_sess, dict):
+            refreshed_base_sess["world_pulse"] = fresh_session.get("world_pulse") if isinstance(fresh_session, dict) else None
+            base_response.session = refreshed_base_sess
         return base_response
 
     @staticmethod
@@ -1138,6 +1404,10 @@ class TurnService:
                 last_entry["scene_title"] = new_outcome["scene_title"]
             raw_hist[-1] = last_entry
             await adb(db.update_session, session_id, history_json=json.dumps(raw_hist, default=str))
+            try:
+                await adb(db.resync_latest_digest_turn, session_id, raw_hist)
+            except Exception as _resync_err:
+                log.warning("resync_latest_digest_turn during retry_narration failed (non-fatal): %s", _resync_err)
 
         # Update snapshot attempts
         snapshot["retry_attempts"] = attempt
@@ -1147,6 +1417,9 @@ class TurnService:
         fresh_session = await adb(db.get_session, session_id)
         new_char = await adb(db.get_character, user_id)
         
+        if isinstance(fresh_session, dict):
+            from mechanics.world.world_events.engine import build_client_world_pulse_payload as _build_wp_retry
+            fresh_session["world_pulse"] = await adb(_build_wp_retry, session_id)
         # D13: Preserve frozen mechanical, spatial & cast state from snapshot["applied"]
         applied_state = dict(snapshot.get("applied", {}))
         merged_outcome = dict(applied_state)

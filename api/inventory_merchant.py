@@ -15,6 +15,8 @@ from mechanics.combat.merchant import (
     update_merchant_catalogue,
     get_anomalous_shop_faction_context,
     compute_anomalous_resale_price,
+    compute_effective_shop_item_price,
+    mark_vault_requisition_claimed,
 )
 from mechanics.combat.items import (
     apply_item_to_target,
@@ -173,7 +175,12 @@ def _enrich_inventory_item(item: dict, char: dict, equipment: dict) -> dict:
                 stats_badges.append(f"+{bv} {bk.upper()}")
         if parsed_eff.get("cure_status"):
             stats_badges.append(f"Cures {', '.join(parsed_eff['cure_status'])}")
-        clean_effect = (cons_meta or {}).get("description") or (", ".join(stats_badges) if stats_badges else "Consumable item.")
+        clean_effect = (
+            (cons_meta or {}).get("description")
+            or (cons_meta or {}).get("desc")
+            or (cons_meta or {}).get("effect_desc")
+            or (", ".join(stats_badges) if stats_badges else "Consumable item.")
+        )
     elif valid_slots:
         if item_is_narrative:
             category_label = f"Narrative Gear ({target_slot})"
@@ -464,7 +471,13 @@ async def get_merchant_shop(
     if not is_phone_shop and merchant_type and merchant.get("is_faction_quartermaster"):
         merchant["is_faction_quartermaster"] = False
         merchant.pop("quartermaster_faction_arch", None)
-    pre_shop_ctx = get_anomalous_shop_faction_context(session, location=loc, is_phone_shop=is_phone_shop, user_id=user_id)
+    pre_shop_ctx = await adb(
+        get_anomalous_shop_faction_context,
+        session,
+        loc,
+        is_phone_shop,
+        user_id,
+    )
     if not pre_shop_ctx.get("allowed", True):
         raise HTTPException(status_code=403, detail=pre_shop_ctx.get("access_denied_reason") or "Access denied to this faction store.")
     is_monastic_member_shrine = (
@@ -562,7 +575,13 @@ async def get_merchant_shop(
             await adb(db.save_merchant_state, session_id, merchant)
 
     discount_pct = _compute_charisma_discount(char, merchant)
-    shop_ctx = get_anomalous_shop_faction_context(session, location=loc, is_phone_shop=is_phone_shop, user_id=user_id)
+    shop_ctx = await adb(
+        get_anomalous_shop_faction_context,
+        session,
+        loc,
+        is_phone_shop,
+        user_id,
+    )
     if not shop_ctx.get("allowed", True):
         raise HTTPException(status_code=403, detail=shop_ctx.get("access_denied_reason") or "Access denied to this faction store.")
     raw_stock = merchant.get(stock_field) or (catalogue.get("stock", []) if catalogue else [])
@@ -579,15 +598,7 @@ async def get_merchant_shop(
         if item.get("quantity", 1) <= 0:
             continue
         base_price = int(item.get("price", 15) or 15)
-        if shop_ctx.get("is_monastic_free_shop"):
-            final_price = 0
-        elif shop_ctx.get("is_public_discounted_shop"):
-            final_price = max(1, int(round(base_price * 0.50)))
-        elif shop_ctx.get("price_multiplier", 1.0) != 1.0:
-            marked_up = int(round(base_price * float(shop_ctx["price_multiplier"])))
-            final_price = discounted_price(marked_up, discount_pct)
-        else:
-            final_price = discounted_price(base_price, discount_pct)
+        final_price = compute_effective_shop_item_price(item, shop_ctx=shop_ctx, discount_pct=discount_pct)
         entry = dict(item)
         entry["base_price"] = base_price
         entry["final_price"] = final_price
@@ -865,26 +876,18 @@ async def merchant_buy(req: MerchantBuyRequest):
 
     stock_item = dict(stock[target_idx])
     discount_pct = _compute_charisma_discount(char, merchant)
-    shop_ctx = get_anomalous_shop_faction_context(
+    shop_ctx = await adb(
+        get_anomalous_shop_faction_context,
         session,
-        location=session.get("current_location", ""),
-        is_phone_shop=bool(req.is_phone_shop),
-        user_id=req.user_id,
+        session.get("current_location", ""),
+        bool(req.is_phone_shop),
+        req.user_id,
     )
     if not shop_ctx.get("allowed", True):
         raise HTTPException(status_code=403, detail=shop_ctx.get("access_denied_reason") or "Access denied to this faction store.")
     if shop_ctx.get("shrine_daily_exhausted"):
         raise HTTPException(status_code=400, detail="Daily Sacred Shrine provisions (3/3) have been claimed today. Stock refreshes tomorrow morning.")
-    base_price = int(stock_item.get("price", 15) or 15)
-    if shop_ctx.get("is_monastic_free_shop"):
-        price = 0
-    elif shop_ctx.get("is_public_discounted_shop"):
-        price = max(1, int(round(base_price * 0.50)))
-    elif shop_ctx.get("price_multiplier", 1.0) != 1.0:
-        marked_up = int(round(base_price * float(shop_ctx["price_multiplier"])))
-        price = discounted_price(marked_up, discount_pct)
-    else:
-        price = discounted_price(base_price, discount_pct)
+    price = compute_effective_shop_item_price(stock_item, shop_ctx=shop_ctx, discount_pct=discount_pct)
 
     if (char.get("gold", 0) or 0) < price:
         raise HTTPException(status_code=400, detail=f"Not enough gold! Need {price}g, have {char.get('gold', 0)}g.")
@@ -914,6 +917,10 @@ async def merchant_buy(req: MerchantBuyRequest):
                 item_eff = f"[CONSUMABLE_JSON]{_json.dumps({'description': item_eff, 'shrine_sacred_grant': True})}"
             elif shop_ctx.get("is_public_discounted_shop"):
                 item_eff = f"[CONSUMABLE_JSON]{_json.dumps({'description': item_eff, 'purchase_price_paid': price, 'public_requisition_item': True})}"
+
+    elif shop_ctx.get("is_event_discounted_shop"):
+        from mechanics.combat.merchant import stamp_discounted_purchase_metadata
+        item_eff = stamp_discounted_purchase_metadata(item_eff, price)
 
     can_fit = await adb(
         db.can_add_item,
@@ -963,30 +970,29 @@ async def merchant_buy(req: MerchantBuyRequest):
                 if isinstance(cat, dict) and "stock" in cat:
                     cat["stock"] = stock
 
+    if stock_item.get("is_vault_requisition"):
+        claimed_reqs = mark_vault_requisition_claimed(session, stock_item.get("name", ""))
+        if claimed_reqs is not None:
+            await adb(db.update_session, req.session_id, extra={"anomalous_vault_requisitions": claimed_reqs})
+
     await adb(db.save_merchant_state, req.session_id, merchant)
     quest_updates = await adb(game_engine.evaluate_quest_state_predicates, req.session_id, req.user_id)
     updated_char = await adb(db.get_character, req.user_id)
 
     # Re-annotate stock with updated faction pricing / remaining daily Shrine grants
-    post_shop_ctx = get_anomalous_shop_faction_context(
+    post_shop_ctx = await adb(
+        get_anomalous_shop_faction_context,
         session,
-        location=session.get("current_location", ""),
-        is_phone_shop=bool(req.is_phone_shop),
-        user_id=req.user_id,
+        session.get("current_location", ""),
+        bool(req.is_phone_shop),
+        req.user_id,
     )
     annotated_stock = []
     for s_item in stock:
         if s_item.get("quantity", 1) <= 0:
             continue
         b_price = int(s_item.get("price", 15) or 15)
-        if post_shop_ctx.get("is_monastic_free_shop"):
-            f_price = 0
-        elif post_shop_ctx.get("is_public_discounted_shop"):
-            f_price = max(1, int(round(b_price * 0.50)))
-        elif post_shop_ctx.get("price_multiplier", 1.0) != 1.0:
-            f_price = discounted_price(int(round(b_price * float(post_shop_ctx["price_multiplier"]))), discount_pct)
-        else:
-            f_price = discounted_price(b_price, discount_pct)
+        f_price = compute_effective_shop_item_price(s_item, shop_ctx=post_shop_ctx, discount_pct=discount_pct)
         s_copy = dict(s_item)
         s_copy["base_price"] = b_price
         s_copy["final_price"] = f_price

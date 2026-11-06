@@ -1,10 +1,11 @@
+from __future__ import annotations
 import json
 import logging
 import asyncio
 
 import db
 from models.llm_schemas import NarrationOutcome, DeterministicTurnNarration, DeterministicCombatNarration
-from llm_client import call_llm_json, call_llm_json_stream
+from llm_client import GM_SHARED_RULES, call_llm_json, call_llm_json_stream
 from scenario_data import is_nsfw_scenario, uses_nsfw_model
 import game_engine
 
@@ -14,14 +15,7 @@ log = logging.getLogger(__name__)
 NARRATION_SYSTEM_PROMPT = """You are a highly skilled interactive fiction engine (the "Narrator").
 Your ONLY job right now is to regenerate the prose (the narrative description of what just happened and what is happening next) and the next available choices.
 
-You MUST NOT change the mechanical outcome of the turn. The facts are absolute and frozen. You are just describing them in vivid, second-person prose according to the player's preferences.
-
-## FROZEN STATE (Authoritative Facts)
-The player took the following action(s):
-{actions_text}
-
-The engine already resolved the outcome and these are the unchangeable facts:
-{frozen_state_text}
+You MUST NOT change the mechanical outcome of the turn. The facts provided in the user prompt's FROZEN STATE block are absolute and frozen. You are just describing them in vivid, second-person prose according to the player's preferences.
 
 ## YOUR TASK
 1. 'outcome_narrative': Describe the immediate result of the NEW player's action(s). Write exactly what happens based on the frozen mechanics. NEVER repeat, re-state, or re-quote dialogue or events that already happened in previous turns.
@@ -60,7 +54,9 @@ def _build_frozen_state_text(snapshot: dict) -> str:
             hp_c = c_dict.get("hp_change", 0)
             mp_c = c_dict.get("mp_change", 0)
             status = c_dict.get("status_effects_gained", [])
-            lines.append(f" - {c_name}: HP {hp_c}, MP {mp_c}, Status Effects: {status}")
+            cond = "critically wounded" if int(hp_c or 0) < -25 else ("severely injured" if int(hp_c or 0) < -10 else ("wounded" if int(hp_c or 0) < 0 else ("rejuvenated" if int(hp_c or 0) > 0 else "steady")))
+            mp_desc = "drained of focus" if int(mp_c or 0) < -15 else ("exerted" if int(mp_c or 0) < 0 else ("energized" if int(mp_c or 0) > 0 else "steady"))
+            lines.append(f" - {c_name}: physical condition is {cond}, magical focus is {mp_desc}, Status Effects: {status}")
             
     # Location
     loc = applied.get("location")
@@ -83,7 +79,7 @@ def _build_frozen_state_text(snapshot: dict) -> str:
         
     xp = applied.get("xp_gained", {})
     if any(xp.values()):
-        lines.append(f"XP gained: {xp}")
+        lines.append("Combat and adventuring experience was gained from the engagement.")
         
     # Time / Sleep
     t_info = applied.get("time_info", {})
@@ -136,8 +132,12 @@ def _build_frozen_state_text(snapshot: dict) -> str:
 
     if not lines:
         lines.append("(No significant mechanical changes)")
+    lines.append("[PROSE GUARD]: Describe all physical and tactical consequences qualitatively; never mention numeric HP/MP numbers or XP digits in story prose.")
         
     return "\n".join(lines)
+
+
+_format_frozen_state_for_prompt = _build_frozen_state_text
 
 
 async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, stream_callback=None) -> dict:
@@ -269,13 +269,10 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
     )
     stage_plan_block = render_stage_plan(frozen_cast_plan)
     frozen_state_text = f"{frozen_state_text}\n\n{stage_plan_block}"
-    
-    sys_prompt = NARRATION_SYSTEM_PROMPT.replace(
-        "{actions_text}", actions_text
-    ).replace(
-        "{frozen_state_text}", frozen_state_text
-    )
-    
+
+    narration_core_zone = f"{GM_SHARED_RULES}\n\n{NARRATION_SYSTEM_PROMPT}"
+    sys_prompt = narration_core_zone
+
     # Ensure lead character gender is populated if available
     lead_char_obj = actions[0].get("char") if actions and isinstance(actions[0], dict) else None
     if not session.get("lead_character_gender") and isinstance(lead_char_obj, dict):
@@ -285,7 +282,7 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
     lang_dir = build_language_directive(session)
     if lang_dir:
         sys_prompt += f"\n\n{lang_dir}"
-    
+
     # Check for conversational exit intent in retry pass
     from mechanics.narrative.intent import is_dialogue_exit_action
     has_exited_convo = any(is_dialogue_exit_action(a) for a in actions)
@@ -300,15 +297,20 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
             "- In `choices`, generate OPEN EXPLORATION, room inspection, or travel choices. DO NOT generate active dialogue choices."
         )
 
-    user_prompt = f"Context & Lore:\n{context_str}\n\nPlease generate the narration and next choices now based strictly on the frozen mechanics.{departure_directive}"
-    
+    frozen_block = (
+        f"## FROZEN STATE (Authoritative Facts)\n"
+        f"The player took the following action(s):\n{actions_text}\n\n"
+        f"The engine already resolved the outcome and these are the unchangeable facts:\n{frozen_state_text}\n\n"
+    )
+    user_prompt = f"Context & Lore:\n{context_str}\n\n{frozen_block}Please generate the narration and next choices now based strictly on the frozen mechanics.{departure_directive}"
+
     # Temperature bump for manual retries (attempt 1 is auto-recovery, attempt 2+ is manual)
     base_temp = 0.7
     if attempt > 1:
         base_temp = min(1.2, base_temp + (attempt - 1) * 0.15)
-        
+
     is_nsfw = uses_nsfw_model(session.get("scenario"))
-    
+
     retry_schema = DeterministicCombatNarration if bool(snapshot.get("applied", {}).get("nearby_enemies")) else DeterministicTurnNarration
 
     if stream_callback:
@@ -319,6 +321,7 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
             temperature=base_temp,
             is_nsfw=is_nsfw,
             response_model=retry_schema,
+            system_zones=(narration_core_zone, lang_dir),
         )
     else:
         result = await call_llm_json(
@@ -327,6 +330,7 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
             temperature=base_temp,
             is_nsfw=is_nsfw,
             response_model=retry_schema,
+            system_zones=(narration_core_zone, lang_dir),
         )
     
     # Convert NarrationOutcome to dict

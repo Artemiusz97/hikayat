@@ -850,6 +850,7 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
                         outcome["current_node_id"] = ext_res["destination_node_id"]
                         outcome["focal_point"] = None
                         outcome["nearby_enemies"] = []
+                        outcome["npcs_present"] = []
                         ext_note = ext_res.get("narrative", "")
                         if ext_note:
                             outcome["outcome_narrative"] = f"{outcome.get('outcome_narrative', '')}\n\n{ext_note}".strip()
@@ -935,6 +936,22 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
                     )
                 except Exception as _sr_e:
                     log.warning("Failed recording turn scene residue: %s", _sr_e)
+        # ── Nearby Enemies & Player Resonance Pips Persistence ──
+        if isinstance(outcome, dict) and session_id:
+            sess_updates = {}
+            if "nearby_enemies" in outcome and outcome["nearby_enemies"] is not None:
+                sess_updates["nearby_enemies"] = outcome["nearby_enemies"]
+            if "player_resonance_pips" in outcome and outcome["player_resonance_pips"] is not None:
+                sess_updates.setdefault("extra", {})["player_resonance_pips"] = outcome["player_resonance_pips"]
+            if outcome.get("_active_quest_encounter"):
+                sess_updates.setdefault("extra", {})["_active_quest_encounter"] = outcome["_active_quest_encounter"]
+            elif "_active_quest_encounter" in outcome:
+                sess_updates.setdefault("extra", {})["_active_quest_encounter"] = None
+            if sess_updates:
+                try:
+                    db.update_session(session_id, **sess_updates)
+                except Exception as _ne_e:
+                    log.warning("Failed committing nearby_enemies / player_resonance_pips: %s", _ne_e)
     # ── Background Digest Trigger ────────────────────────────────────────────
     # Schedule a non-blocking arc digest if an arc boundary was crossed this
     # turn (zone travel, dialogue exit, sub-quest completion, or history full).

@@ -1073,12 +1073,50 @@ def audit_and_expire_commitments(
     abs_current_min = max(0, int(current_day) - 1) * 1440 + max(0, int(current_minute))
     active = get_active_commitments(session_id, limit=100)
     flaked_events: List[Dict[str, Any]] = []
+    macro_events: List[Dict[str, Any]] = []
+    try:
+        macro_events = db.get_world_events(session_id, entity_type="macro_event") or []
+    except Exception:
+        macro_events = []
 
     for c in active:
         c_status = c.get("status")
         c_type = c.get("commitment_type")
         meta = c.get("metadata") or {}
         abs_start_min, abs_end_min = _compute_abs_window(c)
+
+        # 0. World Event Facility Lockdown Auto-Reschedule (Zero Flake / Stood-Up Penalty)
+        if c_type == "rendezvous" and c_status in ("pending", "approaching") and macro_events:
+            t_nid = str(c.get("target_node_id") or "").strip()
+            if t_nid and int(c.get("scheduled_day") or 0) <= int(current_day):
+                from mechanics.world.world_events.modifiers import is_node_locked_by_event
+                lock_info = is_node_locked_by_event(macro_events, t_nid)
+                if lock_info and lock_info.get("is_locked"):
+                    new_s_day = max(int(c.get("scheduled_day") or current_day), int(current_day)) + 1
+                    new_e_day = (int(c["end_day"]) + 1) if c.get("end_day") is not None else None
+                    meta["event_rescheduled_day"] = int(current_day)
+                    meta["reminder_sent"] = False
+                    with get_conn() as conn:
+                        conn.execute(
+                            "UPDATE commitments_ledger SET scheduled_day = ?, end_day = ?, status = 'pending', metadata_json = ? WHERE id = ?",
+                            (new_s_day, new_e_day, json.dumps(meta), c["id"]),
+                        )
+                    npc_id = str(c.get("target_entity") or "")
+                    if npc_id and npc_id != "group" and hasattr(db, "save_phone_message"):
+                        short_loc = str(c.get("target_location") or "our meetup spot").split("➔")[-1].strip()
+                        try:
+                            c_row = _resolve_contact_row(session_id, npc_id)
+                            msg_npc_id = (c_row.get("npc_id") if c_row else None) or npc_id
+                            db.save_phone_message(
+                                session_id=session_id,
+                                contact_npc_id=msg_npc_id,
+                                sender="npc",
+                                message=f"Hey! {short_loc} is cordoned off right now due to {lock_info['title']}. Let's reschedule our meetup for tomorrow at the same time!",
+                                intent="reschedule",
+                            )
+                        except Exception:
+                            pass
+                    continue
 
         # 1. Turn fallback expiration (applies to both rendezvous and 'active' promises)
         turn_expired = False

@@ -1,6 +1,6 @@
 # Hikayat Engineering Invariants & Best Practices
 
-These architectural contracts apply to **every** code change in Hikayat and are statically verified by `tests/test_codebase_contracts.py` and `scripts/package_release.py`.
+These architectural contracts apply to **every** code change in Hikayat. They are verified by `tests/test_codebase_contracts.py` (facade call resolution, serialization, Pydantic dual-access), `tests/test_agent_docs_contracts.py` (agent docs reference only real files, flags, and `db.*` functions), and `scripts/package_release.py` (personal path scan). See §5 for commands.
 
 ## 1. Domain-Driven Modularity & Package Contracts
 - **4-Layer Separation of Concerns**: Keep clear boundaries between:
@@ -20,9 +20,16 @@ These architectural contracts apply to **every** code change in Hikayat and are 
 ## 3. Database, Concurrency & Test Isolation
 - **Never Mutate Live `hikayat.db` in Tests**: In pytest fixtures and `unittest` suites, always redirect **both** `db.DB_PATH` and `db.core.DB_PATH` to an isolated temporary SQLite file (restoring on teardown), or call `db.isolate_simulation_db()` in simulators.
 - **Async DB Execution & Query Hygiene**: Inside `async def` routes, cogs, and `TurnService`, run synchronous SQLite calls through `await adb(db.<fn>, ...)`, respect `distributed_session_lock` / `distributed_user_lock`, and avoid redundant N+1 `await adb(...)` round-trips inside loops when state is already in memory.
-- **Normalized Table Lifecycle Parity**: Any new or modified session-scoped table in `db/` must be wired into save/load slot remapping (`db/saves.py`), turn rollback (`db/sessions.py`), child-record purge (`db/core.py`), and idempotent schema migration (`db.init_db()`).
+- **Normalized Table Lifecycle Parity**: Any new or modified session-scoped table in `db/` must be wired into save/load slot remapping (`db/saves.py`), turn rollback (`db/sessions.py`), child-record purge (`db/core.py`), and idempotent schema migration (`db.init_db()`). The step-by-step checklist lives in the `hikayat-db-lifecycle-checklist` skill.
 
 ## 4. Headless Omnichannel Parity & Prose Guardrails
 - **Deterministic Single Source of Truth**: Resolve all game mechanics deterministically in `services/turn_service.py`, `game_engine/`, and `mechanics/` with idempotent retry handling. Never fork core game rules exclusively inside Discord `cogs/` or FastAPI `api/`.
 - **Zero Stat Leakage in Prose**: Raw HP/MP integers, dice percentages, DC numbers, and internal enum/JSON tags (`[ITEM_JSON]`, `[GEAR_JSON]`, `[SPELLBOOK_JSON]`) must **never** leak into player-facing narrative prose.
 - **Zero Personal Path Leaks**: Never hardcode machine-local user home paths or usernames in tracked files, comments, or skills. `scripts/package_release.py` scans all candidate text files and aborts on personal path tokens.
+
+## 5. Verification & the Local-Only Test Suite
+- **Tests are local-only**: `tests/`, `pytest.ini`, `scripts/run_tests.py`, and `scripts/simulate_*.py` exist in the working tree but are **gitignored** (kept out of the public repo). Use them freely, but never `git add -f` or commit them, and don't treat their absence from `git ls-files` as missing.
+- **After structural or `db/` edits**: `python scripts/run_tests.py agent tests/test_codebase_contracts.py tests/test_five_normalized_models_cutover.py`
+- **After editing `AGENTS.md` or `.agents/`**: `python scripts/run_tests.py agent tests/test_agent_docs_contracts.py`
+- **Before a release**: `python scripts/package_release.py --dry-run`
+- Full runbook (presets, 6 fuzz simulators, seed replay): the `hikayat-sim-and-test` skill.

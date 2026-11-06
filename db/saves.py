@@ -1,3 +1,4 @@
+from __future__ import annotations
 import db
 import asyncio
 import json
@@ -98,22 +99,47 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
             except Exception:
                 child_data[tbl] = []
 
-        # Gather character adventure inventory
-        inv_rows = conn.execute("SELECT * FROM inventory WHERE character_id = ?", (char_id,)).fetchall()
+        # Gather character adventure inventory (including session-scoped quest items where character_id IS NULL)
+        inv_rows = conn.execute(
+            "SELECT * FROM inventory WHERE character_id = ? OR (character_id IS NULL AND user_id = ?)",
+            (char_id, user_id),
+        ).fetchall()
         cleaned_inv = []
         for r in inv_rows:
             rd = dict(r)
             rd.pop("id", None)
             cleaned_inv.append(rd)
 
-        # Character adventure vitals snapshot
+        # Character adventure vitals & 3-axis resonance snapshot
         char_state = {
             "hp": char["hp"],
             "mp": char["mp"],
             "gold": char["gold"],
             "status_effects": char.get("status_effects", "[]"),
-            "days_adventured": char.get("days_adventured", 1)
+            "days_adventured": char.get("days_adventured", 1),
+            "attribute": char.get("attribute"),
+            "combat_archetype": char.get("combat_archetype"),
+            "ability_medium": char.get("ability_medium"),
+            "skill_progress": char.get("skill_progress", "{}"),
+            "learned_spells": char.get("learned_spells", "[]"),
+            "joined_faction_id": char.get("joined_faction_id", ""),
+            "faction_rank": char.get("faction_rank", 0),
+            "faction_title": char.get("faction_title", ""),
         }
+
+        # Eagerly capture world_ending_anomaly in extra_json if scenario is anomalous incursions
+        try:
+            from scenario_data import is_anomalous_incursions_scenario
+            if is_anomalous_incursions_scenario(sess_dict.get("scenario", "")):
+                extra_raw = sess_dict.get("extra_json") or "{}"
+                extra_dict = json.loads(extra_raw) if isinstance(extra_raw, str) else dict(extra_raw or {})
+                if "world_ending_anomaly" not in extra_dict:
+                    import namegen
+                    extra_dict["world_ending_anomaly"] = namegen.generate_world_ending_anomaly_profile(hash_val=int(session_id or 1))
+                    sess_dict["extra_json"] = json.dumps(extra_dict)
+                    conn.execute("UPDATE sessions SET extra_json = ? WHERE id = ?", (sess_dict["extra_json"], session_id))
+        except Exception:
+            pass
 
         snapshot = {
             "version": 1,
@@ -200,10 +226,31 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
 
         sess_data = dict(sess_dict)
         sess_data.pop("id", None)
+        sess_data.setdefault("schema_epoch", 1)
+        sess_data.setdefault("mode", "solo")
+        sess_data.setdefault("capacity", 1)
+        if "turn_count" not in sess_data or sess_data.get("turn_count") is None:
+            raw_hist = sess_data.get("history_json") or "[]"
+            try:
+                hist_obj = json.loads(raw_hist) if isinstance(raw_hist, str) else list(raw_hist)
+                if isinstance(hist_obj, list):
+                    action_turns = [h for h in hist_obj if not (isinstance(h, dict) and h.get("type") == "scene")]
+                    sess_data["turn_count"] = len(action_turns)
+                else:
+                    sess_data["turn_count"] = 0
+            except Exception:
+                sess_data["turn_count"] = 0
+        sess_data.setdefault("last_digested_turn", 0)
         sess_data["status"] = "active"
         sess_data["created_at"] = now
         sess_data["updated_at"] = now
         sess_data["turn_order"] = json.dumps(to)
+
+        # Filter strictly to columns present in live sessions table
+        valid_session_cols = {
+            r["name"] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()
+        }
+        sess_data = {k: v for k, v in sess_data.items() if k in valid_session_cols}
 
         # Make sure any dict/list fields are serialized
         for k, v in sess_data.items():
@@ -337,6 +384,19 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                     ck = row_dict.get("commitment_key", "")
                     if old_session_id and ck:
                         row_dict["commitment_key"] = _rewrite_session_key_id(ck, old_session_id, new_session_id)
+                elif tbl == "world_events":
+                    ek = row_dict.get("event_key", "")
+                    if old_session_id and ek:
+                        row_dict["event_key"] = _rewrite_session_key_id(ek, old_session_id, new_session_id)
+                    esc_k = row_dict.get("escalation_event_key", "")
+                    if old_session_id and esc_k:
+                        row_dict["escalation_event_key"] = _rewrite_session_key_id(esc_k, old_session_id, new_session_id)
+                    old_imp = row_dict.get("implicated_contact_id")
+                    if old_imp is not None:
+                        try:
+                            row_dict["implicated_contact_id"] = contact_id_map.get(int(old_imp), old_imp)
+                        except (TypeError, ValueError):
+                            pass
                 row_dict = {k: (json.dumps(v) if isinstance(v, (dict, list)) else v) for k, v in row_dict.items() if k in t_valid and k != "id"}
                 if not row_dict:
                     continue
@@ -353,6 +413,10 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                         clue_id_map[int(orig_cl_id)] = int(cur.lastrowid)
                     except (TypeError, ValueError):
                         pass
+
+        # Rebuild 3-column multilingual FTS5 index for restored session_digests
+        from .memory import rebuild_session_digests_fts
+        rebuild_session_digests_fts(conn, new_session_id)
 
         # Remap deduction_parents_json inside session_clues if present (D2)
         if clue_id_map:
@@ -380,6 +444,138 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                         conn.execute("UPDATE commitments_ledger SET metadata_json = ? WHERE id = ?", (json.dumps(cm_meta), cm_r["id"]))
                 except Exception:
                     pass
+
+        # Remap contact_id, clue_id, and embedded session keys inside campaign_spines & quest_dossiers
+        _CONTACT_ID_FIELDS = (
+            "contact_id",
+            "implicated_contact_id",
+            "npc_contact_id",
+            "informant_id",
+            "client_id",
+            "target_id",
+            "accomplice_id",
+        )
+
+        def _remap_nested_contact_ids(obj):
+            if isinstance(obj, dict):
+                out = {}
+                for k, v in obj.items():
+                    if k in _CONTACT_ID_FIELDS and v is not None:
+                        try:
+                            out[k] = contact_id_map.get(int(v), v)
+                        except (TypeError, ValueError):
+                            out[k] = v
+                    else:
+                        out[k] = _remap_nested_contact_ids(v)
+                return out
+            if isinstance(obj, list):
+                return [_remap_nested_contact_ids(x) for x in obj]
+            return obj
+
+        def _remap_nested_session_keys(obj):
+            if not old_session_id or not obj:
+                return obj
+            if isinstance(obj, dict):
+                out = {}
+                for k, v in obj.items():
+                    if k in ("key", "lieutenant_key", "nemesis_id") and isinstance(v, str):
+                        out[k] = _rewrite_session_key_id(v, old_session_id, new_session_id)
+                    else:
+                        out[k] = _remap_nested_session_keys(v)
+                return out
+            if isinstance(obj, list):
+                return [_remap_nested_session_keys(x) for x in obj]
+            return obj
+
+        def _remap_nested_clue_ids(obj):
+            if not clue_id_map or not obj:
+                return obj
+            if isinstance(obj, dict):
+                out = {}
+                for k, v in obj.items():
+                    if k == "clue_id" and v is not None:
+                        try:
+                            out[k] = clue_id_map.get(int(v), v)
+                        except (TypeError, ValueError):
+                            out[k] = v
+                    elif k == "paired_with":
+                        if isinstance(v, int):
+                            out[k] = clue_id_map.get(v, v)
+                        elif isinstance(v, str) and v.strip().isdigit():
+                            out[k] = str(clue_id_map.get(int(v.strip()), int(v.strip())))
+                        elif isinstance(v, list):
+                            out[k] = [
+                                clue_id_map.get(p, p)
+                                if isinstance(p, int)
+                                else str(clue_id_map.get(int(p.strip()), int(p.strip())))
+                                if isinstance(p, str) and p.strip().isdigit()
+                                else p
+                                for p in v
+                            ]
+                        else:
+                            out[k] = v
+                    else:
+                        out[k] = _remap_nested_clue_ids(v)
+                return out
+            if isinstance(obj, list):
+                return [_remap_nested_clue_ids(x) for x in obj]
+            return obj
+
+        sp_rows = conn.execute(
+            "SELECT id, lieutenants_roster_json, nemeses_json, state_events_json FROM campaign_spines WHERE session_id = ?",
+            (new_session_id,),
+        ).fetchall()
+        for sp_r in sp_rows:
+            try:
+                lts = json.loads(sp_r["lieutenants_roster_json"] or "[]")
+                nems = json.loads(sp_r["nemeses_json"] or "[]")
+                sp_events = json.loads(sp_r["state_events_json"] or "[]")
+                if isinstance(lts, list):
+                    lts = _remap_nested_session_keys(_remap_nested_contact_ids(lts))
+                if isinstance(nems, list):
+                    nems = _remap_nested_session_keys(_remap_nested_contact_ids(nems))
+                if isinstance(sp_events, list):
+                    sp_events = _remap_nested_session_keys(_remap_nested_contact_ids(sp_events))
+                conn.execute(
+                    "UPDATE campaign_spines SET lieutenants_roster_json = ?, nemeses_json = ?, state_events_json = ? WHERE id = ?",
+                    (json.dumps(lts), json.dumps(nems), json.dumps(sp_events), sp_r["id"]),
+                )
+            except Exception:
+                pass
+
+        qd_rows = conn.execute(
+            """SELECT id, cast_bindings_json, clue_graph_json, leads_graph_json,
+                      twist_spec_json, climax_spec_json, state_events_json
+               FROM quest_dossiers WHERE session_id = ?""",
+            (new_session_id,),
+        ).fetchall()
+        for qd_r in qd_rows:
+            try:
+                cast_b = _remap_nested_contact_ids(json.loads(qd_r["cast_bindings_json"] or "{}"))
+                clue_g = _remap_nested_clue_ids(json.loads(qd_r["clue_graph_json"] or "[]"))
+                leads_g = _remap_nested_clue_ids(_remap_nested_contact_ids(json.loads(qd_r["leads_graph_json"] or "[]")))
+                twist_s = _remap_nested_contact_ids(json.loads(qd_r["twist_spec_json"] or "{}"))
+                climax_s = _remap_nested_contact_ids(json.loads(qd_r["climax_spec_json"] or "{}"))
+                qd_events = json.loads(qd_r["state_events_json"] or "[]")
+                if isinstance(qd_events, list):
+                    qd_events = _remap_nested_session_keys(_remap_nested_clue_ids(_remap_nested_contact_ids(qd_events)))
+                conn.execute(
+                    """UPDATE quest_dossiers
+                       SET cast_bindings_json = ?, clue_graph_json = ?, leads_graph_json = ?,
+                           twist_spec_json = ?, climax_spec_json = ?, state_events_json = ?
+                       WHERE id = ?""",
+                    (
+                        json.dumps(cast_b),
+                        json.dumps(clue_g),
+                        json.dumps(leads_g),
+                        json.dumps(twist_s),
+                        json.dumps(climax_s),
+                        json.dumps(qd_events),
+                        qd_r["id"],
+                    ),
+                )
+            except Exception:
+                pass
 
         # Re-materialize contacts.relations_json from cloned households + social_ties
         try:
@@ -422,34 +618,70 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
         except Exception:
             pass
 
-        # Restore character inventory
-        conn.execute("DELETE FROM inventory WHERE character_id = ?", (char_id,))
+        # Restore character inventory (including session-scoped quest items where character_id IS NULL)
+        inv_valid = _valid_cols("inventory")
+        conn.execute(
+            "DELETE FROM inventory WHERE character_id = ? OR (character_id IS NULL AND user_id = ?)",
+            (char_id, user_id),
+        )
         for item in saved_inv:
             item_dict = dict(item)
             item_dict["character_id"] = char_id
             item_dict["user_id"] = user_id
-            for k, v in item_dict.items():
-                if isinstance(v, (dict, list)):
-                    item_dict[k] = json.dumps(v)
+            item_dict = {
+                k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
+                for k, v in item_dict.items()
+                if k in inv_valid and k != "id"
+            }
+            if not item_dict:
+                continue
             c_names = ",".join(item_dict.keys())
             qmarks = ",".join("?" * len(item_dict))
             conn.execute(f"INSERT INTO inventory ({c_names}) VALUES ({qmarks})", list(item_dict.values()))
 
-        # Restore character vitals and link active_session_id
+        # Restore character vitals, 3-axis resonance, spell progress, and link active_session_id
+        raw_status = char_state.get("status_effects", "[]")
+        status_effects_val = json.dumps(raw_status) if isinstance(raw_status, (list, dict)) else str(raw_status or "[]")
+        restored_attr = char_state.get("attribute")
+        restored_arch = char_state.get("combat_archetype")
+        restored_med = char_state.get("ability_medium")
+        raw_prog = char_state["skill_progress"] if "skill_progress" in char_state else char.get("skill_progress", "{}")
+        prog_val = json.dumps(raw_prog) if isinstance(raw_prog, (list, dict)) else str(raw_prog or "{}")
+        raw_spells = char_state["learned_spells"] if "learned_spells" in char_state else char.get("learned_spells", "[]")
+        spells_val = json.dumps(raw_spells) if isinstance(raw_spells, (list, dict)) else str(raw_spells or "[]")
         conn.execute(
             """UPDATE characters
-               SET hp = ?, mp = ?, gold = ?, status_effects = ?, days_adventured = ?, active_session_id = ?
+               SET hp = ?, mp = ?, gold = ?, status_effects = ?, days_adventured = ?,
+                   attribute = ?, combat_archetype = ?, ability_medium = ?,
+                   skill_progress = ?, learned_spells = ?, active_session_id = ?,
+                   joined_faction_id = ?, faction_rank = ?, faction_title = ?
                WHERE id = ?""",
             (
                 char_state.get("hp", char["max_hp"]),
                 char_state.get("mp", char["max_mp"]),
                 char_state.get("gold", char["gold"]),
-                char_state.get("status_effects", "[]"),
+                status_effects_val,
                 char_state.get("days_adventured", 1),
+                restored_attr,
+                restored_arch,
+                restored_med,
+                prog_val,
+                spells_val,
                 new_session_id,
-                char_id
+                char_state.get("joined_faction_id", ""),
+                char_state.get("faction_rank", 0),
+                char_state.get("faction_title", ""),
+                char_id,
             )
         )
+
+    try:
+        from scenario_data import is_anomalous_incursions_scenario
+        if is_anomalous_incursions_scenario(sess_data.get("scenario", "")):
+            from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
+            sync_equipped_anomalous_spells(user_id)
+    except Exception:
+        pass
 
     return db.get_session(new_session_id)
 

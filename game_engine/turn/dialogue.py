@@ -609,8 +609,8 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                     continue
                 if is_anom_dlg and session.get("id"):
                     try:
-                        from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag, TAG_CIVILIAN
-                        if classify_anomalous_npc_tag(lore_ent or partner, session_id=session["id"], scen_key=_scen_name) == TAG_CIVILIAN:
+                        from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag, TAG_SPECIAL_AGENT
+                        if classify_anomalous_npc_tag(lore_ent or partner, session_id=session["id"], scen_key=_scen_name) != TAG_SPECIAL_AGENT:
                             continue
                     except Exception:
                         pass
@@ -637,7 +637,17 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                 lore_ent = next((p for p in lore_people if p.get("name", "").lower() == partner.lower()), {})
                 t_role = str(lore_ent.get("role") or lore_ent.get("occupation") or "").lower()
                 t_desc = str(lore_ent.get("description") or "").lower()
-                if not is_contact_eligible(name=partner, role=t_role, description=t_desc, scenario=_scen_name):
+                t_grade = str(lore_ent.get("grade") or (lore_ent.get("basic_info") or {}).get("grade") or "")
+                t_srt = str(lore_ent.get("social_role_type") or (lore_ent.get("basic_info") or {}).get("social_role_type") or "")
+                if not is_contact_eligible(
+                    name=partner,
+                    role=t_role,
+                    grade=t_grade,
+                    description=t_desc,
+                    scenario=_scen_name,
+                    social_role_type=t_srt,
+                    session_id=session.get("id"),
+                ):
                     continue
                 existing_c = db.get_contact(session["id"], partner) if session.get("id") else None
                 if is_unlocked_contact(existing_c, party_names_lower) or partner.lower() in party_names_lower:
@@ -1239,7 +1249,8 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
                 f"{intimate_dynamic_openness_section}"
 
-                f"- `next_choices`: Generate 3 to 5 conversational choices reacting directly to what {partner_str} just said. You MUST include at least 1-2 choices that directly advance, accept, clarify, or commit to the bounty task (e.g. accepting the notes, agreeing to the delivery, asking for delivery instructions). Every substantive choice MUST require a skill check (`stat: 'CHA'`, `'INT'`, `'PER'`, or `'AGI'`, requirement: 5-8). Only the 1 dedicated conversational exit has `stat: 'NONE'`, `requirement: 0`.\n"
+                f"- `next_choices`: Generate 3 to 5 conversational choices reacting directly to what {partner_str} just said. You MUST include at least 1-2 choices that directly advance, accept, clarify, or commit to the bounty task (e.g. accepting the notes, agreeing to the delivery, asking for delivery instructions). Every substantive choice MUST require a skill check (stat: CHA, INT, PER, or AGI, requirement: 5 to 8). Only the 1 dedicated conversational exit has stat: NONE and requirement: 0.\n"
+                f"- CHOICE LABEL PROSE INTEGRITY (STRICT): The 'label' field must contain ONLY in-world narrative action text (e.g. 'Ask {partner_str} about the task details'). NEVER include raw JSON field names, LaTeX math formatting (\\text, \\mathbf), stat badges, or requirement numbers inside the label prose.\n"
                 f"{ring2_peer_section}"
                 f"{_dynamic_ledger_section}"
                 f"{_stall_note}"
@@ -1247,7 +1258,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                 f"{recruitment_prompt}"
                 f"{contact_exchange_prompt}"
                 f"- `relationship_updates`: For eligible peer characters ({partner_str}), report affinity reactions (`delta_score`: +1 to +3 for good chat/banter/appealing to likes, +4 to +6 for great insight/support/flirtation targeting likes or turn-ons, +7 to +10 for major milestones; -1 to -4 for triggering dislikes/aversions/offending values/rudeness) and any newly revealed traits or preferences.\n"
-                f"- ALWAYS include 1 dedicated conversational exit (`stat: 'NONE'`, `requirement: 0`, e.g. 'Thank {partner_str} and excuse yourself to step away').\n"
+                f"- ALWAYS include 1 dedicated conversational exit (stat: NONE, requirement: 0, e.g. 'Thank {partner_str} and excuse yourself to step away').\n"
                 f"- STRICTLY FORBIDDEN WHILE IN DIALOGUE: Do NOT generate greeting choices ('Greet {partner_str}') or travel choices to leave the room.\n\n"
 
             )
@@ -1280,7 +1291,8 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
                 f"{intimate_dynamic_openness_section}"
 
-                f"- `next_choices`: Generate 3 to 5 organic, distinct conversational choices reacting directly to what {partner_str} just said or proposed. Every substantive choice (pressing for evidence/clues, negotiating terms, challenging motives, strategic cooperation) MUST require a skill check (`stat: 'INT'`, `'CHA'`, or `'PER'`, requirement: 5-8). Only the 1 dedicated conversational exit has `stat: 'NONE'`, `requirement: 0`.\n"
+                f"- `next_choices`: Generate 3 to 5 organic, distinct conversational choices reacting directly to what {partner_str} just said or proposed. Every substantive choice (pressing for evidence/clues, negotiating terms, challenging motives, strategic cooperation) MUST require a skill check (stat: INT, CHA, or PER, requirement: 5 to 8). Only the 1 dedicated conversational exit has stat: NONE and requirement: 0.\n"
+                f"- CHOICE LABEL PROSE INTEGRITY (STRICT): The 'label' field must contain ONLY in-world narrative action text (e.g. 'Press {partner_str} for details'). NEVER include raw JSON field names, LaTeX math formatting (\\text, \\mathbf), stat badges, or requirement numbers inside the label prose.\n"
                 f"- Give distinct tactical stances (e.g. pressing for evidence/clues, negotiating terms/compromise, challenging motives, or offering strategic cooperation).\n"
                 f"{ring2_peer_section}"
                 f"{_dynamic_ledger_section}"
@@ -1291,7 +1303,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                 f"{contact_exchange_prompt}"
                 f"- `relationship_updates`: For eligible peer characters ({partner_str}), report affinity reactions and newly revealed traits/preferences. Base affinity is +1 on check success (+2 crit), -1 on check failure (-2 crit), 0 on neutral ambient talk. Add +1 to +3 for actions resonating with their traits, preferences, or turn-ons; favorite gifts scale by rarity (+3 common to +7 relic); deduct -1 to -4 for triggering dislikes, turn-offs, prying into boundaries, or failed intimate advances (disliked gifts -3 to -5).\n"
 
-                f"- ALWAYS include 1 dedicated conversational exit (`stat: 'NONE'`, `requirement: 0`, e.g. 'Thank {partner_str} and excuse yourself to step away').\n"
+                f"- ALWAYS include 1 dedicated conversational exit (stat: NONE, requirement: 0, e.g. 'Thank {partner_str} and excuse yourself to step away').\n"
 
                 f"- STRICTLY FORBIDDEN WHILE IN DIALOGUE: Do NOT generate greeting or conversation-initiation choices (e.g. 'Greet {partner_str}', 'Speak with {partner_str}', 'Approach {partner_str}', 'Talk to {partner_str}'). You are ALREADY talking face-to-face in active dialogue! Every choice must be a specific reply, stance, or inquiry reacting to what {partner_str} just said.\n"
 
@@ -1309,17 +1321,19 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
             if _in_active_erotic_dlg:
 
                 _social_next_choices_block = (
-                    f"- `next_choices`: Generate 4 context-aware intimate choices strictly grounded in the current act, postures, sensitive spots, and excitement meters in `[ACTIVE PHYSICAL & INTIMATE STATE CONTINUITY]` above (use the HYBRID CHOICE BLUEPRINTS as your situational guide). Every substantive choice MUST require a skill check (`stat: 'END'`, `'AGI'`, `'STR'`, `'CHA'`, or `'PER'`, requirement: 5-8). Include 1 dedicated pause/exit choice with `stat: 'NONE'` and `requirement: 0`. NEVER splice quest objectives, bounties, clues, or investigation props into intimate choices, and NEVER prefix intimate choices with ⭐, 🎯, or ⚡.\n"
+                    f"- `next_choices`: Generate 4 context-aware intimate choices strictly grounded in the current act, postures, sensitive spots, and excitement meters in `[ACTIVE PHYSICAL & INTIMATE STATE CONTINUITY]` above (use the HYBRID CHOICE BLUEPRINTS as your situational guide). Every substantive choice MUST require a skill check (stat: END, AGI, STR, CHA, or PER, requirement: 5 to 8). Include 1 dedicated pause/exit choice with stat: NONE and requirement: 0. NEVER splice quest objectives, bounties, clues, or investigation props into intimate choices, and NEVER prefix intimate choices with ⭐, 🎯, or ⚡.\n"
+                    f"- CHOICE LABEL PROSE INTEGRITY (STRICT): The 'label' field must contain ONLY in-world narrative action text. NEVER include raw JSON field names, LaTeX math formatting (\\text, \\mathbf), stat badges, or requirement numbers inside the label prose.\n"
                 )
             else:
                 _social_next_choices_block = (
                     f"- `next_choices`: Generate 4 to 6 diverse, rich, and character-driven conversational choices reacting naturally to what {partner_str} just said. Social and banter interactions MUST use proper skill checks (DC 5 to 8) to make roleplaying engaging. Every choice in conversation MUST require a skill check EXCEPT the dedicated exit choice:\n"
-                    f"  1. 🎭 [Playful Banter / Humor]: Playfully tease or crack a witty joke (`stat: 'CHA'`, `'INT'`, or `'LUK'`, requirement: 5-8).\n"
-                    f"  2. 💬 [Personal Inquiry / Getting to Know Them]: Ask insightful questions about their background/passions or read their mood (`stat: 'PER'` or `'INT'`, requirement: 5-7).\n"
-                    f"  3. 💖 [Warmth / Affection / Flirtation]: Give a sincere compliment, show support, or flirt charmingly (or for Shameless/Bold partners, [Bold / Provocative Flirtation / Suggestive Teasing]) (`stat: 'CHA'`, requirement: 6-8, aligned with affinity & dynamic).\n"
-                    f"  4. ☕ [Casual / Shared Atmosphere]: Casual observation, sharing refreshments, or enjoying the setting (`stat: 'PER'`, `'AGI'`, or `'CHA'`, requirement: 5-7).\n"
-                    f"  5. 🎲 [Fun Activity / Shared Experience / Transition]: Propose trying food/drinks, playing a light game, moving to a new cozy spot, or enjoying the immediate activity together (`stat: 'CHA'`, `'AGI'`, or `'LUK'`, requirement: 5-8).\n"
-                    f"  6. 🚪 [Dedicated Exit]: The ONLY action with `stat: 'NONE'` and `requirement: 0` is the 1 dedicated conversational exit (e.g. 'Thank {partner_str} and excuse yourself to step away'). Every other conversational choice MUST require a skill check (DC 5-8)!\n"
+                    f"  1. 🎭 [Playful Banter / Humor]: Playfully tease or crack a witty joke (stat: CHA, INT, or LUK, requirement: 5 to 8).\n"
+                    f"  2. 💬 [Personal Inquiry / Getting to Know Them]: Ask insightful questions about their background/passions or read their mood (stat: PER or INT, requirement: 5 to 7).\n"
+                    f"  3. 💖 [Warmth / Affection / Flirtation]: Give a sincere compliment, show support, or flirt charmingly (or for Shameless/Bold partners, [Bold / Provocative Flirtation / Suggestive Teasing]) (stat: CHA, requirement: 6 to 8, aligned with affinity & dynamic).\n"
+                    f"  4. ☕ [Casual / Shared Atmosphere]: Casual observation, sharing refreshments, or enjoying the setting (stat: PER, AGI, or CHA, requirement: 5 to 7).\n"
+                    f"  5. 🎲 [Fun Activity / Shared Experience / Transition]: Propose trying food/drinks, playing a light game, moving to a new cozy spot, or enjoying the immediate activity together (stat: CHA, AGI, or LUK, requirement: 5 to 8).\n"
+                    f"  6. 🚪 [Dedicated Exit]: The ONLY action with stat: NONE and requirement: 0 is the 1 dedicated conversational exit (e.g. 'Thank {partner_str} and excuse yourself to step away'). Every other conversational choice MUST require a skill check (DC 5-8)!\n"
+                    f"  - CHOICE LABEL PROSE INTEGRITY (STRICT): The 'label' field must contain ONLY in-world narrative action text (e.g. 'Ask {partner_str} how their day has been'). NEVER include raw JSON field names, LaTeX math formatting (\\text, \\mathbf), stat badges, or requirement numbers inside the label prose.\n"
                 )
 
             dialogue_prompt_block = (
@@ -1490,13 +1504,46 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
                 f"- `next_choices` MUST include balanced options to interact with or speak to the distinct characters present ({npc_str}), alongside room investigation, resting, or travel.\n"
 
-                f"- Basic dialogue initiation choices with present NPCs MUST be Free Actions (`stat: 'NONE'`, `requirement: 0`, e.g. 'Speak with {active_room_npcs[0]}').\n"
+                f"- Basic dialogue initiation choices with present NPCs MUST be Free Actions (stat: NONE, requirement: 0, e.g. 'Speak with {active_room_npcs[0]}').\n"
 
                 f"- Do NOT generate multiple redundant travel choices to the same destination; keep travel to 1-2 distinct options so NPC interactions remain accessible.\n\n"
 
             )
 
 
+
+    if new_partners:
+        from mechanics.social.roster_tags import (
+            derive_age_group,
+            get_dialogue_register,
+            format_dialogue_register_directive,
+            is_school_scenario,
+        )
+        if is_school_scenario(scen_key):
+            session_lang = session.get("language") or "en"
+            pl_age = "teen"
+            lore_people = db.get_lorebook(session["id"]).get("person", []) if session.get("id") else []
+            for partner in new_partners:
+                if not partner:
+                    continue
+                p_ent = next((p for p in lore_people if str(p.get("name", "")).lower() == partner.lower()), {})
+                p_basic = p_ent.get("basic_info") if isinstance(p_ent.get("basic_info"), dict) else {}
+                p_role = str(p_ent.get("role") or p_basic.get("role") or p_basic.get("occupation") or "")
+                p_grade = str(p_ent.get("grade") or p_basic.get("grade") or "")
+                p_srt = str(p_ent.get("social_role_type") or p_basic.get("social_role_type") or "")
+                p_age = derive_age_group(grade=p_grade, role=p_role, social_role_type=p_srt, scen_key=scen_key)
+                reg = get_dialogue_register(speaker_age_group=pl_age, listener_age_group=p_age)
+                if reg in ("formal", "instructive"):
+                    reg_dir = format_dialogue_register_directive(
+                        speaker_name=pl_name,
+                        listener_name=partner,
+                        register=reg,
+                        listener_role=p_role,
+                        language=session_lang,
+                        speaker_traits=lead_char.get("traits") or [],
+                    )
+                    if reg_dir:
+                        dialogue_prompt_block += f"\n- {reg_dir}\n"
 
     return dialogue_prompt_block
 

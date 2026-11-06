@@ -317,6 +317,18 @@ def resolve_session_location_tokens(session_id: int = 0, template: str = "", sce
     if "{session_agency}" in res:
         res = res.replace("{session_agency}", get_session_agency_name(session_id, scenario_key))
 
+    if "{session_private_hq_1}" in res:
+        res = res.replace("{session_private_hq_1}", get_session_private_agency_hq_name(session_id, scenario_key, agency_index=1))
+
+    if "{session_private_hq_2}" in res:
+        res = res.replace("{session_private_hq_2}", get_session_private_agency_hq_name(session_id, scenario_key, agency_index=2))
+
+    if "{session_private_agency_1}" in res:
+        res = res.replace("{session_private_agency_1}", get_session_private_agency_name(session_id, scenario_key, agency_index=1))
+
+    if "{session_private_agency_2}" in res:
+        res = res.replace("{session_private_agency_2}", get_session_private_agency_name(session_id, scenario_key, agency_index=2))
+
     if "{session_residential}" in res:
 
         res = res.replace("{session_residential}", get_session_residential_neighborhood_name(session_id, scenario_key))
@@ -1053,8 +1065,16 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
 
                 return (chosen_z, p_found, s_clean)
         else:
+            matched_p1 = None
             if p1_low in primaries:
-                z_found, p_found = primaries[p1_low]
+                matched_p1 = primaries[p1_low]
+            else:
+                for pk, (pz, pp) in primaries.items():
+                    if len(pk) > 8 and (pk in p1_low or p1_low in pk or (pp and len(pp) > 8 and pp.lower() in p1_low)):
+                        matched_p1 = (pz, pp)
+                        break
+            if matched_p1:
+                z_found, p_found = matched_p1
                 chosen_z = p0 if p0 else z_found
                 s_clean = p2 if (p2 and p2.strip().lower() != "main area") else resolve_default_sublocation(p_found, chosen_z, session_id=session_id, scenario_key=scenario_key, char_name=char_name)
                 return (chosen_z, p_found, s_clean)

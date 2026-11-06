@@ -714,9 +714,7 @@ def format_cultural_full_name(
     s_clean = normalize_base_surname(surname.strip())
     f_clean = first_name.strip()
 
-    g = str(gender or "").lower().strip()
-    is_female = any(w in g for w in ("female", "woman", "girl", "feminine", "she"))
-    is_male = any(w in g for w in ("male", "man", "boy", "masculine", "he")) and not is_female
+    is_female, is_male = _classify_namegen_gender(gender)
     if not is_female and not is_male:
         f_low = f_clean.lower()
         if f_low in _ALL_FEMALE_NAMES and f_low not in _ALL_MALE_NAMES:
@@ -831,6 +829,22 @@ def is_spatial_or_object_homonym_name(name: str) -> bool:
     return False
 
 
+def _classify_namegen_gender(gender: str) -> tuple[bool, bool]:
+    """Returns (is_female, is_male) accurately distinguishing words without substring collisions."""
+    g = str(gender or "").lower().strip()
+    if not g:
+        return False, False
+    if g in ("female", "woman", "girl", "feminine", "lady", "heroine", "tomboy", "f"):
+        return True, False
+    if g in ("male", "man", "boy", "masculine", "guy", "hero", "m"):
+        return False, True
+    is_female = bool(re.search(r"\b(female|woman|girl|feminine|lady|heroine|tomboy|she|her|hers)\b", g, re.IGNORECASE))
+    if is_female:
+        return True, False
+    is_male = bool(re.search(r"\b(male|man|boy|masculine|guy|hero|he|him|his)\b", g, re.IGNORECASE))
+    return False, is_male
+
+
 def generate_person_name(
     scenario: str = "fantasy",
     gender: str = "",
@@ -838,8 +852,12 @@ def generate_person_name(
     culture_weights: dict[str, float] | None = None,
     culture: str | None = None,
     seed: int | str | None = None,
+    player_gender: str = "",
+    female_ratio: float | None = None,
+    rng: Any = None,
 ) -> str:
-    rng = random.Random(seed) if seed is not None else random
+    if rng is None:
+        rng = random.Random(seed) if seed is not None else random
 
     d = _get_scenario_data(scenario, "person")
     cultures = d.get("cultures") if isinstance(d, dict) else None
@@ -908,9 +926,7 @@ def generate_person_name(
             first_pool = cultures.get(first_culture) or base_pool
 
             # 3. Select gender-appropriate first name
-            g = str(gender or "").lower().strip()
-            is_female = any(w in g for w in ("female", "woman", "girl", "feminine", "she"))
-            is_male = any(w in g for w in ("male", "man", "boy", "masculine", "he")) and not is_female
+            is_female, is_male = _classify_namegen_gender(gender)
 
             male_pool = first_pool.get("male") or []
             female_pool = first_pool.get("female") or []
@@ -923,7 +939,17 @@ def generate_person_name(
                 resolved_gender = "male"
             else:
                 if male_pool and female_pool:
-                    pool = rng.choice([male_pool, female_pool])
+                    target_ratio = female_ratio
+                    if target_ratio is None and player_gender:
+                        try:
+                            import scenario_data
+                            target_ratio = scenario_data.get_npc_female_target_ratio(scenario, player_gender)
+                        except Exception:
+                            target_ratio = 0.5
+                    if target_ratio is not None and abs(target_ratio - 0.5) > 1e-4:
+                        pool = female_pool if (rng.random() < target_ratio) else male_pool
+                    else:
+                        pool = rng.choice([male_pool, female_pool])
                     resolved_gender = "female" if pool is female_pool else "male"
                 elif female_pool:
                     pool = female_pool
@@ -974,9 +1000,7 @@ def generate_person_name(
     male_pool = d.get("male") or []
     female_pool = d.get("female") or []
 
-    g = str(gender or "").lower().strip()
-    is_female = any(w in g for w in ("female", "woman", "girl", "feminine", "she"))
-    is_male = any(w in g for w in ("male", "man", "boy", "masculine", "he")) and not is_female
+    is_female, is_male = _classify_namegen_gender(gender)
 
     if is_female:
         pool = female_pool or ["Celestia"]
@@ -984,7 +1008,17 @@ def generate_person_name(
         pool = male_pool or ["Aldric"]
     else:
         if male_pool and female_pool:
-            pool = rng.choice([male_pool, female_pool])
+            target_ratio = female_ratio
+            if target_ratio is None and player_gender:
+                try:
+                    import scenario_data
+                    target_ratio = scenario_data.get_npc_female_target_ratio(scenario, player_gender)
+                except Exception:
+                    target_ratio = 0.5
+            if target_ratio is not None and abs(target_ratio - 0.5) > 1e-4:
+                pool = female_pool if (rng.random() < target_ratio) else male_pool
+            else:
+                pool = rng.choice([male_pool, female_pool])
         else:
             pool = male_pool or female_pool or ["Aldric"]
 
@@ -1013,6 +1047,8 @@ def generate_person_name_with_surname(
     cross_culture_chance: float | None = None,
     culture_weights: dict[str, float] | None = None,
     seed: int | str | None = None,
+    player_gender: str = "",
+    female_ratio: float | None = None,
     use_patronymic: bool | None = None,
 ) -> str:
     """Generates a first name matching a predetermined family surname with cultural coordination.
@@ -1069,9 +1105,7 @@ def generate_person_name_with_surname(
 
     first_pool = cultures.get(first_culture) or base_pool
 
-    g = str(gender or "").lower().strip()
-    is_female = any(w in g for w in ("female", "woman", "girl", "feminine", "she"))
-    is_male = any(w in g for w in ("male", "man", "boy", "masculine", "he")) and not is_female
+    is_female, is_male = _classify_namegen_gender(gender)
 
     male_pool = first_pool.get("male") or []
     female_pool = first_pool.get("female") or []
@@ -1084,7 +1118,17 @@ def generate_person_name_with_surname(
         resolved_gender = "male"
     else:
         if male_pool and female_pool:
-            pool = rng.choice([male_pool, female_pool])
+            target_ratio = female_ratio
+            if target_ratio is None and player_gender:
+                try:
+                    import scenario_data
+                    target_ratio = scenario_data.get_npc_female_target_ratio(scenario, player_gender)
+                except Exception:
+                    target_ratio = 0.5
+            if target_ratio is not None and abs(target_ratio - 0.5) > 1e-4:
+                pool = female_pool if (rng.random() < target_ratio) else male_pool
+            else:
+                pool = rng.choice([male_pool, female_pool])
             resolved_gender = "female" if pool is female_pool else "male"
         elif female_pool:
             pool = female_pool
@@ -2123,19 +2167,36 @@ def generate_exorcist_order_name(scenario: str = "anomalous_incursions", hash_va
 
 
 def generate_private_agency_name(scenario: str = "anomalous_incursions", hash_val: int = None, agency_index: int = 1) -> str:
-    """Generates a procedural Private Anomaly Hunting Agency / PMC name."""
-    prefixes = [
-        "Blackwatch", "Aegis", "Cerberus", "Apex", "Hyperion", "Vespera",
-        "Kestrel", "Ironveil", "Ouroboros", "Obsidian", "Monolith", "Paladin"
-    ]
-    domains = [
-        "Tactical", "Security", "Defense", "Contractors", "Recovery",
-        "Solutions", "Mitigation", "Containment"
-    ]
-    suffixes = [
-        "PMC", "Group", "Corp", "Syndicate", "Consultancy"
-    ]
-    idx_salt = int(agency_index or 1) * 43
+    """Generates a procedural Private Anomaly Hunting Agency name.
+    - agency_index == 1: Big Corporate Conglomerate (3 words max).
+    - agency_index >= 2: Humble Local Small-Business Agency (3 words max).
+    """
+    idx = int(agency_index or 1)
+    if idx >= 2:
+        prefixes = [
+            "Crossroad", "Harborview", "Northside", "Ironwood", "Kestrel", "Bayside",
+            "Redbrick", "Cornerstone", "Eastgate", "Daybreak", "Westside", "Pinecrest"
+        ]
+        domains = [
+            "Investigations", "Contracting", "Fieldwork", "Odd-Jobs",
+            "Salvage", "Ward-Work", "Case-Office", "Mitigation"
+        ]
+        suffixes = [
+            "LLC", "Co.", "Agency", "Partners", "Office", "Services"
+        ]
+    else:
+        prefixes = [
+            "Hyperion", "Vespera", "Apex", "Monolith", "Aegis", "Ouroboros",
+            "Helios", "Sovereign", "Omniguard", "Kronos", "Valiance", "Vanguard"
+        ]
+        domains = [
+            "Bio-Defense", "Dynamics", "Containment", "Tactical",
+            "Applied-Tech", "Security", "Risk-Control", "Defense"
+        ]
+        suffixes = [
+            "Corp", "Conglomerate", "Holdings", "Group", "Incorporated"
+        ]
+    idx_salt = idx * 43
     if hash_val is not None:
         h = int(hash_val) + idx_salt
         p = prefixes[(h * 31 + 5) % len(prefixes)]
@@ -2300,24 +2361,24 @@ def generate_world_ending_anomaly_profile(hash_val: int = None) -> dict:
 
 
 _URBAN_ZONE_PREFIX_POOLS: dict[str, list[str]] = {
-    "zone_city_center": ["Kurokawa", "Veridia", "Aegis-Chuo", "Ouka", "Valenport", "Shin-Asahi", "Caelum", "Sovereign-Core", "Kagutsuchi", "Vanguard-Central", "Hakuho", "Meridian"],
-    "zone_downtown": ["Kagero", "Neon-Cross", "Mirage-Ward", "Vespera", "Shinjuku-West", "Starlight", "Pulse-Avenue", "Akatsuki", "Onyx-Square", "Nocturne", "Chuo-South", "Velvet-Mile"],
-    "zone_uptown": ["St. Jude's", "Alderwood", "Kensington", "Shirakawa", "Belvedere", "Montclair", "Ravenscroft", "Aethelgard", "Ashford", "Ginkgo-Hill", "Westminster", "Highgate"],
-    "zone_ultra_rich": ["Aurelia", "Elysium", "Celestia", "Solaria", "Crown-Crest", "Olympos", "Valhalla", "Gilded-Peak", "Seraphim", "Diamond-Ridge", "Astral-Heights", "Imperial"],
-    "zone_low_cost_wards": ["Iron-Gutter", "Cinder-Block", "Kowloon-South", "Rust-Hollow", "Ash-Row", "Rookery-Nine", "Dreg-Side", "Soot-Alley", "Grim-Basin", "Barrow-Ward", "Scrap-Gate", "Bleakwater"],
-    "zone_industrial": ["Vulcan", "Kurogane", "Promethean", "Cinder-Forge", "Smokestack-9", "Ironworks", "Brimstone", "Slag-River", "Titan-Foundry", "Anvil-Sector", "Coal-Harbor", "Heavy-Grid"],
-    "zone_city_docks": ["Blackanchor", "Tidewater", "Shiokaze", "Iron-Quay", "Foghorn-Bay", "Saltwind", "Kraken-Wharf", "Deepwater", "Breakwater-7", "Leviathan-Port", "Storm-Pier", "Bilgewater"],
-    "zone_suburbs": ["Sakura-Hill", "Miyamae", "Komorebi", "Maple-Crest", "Asahigaoka", "Hanamizuki", "Willow-Brook", "Tsukimigaoka", "Birchwood", "Hinata-Vale", "Wakaba", "Clover-Field"],
-    "zone_seaside_beach": ["Shiranui", "Minami-Cove", "Azure-Bay", "Kamome", "Coral-Sands", "Suncrest", "Crescent-Shore", "Pearl-Tide", "Sirens-Bay", "Whitecap", "Starfish-Cove", "Lagoon-Point"],
-    "zone_woods_reserve": ["Mount Tsukimi", "Pinecrest", "Komorebi-Peak", "Cedar-Ridge", "Misty-Hollow", "Blackwood-Crag", "Mount Asahi", "Silver-Fir", "Whispering-Pines", "Wolf-Crest", "Redwood-Basin", "Ravens-Peak"],
-    "zone_theme_park": ["Starlight Wonder", "Dreamland Mirage", "Fantasia Kingdom", "Luna-Carnival", "Arcadia Joy", "Wonder-Galaxy", "Carousel-Bay", "Elysian Funland", "Paradox-Pier", "Miracle-Crown", "Astro-Playland", "Joypolis-Bay"],
-    "zone_eastern_temple": ["Mount Ryujin", "Kiyomizu-Lotus", "Tenryu-zan", "Vermilion-Cloud", "Amaterasu-Peak", "Byakko-ji", "Suzaku-Crest", "Seiryu-Ridge", "Kinkaku-Heights", "Eightfold-Lotus", "Fushimi-Inari", "Cloud-Bell"],
-    "zone_airport": ["Zephyr-Prime", "Haneda-West", "Pacific-Cross", "Aegis-Skyway", "Narita-Bay", "Horizon-Sky", "Stratos-Hub", "Albatross-Field", "Pegasus-Port", "Meridian-Air", "Vanguard-Aero", "Condor-Bay"],
-    "zone_hospital": ["St. Camillus", "Mercy-Cross", "Saiseikai", "Asclepius", "Hakuho-Central", "St. Jude-Memorial", "Seraph-Care", "Providence", "Valen-Medical", "Sanctuary-Cross", "Aegis-General", "Nightingale"],
-    "zone_university": ["Teito Imperial", "Miskatonic-East", "Waseda-Caelum", "St. Ignatius", "Aethelgard", "Kurokawa-State", "Veridia-Grand", "Ravenscroft", "Minerva-Heights", "Scholomance", "Ouka-Collegiate", "Solomon-Crown"],
-    "zone_chinatown": ["Crimson-Lantern", "Longmen-Cross", "Golden-Dragon", "Kowloon-Gate", "Jade-Lotus", "Vermilion-Arch", "Tai-Ping", "Phoenix-Bazaar", "Qilin-Street", "Nine-Lantern", "Huanglong", "Silk-Pagoda"],
-    "zone_undercity": ["Abyssal-Line", "Sector-Zero", "Tartarus-Drain", "Pre-War Hollow", "Nether-Vault", "Gehenna-Depths", "Black-Cistern", "Sub-Level Omega", "Stygian-Line", "Catacomb-Nine", "Deep-Sump", "Under-Crown"],
-    "zone_botanical_zoo": ["Eden-Glass", "Verdant-Bay", "Midori-Ark", "Pelagic-Crown", "Sylvan-Dome", "Gaia-Park", "Emerald-Biosphere", "Nautilus-Bay", "Viridian-Ark", "Solaris-Dome", "Flora-Prime", "Leviathan-Reef"],
+    "zone_city_center": ["Midtown", "Marunouchi", "Chuo", "Metropolitan", "Otemachi", "Civic Center", "Lexington", "Nihonbashi", "Financial District", "West End", "Downtown Central", "Toranomon"],
+    "zone_downtown": ["Shinjuku", "Broadway", "Roppongi", "Vespera", "Dotonbori", "Market Street", "Akihabara", "Uptown Broadway", "Ikebukuro", "Geary", "Fifth Avenue", "Hongdae"],
+    "zone_uptown": ["Upper East", "Aoyama", "Beacon Hill", "Ginkgo Hill", "Kensington", "Daikanyama", "Back Bay", "Shirokane", "Nob Hill", "Azabu", "Gramercy", "Hannam"],
+    "zone_ultra_rich": ["Highland Heights", "Roppongi Hills", "Bel Air", "Den-en-chofu", "Pacific Heights", "Yoyogi Uehara", "Riverdale", "Seongbuk", "Midtown Terrace", "Shoto", "Summit Hill", "Skyline Crest"],
+    "zone_low_cost_wards": ["Southside", "Kamagasaki", "East End", "Sanya", "Canal District", "Riverside", "Old Town", "Lower Basin", "Dockside South", "Bayside Flats", "Westside Crossing", "Guro"],
+    "zone_industrial": ["Keihin", "Bayside Industrial", "Dearborn", "Bayview", "Portside Heavy", "Kawasaki", "Harbor Gate", "East River", "Interstate Logistics", "Steelworks", "Tsurumi", "South Channel"],
+    "zone_city_docks": ["Pier 39", "Yokohama Pier", "Port of Bayside", "South Quay", "Harbor Wharf", "Terminal Island", "Waterfront", "Tokyo Bay Piers", "Fisherman's Wharf", "Seaport", "Drydock Channel", "Busan Port"],
+    "zone_suburbs": ["Maplewood", "Setagaya", "Oakridge", "Kichijoji", "Greenwood", "Suginami", "Fairview", "Musashino", "Riverside Park", "Nerima", "Sunnyvale", "Pangyo"],
+    "zone_seaside_beach": ["Enoshima", "Pacific Beach", "Shonan", "Ocean Beach", "Kamamura Bay", "Bayside Point", "Seaside Boulevard", "Marina Bay", "Surfside", "Sunset Beach", "Laguna", "Haeundae"],
+    "zone_woods_reserve": ["Mount Takao", "Pinecrest Reserve", "Mount Mitake", "Redwood Ridge", "Cedar Mountain", "Miyagase", "Blue Ridge", "Mount Tsukimi", "Highland Woods", "Okutama", "Silver Lake", "Bukhansan"],
+    "zone_theme_park": ["Starlight Wonder", "Grand Bay Wonderland", "Cosmo World", "Pacific Funland", "Adventure Pier", "Bayside World", "Silver Star Lagoon", "Crystal Bay Park", "Wonderland Pier", "Seaside Carnival", "Metro Joypolis", "Lotte World"],
+    "zone_eastern_temple": ["Mount Ryujin", "Zojoji", "Senso-ji", "Meiji Shrine", "Tenryu Woods", "Kiyomizu Valley", "Ginkaku Hill", "Fushimi Reserve", "Asakusa Historic", "Jindaiji", "Mount Hiei", "Jogyesa"],
+    "zone_airport": ["Haneda West", "Metro International", "Pacific Gateway", "Midway", "Sky Harbor", "Narita Express", "Trans-Pacific", "Terminal Central", "Bay Area Regional", "Century Field", "Capital International", "Incheon Air"],
+    "zone_hospital": ["Metropolitan General", "St. Jude Memorial", "University Medical", "Saiseikai Central", "Presbyterian Hospital", "Toranomon Medical", "City Mercy", "Kanto Regional", "Providence Health", "Memorial Hospital", "Sinai Medical", "Severance"],
+    "zone_university": ["Teito Metropolitan", "State University", "Waseda Central", "St. Ignatius", "Metro Institute of Tech", "Northwestern Collegiate", "Kurokawa State", "City University", "Pacific Coast College", "Gakushuin", "Keio District", "Yonsei"],
+    "zone_chinatown": ["Chinatown Gate", "Donganmen", "Little Tokyo", "Koreatown Central", "Mott Street", "Yokohama Chinatown", "Chaozhou Way", "Grant Avenue", "Dragon Gate", "East Market", "Peking Square", "Fukien District"],
+    "zone_undercity": ["Metropolitan Flood Basin", "Sub-Surface Drainage Network", "G-Cans Underground", "Central Storm Vault", "Sub-Level Utility Corridor", "Deep Tunnel System", "Auxiliary Runoff Vault", "Pre-War Aqueduct", "Municipal Bypass Channel", "Lower Conduit Network", "Sewer Interceptor 4", "Deep Storage Trench"],
+    "zone_botanical_zoo": ["Metropolitan Botanical Gardens", "Shinjuku Gyoen", "Bay Aquarium", "Pacific Biosphere", "Ueno Park Reserve", "Conservatory of Flowers", "Greenhouse Pavilion", "Oceanic Research Center", "Marine World", "Civic Arboretum", "Tropical Pavilion", "Botanical Heritage Park"],
 }
 
 
@@ -2365,25 +2426,25 @@ def generate_urban_zone_name(z_id: str, raw_zone_name: str, hash_val: int = None
 
 
 _URBAN_FACILITY_EPITHET_POOLS: dict[str, list[str]] = {
-    "zone_city_center": ["Grand Metro", "Aegis-Square", "Veridia-Core", "Sovereign", "Crown-Plaza", "Centurion", "Apex-Civic", "Meridian", "Ouka-Central", "Obelisk", "Solstice", "Vanguard"],
-    "zone_downtown": ["Neon-Mirage", "Starlight", "Velvet-Note", "Cyber-Pulse", "Midnight-Sun", "Kagero-88", "Crimson-Neon", "Electric-Lotus", "Blue-Comet", "Shinjuku-Gold", "Nova-Beat", "Onyx-Dream"],
-    "zone_uptown": ["Alderwood", "Belvedere", "St. Cecilia", "Victorian-Rose", "Ginkgo-Crown", "Ravenscroft", "Kensington", "Monarch", "Montclair", "Aethelgard", "Ivory-Arch", "Obsidian-Bell"],
-    "zone_ultra_rich": ["Celestia", "Olympos-Gold", "Seraphim", "Valhalla-Crest", "Imperial-Silk", "Solaria-Prime", "Gilded-Swan", "Diamond-Vanguard", "Astral-Crown", "Versailles-Sky", "Platinum-Rose", "Sovereign-Lux"],
-    "zone_low_cost_wards": ["Iron-Dog", "Rust-Bucket", "Cinder-9", "Crossbones", "Black-Gutter", "Grim-Corner", "Scrap-Hound", "Broken-Lantern", "Soot-Lung", "Barrow-Pit", "Dead-End", "Copper-Nail"],
-    "zone_industrial": ["Hephaestus", "Kurogane-7", "Promethean", "Titan-Forge", "Slag-Works", "Brimstone-Core", "Iron-Anvil", "Molten-Crown", "Smokestack-12", "Goliath", "Cinder-Grid", "Cyclops"],
-    "zone_city_docks": ["Kraken-Bay", "Salt-Anchor", "Foghorn-9", "Barnacle-Point", "Leviathan-Quay", "Storm-Tide", "Black-Rudder", "Sirens-Reach", "Deep-Harbor", "Nautilus", "Rusted-Keel", "Maelstrom"],
-    "zone_suburbs": ["Sakura-Lane", "Maple-Leaf", "Komorebi", "Sunny-Brook", "Green-Gables", "Clover-Hill", "Bluebird", "Firefly-Way", "Pine-Needle", "Crescent-Moon", "Autumn-Breeze", "Wisteria"],
-    "zone_school_campus": ["Sakura-Wing", "Ouka-Hall", "West-Pavilion", "Clockwork-Quad", "East-Annex", "Founder's", "North-Belfry", "Varsity-Crown", "Starlight-Hall", "Silver-Bell", "Ivy-Gate", "Horizon-Wing"],
-    "zone_seaside_beach": ["Coral-Reef", "Sun-Splash", "Azure-Wave", "Seagull-Point", "Pelican-Bay", "Tidal-Crown", "Driftwood", "Mermaid-Lagoon", "Golden-Sand", "Albatross", "Riptide", "Conch-Shell"],
-    "zone_woods_reserve": ["Whispering-Cedar", "Silver-Wolf", "Misty-Pine", "Black-Bear", "Redwood-Peak", "Owl-Creek", "Stag-Horn", "Mossy-Crag", "Moonlit-Ridge", "Falcon-Roost", "Elder-Spruce", "Raven-Stone"],
-    "zone_theme_park": ["Starlight-Spin", "Cosmic-Comet", "Dream-Drop", "Wonder-Wheel", "Neon-Carnival", "Mirage-Coaster", "Galaxy-Splash", "Jester's-Crown", "Phantom-Track", "Calliope-9", "Carousel-Prime", "Sky-Scream"],
-    "zone_eastern_temple": ["Ryujin's", "Crimson-Lotus", "Eightfold", "Vermilion-Cloud", "Jade-Bell", "Tenryu", "Amaterasu", "White-Fox", "Golden-Bodhi", "Weeping-Kannon", "Mist-Pagoda", "Silent-Dharma"],
-    "zone_airport": ["Skyway-1", "Stratos-9", "Terminal-Omega", "Zephyr-Gate", "Concorde-Bay", "Pegasus-Wing", "Horizon-Deck", "Mach-3", "Jetstream", "Albatross-Hangar", "Valkyrie-Runway", "Icarus-Point"],
-    "zone_hospital": ["St. Luke's", "Asclepius-3", "Mercy-Wing", "Nightingale", "Lazarus-Ward", "Hippocrates", "White-Cross", "Seraph-Triage", "Caduceus", "Panacea-Hall", "Sanctuary-7", "Bio-Ward"],
-    "zone_university": ["Minerva-Hall", "Euler-Wing", "Miskatonic", "Galileo-Dome", "Paracelsus", "Newton-Quad", "Copernicus", "Hypatia-Stacks", "Solomon-Arch", "Kepler-Spire", "Ptolemy", "Hermes-Lab"],
-    "zone_chinatown": ["Golden-Wok", "Red-Dragon", "Jade-Phoenix", "Hundred-Herbs", "Silk-Lantern", "White-Tiger", "Emperor's", "Celestial-Pearl", "Five-Venoms", "Lotus-Tile", "Crimson-Peony", "Vermilion-Moon"],
-    "zone_undercity": ["Tartarus-9", "Stygian", "Sub-Zero", "Gorgon-Drain", "Catacomb-7", "Black-Sump", "Nether-Pipe", "Charon's", "Rust-Vault", "Abyssal-Shaft", "Morlock-Row", "Deep-Fissure"],
-    "zone_botanical_zoo": ["Eden-Dome", "Amazonia", "Mariana-Trench", "Goliath-Reef", "Orchid-Crown", "Panthera", "Nautilus-9", "Verdant-Canopy", "Chrysalis", "Kraken-Tank", "Biolume", "Rafflesia"],
+    "zone_city_center": ["Grand Metro", "Metropolitan", "Central Plaza", "Commerce Tower", "Federal", "Capital", "Meridian", "Union Square", "Continental", "Apex", "City Center", "State Street"],
+    "zone_downtown": ["Broadway", "Midnight-Sun", "Crossroads", "Neon-Mirage", "Midtown", "Lantern Row", "Eighth Avenue", "Sunset", "Starlight", "Grand Central", "Market", "Center City"],
+    "zone_uptown": ["Belvedere", "Kensington", "Ginkgo Terrace", "Alderwood", "St. Jude", "Rosewood", "Heritage", "Wellington", "Park Avenue", "Westminster", "Clairmont", "Highland"],
+    "zone_ultra_rich": ["Sovereign Crest", "Summit Hill", "Imperial Gate", "Grand Regency", "Skyline", "Diamond Crest", "Grand Vista", "Highland", "Crown Terrace", "Palisades", "Bel Air", "Windsor"],
+    "zone_low_cost_wards": ["Canal Side", "East Ward", "Block 4", "Dockside", "Old Quarter", "Riverside", "Depot", "Station Road", "Corner", "Bayside", "Third Street", "North Alley"],
+    "zone_industrial": ["Keihin", "Bayside", "Apex", "Pacific Steel", "Interstate", "Continental", "General Heavy", "Harbor View", "Kawasaki", "Vulcan Iron", "Metropolitan", "Atlas"],
+    "zone_city_docks": ["Pier 7", "Bayside Quay", "Harbor Terminal", "South Wharf", "Breakwater", "Tidewater", "Dockside", "Terminal 3", "Maritime", "Port Basin", "Bayfront", "Fisherman's"],
+    "zone_suburbs": ["Maple Lane", "Sunnybrook", "Cherry Hill", "Greenfield", "Willow Creek", "Oakwood", "Meadow View", "Cedar Ridge", "Brookside", "Pinecrest", "Fairview", "Highland Park"],
+    "zone_school_campus": ["East Wing", "West Hall", "Central Quad", "Science Annex", "Varsity Field", "Student Union", "Academic Hall", "Library Wing", "North Quad", "South Pavilion", "Main Concourse", "Auditorium Wing"],
+    "zone_seaside_beach": ["Ocean View", "Pacific Point", "Coastline", "Seagull Cove", "Marina", "Boardwalk", "Sunset Pier", "Tidal Reach", "Surfside", "Bay Breeze", "Laguna", "Harbor Point"],
+    "zone_woods_reserve": ["Pine Valley", "Timber Ridge", "Bear Creek", "Cedar Crest", "Silver Creek", "Redwood", "Eagle Rock", "Misty Trail", "Highland Pass", "Forest Glen", "Whispering Pines", "Lookout Point"],
+    "zone_theme_park": ["Wonder Wheel", "Starlight", "Grand Carousel", "Galaxy", "Midway", "Carnival", "Silver Star", "Boardwalk Coaster", "Adventure", "Lagoon Splash", "Sky View", "Fantasy"],
+    "zone_eastern_temple": ["Zojoji", "Tenryu", "Meiji", "Lotus", "Asakusa", "Kyoto", "Stone Garden", "Cypress Gate", "Pagoda", "Lantern Hall", "Sanctuary", "Bell Tower"],
+    "zone_airport": ["Terminal 1", "Concourse A", "Gate 12", "Skyline", "Pacific Bay", "Trans-Air", "Hangar 4", "Runway West", "Express", "Departure Hall", "Air Cargo", "Flight Deck"],
+    "zone_hospital": ["St. Luke", "Memorial", "Mercy", "General", "Central Triage", "West Wing", "Clinic Center", "Trauma Care", "Health Pavilion", "Ambulance Bay", "North Clinic", "Community Care"],
+    "zone_university": ["Science Wing", "Arts Quad", "North Annex", "Memorial Library", "Faculty Hall", "Research Lab", "Central Quad", "Engineering Hall", "Commons", "Lecture Hall A", "Campus Center", "West Pavilion"],
+    "zone_chinatown": ["Golden Gate", "Jade Garden", "Dragon Pavilion", "Silk Road", "Red Lantern", "Lotus Blossom", "East River", "Grand Bazaar", "Pearl Market", "Fukien", "Canton", "Mott Street"],
+    "zone_undercity": ["Drainage Vault 4", "Sub-Level 2", "Runoff Canal", "Pumping Station", "Maintenance Trench", "Central Concourse", "Utility Sump", "Bypass Pipe", "Service Tunnel", "Flood Gate", "Ventilation Shaft", "Storage Basin"],
+    "zone_botanical_zoo": ["Palm Pavilion", "Greenhouse A", "Tropical Dome", "Aquatic Basin", "Rose Garden", "Forest Canopy", "Orchid Wing", "Marine Exhibit", "Terrarium", "Aviary", "Botanical Gallery", "Water Lily Pond"],
 }
 
 
@@ -2509,7 +2570,7 @@ def _extract_gender_from_token(token: str) -> str:
     return ""
 
 
-def resolve_tokens_deep(value, scenario: str = "fantasy"):
+def resolve_tokens_deep(value, scenario: str = "fantasy", player_gender: str = ""):
     """Find every distinct {{PERSON_n}}/{{PLACE_n}}/{{ROLE_n}}/{{SCHOOL_n}}/{{CLASSROOM_n}} (or single-brace {PERSON_n})
     token anywhere in a dict/list/str structure, roll one consistent name per distinct token
     matching the scenario's name pools, and substitute it everywhere. Safe
@@ -2524,7 +2585,7 @@ def resolve_tokens_deep(value, scenario: str = "fantasy"):
         t_clean = token.lstrip("{").rstrip("}").upper()
         if t_clean.startswith("PERSON"):
             gender = _extract_gender_from_token(token)
-            mapping[token] = generate_person_name(scenario, gender=gender)
+            mapping[token] = generate_person_name(scenario, gender=gender, player_gender=player_gender)
         elif t_clean.startswith("ROLE"):
             mapping[token] = generate_role(scenario)
         elif t_clean.startswith("SCHOOL"):
@@ -2679,9 +2740,9 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
         synd_zone = "zone_undercity" if cult_zone == "zone_woods_reserve" else "zone_industrial"
 
         priv_1_acr = format_org_acronym(priv_1_name)
-        priv_1_hq = f"{priv_1_acr} Tower HQ" if priv_1_acr else f"{priv_1_name} HQ"
+        priv_1_hq = f"{priv_1_acr} Corporate Tower HQ" if priv_1_acr else f"{priv_1_name} Tower HQ"
         priv_2_acr = format_org_acronym(priv_2_name)
-        priv_2_hq = f"{priv_2_acr} Operations HQ" if priv_2_acr else f"{priv_2_name} HQ"
+        priv_2_hq = f"{priv_2_acr} Field Office HQ" if priv_2_acr else f"{priv_2_name} Office HQ"
 
         factions.extend([
             {
@@ -2706,19 +2767,19 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
                 "hq_zone_id": p1_zone,
                 "hq_node_id": "loc_private_hq_1",
                 "hq_location_id": priv_1_hq,
-                "notes": "A premier corporate anomaly-hunting agency and licensed containment contractor. Operatives receive no salary, but keep 100% of bounty fees and anomaly loot, and enjoy access to high-tier anomalous gear at their private armory.",
+                "notes": "A massive multi-billion-credit corporate containment conglomerate operating out of a gleaming downtown skyscraper. Operatives receive no base salary, keep 100% of bounty fees and anomaly loot, and deploy with sleek proprietary weapons and armor developed in-house by corporate R&D.",
             },
             {
                 "name": priv_2_name,
                 "archetype_key": "private_agency_2",
-                "hierarchy_template": "corpo",
+                "hierarchy_template": "small_agency",
                 "category": "private_agency",
                 "joinable": True,
                 "diplomatic_stance": "friendly",
                 "hq_zone_id": p2_zone,
                 "hq_node_id": "loc_private_hq_2",
                 "hq_location_id": priv_2_hq,
-                "notes": "A rival private anomaly-eradication conglomerate competing for high-value corporate and municipal containment contracts. Operatives keep all bounty rewards and salvaged anomalous relics.",
+                "notes": "A humble, tight-budget local private containment agency operating out of an ordinary commercial office building. Contractors receive no base salary, keep 100% of bounty rewards and salvaged relics, and rely on pragmatic surplus, pawn-shop, and multi-vendor gear sourced from whatever supplier they can find.",
             },
             {
                 "name": exorcist_order,
@@ -2757,6 +2818,73 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
                 "notes": "A shadowy, distrusted clandestine syndicate trafficking uncatalogued anomalous relics, weaponized cognitohazards, and black-budget research behind the scenes.",
             },
         ])
+
+        if scenario_data.is_anomalous_high_school_scenario(scen_key):
+            gang_name = _unique_name("delinquents", "high_school_drama")
+            factions.extend([
+                {
+                    "name": "Student Council",
+                    "hierarchy_template": "council",
+                    "category": "council",
+                    "faction_domain": "school_club",
+                    "hq_zone_id": "zone_school_campus",
+                    "hq_node_id": "loc_student_council",
+                    "hq_location_id": "Student Council Office",
+                    "notes": "The executive student governing body overseeing school affairs, budget allocation, campus events, and discreet after-hours patrol logistics.",
+                },
+                {
+                    "name": "Drama Club",
+                    "hierarchy_template": "club",
+                    "category": "club",
+                    "faction_domain": "school_club",
+                    "hq_zone_id": "zone_school_campus",
+                    "hq_node_id": "loc_auditorium",
+                    "hq_location_id": "School Auditorium Stage",
+                    "notes": "The theatrical club known for dramatic stage productions, expressive personalities, and campus social intelligence.",
+                },
+                {
+                    "name": "Occult & Mystery Club",
+                    "hierarchy_template": "club",
+                    "category": "club",
+                    "faction_domain": "school_club",
+                    "hq_zone_id": "zone_school_campus",
+                    "hq_node_id": "loc_old_storage_3b",
+                    "hq_location_id": "Old Storage Room 3-B",
+                    "notes": "An eccentric student society cataloging campus ghost rumors, folklore wards, and after-hours anomalous phenomena.",
+                },
+                {
+                    "name": gang_name,
+                    "hierarchy_template": "delinquents",
+                    "category": "delinquents",
+                    "faction_domain": "school_club",
+                    "hq_zone_id": "zone_school_campus",
+                    "hq_node_id": "sub_custodian_boiler_locker",
+                    "hq_location_id": "Behind Gym Storage Sheds",
+                    "notes": "A streetwise group of rebellious students and brawlers who operate outside campus rules and guard the boiler-room drop-boxes.",
+                },
+                {
+                    "name": "Varsity Athletic Directorate",
+                    "hierarchy_template": "council",
+                    "category": "sports",
+                    "faction_domain": "school_club",
+                    "hq_zone_id": "zone_school_campus",
+                    "hq_node_id": "loc_gym",
+                    "hq_location_id": "Main Gymnasium",
+                    "notes": "The competitive varsity athletics committee coordinating inter-school tournaments, physical conditioning, and sports facility access.",
+                },
+            ])
+            if is_nsfw or scenario_data.is_nsfw_scenario(scen_key):
+                nsfw_name = _unique_name("nsfw", "high_school_drama")
+                factions.append({
+                    "name": nsfw_name,
+                    "hierarchy_template": "club",
+                    "category": "nsfw_club",
+                    "faction_domain": "school_club",
+                    "hq_zone_id": "zone_school_campus",
+                    "hq_node_id": "loc_abandoned_school_wing",
+                    "hq_location_id": "Velvet Basement Salon",
+                    "notes": "An underground campus circle gathering inside the Velvet Basement Salon beneath the Abandoned Old Campus Building for secret rites and intimate trysts.",
+                })
 
     # 1.5B Generic Urban Fantasy (Non-Anomalous Incursions)
     elif scenario_data.has_tag(scen_key, "urban_fantasy"):
@@ -2943,3 +3071,62 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
 
     return factions
 
+
+def generate_name_for_scenario(
+    scenario: str = "fantasy",
+    gender: str = "",
+    player_gender: str = "",
+    female_ratio: float | None = None,
+    rng: Any = None,
+    **kwargs: Any,
+) -> str:
+    """Generate a character name appropriate for the given scenario and gender skew constraints."""
+    return generate_person_name(
+        scenario=scenario,
+        gender=gender,
+        player_gender=player_gender,
+        female_ratio=female_ratio,
+        rng=rng,
+        **kwargs,
+    )
+
+
+def generate_npc_profile(
+    scenario: str = "fantasy",
+    gender: str = "",
+    player_gender: str = "",
+    female_ratio: float | None = None,
+    rng: Any = None,
+    **kwargs: Any,
+) -> dict:
+    """Generate an NPC name and resolved gender dictionary matching scenario skew constraints."""
+    if rng is None:
+        import random
+        rng = random
+    if not gender:
+        import scenario_data
+        resolved_gender = scenario_data.resolve_scenario_npc_gender(
+            scenario, player_gender_or_char=player_gender, rng=rng
+        )
+    else:
+        is_f, is_m = _classify_namegen_gender(gender)
+        if is_f:
+            resolved_gender = "female"
+        elif is_m:
+            resolved_gender = "male"
+        else:
+            resolved_gender = gender
+
+    name = generate_person_name(
+        scenario=scenario,
+        gender=resolved_gender,
+        player_gender=player_gender,
+        female_ratio=female_ratio,
+        rng=rng,
+        **kwargs,
+    )
+    return {
+        "name": name,
+        "gender": resolved_gender,
+        "scenario": scenario,
+    }

@@ -11,6 +11,7 @@ import re
 from typing import Dict, Any, List, Optional, Tuple
 
 import db
+import scenario_data
 
 log = logging.getLogger("hikayat.world.access_gate")
 
@@ -203,9 +204,45 @@ def get_node_effective_access_info(
             sched_reason_label = anom_hq["reason_label"]
             sched_reason_code = "faction_hq_restricted"
 
+    # Anomalous High School After-Hours Campus Anomaly Breach Unlock (20:00–06:00)
+    if session_id and not is_unlocked and (schedule_locked or curfew_active) and scenario_data.is_anomalous_high_school_scenario(scen_key):
+        try:
+            from mechanics.world.anomalous_events import get_active_incursion_at_location
+            from mechanics.world.world_schedule import is_campus_node_or_location
+            active_inc = get_active_incursion_at_location(session_id, node_id=node_id, current_minute=current_minute) or (
+                get_active_incursion_at_location(session_id, node_id=str(fac_node.get("node_id") or ""), current_minute=current_minute) if fac_node else None
+            )
+            if active_inc and is_campus_node_or_location(node, fac_node, session_id=session_id, scen_key=scen_key):
+                is_unlocked = True
+                curfew_active = False
+                schedule_locked = False
+                is_trespassing = False
+                sched_reason_code = "after_hours_anomaly_breach"
+                sched_reason_label = "Resonance Breach Entry / Custodian's Side-Key (Active After-Hours Anomaly)"
+        except Exception:
+            pass
+
+    # Procedural World Event Facility Lockdown / Quarantine evaluation
+    if session_id and not is_unlocked:
+        try:
+            from mechanics.world.world_events.modifiers import is_node_locked_by_event
+            ev_list = db.get_world_events(session_id, entity_type="macro_event")
+            ev_lock = is_node_locked_by_event(ev_list, node_id) or (
+                is_node_locked_by_event(ev_list, str(fac_node.get("node_id") or "")) if fac_node else None
+            )
+            if ev_lock and ev_lock.get("is_locked"):
+                tier = "restricted"
+                schedule_locked = True
+                sched_reason_code = "world_event_lockdown"
+                sched_reason_label = f"{ev_lock['title']}: {ev_lock['reason']}"
+        except Exception:
+            pass
+
     # Status Badge
     if is_unlocked and (tier in ("restricted", "private") or schedule_locked):
         status_badge = "Unlocked"
+    elif sched_reason_code == "after_hours_anomaly_breach":
+        status_badge = "Anomalous Breach (Unlocked)"
     elif sched_access.get("badge_override") and sched_reason_code == "theme_park_anomalous_shift":
         status_badge = sched_access["badge_override"]
     elif schedule_locked and sched_access.get("badge_override") and sched_reason_code in ("commercial_closed", "weekend_closed", "restricted"):
@@ -393,16 +430,22 @@ def evaluate_anomalous_hq_access(
         )):
             required_arch = "public_agency"
 
-    # 2. Private Agency #1 HQ (`loc_private_hq_1` / `sub_priv1_*`)
+    # 2. Private Agency #1 HQ (`loc_private_hq_1` / `sub_priv1_*`) — Big Corporate Tower
     elif "loc_private_hq_1" in combined or "sub_priv1_" in combined:
-        if n_id == "loc_private_hq_1" or any(k in combined for k in ("sub_priv1_entrance", "sub_priv1_dispatch", "entrance", "lobby", "contract board", "contract & tactical dispatch")):
+        if n_id == "loc_private_hq_1" or any(k in combined for k in (
+            "sub_priv1_entrance", "sub_priv1_dispatch", "entrance", "lobby", "atrium",
+            "contract board", "contract & telemetry", "contract & tactical dispatch",
+        )):
             is_open_lobby_or_shop = True
         else:
             required_arch = "private_agency_1"
 
-    # 3. Private Agency #2 HQ (`loc_private_hq_2` / `sub_priv2_*`)
+    # 3. Private Agency #2 HQ (`loc_private_hq_2` / `sub_priv2_*`) — Small Commercial Office
     elif "loc_private_hq_2" in combined or "sub_priv2_" in combined:
-        if n_id == "loc_private_hq_2" or any(k in combined for k in ("sub_priv2_entrance", "sub_priv2_dispatch", "entrance", "lobby", "contract board", "contract & tactical dispatch")):
+        if n_id == "loc_private_hq_2" or any(k in combined for k in (
+            "sub_priv2_entrance", "sub_priv2_dispatch", "entrance", "foyer", "reception",
+            "lobby", "corkboard", "dispatch bullpen", "contract board", "contract & tactical dispatch",
+        )):
             is_open_lobby_or_shop = True
         else:
             required_arch = "private_agency_2"
@@ -458,8 +501,8 @@ def evaluate_anomalous_hq_access(
 
     label_map = {
         "public_agency": "Restricted Bureau Inner Sector (Public Agency Clearance Required)",
-        "private_agency_1": "Restricted Syndicate Vault & Armory (Agency #1 Operative Clearance Required)",
-        "private_agency_2": "Restricted Rival Syndicate Vault & Armory (Agency #2 Operative Clearance Required)",
+        "private_agency_1": "Restricted Corporate R&D Floor & Vault (Conglomerate Operative Clearance Required)",
+        "private_agency_2": "Padlocked Back-Office Cage & Cellar (Local Agency Staff Key Required)",
         "monastic_order": "Restricted Monastic Inner Sanctum (Order Initiate Clearance Required)",
         "cult_faction": "Ward-Sealed Occult Sanctum (Hostile Cult Restricted Area)",
         "clandestine_faction": "Biometric Clandestine Vault (Unauthorized Entry Prohibited)",
@@ -538,16 +581,29 @@ def evaluate_node_access_gate(
     is_breach_action = has_check or any(w in current_action_label for w in (
         "sneak", "pick", "climb", "scale", "fence", "lockpick", "force", "break in", "bypass",
         "talk your way", "convince", "excuse", "nurse", "ring the intercom", "buzz", "apologize",
-        "audition", "charm", "cellar", "grate"
+        "audition", "charm", "cellar", "grate", "contract permit", "freelance permit", "public agency", "flash permit"
     ))
 
-    action_check_tier = "success"
+    action_check_tier = ""
     if actions and isinstance(actions[0], dict) and actions[0].get("check"):
         chk = actions[0]["check"]
         if isinstance(chk, dict):
-            action_check_tier = str(chk.get("tier", "success")).lower()
+            action_check_tier = str(chk.get("tier") or "").lower()
         else:
-            action_check_tier = str(getattr(chk, "tier", "success")).lower()
+            action_check_tier = str(getattr(chk, "tier", "") or "").lower()
+
+    # A breach only counts as "rolled" when it was a real stat check (AGI/CHA/...), never an
+    # auto-success NONE/FREE/ITEM action or a freeform label that merely contains "sneak"/"excuse".
+    _first_action = actions[0] if (actions and isinstance(actions[0], dict)) else {}
+    _action_stat = str(_first_action.get("stat") or "").upper().strip()
+    if not _action_stat:
+        _stat_tag = re.match(r"^\s*\[([A-Za-z]{3})\]", str(_first_action.get("label") or ""))
+        _action_stat = _stat_tag.group(1).upper() if _stat_tag else ""
+    is_rolled_stat_breach = bool(
+        _action_stat and _action_stat not in ("NONE", "FREE", "ITEM")
+        and action_check_tier in ("critical_success", "crit_success", "success", "partial_success")
+    )
+    is_permit_action = any(k in current_action_label for k in ("contract permit", "freelance permit", "flash permit"))
 
     # 0b. High School Weekday Class Hours (08:00–15:00 Mon–Fri): Outbound Truancy Lockdown & Late Arrival
     late_arrival_directive = ""
@@ -595,8 +651,14 @@ def evaluate_node_access_gate(
         )
 
         if player_on_campus and not target_on_campus and not is_npc_private_home:
+            from mechanics.social.origin_mode import is_student_operative
+            _is_adult_in_ahs = (
+                scenario_data.is_anomalous_high_school_scenario(scen_key)
+                and not is_student_operative(session if isinstance(session, dict) else {})
+            )
             has_truancy_pass = (
-                (gate_state.get("truancy_unlocked_day") or 0) >= curr_day
+                _is_adult_in_ahs
+                or (gate_state.get("truancy_unlocked_day") or 0) >= curr_day
                 or (isinstance(session, dict) and int(session.get("infirmary_pass_day") or 0) >= curr_day)
                 or any(k in inv_str for k in ("hall pass", "nurse pass", "sick pass", "early dismissal", "staff pass", "gate pass", "master key", "council badge"))
                 or any(
@@ -610,48 +672,66 @@ def evaluate_node_access_gate(
                 school_zone = get_session_school_name(session_id, scen_key) or "Main Academy Campus"
                 halt_loc = f"{school_zone} ➔ School Main Gates ➔ Outside the Locked Entrance"
 
-                if is_breach_action:
-                    is_success_tier = action_check_tier in ("critical_success", "crit_success", "success", "partial_success")
-                    if is_success_tier:
-                        db.update_world_node_state(
-                            session_id,
-                            "loc_school_gate",
-                            {"truancy_unlocked_day": curr_day, "pending_truancy_target_node_id": "", "pending_truancy_target_name": ""}
+                # Public Agency Freelance Contract Permit is only valid for Student Operatives in
+                # Anomalous High while an off-campus daytime breach or an active contract exists.
+                permit_valid = bool(
+                    scenario_data.is_anomalous_high_school_scenario(scen_key)
+                    and (
+                        any(
+                            isinstance(inc, dict)
+                            and not inc.get("resolved")
+                            and str(inc.get("time_window") or "") != "after_hours"
+                            and not is_campus_node_or_location(
+                                location_str=str(inc.get("location") or ""),
+                                session_id=session_id,
+                                scen_key=scen_key,
+                            )
+                            for inc in ((session.get("daily_incursions") if isinstance(session, dict) else None) or [])
                         )
-                        return {
-                            "gated": False,
-                            "unlocked_by": "truancy_bypass",
-                            "resolved_target_node_id": target_node_id,
-                            "resolved_target_name": display_name,
-                        }
-                    else:
-                        return {
-                            "gated": True,
-                            "node_id": "loc_school_gate",
-                            "facility_node_id": "loc_school_gate",
-                            "node_name": "School Main Gates",
-                            "halt_location_override": halt_loc,
-                            "reason_code": "school_hours_lockdown",
-                            "reason_label": "Caught Attempting Truancy (08:00–15:00)",
-                            "focal_point": "At the School Main Gates (Intercepted by Campus Gatekeeper)",
-                            "patrol_confrontation": True,
-                            "patrol_npc": {
-                                "name": "Officer Takahashi",
-                                "role": "Campus Gatekeeper",
-                                "stage_role": "active_partner",
-                                "attention_ring": "ring_1_primary",
-                                "status_effects": ["Alerted"],
-                            },
-                            "prompt_directive": (
-                                f"[SYSTEM: TRUANCY ATTEMPT INTERCEPTED (08:00–15:00)]\n"
-                                f"The player attempted to sneak off campus toward {display_name} during active school hours, "
-                                f"but was intercepted at the School Main Gates by the Campus Gatekeeper!"
-                            ),
-                            "barrier_choices": [
-                                Phase2Choice(f"[CHA] Apologize and make up an excuse about forgetting a textbook", stat="CHA", requirement=10),
-                                Phase2Choice("Return to campus grounds", stat="NONE", requirement=0),
-                            ],
-                        }
+                        or bool(db.get_session_quests(session_id, status="Active"))
+                    )
+                )
+
+                if (is_permit_action and permit_valid) or is_rolled_stat_breach:
+                    db.update_world_node_state(
+                        session_id,
+                        "loc_school_gate",
+                        {"truancy_unlocked_day": curr_day, "pending_truancy_target_node_id": "", "pending_truancy_target_name": ""}
+                    )
+                    return {
+                        "gated": False,
+                        "unlocked_by": "agency_contract_permit" if (is_permit_action and permit_valid) else "truancy_bypass",
+                        "resolved_target_node_id": target_node_id,
+                        "resolved_target_name": display_name,
+                    }
+                if is_breach_action and action_check_tier in ("fail", "failure", "crit_fail", "critical_fail", "critical_failure"):
+                    return {
+                        "gated": True,
+                        "node_id": "loc_school_gate",
+                        "facility_node_id": "loc_school_gate",
+                        "node_name": "School Main Gates",
+                        "halt_location_override": halt_loc,
+                        "reason_code": "school_hours_lockdown",
+                        "reason_label": "Caught Attempting Truancy (08:00–15:00)",
+                        "focal_point": "At the School Main Gates (Intercepted by Campus Gatekeeper)",
+                        "patrol_confrontation": True,
+                        "patrol_npc": {
+                            "name": "Officer Takahashi",
+                            "role": "Campus Gatekeeper",
+                            "stage_role": "active_partner",
+                            "attention_ring": "ring_1_primary",
+                            "status_effects": ["Alerted"],
+                        },
+                        "prompt_directive": (
+                            f"[SYSTEM: TRUANCY ATTEMPT INTERCEPTED (08:00–15:00)]\n"
+                            f"The player attempted to sneak off campus toward {display_name} during active school hours, "
+                            f"but was intercepted at the School Main Gates by the Campus Gatekeeper!"
+                        ),
+                        "barrier_choices": [
+                            Phase2Choice(f"[CHA] Apologize and make up an excuse about forgetting a textbook", stat="CHA", requirement=10),
+                            Phase2Choice("Return to campus grounds", stat="NONE", requirement=0),
+                        ],
+                    }
 
                 db.update_world_node_state(
                     session_id,
@@ -674,7 +754,17 @@ def evaluate_node_access_gate(
                         f"- Place the scene at '{halt_loc}' where the closed iron gates and campus gatekeeper block students from leaving.\n"
                         f"- The player must pass an [AGI] check to climb the side perimeter fence/sneak out, pass a [CHA] check to bluff past the gatekeeper with an excuse, or return to campus."
                     ),
-                    "barrier_choices": [
+                    "barrier_choices": (
+                        [
+                            Phase2Choice(
+                                f"🪪 Flash Public Agency Freelance Contract Permit to leave for {display_name}",
+                                stat="NONE",
+                                requirement=0,
+                            )
+                        ]
+                        if permit_valid
+                        else []
+                    ) + [
                         Phase2Choice(f"[AGI] Sneak out by climbing the side perimeter fence toward {display_name}", stat="AGI", requirement=12),
                         Phase2Choice(f"[CHA] Convince the gatekeeper with a nurse's pass or family emergency excuse to leave for {display_name}", stat="CHA", requirement=11),
                         Phase2Choice("Return to campus grounds", stat="NONE", requirement=0),
@@ -1079,9 +1169,31 @@ def evaluate_node_access_gate(
             intent="movement",
         ))
     else:
-        if not is_lock_jammed:
+        has_story_wp = False
+        if session_id:
+            try:
+                with db.get_conn() as conn:
+                    wp_row = conn.execute(
+                        """SELECT qw.id FROM quest_waypoints qw
+                           JOIN quests q ON q.session_id = qw.session_id AND q.quest_id = qw.quest_id
+                           WHERE qw.session_id = ? AND qw.status = 'active'
+                             AND q.status = 'Active' AND q.is_story_quest = 1
+                             AND (LOWER(qw.target_node_id) = ? OR LOWER(qw.target_location) LIKE ?)
+                           LIMIT 1""",
+                        (session_id, str(target_node_id or "").lower(), f"%{display_name.lower()}%"),
+                    ).fetchone()
+                    has_story_wp = wp_row is not None
+            except Exception:
+                has_story_wp = False
+
+        if not is_lock_jammed or has_story_wp or sched_reason_code == "world_event_lockdown":
+            infil_label = (
+                f"[AGI] Infiltrate past the lockdown perimeter into {display_name}"
+                if (sched_reason_code == "world_event_lockdown" or (is_lock_jammed and has_story_wp))
+                else f"[AGI] Sneak in or pick the lock to enter {display_name}"
+            )
             barrier_choices.append(Phase2Choice(
-                f"[AGI] Sneak in or pick the lock to enter {display_name}",
+                infil_label,
                 stat="AGI",
                 requirement=12,
                 target_node_id=target_node_id,
@@ -1186,6 +1298,21 @@ def record_turn_scene_residue(
                 new_memory_text = f"Day {curr_day}: Discovered clue: {snip}."
                 priority = 2
                 break
+        # Persist sparse prop delta if a room prop was searched or focused during clue discovery
+        try:
+            room_props = get_node_props(session_id, node_id)
+            if room_props:
+                focal_str = str(session.get("focal_point") or "").lower()
+                act_labels = " ".join(
+                    str(a.get("label") or a) if isinstance(a, dict) else str(a)
+                    for a in (actions or [])
+                ).lower()
+                for rp in room_props:
+                    rp_low = str(rp).strip().lower()
+                    if rp_low and (rp_low in focal_str or rp_low in act_labels):
+                        db.update_world_node_prop_delta(session_id, node_id, rp, {"is_searched": True})
+        except Exception:
+            pass
     # 3. Breach / Unlock Event (Priority 2)
     elif unlocked_by in ("skill_check", "key", "illicit_rendezvous"):
         node_name = node.get("name", "the entrance")
@@ -1246,67 +1373,153 @@ def get_privacy_nudge_choice(
     partner_name: str,
     session: dict,
     actions: list = None
-) -> str | None:
+) -> Phase2Choice | None:
     """
     Edge Case 7: When in a public sub-location with an active dialogue partner during
     confidential, secret, or romantic tension, returns a choice to step into an adjacent secluded room or prop.
     """
-    if not session_id or not current_node_id or not partner_name:
+    if not session_id or not partner_name:
         return None
 
-    curr_node = db.get_world_node(session_id, current_node_id)
-    if not curr_node:
-        resolved_id = db.resolve_node_id_from_location(session_id, current_node_id)
+    sess_dict = session if isinstance(session, dict) else (getattr(session, '__dict__', {}) if session else {})
+
+    # Seclusion Guard: Stop appearing if already in a secluded prop or private/discreet location
+    curr_focal = str(sess_dict.get('focal_point') or '').strip().lower()
+    curr_loc_str = str(sess_dict.get('current_location') or '').strip()
+    curr_loc_lower = curr_loc_str.lower()
+    secluded_keywords = (
+        'aisle', 'alcove', 'corner', 'behind', 'booth', 'closet', 'balcony',
+        'stairwell', 'under', 'terrace', 'shed', 'secluded', 'private', 'trellis'
+    )
+    if curr_focal and any(k in curr_focal for k in secluded_keywords):
+        return None
+    if any(k in curr_loc_lower for k in ('balcony', 'booth', 'alcove', 'shed', 'closet', 'terrace', 'secluded', 'stairwell', 'trellis')):
+        return None
+
+    eff_nid = str(current_node_id or sess_dict.get('current_node_id') or '').strip()
+    if not eff_nid and curr_loc_str:
+        eff_nid = db.resolve_node_id_from_location(session_id, curr_loc_str) or ''
+
+    curr_node = db.get_world_node(session_id, eff_nid) if eff_nid else None
+    if not curr_node and eff_nid:
+        resolved_id = db.resolve_node_id_from_location(session_id, eff_nid)
         if resolved_id:
             curr_node = db.get_world_node(session_id, resolved_id)
-    if not curr_node or curr_node.get("privacy_level") != "public":
+
+    if not curr_node:
         return None
 
-    parent_id = curr_node.get("parent_id")
+    priv_lvl = str(curr_node.get('privacy_level') or 'public').lower()
+    if priv_lvl in ('semi_private', 'private', 'restricted') or bool(curr_node.get('is_discreet')) or priv_lvl != 'public':
+        return None
+
+    parent_id = curr_node.get('parent_id')
     if not parent_id:
         return None
 
+    # Anti-badgering deflection guard: suppress if partner deflected within last 180 min
+    p_key = re.sub(r'[^a-z0-9_]+', '_', partner_name.lower().strip())
+    defl = (sess_dict.get('extra') or {}).get(f'privacy_deflected_{p_key}')
+    if defl and isinstance(defl, (list, tuple)) and len(defl) == 2:
+        d_day, d_min = defl
+        c_day = int(sess_dict.get('current_day') or 1)
+        c_min = int(sess_dict.get('current_minute') or 480)
+        if d_day == c_day and (c_min - d_min) < 180:
+            return None
+
     # Check partner bond / context
     contacts = db.get_contacts(session_id) or []
-    contact = next((c for c in contacts if (c.get("name") or "").lower() == partner_name.lower()), None)
-    is_romantic = False
-    if contact:
-        score = int(contact.get("relationship_score", 0) or 0)
-        track = str(contact.get("track", "")).lower()
-        is_romantic = (score >= 30) or (track == "romantic")
+    contact = next((c for c in contacts if str(c.get('name') or '').strip().lower() == partner_name.strip().lower()), None)
+    score = int(contact.get('relationship_score', 0) or 0) if contact else 0
+    track = str(contact.get('track', '')).lower() if contact else ''
+    is_romantic = (score >= 30) or (track == 'romantic')
 
-    action_text = " ".join(str(a.get("label", "") if isinstance(a, dict) else a) for a in (actions or [])).lower()
-    is_secret_context = any(w in action_text for w in ("confess", "kiss", "whisper", "private", "alone", "secret", "hide", "intimate"))
+    action_text = ' '.join(str(a.get('label', '') if isinstance(a, dict) else a) for a in (actions or [])).lower()
+    is_secret_context = any(w in action_text for w in ('confess', 'kiss', 'whisper', 'private', 'alone', 'secret', 'hide', 'intimate'))
 
     if not (is_romantic or is_secret_context):
         return None
 
-    # 1. Check for a secluded prop within the current room first
-    try:
-        from .seeds import get_node_props
-        scen_key = (session.get("scenario") if isinstance(session, dict) else "") or "high_school_drama"
-        curr_focal = str((session.get("focal_point") if isinstance(session, dict) else "") or "").lower()
-        room_props = get_node_props(session_id, curr_node["node_id"], scenario_key=scen_key)
-        secluded_prop_keywords = ("aisle", "alcove", "corner", "behind", "booth", "closet", "balcony", "stairwell", "under")
-        for pr in room_props:
-            pr_low = pr.lower()
-            if pr_low != curr_focal and any(k in pr_low for k in secluded_prop_keywords):
-                return Phase2Choice(f"Step into {pr} with {partner_name} for privacy", stat="NONE", requirement=0)
-    except Exception:
-        pass
+    # Affinity-scaled DC curve (Stranger: DC 12 -> Acquaintance: 10-11 -> Friend: 8-9 -> Romantic/Dating: 5-7)
+    score_discount = max(0, min(6, score // 25))
+    track_bonus = 2 if track == 'romantic' else (1 if score >= 60 else 0)
+    req_dc = max(5, min(14, 12 - score_discount - track_bonus))
 
-    # 2. Find adjacent secluded sibling room under the same facility
+    scen_key = str(sess_dict.get('scenario') or 'high_school_drama')
+    from mechanics.world.locations.hierarchy import parse_tiered_location, format_tiered_location_string
+    pz, pp, _ = parse_tiered_location(curr_loc_str, scen_key, session_id=session_id)
+
+    # 1. Prefer adjacent secluded sibling room under the same facility for full room transition
     all_nodes = db.get_session_world_nodes(session_id)
     siblings = [
         n for n in all_nodes
-        if n.get("parent_id") == parent_id
-        and n.get("node_id") != curr_node["node_id"]
-        and n.get("node_type") == "ROOM"
-        and n.get("privacy_level") in ("semi_private", "private")
+        if n.get('parent_id') == parent_id
+        and n.get('node_id') != curr_node['node_id']
+        and n.get('node_type') == 'ROOM'
+        and (n.get('privacy_level') in ('semi_private', 'private', 'restricted') or bool(n.get('is_discreet')))
     ]
 
-    if not siblings:
-        return None
+    if siblings:
+        def _sibling_priority(n: dict) -> tuple:
+            nid = str(n.get('node_id') or '')
+            curr_nid = str(curr_node.get('node_id') or '')
+            is_affiliated = nid.startswith(curr_nid + '_')
+            name_low = str(n.get('name') or '').lower()
+            has_secluded_name = any(k in name_low for k in ('balcony', 'terrace', 'booth', 'alcove', 'shed', 'nook', 'private', 'corner'))
+            sj_raw = n.get('state_json')
+            sj_dict = json.loads(sj_raw) if isinstance(sj_raw, str) and sj_raw.strip().startswith('{') else (sj_raw if isinstance(sj_raw, dict) else {})
+            is_child = bool(getattr(sj_dict, 'get', lambda _k: None)('parent_sub_id') == curr_nid)
+            is_discreet = bool(n.get('is_discreet')) or bool(getattr(sj_dict, 'get', lambda _k: None)('is_discreet'))
+            return (0 if (is_affiliated or is_child) else 1, 0 if is_discreet else 1, 0 if has_secluded_name else 1)
 
-    chosen_sub = siblings[0]
-    return Phase2Choice(f"Step into {chosen_sub['name']} with {partner_name} for privacy", stat="NONE", requirement=0)
+        def _sibling_priority_stable(n: dict) -> tuple:
+            pri = _sibling_priority(n)
+            try:
+                idx = all_nodes.index(n)
+            except Exception:
+                idx = 999
+            return (pri[0], pri[1], pri[2], idx)
+
+        siblings.sort(key=_sibling_priority_stable)
+        chosen_sub = siblings[0]
+        dest_loc = format_tiered_location_string(pz, pp, chosen_sub['name'])
+        return Phase2Choice(
+            f'Step into {chosen_sub["name"]} with {partner_name} for privacy',
+            stat='CHA',
+            requirement=req_dc,
+            mp_cost=0,
+            intent='social_invite',
+            sub_intent='privacy_nudge',
+            target_npc=partner_name,
+            target_node_id=chosen_sub['node_id'],
+            target_location=dest_loc,
+            _privacy_nudge=True,
+            _band=2,
+        )
+
+    # 2. Check for a secluded prop within the current room
+    try:
+        from .seeds import get_node_props
+        room_props = get_node_props(session_id, curr_node['node_id'], scenario_key=scen_key)
+        for pr in room_props:
+            pr_low = pr.lower()
+            if pr_low != curr_focal and any(k in pr_low for k in secluded_keywords):
+                dest_loc = format_tiered_location_string(pz, pp, pr)
+                return Phase2Choice(
+                    f'Step into {pr} with {partner_name} for privacy',
+                    stat='CHA',
+                    requirement=req_dc,
+                    mp_cost=0,
+                    intent='social_invite',
+                    sub_intent='privacy_nudge',
+                    target_npc=partner_name,
+                    target_node_id=curr_node['node_id'],
+                    target_location=dest_loc,
+                    focal_point=pr,
+                    _privacy_nudge=True,
+                    _band=2,
+                )
+    except Exception:
+        pass
+
+    return None

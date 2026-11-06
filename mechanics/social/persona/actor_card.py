@@ -619,6 +619,15 @@ def build_actor_direction_card(
     lines.append(f"  * Physical Activity: {activity}")
     lines.append(f"  * Immediate Agenda: {agenda}")
 
+    # Situational Speech Register
+    from mechanics.social.roster_tags import derive_age_group, is_school_scenario
+    if is_school_scenario(scen_key):
+        npc_age = npc.get("age_group") or derive_age_group(grade=npc.get("grade") or basic.get("grade") or "", role=role, scen_key=scen_key)
+        if npc_age == "adult":
+            lines.append("  * Speech Register: Adult authority / professional figure. Expects respectful formality from students (e.g. Mr./Ms./Dr./Coach/Sensei). Speaks with authoritative guidance, mentorship, or adult discipline; never uses teenage peer slang.")
+        else:
+            lines.append("  * Speech Register: Student peer. Uses casual, contemporary youth banter with fellow students. Uses polite respect and formal address when speaking to adults/faculty.")
+
     # Micro-Blocking & Prop Continuity
     blocking = npc.get("micro_blocking")
     if not blocking and isinstance(session, dict):

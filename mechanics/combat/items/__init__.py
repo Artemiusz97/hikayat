@@ -192,27 +192,26 @@ def _infer_class_archetype_profile(char_class: str, class_description: str = "",
     if _scen("high_school", "school", "academy"):
         profile["armor"] = None
         profile["shield"] = None
+        profile["head"] = None
+        profile["gloves"] = None
         if _has("delinquent", "rebel"):
-            profile["top_archetype"] = _rand.choice(["jacket", "casual_shirt", "school_uniform_top"])
+            profile["top_archetype"] = _rand.choice(["jacket", "school_uniform_top"])
             profile["bottom_archetype"] = _rand.choice(["trousers", "slacks"])
             profile["shoes"] = "light_sneakers"
-            profile["gloves"] = _rand.choice(["fingerless_gloves", None])
         elif _has("athlete", "varsity", "runner", "sports", "gym"):
-            profile["top_archetype"] = _rand.choice(["casual_shirt", "jacket", "hoodie"])
-            profile["bottom_archetype"] = _rand.choice(["shorts", "sweatpants", "trousers"])
+            profile["top_archetype"] = _rand.choice(["jacket", "tank_top"])
+            profile["bottom_archetype"] = _rand.choice(["shorts", "sweatpants"])
             profile["shoes"] = "light_sneakers"
-            profile["gloves"] = None
         elif _has("bookworm", "honor", "student", "journalist", "organizer", "prodigy"):
             profile["top_archetype"] = _rand.choice(["blazer", "school_uniform_top", "waistcoat", "sweater"])
             profile["bottom_archetype"] = _rand.choice(["slacks", "trousers", "skirt"])
             profile["shoes"] = "formal_shoes"
-            profile["gloves"] = None
         else:
-            profile["top_archetype"] = _rand.choice(["school_uniform_top", "blazer", "sweater", "blouse", "casual_shirt"])
+            profile["top_archetype"] = _rand.choice(["school_uniform_top", "blazer", "sweater", "blouse", "waistcoat"])
             profile["bottom_archetype"] = _rand.choice(["slacks", "trousers", "skirt"])
             profile["shoes"] = _rand.choice(["light_sneakers", "formal_shoes"])
-            profile["gloves"] = None
-        profile["accessory"] = _rand.choice(["ring", "bracelet", "amulet", None])
+        profile["accessory"] = "smartwatch"
+        profile["accessory_2"] = "school_ribbon"
         return profile
 
     # ── 1. Heavy Fighter / Tank / Knight / Paladin ────────────────────────────
@@ -465,6 +464,8 @@ def generate_starter_equipment_loadout(
     tier: int = 3,
     archetype_profile: dict | None = None,
     starting_faction: str = "",
+    is_nsfw: bool = False,
+    allow_revealing: bool = False,
 ) -> dict:
     """Generates a complete starting equipment loadout based on the new equipment generation system.
 
@@ -488,6 +489,7 @@ def generate_starter_equipment_loadout(
     from scenario_data import is_non_combat_scenario
     from character_data import is_tailed_race
     is_non_combat = is_non_combat_scenario(scenario)
+    is_school = is_non_combat and any(x in str(scenario).lower() for x in ("school", "academy"))
     has_tail = is_tailed_race(race)
 
     # 1. Weapon
@@ -522,45 +524,47 @@ def generate_starter_equipment_loadout(
     bottom_arch = archetype_profile.get("bottom_archetype")
 
     # Generate top, re-roll up to 5 times to match inferred archetype
-    top = _gen_clothing(scenario, "Top", tier=tier, archetype=top_arch, gender=gender, race=race)
+    top = _gen_clothing(scenario, "Top", tier=tier, archetype=top_arch, gender=gender, race=race, allow_revealing=allow_revealing, is_nsfw=is_nsfw)
     if top_arch:
         for _ in range(5):
             if top.get("metadata", {}).get("archetype") == top_arch:
                 break
-            top = _gen_clothing(scenario, "Top", tier=tier, archetype=top_arch, gender=gender, race=race)
+            top = _gen_clothing(scenario, "Top", tier=tier, archetype=top_arch, gender=gender, race=race, allow_revealing=allow_revealing, is_nsfw=is_nsfw)
 
     # Generate bottom, re-roll up to 5 times to match inferred archetype
-    bottom = _gen_clothing(scenario, "Bottom", tier=tier, archetype=bottom_arch, gender=gender, race=race)
+    bottom = _gen_clothing(scenario, "Bottom", tier=tier, archetype=bottom_arch, gender=gender, race=race, allow_revealing=allow_revealing, is_nsfw=is_nsfw)
     if bottom_arch:
         for _ in range(5):
             if bottom.get("metadata", {}).get("archetype") == bottom_arch:
                 break
-            bottom = _gen_clothing(scenario, "Bottom", tier=tier, archetype=bottom_arch, gender=gender, race=race)
+            bottom = _gen_clothing(scenario, "Bottom", tier=tier, archetype=bottom_arch, gender=gender, race=race, allow_revealing=allow_revealing, is_nsfw=is_nsfw)
 
     # Guard against skirts on male characters
     if is_male:
         b_meta = bottom.get("metadata", {})
-        if b_meta.get("archetype") == "skirt" or "skirt" in bottom.get("name", "").lower():
+        if b_meta.get("archetype") in ("skirt", "micro_pleated_skirt") or "skirt" in bottom.get("name", "").lower():
             for _ in range(10):
-                bottom = _gen_clothing(scenario, "Bottom", tier=tier, archetype="trousers", gender=gender, race=race)
-                if bottom.get("metadata", {}).get("archetype") != "skirt" and "skirt" not in bottom.get("name", "").lower():
+                bottom = _gen_clothing(scenario, "Bottom", tier=tier, archetype="trousers", gender=gender, race=race, allow_revealing=allow_revealing, is_nsfw=is_nsfw)
+                if bottom.get("metadata", {}).get("archetype") not in ("skirt", "micro_pleated_skirt") and "skirt" not in bottom.get("name", "").lower():
                     break
 
     loadout["Top"] = top
     loadout["Bottom"] = bottom
 
-    # 4. Headwear
-    head_arch = archetype_profile.get("head")
-    loadout["Head"] = _gen_headwear(scenario, "Head", tier=tier,
-                                    archetype=head_arch if head_arch else None)
+    # 4. Headwear (omitted for high school starting characters)
+    if not is_school:
+        head_arch = archetype_profile.get("head")
+        if head_arch is not None or "head" not in archetype_profile:
+            loadout["Head"] = _gen_headwear(scenario, "Head", tier=tier,
+                                            archetype=head_arch if head_arch else None)
 
-    # 5. Gloves — explicit None in profile means bare-handed class
-    glove_arch = archetype_profile.get("gloves", "UNSET")
-    if glove_arch == "UNSET":
-        loadout["Gloves"] = _gen_gloves(scenario, "Gloves", tier=tier)
-    elif glove_arch is not None:
-        loadout["Gloves"] = _gen_gloves(scenario, "Gloves", tier=tier, archetype=glove_arch)
-    # else: None → skip (bare-handed)
+    # 5. Gloves (omitted for high school starting characters)
+    if not is_school:
+        glove_arch = archetype_profile.get("gloves", "UNSET")
+        if glove_arch == "UNSET":
+            loadout["Gloves"] = _gen_gloves(scenario, "Gloves", tier=tier)
+        elif glove_arch is not None:
+            loadout["Gloves"] = _gen_gloves(scenario, "Gloves", tier=tier, archetype=glove_arch)
 
     # 6. Shoes / Footwear
     shoe_arch = archetype_profile.get("shoes")
@@ -584,10 +588,24 @@ def generate_starter_equipment_loadout(
                                             archetype=shield_arch)
         # else: None → skip shield
 
-    # 8. Accessories (Accessory 1 guaranteed, Accessory 2 optional)
-    loadout["Accessory 1"] = _gen_acc(scenario, "Accessory 1", tier=tier)
-    if random.random() < 0.50:
-        loadout["Accessory 2"] = _gen_acc(scenario, "Accessory 2", tier=tier)
+    # 8. Accessories (In High School, both Accessory 1 and Accessory 2 are guaranteed)
+    acc_arch = archetype_profile.get("accessory") if archetype_profile else None
+    acc1 = _gen_acc(scenario, "Accessory 1", tier=tier, archetype=acc_arch if acc_arch else None)
+    loadout["Accessory 1"] = acc1
+
+    if is_school or random.random() < 0.50:
+        acc1_meta = (acc1.get("metadata") if isinstance(acc1, dict) else {}) or {}
+        acc1_arch = acc1_meta.get("archetype") or (acc1.get("archetype") if isinstance(acc1, dict) else None)
+        acc1_name = acc1.get("name", "") if isinstance(acc1, dict) else ""
+        acc2 = None
+        for _ in range(5):
+            candidate = _gen_acc(scenario, "Accessory 2", tier=tier)
+            c_meta = candidate.get("metadata") or {}
+            c_arch = c_meta.get("archetype") or candidate.get("archetype")
+            if c_arch != acc1_arch and candidate.get("name") != acc1_name:
+                acc2 = candidate
+                break
+        loadout["Accessory 2"] = acc2 or candidate
 
     # Race-specific adjustments (tail-slots for tailed species, no tail-slots for tailless)
     if has_tail:
@@ -614,12 +632,17 @@ def generate_starter_equipment_loadout(
                 item["metadata"] = make_narrative_metadata(item["metadata"])
                 item["effect"] = serialize_item(item["metadata"])
 
-    from .anomalous_gear import is_anomalous_scenario, apply_anomalous_faction_starter_theme
+    from .anomalous_gear import (
+        is_anomalous_scenario,
+        apply_anomalous_faction_starter_theme,
+        infer_anomalous_faction_from_class,
+    )
     if is_anomalous_scenario(scenario):
+        resolved_fac = starting_faction or infer_anomalous_faction_from_class(char_class) or "public_agency"
         loadout = apply_anomalous_faction_starter_theme(
             loadout,
             scenario=scenario,
-            starting_faction=starting_faction or "public_agency",
+            starting_faction=resolved_fac,
             gender=gender,
             race=race,
             char_class=char_class,
@@ -692,3 +715,30 @@ def format_equipment_card(metadata: dict) -> str:
 def enrich_equipment_item(item: dict, scenario: str = "fantasy") -> dict:
     from mechanics.combat.equipment import enrich_equipment_item as _enrich
     return _enrich(item, scenario)
+
+
+def format_clean_item_summary(item: dict, fallback: str = "") -> str:
+    """Extract a player-safe summary from an item dict without leaking raw [ITEM_JSON]/[CONSUMABLE_JSON] tags."""
+    import json as _json
+
+    if not isinstance(item, dict):
+        return fallback or "Item"
+    raw_eff = str(item.get("effect") or item.get("description") or "").strip()
+    for prefix in ("[CONSUMABLE_JSON]", "[ITEM_JSON]", "[GEAR_JSON]", "[SPELLBOOK_JSON]", "[DIGITAL_JSON]"):
+        if raw_eff.startswith(prefix):
+            try:
+                meta = _json.loads(raw_eff[len(prefix):])
+                if isinstance(meta, dict):
+                    summary = (
+                        meta.get("description")
+                        or meta.get("desc")
+                        or meta.get("effect_desc")
+                        or meta.get("caption")
+                        or (f"Teaches {meta['spell_name']}" if meta.get("spell_name") else "")
+                    )
+                    if summary:
+                        return str(summary).strip()
+            except Exception:
+                pass
+            return fallback or f"Type: {item.get('item_type', 'Item')}"
+    return raw_eff or fallback or f"Type: {item.get('item_type', 'Item')}"

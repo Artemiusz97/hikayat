@@ -107,7 +107,7 @@ def build_inventory_embed(user_id: int, feedback_notice: str = "") -> discord.Em
         elif effect.startswith("[CONSUMABLE_JSON]"):
             from mechanics.combat.items.consumables import parse_consumable_metadata
             c_meta = parse_consumable_metadata(item) or {}
-            desc = c_meta.get("effect_desc") or c_meta.get("description") or ""
+            desc = c_meta.get("effect_desc") or c_meta.get("description") or c_meta.get("desc") or ""
             if not desc:
                 parts = []
                 if c_meta.get("hp_restore"): parts.append(f"❤️ +{c_meta['hp_restore']} HP")
@@ -185,10 +185,26 @@ class InventoryDashboardView(discord.ui.View):
 
     @discord.ui.button(label="Equip", style=discord.ButtonStyle.primary, emoji="⚔️", row=0)
     async def equip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from mechanics.combat.items import is_key_item, is_digital_item
+        from mechanics.combat.equipment import parse_equipment_metadata
+
         inv = await adb(db.get_inventory, self.user_id)
-        carried = [i for i in inv if not i.get("equipped")]
+        non_gear_types = {"potion", "food", "drink", "consumable", "misc", "gift", "key item", "quest", "spellbook"}
+        carried = []
+        for i in inv:
+            if i.get("equipped") or is_key_item(i) or is_digital_item(i):
+                continue
+            eff_str = str(i.get("effect") or "").strip()
+            if eff_str.startswith("[SPELLBOOK_JSON]") or eff_str.startswith("[CONSUMABLE_JSON]"):
+                continue
+            it_low = str(i.get("item_type") or "").strip().lower()
+            if it_low in non_gear_types:
+                eq_m = parse_equipment_metadata(i) or {}
+                if not (eq_m.get("slot") or eq_m.get("archetype")):
+                    continue
+            carried.append(i)
         if not carried:
-            await interaction.response.send_message("❌ You have no carried items to equip.", ephemeral=True)
+            await interaction.response.send_message("❌ You have no carried equippable gear.", ephemeral=True)
             return
 
         view = EquipItemSelectView(self.user_id, carried)
@@ -373,6 +389,12 @@ class EquipSlotSelectDropdown(discord.ui.Select):
                 emoji=emoji,
                 default=is_default
             ))
+        if not options:
+            options.append(discord.SelectOption(
+                label=default_slot or "Weapon",
+                value=default_slot or "Weapon",
+                description="Cannot equip combat gear in this scenario",
+            ))
         super().__init__(placeholder="Choose slot...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
@@ -476,9 +498,10 @@ class UseItemSelectDropdown(discord.ui.Select):
             if name in seen:
                 continue
             seen.add(name)
+            from mechanics.combat.items import format_clean_item_summary
             parsed = parse_item_effect(item)
             icon = get_item_icon(name, item.get("item_type", ""), item.get("effect", ""))
-            desc = item.get("effect") or f"Category: {parsed['category'].capitalize()}"
+            desc = format_clean_item_summary(item, fallback=f"Category: {parsed['category'].capitalize()}")
             options.append(discord.SelectOption(
                 label=(f"{name} (x{sum(1 for it in items if it.get('name') == name)})" if sum(1 for it in items if it.get("name") == name) > 1 else f"{name}")[:100],
                 value=str(item["id"]),

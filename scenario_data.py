@@ -9,7 +9,9 @@ mechanics, and environmental hazards for a session's lifetime.
 import json
 import logging
 import random
+import re
 from pathlib import Path
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -243,6 +245,10 @@ COMMON_SCENARIO_ALIASES = {
     "mcb": "anomalous_incursions",
     "scp": "anomalous_incursions",
     "control": "anomalous_incursions",
+    "anomalous_high": "anomalous_high_school",
+    "anomalous_school": "anomalous_high_school",
+    "anomaly_school": "anomalous_high_school",
+    "anomalous_academy": "anomalous_high_school",
 }
 
 
@@ -304,16 +310,26 @@ def has_tag(scenario_or_key: dict | str | None, tag_name: str) -> bool:
 
 
 def get_base_scenario_key(key: str | None) -> str:
-    """Return the base_scenario key or matching tag key for fallback data lookups."""
-    scen = get_scenario(key)
-    if scen.get("base_scenario") and scen["base_scenario"] in load_scenarios():
-        return scen["base_scenario"]
-    tags = scen.get("tags") or []
+    """Return the root base_scenario key or matching tag key for fallback data lookups."""
     scenarios = load_scenarios()
+    curr_key = resolve_scenario_key(key)
+    visited = {curr_key}
+    while True:
+        scen = scenarios.get(curr_key, {})
+        base = scen.get("base_scenario")
+        if base and base in scenarios and base not in visited:
+            visited.add(base)
+            curr_key = base
+        else:
+            break
+    if curr_key != resolve_scenario_key(key):
+        return curr_key
+    scen = get_scenario(key)
+    tags = scen.get("tags") or []
     for tag in tags:
         if tag in scenarios:
             return tag
-    return resolve_scenario_key(key)
+    return curr_key
 
 
 def is_mechanic_enabled(scenario_or_key: dict | str | None, mechanic_name: str) -> bool:
@@ -473,7 +489,13 @@ MODIFIER_TAGS = get_modifier_tags()
 STARTING_ARCHETYPES = ("hub_launchpad", "in_media_res", "delve_threshold")
 
 
-def get_dynamic_starting_hook(scenario: dict | str | None, session_id: int = 0, char_name: str = "") -> dict:
+def get_dynamic_starting_hook(
+    scenario: dict | str | None,
+    session_id: int = 0,
+    char_name: str = "",
+    faction_key: str | None = None,
+    preferred_location: str | None = None,
+) -> dict:
     """Selects a map-anchored starting hook from active scenario or genre tags and randomly chooses one of 3 Starting Archetypes:
     - hub_launchpad: Open Hub Exploration (Social / Investigative / Notice Board / Present NPCs)
     - in_media_res: High-Tension Crisis (Combat / Ambush / Alarms / Tactical Survival)
@@ -503,7 +525,35 @@ def get_dynamic_starting_hook(scenario: dict | str | None, session_id: int = 0, 
     # Collect hooks by archetype: prefer scenario-specific starting_hooks if defined (e.g. dark_fantasy), otherwise pool from genre tags
     archetype_pools = {"hub_launchpad": [], "in_media_res": [], "delve_threshold": []}
     
-    scen_hooks = scen_dict.get("starting_hooks", [])
+    # 1. Multi-hop base_scenario traversal for scenario-specific starting hooks
+    scen_hooks = []
+    curr_dict = scen_dict
+    visited_bases = set()
+    while curr_dict:
+        cand_hooks = curr_dict.get("starting_hooks", [])
+        if cand_hooks:
+            scen_hooks = cand_hooks
+            break
+        base_k = curr_dict.get("base_scenario")
+        if not base_k or base_k in visited_bases:
+            break
+        visited_bases.add(base_k)
+        all_scens = load_scenarios()
+        curr_dict = all_scens.get(base_k, {})
+
+    # 2. Two-tier faction filtering on scenario hooks
+    norm_fac = str(faction_key or "").strip().lower()
+    if scen_hooks and norm_fac:
+        def _hook_matches_faction(h_entry: Any) -> bool:
+            if not isinstance(h_entry, dict):
+                return False
+            h_fac = str(h_entry.get("faction") or "").strip().lower()
+            h_facs = [str(x).strip().lower() for x in h_entry.get("factions", [])]
+            return h_fac == norm_fac or norm_fac in h_facs
+
+        matched_fac_hooks = [h for h in scen_hooks if _hook_matches_faction(h)]
+        if matched_fac_hooks:
+            scen_hooks = matched_fac_hooks
     if scen_hooks:
         for h in scen_hooks:
             if isinstance(h, dict):
@@ -571,7 +621,18 @@ def get_dynamic_starting_hook(scenario: dict | str | None, session_id: int = 0, 
         }
         
     chosen_archetype = random.choice(available_archetypes)
-    chosen_entry = random.choice(archetype_pools[chosen_archetype])
+    chosen_pool = archetype_pools[chosen_archetype]
+    chosen_entry = None
+    if preferred_location and chosen_pool:
+        norm_pref = str(preferred_location).strip().lower()
+        for cand in chosen_pool:
+            cand_raw = cand.get("suggested_location", "") or cand.get("location_hint", "")
+            cand_res = resolve_session_location_tokens(session_id=session_id, template=cand_raw, scenario_key=scen_key, char_name=char_name).lower()
+            if cand_res and (cand_res in norm_pref or norm_pref in cand_res or cand_res.split("➔")[-1].strip() == norm_pref.split("➔")[-1].strip()):
+                chosen_entry = cand
+                break
+    if not chosen_entry:
+        chosen_entry = random.choice(chosen_pool)
     
     # Resolve guaranteed-valid map location from session's seeded map
     loc_hint = chosen_entry.get("suggested_location", "") or chosen_entry.get("location_hint", "")
@@ -582,7 +643,7 @@ def get_dynamic_starting_hook(scenario: dict | str | None, session_id: int = 0, 
         scenario_key=scen_key,
         archetype=chosen_archetype,
         char_name=char_name,
-        preferred_hint=loc_hint
+        preferred_hint=loc_hint or preferred_location
     )
     resolved_location = f"{z} ➔ {p} ➔ {s}"
     
@@ -635,6 +696,9 @@ def get_dynamic_starting_hook(scenario: dict | str | None, session_id: int = 0, 
         starting_prop = None
 
     visual_cues = chosen_entry.get("visual_cues", "")
+    if visual_cues:
+        visual_cues = visual_cues.replace("{starting_zone}", z).replace("{starting_primary}", p).replace("{starting_sub}", s).replace("{starting_location}", resolved_location)
+        visual_cues = resolve_session_location_tokens(session_id=session_id, template=visual_cues, scenario_key=scen_key, char_name=char_name)
 
     return {
         "archetype": chosen_archetype,
@@ -663,13 +727,47 @@ def opening_environment_note(scenario: dict | str | None, session_id: int = 0, c
 
 
 
+ANOMALOUS_HIGH_SCHOOL_SCENARIO_KEYS = frozenset({
+    "anomalous_high_school",
+    "nsfw_gore_anomalous_high_school",
+    "furry_anomalous_high_school",
+    "nsfw_furry_gore_anomalous_high_school",
+})
+
+# The Anomalous High hybrid inherits every Anomalous Incursions system (city map,
+# awakened kits, rifts, bounties, quartermasters), so its keys are members here too.
 ANOMALOUS_INCURSIONS_SCENARIO_KEYS = frozenset({
     "anomalous_incursions",
     "nsfw_gore_anomalous_incursions",
     "furry_anomalous_incursions",
     "nsfw_furry_gore_anomalous_incursions",
     "urban_anomalies",
-})
+}) | ANOMALOUS_HIGH_SCHOOL_SCENARIO_KEYS
+
+
+def _scenario_key_of(scenario_or_key: dict | str | None) -> tuple[str, str]:
+    """Returns (key, base_scenario) lowercased for a scenario dict or key string."""
+    if isinstance(scenario_or_key, dict):
+        k = str(scenario_or_key.get("key") or scenario_or_key.get("scenario") or "").strip().lower()
+        base = str(scenario_or_key.get("base_scenario") or "").strip().lower()
+        return k, base
+    k = str(scenario_or_key or "").strip().lower()
+    base = ""
+    if k and k in load_scenarios():
+        base = str(load_scenarios()[k].get("base_scenario") or "").strip().lower()
+    return k, base
+
+
+def is_anomalous_high_school_scenario(scenario_or_key: dict | str | None) -> bool:
+    """Return True strictly for the 4 Anomalous High (academy + incursions) hybrid scenario keys."""
+    if not scenario_or_key:
+        return False
+    k, base = _scenario_key_of(scenario_or_key)
+    if k in ANOMALOUS_HIGH_SCHOOL_SCENARIO_KEYS or base in ANOMALOUS_HIGH_SCHOOL_SCENARIO_KEYS:
+        return True
+    if isinstance(scenario_or_key, dict):
+        return "anomalous high" in str(scenario_or_key.get("name") or "").strip().lower()
+    return False
 
 
 def is_anomalous_incursions_scenario(scenario_or_key: dict | str | None) -> bool:
@@ -700,7 +798,150 @@ def is_anomalous_incursions_scenario(scenario_or_key: dict | str | None) -> bool
 
 
 def get_max_campaign_chapters(scenario_or_key: dict | str | None) -> int:
-    """Returns 11 for Anomalous Incursions (10 story chapters + Chapter 11 Resolution/Epilogue), and 10 for others."""
-    if is_anomalous_incursions_scenario(scenario_or_key):
-        return 11
-    return 10
+    """Universal 11-Chapter Arc across all scenarios (Chapters 1-10 Story + Chapter 11 Playable Epilogue)."""
+    return 11
+
+
+HIGH_SCHOOL_SCENARIO_KEYS = frozenset({
+    "high_school_drama",
+    "nsfw_high_school_drama",
+    "furry_high_school_drama",
+    "nsfw_furry_high_school_drama",
+    "high_school",
+    "highschool",
+    "school",
+})
+
+
+def is_high_school_scenario(scenario_or_key: dict | str | None) -> bool:
+    """Return True strictly if the scenario is one of the high school scenarios or carries high_school tags."""
+    if not scenario_or_key:
+        return False
+    if has_tag(scenario_or_key, "high_school") or has_tag(scenario_or_key, "school"):
+        return True
+    if isinstance(scenario_or_key, dict):
+        k = str(scenario_or_key.get("key") or scenario_or_key.get("scenario") or "").strip().lower()
+        base = str(scenario_or_key.get("base_scenario") or "").strip().lower()
+        name = str(scenario_or_key.get("name") or "").strip().lower()
+        if k in HIGH_SCHOOL_SCENARIO_KEYS or base in HIGH_SCHOOL_SCENARIO_KEYS:
+            return True
+        return "high school" in name
+    s = str(scenario_or_key).strip().lower()
+    if s in HIGH_SCHOOL_SCENARIO_KEYS:
+        return True
+    if s.startswith("custom"):
+        return False
+    resolved = resolve_scenario_key(s)
+    if resolved in HIGH_SCHOOL_SCENARIO_KEYS:
+        return True
+    try:
+        scen = get_scenario(s)
+        return str(scen.get("base_scenario") or "").strip().lower() in HIGH_SCHOOL_SCENARIO_KEYS or has_tag(scen, "high_school")
+    except Exception:
+        return False
+
+
+def has_school_campus_mechanics(scenario_or_key: dict | str | None) -> bool:
+    """Return True when campus systems (school roster, class schedules, gate lockdown, school clubs,
+    campus gossip) should run: pure school scenarios plus the Anomalous High hybrid.
+
+    `is_school_scenario()` stays False for the hybrid so that non-combat school rules and the
+    school-only location seed never override the Anomalous Incursions city systems.
+    """
+    return is_anomalous_high_school_scenario(scenario_or_key) or is_school_scenario(scenario_or_key)
+
+
+def is_character_male(gender_or_char: Any) -> bool:
+    """Returns True if the character or gender string represents a male character."""
+    if not gender_or_char:
+        return False
+    if isinstance(gender_or_char, dict):
+        g_val = str(
+            gender_or_char.get("gender")
+            or gender_or_char.get("player_gender")
+            or gender_or_char.get("sex")
+            or ""
+        ).strip().lower()
+    elif hasattr(gender_or_char, "gender"):
+        g_val = str(getattr(gender_or_char, "gender") or "").strip().lower()
+    elif hasattr(gender_or_char, "player_gender"):
+        g_val = str(getattr(gender_or_char, "player_gender") or "").strip().lower()
+    else:
+        g_val = str(gender_or_char).strip().lower()
+
+    if not g_val:
+        return False
+
+    # Exact fast paths
+    if g_val in ("m", "male", "man", "boy", "guy", "masculine", "he", "him", "his"):
+        return True
+    if g_val in ("f", "female", "woman", "girl", "lady", "tomboy", "she", "her", "hers"):
+        return False
+
+    # Explicit rejection of female keywords first (handles "tomboy", "woman", etc.)
+    if re.search(r"\b(female|woman|girl|lady|tomboy|she|her|hers)\b", g_val, re.IGNORECASE):
+        return False
+
+    # Explicit match on male keywords (avoiding single \bm\b which matches "'m" in "I'm")
+    if re.search(r"\b(male|man|boy|guy|masculine|he|him|his)\b", g_val, re.IGNORECASE):
+        return True
+
+    return False
+
+
+def should_skew_female_npcs(scenario_or_key: dict | str | None, player_gender_or_char: Any) -> bool:
+    """
+    Returns True if in High School or Anomalous Incursions scenario AND the player character is male,
+    mandating an elevated female NPC generation rate (approx 2/3 female).
+    For female or other player characters, returns False (standard balanced/random distribution).
+    """
+    if not is_character_male(player_gender_or_char):
+        return False
+    return is_high_school_scenario(scenario_or_key) or is_anomalous_incursions_scenario(scenario_or_key)
+
+
+def get_npc_female_target_ratio(scenario_or_key: dict | str | None, player_gender_or_char: Any) -> float:
+    """Returns 2/3 (0.6667) if scenario and player gender require female NPC skew, else 0.5."""
+    if should_skew_female_npcs(scenario_or_key, player_gender_or_char):
+        return 2.0 / 3.0
+    return 0.5
+
+
+def is_scenario_skewed_for_female_npcs(scenario_or_key: dict | str | None, player_gender_or_char: Any = None) -> bool:
+    """
+    Public contract alias: Returns True if in High School or Anomalous Incursions scenario
+    AND the player character is male, mandating an elevated female NPC generation rate.
+    """
+    return should_skew_female_npcs(scenario_or_key, player_gender_or_char)
+
+
+def resolve_scenario_npc_gender(
+    scenario_or_key: dict | str | None,
+    player_gender_or_char: Any = None,
+    rng: Any = None,
+) -> str:
+    """
+    Deterministically or randomly resolves an NPC's gender ('male' or 'female')
+    based on scenario rules and player character gender.
+    If skewed (High School or Anomalous Incursions with a male protagonist),
+    female rate is ~2/3 (66.7%). Otherwise 50/50.
+    """
+    rand_fn = rng.random if rng is not None else random.random
+    if should_skew_female_npcs(scenario_or_key, player_gender_or_char):
+        return "female" if rand_fn() < (2.0 / 3.0) else "male"
+    return "female" if rand_fn() < 0.5 else "male"
+
+
+def is_school_scenario(scenario_key: str | dict | None) -> bool:
+    """Re-export alias checking if scenario is a school/academy setting."""
+    try:
+        from mechanics.world.locations.seeds import is_school_scenario as _is_school
+        if isinstance(scenario_key, dict):
+            k = str(scenario_key.get("id") or scenario_key.get("name") or "")
+        else:
+            k = str(scenario_key or "")
+        return _is_school(k)
+    except Exception:
+        s = str(scenario_key or "").lower()
+        return any(x in s for x in ("school", "academy", "high_school"))
+

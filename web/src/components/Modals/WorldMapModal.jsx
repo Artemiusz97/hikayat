@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Map, Compass, MapPin, Navigation, Sparkles, X, RefreshCw, ArrowRight, Target } from 'lucide-react';
 import { apiCall } from '../../api/client';
 import { formatCleanLocation, cleanProseLocations } from '../../utils/locationFormat';
+import { isValidSessionId } from '../../utils/session';
 
 const FACILITY_BADGE_LABELS = [
   { icon: '📋', label: '📋 Notice Board', color: 'bg-amber-950/60 text-amber-300 border-amber-700/50' },
@@ -43,7 +44,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
   const [travelError, setTravelError] = useState(null);
 
   const fetchLocations = async () => {
-    if (!session?.id) return;
+    if (!isValidSessionId(session?.id)) return;
     setLoading(true);
     setError(null);
     try {
@@ -62,7 +63,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
   };
 
   useEffect(() => {
-    if (isOpen && session?.id) {
+    if (isOpen && isValidSessionId(session?.id)) {
       fetchLocations();
     }
   }, [isOpen, session?.id, session?.current_location, initialTargetLocation]);
@@ -578,7 +579,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                     )
                                   );
                                   const subProps = (isObj && Array.isArray(sub.props) && sub.props.length > 0)
-                                    ? `Props: ${sub.props.join(', ')}`
+                                    ? `In-Room: ${sub.props.join(', ')}`
                                     : '';
                                   const tooltip = [subName, subEta, subBadge && subBadge !== 'Open' ? `[${subBadge}]` : '', subProps]
                                     .filter(Boolean)
