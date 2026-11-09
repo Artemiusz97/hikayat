@@ -403,6 +403,7 @@ def _persist_event_bounty_claim(
             is_minor=is_minor,
             turn_number=int(turn_number),
             conn=conn,
+            sync_waypoints=False,
         )
     except Exception:
         pass
@@ -932,20 +933,30 @@ def get_world_event_candidate_context(session_id: int) -> dict[str, list[dict[st
             (session_id,),
         ).fetchall()
         node_rows = conn.execute(
-            "SELECT node_id, name, node_type FROM world_nodes WHERE session_id = ? LIMIT 40",
+            "SELECT node_id, name, node_type, state_json FROM world_nodes WHERE session_id = ? LIMIT 120",
             (session_id,),
         ).fetchall()
         c_rows = conn.execute(
             "SELECT * FROM contacts WHERE session_id = ?",
             (session_id,),
         ).fetchall()
+        visible_facilities: list[dict[str, Any]] = []
+        for r in node_rows:
+            rd = dict(r)
+            if str(rd.get("node_type") or "").upper() not in ("FACILITY", "ROOM"):
+                continue
+            raw_st = rd.get("state_json")
+            if raw_st:
+                try:
+                    st_dict = json.loads(raw_st) if isinstance(raw_st, str) else raw_st
+                    if isinstance(st_dict, dict) and st_dict.get("is_hidden"):
+                        continue
+                except Exception:
+                    pass
+            visible_facilities.append(rd)
         return {
             "factions": [dict(r) for r in fac_rows],
-            "facilities": [
-                dict(r)
-                for r in node_rows
-                if str(r["node_type"] or "").upper() in ("FACILITY", "ROOM")
-            ],
+            "facilities": visible_facilities,
             "contacts": [dict(r) for r in c_rows],
         }
 

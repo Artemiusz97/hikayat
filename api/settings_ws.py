@@ -1,4 +1,5 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, Query
+from .security import is_share_mode_active, verify_session_participant, verify_user_access
 
 import config
 import db
@@ -16,7 +17,9 @@ router = APIRouter()
 
 
 @router.get("/api/settings/debug/telemetry")
-async def get_telemetry():
+async def get_telemetry(request: Request = None):
+    if is_share_mode_active():
+        raise HTTPException(status_code=403, detail="Debug telemetry is disabled in share mode.")
     """Returns rolling LLM token/latency telemetry and active circuit-breaker cooldowns."""
     raw = llm_client.get_llm_telemetry()
     data = dict(raw) if isinstance(raw, dict) else {}
@@ -32,14 +35,16 @@ async def get_telemetry():
 
 
 @router.get("/api/settings/{user_id}")
-async def get_settings(user_id: int):
+async def get_settings(user_id: int, request: Request = None):
+    await verify_user_access(request, user_id)
     """Gets user preferences."""
     s = await adb(db.get_user_settings, user_id)
     return {"settings": s}
 
 
 @router.post("/api/settings/{user_id}")
-async def save_settings(user_id: int, req: SettingsUpdateRequest):
+async def save_settings(user_id: int, req: SettingsUpdateRequest, request: Request = None):
+    await verify_user_access(request, user_id)
     """Saves user preferences."""
     await adb(
         db.save_user_settings,
@@ -62,7 +67,10 @@ async def save_settings(user_id: int, req: SettingsUpdateRequest):
 
 
 @router.get("/api/debug/{user_id}")
-async def get_debug_settings(user_id: int):
+async def get_debug_settings(user_id: int, request: Request = None):
+    if is_share_mode_active():
+        raise HTTPException(status_code=403, detail="Debug endpoints are disabled when --share is active.")
+    await verify_user_access(request, user_id)
     s = await adb(db.get_settings, user_id)
     return {
         "user_id": user_id,
@@ -74,7 +82,10 @@ async def get_debug_settings(user_id: int):
 
 
 @router.post("/api/debug/{user_id}")
-async def save_debug_settings(user_id: int, req: DebugUpdateRequest):
+async def save_debug_settings(user_id: int, req: DebugUpdateRequest, request: Request = None):
+    if is_share_mode_active():
+        raise HTTPException(status_code=403, detail="Debug endpoints are disabled when --share is active.")
+    await verify_user_access(request, user_id)
     updates = {}
     if req.debug_stat_mode is not None:
         await adb(db.apply_stat_mode, user_id, req.debug_stat_mode)
@@ -135,7 +146,12 @@ async def save_debug_settings(user_id: int, req: DebugUpdateRequest):
 
 @router.websocket("/ws/session/{session_id}")
 async def websocket_session(websocket: WebSocket, session_id: int, user_id: int = Query(...)):
-    await manager.connect(session_id, user_id, websocket)
+    try:
+        _, verified_uid = await verify_session_participant(websocket, session_id, user_id)
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
+    await manager.connect(session_id, verified_uid, websocket)
     try:
         while True:
             data = await websocket.receive_json()
@@ -143,11 +159,13 @@ async def websocket_session(websocket: WebSocket, session_id: int, user_id: int 
             if msg_type == "PING":
                 await websocket.send_json({"type": "PONG"})
             elif msg_type == "CHAT":
+                char_row = await adb(db.get_character, verified_uid)
+                sender_name = (char_row.get("name") if isinstance(char_row, dict) else None) or f"User {verified_uid}"
                 await manager.broadcast(session_id, {
                     "type": "CHAT_MESSAGE",
-                    "user_id": user_id,
-                    "sender": data.get("sender", f"User {user_id}"),
-                    "message": data.get("message", "")
+                    "user_id": verified_uid,
+                    "sender": sender_name,
+                    "message": str(data.get("message") or "")[:500],
                 })
     except WebSocketDisconnect:
         manager.disconnect(session_id, websocket)
@@ -155,3 +173,7 @@ async def websocket_session(websocket: WebSocket, session_id: int, user_id: int 
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(session_id, websocket)
+        try:
+            await manager.broadcast_presence(session_id)
+        except Exception:
+            pass

@@ -2193,7 +2193,7 @@ def deduce_weapon_archetype(name: str, pool_dict: Dict[str, Any] | None = None) 
         (["machete", "shortsword", "gladius"], "shortsword"),
         (["baseball bat", "wooden bat", "spiked bat", "billiard cue", "skateboard", "guitar case"], "bat"),
         (["kendo sword", "bokken", "shinai"], "katana"),
-        (["submachinegun", "smg", "machine pistol", "pdw"], "submachinegun"),
+        (["submachinegun", "submachine gun", "smg", "machine pistol", "pdw"], "submachinegun"),
         (["pipe rifle", "sniper rifle", "hunting rifle", "carbine", "rifle"], "rifle"),
         (["shotgun", "scattergun", "scatterer"], "shotgun"),
         (["revolver", "six-shooter", "derringer"], "revolver"),
@@ -2343,10 +2343,29 @@ def generate_random_equipment(
                 item_name = f"{random.choice(prefix_pool)} {base_name} {random.choice(suffix_pool)}"
         
     stat_mods: Dict[str, Any] = {}
-    tags_dict = dict(base_data["tags"])
-    
-    # Check for armor piercing affixes
     name_lower = item_name.lower()
+    eff_handedness = (
+        "Versatile"
+        if any(k in name_lower for k in ("breaching maul", "breaching sledgehammer"))
+        else base_data.get("handedness", "1H")
+    )
+    if eff_handedness != base_data.get("handedness", "1H"):
+        profile_dmg_types = list(
+            {p["damage_type"] for p in base_data.get("attack_profiles", {}).values()}
+        ) or list(base_data.get("default_damage", {"physical": 1.0}).keys())
+        tags_dict = derive_weapon_tags(
+            archetype=arch,
+            handedness=eff_handedness,
+            mass=base_data.get("mass", "medium"),
+            attack_types=base_data.get("attack_types", ["blunt"]),
+            damage_types=profile_dmg_types,
+            special_traits=base_data.get("special_traits", []),
+            projectile_type=base_data.get("projectile_type"),
+        )
+    else:
+        tags_dict = dict(base_data["tags"])
+
+    # Check for armor piercing affixes
     ap_val = 0.0
     for affix_key, val in ARMOR_PIERCING_AFFIXES.items():
         if affix_key in name_lower:
@@ -2386,7 +2405,7 @@ def generate_random_equipment(
         "item_type": "Weapon",
         "archetype": arch,
         "mass": base_data.get("mass", "medium"),
-        "handedness": base_data.get("handedness", "1H"),
+        "handedness": eff_handedness,
         "multiplier": base_data["multiplier"],
         "crit_bonus": base_data.get("crit_bonus", 0),
         "attack_types": list(base_data["attack_types"]),

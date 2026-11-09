@@ -152,11 +152,19 @@ def find_spatial_path(
     # Also check session discovered POIs / unlocked nodes
     with db.get_conn() as conn:
         disc_rows = conn.execute(
-            "SELECT node_id FROM world_nodes WHERE session_id = ? AND (is_dynamic = 1 OR state_json LIKE '%discovered%')",
+            "SELECT node_id, is_dynamic, state_json FROM world_nodes WHERE session_id = ? AND (is_dynamic = 1 OR state_json LIKE '%discovered%')",
             (session_id,)
         ).fetchall()
         for dr in disc_rows:
-            discovered.add(dr["node_id"])
+            if int(dr["is_dynamic"] or 0) == 1:
+                discovered.add(dr["node_id"])
+            else:
+                try:
+                    _st = json.loads(dr["state_json"] or "{}") if isinstance(dr["state_json"], str) else (dr["state_json"] or {})
+                except Exception:
+                    _st = {}
+                if isinstance(_st, dict) and _st.get("discovered") is True and not _st.get("is_hidden"):
+                    discovered.add(dr["node_id"])
 
     edges = db.get_session_world_edges(session_id)
     nodes = db.get_session_world_nodes(session_id)
@@ -174,6 +182,8 @@ def find_spatial_path(
         v = e.get("to_node_id")
         w = max(1, int(e.get("travel_minutes") or 2))
         if not u or not v:
+            continue
+        if str(e.get("edge_type") or "") == "leyline_spirit_passage" and int(e.get("is_locked") or 0) == 1 and not include_hidden:
             continue
 
         v_node = node_map.get(v)
@@ -357,6 +367,7 @@ def evaluate_spatial_route(
             "unlocked_edges": [],
             "unlocked_nodes": [],
             "consumed_key_items": [],
+            "staged_folklore_ops": {},
         }
 
     effective_node_id = route_node_ids[0]
@@ -369,6 +380,7 @@ def evaluate_spatial_route(
     unlocked_edges: List[Tuple[str, str]] = []
     unlocked_nodes: List[str] = []
     consumed_key_items: List[dict] = []
+    staged_folklore_ops: Dict[str, Any] = {}
     last_gate_res: Optional[dict] = None
 
     # Gather party inventory
@@ -508,19 +520,26 @@ def evaluate_spatial_route(
         from mechanics.world.locations.access_gate import evaluate_node_access_gate
         gate_res = evaluate_node_access_gate(
             session_id, v, session,
-            actions=actions, party=party, companions=traveling_companions
+            actions=actions, party=party, companions=traveling_companions,
+            persist_db=persist_db,
         )
+        if isinstance(gate_res.get("staged_folklore_ops"), dict) and gate_res["staged_folklore_ops"]:
+            staged_folklore_ops.update(gate_res["staged_folklore_ops"])
         if gate_res.get("gated"):
             gated = True
             barrier_node_id = v
             last_gate_res = gate_res
             v_node = db.get_world_node(session_id, v)
             v_name = (v_node.get("name") if v_node else v) or v
-            reason = gate_res.get("reason") or "Access restricted"
+            reason = gate_res.get("reason") or gate_res.get("reason_label") or "Access restricted"
             stage_directives.append(
                 f"[STAGE DIRECTION — ACCESS BLOCKED]: Access to {v_name} halted. Reason: {reason}."
             )
+            if gate_res.get("prompt_directive") and gate_res["prompt_directive"] not in stage_directives:
+                stage_directives.append(gate_res["prompt_directive"])
             break
+        elif gate_res.get("prompt_directive") and gate_res["prompt_directive"] not in stage_directives:
+            stage_directives.append(gate_res["prompt_directive"])
 
         # 4. Mid-Route Ambush / Encounter Interruption (A11)
         if v != route_node_ids[-1]:
@@ -636,15 +655,18 @@ def evaluate_spatial_route(
 
     barrier_choices = []
     if gated and barrier_node_id:
-        barrier_edge = get_edge_between(session_id, effective_node_id, barrier_node_id)
-        barrier_choices = build_barrier_obstacle_choices(
-            session_id=session_id,
-            current_node_id=effective_node_id,
-            barrier_node_id=barrier_node_id,
-            edge=barrier_edge,
-            session=session,
-            party=party,
-        )
+        if isinstance(last_gate_res, dict) and last_gate_res.get("barrier_choices"):
+            barrier_choices = list(last_gate_res["barrier_choices"])
+        else:
+            barrier_edge = get_edge_between(session_id, effective_node_id, barrier_node_id)
+            barrier_choices = build_barrier_obstacle_choices(
+                session_id=session_id,
+                current_node_id=effective_node_id,
+                barrier_node_id=barrier_node_id,
+                edge=barrier_edge,
+                session=session,
+                party=party,
+            )
         last_gate_res = dict(last_gate_res) if isinstance(last_gate_res, dict) else {"gated": True}
         last_gate_res.update({"barrier_node_id": barrier_node_id, "barrier_choices": barrier_choices})
 
@@ -665,6 +687,7 @@ def evaluate_spatial_route(
         "unlocked_edges": unlocked_edges,
         "unlocked_nodes": unlocked_nodes,
         "consumed_key_items": consumed_key_items,
+        "staged_folklore_ops": staged_folklore_ops,
     }
 
 

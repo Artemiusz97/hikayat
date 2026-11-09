@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Map, Compass, MapPin, Navigation, Sparkles, X, RefreshCw, ArrowRight, Target } from 'lucide-react';
 import { apiCall } from '../../api/client';
 import { formatCleanLocation, cleanProseLocations } from '../../utils/locationFormat';
 import { isValidSessionId } from '../../utils/session';
 
-const FACILITY_BADGE_LABELS = [
-  { icon: '📋', label: '📋 Notice Board', color: 'bg-amber-950/60 text-amber-300 border-amber-700/50' },
-  { icon: '💾', label: '💾 Job Terminal', color: 'bg-cyan-950/60 text-cyan-300 border-cyan-700/50' },
-  { icon: '📡', label: '📡 Comm Terminal', color: 'bg-cyan-950/60 text-cyan-300 border-cyan-700/50' },
-  { icon: '📻', label: '📻 Dispatch Board', color: 'bg-amber-950/60 text-amber-300 border-amber-700/50' },
-  { icon: '🛍️', label: '🛍️ Merchant Shop', color: 'bg-purple-950/60 text-purple-300 border-purple-700/50' },
-  { icon: '🏛️', label: '🏛️ Faction HQ', color: 'bg-blue-950/60 text-blue-300 border-blue-700/50' },
-  { icon: '🏠', label: '🏠 Home', color: 'bg-emerald-950/60 text-emerald-300 border-emerald-700/50' },
+const getFacilityBadgeLabels = (t) => [
+  { icon: '📋', label: t('atlas.badge_notice_board', '📋 Notice Board'), color: 'bg-amber-950/60 text-amber-300 border-amber-700/50' },
+  { icon: '💾', label: t('atlas.badge_job_terminal', '💾 Job Terminal'), color: 'bg-cyan-950/60 text-cyan-300 border-cyan-700/50' },
+  { icon: '📡', label: t('atlas.badge_comm_terminal', '📡 Comm Terminal'), color: 'bg-cyan-950/60 text-cyan-300 border-cyan-700/50' },
+  { icon: '📻', label: t('atlas.badge_dispatch_board', '📻 Dispatch Board'), color: 'bg-amber-950/60 text-amber-300 border-amber-700/50' },
+  { icon: '🛍️', label: t('atlas.badge_merchant_shop', '🛍️ Merchant Shop'), color: 'bg-purple-950/60 text-purple-300 border-purple-700/50' },
+  { icon: '🏛️', label: t('atlas.badge_faction_hq', '🏛️ Faction HQ'), color: 'bg-blue-950/60 text-blue-300 border-blue-700/50' },
+  { icon: '🏠', label: t('atlas.badge_home', '🏠 Home'), color: 'bg-emerald-950/60 text-emerald-300 border-emerald-700/50' },
 ];
 
 const extractZoneFromTarget = (targetStr, zones = []) => {
@@ -36,6 +37,7 @@ const extractZoneFromTarget = (targetStr, zones = []) => {
 };
 
 const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTargetLocation }) => {
+  const { t } = useTranslation();
   const [mapData, setMapData] = useState(null);
   const [selectedZone, setSelectedZone] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -56,7 +58,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
       const currentZone = zones.find(z => z.is_current) || zones[0] || null;
       setSelectedZone(matchedInitial || (currentZone ? currentZone.zone_name : null));
     } catch (err) {
-      setError(err.message || 'Failed to load world map.');
+      setError(err.message || t('atlas.load_failed', 'Failed to load world map.'));
     } finally {
       setLoading(false);
     }
@@ -98,8 +100,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
     } catch (err) {
       console.error('Fast travel failed:', err);
       setTravelError(
-        err?.message ||
-        'Fast travel failed. The server or generative models may be temporarily unavailable.'
+        err?.message || t('atlas.travel_failed', 'Fast travel failed. The server or generative models may be temporarily unavailable.')
       );
     } finally {
       setTraveling(false);
@@ -118,16 +119,16 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
             </div>
             <div>
               <h2 className="font-rpg font-bold text-base text-gray-100 tracking-wider uppercase flex items-center gap-2">
-                <span>World Atlas & Fast-Travel</span>
+                <span>{t('atlas.title', 'World Atlas & Fast-Travel')}</span>
                 {activeQuestDestinations.length > 0 && (
                   <span className="text-[10px] font-sans font-bold px-2 py-0.5 rounded-full bg-amber-500/25 text-amber-300 border border-amber-500/60">
-                    ⭐ {activeQuestDestinations.length} Active Quest Lead{activeQuestDestinations.length > 1 ? 's' : ''}
+                    {activeQuestDestinations.length === 1 ? t('atlas.active_leads', { count: 1, defaultValue: '⭐ 1 Active Quest Lead' }) : t('atlas.active_leads_plural', { count: activeQuestDestinations.length, defaultValue: `⭐ ${activeQuestDestinations.length} Active Quest Leads` })}
                   </span>
                 )}
               </h2>
               <p className="text-xs text-gray-400 flex items-center gap-1.5 mt-0.5">
                 <MapPin size={12} className="text-fantasy-accent shrink-0" />
-                <span>Current Position:</span>
+                <span>{t('atlas.current_position', 'Current Position:')}</span>
                 <strong className="text-gray-200">{session?.current_location || 'Unknown Area'}</strong>
               </p>
             </div>
@@ -138,7 +139,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
               onClick={fetchLocations}
               disabled={loading}
               className="p-2 rounded-lg bg-black/50 hover:bg-black/80 text-gray-400 hover:text-gray-200 border border-fantasy-border transition-colors"
-              title="Refresh Atlas"
+              title={t('atlas.refresh', 'Refresh Atlas')}
             >
               <RefreshCw size={15} className={loading ? 'animate-spin text-fantasy-accent' : ''} />
             </button>
@@ -155,14 +156,14 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
         {travelError && (
           <div className="px-5 py-2.5 bg-red-950/90 border-b border-red-700/60 text-red-200 text-xs flex items-center justify-between gap-3 animate-fade-in">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="text-red-400 font-bold shrink-0">⚠️ Travel Error:</span>
+              <span className="text-red-400 font-bold shrink-0">{t('atlas.travel_error', '⚠️ Travel Error:')}</span>
               <span className="truncate">{travelError}</span>
             </div>
             <button
               onClick={() => setTravelError(null)}
               className="text-red-300 hover:text-red-100 font-bold text-xs shrink-0 px-2 py-0.5 rounded bg-black/40 hover:bg-black/60 border border-red-800/40"
             >
-              Dismiss
+              {t('atlas.dismiss', 'Dismiss')}
             </button>
           </div>
         )}
@@ -173,7 +174,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
                 <Target size={12} className="text-amber-400" />
-                <span>Active Quest Destinations — Click to Locate or Fast-Travel</span>
+                <span>{t('atlas.quick_jump_header', 'Active Quest Destinations — Click to Locate or Fast-Travel')}</span>
               </span>
             </div>
             <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
@@ -199,7 +200,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                     </div>
                     {qd.is_current_place ? (
                       <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 font-bold uppercase shrink-0">
-                        Here
+                        {t('atlas.here', 'Here')}
                       </span>
                     ) : (
                       <button
@@ -213,7 +214,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                           traveling ? 'opacity-50 cursor-not-allowed' : ''
                         }`}
                       >
-                        <span>{traveling ? 'Traveling...' : (qd.travel_tag && qd.travel_tag !== 'Here' ? `Travel (${qd.travel_tag})` : 'Travel')}</span>
+                        <span>{traveling ? t('atlas.traveling', 'Traveling...') : (qd.travel_tag && qd.travel_tag !== 'Here' ? t('atlas.travel_with_tag', { tag: qd.travel_tag, defaultValue: `Travel (${qd.travel_tag})` }) : t('atlas.travel', 'Travel'))}</span>
                         <ArrowRight size={10} />
                       </button>
                     )}
@@ -228,15 +229,15 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
         {loading && !mapData ? (
           <div className="flex-1 flex flex-col items-center justify-center py-20 text-gray-400 space-y-2">
             <Compass size={32} className="animate-spin text-fantasy-accent opacity-70" />
-            <p className="text-xs italic">Charting discovered regions and waypoints...</p>
+            <p className="text-xs italic">{t('atlas.charting', 'Charting discovered regions and waypoints...')}</p>
           </div>
         ) : error ? (
           <div className="p-8 text-center text-red-300 text-xs">{error}</div>
         ) : zones.length === 0 ? (
           <div className="p-12 text-center text-gray-500 space-y-2">
             <Map size={32} className="mx-auto opacity-30" />
-            <p className="text-sm font-semibold text-gray-400">No Regions Charted Yet</p>
-            <p className="text-xs">Explore your surroundings to unlock regions and fast-travel destinations.</p>
+            <p className="text-sm font-semibold text-gray-400">{t('atlas.no_regions_title', 'No Regions Charted Yet')}</p>
+            <p className="text-xs">{t('atlas.no_regions_desc', 'Explore your surroundings to unlock regions and fast-travel destinations.')}</p>
           </div>
         ) : (
           <div className="flex-1 grid grid-cols-1 md:grid-cols-12 min-h-[400px] overflow-hidden">
@@ -246,7 +247,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
               <div className="px-4 py-2.5 border-b border-fantasy-border/60 flex items-center justify-between">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
                   <Compass size={13} className="text-fantasy-accent" />
-                  <span>Discovered Regions ({zones.length})</span>
+                  <span>{t('atlas.discovered_regions', { count: zones.length, defaultValue: `Discovered Regions (${zones.length})` })}</span>
                 </span>
               </div>
 
@@ -281,7 +282,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                           <span className="font-semibold text-xs truncate">{z.zone_name}</span>
                           {z.is_current && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 font-bold uppercase shrink-0">
-                              Here
+                              {t('atlas.here', 'Here')}
                             </span>
                           )}
                         </div>
@@ -371,7 +372,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                       )}
                     </div>
                     <span className="text-[10px] font-mono text-fantasy-accent bg-fantasy-accent/10 px-2.5 py-1 rounded border border-fantasy-accent/30 shrink-0">
-                      { activeZoneObj.is_current ? '📍 Current Region' : `🧭 ${activeZoneObj.travel_tag || 'Cross-Region Travel'}` }
+                      { activeZoneObj.is_current ? t('atlas.current_region', '📍 Current Region') : `🧭 ${activeZoneObj.travel_tag || t('atlas.cross_region_travel', 'Cross-Region Travel')}` }
                     </span>
                   </div>
 
@@ -379,7 +380,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                     {primaryPlaces.length === 0 ? (
                       <div className="bg-black/40 border border-fantasy-border/60 rounded-lg p-5 text-center space-y-3">
                         <p className="text-xs text-gray-400">
-                          Main hub of <strong>{activeZoneObj.zone_name}</strong> is ready for exploration.
+                          {t('atlas.hub_ready', { zone: activeZoneObj.zone_name, defaultValue: `Main hub of ${activeZoneObj.zone_name} is ready for exploration.` })}
                         </p>
                         <button
                           disabled={traveling}
@@ -389,7 +390,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                           }`}
                         >
                           <Navigation size={13} />
-                          <span>{traveling ? 'Traveling...' : `Travel to ${activeZoneObj.zone_name}`}</span>
+                          <span>{traveling ? t('atlas.traveling', 'Traveling...') : t('atlas.travel_to_zone', { zone: activeZoneObj.zone_name, defaultValue: `Travel to ${activeZoneObj.zone_name}` })}</span>
                         </button>
                       </div>
                     ) : (
@@ -404,7 +405,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                         const questMarkers = Array.isArray(place.quest_markers) ? place.quest_markers : [];
                         const hasQuest = Boolean(place.quest_tag) || questMarkers.length > 0;
                         const rawBadges = String(place.badges || '');
-                        const facilityPills = FACILITY_BADGE_LABELS.filter(fb => rawBadges.includes(fb.icon));
+                        const facilityPills = getFacilityBadgeLabels(t).filter(fb => rawBadges.includes(fb.icon));
 
                         return (
                           <div
@@ -424,12 +425,12 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                   <span className="font-bold text-xs text-gray-100">{placeName}</span>
                                   {hasQuest && (
                                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-black font-extrabold uppercase tracking-wide shadow-sm">
-                                      {place.quest_tag || '⭐ Quest Target'}
+                                      {place.quest_tag || t('atlas.quest_target', '⭐ Quest Target')}
                                     </span>
                                   )}
                                   {place.is_transit_hub && (
                                     <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border bg-cyan-950/60 text-cyan-300 border-cyan-800/60">
-                                      🚀 Transit Hub
+                                      🚀 {t('atlas.transit_hub', 'Transit Hub')}
                                     </span>
                                   )}
                                   <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border ${
@@ -450,9 +451,15 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                   {place.access_badge && (() => {
                                     const isCurfew = Boolean(place.is_curfew_active || place.access_badge.includes('Curfew'));
                                     const isClosedOrLocked = Boolean(place.schedule_locked || place.access_badge.includes('Closed') || place.access_badge.includes('Locked'));
+                                    const isForSale = place.access_badge.startsWith('For Sale');
+                                    const isOwnedHome = place.access_badge === 'Owned Residence' || place.access_badge === 'Starter Quarters';
                                     return (
                                       <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border ${
-                                        place.access_badge === 'Unlocked'
+                                        isForSale
+                                          ? 'bg-amber-950/75 text-amber-300 border-amber-500/70 shadow-sm'
+                                          : isOwnedHome
+                                            ? 'bg-emerald-950/75 text-emerald-300 border-emerald-500/70'
+                                            : place.access_badge === 'Unlocked'
                                           ? 'bg-teal-950/60 text-teal-300 border-teal-800/60'
                                           : isCurfew || isClosedOrLocked
                                             ? 'bg-rose-950/70 text-rose-300 border-rose-800/60'
@@ -462,11 +469,13 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                                 ? 'bg-purple-950/60 text-purple-300 border-purple-800/60'
                                                 : 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60'
                                       }`}>
-                                        {place.access_badge === 'Unlocked' ? '🔓 Unlocked' :
+                                        {isForSale ? `🏷️ ${t('realty.badge_for_sale', 'For Sale')}${place.access_badge?.includes('—') ? ' — ' + place.access_badge.split('—')[1].trim() : ''}` :
+                                         isOwnedHome ? `🏠 ${place.access_badge === 'Owned Residence' ? t('realty.badge_owned', 'Owned Residence') : t('realty.badge_starter', 'Starter Quarters')}` :
+                                         place.access_badge === 'Unlocked' ? t('atlas.access_unlocked', '🔓 Unlocked') :
                                          isCurfew || isClosedOrLocked ? `🔒 ${place.access_badge}` :
-                                         place.access_badge === 'Restricted' ? '⛔ Restricted' :
-                                         place.access_badge === 'Private' ? '🏠 Private' :
-                                         '🟢 Open'}
+                                         place.access_badge === 'Restricted' ? t('atlas.access_restricted', '⛔ Restricted') :
+                                         place.access_badge === 'Private' ? t('atlas.access_private', '🏠 Private') :
+                                         t('atlas.access_open', '🟢 Open')}
                                       </span>
                                     );
                                   })()}
@@ -500,7 +509,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                         title={`${kn.name} is currently here (${kn.status})`}
                                       >
                                         <span>👤 {kn.name}</span>
-                                        {kn.status === 'Rendezvous' && <span className="text-[8px] uppercase tracking-wider text-amber-400 font-bold">• Meetup</span>}
+                                        {kn.status === 'Rendezvous' && <span className="text-[8px] uppercase tracking-wider text-amber-400 font-bold">{t('atlas.meetup', '• Meetup')}</span>}
                                       </span>
                                     ))}
                                     {place.unmet_activity_count > 0 && (
@@ -515,7 +524,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                 {place.scene_residue && (
                                   <div className="text-[10px] text-amber-200/90 italic bg-amber-950/30 border border-amber-800/40 rounded px-2 py-1 mt-1 flex items-center gap-1.5">
                                     <span className="not-italic shrink-0">💭</span>
-                                    <span className="truncate" title={place.scene_residue}>Memory: &ldquo;{place.scene_residue}&rdquo;</span>
+                                    <span className="truncate" title={place.scene_residue}>{t('atlas.memory_prefix', 'Memory:')} &ldquo;{place.scene_residue}&rdquo;</span>
                                   </div>
                                 )}
                               </div>
@@ -523,7 +532,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                               <div className="shrink-0">
                                 {isHere ? (
                                   <span className="px-3 py-1.5 rounded-lg bg-emerald-950/60 text-emerald-300 border border-emerald-700/50 text-[11px] font-bold inline-block">
-                                    Current Location
+                                    {t('atlas.current_location', 'Current Location')}
                                   </span>
                                 ) : (
                                   <button
@@ -537,7 +546,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                         : 'bg-fantasy-accent/20 hover:bg-fantasy-accent/35 text-fantasy-accent border-fantasy-accent/50'
                                     }`}
                                   >
-                                    <span>{traveling ? 'Traveling...' : 'Travel Here'}</span>
+                                    <span>{traveling ? t('atlas.traveling', 'Traveling...') : t('atlas.travel_here', 'Travel Here')}</span>
                                     <ArrowRight size={13} />
                                   </button>
                                 )}
@@ -549,7 +558,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                               <div className="bg-amber-950/50 border border-amber-500/60 rounded-md p-2.5 space-y-1">
                                 <div className="text-[10px] font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1">
                                   <Sparkles size={11} className="text-amber-400 shrink-0" />
-                                  <span>Active Quest Objective Here</span>
+                                  <span>{t('atlas.active_quest_objective_here', 'Active Quest Objective Here')}</span>
                                 </div>
                                 {questMarkers.map((qm, qmIdx) => (
                                   <div key={qmIdx} className="text-xs text-amber-100 font-medium leading-snug">
@@ -560,9 +569,9 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                             )}
 
                             {/* 3rd-Tier Rooms / Wings Chips */}
-                            {subLocationItems.length > 0 && (
+                            {!place.is_unpurchased_realty && subLocationItems.length > 0 && (
                               <div className="pt-2 border-t border-fantasy-border/40 flex flex-wrap items-center gap-1.5">
-                                <span className="text-[10px] font-mono uppercase text-gray-500 mr-1">Rooms / Wings:</span>
+                                <span className="text-[10px] font-mono uppercase text-gray-500 mr-1">{t('atlas.rooms_wings', 'Rooms / Wings:')}</span>
                                 {subLocationItems.map((sub, sIdx) => {
                                   const isObj = typeof sub === 'object' && sub !== null;
                                   const subName = isObj ? (sub.name || sub.label) : sub;

@@ -188,6 +188,8 @@ def get_archetype_starting_location(
             for p in z.get("primary_locations", []):
 
                 p_id = p.get("id", "")
+                if p.get("is_hidden"):
+                    continue
 
                 p_name = p.get("name", "Main Area")
 
@@ -776,6 +778,10 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
         for primary in zone.get("primary_locations") or []:
 
             p_id = primary.get("id", "")
+            if p_id == "fac_suburbs_townhouse":
+                from mechanics.social.origin_mode import is_student_operative
+                if not is_student_operative(session_id):
+                    continue
 
             primary_name = primary.get("name", "Main Area")
 
@@ -799,8 +805,9 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
                 primary_name = agency_hq_name
 
             elif primary_name == "Player's House" or p_id == "loc_player_house":
-
-                primary_name = player_house
+                from .realty_catalog import is_anomalous_realty_scenario
+                from mechanics.social.origin_mode import is_student_operative
+                primary_name = "Tree-Lined Suburban House" if (is_anomalous_realty_scenario(scenario_key) and not is_student_operative(session_id)) else player_house
 
             elif park_name and (primary_name == "Neighborhood Park" or p_id == "loc_local_park"):
 
@@ -824,8 +831,11 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
                 continue
 
-            if is_urban_anomalous_scenario(scenario_key):
+            from .realty_catalog import ALL_STATIC_RESIDENTIAL_FACILITY_IDS
+            if is_urban_anomalous_scenario(scenario_key) and p_id not in ALL_STATIC_RESIDENTIAL_FACILITY_IDS:
                 primary_name = get_session_urban_facility_name(session_id, z_id, p_id, primary_name, scenario_key, char_name)
+            if primary.get("is_hidden"):
+                primary_name = str(primary.get("mundane_name") or primary_name)
             primary_name = resolve_session_location_tokens(session_id, primary_name, scenario_key, char_name)
 
             from .graph_seeder import infer_facility_atmosphere
@@ -836,6 +846,8 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
             for sub in primary.get("sub_locations") or []:
 
+                if sub.get("is_hidden"):
+                    continue
                 s_id = sub.get("id", "")
 
                 sub_name = sub.get("name") or resolve_default_sublocation(primary_name, zone_name, session_id=session_id, scenario_key=scenario_key, char_name=char_name)

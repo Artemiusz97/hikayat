@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, LogOut, User, Package, Users, Compass, BookOpen, X, Smartphone, Sliders, Bookmark, Map, ArrowLeft, FlagOff, ScrollText, Share2, Check, MoreVertical, Clock } from 'lucide-react';
+import { Menu, LogOut, User, Package, Users, Compass, BookOpen, X, Smartphone, Sliders, Bookmark, Map, ArrowLeft, FlagOff, ScrollText, Share2, Check, MoreVertical, Clock, Flame } from 'lucide-react';
 import { apiCall } from '../api/client';
 import CharacterSheet from '../components/Sidebar/CharacterSheet';
 import InventoryPanel from '../components/Sidebar/InventoryPanel';
@@ -19,6 +19,7 @@ import TacticalActionDock from '../components/Sidebar/TacticalActionDock';
 import TimeSkipModal from '../components/Modals/TimeSkipModal';
 import QuickBeltPopover from '../components/Modals/QuickBeltPopover';
 import GiveGiftModal from '../components/Modals/GiveGiftModal';
+import EntityContractsModal from '../components/Modals/EntityContractsModal';
 import { useTranslation } from 'react-i18next';
 import LanguageSwitcher from '../components/Common/LanguageSwitcher';
 import ThemeSwitcher from '../components/Common/ThemeSwitcher';
@@ -28,7 +29,7 @@ import { useInventory } from '../hooks/useInventory';
 import { useCodex } from '../hooks/useCodex';
 import { usePhone } from '../hooks/usePhone';
 import { useSettings } from '../hooks/useSettings';
-import { isValidSessionId } from '../utils/session';
+import { isValidSessionId, isAnomalousScenarioKey } from '../utils/session';
 
 const GameView = ({
   user,
@@ -77,6 +78,7 @@ const GameView = ({
   const [timeSkipModalOpen, setTimeSkipModalOpen] = useState(false);
   const [quickBeltModalOpen, setQuickBeltModalOpen] = useState(false);
   const [giveGiftModalOpen, setGiveGiftModalOpen] = useState(false);
+  const [contractsModalOpen, setContractsModalOpen] = useState(false);
 
   // Right rail (world & outcomes) only fits on wide screens; below that it becomes a sidebar tab.
   const isWide = useMediaQuery('(min-width: 1280px)');
@@ -382,6 +384,7 @@ const GameView = ({
 
   const menuItems = (includeSettings) => [
     { id: 'share', label: headerCopied ? t('common.copied') : t('common.share'), icon: headerCopied ? Check : Share2, onClick: handleShareAdventure, keepOpen: true, active: headerCopied },
+    { id: 'contracts', label: t('contracts.nav_label', 'Contracts'), icon: Flame, onClick: () => setContractsModalOpen(true), hidden: !isAnomalousScenarioKey(session?.scenario) },
     { id: 'saves', label: t('nav.saves'), icon: Bookmark, onClick: () => setSavesModalOpen(true) },
     { id: 'map', label: t('nav.map'), icon: Map, onClick: () => openWorldMap() },
     { id: 'settings', label: t('nav.settings'), icon: Sliders, onClick: () => setSettingsModalOpen(true), hidden: !includeSettings },
@@ -490,6 +493,7 @@ const GameView = ({
             onOpenTimeSkip={() => setTimeSkipModalOpen(true)}
             onOpenQuickBelt={() => setQuickBeltModalOpen(true)}
             onOpenGiveGift={() => setGiveGiftModalOpen(true)}
+            onOpenContracts={() => setContractsModalOpen(true)}
           />
         </div>
       </aside>
@@ -663,6 +667,7 @@ const GameView = ({
                 onOpenTimeSkip={() => { setMobileDrawerOpen(false); setTimeSkipModalOpen(true); }}
                 onOpenQuickBelt={() => { setMobileDrawerOpen(false); setQuickBeltModalOpen(true); }}
                 onOpenGiveGift={() => { setMobileDrawerOpen(false); setGiveGiftModalOpen(true); }}
+                onOpenContracts={() => { setMobileDrawerOpen(false); setContractsModalOpen(true); }}
               />
             </div>
           </div>
@@ -750,6 +755,22 @@ const GameView = ({
         onAction={handleAction}
         processing={processingTurn}
       />
+
+      {/* Entity Contracts & Devil Pacts Modal */}
+      {isAnomalousScenarioKey(session?.scenario) && (
+        <EntityContractsModal
+          isOpen={contractsModalOpen}
+          onClose={() => setContractsModalOpen(false)}
+          session={session}
+          user={user}
+          onSessionUpdated={handleSessionLoaded}
+          onContractMutated={() => {
+            refreshCharacter();
+            inventory.refreshInventory();
+            codex.refreshCodex();
+          }}
+        />
+      )}
 
       {/* Genshin-Style Time Skip Chronos Dial Modal */}
       <TimeSkipModal

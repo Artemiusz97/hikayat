@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Sparkles, RefreshCw, Maximize2, X } from 'lucide-react';
 
 export const SceneImageCard = ({
@@ -9,6 +10,7 @@ export const SceneImageCard = ({
   onReroll = null,
   isRerolling = false,
 }) => {
+  const { t } = useTranslation();
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
   useEffect(() => {
@@ -32,10 +34,10 @@ export const SceneImageCard = ({
         <div className="mb-4 md:mb-5 p-3.5 rounded-xl border border-dashed border-fantasy-accent/40 bg-black/40 flex items-center justify-between gap-3 animate-pulse">
           <div className="flex items-center gap-2.5 text-xs text-fantasy-accent font-serif">
             <Sparkles size={14} className="animate-spin text-fantasy-accent shrink-0" />
-            <span>Illustrating scene in background...</span>
+            <span>{t('feed.illustrating_background', 'Illustrating scene in background...')}</span>
           </div>
           <span className="text-[10px] font-mono text-gray-400 bg-white/5 px-2 py-0.5 rounded border border-white/10 uppercase tracking-wider">
-            Rendering
+            {t('feed.rendering', 'Rendering')}
           </span>
         </div>
       );
@@ -45,7 +47,7 @@ export const SceneImageCard = ({
         <div className="mb-4 md:mb-5 p-3 rounded-xl border border-dashed border-amber-500/40 bg-amber-950/10 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-amber-200/90 font-serif">
             <Sparkles size={14} className="text-amber-400 shrink-0" />
-            <span>Scene illustration available on demand.</span>
+            <span>{t('feed.illustration_available', 'Scene illustration available on demand.')}</span>
           </div>
           <button
             type="button"
@@ -58,7 +60,7 @@ export const SceneImageCard = ({
             ) : (
               <Sparkles size={12} className="text-amber-400" />
             )}
-            <span>{isRerolling ? 'Illustrating...' : 'Illustrate Scene'}</span>
+            <span>{isRerolling ? t('feed.illustrating', 'Illustrating...') : t('feed.illustrate_scene', 'Illustrate Scene')}</span>
           </button>
         </div>
       );
@@ -85,7 +87,7 @@ export const SceneImageCard = ({
             type="button"
             onClick={() => setLightboxOpen(true)}
             className="p-1.5 rounded-lg bg-black/70 hover:bg-black/90 border border-white/20 text-gray-200 hover:text-white backdrop-blur-md shadow-lg transition-colors"
-            title="View full resolution"
+            title={t('feed.view_full_res', 'View full resolution')}
           >
             <Maximize2 size={13} />
           </button>
@@ -100,10 +102,10 @@ export const SceneImageCard = ({
               }}
               disabled={isRerolling}
               className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-black/75 hover:bg-black/95 border border-amber-500/50 hover:border-amber-400 text-amber-300 backdrop-blur-md flex items-center gap-1.5 shadow-lg transition-all"
-              title="Reroll scene illustration"
+              title={t('feed.reroll_illustration', 'Reroll scene illustration')}
             >
               <RefreshCw size={12} className={isRerolling ? 'animate-spin text-amber-400' : 'text-amber-400'} />
-              <span>{isRerolling ? 'Regenerating...' : 'Reroll'}</span>
+              <span>{isRerolling ? t('feed.regenerating', 'Regenerating...') : t('feed.reroll', 'Reroll')}</span>
             </button>
           )}
         </div>
@@ -121,7 +123,7 @@ export const SceneImageCard = ({
               type="button"
               onClick={() => setLightboxOpen(false)}
               className="absolute -top-10 right-0 sm:top-2 sm:right-2 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white border border-white/20 backdrop-blur-sm transition-colors z-20"
-              title="Close preview (Esc)"
+              title={t('feed.close_preview', 'Close preview (Esc)')}
             >
               <X size={20} />
             </button>

@@ -5,6 +5,7 @@ import re
 import db
 import scenario_data
 import mechanics.system.phone
+from game_engine.prompt_layout import build_side_channel_language_directive
 from .media_captions import (
     generate_player_casual_photo,
     generate_player_spicy_photo
@@ -146,8 +147,16 @@ async def generate_player_chat_message(session: dict, contact: dict, player_char
         user_prompt = f"Generate {char_name}'s opening message to {contact_name}:"
 
     try:
+        _out_dir = build_side_channel_language_directive(
+            session,
+            text_fields=("message",),
+            style="sms",
+            speaker_gender=str(player_char.get("gender") or session.get("lead_character_gender") or ""),
+            recipient_gender=str(contact.get("gender") or basic.get("gender") or ""),
+        )
         result = await mechanics.system.phone.call_llm_json(
-            system_prompt,
+            f"{system_prompt}\n\n{_out_dir}" if _out_dir else system_prompt,
+
             user_prompt,
             temperature=0.85,
             is_nsfw=scenario_data.uses_nsfw_model(scen_key),
@@ -161,7 +170,7 @@ async def generate_player_chat_message(session: dict, contact: dict, player_char
                 first_name = namegen.get_given_name(contact_name) or (contact_name.split()[0] if contact_name.split() else contact_name)
                 name_alt = rf"(?:{re.escape(contact_name)}|{re.escape(first_name)})"
                 clean_msg = re.sub(
-                    rf"^(?:hey(?:a)?|hi|hello|yo)\s*(?:{name_alt}|there)?\s*[,!.:-]*\s*",
+                    rf"^(?:hey(?:a)?|hi|hello|yo|cześć|hej|siema|hai|helo|halo)\s*(?:{name_alt}|there)?\s*[,!.:-]*\s*",
                     "",
                     player_msg,
                     flags=re.IGNORECASE

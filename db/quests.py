@@ -21,7 +21,58 @@ _TRANSIENT_SUB_OBJ_KEYS = {
     "stage_index",
     "total_stages",
     "completed_stages",
+    "stages",
 }
+
+
+def is_quest_main_objectives_complete(sub_objectives: list | None) -> bool:
+    """Evaluates whether a quest's mandatory Main Objective(s) are satisfied.
+    - On compiled `1 Main + 1-3 Optionals` quests: True if Main (`is_optional=False`) is completed/bypassed
+      OR if an `alternative` Optional (`role == 'alternative'`) is completed. Skipped/failed Optionals never block.
+    - On legacy 3-checkbox quests (no `is_optional` flags): True when all sub-objectives are `completed`.
+    """
+    valid = [so for so in (sub_objectives or []) if isinstance(so, dict)]
+    if not valid:
+        return False
+    if any(
+        bool(so.get("is_optional"))
+        and str(so.get("role") or "").strip().lower() == "alternative"
+        and (bool(so.get("completed")) or str(so.get("status") or "").strip().lower() == "completed")
+        for so in valid
+    ):
+        return True
+    main_sos = [so for so in valid if not bool(so.get("is_optional"))]
+    if not main_sos:
+        return False
+    return all(
+        bool(so.get("completed"))
+        or str(so.get("status") or "").strip().lower() in ("completed", "bypassed")
+        for so in main_sos
+    )
+
+
+def compute_quest_main_progress_ratio(sub_objectives: list | None) -> float:
+    """Computes 0.0..1.0 Main Objective progress without penalizing skipped Optionals."""
+    valid = [so for so in (sub_objectives or []) if isinstance(so, dict)]
+    if not valid:
+        return 0.0
+    if is_quest_main_objectives_complete(valid):
+        return 1.0
+    main_sos = [so for so in valid if not bool(so.get("is_optional"))]
+    if not main_sos:
+        return 0.0
+    if len(main_sos) == 1:
+        m0 = main_sos[0]
+        tot = int(m0.get("total_stages") or 0)
+        done = int(m0.get("completed_stages") or 0)
+        if tot > 0:
+            return max(0.0, min(1.0, done / float(tot)))
+    done_cnt = sum(
+        1
+        for so in main_sos
+        if bool(so.get("completed")) or str(so.get("status") or "").strip().lower() in ("completed", "bypassed")
+    )
+    return max(0.0, min(1.0, done_cnt / float(len(main_sos))))
 
 def _normalize_loc_arrow(loc: str) -> str:
     if not loc:
@@ -39,6 +90,25 @@ def _clean_sub_objectives_for_storage(sub_objectives: list | str | None) -> str:
         return json.dumps(cleaned)
     return sub_objectives or "[]"
 
+def _serialize_quest_anomaly_blueprint_col(
+    anomaly_blueprint: dict | str | None,
+    quest_notes: str | None,
+) -> str | None:
+    if isinstance(anomaly_blueprint, dict):
+        return json.dumps(anomaly_blueprint, separators=(",", ":"), ensure_ascii=True) if anomaly_blueprint else "{}"
+    if isinstance(anomaly_blueprint, str) and anomaly_blueprint.strip():
+        return anomaly_blueprint.strip()
+    if quest_notes and ("anomaly_bp:" in str(quest_notes) or "anomaly_blueprint:" in str(quest_notes)):
+        try:
+            from mechanics.world.anomaly_engine import parse_blueprint_from_notes
+            parsed = parse_blueprint_from_notes(str(quest_notes))
+            if isinstance(parsed, dict) and parsed:
+                return json.dumps(parsed, separators=(",", ":"), ensure_ascii=True)
+        except Exception:
+            pass
+    return None
+
+
 def upsert_quest(session_id: int, quest_id: str, quest_type: str, title: str,
                  objective: str, progress: str = "", current_clues: str = "",
                  status: str = "Active", reward_xp: int = 100, reward_gold: int = 25,
@@ -50,9 +120,18 @@ def upsert_quest(session_id: int, quest_id: str, quest_type: str, title: str,
                  required_item_count: int = None, strikes: int = None,
                  max_strikes: int = None, deadline_day: int = None,
                  deadline_minute: int = None, resolution_approach: str = None,
-                 engine: str = None, dossier_stage: str = None) -> dict:
+                 engine: str = None, dossier_stage: str = None,
+                 anomaly_blueprint: dict | str | None = None) -> dict:
     now = time.time()
+    is_story_flag = int(
+        bool(int(is_story_quest or 0) == 1 or str(quest_type or "").strip().lower() in ("story quest", "main quest"))
+    )
+    if is_story_flag:
+        is_story_quest = 1
+        deadline_day = None
+        deadline_minute = None
     sub_obj_str = _clean_sub_objectives_for_storage(sub_objectives)
+    bp_col_str = _serialize_quest_anomaly_blueprint_col(anomaly_blueprint, quest_notes)
     if blueprint_id is None:
         try:
             from mechanics.narrative.blueprints import get_blueprint_for_archetype
@@ -80,11 +159,12 @@ def upsert_quest(session_id: int, quest_id: str, quest_type: str, title: str,
                    required_item_count=COALESCE(?, required_item_count),
                    strikes=COALESCE(?, strikes),
                    max_strikes=COALESCE(?, max_strikes),
-                   deadline_day=COALESCE(?, deadline_day),
-                   deadline_minute=COALESCE(?, deadline_minute),
+                   deadline_day=CASE WHEN ? = 1 THEN NULL ELSE COALESCE(?, deadline_day) END,
+                   deadline_minute=CASE WHEN ? = 1 THEN NULL ELSE COALESCE(?, deadline_minute) END,
                    resolution_approach=COALESCE(?, resolution_approach),
                    engine=COALESCE(?, engine),
                    dossier_stage=COALESCE(?, dossier_stage),
+                   anomaly_blueprint_json=COALESCE(?, anomaly_blueprint_json),
                    updated_at=?
                    WHERE id=?""",
                 (quest_type or "Main Quest", title, objective, progress or "", current_clues or "",
@@ -92,8 +172,11 @@ def upsert_quest(session_id: int, quest_id: str, quest_type: str, title: str,
                  is_story_quest, clues_required,
                  quest_notes, sub_obj_str, sub_obj_str,
                  blueprint_id, client_npc, client_location, required_item, required_item_count,
-                 strikes, max_strikes, deadline_day, deadline_minute, resolution_approach,
-                 engine, dossier_stage,
+                 strikes, max_strikes,
+                 is_story_flag, deadline_day,
+                 is_story_flag, deadline_minute,
+                 resolution_approach,
+                 engine, dossier_stage, bp_col_str,
                  now, existing["id"])
             )
         else:
@@ -104,8 +187,9 @@ def upsert_quest(session_id: int, quest_id: str, quest_type: str, title: str,
                     is_story_quest, clues_required, reward_claimed, quest_notes,
                     sub_objectives_json, blueprint_id, client_npc, client_location,
                     required_item, required_item_count, strikes, max_strikes,
-                    deadline_day, deadline_minute, resolution_approach, engine, dossier_stage, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    deadline_day, deadline_minute, resolution_approach, engine, dossier_stage,
+                    anomaly_blueprint_json, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (session_id, quest_id, quest_type or "Main Quest", title, objective, progress or "",
                  current_clues or "", status or "Active", reward_xp, reward_gold, reward_stat_points,
                  reward_item or "", is_story_quest, clues_required, quest_notes or "",
@@ -113,12 +197,19 @@ def upsert_quest(session_id: int, quest_id: str, quest_type: str, title: str,
                  required_item or "", int(required_item_count if required_item_count is not None else 1),
                  int(strikes or 0), int(max_strikes if max_strikes is not None else 2),
                  deadline_day, deadline_minute, resolution_approach or "",
-                 engine or "", dossier_stage or "legacy", now, now)
+                 engine or "", dossier_stage or "legacy",
+                 bp_col_str or "{}", now, now)
             )
 
     return get_quest_by_id(session_id, quest_id)
 
-def _hydrate_quest_waypoint_for_enrichment(session_id: int, wr: Any) -> dict:
+def _hydrate_quest_waypoint_for_enrichment(
+    session_id: int,
+    wr: Any,
+    session: Optional[dict] = None,
+    session_time: Optional[tuple] = None,
+    contacts_cache: Optional[dict] = None,
+) -> dict:
     w_dict = dict(wr)
     try:
         appr_raw = w_dict.get("approaches_json") or "[]"
@@ -131,7 +222,13 @@ def _hydrate_quest_waypoint_for_enrichment(session_id: int, wr: Any) -> dict:
     if w_dict.get("follow_npc_schedule") and w_dict.get("target_npc"):
         try:
             from mechanics.world.waypoints.matching import resolve_effective_waypoint_location
-            eff_loc = resolve_effective_waypoint_location(session_id, w_dict)
+            eff_loc = resolve_effective_waypoint_location(
+                session_id,
+                w_dict,
+                session=session,
+                session_time=session_time,
+                contacts_cache=contacts_cache,
+            )
             if eff_loc:
                 norm_eff = _normalize_loc_arrow(eff_loc)
                 w_dict["live_scheduled_location"] = norm_eff
@@ -157,6 +254,11 @@ def _enrich_quest_dict(
     d["resolution_approach"] = str(d.get("resolution_approach") or "")
     d["engine"] = str(d.get("engine") or "")
     d["dossier_stage"] = str(d.get("dossier_stage") or "legacy")
+    try:
+        from mechanics.world.anomaly_engine import parse_blueprint_from_notes
+        d["anomaly_blueprint"] = parse_blueprint_from_notes(d)
+    except Exception:
+        d["anomaly_blueprint"] = None
     if d.get("sub_objectives_json"):
         try:
             raw_sos = json.loads(d["sub_objectives_json"])
@@ -195,7 +297,17 @@ def _enrich_quest_dict(
     else:
         d["dossier"] = preloaded_dossier if dossier_preloaded else None
 
+    d["has_structured_objectives"] = False
+    d["main_objective"] = None
+    d["optional_objectives"] = []
+
     if d["sub_objectives"]:
+        is_structured = any(
+            isinstance(so, dict) and ("is_optional" in so or _safe_int_db(so.get("id"), -1) == 0)
+            for so in d["sub_objectives"]
+        )
+        d["has_structured_objectives"] = is_structured
+
         for idx, so in enumerate(d["sub_objectives"]):
             if not isinstance(so, dict):
                 continue
@@ -205,33 +317,77 @@ def _enrich_quest_dict(
                 if w.get("sub_obj_id") is not None and _safe_int_db(w.get("sub_obj_id"), -1) == _safe_int_db(so_id, -2)
             ]
             if so_wps:
+                is_disc = bool(so.get("is_discovered", True))
+                so_stat = str(so.get("status") or ("completed" if so.get("completed") else "active")).lower()
                 active_wp = next((w for w in so_wps if w.get("status") == "active"), None)
-                if not active_wp and not so.get("completed"):
+                if not active_wp and not so.get("completed") and is_disc and so_stat not in ("failed", "bypassed", "locked_out"):
                     active_wp = next((w for w in so_wps if w.get("status") == "locked"), so_wps[0])
                 elif not active_wp and so.get("completed"):
                     active_wp = so_wps[-1]
                 so["waypoints"] = so_wps
-                so["active_waypoint"] = active_wp
+                so["active_waypoint"] = active_wp if (is_disc and so_stat not in ("failed", "bypassed", "locked_out")) else None
                 so["target_location"] = (active_wp.get("target_location") or "") if active_wp else _normalize_loc_arrow(so.get("target_location") or "")
                 so["target_npc"] = (active_wp.get("target_npc") or "") if active_wp else (so.get("target_npc") or "")
                 so["stage_label"] = (active_wp.get("stage_label") or "") if active_wp else ""
                 so["stage_index"] = int(active_wp.get("stage_index", 1) or 1) if active_wp else 1
                 so["total_stages"] = len(so_wps)
-                so["completed_stages"] = sum(1 for w in so_wps if w.get("status") == "completed")
+                so["completed_stages"] = sum(1 for w in so_wps if w.get("status") in ("completed", "bypassed"))
+                so["stages"] = [
+                    {
+                        "stage_index": int(w.get("stage_index", i + 1) or (i + 1)),
+                        "stage_label": w.get("stage_label", ""),
+                        "text": w.get("stage_label", ""),
+                        "target_location": w.get("target_location", ""),
+                        "target_npc": w.get("target_npc", ""),
+                        "completion_trigger": w.get("completion_trigger", "arrival"),
+                        "status": w.get("status", "locked"),
+                        "completed": w.get("status") in ("completed", "bypassed"),
+                    }
+                    for i, w in enumerate(so_wps)
+                ]
             elif so.get("target_location"):
                 so["target_location"] = _normalize_loc_arrow(so["target_location"])
 
-        all_so_done = all(isinstance(so, dict) and bool(so.get("completed")) for so in d["sub_objectives"])
+        all_so_done = is_quest_main_objectives_complete(d["sub_objectives"])
         if all_so_done and d.get("status") == "Active":
             d["climax_ready"] = True
 
-        active_so_wps = [
-            so["active_waypoint"]
+        if is_structured:
+            d["main_objective"] = next(
+                (so for so in d["sub_objectives"] if isinstance(so, dict) and not bool(so.get("is_optional"))),
+                None,
+            )
+            d["optional_objectives"] = [
+                so
+                for so in d["sub_objectives"]
+                if isinstance(so, dict) and bool(so.get("is_optional")) and bool(so.get("is_discovered", True))
+            ]
+            if d["main_objective"] and d["main_objective"].get("stages"):
+                d["stages"] = d["main_objective"]["stages"]
+
+        eligible_sos = [
+            so
             for so in d["sub_objectives"]
-            if isinstance(so, dict) and not so.get("completed") and so.get("active_waypoint")
+            if isinstance(so, dict)
+            and not bool(so.get("completed"))
+            and bool(so.get("is_discovered", True))
+            and str(so.get("status") or "active").lower() not in ("completed", "failed", "bypassed", "locked_out")
+            and so.get("active_waypoint")
         ]
+        # Prioritize Main Objective (`is_optional=False` / `id=0`) in HUD compass
+        eligible_sos.sort(key=lambda s: (1 if bool(s.get("is_optional")) else 0, _safe_int_db(s.get("id"), 99)))
+        active_so_wps = [so["active_waypoint"] for so in eligible_sos]
         if all_wps:
-            d["waypoints"] = all_wps
+            d["waypoints"] = [
+                w
+                for w in all_wps
+                if not any(
+                    isinstance(s, dict)
+                    and _safe_int_db(s.get("id"), -99) == _safe_int_db(w.get("sub_obj_id"), -98)
+                    and not bool(s.get("is_discovered", True))
+                    for s in d["sub_objectives"]
+                )
+            ]
             d["active_waypoints"] = active_so_wps
             if active_so_wps:
                 d["active_waypoint"] = active_so_wps[0]
@@ -403,15 +559,66 @@ def update_quest_status(session_id: int, quest_id: str, status: str):
         )
 
 def append_quest_note_flag_in_db(session_id: int, quest_id: str, flag_key: str, flag_val: str = "1") -> str:
-    """Appends or updates a flag in the quest's quest_notes field in SQLite."""
+    """Appends or updates a flag in the quest's quest_notes field in SQLite (and syncs `anomaly_blueprint_json` on reveal)."""
     from mechanics.narrative.blueprints import append_quest_note_flag
     now = time.time()
     with get_conn() as conn:
-        row = conn.execute("SELECT quest_notes FROM quests WHERE session_id=? AND quest_id=?", (session_id, quest_id)).fetchone()
+        row = conn.execute(
+            "SELECT quest_notes, anomaly_blueprint_json FROM quests WHERE session_id=? AND quest_id=?",
+            (session_id, quest_id),
+        ).fetchone()
         cur_notes = row["quest_notes"] if row else ""
         new_notes = append_quest_note_flag(cur_notes, flag_key, flag_val)
-        conn.execute("UPDATE quests SET quest_notes=?, updated_at=? WHERE session_id=? AND quest_id=?", (new_notes, now, session_id, quest_id))
+        bp_json_upd = None
+        if row and flag_key == "dossier_revealed":
+            raw_bp_j = row["anomaly_blueprint_json"] or ""
+            if raw_bp_j.strip() not in ("", "{}"):
+                try:
+                    bp_d = json.loads(raw_bp_j)
+                    if isinstance(bp_d, dict) and bp_d:
+                        rev_bool = str(flag_val).strip().lower() in ("1", "true", "yes")
+                        bp_d["dossier_revealed"] = rev_bool
+                        if rev_bool and isinstance(bp_d.get("disguise_state"), dict):
+                            bp_d["disguise_state"]["is_disguised"] = False
+                        bp_json_upd = json.dumps(bp_d, separators=(",", ":"), ensure_ascii=True)
+                except Exception:
+                    bp_json_upd = None
+        if bp_json_upd is not None:
+            conn.execute(
+                "UPDATE quests SET quest_notes=?, anomaly_blueprint_json=?, updated_at=? WHERE session_id=? AND quest_id=?",
+                (new_notes, bp_json_upd, now, session_id, quest_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE quests SET quest_notes=?, updated_at=? WHERE session_id=? AND quest_id=?",
+                (new_notes, now, session_id, quest_id),
+            )
         return new_notes
+
+
+def update_quest_anomaly_blueprint(
+    session_id: int,
+    quest_id: str,
+    blueprint: dict,
+    quest_notes: str | None = None,
+) -> bool:
+    """Persists an updated `AnomalyBlueprint` into `quests.anomaly_blueprint_json` (and optional `quest_notes`)."""
+    if not session_id or not quest_id or not isinstance(blueprint, dict):
+        return False
+    now = time.time()
+    bp_json_str = json.dumps(blueprint, separators=(",", ":"), ensure_ascii=True)
+    with get_conn() as conn:
+        if quest_notes is not None:
+            cur = conn.execute(
+                "UPDATE quests SET anomaly_blueprint_json=?, quest_notes=?, updated_at=? WHERE session_id=? AND quest_id=?",
+                (bp_json_str, quest_notes, now, session_id, quest_id),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE quests SET anomaly_blueprint_json=?, updated_at=? WHERE session_id=? AND quest_id=?",
+                (bp_json_str, now, session_id, quest_id),
+            )
+        return cur.rowcount > 0
 
 def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]) -> dict:
     quest = get_quest_by_id(session_id, quest_id)
@@ -852,7 +1059,7 @@ def apply_caseboard_breakthrough_to_quests(
                     if not isinstance(so, dict) or so.get("completed"):
                         continue
                     so_id = so.get("id")
-                    if not so_id:
+                    if so_id is None:
                         continue
                     so_wp = get_active_waypoint(session_id, qid, so_id)
                     so_all_wps = get_quest_waypoints(session_id, qid, so_id) or []
@@ -988,9 +1195,21 @@ def _hydrate_waypoint_row(row) -> dict | None:
     return d
 
 def get_active_waypoint(session_id: int, quest_id: str, sub_obj_id: int | None = None) -> dict | None:
-    """Returns the first 'active' waypoint for this quest/sub-objective, or None."""
+    """Returns the first 'active' waypoint for this quest/sub-objective, or None.
+    When `sub_obj_id is None` and no legacy `sub_obj_id IS NULL` rows exist, falls back to
+    `sub_obj_id = 0` (the Main Objective track of structured `1 Main + 1-3 Optionals` quests).
+    """
     with get_conn() as conn:
         if sub_obj_id is None:
+            has_legacy = conn.execute(
+                "SELECT 1 FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id IS NULL LIMIT 1",
+                (session_id, quest_id),
+            ).fetchone()
+            eff_sub_id = None if has_legacy else 0
+        else:
+            eff_sub_id = sub_obj_id
+
+        if eff_sub_id is None:
             row = conn.execute(
                 """SELECT * FROM quest_waypoints
                    WHERE session_id=? AND quest_id=? AND sub_obj_id IS NULL AND status='active'
@@ -1002,12 +1221,15 @@ def get_active_waypoint(session_id: int, quest_id: str, sub_obj_id: int | None =
                 """SELECT * FROM quest_waypoints
                    WHERE session_id=? AND quest_id=? AND sub_obj_id=? AND status='active'
                    ORDER BY stage_index ASC LIMIT 1""",
-                (session_id, quest_id, sub_obj_id)
+                (session_id, quest_id, eff_sub_id)
             ).fetchone()
         return _hydrate_waypoint_row(row)
 
 def get_quest_waypoints(session_id: int, quest_id: str, sub_obj_id: int | None = None) -> list[dict]:
-    """Returns all waypoints for this quest/sub-objective ordered by stage_index ASC."""
+    """Returns all waypoints for this quest/sub-objective ordered by stage_index ASC.
+    When `sub_obj_id is None` and no legacy `sub_obj_id IS NULL` rows exist, falls back to
+    `sub_obj_id = 0` (the Main Objective track of structured `1 Main + 1-3 Optionals` quests).
+    """
     with get_conn() as conn:
         if sub_obj_id is None:
             rows = conn.execute(
@@ -1016,6 +1238,13 @@ def get_quest_waypoints(session_id: int, quest_id: str, sub_obj_id: int | None =
                    ORDER BY stage_index ASC""",
                 (session_id, quest_id)
             ).fetchall()
+            if not rows:
+                rows = conn.execute(
+                    """SELECT * FROM quest_waypoints
+                       WHERE session_id=? AND quest_id=? AND sub_obj_id=0
+                       ORDER BY stage_index ASC""",
+                    (session_id, quest_id)
+                ).fetchall()
         else:
             rows = conn.execute(
                 """SELECT * FROM quest_waypoints
@@ -1028,10 +1257,21 @@ def get_quest_waypoints(session_id: int, quest_id: str, sub_obj_id: int | None =
 def advance_waypoint(session_id: int, quest_id: str, stage_index: int, sub_obj_id: int | None = None) -> dict | None:
     """Marks the given stage as 'completed', unlocks the next 'locked' stage to 'active'.
     Returns the newly-unlocked waypoint dict, or None if no more stages remain (quest chain done).
+    When `sub_obj_id is None` and no legacy `sub_obj_id IS NULL` rows exist, falls back to
+    `sub_obj_id = 0` (the Main Objective track of structured `1 Main + 1-3 Optionals` quests).
     """
     now = time.time()
     with get_conn() as conn:
         if sub_obj_id is None:
+            has_legacy = conn.execute(
+                "SELECT 1 FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id IS NULL LIMIT 1",
+                (session_id, quest_id),
+            ).fetchone()
+            eff_sub_id = None if has_legacy else 0
+        else:
+            eff_sub_id = sub_obj_id
+
+        if eff_sub_id is None:
             conn.execute(
                 "UPDATE quest_waypoints SET status='completed', updated_at=? WHERE session_id=? AND quest_id=? AND sub_obj_id IS NULL AND stage_index=?",
                 (now, session_id, quest_id, stage_index)
@@ -1065,18 +1305,34 @@ def advance_waypoint(session_id: int, quest_id: str, stage_index: int, sub_obj_i
         else:
             conn.execute(
                 "UPDATE quest_waypoints SET status='completed', updated_at=? WHERE session_id=? AND quest_id=? AND sub_obj_id=? AND stage_index=?",
-                (now, session_id, quest_id, sub_obj_id, stage_index)
+                (now, session_id, quest_id, eff_sub_id, stage_index)
             )
             next_row = conn.execute(
                 """SELECT * FROM quest_waypoints
                    WHERE session_id=? AND quest_id=? AND sub_obj_id=? AND status='locked'
                    ORDER BY stage_index ASC LIMIT 1""",
-                (session_id, quest_id, sub_obj_id)
+                (session_id, quest_id, eff_sub_id)
             ).fetchone()
             if next_row:
                 conn.execute(
                     "UPDATE quest_waypoints SET status='active', updated_at=? WHERE session_id=? AND quest_id=? AND sub_obj_id=? AND stage_index=?",
-                    (now, session_id, quest_id, sub_obj_id, next_row["stage_index"])
+                    (now, session_id, quest_id, eff_sub_id, next_row["stage_index"])
+                )
+            tot_row = conn.execute(
+                "SELECT COUNT(*) as c FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id=?",
+                (session_id, quest_id, eff_sub_id)
+            ).fetchone()
+            don_row = conn.execute(
+                "SELECT COUNT(*) as c FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id=? AND status='completed'",
+                (session_id, quest_id, eff_sub_id)
+            ).fetchone()
+            tot = tot_row["c"] if tot_row else 0
+            don = don_row["c"] if don_row else 0
+            if tot > 0:
+                prefix_lbl = "Main Objective" if eff_sub_id == 0 else f"Optional #{eff_sub_id}"
+                conn.execute(
+                    "UPDATE quests SET progress=?, updated_at=? WHERE session_id=? AND quest_id=?",
+                    (f"{don}/{tot} {prefix_lbl} Stages", now, session_id, quest_id)
                 )
         return dict(next_row) if next_row else None
 
@@ -1087,23 +1343,23 @@ def unlock_climax_waypoint(
     climax_loc: str = "",
     target_npc: str = "",
 ) -> int:
-    """Promotes a 'locked' climax stage in quest_waypoints to 'active' when climax_spec['is_unlocked'] becomes True."""
+    """Promotes a 'locked' climax/Main stage in quest_waypoints to 'active' when climax_spec['is_unlocked'] becomes True."""
     now = time.time()
     with get_conn() as conn:
         row = None
         if climax_loc:
             row = conn.execute(
                 """SELECT id, stage_index FROM quest_waypoints
-                   WHERE session_id=? AND quest_id=? AND sub_obj_id IS NULL AND status='locked'
+                   WHERE session_id=? AND quest_id=? AND (sub_obj_id IS NULL OR sub_obj_id=0) AND status='locked'
                      AND (target_location=? OR ? LIKE '%' || target_location || '%')
-                   ORDER BY stage_index ASC LIMIT 1""",
+                   ORDER BY COALESCE(sub_obj_id, 0) ASC, stage_index ASC LIMIT 1""",
                 (session_id, quest_id, climax_loc, climax_loc),
             ).fetchone()
         if not row:
             row = conn.execute(
                 """SELECT id, stage_index FROM quest_waypoints
-                   WHERE session_id=? AND quest_id=? AND sub_obj_id IS NULL AND status='locked'
-                   ORDER BY stage_index ASC LIMIT 1""",
+                   WHERE session_id=? AND quest_id=? AND (sub_obj_id IS NULL OR sub_obj_id=0) AND status='locked'
+                   ORDER BY COALESCE(sub_obj_id, 0) ASC, stage_index ASC LIMIT 1""",
                 (session_id, quest_id),
             ).fetchone()
         if row:
@@ -1195,7 +1451,16 @@ def get_all_session_active_waypoints(session_id: int) -> list[dict]:
                 try:
                     sos = json.loads(so_json) if isinstance(so_json, str) else so_json
                     if isinstance(sos, list):
-                        if any(isinstance(s, dict) and int(s.get("id", -1)) == int(sub_id) and s.get("completed") for s in sos):
+                        if any(
+                            isinstance(s, dict)
+                            and int(s.get("id", -1)) == int(sub_id)
+                            and (
+                                bool(s.get("completed"))
+                                or not bool(s.get("is_discovered", True))
+                                or str(s.get("status") or "active").lower() in ("completed", "failed", "bypassed", "locked_out")
+                            )
+                            for s in sos
+                        ):
                             continue
                 except Exception:
                     pass
@@ -1203,33 +1468,299 @@ def get_all_session_active_waypoints(session_id: int) -> list[dict]:
         return result
 
 def mark_sub_objective_completed_in_quest(session_id: int, quest_id: str, sub_obj_id: int):
-    """Directly marks a Story Quest sub-objective as completed=True in sub_objectives_json.
+    """Directly marks a quest sub-objective as completed=True in sub_objectives_json.
     Called by the waypoint engine when all waypoint stages for that sub-obj are done.
-    This is deterministic Python — no LLM JSON required.
+    Preserves hidden Optionals and only auto-unlocks `sub_obj_id + 1` on legacy sequential quests.
     """
-    quest = get_quest_by_id(session_id, quest_id)
-    if not quest:
-        return
-    sub_objs = quest.get("sub_objectives") or []
-    changed = False
-    for so in sub_objs:
-        if isinstance(so, dict) and int(so.get("id", -1)) == int(sub_obj_id):
-            if not so.get("completed"):
-                so["completed"] = True
-                changed = True
-            break
-    if changed:
-        now = time.time()
-        with get_conn() as conn:
+    now = time.time()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT sub_objectives_json FROM quests WHERE session_id=? AND quest_id=?",
+            (session_id, quest_id),
+        ).fetchone()
+        if not row:
+            return
+        try:
+            sub_objs = json.loads(row["sub_objectives_json"] or "[]")
+        except Exception:
+            sub_objs = []
+        if not isinstance(sub_objs, list):
+            return
+        is_structured = any(
+            isinstance(so, dict) and ("is_optional" in so or _safe_int_db(so.get("id"), -1) == 0)
+            for so in sub_objs
+        )
+        changed = False
+        for so in sub_objs:
+            if isinstance(so, dict) and int(so.get("id", -1)) == int(sub_obj_id):
+                if not so.get("completed") or str(so.get("status") or "") != "completed":
+                    so["completed"] = True
+                    so["status"] = "completed"
+                    changed = True
+                break
+        if changed:
             conn.execute(
                 "UPDATE quests SET sub_objectives_json=?, updated_at=? WHERE session_id=? AND quest_id=?",
-                (_clean_sub_objectives_for_storage(sub_objs), now, session_id, quest_id)
+                (_clean_sub_objectives_for_storage(sub_objs), now, session_id, quest_id),
             )
-            # Unlock stage 1 of the next sub-objective (sub_obj_id + 1)
-            conn.execute(
-                "UPDATE quest_waypoints SET status='active', updated_at=? WHERE session_id=? AND quest_id=? AND sub_obj_id=? AND stage_index=1 AND status='locked'",
-                (now, session_id, quest_id, int(sub_obj_id) + 1)
+            if not is_structured:
+                conn.execute(
+                    "UPDATE quest_waypoints SET status='active', updated_at=? WHERE session_id=? AND quest_id=? AND sub_obj_id=? AND stage_index=1 AND status='locked'",
+                    (now, session_id, quest_id, int(sub_obj_id) + 1),
+                )
+
+
+def sync_quest_projection_from_dossier(
+    session_id: int,
+    quest_id: str,
+    dossier: Optional[dict] = None,
+    conn: Optional[sqlite3.Connection] = None,
+    is_rollback: bool = False,
+) -> list[dict]:
+    """Deterministically projects `1 Main Objective + 1-3 Optionals` from `quest_dossiers`
+    into `quests.sub_objectives_json` and `quest_waypoints` inside a single SQLite transaction.
+    Used both at compilation/turn resolution AND during atomic `/rollback`.
+    """
+    now = time.time()
+
+    def _run(c: sqlite3.Connection) -> list[dict]:
+        eff_dossier = dossier or get_quest_dossier(session_id, quest_id, conn=c)
+        if not eff_dossier or str(eff_dossier.get("status_stage") or "pitch") == "pitch":
+            return []
+
+        climax_spec = dict(eff_dossier.get("climax_spec") or {})
+        leads_graph = [dict(ld) for ld in (eff_dossier.get("leads_graph") or []) if isinstance(ld, dict)]
+        main_stages = [dict(st) for st in (climax_spec.get("main_stages") or []) if isinstance(st, dict)]
+
+        if not main_stages and not climax_spec.get("has_structured_model"):
+            # Pre-overhaul dossier format without `main_stages` — leave untouched
+            return []
+
+        q_row = c.execute(
+            "SELECT objective, status FROM quests WHERE session_id=? AND quest_id=?",
+            (session_id, quest_id),
+        ).fetchone()
+        if not q_row:
+            return []
+
+        alt_completed = any(
+            str(ld.get("role") or "").lower() == "alternative"
+            and str(ld.get("status") or "").lower() == "completed"
+            for ld in leads_graph
+        )
+        climax_done = bool(
+            climax_spec.get("completed")
+            or str(climax_spec.get("status") or "").lower() == "completed"
+            or alt_completed
+            or str(q_row["status"] or "") == "Completed"
+        )
+
+        # Remove any stale un-indexed (`sub_obj_id IS NULL`) rows on structured quests
+        c.execute(
+            "DELETE FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id IS NULL",
+            (session_id, quest_id),
+        )
+
+        # 1. Materialize Main Objective stages (`sub_obj_id = 0`)
+        if not main_stages:
+            main_stages = [
+                {
+                    "stage_index": 1,
+                    "stage_label": str(climax_spec.get("label") or q_row["objective"] or "Complete Main Objective"),
+                    "target_location": _normalize_loc_arrow(str(climax_spec.get("target_location") or "")),
+                    "target_npc": str(climax_spec.get("target_npc") or ""),
+                    "completion_trigger": str(climax_spec.get("completion_trigger") or "action"),
+                    "approaches": list(climax_spec.get("approaches") or []),
+                    "status": "completed" if climax_done else ("active" if climax_spec.get("is_unlocked", True) else "locked"),
+                }
+            ]
+
+        gate_kind = str(climax_spec.get("gate_type") or climax_spec.get("gate_mode") or "open").lower()
+        secret_gate_unlocked = bool(gate_kind == "secret" and climax_spec.get("is_unlocked", False))
+        active_assigned = False
+        resolved_main_stages: list[dict] = []
+        for idx_zero, st in enumerate(main_stages):
+            st_idx = int(st.get("stage_index") or (idx_zero + 1))
+            raw_st_status = str(st.get("status") or "").lower()
+            if climax_done or raw_st_status in ("completed", "bypassed"):
+                eff_st_status = "completed"
+            elif secret_gate_unlocked and st_idx == len(main_stages):
+                eff_st_status = "active"
+            elif not active_assigned:
+                active_assigned = True
+                is_secret_gate_stage = bool(
+                    gate_kind == "secret"
+                    and not bool(climax_spec.get("is_unlocked", False))
+                    and (st_idx == len(main_stages) or bool(climax_spec.get("secret_lair_locked")))
+                )
+                eff_st_status = "locked" if is_secret_gate_stage else "active"
+            else:
+                eff_st_status = "locked"
+
+            st_loc = _normalize_loc_arrow(str(st.get("target_location") or climax_spec.get("target_location") or ""))
+            st_npc = str(st.get("target_npc") or (climax_spec.get("target_npc") if st_idx == len(main_stages) else "") or "")
+            st_label = str(st.get("stage_label") or st.get("label") or climax_spec.get("label") or f"Stage {st_idx}")
+            st_trig = str(st.get("completion_trigger") or "action")
+            st_appr = json.dumps(list(st.get("approaches") or climax_spec.get("approaches") or []))
+            follow_sched = int(bool(st.get("follow_npc_schedule", bool(st_npc))))
+
+            existing_wp = c.execute(
+                "SELECT id, status FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id=0 AND stage_index=?",
+                (session_id, quest_id, st_idx),
+            ).fetchone()
+            if existing_wp:
+                if not is_rollback and existing_wp["status"] in ("completed", "bypassed"):
+                    eff_st_status = existing_wp["status"]
+                c.execute(
+                    """UPDATE quest_waypoints
+                       SET stage_label=?, target_location=?, target_npc=?, completion_trigger=?,
+                           status=?, follow_npc_schedule=?, approaches_json=?, updated_at=?
+                       WHERE id=?""",
+                    (st_label, st_loc, st_npc, st_trig, eff_st_status, follow_sched, st_appr, now, existing_wp["id"]),
+                )
+            else:
+                c.execute(
+                    """INSERT INTO quest_waypoints
+                       (session_id, quest_id, sub_obj_id, stage_index, stage_label, target_location,
+                        target_npc, completion_trigger, resource_target, resource_collected, status,
+                        follow_npc_schedule, valid_time_phases_json, approaches_json, created_at, updated_at)
+                       VALUES (?, ?, 0, ?, ?, ?, ?, ?, 0, 0, ?, ?, '[]', ?, ?, ?)""",
+                    (session_id, quest_id, st_idx, st_label, st_loc, st_npc, st_trig, eff_st_status, follow_sched, st_appr, now, now),
+                )
+            resolved_main_stages.append(
+                {
+                    "stage_index": st_idx,
+                    "target_location": st_loc,
+                    "target_npc": st_npc,
+                    "status": eff_st_status,
+                }
             )
+
+        c.execute(
+            "DELETE FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id=0 AND stage_index > ?",
+            (session_id, quest_id, len(main_stages)),
+        )
+
+        all_main_stages_done = bool(resolved_main_stages) and all(s["status"] == "completed" for s in resolved_main_stages)
+        main_done_final = bool(climax_done or all_main_stages_done)
+        cur_main_stage = next((s for s in resolved_main_stages if s["status"] != "completed"), resolved_main_stages[-1])
+
+        projected_sos: list[dict] = [
+            {
+                "id": 0,
+                "text": str(climax_spec.get("main_objective_text") or climax_spec.get("label") or q_row["objective"] or ""),
+                "is_optional": False,
+                "is_main": True,
+                "role": "main",
+                "is_discovered": True,
+                "status": "completed" if main_done_final else "active",
+                "completed": main_done_final,
+                "target_location": cur_main_stage["target_location"],
+                "target_npc": cur_main_stage["target_npc"],
+            }
+        ]
+
+        # 2. Materialize Optional Objectives (`sub_obj_id = 1..3`, 1 stage each)
+        valid_opt_ids: list[int] = []
+        for idx_opt, ld in enumerate(leads_graph, start=1):
+            opt_sub_id = int(ld.get("sub_obj_id") or idx_opt)
+            valid_opt_ids.append(opt_sub_id)
+            opt_role = str(ld.get("role") or "aid").lower()
+            is_disc = bool(ld.get("is_discovered", True))
+            ld_status = str(ld.get("status") or "active").lower()
+            if ld_status not in ("active", "completed", "failed", "bypassed", "locked_out"):
+                ld_status = "active"
+            opt_loc = _normalize_loc_arrow(str(ld.get("target_location") or ""))
+            opt_npc = str(ld.get("target_npc") or "")
+            opt_label = str(ld.get("label") or f"Optional Lead {idx_opt}")
+            opt_appr = json.dumps(list(ld.get("approaches") or []))
+            opt_follow = int(bool(ld.get("follow_npc_schedule", bool(opt_npc))))
+
+            if ld_status == "completed":
+                wp_status = "completed"
+            elif not is_disc or ld_status in ("failed", "bypassed", "locked_out"):
+                wp_status = "locked"
+            else:
+                wp_status = "active"
+
+            existing_opt_wp = c.execute(
+                "SELECT id FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id=? AND stage_index=1",
+                (session_id, quest_id, opt_sub_id),
+            ).fetchone()
+            if existing_opt_wp:
+                c.execute(
+                    """UPDATE quest_waypoints
+                       SET stage_label=?, target_location=?, target_npc=?, completion_trigger=?,
+                           status=?, follow_npc_schedule=?, approaches_json=?, updated_at=?
+                       WHERE id=?""",
+                    (opt_label, opt_loc, opt_npc, str(ld.get("completion_trigger") or "action"), wp_status, opt_follow, opt_appr, now, existing_opt_wp["id"]),
+                )
+            else:
+                c.execute(
+                    """INSERT INTO quest_waypoints
+                       (session_id, quest_id, sub_obj_id, stage_index, stage_label, target_location,
+                        target_npc, completion_trigger, resource_target, resource_collected, status,
+                        follow_npc_schedule, valid_time_phases_json, approaches_json, created_at, updated_at)
+                       VALUES (?, ?, ?, 1, ?, ?, ?, ?, 0, 0, ?, ?, '[]', ?, ?, ?)""",
+                    (session_id, quest_id, opt_sub_id, opt_label, opt_loc, opt_npc, str(ld.get("completion_trigger") or "action"), wp_status, opt_follow, opt_appr, now, now),
+                )
+
+            projected_sos.append(
+                {
+                    "id": opt_sub_id,
+                    "optional_id": str(ld.get("optional_id") or ld.get("lead_id") or f"opt_{idx_opt}"),
+                    "lead_id": str(ld.get("lead_id") or f"opt_{idx_opt}"),
+                    "text": opt_label,
+                    "is_optional": True,
+                    "is_main": False,
+                    "role": opt_role,
+                    "badge": str(ld.get("badge") or f"Optional — {opt_role.title()}"),
+                    "stakes_hint": str(ld.get("stakes_hint") or ""),
+                    "is_discovered": is_disc,
+                    "unlock_trigger": str(ld.get("unlock_trigger") or "upfront"),
+                    "status": ld_status,
+                    "completed": ld_status == "completed",
+                    "target_location": opt_loc,
+                    "target_npc": opt_npc,
+                    "field_bonus": dict(ld.get("field_bonus") or {}),
+                    "bonus_claimed": bool(ld.get("bonus_claimed", False)),
+                    "rival_faction_slug": str(ld.get("rival_faction_slug") or ""),
+                    "opposing_faction_slug": str(ld.get("opposing_faction_slug") or ""),
+                    "implicated_ally_npc": str(ld.get("implicated_ally_npc") or ""),
+                    "lockout_reason": str(ld.get("lockout_reason") or ""),
+                }
+            )
+
+        if valid_opt_ids:
+            q_marks = ",".join("?" * len(valid_opt_ids))
+            c.execute(
+                f"DELETE FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id > 0 AND sub_obj_id NOT IN ({q_marks})",
+                [session_id, quest_id, *valid_opt_ids],
+            )
+        else:
+            c.execute(
+                "DELETE FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id > 0",
+                (session_id, quest_id),
+            )
+        c.execute(
+            "DELETE FROM quest_waypoints WHERE session_id=? AND quest_id=? AND (sub_obj_id IS NULL OR (sub_obj_id > 0 AND stage_index > 1))",
+            (session_id, quest_id),
+        )
+
+        c.execute(
+            """UPDATE quests
+               SET sub_objectives_json=?,
+                   dossier_stage=CASE WHEN dossier_stage IN ('legacy', 'pitch', '') OR dossier_stage IS NULL THEN 'compiled' ELSE dossier_stage END,
+                   updated_at=?
+               WHERE session_id=? AND quest_id=?""",
+            (_clean_sub_objectives_for_storage(projected_sos), now, session_id, quest_id),
+        )
+        return projected_sos
+
+    if conn is not None:
+        return _run(conn)
+    with get_conn() as c:
+        return _run(c)
 
 
 # -----------------------------------------------------------------------------

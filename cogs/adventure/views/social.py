@@ -1,3 +1,5 @@
+from __future__ import annotations
+from .base import SessionRestrictedView
 from .constants import *
 import asyncio
 import json
@@ -40,20 +42,37 @@ from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as 
 from mechanics.combat.items import parse_item_effect, apply_item_to_target
 import unicodedata
 from ..embeds import *
-from ..embeds import _build_bounties_embed, _build_bounty_board_embed, _build_campaign_goals_embed, _build_caseboard_embed, _build_history_embed, _build_main_quest_embed, _build_quest_log_embed, _choice_button_label, _format_items_gained, _format_items_gained_multi, _format_tracker_entity, _get_choice_emoji, _get_choice_quest_icon, _get_choice_skill_emoji, _get_quest_scenario_labels, _is_dialogue_partner, _location_text, _norm_name, _parse_status_effects, _party_vitals_text, _safe_add_field, _safe_int, _scenario_command_choices, _strip_leading_emojis, _tracker_group_text, _tracker_header, _truncate_embed_text, _truncate_field_name, _truncate_field_value
-from ..embeds import _RESULT_COLORS, _RESULT_TITLES, _scenario_command_choices, _parse_status_effects, _party_vitals_text, _location_text, _safe_int, _truncate_field_value, _truncate_field_name, _safe_add_field, _norm_name, _is_dialogue_partner, _format_tracker_entity, _tracker_group_text, _strip_leading_emojis, _get_choice_quest_icon, _get_choice_skill_emoji, _get_choice_emoji, _format_items_gained, _format_items_gained_multi, _tracker_header, _truncate_embed_text, _choice_button_label, _get_quest_scenario_labels, _build_campaign_goals_embed, _build_main_quest_embed, _build_bounties_embed, _build_history_embed, _build_caseboard_embed, _build_quest_log_embed, _build_bounty_board_embed
+from ..embeds import (
+    _RESULT_COLORS, _RESULT_TITLES, _build_bounties_embed, _build_bounty_board_embed,
+    _build_campaign_goals_embed, _build_caseboard_embed, _build_history_embed,
+    _build_main_quest_embed, _build_quest_log_embed, _choice_button_label,
+    _format_items_gained, _format_items_gained_multi, _format_tracker_entity,
+    _get_choice_emoji, _get_choice_quest_icon, _get_choice_skill_emoji,
+    _get_quest_scenario_labels, _is_dialogue_partner, _location_text, _norm_name,
+    _parse_status_effects, _party_vitals_text, _safe_add_field, _safe_int,
+    _scenario_command_choices, _strip_leading_emojis, _tracker_group_text,
+    _tracker_header, _truncate_embed_text, _truncate_field_name, _truncate_field_value,
+)
 
-class PartyDialogueSelectView(discord.ui.View):
-    def __init__(self, cog: "AdventureCog", session_id: int, user_id: int, sync: bool = False):
-        super().__init__(timeout=120)
+class PartyDialogueSelectView(SessionRestrictedView):
+    def __init__(
+        self,
+        cog: "AdventureCog",
+        session_id: int,
+        user_id: int,
+        sync: bool = False,
+        *,
+        party_npcs: list[dict] | None = None,
+    ):
+        super().__init__(session_id=session_id, timeout=120, owner_user_id=user_id)
         self.cog = cog
         self.session_id = session_id
         self.user_id = user_id
         self.sync = sync
 
-        party_npcs = db.get_session_party_npcs(session_id)
-        if party_npcs:
-            self.add_item(PartyCompanionSelectDropdown(cog, session_id, user_id, party_npcs, sync=sync))
+        resolved_npcs = party_npcs if party_npcs is not None else db.get_session_party_npcs(session_id)
+        if resolved_npcs:
+            self.add_item(PartyCompanionSelectDropdown(cog, session_id, user_id, resolved_npcs, sync=sync))
 
 class PartyCompanionSelectDropdown(discord.ui.Select):
     def __init__(self, cog: "AdventureCog", session_id: int, user_id: int, party_npcs: list[dict], sync: bool = False):
@@ -84,9 +103,9 @@ class PartyCompanionSelectDropdown(discord.ui.Select):
         view = PartyCompanionActionView(self.cog, self.session_id, self.user_id, npc_name, sync=self.sync)
         await interaction.response.edit_message(embed=embed, view=view)
 
-class PartyCompanionActionView(discord.ui.View):
+class PartyCompanionActionView(SessionRestrictedView):
     def __init__(self, cog: "AdventureCog", session_id: int, user_id: int, npc_name: str, sync: bool = False):
-        super().__init__(timeout=120)
+        super().__init__(session_id=session_id, timeout=120, owner_user_id=user_id)
         self.cog = cog
         self.session_id = session_id
         self.user_id = user_id
@@ -134,7 +153,16 @@ class PartyCompanionActionView(discord.ui.View):
 
     @discord.ui.button(label="Dismiss from Party", style=discord.ButtonStyle.danger, emoji="🚪", row=1)
     async def dismiss_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        removed = db.remove_session_party_npc(self.session_id, self.npc_name)
+        sess_info = await adb(db.get_session, self.session_id) or {}
+        member_ids = await adb(db.get_session_members, self.session_id) or []
+        host_uid = sess_info.get("host_user_id")
+        if len(member_ids) > 1 and host_uid is not None and int(interaction.user.id) != int(host_uid):
+            await interaction.response.send_message(
+                f"Only the party host (<@{host_uid}>) can dismiss companions in multiplayer sessions.",
+                ephemeral=True,
+            )
+            return
+        removed = await adb(db.remove_session_party_npc, self.session_id, self.npc_name)
         origin_loc = (removed.get("origin_location") if removed else "") or "Solaria ➔ The Boar's Tusk Tavern ➔ Hearthside Table"
         
         embed = discord.Embed(
@@ -161,19 +189,19 @@ class JoinView(discord.ui.View):
 
     @discord.ui.button(label="Join Game", style=discord.ButtonStyle.success, emoji="🙋")
     async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        char = db.get_character(interaction.user.id)
+        char = await adb(db.get_character, interaction.user.id)
         if not char:
             await interaction.response.send_message(
                 "You need a character first. Use `/character create`.", ephemeral=True)
             return
-        if db.get_active_session_id_for_user(interaction.user.id):
+        if await adb(db.get_active_session_id_for_user, interaction.user.id):
             await interaction.response.send_message(
                 "You're already in an active adventure.", ephemeral=True)
             return
 
         await interaction.response.defer()
         try:
-            session = db.join_session(self.session_id, interaction.user.id)
+            session = await adb(db.join_session, self.session_id, interaction.user.id)
         except ValueError as e:
             await interaction.followup.send(str(e), ephemeral=True)
             return

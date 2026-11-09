@@ -906,3 +906,33 @@ body::before {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+
+/* ==========================================================================
+   Native <dialog> top-layer scroll containment & backdrop (modern-web-guidance)
+   ========================================================================== */
+dialog.hk-chronicle-dialog,
+dialog.hk-contracts-dialog {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  max-height: calc(var(--app-height, 100dvh) - 1.5rem);
+  width: 100%;
+  margin: auto;
+}
+dialog.hk-chronicle-dialog {
+  max-width: min(36rem, calc(100vw - 1.5rem));
+}
+dialog.hk-contracts-dialog {
+  max-width: min(56rem, calc(100vw - 1.5rem));
+}
+dialog:modal {
+  overscroll-behavior: contain;
+}
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background-color: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+}

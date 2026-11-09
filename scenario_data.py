@@ -252,11 +252,16 @@ COMMON_SCENARIO_ALIASES = {
 }
 
 
+_NULL_SCENARIO_STRINGS = ("", "none", "null", "undefined")
+
+
 def resolve_scenario_key(key: str | None) -> str:
     """Return a valid scenario key, falling back to DEFAULT_SCENARIO or dynamically building custom combinators."""
     if not key:
         return DEFAULT_SCENARIO
     clean_k = str(key).strip().lower()
+    if clean_k in _NULL_SCENARIO_STRINGS:
+        return DEFAULT_SCENARIO
     if clean_k in COMMON_SCENARIO_ALIASES:
         key = COMMON_SCENARIO_ALIASES[clean_k]
     scenarios = load_scenarios()
@@ -292,7 +297,9 @@ def get_scenario(key: str | None) -> dict:
 
 
 def get_scenario_tags(scenario_or_key: dict | str | None) -> list[str]:
-    if scenario_or_key is None:
+    if not scenario_or_key:
+        return []
+    if isinstance(scenario_or_key, str) and scenario_or_key.strip().lower() in _NULL_SCENARIO_STRINGS:
         return []
     if isinstance(scenario_or_key, dict):
         scen = scenario_or_key
@@ -312,7 +319,8 @@ def has_tag(scenario_or_key: dict | str | None, tag_name: str) -> bool:
 def get_base_scenario_key(key: str | None) -> str:
     """Return the root base_scenario key or matching tag key for fallback data lookups."""
     scenarios = load_scenarios()
-    curr_key = resolve_scenario_key(key)
+    base_resolved = resolve_scenario_key(key)
+    curr_key = base_resolved
     visited = {curr_key}
     while True:
         scen = scenarios.get(curr_key, {})
@@ -322,9 +330,9 @@ def get_base_scenario_key(key: str | None) -> str:
             curr_key = base
         else:
             break
-    if curr_key != resolve_scenario_key(key):
+    if curr_key != base_resolved:
         return curr_key
-    scen = get_scenario(key)
+    scen = scenarios[base_resolved]
     tags = scen.get("tags") or []
     for tag in tags:
         if tag in scenarios:
@@ -394,42 +402,116 @@ def build_custom_scenario(tag_keys: list[str] | str, title: str = "") -> dict:
     }
 
 
-def get_scenario_display_name(scenario_or_key: dict | str | None) -> str:
+def normalize_locale_code(lang: str | None) -> str:
+    code = str(lang or "en").strip().lower()
+    if code in ("pl", "polish", "polski"):
+        return "pl"
+    if code in ("ms", "my", "malay", "melayu", "bm"):
+        return "ms"
+    if code in ("zh", "cn", "zh-cn", "zh_cn"):
+        return "zh"
+    if code in ("de", "german", "deutsch"):
+        return "de"
+    return code[:2] if len(code) >= 2 else "en"
+
+
+def localize_scenario_entry(entry: dict, lang: str | None = None) -> dict:
+    """Returns a shallow copy of `entry` with localized display fields overlaid when available."""
+    if not isinstance(entry, dict):
+        return {}
+    out = dict(entry)
+    out.setdefault("canonical_name", entry.get("name") or entry.get("display_name") or "")
+    code = normalize_locale_code(lang)
+    if code == "en":
+        return out
+    loc = (entry.get("locales") or {}).get(code)
+    if isinstance(loc, dict):
+        for field in ("display_name", "dropdown_label", "description"):
+            if loc.get(field):
+                out[field] = loc[field]
+    return out
+
+
+def localize_genre_entry(entry: dict, lang: str | None = None) -> dict:
+    """Returns a shallow copy of a genre/modifier dict with localized `name` / `display_name` / `description`."""
+    if not isinstance(entry, dict):
+        return {}
+    out = dict(entry)
+    out["canonical_name"] = entry.get("name", "")
+    out.setdefault("display_name", entry.get("name", ""))
+    code = normalize_locale_code(lang)
+    if code == "en":
+        return out
+    loc = (entry.get("locales") or {}).get(code)
+    if isinstance(loc, dict):
+        if loc.get("name"):
+            out["name"] = loc["name"]
+            out["display_name"] = loc["name"]
+        elif loc.get("display_name"):
+            out["name"] = loc["display_name"]
+            out["display_name"] = loc["display_name"]
+        if loc.get("description"):
+            out["description"] = loc["description"]
+    return out
+
+
+def get_localized_scenarios(lang: str | None = None) -> dict[str, dict]:
+    raw = load_scenarios()
+    code = normalize_locale_code(lang)
+    if code == "en":
+        return {k: dict(v) for k, v in raw.items()}
+    return {k: localize_scenario_entry(v, code) for k, v in raw.items()}
+
+
+def get_localized_genres(lang: str | None = None) -> dict[str, dict]:
+    raw = load_genres()
+    code = normalize_locale_code(lang)
+    if code == "en":
+        return {k: dict(v) for k, v in raw.items()}
+    return {k: localize_genre_entry(v, code) for k, v in raw.items()}
+
+
+def get_scenario_display_name(scenario_or_key: dict | str | None, lang: str | None = None) -> str:
     """Returns the human-readable thematic display name for a scenario or custom combinator key."""
-    if not scenario_or_key:
-        return get_scenario(DEFAULT_SCENARIO).get("display_name", "Realms of Myth & Magic")
+    code = normalize_locale_code(lang)
+    custom_prefix = {"ms": "Tersuai", "pl": "Własny"}.get(code, "Custom")
+    if not scenario_or_key or (isinstance(scenario_or_key, str) and scenario_or_key.strip().lower() in _NULL_SCENARIO_STRINGS):
+        scen0 = localize_scenario_entry(get_scenario(DEFAULT_SCENARIO), code)
+        return scen0.get("display_name", "Realms of Myth & Magic")
     if isinstance(scenario_or_key, dict):
-        return scenario_or_key.get("display_name") or scenario_or_key.get("name") or "Realms of Myth & Magic"
+        scen_loc = localize_scenario_entry(scenario_or_key, code)
+        return scen_loc.get("display_name") or scen_loc.get("name") or "Realms of Myth & Magic"
     key_str = str(scenario_or_key).strip()
     if key_str.startswith("custom_combinator_"):
         valid_tags = resolve_tag_keys(key_str[len("custom_combinator_"):])
         preset_key = find_matching_preset_scenario(valid_tags)
         if preset_key:
-            scen = get_scenario(preset_key)
+            scen = localize_scenario_entry(get_scenario(preset_key), code)
             return scen.get("display_name") or scen.get("name") or preset_key
-        genres_data = load_genres()
+        genres_data = get_localized_genres(code)
         tag_labels = [genres_data.get(t, {}).get("name", t.replace("_", " ").title()) for t in valid_tags]
-        return f"Custom: {' • '.join(tag_labels)}" if tag_labels else "Custom Scenario"
+        return f"{custom_prefix}: {' • '.join(tag_labels)}" if tag_labels else f"{custom_prefix} Scenario"
     try:
-        scen = get_scenario(key_str)
+        scen = localize_scenario_entry(get_scenario(key_str), code)
         return scen.get("display_name") or scen.get("name") or key_str
     except Exception:
         return key_str.replace("_", " ").title()
 
 
-def get_scenario_dropdown_label(scenario_or_key: dict | str | None) -> str:
+def get_scenario_dropdown_label(scenario_or_key: dict | str | None, lang: str | None = None) -> str:
     """Returns the dropdown label with genre/modifier hints (e.g., 'Realms of Myth & Magic [Fantasy]')."""
+    code = normalize_locale_code(lang)
     if isinstance(scenario_or_key, dict):
-        scen = scenario_or_key
+        scen = localize_scenario_entry(scenario_or_key, code)
     else:
-        scen = get_scenario(scenario_or_key)
+        scen = localize_scenario_entry(get_scenario(scenario_or_key), code)
     if scen.get("dropdown_label"):
         return scen["dropdown_label"]
     display = scen.get("display_name") or scen.get("name") or "Adventure"
-    genres_data = load_genres()
+    genres_data = get_localized_genres(code)
     tags = [t for t in (scen.get("tags") or []) if t != "non_combat"]
     tag_labels = [genres_data.get(t, {}).get("name", t.replace("_", " ").title()) for t in tags]
-    if tag_labels and not display.startswith("Custom:"):
+    if tag_labels and not display.startswith(("Custom:", "Tersuai:", "Własny:")):
         return f"{display} [{' • '.join(tag_labels)}]"
     return display
 
@@ -459,9 +541,15 @@ def scenario_prompt_block(scenario: dict | str | None) -> str:
     
     instructions_text = "\n".join(f"- {inst}" for inst in instructions) if instructions else "- None"
     mechanics_text = ", ".join(active_mechanics) or "none"
+    scen_name = str(scenario.get("name", "Adventure"))
+    scen_desc = str(scenario.get("description", ""))
+    if str(scenario.get("key") or "").startswith("custom") or scen_name.startswith(("Custom:", "Tersuai:", "Własny:")):
+        from mechanics.system.input_sanitizer import sanitize_character_name, wrap_custom_lore
+        scen_name = sanitize_character_name(scen_name, max_len=80) or "Custom Adventure"
+        scen_desc = wrap_custom_lore(scen_desc, max_len=2000) or scen_desc
     return (
-        f"ACTIVE SCENARIO: {scenario['name']}{tags_str}\n"
-        f"World: {scenario['description']}\n"
+        f"ACTIVE SCENARIO: {scen_name}{tags_str}\n"
+        f"World: {scen_desc}\n"
         f"Tone: {scenario['tone_guidelines']}\n"
         f"Active Code Mechanics: {mechanics_text}\n"
         f"Special GM Instructions:\n{instructions_text}\n"
@@ -762,6 +850,8 @@ def is_anomalous_high_school_scenario(scenario_or_key: dict | str | None) -> boo
     """Return True strictly for the 4 Anomalous High (academy + incursions) hybrid scenario keys."""
     if not scenario_or_key:
         return False
+    if isinstance(scenario_or_key, str) and scenario_or_key.strip().lower() in _NULL_SCENARIO_STRINGS:
+        return False
     k, base = _scenario_key_of(scenario_or_key)
     if k in ANOMALOUS_HIGH_SCHOOL_SCENARIO_KEYS or base in ANOMALOUS_HIGH_SCHOOL_SCENARIO_KEYS:
         return True
@@ -783,6 +873,8 @@ def is_anomalous_incursions_scenario(scenario_or_key: dict | str | None) -> bool
             return True
         return "anomalous incursions" in name
     s = str(scenario_or_key).strip().lower()
+    if s in _NULL_SCENARIO_STRINGS:
+        return False
     if s in ANOMALOUS_INCURSIONS_SCENARIO_KEYS:
         return True
     if s.startswith("custom"):
@@ -816,6 +908,8 @@ HIGH_SCHOOL_SCENARIO_KEYS = frozenset({
 def is_high_school_scenario(scenario_or_key: dict | str | None) -> bool:
     """Return True strictly if the scenario is one of the high school scenarios or carries high_school tags."""
     if not scenario_or_key:
+        return False
+    if isinstance(scenario_or_key, str) and scenario_or_key.strip().lower() in _NULL_SCENARIO_STRINGS:
         return False
     if has_tag(scenario_or_key, "high_school") or has_tag(scenario_or_key, "school"):
         return True

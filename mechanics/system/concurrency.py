@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import asyncio
 import uuid
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Iterable, Optional
 import logging
 from contextlib import asynccontextmanager
 from fastapi import HTTPException
@@ -70,3 +72,58 @@ async def distributed_user_lock(user_id: int, owner_id: str = None) -> AsyncGene
             await loop.run_in_executor(None, db.release_distributed_lock, lock_key, owner_id)
         except Exception as e:
             log.exception(f"Failed to release distributed lock for user {user_id}: {e}")
+
+
+@asynccontextmanager
+async def distributed_adventure_lock(
+    user_id: Optional[int],
+    session_ids: int | Iterable[int] | None = None,
+    owner_id: Optional[str] = None,
+    raise_http_error: bool = True,
+) -> AsyncGenerator[None, None]:
+    """
+    Canonical hierarchical lock acquiring `user_{user_id}` BEFORE sorted `session_{sid}` locks,
+    eliminating cross-endpoint races and ABBA deadlocks across start/load/save/end/companion flows.
+    """
+    if not owner_id:
+        owner_id = str(uuid.uuid4())
+
+    lock_keys: list[str] = []
+    if user_id is not None and int(user_id) > 0:
+        lock_keys.append(f"user_{int(user_id)}")
+
+    raw_sids: list[int] = []
+    if isinstance(session_ids, int):
+        raw_sids = [session_ids]
+    elif session_ids is not None:
+        raw_sids = [int(s) for s in session_ids if s is not None and int(s) > 0]
+
+    for sid in sorted({s for s in raw_sids if s > 0}):
+        lock_keys.append(f"session_{sid}")
+
+    loop = asyncio.get_running_loop()
+    acquired_keys: list[str] = []
+    try:
+        for lk in lock_keys:
+            ok = await loop.run_in_executor(None, db.acquire_distributed_lock, lk, owner_id)
+            if not ok:
+                log.warning("Failed to acquire hierarchical lock %s by %s", lk, owner_id)
+                err_msg = (
+                    "Adventure start already in progress for this user. Please wait."
+                    if lk.startswith("user_")
+                    else "Another action is currently in progress for this adventure session. Please wait."
+                )
+                if raise_http_error:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=err_msg,
+                    )
+                raise LockAcquisitionError(err_msg)
+            acquired_keys.append(lk)
+        yield
+    finally:
+        for lk in reversed(acquired_keys):
+            try:
+                await loop.run_in_executor(None, db.release_distributed_lock, lk, owner_id)
+            except Exception as e:
+                log.exception("Failed to release hierarchical lock %s: %s", lk, e)

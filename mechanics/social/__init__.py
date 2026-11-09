@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from . import consequences, deck, locales, pacing
 from .roster_tags import (
     AgeGroup,
     AGE_GROUP_TEEN,
@@ -16,11 +17,35 @@ from .roster_tags import (
 )
 from .genealogy import get_or_generate_family_tree
 from .factions import is_school_club_faction, get_faction_category_tag
+from .folklore_roster import (
+    FOLKLORE_RACES,
+    befriend_folklore_villager,
+    commit_staged_folklore_ops,
+    ensure_folklore_villager_roster,
+    generate_folklore_villager_roster,
+    get_folklore_villager_spec,
+    get_scheduled_villagers_for_node,
+    hydrate_folklore_villager_on_encounter,
+    hydrate_village_cast_for_node,
+    is_folklore_race,
+    is_myobu_fox_race,
+    npc_is_folklore_villager,
+    recruit_folklore_companion,
+    resolve_glamour_wanderer_interaction,
+    rollback_folklore_roster_state_after_turn,
+    shift_kitsune_form,
+    sync_kitsune_circadian_forms_for_node,
+)
 
 __all__ = [
+    "consequences",
+    "deck",
+    "locales",
+    "pacing",
     "AgeGroup",
     "AGE_GROUP_TEEN",
     "AGE_GROUP_ADULT",
+    "FOLKLORE_RACES",
     "derive_age_group",
     "normalize_standing",
     "normalize_social_role_type",
@@ -33,4 +58,20 @@ __all__ = [
     "get_or_generate_family_tree",
     "is_school_club_faction",
     "get_faction_category_tag",
+    "befriend_folklore_villager",
+    "commit_staged_folklore_ops",
+    "ensure_folklore_villager_roster",
+    "generate_folklore_villager_roster",
+    "get_folklore_villager_spec",
+    "get_scheduled_villagers_for_node",
+    "hydrate_folklore_villager_on_encounter",
+    "hydrate_village_cast_for_node",
+    "is_folklore_race",
+    "is_myobu_fox_race",
+    "npc_is_folklore_villager",
+    "recruit_folklore_companion",
+    "resolve_glamour_wanderer_interaction",
+    "rollback_folklore_roster_state_after_turn",
+    "shift_kitsune_form",
+    "sync_kitsune_circadian_forms_for_node",
 ]

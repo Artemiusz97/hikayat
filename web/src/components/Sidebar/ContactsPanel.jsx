@@ -4,6 +4,7 @@ import {
   Smartphone, Users, Heart, Search, MessageCircle, MapPin,
   ChevronDown, ChevronRight, User, UserPlus, UserMinus, Sparkles, Scroll, ShieldAlert
 } from 'lucide-react';
+import { apiCall } from '../../api/client';
 import { StatusEffectBadge } from './CharacterSheet';
 import { getRelationshipTier } from './CodexPanel';
 import { formatCleanLocation } from '../../utils/locationFormat';
@@ -69,7 +70,7 @@ const renderBulletPoints = (lines) => {
             <div key={idx} className="leading-relaxed text-gray-300 text-xs">
               • <strong className="text-gray-100">{label}</strong>:{' '}
               {isUnknown ? (
-                <span className="text-gray-500 italic">Unknown</span>
+                <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>
               ) : (
                 <span>{val}</span>
               )}
@@ -157,9 +158,8 @@ const ContactsPanel = ({
     setCompanionBusy(npcName);
     setCompanionFeedback(null);
     try {
-      const res = await fetch('/api/party/companion', {
+      const data = await apiCall('/api/party/companion', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: user.user_id,
           session_id: session.id,
@@ -167,17 +167,12 @@ const ContactsPanel = ({
           action: isInParty ? 'dismiss' : 'recruit',
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setCompanionFeedback({ type: 'error', text: data.detail || 'Could not update party.' });
-      } else {
-        setCompanionFeedback({ type: 'ok', text: data.message || 'Party updated.' });
-        if (onSessionUpdated && Array.isArray(data.party_npcs)) {
-          onSessionUpdated({ ...session, party_npcs: data.party_npcs });
-        }
+      setCompanionFeedback({ type: 'ok', text: data.message || 'Party updated.' });
+      if (onSessionUpdated && Array.isArray(data.party_npcs)) {
+        onSessionUpdated({ ...session, party_npcs: data.party_npcs });
       }
     } catch (err) {
-      setCompanionFeedback({ type: 'error', text: err.message });
+      setCompanionFeedback({ type: 'error', text: err.message || 'Could not update party.' });
     } finally {
       setCompanionBusy(null);
     }
@@ -339,7 +334,7 @@ const ContactsPanel = ({
 
       {/* Content View */}
       {loading && personalContacts.length === 0 ? (
-        <p className="text-xs text-gray-500 italic text-center py-8">Loading saved contacts...</p>
+        <p className="text-xs text-gray-500 italic text-center py-8">{t('contacts.loading', 'Loading saved contacts...')}</p>
       ) : filteredContacts.length === 0 ? (
         <div className="text-center py-8 px-3 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
           <Users size={24} className="mx-auto mb-1.5 opacity-40" />
@@ -931,34 +926,34 @@ const ContactsPanel = ({
                                     <div className={`flex flex-wrap items-center gap-1.5 ${hasDetails ? 'pb-2 border-b border-fantasy-border/25' : ''}`}>
                                       {eyeColor && (
                                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-black/60 border border-fantasy-border/50 text-gray-300">
-                                          <span className="text-gray-400">👁️ Eyes:</span>
+                                          <span className="text-gray-400">{t('contacts.eyes', '👁️ Eyes:')}</span>
                                           <strong className="text-gray-100 font-medium">{formatTitle(eyeColor)}</strong>
                                         </span>
                                       )}
                                       {buildDesc && (
                                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-black/60 border border-fantasy-border/50 text-gray-300">
-                                          <span className="text-gray-400">📏 Build:</span>
+                                          <span className="text-gray-400">{t('contacts.build', '📏 Build:')}</span>
                                           <strong className="text-gray-100 font-medium">{buildDesc}</strong>
                                         </span>
                                       )}
                                       {isNsfwScenario && !isMale && (
                                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pink-950/40 border border-pink-800/50 text-pink-300">
-                                          <span className="text-pink-400 font-medium">🔞 Breast Size:</span>
+                                          <span className="text-pink-400 font-medium">{t('contacts.breast_size', '🔞 Breast Size:')}</span>
                                           <strong className="text-pink-100 font-medium">
                                             {formatTitle(appearance.breast_size || 'Modest B-Cup')}
                                           </strong>
-                                          {appearance.asset_texture && (
+                                          {Boolean(npc?.intimate_dossier_revealed || npc?.debug_revealed) && appearance.asset_texture && (
                                             <span className="text-pink-200 text-[10px] italic font-normal">({appearance.asset_texture})</span>
                                           )}
                                         </span>
                                       )}
                                       {isNsfwScenario && canShowMaleSize && (
                                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-950/40 border border-purple-800/50 text-purple-300">
-                                          <span className="text-purple-400 font-medium">🔞 Penis Size:</span>
+                                          <span className="text-purple-400 font-medium">{t('contacts.penis_size', '🔞 Penis Size:')}</span>
                                           <strong className="text-purple-100 font-medium">
                                             {formatTitle(appearance.penis_size)}
                                           </strong>
-                                          {appearance.asset_texture && (
+                                          {Boolean(npc?.intimate_dossier_revealed || npc?.debug_revealed) && appearance.asset_texture && (
                                             <span className="text-purple-200 text-[10px] italic font-normal">({appearance.asset_texture})</span>
                                           )}
                                         </span>
@@ -970,25 +965,25 @@ const ContactsPanel = ({
                                     <div className="space-y-1.5 text-gray-300">
                                       {hairDesc && (
                                         <div className="leading-snug">
-                                          <span className="text-gray-400 font-medium">💇 Hair: </span>
+                                          <span className="text-gray-400 font-medium">{t('contacts.hair', '💇 Hair:')} </span>
                                           <strong className="text-gray-200 font-medium">{hairDesc}</strong>
                                         </div>
                                       )}
                                       {coatOrSkin && (
                                         <div className="leading-snug">
-                                          <span className="text-gray-400 font-medium">🐾 Coat / Skin: </span>
+                                          <span className="text-gray-400 font-medium">{t('contacts.coat_skin', '🐾 Coat / Skin:')} </span>
                                           <strong className="text-gray-200 font-medium">{coatOrSkin}</strong>
                                         </div>
                                       )}
                                       {featuresDesc && (
                                         <div className="leading-snug">
-                                          <span className="text-gray-400 font-medium">✨ Features: </span>
+                                          <span className="text-gray-400 font-medium">{t('contacts.features', '✨ Features:')} </span>
                                           <strong className="text-gray-200 font-medium">{featuresDesc}</strong>
                                         </div>
                                       )}
                                       {outfitDesc && (
                                         <div className="leading-snug">
-                                          <span className="text-gray-400 font-medium">👔 Outfit: </span>
+                                          <span className="text-gray-400 font-medium">{t('contacts.outfit', '👔 Outfit:')} </span>
                                           <span className="text-gray-300">{outfitDesc}</span>
                                         </div>
                                       )}
@@ -1016,6 +1011,17 @@ const ContactsPanel = ({
                               </div>
                             )}
 
+                            {(npc.known_schedule || npc.schedule_summary) && (
+                              <div className="bg-black/40 p-2.5 rounded-lg border border-fantasy-border/40 text-xs text-gray-300 leading-relaxed">
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">
+                                  🕒 {t('social.schedule_header', 'Schedule & Routine')}
+                                </span>
+                                <span className={npc.schedule_revealed === false || String(npc.known_schedule || npc.schedule_summary).includes('???') ? 'font-mono text-gray-500 italic' : 'text-gray-200'}>
+                                  {npc.known_schedule || npc.schedule_summary}
+                                </span>
+                              </div>
+                            )}
+
                             {traits.length > 0 && (
                               <div>
                                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">
@@ -1023,7 +1029,7 @@ const ContactsPanel = ({
                                 </span>
                                 <div className="flex flex-wrap gap-1.5">
                                   {traits.map((tr, idx) => (
-                                    <span key={idx} className="text-xs px-2 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border">
+                                    <span key={idx} className={`text-xs px-2 py-0.5 rounded border ${String(typeof tr === 'string' ? tr : (tr.trait || tr.name || '')).includes('???') ? 'bg-black/40 text-gray-500 border-dashed border-neutral-700 font-mono' : 'bg-black/60 text-gray-300 border-fantasy-border'}`}>
                                       {typeof tr === 'string' ? tr : (tr.trait || tr.name)}
                                     </span>
                                   ))}
@@ -1038,7 +1044,7 @@ const ContactsPanel = ({
                                 </span>
                                 <div className="flex flex-wrap gap-1.5">
                                   {preferences.map((p, idx) => (
-                                    <span key={idx} className="text-xs px-2 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40">
+                                    <span key={idx} className={`text-xs px-2 py-0.5 rounded border ${String(typeof p === 'string' ? p : (p.preference || p.name || '')).includes('???') ? 'bg-black/40 text-gray-500 border-dashed border-neutral-700 font-mono' : 'bg-cyan-950/40 text-cyan-300 border-cyan-800/40'}`}>
                                       {typeof p === 'string' ? p : (p.preference || p.name)}
                                     </span>
                                   ))}
@@ -1053,7 +1059,7 @@ const ContactsPanel = ({
                                 </span>
                                 <div className="flex flex-wrap gap-1.5">
                                   {dislikes.map((d, idx) => (
-                                    <span key={idx} className="text-xs px-2 py-0.5 rounded bg-red-950/40 text-red-300 border border-red-800/40">
+                                    <span key={idx} className={`text-xs px-2 py-0.5 rounded border ${String(typeof d === 'string' ? d : (d.dislike || d.name || '')).includes('???') ? 'bg-black/40 text-gray-500 border-dashed border-neutral-700 font-mono' : 'bg-red-950/40 text-red-300 border-red-800/40'}`}>
                                       {typeof d === 'string' ? d : (d.dislike || d.name)}
                                     </span>
                                   ))}
@@ -1075,7 +1081,7 @@ const ContactsPanel = ({
                             <div className="flex items-center justify-between border-b border-fantasy-border/30 pb-2">
                               <span className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
                                 <Scroll size={13} />
-                                <span>Recent Shared Interactions & History</span>
+                                <span>{t('contacts.recent_history', 'Recent Shared Interactions & History')}</span>
                               </span>
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/60 text-gray-400 border border-fantasy-border/40 font-mono">
                                 {recentMemories.length} {recentMemories.length === 1 ? 'Event' : 'Events'}
@@ -1177,7 +1183,7 @@ const ContactsPanel = ({
                                   )}
                                 </div>
                               ) : (
-                                <p className="text-gray-500 italic text-xs">No family records uncovered yet.</p>
+                                <p className="text-gray-500 italic text-xs">{t('contacts.no_family', 'No family records uncovered yet.')}</p>
                               )}
                             </div>
 
@@ -1187,7 +1193,7 @@ const ContactsPanel = ({
                               </span>
                               <div className="space-y-1 leading-relaxed">
                                 <div>
-                                  • <strong className="text-gray-200">Current Status</strong>:{' '}
+                                  • <strong className="text-gray-200">{t('contacts.current_status', 'Current Status')}</strong>:{' '}
                                   {romData.current_partner ? (
                                     <span className="text-pink-300 font-semibold">
                                       💖 {renderLinkedPerson(romData.current_partner, 'text-pink-300 font-semibold')}
@@ -1201,7 +1207,7 @@ const ContactsPanel = ({
 
                                 {romData.secret_partner && (
                                   <div>
-                                    • <strong className="text-gray-200">Secret Affair</strong>:{' '}
+                                    • <strong className="text-gray-200">{t('contacts.secret_affair', 'Secret Affair')}</strong>:{' '}
                                     {romData.secret_partner.locked ? (
                                       <span className="text-gray-500 italic">{romData.secret_partner.message}</span>
                                     ) : (
@@ -1213,7 +1219,7 @@ const ContactsPanel = ({
                                 )}
 
                                 <div>
-                                  • <strong className="text-gray-200">Past Ex-Partner(s)</strong>:{' '}
+                                  • <strong className="text-gray-200">{t('contacts.past_ex_partners', 'Past Ex-Partner(s)')}</strong>:{' '}
                                   {romData.ex_partners && romData.ex_partners.length > 0 ? (
                                     <span className="text-gray-300">
                                       💔{' '}
@@ -1225,9 +1231,9 @@ const ContactsPanel = ({
                                       ))}
                                     </span>
                                   ) : (romData.revealed || infoLevel >= 2 || isDebugRevealed) ? (
-                                    <span className="text-gray-400 italic">None (No prior romantic partners)</span>
+                                    <span className="text-gray-400 italic">{t('contacts.no_ex_partners', 'None (No prior romantic partners)')}</span>
                                   ) : (
-                                    <span className="text-gray-500 italic">🔒 Locked (Requires Info Level 2+)</span>
+                                    <span className="text-gray-500 italic">{t('contacts.locked_info_level', '🔒 Locked (Requires Info Level 2+)')}</span>
                                   )}
                                 </div>
                               </div>
@@ -1246,7 +1252,7 @@ const ContactsPanel = ({
                                   ))}
                                 </div>
                               ) : (
-                                <p className="text-gray-500 italic text-xs">No close friends recorded.</p>
+                                <p className="text-gray-500 italic text-xs">{t('contacts.no_friends', 'No close friends recorded.')}</p>
                               )}
                             </div>
 
@@ -1263,7 +1269,7 @@ const ContactsPanel = ({
                                   ))}
                                 </div>
                               ) : (
-                                <p className="text-gray-500 italic text-xs">No known rivals recorded.</p>
+                                <p className="text-gray-500 italic text-xs">{t('contacts.no_rivals', 'No known rivals recorded.')}</p>
                               )}
                             </div>
 
@@ -1298,7 +1304,8 @@ const ContactsPanel = ({
                         const braVal = rawBra ? rawBra.replace(/\bNude\s*\/\s*Beige\b/gi, 'Beige / Skin-Tone') : '';
                         const undVal = rawUnd ? rawUnd.replace(/\bNude\s*\/\s*Beige\b/gi, 'Beige / Skin-Tone') : '';
 
-                        const isHistoryUnlocked = infoLevel >= 3 || Boolean(npc.history_revealed) || isDebugRevealed;
+                        const isIntimateRevealed = npc.intimate_dossier_revealed !== false && (infoLevel >= 3 || isDebugRevealed);
+                        const isHistoryUnlocked = isIntimateRevealed || Boolean(npc.history_revealed) || isDebugRevealed;
                         const hasHistoryEntries = Boolean(npc.past_intimate_history || (npc.past_intimate_entries && npc.past_intimate_entries.length > 0));
                         const ROMANTIC_KEYWORDS = [
                           'kiss', 'confess', 'date', 'intercourse', 'oral', 'manual', 'anal', 'virgin',
@@ -1334,12 +1341,12 @@ const ContactsPanel = ({
                                 <div className="space-y-1 text-gray-300 leading-relaxed">
                                   <div>• <strong className="text-gray-100">{isMaleNpc ? 'Penis Size' : 'Breast Size'}</strong>: {sizeDisplay}</div>
                                   {appearance.asset_texture && (
-                                    <div>• <strong className="text-gray-100">Tactile Feature</strong>: <span className="text-pink-300 font-medium">{appearance.asset_texture}</span></div>
+                                    <div>• <strong className="text-gray-100">{t('contacts.tactile_feature', 'Tactile Feature')}</strong>: <span className="text-pink-300 font-medium">{appearance.asset_texture}</span></div>
                                   )}
-                                  <div>• <strong className="text-gray-100">Intercourse</strong>: {iExpDisp}</div>
-                                  <div>• <strong className="text-gray-100">Oral Intimacy</strong>: {oExpDisp}</div>
-                                  <div>• <strong className="text-gray-100">Manual Intimacy</strong>: {mExpDisp}</div>
-                                  <div>• <strong className="text-gray-100">Anal Intimacy</strong>: {aExpDisp}</div>
+                                  <div>• <strong className="text-gray-100">{t('contacts.intercourse', 'Intercourse')}</strong>: {iExpDisp}</div>
+                                  <div>• <strong className="text-gray-100">{t('contacts.oral_intimacy', 'Oral Intimacy')}</strong>: {oExpDisp}</div>
+                                  <div>• <strong className="text-gray-100">{t('contacts.manual_intimacy', 'Manual Intimacy')}</strong>: {mExpDisp}</div>
+                                  <div>• <strong className="text-gray-100">{t('contacts.anal_intimacy', 'Anal Intimacy')}</strong>: {aExpDisp}</div>
                                 </div>
                               )}
                             </div>
@@ -1352,9 +1359,9 @@ const ContactsPanel = ({
                                 renderBulletPoints(intSec.dynamic)
                               ) : (
                                 <div className="space-y-1 text-gray-300 leading-relaxed">
-                                  <div>• <strong className="text-gray-100">Demeanor</strong>: {(infoLevel >= 3 || isDebugRevealed) && appearance.intimate_demeanor ? appearance.intimate_demeanor : <span className="text-gray-500 italic">Unknown</span>}</div>
-                                  <div>• <strong className="text-gray-100">Dynamic</strong>: {(infoLevel >= 3 || isDebugRevealed) && appearance.intimate_dynamic ? appearance.intimate_dynamic : <span className="text-gray-500 italic">Unknown</span>}</div>
-                                  <div>• <strong className="text-gray-100">Openness</strong>: {(infoLevel >= 3 || isDebugRevealed) && (appearance.erotic_openness || appearance.openness) ? (appearance.erotic_openness || appearance.openness) : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                  <div>• <strong className="text-gray-100">{t('contacts.demeanor', 'Demeanor')}</strong>: {(infoLevel >= 3 || isDebugRevealed) && appearance.intimate_demeanor ? appearance.intimate_demeanor : <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>}</div>
+                                  <div>• <strong className="text-gray-100">{t('contacts.dynamic', 'Dynamic')}</strong>: {(infoLevel >= 3 || isDebugRevealed) && appearance.intimate_dynamic ? appearance.intimate_dynamic : <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>}</div>
+                                  <div>• <strong className="text-gray-100">{t('contacts.openness', 'Openness')}</strong>: {(infoLevel >= 3 || isDebugRevealed) && (appearance.erotic_openness || appearance.openness) ? (appearance.erotic_openness || appearance.openness) : <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>}</div>
                                 </div>
                               )}
                             </div>
@@ -1368,9 +1375,9 @@ const ContactsPanel = ({
                               ) : (
                                 <div className="space-y-1 text-gray-300 leading-relaxed">
                                   {!isMaleNpc && (
-                                    <div>• <strong className="text-gray-100">Bra</strong>: {(infoLevel >= 3 || isDebugRevealed) && braVal ? braVal : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                    <div>• <strong className="text-gray-100">{t('contacts.bra', 'Bra')}</strong>: {(infoLevel >= 3 || isDebugRevealed) && braVal ? braVal : <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>}</div>
                                   )}
-                                  <div>• <strong className="text-gray-100">Underwear</strong>: {(infoLevel >= 3 || isDebugRevealed) && undVal ? undVal : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                  <div>• <strong className="text-gray-100">{t('contacts.underwear', 'Underwear')}</strong>: {(infoLevel >= 3 || isDebugRevealed) && undVal ? undVal : <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>}</div>
                                 </div>
                               )}
                             </div>
@@ -1383,7 +1390,7 @@ const ContactsPanel = ({
                                 renderBulletPoints(intSec.sensitive_spots || intSec.sensitivities.filter(s => s.toLowerCase().includes('sensitive spot')))
                               ) : (
                                 <div className="space-y-1 text-gray-300 leading-relaxed">
-                                  <div>• <strong className="text-gray-100">Sensitive Spots</strong>: {(infoLevel >= 3 || isDebugRevealed) && appearance.sensitive_spots ? appearance.sensitive_spots : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                  <div>• <strong className="text-gray-100">{t('contacts.sensitive_spots', 'Sensitive Spots')}</strong>: {(infoLevel >= 3 || isDebugRevealed) && appearance.sensitive_spots ? appearance.sensitive_spots : <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>}</div>
                                 </div>
                               )}
                             </div>
@@ -1396,8 +1403,8 @@ const ContactsPanel = ({
                                 renderBulletPoints(intSec.desires_and_turn_offs || intSec.sensitivities.filter(s => !s.toLowerCase().includes('sensitive spot')))
                               ) : (
                                 <div className="space-y-1 text-gray-300 leading-relaxed">
-                                  <div>• <strong className="text-gray-100">Desires & Kinks</strong>: {(infoLevel >= 3 || isDebugRevealed) && (appearance.desires_and_kinks || appearance.turn_ons) ? (Array.isArray(appearance.desires_and_kinks || appearance.turn_ons) ? (appearance.desires_and_kinks || appearance.turn_ons).join(', ') : (appearance.desires_and_kinks || appearance.turn_ons)) : <span className="text-gray-500 italic">Unknown</span>}</div>
-                                  <div>• <strong className="text-red-300">Turn-Offs</strong>: {(infoLevel >= 3 || isDebugRevealed) && appearance.turn_offs ? (Array.isArray(appearance.turn_offs) ? appearance.turn_offs.join(', ') : appearance.turn_offs) : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                  <div>• <strong className="text-gray-100">{t('contacts.desires_kinks', 'Desires & Kinks')}</strong>: {(infoLevel >= 3 || isDebugRevealed) && (appearance.desires_and_kinks || appearance.turn_ons) ? (Array.isArray(appearance.desires_and_kinks || appearance.turn_ons) ? (appearance.desires_and_kinks || appearance.turn_ons).join(', ') : (appearance.desires_and_kinks || appearance.turn_ons)) : <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>}</div>
+                                  <div>• <strong className="text-red-300">{t('contacts.turn_offs', 'Turn-Offs')}</strong>: {(infoLevel >= 3 || isDebugRevealed) && appearance.turn_offs ? (Array.isArray(appearance.turn_offs) ? appearance.turn_offs.join(', ') : appearance.turn_offs) : <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>}</div>
                                 </div>
                               )}
                             </div>
@@ -1410,8 +1417,8 @@ const ContactsPanel = ({
                                 renderBulletPoints(intSec.act_preferences)
                               ) : (
                                 <div className="space-y-1 text-gray-300 leading-relaxed">
-                                  <div>• <strong className="text-gray-100">Preferred / Likes</strong>: {(infoLevel >= 3 || isDebugRevealed) && (appearance.favorite_acts || appearance.act_likes) ? (Array.isArray(appearance.favorite_acts) ? appearance.favorite_acts.join(', ') : (appearance.act_likes || 'None')) : <span className="text-gray-500 italic">Unknown</span>}</div>
-                                  <div>• <strong className="text-gray-100">Aversions / Dislikes</strong>: {(infoLevel >= 3 || isDebugRevealed) && (appearance.disliked_acts || appearance.act_dislikes) ? (Array.isArray(appearance.disliked_acts) ? appearance.disliked_acts.join(', ') : (appearance.act_dislikes || 'None')) : <span className="text-gray-500 italic">Unknown</span>}</div>
+                                  <div>• <strong className="text-gray-100">{t('contacts.preferred_likes', 'Preferred / Likes')}</strong>: {(infoLevel >= 3 || isDebugRevealed) && (appearance.favorite_acts || appearance.act_likes) ? (Array.isArray(appearance.favorite_acts) ? appearance.favorite_acts.join(', ') : (appearance.act_likes || 'None')) : <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>}</div>
+                                  <div>• <strong className="text-gray-100">{t('contacts.aversions_dislikes', 'Aversions / Dislikes')}</strong>: {(infoLevel >= 3 || isDebugRevealed) && (appearance.disliked_acts || appearance.act_dislikes) ? (Array.isArray(appearance.disliked_acts) ? appearance.disliked_acts.join(', ') : (appearance.act_dislikes || 'None')) : <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>}</div>
                                 </div>
                               )}
                             </div>
@@ -1441,14 +1448,14 @@ const ContactsPanel = ({
                                   <p className="text-gray-300 italic text-xs leading-relaxed">• {npc.past_intimate_history}</p>
                                 )
                               ) : (
-                                <p className="text-gray-400 italic text-xs leading-relaxed">• Virgin (No prior intimate history before meeting you)</p>
+                                <p className="text-gray-400 italic text-xs leading-relaxed">{t('contacts.virgin_history', '• Virgin (No prior intimate history before meeting you)')}</p>
                               )}
                             </div>
 
                             <div className="pt-2 border-t border-fantasy-border/30">
                               <span className="text-xs font-bold text-pink-400 uppercase tracking-wider flex items-center gap-1.5 mb-1.5">
                                 <Sparkles size={12} />
-                                <span>Shared Romantic Milestones</span>
+                                <span>{t('contacts.romantic_milestones', 'Shared Romantic Milestones')}</span>
                               </span>
                               {sharedMilestones.length > 0 ? (
                                 <div className="space-y-1.5 bg-black/50 p-2.5 rounded-lg border border-pink-900/40">

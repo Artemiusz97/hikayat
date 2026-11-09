@@ -19,6 +19,7 @@ import scenario_data
 TAG_SPECIAL_AGENT = "special_agent"
 TAG_CIVILIAN = "civilian"
 TAG_ANOMALY_ENTITY = "anomaly_entity"
+TAG_FOLKLORE_VILLAGER = "folklore_villager"
 
 CIVILIAN_BASE_HP = 100
 CIVILIAN_BASE_MP = 0
@@ -86,8 +87,11 @@ _UNSET = object()
 
 def _get_known_faction_class_names_lower() -> set[str]:
     try:
-        from mechanics.combat.items.anomalous_gear import ANOMALOUS_FACTION_CLASSES
-        names: set[str] = set()
+        from mechanics.combat.items.anomalous_gear import (
+            ANOMALOUS_FACTION_CLASSES,
+            _LEGACY_ANOMALOUS_CLASS_FACTIONS,
+        )
+        names: set[str] = set(_LEGACY_ANOMALOUS_CLASS_FACTIONS.keys())
         for f_classes in ANOMALOUS_FACTION_CLASSES.values():
             if isinstance(f_classes, dict):
                 for c_name in f_classes.keys():
@@ -143,8 +147,17 @@ def classify_anomalous_npc_tag(
         basic.get("anomalous_npc_tag"),
     ):
         clean_t = str(raw_tag or "").strip().lower()
-        if clean_t in (TAG_SPECIAL_AGENT, TAG_CIVILIAN, TAG_ANOMALY_ENTITY):
+        if clean_t in (TAG_SPECIAL_AGENT, TAG_CIVILIAN, TAG_ANOMALY_ENTITY, TAG_FOLKLORE_VILLAGER):
             return clean_t
+
+    try:
+        from mechanics.social.folklore_roster import get_folklore_villager_spec, npc_is_folklore_villager
+        if npc_is_folklore_villager(ent_dict):
+            return TAG_FOLKLORE_VILLAGER
+        if session_id and name and get_folklore_villager_spec(session_id, name, persist_db=False):
+            return TAG_FOLKLORE_VILLAGER
+    except Exception:
+        pass
 
     if ent_dict.get("is_special_agent") is True or basic.get("is_special_agent") is True:
         return TAG_SPECIAL_AGENT
@@ -179,8 +192,14 @@ def classify_anomalous_npc_tag(
             if isinstance(c_rec, dict):
                 cb = _extract_basic_info(c_rec)
                 persisted_c_tag = str(cb.get("anomalous_npc_tag") or c_rec.get("anomalous_npc_tag") or "").strip().lower()
-                if persisted_c_tag in (TAG_SPECIAL_AGENT, TAG_CIVILIAN):
+                if persisted_c_tag in (TAG_SPECIAL_AGENT, TAG_CIVILIAN, TAG_FOLKLORE_VILLAGER):
                     return persisted_c_tag
+                try:
+                    from mechanics.social.folklore_roster import npc_is_folklore_villager
+                    if npc_is_folklore_villager(c_rec):
+                        return TAG_FOLKLORE_VILLAGER
+                except Exception:
+                    pass
                 if cb.get("is_special_agent") is True:
                     return TAG_SPECIAL_AGENT
                 if not ent_dict.get("role") and cb.get("role"):
@@ -203,8 +222,14 @@ def classify_anomalous_npc_tag(
                     or l_meta.get("anomalous_npc_tag")
                     or ""
                 ).strip().lower()
-                if persisted_l_tag in (TAG_SPECIAL_AGENT, TAG_CIVILIAN):
+                if persisted_l_tag in (TAG_SPECIAL_AGENT, TAG_CIVILIAN, TAG_FOLKLORE_VILLAGER):
                     return persisted_l_tag
+                try:
+                    from mechanics.social.folklore_roster import is_folklore_race
+                    if is_folklore_race(str(lore_ent.get("race") or "")):
+                        return TAG_FOLKLORE_VILLAGER
+                except Exception:
+                    pass
                 if not ent_dict.get("role") and (lore_ent.get("role") or lore_ent.get("description")):
                     ent_dict = {
                         **ent_dict,
@@ -275,10 +300,16 @@ def _infer_emergent_agent_faction_and_class(role_text: str, seed_val: int) -> Tu
         return ("monastic_order", "Eastern Shrine Order", "Shinto Shrine Exorcist", tier)
     if any(k in low for k in ("marshal", "bureau", "directorate", "public containment", "federal")):
         return ("public_agency", "Public Containment Bureau", "Field Containment Agent", tier)
-    if any(k in low for k in ("surplus", "storefront", "trouble-shooter", "small agency", "local agency")):
-        return ("private_agency_2", "Local Private Agency", "Contract Trouble-Shooter", tier)
-    if any(k in low for k in ("corporate", "contractor", "executive", "conglomerate", "proprietary")):
-        return ("private_agency_1", "Corporate Containment Conglomerate", "Corporate Strike Operator", tier)
+    if any(k in low for k in (
+        "surplus", "storefront", "trouble-shooter", "small agency", "local agency",
+        "licensed field", "gunsmith", "partner-owned", "independent agency", "private case",
+    )):
+        return ("private_agency_2", "Independent Private Agency", "Licensed Field Specialist", tier)
+    if any(k in low for k in (
+        "corporate", "contractor", "executive", "conglomerate", "proprietary",
+        "asset recovery", "applied ordnance", "overwatch telemetry", "loss-prevention",
+    )):
+        return ("private_agency_1", "Containment Conglomerate", "Asset Recovery Operator", tier)
 
     freelance_classes = [
         "Freelance Anomaly Hunter",
@@ -379,18 +410,24 @@ def resolve_special_agent_weapon_profile(faction_id: str, agent_class: str, agen
             "mundane_weapon": False,
             "mana_infused": True,
         }
-    if "private_agency_2" in cls_low or "surplus" in cls_low or "trouble-shooter" in cls_low or "storefront" in cls_low or "aftermarket" in cls_low:
+    if any(k in cls_low for k in (
+        "private_agency_2", "surplus", "trouble-shooter", "storefront", "aftermarket",
+        "licensed field", "close-quarters entry", "private case", "countermeasure tech", "containment escort",
+    )):
         return {
-            "name": "Aftermarket Ward-Modded Surplus Shotgun",
+            "name": "Custom Ward-Tuned Entry Shotgun",
             "atk_bonus": atk_bonus + 2,
             "matk_bonus": matk_bonus,
             "damage_types": {"piercing": 0.6, "shock": 0.4},
             "mundane_weapon": False,
             "mana_infused": True,
         }
-    if "private" in cls_low or "corporate" in cls_low or "proprietary" in cls_low or "contractor" in cls_low or "sniper" in cls_low:
+    if any(k in cls_low for k in (
+        "private", "corporate", "proprietary", "contractor", "sniper",
+        "asset recovery", "applied ordnance", "executive containment", "overwatch telemetry", "loss-prevention",
+    )):
         return {
-            "name": "Proprietary R&D Gauss Carbine",
+            "name": "VX-4 Gauss Carbine",
             "atk_bonus": atk_bonus + 2,
             "matk_bonus": matk_bonus + 1,
             "damage_types": {"piercing": 0.5, "shock": 0.5},
@@ -668,6 +705,80 @@ def hydrate_anomalous_npc_profile(
         or ""
     ).strip()
 
+    if tag == TAG_FOLKLORE_VILLAGER:
+        from mechanics.social.folklore_roster import get_folklore_villager_spec, is_myobu_fox_race
+        fk_spec = (get_folklore_villager_spec(session_id, name, persist_db=False) if (session_id and name) else None) or {}
+        fk_tier = int(entity.get("agent_tier") or basic.get("agent_tier") or fk_spec.get("agent_tier") or 3)
+        fk_village = str(
+            entity.get("folklore_village")
+            or basic.get("folklore_village")
+            or fk_spec.get("folklore_village")
+            or ("kitsune" if "kitsune" in str(entity.get("race") or basic.get("race") or "").lower() else "bunian")
+        ).strip().lower()
+        fk_race = str(entity.get("race") or basic.get("race") or fk_spec.get("race") or "").strip().lower()
+        fk_role = str(role_text or fk_spec.get("role") or "Folklore Guardian")
+        fk_rank = str(entity.get("rank_title") or basic.get("rank_title") or fk_spec.get("rank_title") or fk_role)
+        fk_abils = list(entity.get("innate_abilities") or basic.get("innate_abilities") or fk_spec.get("innate_abilities") or [])
+        fk_stats = dict(entity.get("stats") or basic.get("stats") or fk_spec.get("stats") or {"STR": 16, "PER": 18, "END": 16, "CHA": 18, "INT": 18, "AGI": 19, "LUK": 16})
+        fk_hp = int(entity.get("max_hp") or (70 + fk_tier * 25))
+        fk_mp = int(entity.get("max_mp") or (50 + fk_tier * 20))
+        fk_is_fox = is_myobu_fox_race(fk_race)
+        fk_attr = "fire" if (fk_is_fox or fk_village == "kitsune") else "aether"
+        if fk_is_fox:
+            fk_weapon = {
+                "name": "Sacred Kitsunebi Fangs & Claws",
+                "damage_dice": "2d8",
+                "damage_type": "fire",
+                "atk_bonus": 6 + fk_tier * 3,
+                "matk_bonus": 8 + fk_tier * 3,
+                "is_mana_infused": True,
+                "mundane_weapon": False,
+            }
+        elif fk_village == "kitsune":
+            fk_weapon = {
+                "name": "Inari Kagura Spirit-Fan & Ofuda",
+                "damage_dice": "2d8",
+                "damage_type": "fire",
+                "atk_bonus": 6 + fk_tier * 3,
+                "matk_bonus": 8 + fk_tier * 3,
+                "is_mana_infused": True,
+                "mundane_weapon": False,
+            }
+        else:
+            fk_weapon = {
+                "name": "Kayangan Pamor Keris",
+                "damage_dice": "2d8",
+                "damage_type": "aether",
+                "atk_bonus": 6 + fk_tier * 3,
+                "matk_bonus": 8 + fk_tier * 3,
+                "is_mana_infused": True,
+                "mundane_weapon": False,
+            }
+        return {
+            "anomalous_npc_tag": TAG_FOLKLORE_VILLAGER,
+            "anomalous_tag_label": "Folklore Spirit",
+            "is_special_agent": False,
+            "is_folklore_villager": True,
+            "is_beast_companion": fk_is_fox,
+            "folklore_village": fk_village,
+            "can_recruit_companion": True,
+            "agent_tier": fk_tier,
+            "attribute": fk_attr,
+            "rank_title": fk_rank,
+            "agent_class": fk_role,
+            "faction_id": "kitsune_enclave" if fk_village == "kitsune" else "bunian_enclave",
+            "faction_name": "Sato-no-Inari Kitsune Enclave" if fk_village == "kitsune" else "Kampung Kayangan Bunian",
+            "innate_abilities": fk_abils,
+            "innate_ability_details": format_innate_ability_details(fk_abils),
+            "hp": fk_hp,
+            "max_hp": fk_hp,
+            "mp": fk_mp,
+            "max_mp": fk_mp,
+            "level": max(int(player_level or 1), fk_tier),
+            "stats": fk_stats,
+            "weapon_profile": fk_weapon,
+        }
+
     if tag == TAG_SPECIAL_AGENT:
         sp_agent = None
         if session_id and name:
@@ -748,6 +859,13 @@ def hydrate_anomalous_npc_profile(
         if not innate_abilities:
             innate_abilities = build_awakened_kit_ids(attribute, combat_archetype, ability_medium)
 
+        pact_id = str((sp_agent or {}).get("pact_id") or entity.get("pact_id") or basic.get("pact_id") or "").strip()
+        pact_name = str((sp_agent or {}).get("pact_name") or entity.get("pact_name") or basic.get("pact_name") or "").strip()
+        pact_tier = int((sp_agent or {}).get("pact_tier") or entity.get("pact_tier") or basic.get("pact_tier") or 0)
+        pact_spell_id = str((sp_agent or {}).get("pact_spell_id") or entity.get("pact_spell_id") or basic.get("pact_spell_id") or "").strip()
+        pact_tell = str((sp_agent or {}).get("pact_tell") or entity.get("pact_tell") or basic.get("pact_tell") or "").strip()
+        pact_ability_details = format_innate_ability_details([pact_spell_id]) if pact_spell_id else []
+
         combat_stats = compute_special_agent_combat_stats(
             agent_tier=agent_tier,
             player_level=player_level,
@@ -769,6 +887,13 @@ def hydrate_anomalous_npc_profile(
             "attribute": attribute,
             "combat_archetype": combat_archetype,
             "ability_medium": ability_medium,
+            "has_entity_contract": bool(pact_id),
+            "pact_id": pact_id,
+            "pact_name": pact_name,
+            "pact_tier": pact_tier,
+            "pact_spell_id": pact_spell_id,
+            "pact_tell": pact_tell,
+            "pact_ability_detail": pact_ability_details[0] if pact_ability_details else None,
             "innate_abilities": innate_abilities,
             "innate_ability_details": format_innate_ability_details(innate_abilities),
             **combat_stats,
@@ -801,9 +926,21 @@ def is_supernatural_anomalous_entity(target: Dict[str, Any]) -> bool:
     """
     if not isinstance(target, dict):
         return False
-    t_tag = str(target.get("anomalous_npc_tag") or "").strip().lower()
-    if t_tag in (TAG_CIVILIAN, TAG_SPECIAL_AGENT) or target.get("is_human_npc"):
+    basic = _extract_basic_info(target)
+    t_tag = str(target.get("anomalous_npc_tag") or basic.get("anomalous_npc_tag") or "").strip().lower()
+    if (
+        t_tag in (TAG_CIVILIAN, TAG_SPECIAL_AGENT, TAG_FOLKLORE_VILLAGER)
+        or target.get("is_human_npc")
+        or target.get("is_folklore_villager")
+        or basic.get("is_folklore_villager")
+    ):
         return False
+    try:
+        from mechanics.social.folklore_roster import npc_is_folklore_villager
+        if npc_is_folklore_villager(target):
+            return False
+    except Exception:
+        pass
     if target.get("incursion_id") or target.get("category_tag") or target.get("requires_non_lethal_subdue"):
         return True
 
@@ -893,11 +1030,11 @@ def build_anomalous_human_combatant_enemy(
     tag = prof["anomalous_npc_tag"]
     weapon = prof["weapon_profile"]
 
-    if tag == TAG_SPECIAL_AGENT:
+    if tag in (TAG_SPECIAL_AGENT, TAG_FOLKLORE_VILLAGER):
         tier = int(prof.get("agent_tier", 2) or 2)
         return {
             "name": name,
-            "archetype": prof.get("agent_class") or "Special Agent",
+            "archetype": prof.get("agent_class") or ("Folklore Guardian" if tag == TAG_FOLKLORE_VILLAGER else "Special Agent"),
             "level": prof["level"],
             "tier_rank": max(2, min(5, tier)),
             "hp": prof["hp"],
@@ -905,13 +1042,20 @@ def build_anomalous_human_combatant_enemy(
             "mp": prof["mp"],
             "max_mp": prof["max_mp"],
             "stats": prof["stats"],
-            "anomalous_npc_tag": TAG_SPECIAL_AGENT,
-            "is_special_agent": True,
+            "anomalous_npc_tag": tag,
+            "is_special_agent": tag == TAG_SPECIAL_AGENT,
+            "is_folklore_villager": tag == TAG_FOLKLORE_VILLAGER,
             "is_human_npc": True,
             "agent_tier": tier,
             "agent_class": prof.get("agent_class", "Special Agent"),
             "faction_id": prof.get("faction_id", ""),
             "faction_name": prof.get("faction_name", ""),
+            "has_entity_contract": prof.get("has_entity_contract", False),
+            "pact_id": prof.get("pact_id", ""),
+            "pact_name": prof.get("pact_name", ""),
+            "pact_tier": prof.get("pact_tier", 0),
+            "pact_spell_id": prof.get("pact_spell_id", ""),
+            "pact_tell": prof.get("pact_tell", ""),
             "innate_abilities": prof.get("innate_abilities", []),
             "weapon_profile": weapon,
             "intent": f"Channeling anomalous resonance through {weapon['name']}",
@@ -1052,7 +1196,14 @@ def resolve_anomalous_ally_combat_action(
         return
     r = rng or random
     comp_name = str(comp.get("name") or "Ally")
-    tag = str(comp.get("anomalous_npc_tag") or (TAG_SPECIAL_AGENT if comp.get("is_special_agent") else TAG_CIVILIAN)).lower()
+    tag = str(
+        comp.get("anomalous_npc_tag")
+        or (
+            TAG_FOLKLORE_VILLAGER
+            if comp.get("is_folklore_villager")
+            else (TAG_SPECIAL_AGENT if comp.get("is_special_agent") else TAG_CIVILIAN)
+        )
+    ).lower()
     comp_stats = comp.get("stats") if isinstance(comp.get("stats"), dict) else {}
 
     def _is_protected_capture(e_obj: Dict[str, Any]) -> bool:
@@ -1117,14 +1268,50 @@ def resolve_anomalous_ally_combat_action(
             )
         return
 
-    # --- BRANCH B: SPECIAL AGENT (MP-Driven Innate Abilities + Mana-Infused Weapon) ---
+    # --- BRANCH B: SPECIAL AGENT & FOLKLORE SPIRIT (MP-Driven Innate Abilities + Mana-Infused Weapon) ---
     from mechanics.combat.spells.registry import get_spell
     cur_mp = int(comp.get("mp", 0) or 0)
     agent_tier = max(1, int(comp.get("agent_tier", 1) or 1))
     raw_abilities = list(comp.get("innate_abilities") or [])
+    ally_pact_sp_id = str(comp.get("pact_spell_id") or "").strip()
+    if ally_pact_sp_id and ally_pact_sp_id not in raw_abilities:
+        raw_abilities.append(ally_pact_sp_id)
+
+    def _normalize_ally_ability_dict(sp_raw: Dict[str, Any]) -> Dict[str, Any]:
+        norm = dict(sp_raw)
+        ab_type = str(norm.get("type") or "").strip().lower()
+        pwr = int(norm.get("power") or 0)
+        if ab_type == "heal" and not norm.get("heal_amount"):
+            norm["heal_amount"] = max(20, pwr)
+            norm.setdefault("discipline", "heal")
+            norm.setdefault("tier", 2)
+            norm.setdefault("emoji", "💚")
+        elif ab_type == "buff":
+            norm.setdefault("discipline", "support")
+            norm.setdefault("buff_pct", max(15, pwr))
+            norm.setdefault("temp_hp_shield", max(14, pwr))
+            norm.setdefault("tier", 2)
+            norm.setdefault("emoji", "🛡️")
+        elif ab_type == "debuff":
+            norm.setdefault("discipline", "curse")
+            norm.setdefault("tier", 2)
+            norm.setdefault("emoji", "🧠")
+        elif ab_type == "ultimate" or norm.get("is_ultimate"):
+            norm["is_ultimate"] = True
+            norm.setdefault("discipline", "attack")
+            norm.setdefault("tier", 1)
+            norm.setdefault("power_mult", round(max(2.2, pwr / 20.0), 2) if pwr > 0 else 2.6)
+            norm.setdefault("emoji", "🌟")
+        elif ab_type == "offensive":
+            norm.setdefault("discipline", "attack")
+            norm.setdefault("tier", 2)
+            norm.setdefault("power_mult", round(max(1.2, pwr / 20.0), 2) if pwr > 0 else 1.4)
+            norm.setdefault("emoji", "🦊" if comp.get("folklore_village") == "kitsune" else "✨")
+        return norm
+
     resolved_spells = []
     for ab in raw_abilities:
-        sp = get_spell(ab) if isinstance(ab, str) else (ab if isinstance(ab, dict) else None)
+        sp = get_spell(ab) if isinstance(ab, str) else (_normalize_ally_ability_dict(ab) if isinstance(ab, dict) else None)
         if isinstance(sp, dict):
             resolved_spells.append(sp)
 
@@ -1177,7 +1364,13 @@ def resolve_anomalous_ally_combat_action(
     )
     from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids, normalize_anomalous_attribute
 
-    comp_attr = normalize_anomalous_attribute(comp.get("attribute"), fallback="physical")
+    is_fk_ally = bool(tag == TAG_FOLKLORE_VILLAGER or comp.get("is_folklore_villager"))
+    fk_default_attr = (
+        "fire"
+        if (is_fk_ally and (comp.get("is_beast_companion") or str(comp.get("folklore_village") or "").lower() == "kitsune"))
+        else ("aether" if is_fk_ally else "physical")
+    )
+    comp_attr = normalize_anomalous_attribute(comp.get("attribute"), fallback=fk_default_attr)
     comp_arch = str(comp.get("combat_archetype") or "vanguard").strip().lower()
     comp_med = str(comp.get("ability_medium") or "direct_manifestation").strip().lower()
     if not resolved_spells:
@@ -1248,7 +1441,13 @@ def resolve_anomalous_ally_combat_action(
         sp = r.choice(tactical_spells)
         cost = int(sp.get("mp_cost", 6))
         disc = str(sp.get("discipline") or "attack")
-        comp["mp"] = max(0, cur_mp - cost)
+        if sp.get("is_pact_skill") and int(comp.get("hp", 20)) > 12:
+            hp_toll = max(4, int(comp.get("max_hp", 130) * 0.08))
+            comp["hp"] = max(1, int(comp.get("hp", 20)) - hp_toll)
+            cost_note = f"-{hp_toll} HP, 0 MP"
+        else:
+            comp["mp"] = max(0, cur_mp - cost)
+            cost_note = f"-{cost} MP"
 
         if disc == "summon":
             has_summon = any(n.get("is_summon") and n.get("summoner") == comp_name for n in current_npcs)
@@ -1315,17 +1514,27 @@ def resolve_anomalous_ally_combat_action(
             comp["hp"] = min(comp.get("max_hp", 130), comp.get("hp", 1) + max(3, int(total_dealt * 0.25)))
         if hit_parts:
             combat_log.append(
-                f"{sp.get('emoji', '⚡')} **{comp_name}** cast **{sp['name']}** (-{cost} MP) -> {', '.join(hit_parts)}."
+                f"{sp.get('emoji', '⚡')} **{comp_name}** cast **{sp['name']}** ({cost_note}) -> {', '.join(hit_parts)}."
             )
             return
 
-    # 4. Mana-Infused Faction Weapon Fallback (when conserving or out of MP)
+    # 4. Mana-Infused Faction / Folklore Spirit Weapon Fallback (when conserving or out of MP)
     target_m = _pick_role_target(engageable_enemies)
-    weapon = comp.get("weapon_profile") or resolve_special_agent_weapon_profile(
-        str(comp.get("faction_id") or ""),
-        str(comp.get("agent_class") or ""),
-        agent_tier,
-    )
+    weapon = comp.get("weapon_profile")
+    if not weapon:
+        if is_fk_ally:
+            from mechanics.social.folklore_roster_lifecycle import _build_folklore_weapon_profile
+            weapon = _build_folklore_weapon_profile(
+                str(comp.get("race") or ""),
+                str(comp.get("folklore_village") or ""),
+                agent_tier,
+            )
+        else:
+            weapon = resolve_special_agent_weapon_profile(
+                str(comp.get("faction_id") or ""),
+                str(comp.get("agent_class") or ""),
+                agent_tier,
+            )
     w_name = str(weapon.get("name") or "Resonance Weapon")
     if str(target_m.get("physicality") or "").strip().lower() == "non_corporeal" and comp_attr == "physical":
         target_m["spotter_marked"] = True
@@ -1368,7 +1577,11 @@ def resolve_hostile_special_agent_ability_modifier(
     from mechanics.combat.spells.registry import get_spell
     r = rng or random
     resolved = []
-    for ab in (enemy.get("innate_abilities") or []):
+    cand_abilities = list(enemy.get("innate_abilities") or [])
+    enemy_pact_sp_id = str(enemy.get("pact_spell_id") or "").strip()
+    if enemy_pact_sp_id and enemy_pact_sp_id not in cand_abilities:
+        cand_abilities.append(enemy_pact_sp_id)
+    for ab in cand_abilities:
         sp = get_spell(ab) if isinstance(ab, str) else (ab if isinstance(ab, dict) else None)
         if isinstance(sp, dict):
             raw_c = sp.get("mp_cost", 6)
@@ -1398,7 +1611,11 @@ def resolve_hostile_special_agent_ability_modifier(
         sp = ults[0]
         raw_uc = sp.get("mp_cost", 0)
         cost = int(raw_uc) if raw_uc is not None else 0
-        enemy["mp"] = max(0, cur_mp - cost)
+        if sp.get("is_pact_skill") and int(enemy.get("hp", 20)) > 15:
+            hp_toll = max(4, int(enemy.get("max_hp", 140) * 0.08))
+            enemy["hp"] = max(1, int(enemy.get("hp", 20)) - hp_toll)
+        else:
+            enemy["mp"] = max(0, cur_mp - cost)
         enemy["_used_ultimate_this_combat"] = True
         return {"spell": sp, "damage_mult": 1.65, "is_ultimate": True, "cost": cost}
 
@@ -1407,7 +1624,11 @@ def resolve_hostile_special_agent_ability_modifier(
     if attacks and r.random() < 0.60:
         sp = r.choice(attacks)
         cost = int(sp.get("mp_cost", 6))
-        enemy["mp"] = max(0, cur_mp - cost)
+        if sp.get("is_pact_skill") and int(enemy.get("hp", 20)) > 15:
+            hp_toll = max(4, int(enemy.get("max_hp", 140) * 0.08))
+            enemy["hp"] = max(1, int(enemy.get("hp", 20)) - hp_toll)
+        else:
+            enemy["mp"] = max(0, cur_mp - cost)
         return {"spell": sp, "damage_mult": 1.25, "is_ultimate": False, "cost": cost}
 
     return None

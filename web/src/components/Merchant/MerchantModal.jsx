@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, ShoppingBag, Coins, Sparkles, Tag, MessageCircle, Package, Handshake, Ear, CheckCircle2 } from 'lucide-react';
 import { apiCall } from '../../api/client';
 
 const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, onRefreshCodex }) => {
+  const { t } = useTranslation();
   const [shop, setShop] = useState(null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('buy'); // 'buy' | 'sell' | 'rumors'
@@ -24,7 +26,7 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
         setSelectedStoreType(data.merchant_type);
       }
     } catch (err) {
-      setFeedback({ type: 'error', text: err.message || 'Failed to load merchant wares' });
+      setFeedback({ type: 'error', text: err.message || t('merchant.load_wares_failed', 'Failed to load merchant wares') });
     } finally {
       setLoading(false);
     }
@@ -58,11 +60,11 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
           merchant_type: shop?.merchant_type || selectedStoreType
         })
       });
-      setFeedback({ type: 'success', text: `Purchased ${res.item_name} for ${res.price_paid}G!` });
+      setFeedback({ type: 'success', text: t('merchant.purchased_feedback', { name: res.item_name, price: res.price_paid, defaultValue: `Purchased ${res.item_name} for ${res.price_paid}G!` }) });
       await loadShop(shop?.merchant_type || selectedStoreType);
       if (onTransactionComplete) onTransactionComplete();
     } catch (err) {
-      setFeedback({ type: 'error', text: err.message || 'Purchase failed' });
+      setFeedback({ type: 'error', text: err.message || t('merchant.purchase_failed', 'Purchase failed') });
     } finally {
       setBusyKey(null);
     }
@@ -80,11 +82,11 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
           item_id: item.id
         })
       });
-      setFeedback({ type: 'success', text: `Sold ${res.item_name} for ${res.gold_earned}G!` });
+      setFeedback({ type: 'success', text: t('merchant.sold_feedback', { name: res.item_name, gold: res.gold_earned, defaultValue: `Sold ${res.item_name} for ${res.gold_earned}G!` }) });
       await loadShop(shop?.merchant_type || selectedStoreType);
       if (onTransactionComplete) onTransactionComplete();
     } catch (err) {
-      setFeedback({ type: 'error', text: err.message || 'Sale failed' });
+      setFeedback({ type: 'error', text: err.message || t('merchant.sale_failed', 'Sale failed') });
     } finally {
       setBusyKey(null);
     }
@@ -103,11 +105,11 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
       });
       setFeedback({
         type: res.haggle_succeeded ? 'success' : 'error',
-        text: res.message || (res.haggle_succeeded ? 'Haggle succeeded!' : 'Haggle failed.')
+        text: res.message || (res.haggle_succeeded ? t('merchant.haggle_success', 'Haggle succeeded!') : t('merchant.haggle_failed', 'Haggle failed.'))
       });
       await loadShop(shop?.merchant_type || selectedStoreType);
     } catch (err) {
-      setFeedback({ type: 'error', text: err.message || 'Haggle attempt failed' });
+      setFeedback({ type: 'error', text: err.message || t('merchant.haggle_attempt_failed', 'Haggle attempt failed') });
     } finally {
       setBusyKey(null);
     }
@@ -127,14 +129,14 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
       });
       setFeedback({
         type: res.rumor_succeeded ? 'success' : 'error',
-        text: res.message || 'Rumor investigated.'
+        text: res.message || t('merchant.rumor_investigated', 'Rumor investigated.')
       });
       await loadShop(shop?.merchant_type || selectedStoreType);
       if (res.rumor_succeeded && onRefreshCodex) {
         onRefreshCodex();
       }
     } catch (err) {
-      setFeedback({ type: 'error', text: err.message || 'Failed to investigate rumor' });
+      setFeedback({ type: 'error', text: err.message || t('merchant.rumor_investigate_failed', 'Failed to investigate rumor') });
     } finally {
       setBusyKey(null);
     }
@@ -155,10 +157,10 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
             </div>
             <div className="min-w-0">
               <h3 className="font-rpg font-bold text-base text-fantasy-accent truncate">
-                {shop?.merchant_name || 'Merchant Emporium'}
+                {shop?.merchant_name || t('merchant.title_fallback', 'Merchant Emporium')}
               </h3>
               <p className="text-xs text-gray-400 line-clamp-1">
-                {shop?.merchant_description || 'Browse local wares, trade equipment, or listen for rumors.'}
+                {shop?.merchant_description || t('merchant.desc_fallback', 'Browse local wares, trade equipment, or listen for rumors.')}
               </p>
             </div>
           </div>
@@ -178,7 +180,7 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
         {Array.isArray(shop?.available_stores) && shop.available_stores.length > 1 && (
           <div className="px-4 py-2 bg-black/60 border-b border-fantasy-border/70 flex items-center gap-1.5 overflow-x-auto custom-scrollbar">
             <span className="text-[10px] uppercase tracking-wider font-bold text-gray-500 mr-1 shrink-0">
-              Bazaar Stalls:
+              {t('merchant.bazaar_stalls', 'Bazaar Stalls:')}
             </span>
             {shop.available_stores.map((st) => {
               const isSelected = (shop?.merchant_type || selectedStoreType) === st.type;
@@ -205,9 +207,9 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
         <div className="px-4 py-2 bg-black/40 border-b border-fantasy-border flex flex-wrap items-center justify-between gap-2">
           <div className="flex gap-1">
             {[
-              { id: 'buy', label: `Buy Wares (${shop?.stock?.length || 0})` },
-              { id: 'sell', label: `Sell Pack (${shop?.sellable_items?.length || 0})` },
-              { id: 'rumors', label: `Rumors (${shop?.rumors?.length || 0})` }
+              { id: 'buy', label: `${t('merchant.buy_wares', 'Buy Wares')} (${shop?.stock?.length || 0})` },
+              { id: 'sell', label: `${t('merchant.sell_pack', 'Sell Pack')} (${shop?.sellable_items?.length || 0})` },
+              { id: 'rumors', label: `${t('merchant.rumors', 'Rumors')} (${shop?.rumors?.length || 0})` }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -226,18 +228,18 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
           <div className="flex items-center gap-2">
             {shop?.discount_pct > 0 && (
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-700/50 flex items-center gap-1">
-                <Tag size={10} /> -{shop.discount_pct}% Off
+                <Tag size={10} /> {t('merchant.off_discount', { pct: shop.discount_pct, defaultValue: `-${shop.discount_pct}% Off` })}
               </span>
             )}
 
             <button
               onClick={handleHaggle}
               disabled={haggleLeft <= 0 || busyKey === 'haggle' || loading}
-              title="Attempt a Charisma + Luck check for an extra -10% discount"
+              title={t('merchant.haggle_title', 'Attempt a Charisma + Luck check for an extra -10% discount')}
               className="px-2.5 py-1 rounded bg-purple-950/60 hover:bg-purple-900/70 text-purple-200 border border-purple-700/60 text-[11px] font-semibold flex items-center gap-1 disabled:opacity-40 transition-colors"
             >
               <Handshake size={12} className="text-purple-300" />
-              <span>{busyKey === 'haggle' ? 'Haggling...' : `Haggle (${haggleLeft}/3)`}</span>
+              <span>{busyKey === 'haggle' ? t('merchant.haggling', 'Haggling...') : t('merchant.haggle', { left: haggleLeft, defaultValue: `Haggle (${haggleLeft}/3)` })}</span>
             </button>
           </div>
         </div>
@@ -260,13 +262,13 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
         <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2.5">
           {loading ? (
             <div className="text-center py-12 text-gray-400 text-xs animate-pulse">
-              Appraising merchant stock...
+              {t('merchant.appraising', 'Appraising merchant stock...')}
             </div>
           ) : activeTab === 'buy' ? (
             (shop?.stock || []).length === 0 ? (
               <div className="text-center py-10 text-gray-500 border border-dashed border-fantasy-border/50 rounded-lg">
                 <Package size={24} className="mx-auto mb-1.5 opacity-40" />
-                <p className="text-xs">The merchant is currently sold out.</p>
+                <p className="text-xs">{t('merchant.sold_out', 'The merchant is currently sold out.')}</p>
               </div>
             ) : (
               (shop?.stock || []).map((item, idx) => {
@@ -310,7 +312,7 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
             (shop?.sellable_items || []).length === 0 ? (
               <div className="text-center py-10 text-gray-500 border border-dashed border-fantasy-border/50 rounded-lg">
                 <Package size={24} className="mx-auto mb-1.5 opacity-40" />
-                <p className="text-xs">No unequipped sellable items in your pack.</p>
+                <p className="text-xs">{t('merchant.no_sellable', 'No unequipped sellable items in your pack.')}</p>
               </div>
             ) : (
               (shop?.sellable_items || []).map(item => {
@@ -338,7 +340,7 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
                       className="px-3 py-1.5 rounded bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300 border border-emerald-700/50 text-xs font-bold font-mono flex items-center gap-1 shrink-0 disabled:opacity-40 transition-colors"
                     >
                       <Coins size={12} />
-                      <span>{isSelling ? '...' : `Sell +${item.sell_price}G`}</span>
+                      <span>{isSelling ? '...' : t('merchant.sell_action', { price: item.sell_price, defaultValue: `Sell +${item.sell_price}G` })}</span>
                     </button>
                   </div>
                 );
@@ -346,7 +348,7 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
             )
           ) : (
             (shop?.rumors || []).length === 0 ? (
-              <p className="text-center py-10 text-xs text-gray-500 italic">The merchant has no rumors to share right now.</p>
+              <p className="text-center py-10 text-xs text-gray-500 italic">{t('merchant.no_rumors', 'The merchant has no rumors to share right now.')}</p>
             ) : (
               (shop?.rumors || []).map((r, idx) => {
                 const text = typeof r === 'string' ? r : r.text;
@@ -364,19 +366,19 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
                       {revealed ? (
                         <div>
                           <p className="text-xs text-gray-200 italic leading-relaxed">
-                            {succeeded ? `"${text}"` : 'The merchant mumbled something inconclusive.'}
+                            {succeeded ? `"${text}"` : t('merchant.rumor_inconclusive', 'The merchant mumbled something inconclusive.')}
                           </p>
                           {succeeded && (
                             <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 mt-1">
-                              <CheckCircle2 size={11} /> Logged to Clue Caseboard
+                              <CheckCircle2 size={11} /> {t('merchant.logged_to_caseboard', 'Logged to Clue Caseboard')}
                             </span>
                           )}
                         </div>
                       ) : (
                         <div>
-                          <p className="text-xs font-semibold text-gray-300">Rumor Topic #{idx + 1}</p>
+                          <p className="text-xs font-semibold text-gray-300">{t('merchant.rumor_topic', { num: idx + 1, defaultValue: `Rumor Topic #${idx + 1}` })}</p>
                           <p className="text-[11px] text-gray-500">
-                            Ask the merchant about local whispers (CHA skill check).
+                            {t('merchant.ask_whispers_hint', 'Ask the merchant about local whispers (CHA skill check).')}
                           </p>
                         </div>
                       )}
@@ -389,7 +391,7 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
                         className="px-3 py-1.5 rounded bg-fantasy-accent/20 hover:bg-fantasy-accent/30 text-fantasy-accent border border-fantasy-accent/50 text-xs font-bold flex items-center gap-1.5 shrink-0 disabled:opacity-40 transition-colors"
                       >
                         <Ear size={12} />
-                        <span>{isAsking ? 'Asking...' : 'Ask Around'}</span>
+                        <span>{isAsking ? t('merchant.asking', 'Asking...') : t('merchant.ask_around', 'Ask Around')}</span>
                       </button>
                     )}
                   </div>

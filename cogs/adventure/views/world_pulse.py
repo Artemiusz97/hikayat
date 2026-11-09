@@ -7,6 +7,7 @@ import discord
 
 import db
 from db import adb
+from .base import SessionRestrictedView
 from mechanics.system.concurrency import distributed_session_lock
 from mechanics.world.world_events import build_client_world_pulse_payload
 
@@ -208,7 +209,7 @@ class RumorTrackSelect(discord.ui.Select):
         await interaction.response.edit_message(embed=embed, view=view)
 
 
-class WorldPulseView(discord.ui.View):
+class WorldPulseView(SessionRestrictedView):
     """Discord World Pulse interactive view with row=0 Select and row=1 filter/refresh buttons."""
 
     def __init__(
@@ -218,7 +219,7 @@ class WorldPulseView(discord.ui.View):
         filter_mode: str = "all",
         payload: dict[str, Any] | None = None,
     ):
-        super().__init__(timeout=300)
+        super().__init__(session_id=session_id, timeout=300)
         self.session_id = session_id
         self.user_id = user_id
         self.filter_mode = filter_mode if filter_mode in ("all", "events", "rumors") else "all"

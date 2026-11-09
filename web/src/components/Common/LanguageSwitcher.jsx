@@ -46,7 +46,7 @@ export const LanguageSwitcher = ({ settingsHook, className = '' }) => {
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         className="hk-icon-btn text-xs font-medium"
-        title="Language Settings"
+        title={t('common.language_settings', 'Language Settings')}
       >
         <Globe size={13} className="text-fantasy-accent" />
         <span className="font-mono text-[11px] font-bold tracking-wider">{pillLabel}</span>

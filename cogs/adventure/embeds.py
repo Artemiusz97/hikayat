@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -5,6 +7,7 @@ import os
 import random
 import re
 import time
+from typing import Any, Optional
 import discord
 from mechanics.world.locations import (
     format_tiered_location_string,
@@ -21,7 +24,7 @@ import image_client
 from character_data import (
     XP_REWARDS, STATS, STAT_NAMES, STAT_EMOJI, MAX_LEVEL, MAX_STAT_VALUE,
     get_item_icon, format_item_with_icon, get_class_templates, get_starting_weapons,
-    get_starter_gear_by_class, get_starting_items, inventory_capacity
+    get_starter_gear_by_class, get_starting_items
 )
 from cogs.character import build_character_sheet_embed
 from db import STAT_COLUMN
@@ -33,6 +36,7 @@ from mechanics.social.persona import normalize_appearance
 from mechanics.world.locations import is_location_engine_enabled, get_discovered_location_tree, is_hub_location
 from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as _quest_type_icon
 from mechanics.combat.items import parse_item_effect, apply_item_to_target
+from localization import get_quest_ui_label
 import unicodedata
 
 
@@ -56,13 +60,18 @@ _RESULT_TITLES = {
 
 def _scenario_command_choices() -> list[app_commands.Choice[str]]:
     try:
+        import scenario_variants
         choices = []
-        for key, entry in load_scenarios().items():
-            if key.startswith("custom_combinator_"):
-                continue
+        scenarios = load_scenarios()
+        # Only family roots: variants are picked in a follow-up Select (Discord caps static choices at 25).
+        for key in scenario_variants.get_family_root_keys():
+            entry = scenarios[key]
             label = entry.get("dropdown_label") or entry.get("display_name") or entry.get("name", key)
             emoji = entry.get("emoji", "")
-            name = (f"{emoji} {label}".strip() if emoji and not label.startswith(emoji) else label)[:100]
+            variant_count = len(scenario_variants.get_family_variants(key))
+            suffix = f" · {variant_count} variants" if variant_count > 1 else ""
+            base = f"{emoji} {label}".strip() if emoji and not label.startswith(emoji) else label
+            name = base[:100 - len(suffix)] + suffix
             choices.append(app_commands.Choice(name=name, value=key))
         choices.append(app_commands.Choice(name="🛠️ Custom Scenario (Use Tags Parameter)", value="custom"))
         return choices
@@ -713,6 +722,16 @@ def build_outcome_embeds(
             if etitle:
                 stage_str = f" → {estage.capitalize()}" if estage else ""
                 social_lines.append(f"🌍 {etitle}{stage_str}")
+        for pill_txt in (outcome.get("social_feedback_pills") or []):
+            if isinstance(pill_txt, dict):
+                p_clean = str(pill_txt.get("label") or "").strip()
+                if not p_clean and pill_txt.get("key"):
+                    from mechanics.social import locales as _pill_loc
+                    p_clean = _pill_loc.format_feedback_pill(str(pill_txt["key"]), detail=str(pill_txt.get("detail") or ""))
+            else:
+                p_clean = str(pill_txt or "").strip()
+            if p_clean:
+                social_lines.append(f"💬 *{p_clean}*")
         if social_lines:
             _safe_add_field(breakdown_embed, name="🤝 Social & Faction Updates",
                              value="\n".join(social_lines), inline=False)
@@ -1001,6 +1020,27 @@ def scene_embed(session: dict, actor_char: dict, scene_title: str, narrative: st
         dialogue_partners = get_session_dialogue_partners(session)
         _safe_add_field(dash_embed, name=_tracker_header("🧑‍🤝‍🧑", "Character", "Characters", len(npcs)),
                          value=_tracker_group_text(npcs, dialogue_partners=dialogue_partners, show_vitals=combat_enabled), inline=False)
+        mood_info = session.get("active_dialogue_mood")
+        if not mood_info and dialogue_partners and session.get("id") and not enemies and not session.get("_in_active_erotic_dlg"):
+            try:
+                from mechanics.social import locales as _emb_loc
+                from mechanics.social import pacing as _emb_pac
+                _dp0 = str(dialogue_partners[0]).strip()
+                if _dp0:
+                    _comp_e = _emb_pac.sync_and_get_composure(int(session["id"]), _dp0, current_day=int(c_day), current_minute=int(c_min))
+                    _mk, _ = _emb_pac.derive_mood_and_dc_mod(
+                        int(_comp_e.get("current_composure", 100)),
+                        int(_comp_e.get("max_composure", 100)),
+                        str(_comp_e.get("composure_state") or "composed"),
+                        clear_the_air_required=bool(int(_comp_e.get("clear_the_air_required") or 0) == 1),
+                    )
+                    mood_info = {"npc_name": _dp0, "mood_key": _mk, "mood_label": _emb_loc.get_mood_label(_mk, lang=str(session.get("language") or "en"))}
+            except Exception:
+                mood_info = None
+        if isinstance(mood_info, dict) and mood_info.get("mood_label"):
+            _m_emoji = {"Engaged": "🟢", "Guarded": "🟡", "Drained": "⚪", "Upset": "🔴"}.get(str(mood_info.get("mood_key") or ""), "💬")
+            _m_who = f"**{mood_info['npc_name']}**: " if mood_info.get("npc_name") else ""
+            _safe_add_field(dash_embed, name="💬 Dialogue Mood", value=f"{_m_emoji} {_m_who}`{mood_info['mood_label']}`", inline=False)
 
     if enemies:
         _safe_add_field(dash_embed, name=_tracker_header("👹", "Enemy", "Enemies", len(enemies)),
@@ -1028,6 +1068,8 @@ def sync_scene_embed(session: dict, party: list, scene_title: str, narrative: st
     first_char_name = first_p.get("name", "") if isinstance(first_p, dict) else ""
     dash_embed = discord.Embed(title="⚙️ Game Dashboard", color=discord.Color.teal())
     _safe_add_field(dash_embed, name="📍 Location", value=_location_text(session, char_name=first_char_name), inline=False)
+    c_day = session.get("current_day") or 1
+    c_min = session.get("current_minute") if session.get("current_minute") is not None else 480
 
     enemies = session.get("nearby_enemies", [])
     enemy_names = {game_engine._get_npc_name(e).lower() for e in enemies if e}
@@ -1064,6 +1106,27 @@ def sync_scene_embed(session: dict, party: list, scene_title: str, narrative: st
         dialogue_partners = get_session_dialogue_partners(session)
         _safe_add_field(dash_embed, name=_tracker_header("🧑‍🤝‍🧑", "Character", "Characters", len(npcs)),
                          value=_tracker_group_text(npcs, dialogue_partners=dialogue_partners, show_vitals=combat_enabled), inline=False)
+        mood_info = session.get("active_dialogue_mood")
+        if not mood_info and dialogue_partners and session.get("id") and not enemies and not session.get("_in_active_erotic_dlg"):
+            try:
+                from mechanics.social import locales as _emb_loc
+                from mechanics.social import pacing as _emb_pac
+                _dp0 = str(dialogue_partners[0]).strip()
+                if _dp0:
+                    _comp_e = _emb_pac.sync_and_get_composure(int(session["id"]), _dp0, current_day=int(c_day), current_minute=int(c_min))
+                    _mk, _ = _emb_pac.derive_mood_and_dc_mod(
+                        int(_comp_e.get("current_composure", 100)),
+                        int(_comp_e.get("max_composure", 100)),
+                        str(_comp_e.get("composure_state") or "composed"),
+                        clear_the_air_required=bool(int(_comp_e.get("clear_the_air_required") or 0) == 1),
+                    )
+                    mood_info = {"npc_name": _dp0, "mood_key": _mk, "mood_label": _emb_loc.get_mood_label(_mk, lang=str(session.get("language") or "en"))}
+            except Exception:
+                mood_info = None
+        if isinstance(mood_info, dict) and mood_info.get("mood_label"):
+            _m_emoji = {"Engaged": "🟢", "Guarded": "🟡", "Drained": "⚪", "Upset": "🔴"}.get(str(mood_info.get("mood_key") or ""), "💬")
+            _m_who = f"**{mood_info['npc_name']}**: " if mood_info.get("npc_name") else ""
+            _safe_add_field(dash_embed, name="💬 Dialogue Mood", value=f"{_m_emoji} {_m_who}`{mood_info['mood_label']}`", inline=False)
 
     if enemies:
         _safe_add_field(dash_embed, name=_tracker_header("👹", "Enemy", "Enemies", len(enemies)),
@@ -1162,7 +1225,11 @@ def build_zone_places_embed(session_id: int, zone_name: str, scen_key: str, curr
                 access_badge = p.get("access_badge")
                 access_str = ""
                 if access_badge:
-                    if p.get("is_unlocked"):
+                    if str(access_badge).startswith("For Sale"):
+                        access_str = f" `🏷️ {access_badge}`"
+                    elif access_badge in ("Owned Residence", "Starter Quarters"):
+                        access_str = f" `🏠 {access_badge}`"
+                    elif p.get("is_unlocked"):
                         access_str = " `🔓 Unlocked`"
                     elif p.get("is_curfew_active") or p.get("schedule_locked") or "Closed" in access_badge or "Locked" in access_badge or access_badge in ("Restricted", "Private"):
                         access_str = f" `🔒 {access_badge}`"
@@ -1275,20 +1342,179 @@ def _get_quest_scenario_labels(scen_key: str = None) -> dict:
         "board_emoji": "📋"
     }
 
-def _format_fow_dossier_embed_fields(embed: discord.Embed, session_id: int, quest: dict) -> None:
+def _resolve_session_ui_lang(session_id: int, session: Optional[dict] = None) -> str:
+    try:
+        sess = session if isinstance(session, dict) else (db.get_session(session_id) or {})
+        host_uid = sess.get("host_user_id")
+        if host_uid:
+            ui_lang = str((db.get_settings(host_uid) or {}).get("ui_language") or "").strip().lower()
+            if ui_lang:
+                return ui_lang
+        return str(sess.get("narration_language") or sess.get("language") or "en").strip().lower() or "en"
+    except Exception:
+        return "en"
+
+
+def _resolve_reveal_all(session_id: int, session: Optional[dict] = None) -> bool:
+    try:
+        sess = session if isinstance(session, dict) else (db.get_session(session_id) or {})
+        host_uid = sess.get("host_user_id")
+        return bool(int((db.get_settings(host_uid) or {}).get("debug_reveal_all_info") or 0)) if host_uid else False
+    except Exception:
+        return False
+
+
+def _format_structured_quest_embed_fields(
+    embed: discord.Embed,
+    session_id: int,
+    redacted_q: dict,
+    lang: str = "en",
+) -> None:
+    """Renders structured `1 Main Objective (2–3 stages) + 1–3 (Optional) Tactical Routes` on Discord embeds."""
+    fow = redacted_q.get("fow") if isinstance(redacted_q.get("fow"), dict) else {}
+    mo = redacted_q.get("main_objective") or fow.get("main_objective") or {}
+    opts = redacted_q.get("optional_objectives") or fow.get("optional_objectives") or []
+    leads_by_id = {
+        str(ld.get("optional_id") or ld.get("lead_id") or ""): ld
+        for ld in (fow.get("leads") or [])
+        if isinstance(ld, dict)
+    }
+
+    if isinstance(mo, dict) and mo:
+        stages = list(mo.get("stages") or [])
+        total_st = max(1, int(mo.get("total_stages") or len(stages) or 2))
+        cur_st = min(total_st, max(1, int(mo.get("current_stage") or 1)))
+        comp_st = int(mo.get("completed_stages") or sum(1 for s in stages if isinstance(s, dict) and s.get("completed")))
+        pct = int((comp_st / total_st) * 100) if total_st > 0 else 0
+        bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
+
+        tags = [f"`[{bar}] Stage {cur_st}/{total_st}`"]
+        if fow.get("is_peak_chapter"):
+            tags.append(f"⚡ `{get_quest_ui_label('peak_chapter', lang)}`")
+        if int(mo.get("aid_dc_reduction") or 0) > 0:
+            tags.append("🛡️ `Aid Active`")
+        if mo.get("bypass_unlocked"):
+            tags.append("⏭️ `Shortcut Active`")
+
+        mo_title = clean_narrative_location_arrows(str(mo.get("title") or mo.get("text") or redacted_q.get("objective") or ""))
+        stage_lines = [f"**{mo_title}**\n" + " • ".join(tags)]
+        for idx_s, st in enumerate(stages, start=1):
+            if not isinstance(st, dict):
+                continue
+            s_idx = int(st.get("stage_index") or idx_s)
+            s_stat = str(st.get("status") or "locked").lower()
+            s_done = bool(st.get("completed")) or s_stat in ("completed", "bypassed")
+            s_lbl = clean_narrative_location_arrows(str(st.get("stage_label") or st.get("text") or f"Stage {s_idx}"))
+            s_loc = format_clean_location_badge(str(st.get("target_location") or ""))
+            s_npc = str(st.get("target_npc") or "").strip()
+
+            if st.get("bypassed") or s_stat == "bypassed":
+                stage_lines.append(f"⏭️ **Stage {s_idx} (`[Bypassed]`):** *{s_lbl}*")
+            elif s_done:
+                stage_lines.append(f"☑️ **Stage {s_idx}:** *{s_lbl}*")
+            elif s_stat == "active" or s_idx == cur_st:
+                loc_part = f"\n   ↳ 📍 `{s_loc}`" if s_loc else ""
+                npc_part = f" • 👤 `{s_npc}`" if s_npc else ""
+                stage_lines.append(f"📍 **Stage {s_idx}:** *{s_lbl}*{loc_part}{npc_part}")
+            else:
+                stage_lines.append(f"🔒 **Stage {s_idx}:** *{s_lbl}*")
+
+        embed.add_field(
+            name=f"★ {get_quest_ui_label('main_objective', lang)}",
+            value="\n".join(stage_lines)[:1024],
+            inline=False,
+        )
+
+    if opts:
+        opt_lines = []
+        role_label_keys = {
+            "aid": "optional_aid",
+            "bypass": "optional_bypass",
+            "alternative": "optional_alternative",
+            "threatened": "optional_threatened",
+        }
+        for opt in opts[:4]:
+            if not isinstance(opt, dict):
+                continue
+            role = str(opt.get("role") or "aid").lower()
+            role_badge = clean_narrative_location_arrows(
+                str(opt.get("badge") or get_quest_ui_label(role_label_keys.get(role, "optional_aid"), lang))
+            )
+            st = str(opt.get("status") or "active").lower()
+            if st == "completed" or opt.get("completed"):
+                bonus_tag = f" `[{get_quest_ui_label('bonus_claimed', lang)}]`" if opt.get("bonus_claimed") else ""
+                icon = f"☑️{bonus_tag}"
+            elif st == "failed" or opt.get("failed"):
+                icon = f"❌ `[{get_quest_ui_label('failed_route', lang)}]`"
+            elif st == "bypassed" or opt.get("bypassed"):
+                icon = "⏭️ `[Bypassed]`"
+            elif st == "locked_out" or opt.get("locked_out"):
+                icon = f"🔒 `[{get_quest_ui_label('locked_out', lang)}]`"
+            else:
+                icon = "🧭"
+
+            apprs = []
+            for a in (opt.get("approaches") or [])[:4]:
+                if not isinstance(a, dict):
+                    continue
+                lbl = str(a.get("stat") or a.get("approach_id") or "").upper()
+                if lbl:
+                    apprs.append(f"~~{lbl}~~" if a.get("burned") else f"`{lbl}`")
+            appr_str = f" — {' / '.join(apprs)}" if apprs else ""
+
+            opt_title = clean_narrative_location_arrows(str(opt.get("title") or opt.get("text") or "Optional Lead"))
+            line = f"{icon} `[{role_badge}]` **{opt_title}**{appr_str}"
+
+            if st == "active" and opt.get("target_location"):
+                loc_clean = format_clean_location_badge(str(opt.get("target_location") or ""))
+                if loc_clean:
+                    line += f"\n   ↳ 📍 `{loc_clean}`"
+
+            hint = clean_narrative_location_arrows(str(opt.get("stakes_hint") or "").strip())
+            if hint:
+                line += f"\n   ↳ *{hint}*"
+
+            opt_key = str(opt.get("optional_id") or opt.get("lead_id") or "")
+            matched_ld = leads_by_id.get(opt_key) or {}
+            if matched_ld.get("scouted_enemies"):
+                names = ", ".join(str(e.get("name") or "Hostile") for e in matched_ld["scouted_enemies"][:3])
+                line += f"\n   ↳ 👁️ *Scouted Pack:* {names}"
+
+            opt_lines.append(line)
+
+        if opt_lines:
+            embed.add_field(
+                name=f"🧭 {get_quest_ui_label('optional_routes', lang)}",
+                value="\n".join(opt_lines)[:1024],
+                inline=False,
+            )
+
+
+def _format_fow_dossier_embed_fields(
+    embed: discord.Embed,
+    session_id: int,
+    quest: dict,
+    raw_quest: Optional[dict] = None,
+) -> None:
     """Appends Fog-of-War Alert Meter, Multi-Approach Leads, Bypassed badges, and Uncovered Twist intel."""
     reveal_all = False
     try:
         sess = db.get_session(session_id) or {}
-        host_uid = sess.get("host_user_id")
-        reveal_all = bool(int((db.get_settings(host_uid) or {}).get("debug_reveal_all_info") or 0)) if host_uid else False
-        q_notes_raw = str((quest or {}).get("quest_notes") or "")
-        if "anomaly_bp:" in q_notes_raw or "anomaly_blueprint:" in q_notes_raw:
+        reveal_all = _resolve_reveal_all(session_id, sess)
+        anom_src = raw_quest if isinstance(raw_quest, dict) else (quest or {})
+        q_notes_raw = str(anom_src.get("quest_notes") or "")
+        has_anom_bp = (
+            "anomaly_bp:" in q_notes_raw
+            or "anomaly_blueprint:" in q_notes_raw
+            or bool(isinstance(anom_src.get("anomaly_blueprint"), dict) and anom_src.get("anomaly_blueprint"))
+            or str(anom_src.get("anomaly_blueprint_json") or "").strip() not in ("", "{}")
+        )
+        if has_anom_bp:
             from mechanics.world.anomaly_engine import (
                 parse_blueprint_from_notes,
                 format_anomaly_dossier_summary,
             )
-            bp_q = parse_blueprint_from_notes(q_notes_raw)
+            bp_q = parse_blueprint_from_notes(anom_src)
             if bp_q:
                 is_rev = bool(reveal_all or "dossier_revealed:1" in q_notes_raw or bp_q.get("dossier_revealed"))
                 dossier_obj = format_anomaly_dossier_summary(bp_q, revealed=is_rev)
@@ -1299,7 +1525,11 @@ def _format_fow_dossier_embed_fields(embed: discord.Embed, session_id: int, ques
                         value=dossier_txt[:1024],
                         inline=False,
                     )
-        fow = game_engine.build_fog_of_war_quest_payload(session_id, quest, reveal_all=reveal_all)
+        fow = (
+            quest.get("fow")
+            if isinstance((quest or {}).get("fow"), dict)
+            else game_engine.build_fog_of_war_quest_payload(session_id, quest, reveal_all=reveal_all)
+        )
     except Exception:
         return
     if not isinstance(fow, dict) or fow.get("dossier_stage") != "compiled":
@@ -1316,11 +1546,20 @@ def _format_fow_dossier_embed_fields(embed: discord.Embed, session_id: int, ques
     )
 
     leads = fow.get("leads") or []
-    if leads:
+    if leads and not fow.get("has_structured_objectives"):
         lead_lines = []
         for ld in leads[:4]:
-            st = ld.get("status") or "active"
-            badge = "☑️" if st == "completed" else ("⏭️ `[Bypassed]`" if st == "bypassed" else "📍")
+            st = str(ld.get("status") or "active").lower()
+            if st == "completed":
+                badge = "☑️"
+            elif st == "bypassed":
+                badge = "⏭️ `[Bypassed]`"
+            elif st == "failed":
+                badge = "❌ `[Failed]`"
+            elif st == "locked_out":
+                badge = "🔒 `[Locked Out]`"
+            else:
+                badge = "📍"
             apprs = []
             for a in (ld.get("approaches") or [])[:4]:
                 lbl = str(a.get("stat") or a.get("approach_id") or "").upper()
@@ -1342,13 +1581,69 @@ def _format_fow_dossier_embed_fields(embed: discord.Embed, session_id: int, ques
         )
 
 
+def _build_chronicle_tapestry_embed(session_id: int, slide_idx: int = 0) -> discord.Embed:
+    """Renders the 4-Slide Chronicle Tapestry (`World`, `Factions`, `Bonds`, `Earned Title`) for Discord."""
+    session = db.get_session(session_id) or {}
+    ui_lang = _resolve_session_ui_lang(session_id, session)
+    spine = db.get_campaign_spine(session_id) or {}
+    tapestry = (spine.get("chronicle_tapestry") or session.get("chronicle_tapestry") or {})
+    slides = list(tapestry.get("slides") or [])
+    is_fallen = bool(
+        tapestry.get("is_fallen_world")
+        or str(tapestry.get("ending_archetype") or tapestry.get("ending_id") or "") == "fallen_world"
+        or session.get("fallen_world")
+    )
+
+    if not slides:
+        return discord.Embed(
+            title=f"📜 {get_quest_ui_label('chronicle_tapestry', ui_lang)}",
+            description="Complete Chapter 11 to weave your 4-slide Chronicle Tapestry.",
+            color=discord.Color.dark_red() if is_fallen else discord.Color.gold(),
+        )
+
+    safe_idx = max(0, min(int(slide_idx or 0), len(slides) - 1))
+    slide = slides[safe_idx] or {}
+    slide_id = str(slide.get("slide_id") or slide.get("id") or "")
+    slide_icons = {"world": "🌍", "factions": "🛡️", "bonds": "🤝", "title": "👑"}
+    s_icon = slide_icons.get(slide_id, "📜")
+
+    ending_title = clean_narrative_location_arrows(
+        str(tapestry.get("ending_title") or get_quest_ui_label("chronicle_tapestry", ui_lang))
+    )
+    earned_title = clean_narrative_location_arrows(str(tapestry.get("earned_title") or ""))
+    heading = clean_narrative_location_arrows(str(slide.get("heading") or f"Slide {safe_idx + 1}"))
+    body = clean_narrative_location_arrows(str(slide.get("text") or slide.get("body") or ""))
+
+    embed = discord.Embed(
+        title=f"📜 {ending_title}",
+        description=f"🏅 **{earned_title}**" if earned_title else None,
+        color=discord.Color.dark_red() if is_fallen else discord.Color.gold(),
+    )
+    embed.add_field(
+        name=f"{s_icon} {heading} ({safe_idx + 1}/{len(slides)})",
+        value=body[:1024] or "—",
+        inline=False,
+    )
+    nav_pills = []
+    for idx_s, sl in enumerate(slides):
+        sl_head = clean_narrative_location_arrows(str((sl or {}).get("heading") or f"#{idx_s + 1}"))
+        nav_pills.append(f"**[{idx_s + 1}. {sl_head}]**" if idx_s == safe_idx else f"{idx_s + 1}. {sl_head}")
+    embed.set_footer(text=" • ".join(nav_pills)[:2048])
+    return embed
+
+
 def _build_campaign_goals_embed(session_id: int) -> discord.Embed:
     session = db.get_session(session_id) or {}
+    ui_lang = _resolve_session_ui_lang(session_id, session)
+    spine = db.get_campaign_spine(session_id) or {}
     goals = db.get_session_campaign_goals(session_id)
     cur_ch = db.get_session_chapter(session_id) or 1
+    peak_note = f" • ⚡ `{get_quest_ui_label('peak_chapter', ui_lang)}`" if int(cur_ch) in (3, 6, 8, 9, 10) else ""
     status_banner = ""
     if session.get("campaign_game_over"):
         status_banner = "\n💀 **FALLEN WORLD — CAMPAIGN DEFEAT (Chapter 10 Climax Lost)**"
+    elif session.get("fallen_world") and not session.get("epilogue_ready") and not session.get("campaign_archived"):
+        status_banner = f"\n🌑 **{get_quest_ui_label('fallen_world_epilogue', ui_lang).upper()}**"
     elif session.get("epilogue_ready"):
         status_banner = "\n🌅 **CHAPTER 11 EPILOGUE READY** — Choose Archive or Endless World!"
     elif session.get("endless_mode_unlocked"):
@@ -1357,11 +1652,26 @@ def _build_campaign_goals_embed(session_id: int) -> discord.Embed:
     embed = discord.Embed(
         title="🏆 Campaign End Goals",
         description=(
-            f"Current Progress: **Chapter {cur_ch} of 11**{status_banner}\n"
+            f"Current Progress: **Chapter {cur_ch} of 11**{peak_note}{status_banner}\n"
             "Long-term campaign objectives tracking overall story progression."
         ),
-        color=discord.Color.dark_red() if session.get("campaign_game_over") else discord.Color.gold()
+        color=(
+            discord.Color.dark_red()
+            if (session.get("campaign_game_over") or session.get("fallen_world"))
+            else discord.Color.gold()
+        ),
     )
+
+    tapestry = spine.get("chronicle_tapestry") or session.get("chronicle_tapestry") or {}
+    if isinstance(tapestry, dict) and tapestry.get("slides"):
+        e_title = clean_narrative_location_arrows(str(tapestry.get("ending_title") or "Chronicle Tapestry"))
+        ep_badge = f" • 🏅 `{clean_narrative_location_arrows(str(tapestry['earned_title']))}`" if tapestry.get("earned_title") else ""
+        embed.add_field(
+            name=f"📜 {get_quest_ui_label('chronicle_tapestry', ui_lang)}",
+            value=f"**{e_title}**{ep_badge}\n*Click **Chronicle Tapestry** below to inspect all 4 slides.*",
+            inline=False,
+        )
+
     scars = [
         e
         for e in (db.get_world_events(session_id, statuses=("active",)) or [])
@@ -1373,7 +1683,20 @@ def _build_campaign_goals_embed(session_id: int) -> discord.Embed:
         )
     ]
     if scars:
-        scar_lines = [f"• 🔥 **{s.get('title', 'World Scar')}** (`{s.get('location_name', 'Region')}`)" for s in scars[:5]]
+        scar_lines = []
+        for s in scars[:5]:
+            meta = s.get("metadata") if isinstance(s.get("metadata"), dict) else {}
+            s_tier = str(meta.get("scar_tier") or "bounty").lower()
+            rem_type = str(meta.get("remediation_type") or "").lower()
+            if s_tier == "peak":
+                tier_tag = f" `[{get_quest_ui_label('peak_scar', ui_lang)}]`"
+            elif s_tier == "buildup" or rem_type == "liberation":
+                tier_tag = f" `[{get_quest_ui_label('liberation_op', ui_lang)}]`"
+            else:
+                tier_tag = ""
+            scar_lines.append(
+                f"• 🔥 **{s.get('title', 'World Scar')}** (`{s.get('location_name', 'Region')}`){tier_tag}"
+            )
         embed.add_field(name=f"⚠️ Active World Scars ({len(scars)})", value="\n".join(scar_lines)[:1024], inline=False)
     if not goals:
         embed.add_field(name="No Campaign Goals", value="No long-term campaign goals are currently active.", inline=False)
@@ -1393,10 +1716,12 @@ def _build_campaign_goals_embed(session_id: int) -> discord.Embed:
 def _build_main_quest_embed(session_id: int) -> discord.Embed:
     session = db.get_session(session_id)
     scen_key = session.get("scenario", "fantasy") if session else "fantasy"
+    ui_lang = _resolve_session_ui_lang(session_id, session)
+    reveal_all = _resolve_reveal_all(session_id, session)
     labels = _get_quest_scenario_labels(scen_key)
-    active_sq = db.get_active_story_quest(session_id)
+    raw_sq = db.get_active_story_quest(session_id)
 
-    if not active_sq:
+    if not raw_sq:
         embed = discord.Embed(
             title=f"{labels['main_emoji']} {labels['main_tab']} — No Active Objective",
             description="You currently have no active main story chapter. Explore the world, interact with key characters, or check local notice boards to unlock the next chapter!",
@@ -1409,84 +1734,111 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
         )
         return embed
 
+    active_sq = game_engine.redact_quest_for_fog_of_war(session_id, raw_sq, reveal_all=reveal_all)
+    has_structured = bool(active_sq.get("has_structured_objectives"))
     title = clean_narrative_location_arrows(active_sq.get("title", "Active Chapter"))
-    q_type = active_sq.get("quest_type", "Story Quest")
     obj = clean_narrative_location_arrows(active_sq.get("objective", ""))
-    sub_objs = active_sq.get("sub_objectives", []) or []
-    all_so_done = bool(sub_objs and all(isinstance(so, dict) and so.get("completed") for so in sub_objs))
 
-    if all_so_done:
+    if has_structured:
+        mo = active_sq.get("main_objective") or {}
+        is_peak = bool(active_sq.get("is_peak_chapter"))
+        all_main_done = bool(mo.get("completed"))
+        hdr_icon = "⚡" if (is_peak or all_main_done) else "⭐"
+        peak_suffix = f" [{get_quest_ui_label('peak_chapter', ui_lang).upper()}]" if is_peak else ""
         embed = discord.Embed(
-            title=f"⚡ {labels['main_tab'].upper()} (CLIMAX READY): {title}",
+            title=f"{hdr_icon} {labels['main_tab'].upper()}{peak_suffix}: {title}",
             description=f"**Objective:** {obj}",
-            color=discord.Color.purple()
+            color=discord.Color.purple() if (is_peak or all_main_done) else discord.Color.blue(),
         )
+        _format_structured_quest_embed_fields(embed, session_id, active_sq, lang=ui_lang)
     else:
-        embed = discord.Embed(
-            title=f"⭐ {labels['main_tab'].upper()}: {title}",
-            description=f"**Objective:** {obj}",
-            color=discord.Color.blue()
-        )
+        sub_objs = active_sq.get("sub_objectives", []) or []
+        all_so_done = bool(sub_objs and all(isinstance(so, dict) and so.get("completed") for so in sub_objs))
 
-    # Waypoint / Stage Compass Quick-Tracker for in-progress stage
-    active_wp_lead = None
-    if sub_objs and not all_so_done:
-        for so in sub_objs:
-            if not so.get("completed") and so.get("id"):
-                try:
-                    wp = so.get("active_waypoint") or db.get_active_waypoint(session_id, active_sq.get("quest_id"), so["id"])
-                    if wp and wp.get("target_location"):
-                        active_wp_lead = wp
-                        break
-                except Exception:
-                    pass
-
-    if active_wp_lead:
-        s_idx = active_wp_lead.get("stage_index", 1)
-        s_lbl = clean_narrative_location_arrows(active_wp_lead.get("stage_label", ""))
-        s_loc = format_clean_location_badge(active_wp_lead.get("target_location", ""))
-        embed.add_field(
-            name="📍 Current Waypoint Lead",
-            value=f"**Stage {s_idx}/3:** *{s_lbl}*\n➔ 📍 **Target Location:** `{s_loc}`",
-            inline=False
-        )
-
-    # Sub-Objectives Checklist
-    if sub_objs:
-        sub_lines = []
-        for so in sub_objs:
-            is_done = bool(so.get("completed"))
-            chk = "☑️" if is_done else "☐"
-            arch = f" [{so['archetype']}]" if so.get("archetype") else ""
-            raw_text = clean_narrative_location_arrows(str(so.get("text", "")).strip())
-            if len(raw_text) > 175:
-                raw_text = raw_text[:172].rstrip() + "..."
-            line = f"{chk}{arch} {raw_text}"
-            if not is_done and so.get("id"):
-                try:
-                    wp = so.get("active_waypoint") or db.get_active_waypoint(session_id, active_sq.get("quest_id"), so["id"])
-                    if wp:
-                        s_idx = wp.get("stage_index", 1)
-                        s_lbl = clean_narrative_location_arrows(wp.get("stage_label", ""))
-                        s_loc = format_clean_location_badge(wp.get("target_location", ""))
-                        loc_display = f" ➔ 📍 `{s_loc}`" if s_loc else ""
-                        line += f"\n   ↳ *Stage {s_idx}/3: {s_lbl}{loc_display}*"
-                except Exception:
-                    pass
-            sub_lines.append(line)
-        
-        sub_val = "\n".join(sub_lines)
         if all_so_done:
-            from mechanics.world.waypoints import get_story_quest_climax_location
-            _, climax_loc = get_story_quest_climax_location(session_id)
-            climax_display = f"`{format_clean_location_badge(climax_loc)}`" if climax_loc else "`Local Area`"
-            sub_val += (
-                f"\n\n⚡ **CLIMAX READY — FINAL SHOWDOWN:**\n"
-                f"• All preliminary sub-objectives completed!\n"
-                f"• 📍 **Destination:** {climax_display}\n"
-                f"• *Proceed to the destination to confront the climax encounter and conclude this chapter!*"
+            embed = discord.Embed(
+                title=f"⚡ {labels['main_tab'].upper()} (CLIMAX READY): {title}",
+                description=f"**Objective:** {obj}",
+                color=discord.Color.purple()
             )
-        embed.add_field(name="Sub-Objectives (Tackle in any order)", value=sub_val[:1024], inline=False)
+        else:
+            embed = discord.Embed(
+                title=f"⭐ {labels['main_tab'].upper()}: {title}",
+                description=f"**Objective:** {obj}",
+                color=discord.Color.blue()
+            )
+
+        # Legacy Waypoint / Stage Compass Quick-Tracker for in-progress stage
+        active_wp_lead = None
+        if sub_objs and not all_so_done:
+            for so in sub_objs:
+                if not so.get("completed") and so.get("id") is not None:
+                    try:
+                        wp = so.get("active_waypoint") or db.get_active_waypoint(session_id, active_sq.get("quest_id"), so["id"])
+                        if wp and wp.get("target_location"):
+                            active_wp_lead = wp
+                            break
+                    except Exception:
+                        pass
+
+        if active_wp_lead:
+            s_idx = active_wp_lead.get("stage_index", 1)
+            s_lbl = clean_narrative_location_arrows(active_wp_lead.get("stage_label", ""))
+            s_loc = format_clean_location_badge(active_wp_lead.get("target_location", ""))
+            embed.add_field(
+                name="📍 Current Waypoint Lead",
+                value=f"**Stage {s_idx}/3:** *{s_lbl}*\n➔ 📍 **Target Location:** `{s_loc}`",
+                inline=False
+            )
+
+        if sub_objs:
+            sub_lines = []
+            for so in sub_objs:
+                is_done = bool(so.get("completed"))
+                chk = "☑️" if is_done else "☐"
+                arch = f" [{so['archetype']}]" if so.get("archetype") else ""
+                raw_text = clean_narrative_location_arrows(str(so.get("text", "")).strip())
+                if len(raw_text) > 175:
+                    raw_text = raw_text[:172].rstrip() + "..."
+                line = f"{chk}{arch} {raw_text}"
+                if not is_done and so.get("id") is not None:
+                    try:
+                        wp = so.get("active_waypoint") or db.get_active_waypoint(session_id, active_sq.get("quest_id"), so["id"])
+                        if wp:
+                            s_idx = wp.get("stage_index", 1)
+                            s_lbl = clean_narrative_location_arrows(wp.get("stage_label", ""))
+                            s_loc = format_clean_location_badge(wp.get("target_location", ""))
+                            loc_display = f" ➔ 📍 `{s_loc}`" if s_loc else ""
+                            line += f"\n   ↳ *Stage {s_idx}/3: {s_lbl}{loc_display}*"
+                    except Exception:
+                        pass
+                sub_lines.append(line)
+
+            sub_val = "\n".join(sub_lines)
+            if all_so_done:
+                from mechanics.world.waypoints import get_story_quest_climax_location
+                fow_meta = (active_sq.get("fow") or {}).get("climax") or {}
+                sq_dos = db.get_quest_dossier(session_id, str(active_sq.get("quest_id") or ""))
+                climax_spec_sq = (sq_dos or {}).get("climax_spec") or {}
+                climax_open = bool(
+                    reveal_all
+                    or str(climax_spec_sq.get("gate_type") or climax_spec_sq.get("gate_mode") or "").lower() == "open"
+                    or climax_spec_sq.get("is_unlocked")
+                    or fow_meta.get("is_unlocked")
+                )
+                _, climax_loc = get_story_quest_climax_location(session_id)
+                climax_display = (
+                    f"`{format_clean_location_badge(climax_loc)}`"
+                    if (climax_loc and climax_open)
+                    else "`Hidden Lair (Uncover Clues to Reveal)`"
+                )
+                sub_val += (
+                    f"\n\n⚡ **CLIMAX READY — FINAL SHOWDOWN:**\n"
+                    f"• All preliminary sub-objectives completed!\n"
+                    f"• 📍 **Destination:** {climax_display}\n"
+                    f"• *Proceed to the destination to confront the climax encounter and conclude this chapter!*"
+                )
+            embed.add_field(name="Sub-Objectives (Tackle in any order)", value=sub_val[:1024], inline=False)
 
     # Streamlined Investigation Notes / Clues Dossier
     clues_str = active_sq.get("current_clues") or ""
@@ -1510,8 +1862,8 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
             inline=False
         )
 
-    # Rewards
-    _format_fow_dossier_embed_fields(embed, session_id, active_sq)
+    # Rewards (100% Base Payout guaranteed on Main Completion; Optionals grant Field Bonuses)
+    _format_fow_dossier_embed_fields(embed, session_id, active_sq, raw_quest=raw_sq)
     rxp = active_sq.get("reward_xp", 100)
     rgold = active_sq.get("reward_gold", 25)
     ritem = active_sq.get("reward_item", "")
@@ -1519,7 +1871,11 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
     if rxp: rewards.append(f"{rxp} XP")
     if rgold: rewards.append(f"{rgold} Gold")
     if ritem: rewards.append(f"🎒 Item: {ritem}")
-    embed.add_field(name="Rewards", value=", ".join(rewards) if rewards else "Standard", inline=False)
+    embed.add_field(
+        name=get_quest_ui_label("base_reward_note", ui_lang),
+        value=", ".join(rewards) if rewards else "Standard",
+        inline=False,
+    )
 
     return embed
 
@@ -1527,6 +1883,8 @@ def _build_bounties_embed(session_id: int, selected_quest_id: str | None = None)
     session = db.get_session(session_id)
     scen_key = session.get("scenario", "fantasy") if session else "fantasy"
     cur_loc = session.get("current_location", "") if session else ""
+    ui_lang = _resolve_session_ui_lang(session_id, session)
+    reveal_all = _resolve_reveal_all(session_id, session)
     labels = _get_quest_scenario_labels(scen_key)
 
     all_active = db.get_session_quests(session_id, status="Active")
@@ -1546,11 +1904,12 @@ def _build_bounties_embed(session_id: int, selected_quest_id: str | None = None)
 
     # Detailed Inspector Mode
     if selected_quest_id:
-        target_bounty = next((b for b in active_bounties if b.get("quest_id") == selected_quest_id), None)
-        if not target_bounty:
-            target_bounty = db.get_quest_by_id(session_id, selected_quest_id)
+        raw_bounty = next((b for b in active_bounties if b.get("quest_id") == selected_quest_id), None)
+        if not raw_bounty:
+            raw_bounty = db.get_quest_by_id(session_id, selected_quest_id)
 
-        if target_bounty:
+        if raw_bounty:
+            target_bounty = game_engine.redact_quest_for_fog_of_war(session_id, raw_bounty, reveal_all=reveal_all)
             b_id = target_bounty.get("quest_id", "")
             title = clean_narrative_location_arrows(target_bounty.get("title", "Bounty Details"))
             q_type = target_bounty.get("quest_type", "Side Bounty")
@@ -1558,84 +1917,85 @@ def _build_bounties_embed(session_id: int, selected_quest_id: str | None = None)
             obj = clean_narrative_location_arrows(target_bounty.get("objective", ""))
             clues = target_bounty.get("current_clues", "")
 
-            wps = db.get_quest_waypoints(session_id, b_id, sub_obj_id=None)
-            active_wp = db.get_active_waypoint(session_id, b_id, sub_obj_id=None)
-
             embed = discord.Embed(
                 title=f"{icon} {labels['bounties_tab']} Detail: {title}",
                 description=f"**Type:** {q_type}\n**Status:** ⏳ In Progress\n\n**Objective:**\n{obj}",
                 color=discord.Color.teal()
             )
 
-            # 1. Progression Roadmap & Stage Checklist
-            if wps:
-                completed_count = len([w for w in wps if w.get("status") == "completed"])
-                total_stages = len(wps)
-                pct = int((completed_count / total_stages) * 100) if total_stages > 0 else 0
-                bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
-                cur_stage_idx = active_wp.get("stage_index", total_stages) if active_wp else total_stages
-
-                stage_lines = []
-                for wp in wps:
-                    st_idx = wp.get("stage_index", 1)
-                    st_status = wp.get("status", "locked")
-                    st_lbl = clean_narrative_location_arrows(wp.get("stage_label", ""))
-                    st_loc = format_clean_location_badge(wp.get("target_location", ""))
-                    st_npc = wp.get("target_npc", "")
-
-                    if st_status == "completed":
-                        chk = "☑️"
-                        status_str = "Completed"
-                        stage_lines.append(f"{chk} **Stage {st_idx} ({status_str}):** *{st_lbl}*")
-                    elif st_status == "active":
-                        chk = "📍"
-                        status_str = "Active Lead"
-                        loc_display = f"\n   ↳ 📍 **Target Location:** `{st_loc}`" if st_loc else ""
-                        npc_display = f"\n   ↳ 👤 **Contact / NPC:** `{st_npc}`" if st_npc else ""
-
-                        # Check gathering resource target
-                        res_tgt = wp.get("resource_target", 0)
-                        res_col = wp.get("resource_collected", 0)
-                        res_display = ""
-                        if res_tgt > 0:
-                            res_pct = int(min(1.0, res_col / res_tgt) * 10)
-                            res_bar = "█" * res_pct + "░" * (10 - res_pct)
-                            res_display = f"\n   ↳ 📦 **Gathering Progress:** `{res_col}/{res_tgt}` [{res_bar}]"
-
-                        stage_lines.append(f"{chk} **Stage {st_idx} ({status_str}):** *{st_lbl}*{loc_display}{npc_display}{res_display}")
-                    else:
-                        chk = "🔒"
-                        status_str = "Locked"
-                        stage_lines.append(f"{chk} **Stage {st_idx} ({status_str}):** *{st_lbl}*")
-
-                header_text = f"[{bar}] Stage {cur_stage_idx} of {total_stages} ({pct}%)"
-                embed.add_field(
-                    name="📊 Progression Roadmap",
-                    value=f"**Milestone Progress:** `{header_text}`\n\n" + "\n".join(stage_lines),
-                    inline=False
-                )
+            if target_bounty.get("has_structured_objectives"):
+                _format_structured_quest_embed_fields(embed, session_id, target_bounty, lang=ui_lang)
             else:
-                raw_prog = target_bounty.get("progress") or "In Progress"
-                embed.add_field(name="📊 Progression Status", value=f"**Status:** `{raw_prog}`", inline=False)
+                wps = db.get_quest_waypoints(session_id, b_id, sub_obj_id=None)
+                active_wp = db.get_active_waypoint(session_id, b_id, sub_obj_id=None)
 
-            # 2. Active Action Callout Box
-            if active_wp:
-                action_lines = [f"**Current Task:** {clean_narrative_location_arrows(active_wp.get('stage_label', ''))}"]
-                if active_wp.get("target_location"):
-                    action_lines.append(f"📍 **Destination:** `{format_clean_location_badge(active_wp['target_location'])}`")
-                if active_wp.get("target_npc"):
-                    action_lines.append(f"👤 **Key Contact:** `{active_wp['target_npc']}`")
-                trig = active_wp.get("completion_trigger", "arrival")
-                trig_str = "Travel to destination" if trig == "arrival" else "Pass thematic skill check / investigation"
-                action_lines.append(f"🎲 **Requirement:** *{trig_str}*")
-                embed.add_field(name="🎯 Current Milestone Action", value="\n".join(action_lines), inline=False)
+                # 1. Progression Roadmap & Stage Checklist (Legacy Fallback)
+                if wps:
+                    completed_count = len([w for w in wps if w.get("status") == "completed"])
+                    total_stages = len(wps)
+                    pct = int((completed_count / total_stages) * 100) if total_stages > 0 else 0
+                    bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
+                    cur_stage_idx = active_wp.get("stage_index", total_stages) if active_wp else total_stages
+
+                    stage_lines = []
+                    for wp in wps:
+                        st_idx = wp.get("stage_index", 1)
+                        st_status = wp.get("status", "locked")
+                        st_lbl = clean_narrative_location_arrows(wp.get("stage_label", ""))
+                        st_loc = format_clean_location_badge(wp.get("target_location", ""))
+                        st_npc = wp.get("target_npc", "")
+
+                        if st_status == "completed":
+                            chk = "☑️"
+                            status_str = "Completed"
+                            stage_lines.append(f"{chk} **Stage {st_idx} ({status_str}):** *{st_lbl}*")
+                        elif st_status == "active":
+                            chk = "📍"
+                            status_str = "Active Lead"
+                            loc_display = f"\n   ↳ 📍 **Target Location:** `{st_loc}`" if st_loc else ""
+                            npc_display = f"\n   ↳ 👤 **Contact / NPC:** `{st_npc}`" if st_npc else ""
+
+                            res_tgt = wp.get("resource_target", 0)
+                            res_col = wp.get("resource_collected", 0)
+                            res_display = ""
+                            if res_tgt > 0:
+                                res_pct = int(min(1.0, res_col / res_tgt) * 10)
+                                res_bar = "█" * res_pct + "░" * (10 - res_pct)
+                                res_display = f"\n   ↳ 📦 **Gathering Progress:** `{res_col}/{res_tgt}` [{res_bar}]"
+
+                            stage_lines.append(f"{chk} **Stage {st_idx} ({status_str}):** *{st_lbl}*{loc_display}{npc_display}{res_display}")
+                        else:
+                            chk = "🔒"
+                            status_str = "Locked"
+                            stage_lines.append(f"{chk} **Stage {st_idx} ({status_str}):** *{st_lbl}*")
+
+                    header_text = f"[{bar}] Stage {cur_stage_idx} of {total_stages} ({pct}%)"
+                    embed.add_field(
+                        name="📊 Progression Roadmap",
+                        value=f"**Milestone Progress:** `{header_text}`\n\n" + "\n".join(stage_lines),
+                        inline=False
+                    )
+                else:
+                    raw_prog = target_bounty.get("progress") or "In Progress"
+                    embed.add_field(name="📊 Progression Status", value=f"**Status:** `{raw_prog}`", inline=False)
+
+                if active_wp:
+                    action_lines = [f"**Current Task:** {clean_narrative_location_arrows(active_wp.get('stage_label', ''))}"]
+                    if active_wp.get("target_location"):
+                        action_lines.append(f"📍 **Destination:** `{format_clean_location_badge(active_wp['target_location'])}`")
+                    if active_wp.get("target_npc"):
+                        action_lines.append(f"👤 **Key Contact:** `{active_wp['target_npc']}`")
+                    trig = active_wp.get("completion_trigger", "arrival")
+                    trig_str = "Travel to destination" if trig == "arrival" else "Pass thematic skill check / investigation"
+                    action_lines.append(f"🎲 **Requirement:** *{trig_str}*")
+                    embed.add_field(name="🎯 Current Milestone Action", value="\n".join(action_lines), inline=False)
 
             # 3. Contract Intel & Clues
             if clues:
                 embed.add_field(name="🔍 Bounty Intel & Notes", value=clues[:1024], inline=False)
 
             # 4. Rewards
-            _format_fow_dossier_embed_fields(embed, session_id, target_bounty)
+            _format_fow_dossier_embed_fields(embed, session_id, target_bounty, raw_quest=raw_bounty)
             rxp = target_bounty.get("reward_xp", 100)
             rgold = target_bounty.get("reward_gold", 25)
             ritem = target_bounty.get("reward_item", "")
@@ -1670,22 +2030,28 @@ def _build_bounties_embed(session_id: int, selected_quest_id: str | None = None)
         embed.add_field(name="Empty Contract Log", value="Accept commissions from notice boards across the world.", inline=False)
         return embed
 
-    for idx, b in enumerate(active_bounties[:5], start=1):
+    for idx, raw_b in enumerate(active_bounties[:5], start=1):
+        b = game_engine.redact_quest_for_fog_of_war(session_id, raw_b, reveal_all=reveal_all)
         q_type = b.get("quest_type", "Side Bounty")
         icon = _quest_type_icon(q_type)
         obj = clean_narrative_location_arrows(b.get("objective", ""))
         if len(obj) > 200:
             obj = obj[:197].rstrip() + "..."
+        opt_count = len(b.get("optional_objectives") or [])
+        struct_tag = f" • `1 Main + {opt_count} Optional`" if b.get("has_structured_objectives") else ""
 
         embed.add_field(
             name=f"{idx}. {icon} {clean_narrative_location_arrows(b['title'])} [{q_type}]",
-            value=f"**Objective:** {obj}",
+            value=f"**Objective:** {obj}{struct_tag}",
             inline=False
         )
 
     return embed
 
 def _build_history_embed(session_id: int, selected_quest_id: str | None = None) -> discord.Embed:
+    session = db.get_session(session_id)
+    ui_lang = _resolve_session_ui_lang(session_id, session)
+    reveal_all = _resolve_reveal_all(session_id, session)
     all_quests = db.get_session_quests(session_id)
     history_quests = [
         q for q in all_quests
@@ -1703,11 +2069,12 @@ def _build_history_embed(session_id: int, selected_quest_id: str | None = None) 
 
     # Detailed Inspector Mode for a specific past quest
     if selected_quest_id:
-        target_q = next((q for q in history_quests if q.get("quest_id") == selected_quest_id), None)
-        if not target_q:
-            target_q = db.get_quest_by_id(session_id, selected_quest_id)
+        raw_q = next((q for q in history_quests if q.get("quest_id") == selected_quest_id), None)
+        if not raw_q:
+            raw_q = db.get_quest_by_id(session_id, selected_quest_id)
 
-        if target_q:
+        if raw_q:
+            target_q = game_engine.redact_quest_for_fog_of_war(session_id, raw_q, reveal_all=reveal_all)
             title = target_q.get("title", "Past Quest Record")
             status = target_q.get("status", "Completed")
             is_sq = bool(target_q.get("is_story_quest") or target_q.get("quest_type") in ("Story Quest", "Main Quest"))
@@ -1720,7 +2087,9 @@ def _build_history_embed(session_id: int, selected_quest_id: str | None = None) 
                 color=discord.Color.gold() if status == "Completed" else discord.Color.dark_grey()
             )
 
-            if is_sq:
+            if target_q.get("has_structured_objectives"):
+                _format_structured_quest_embed_fields(embed, session_id, target_q, lang=ui_lang)
+            elif is_sq:
                 sub_objs = target_q.get("sub_objectives", []) or []
                 if sub_objs:
                     sub_lines = []

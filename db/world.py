@@ -1568,6 +1568,8 @@ def find_shortest_graph_path_minutes(session_id: int, from_node_id: str, to_node
         u = e.get("from_node_id")
         v = e.get("to_node_id")
         w = max(1, int(e.get("travel_minutes") or 2))
+        if str(e.get("edge_type") or "") == "leyline_spirit_passage" and int(e.get("is_locked") or 0) == 1:
+            continue
         if u and v:
             adj[u].append((v, w))
             if e.get("is_bidirectional", 1):
@@ -1577,6 +1579,7 @@ def find_shortest_graph_path_minutes(session_id: int, from_node_id: str, to_node
         "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
         "loc_general_hospital", "loc_theme_park", "loc_eastern_temple",
         "loc_botanical_zoo", "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
+        "loc_hidden_kitsune_village", "loc_hidden_bunian_village",
     }
     # Add implicit parent-child transitions (1 minute between facility and room; or zone if directly queried)
     for n in nodes:

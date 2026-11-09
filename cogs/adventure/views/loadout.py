@@ -235,13 +235,13 @@ class LoadoutClassSelectView(discord.ui.View):
                 discord.SelectOption(
                     label="Corporate Containment Conglomerate",
                     value="private_agency_1",
-                    description="Big Corpo Skyscraper HQ • Proprietary In-House R&D Gear • Keep 100% Loot",
+                    description="Skyscraper Tower HQ • Special Ordnance Vault • Keep 100% Loot",
                     default=(starting_faction == "private_agency_1"),
                 ),
                 discord.SelectOption(
-                    label="Small Local Private Agency",
+                    label="Independent Private Agency",
                     value="private_agency_2",
-                    description="Modest Commercial Office HQ • Multi-Vendor Surplus Gear • Keep 100% Loot",
+                    description="Partner Field Office HQ • Custom Gunsmith Armory • Keep 100% Loot",
                     default=(starting_faction == "private_agency_2"),
                 ),
                 discord.SelectOption(
@@ -266,11 +266,16 @@ class LoadoutClassSelectView(discord.ui.View):
             fac_select.callback = self._on_faction_select
             self.add_item(fac_select)
 
+        from character_data import localize_class_template
+        user_settings = db.get_settings(self.user_id) if self.user_id else {}
+        ui_lang = str((user_settings or {}).get("ui_language") or "en")
         templates = get_class_templates(scenario, starting_faction=starting_faction)
         options = []
         for cls_name, cls_data in list(templates.items())[:24]:
-            desc = cls_data.get("description", "")[:100]
-            options.append(discord.SelectOption(label=cls_name, description=desc))
+            loc_cls = localize_class_template(cls_name, cls_data, ui_lang) if ui_lang != "en" and isinstance(cls_data, dict) else cls_data
+            disp_label = str((loc_cls or {}).get("display_name") or cls_name)[:100]
+            desc = str((loc_cls or {}).get("description") or cls_data.get("description", ""))[:100]
+            options.append(discord.SelectOption(label=disp_label, value=cls_name, description=desc))
 
         options.append(discord.SelectOption(
             label="Custom Profession...", value="__custom__", description="Type your own custom class and background"
@@ -697,7 +702,11 @@ class LoadoutWeaponSelectView(discord.ui.View):
         scenario = session_config.get("scenario", "fantasy")
         starting_faction = session_config.get("starting_faction", "public_agency")
 
+        from character_data import get_localized_starting_weapons_map
+        user_settings = db.get_settings(self.user_id) if self.user_id else {}
+        ui_lang = str((user_settings or {}).get("ui_language") or "en")
         weapons = get_starting_weapons(scenario, starting_faction=starting_faction)
+        wpn_labels = get_localized_starting_weapons_map(weapons, ui_lang) if ui_lang != "en" else {}
         options = []
         for w in weapons[:24]:
             try:
@@ -715,7 +724,8 @@ class LoadoutWeaponSelectView(discord.ui.View):
                     desc = f"{arch} • {hand} • {mult}x ATK"
             except Exception:
                 desc = None
-            options.append(discord.SelectOption(label=w[:100], description=desc[:100] if desc else None))
+            disp_w = str(wpn_labels.get(w) or w)[:100]
+            options.append(discord.SelectOption(label=disp_w, value=w[:100], description=desc[:100] if desc else None))
         options.append(discord.SelectOption(
             label="Custom Weapon...", value="__custom__", description="Name your own custom weapon"
         ))

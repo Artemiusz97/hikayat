@@ -128,11 +128,11 @@ const StoryFeed = ({
               <div className="flex items-center gap-2 min-w-0 text-xs text-amber-300 font-medium">
                 <span className="text-fantasy-accent not-italic font-mono text-[11px]">▸</span>
                 <span className="truncate">
-                  {pendingAction?.label || pendingAction?.direct_choice?.label || pendingAction?.direct_choice?.text || pendingAction?.custom_action_text || 'Resolving Action...'}
+                  {pendingAction?.label || pendingAction?.direct_choice?.label || pendingAction?.direct_choice?.text || pendingAction?.custom_action_text || t('feed.resolving_action', 'Resolving Action...')}
                 </span>
                 <span className="inline-flex items-center gap-1 text-[10px] font-mono not-italic text-amber-400/90 px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
                   <Sparkles size={10} className="animate-spin" />
-                  Resolving
+                  {t('feed.resolving', 'Resolving')}
                 </span>
               </div>
             </div>
@@ -140,10 +140,10 @@ const StoryFeed = ({
               <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin shrink-0" />
               <div className="flex flex-col">
                 <span className="font-semibold text-xs tracking-wider uppercase text-amber-300">
-                  The Chronicler is resolving your choice...
+                  {t('feed.chronicler_resolving', 'The Chronicler is resolving your choice...')}
                 </span>
                 <span className="text-[11px] text-gray-400 mt-0.5">
-                  Calculating outcomes, dice checks, and world reactions...
+                  {t('feed.calculating_outcomes', 'Calculating outcomes, dice checks, and world reactions...')}
                 </span>
               </div>
             </div>
@@ -157,10 +157,10 @@ const StoryFeed = ({
             <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5 pt-2 border-t border-white/10">
               <div className="flex items-center gap-2 min-w-0 text-xs text-gray-400 italic">
                 <span className="text-fantasy-accent not-italic font-mono text-[11px]">▸</span>
-                <span className="truncate">{streamAction?.label || 'Resolving Action...'}</span>
+                <span className="truncate">{streamAction?.label || t('feed.resolving_action', 'Resolving Action...')}</span>
                 <span className="inline-flex items-center gap-1 text-[10px] font-mono not-italic text-amber-400/90 px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
                   <Feather size={10} className="animate-bounce" />
-                  Live
+                  {t('feed.live', 'Live')}
                 </span>
               </div>
 
@@ -195,7 +195,7 @@ const StoryFeed = ({
             ) : (
               <div className={`border-l-2 ${streamTheme.accentBorderClass} pl-4 py-2 flex items-center gap-2 text-sm text-gray-400 italic`}>
                 <Sparkles size={14} className="text-amber-400 animate-spin" />
-                <span>The Chronicler is weaving your fate...</span>
+                <span>{t('feed.chronicler_weaving', 'The Chronicler is weaving your fate...')}</span>
               </div>
             )}
           </div>
@@ -207,7 +207,7 @@ const StoryFeed = ({
             <div className="flex items-center justify-between border-b border-red-800/50 pb-2.5 mb-3">
               <div className="flex items-center gap-2 text-red-300 font-rpg font-bold text-sm uppercase tracking-wider">
                 <Swords size={16} className="text-red-400 animate-pulse" />
-                <span>Active Combat Encounter</span>
+                <span>{t('feed.active_combat', 'Active Combat Encounter')}</span>
               </div>
               <div className="flex items-center gap-1.5 flex-wrap">
                 {currentScene?.construct_status && (
@@ -222,7 +222,7 @@ const StoryFeed = ({
                   </span>
                 )}
                 <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-red-900/50 text-red-200 border border-red-700/50">
-                  {activeMonsters.filter((m) => (m.hp ?? 1) > 0).length} / {activeMonsters.length} Hostiles Active
+                  {t('feed.hostiles_active', { active: activeMonsters.filter((m) => (m.hp ?? 1) > 0).length, total: activeMonsters.length, defaultValue: `${activeMonsters.filter((m) => (m.hp ?? 1) > 0).length} / ${activeMonsters.length} Hostiles Active` })}
                 </span>
               </div>
             </div>
@@ -260,7 +260,7 @@ const StoryFeed = ({
                         </span>
                         {isSelectedTarget && (
                           <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/50 font-bold uppercase shrink-0">
-                            🎯 Target
+                            🎯 {t('feed.target', 'Target')}
                           </span>
                         )}
                       </div>
@@ -379,7 +379,20 @@ const StoryFeed = ({
             <div className="flex items-center justify-between border-b border-purple-800/50 pb-2.5 mb-3">
               <div className="flex items-center gap-2 text-purple-300 font-rpg font-bold text-sm uppercase tracking-wider">
                 <Heart size={16} className="text-purple-400" />
-                <span>Locked in Conversation: {conversationLock}</span>
+                <span>{t('feed.locked_in_conversation', { npc: conversationLock, defaultValue: `Locked in Conversation: ${conversationLock}` })}</span>
+                {currentScene?.active_dialogue_mood?.mood_key && (
+                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border font-semibold normal-case ${
+                    currentScene.active_dialogue_mood.mood_key === 'Engaged'
+                      ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60'
+                      : currentScene.active_dialogue_mood.mood_key === 'Guarded'
+                      ? 'bg-amber-950/80 text-amber-300 border-amber-700/60'
+                      : currentScene.active_dialogue_mood.mood_key === 'Upset'
+                      ? 'bg-rose-950/80 text-rose-300 border-rose-700/60'
+                      : 'bg-slate-900/80 text-slate-300 border-slate-700/60'
+                  }`}>
+                    {t('social.mood_prefix', 'Mood')}: {t(`social.moods.${currentScene.active_dialogue_mood.mood_key}`, currentScene.active_dialogue_mood.mood_label || currentScene.active_dialogue_mood.mood_key)}
+                  </span>
+                )}
               </div>
             </div>
             <div className="flex gap-2">

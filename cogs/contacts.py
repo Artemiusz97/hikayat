@@ -91,7 +91,7 @@ class ContactSelect(discord.ui.Select):
             await interaction.response.send_message("Contact not found.", ephemeral=True)
             return
 
-        embed = build_contact_detail_embed(contact, self.scenario_key, user_id=interaction.user.id)
+        embed = await adb(build_contact_detail_embed, contact, self.scenario_key, user_id=interaction.user.id)
         new_view = ContactView(
             self.all_contacts, self.scenario_key, interaction.user.id,
             active_contact=contact, page=self.page,
@@ -113,7 +113,7 @@ class RomanticMemoriesButton(discord.ui.Button):
         self.from_phone = from_phone
 
     async def callback(self, interaction: discord.Interaction):
-        embed = build_romantic_memories_embed(self.contact, scenario_key=self.scenario_key, user_id=self.user_id)
+        embed = await adb(build_romantic_memories_embed, self.contact, scenario_key=self.scenario_key, user_id=self.user_id)
         view = RomanticMemoriesView(
             self.contact, self.scenario_key, self.user_id, self.contacts,
             session_id=self.session_id, cog=self.cog, from_phone=self.from_phone
@@ -134,7 +134,7 @@ class RelationsButton(discord.ui.Button):
         self.from_phone = from_phone
 
     async def callback(self, interaction: discord.Interaction):
-        embed = build_relations_embed(self.contact, scenario_key=self.scenario_key, user_id=self.user_id)
+        embed = await adb(build_relations_embed, self.contact, scenario_key=self.scenario_key, user_id=self.user_id)
         view = RelationsView(
             self.contact, self.scenario_key, self.user_id, self.contacts,
             session_id=self.session_id, cog=self.cog, from_phone=self.from_phone
@@ -155,7 +155,7 @@ class IntimateProfileButton(discord.ui.Button):
         self.from_phone = from_phone
 
     async def callback(self, interaction: discord.Interaction):
-        embed = build_intimate_profile_embed(self.contact, scenario_key=self.scenario_key, user_id=self.user_id)
+        embed = await adb(build_intimate_profile_embed, self.contact, scenario_key=self.scenario_key, user_id=self.user_id)
         view = IntimateProfileView(
             self.contact, self.scenario_key, self.user_id, self.contacts,
             session_id=self.session_id, cog=self.cog, from_phone=self.from_phone
@@ -193,7 +193,7 @@ class BackToProfileButton(discord.ui.Button):
         self.from_phone = from_phone
 
     async def callback(self, interaction: discord.Interaction):
-        embed = build_contact_detail_embed(self.contact, self.scenario_key, user_id=self.user_id)
+        embed = await adb(build_contact_detail_embed, self.contact, self.scenario_key, user_id=self.user_id)
         view = ContactView(
             self.contacts, self.scenario_key, self.user_id,
             active_contact=self.contact,
@@ -445,7 +445,7 @@ class ContactView(discord.ui.View):
             session_id=self.session_id, cog=self.cog, from_phone=self.from_phone
         )
         start = new_view.page * new_view.page_size
-        embed = build_contact_detail_embed(self.contacts[start], self.scenario_key, user_id=self.user_id)
+        embed = await adb(build_contact_detail_embed, self.contacts[start], self.scenario_key, user_id=self.user_id)
         await interaction.response.edit_message(embed=embed, view=new_view)
 
     async def _on_next(self, interaction: discord.Interaction):
@@ -456,7 +456,7 @@ class ContactView(discord.ui.View):
             session_id=self.session_id, cog=self.cog, from_phone=self.from_phone
         )
         start = new_view.page * new_view.page_size
-        embed = build_contact_detail_embed(self.contacts[start], self.scenario_key, user_id=self.user_id)
+        embed = await adb(build_contact_detail_embed, self.contacts[start], self.scenario_key, user_id=self.user_id)
         await interaction.response.edit_message(embed=embed, view=new_view)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -624,116 +624,68 @@ def build_relations_embed(contact: dict, scenario_key: str = "fantasy", user_id:
     return embed
 
 
-def build_romantic_memories_embed(contact: dict, scenario_key: str = "fantasy", user_id: int = 0) -> discord.Embed:
-    name = contact.get("name", "Unknown NPC")
-    memories = list(contact.get("intimate_memories", []))
+def _resolve_discord_masked_dossier(contact: dict, scenario_key: str, user_id: int = 0) -> tuple[dict, bool, str]:
+    """Runs shared enrich_contact_dossier + Fog-of-War masking for Discord contact embeds."""
+    from mechanics.social.relationships import enrich_contact_dossier
 
-    score = contact.get("relationship_score", 0)
-    info_level = get_unlocked_info_level(score)
-
+    c_in = dict(contact or {})
     reveal_debug = False
+    ui_lang = "en"
     if user_id:
-        user_settings = db.get_settings(user_id)
+        user_settings = db.get_settings(user_id) or {}
         reveal_debug = bool(user_settings.get("debug_reveal_all_info"))
-
-    intimate_unlocked = (
-        (info_level >= 3)
-        or contact.get("revealed_flags", {}).get("intimate_revealed", False)
-        or contact.get("revealed_flags", {}).get("all_revealed", False)
-        or contact.get("appearance", {}).get("intimate_revealed", False)
-        or contact.get("appearance", {}).get("all_revealed", False)
-        or reveal_debug
+        ui_lang = str(user_settings.get("ui_language") or "en")
+        if not c_in.get("character_id"):
+            char_row = db.get_character(user_id)
+            if char_row and char_row.get("id"):
+                c_in["character_id"] = int(char_row["id"])
+    sess_id = int(c_in.get("session_id") or 0)
+    enriched = enrich_contact_dossier(
+        c_in,
+        sess_id,
+        scenario_key or "fantasy",
+        debug_reveal_all=reveal_debug,
+        lang=ui_lang,
     )
+    return enriched, reveal_debug, ui_lang
 
-    from mechanics.social.persona import is_romantic_milestone_str
-    shared_milestones = [m for m in memories if not str(m).startswith("Past History:") and is_romantic_milestone_str(str(m))]
-    past_history = [m for m in memories if str(m).startswith("Past History:")]
 
-    from mechanics.social.persona import generate_past_intimate_history, enforce_intimacy_safeguard_invariants
-    import hashlib
-    app_dict = dict(contact.get("appearance", {}))
-    app_dict["intimate_memories"] = list(memories)
-    app_dict = enforce_intimacy_safeguard_invariants(app_dict)
-
-    if app_dict.get("had_first_time_with_player") and app_dict.get("intercourse_experience") == "non_virgin":
-        past_history = ["Past History: Virgin (No prior intimate history before meeting you; shared first time with you)"]
-    elif (reveal_debug or intimate_unlocked) and not past_history:
-        i_exp = app_dict.get("intercourse_experience", "")
-        o_exp = app_dict.get("oral_experience", "")
-        m_exp = app_dict.get("manual_experience", "")
-        open_val = app_dict.get("erotic_openness") or app_dict.get("openness") or "moderate"
-        c_gender = contact.get("gender") or app_dict.get("gender") or contact.get("basic_info", {}).get("gender", "")
-        c_race = contact.get("race") or app_dict.get("race") or contact.get("basic_info", {}).get("race", "")
-
-        is_virgin_or_inexp = (not i_exp or i_exp in ("virgin", "inexperienced"))
-        is_oral_inexp = (not o_exp or o_exp == "inexperienced")
-        is_manual_inexp = (not m_exp or m_exp == "inexperienced")
-
-        if not (is_virgin_or_inexp and is_oral_inexp and is_manual_inexp):
-            seed_str = (name.strip() + "_past_history").encode("utf-8")
-            h_val = int(hashlib.md5(seed_str).hexdigest(), 16)
-            past_data = generate_past_intimate_history(
-                hash_val=h_val,
-                race=c_race,
-                gender=c_gender,
-                scenario=scenario_key,
-                openness=open_val,
-                intercourse=i_exp,
-                oral=o_exp,
-                manual=m_exp
-            )
-            if past_data and past_data.get("entries"):
-                past_history = past_data["entries"]
-            elif past_data:
-                past_history = [past_data["entry"]]
-            # Persist generated entries so they stabilize across repeated views
-            if past_history:
-                try:
-                    sess_id = contact.get("session_id", 0)
-                    char_id = contact.get("character_id", 0)
-                    npc_id = contact.get("npc_id") or name.strip()
-                    for ph_entry in past_history:
-                        mem_str = str(ph_entry) if str(ph_entry).startswith("Past History:") else f"Past History: {ph_entry}"
-                        db.upsert_contact(
-                            session_id=sess_id,
-                            character_id=char_id,
-                            npc_id=npc_id,
-                            name=name.strip(),
-                            new_memory=mem_str,
-                        )
-                except Exception:
-                    pass
-        else:
-            past_history = ["Past History: Virgin (No prior intimate history before meeting you)"]
-
+def build_romantic_memories_embed(contact: dict, scenario_key: str = "fantasy", user_id: int = 0) -> discord.Embed:
+    enriched_c, reveal_debug, _ = _resolve_discord_masked_dossier(contact, scenario_key, user_id)
+    name = enriched_c.get("name", contact.get("name", "Unknown NPC"))
+    shared_milestones = list(enriched_c.get("shared_romantic_milestones") or [])
+    past_history = list(enriched_c.get("past_intimate_entries") or [])
     embed = discord.Embed(
         title=f"📖 Romantic Memories Journal: {name}",
         description="*A persistent record of shared milestones, dates, and background history.*",
-        color=discord.Color.magenta()
+        color=discord.Color.magenta(),
     )
-
     if shared_milestones:
         mem_lines = [f"• {m}" for m in shared_milestones[:15]]
         embed.add_field(
             name="💖 Shared Romantic Milestones",
             value="\n".join(mem_lines),
-            inline=False
+            inline=False,
         )
     else:
         embed.add_field(
             name="💖 Shared Romantic Milestones",
             value="*No romantic milestones shared with you yet. Build your relationship to unlock shared dates, first kisses, and intimate memories!*",
-            inline=False
+            inline=False,
         )
-
     if past_history:
         clean_past = [str(m).replace("Past History:", "").strip() for m in past_history]
         embed.add_field(
             name="📜 Past Intimate History",
             value="\n".join(f"• {m}" for m in clean_past[:10]),
-            inline=False
+            inline=False,
         )
-
+    elif not enriched_c.get("intimate_dossier_revealed") and not reveal_debug:
+        embed.add_field(
+            name="📜 Past Intimate History",
+            value="• ???",
+            inline=False,
+        )
     total_count = len(shared_milestones) + len(past_history)
     footer_suffix = " • [🛠️ DEBUG: Revealed]" if reveal_debug else ""
     embed.set_footer(text=f"Total Recorded Entries: {total_count} | Max Display: 20{footer_suffix}")
@@ -741,69 +693,11 @@ def build_romantic_memories_embed(contact: dict, scenario_key: str = "fantasy", 
 
 
 def build_intimate_profile_embed(contact: dict, scenario_key: str = "fantasy", user_id: int = 0) -> discord.Embed:
-    name = contact.get("name", "Unknown NPC")
-    score = contact.get("relationship_score", 0)
-    info_level = get_unlocked_info_level(score)
-
-    reveal_debug = False
-    if user_id:
-        user_settings = db.get_settings(user_id)
-        reveal_debug = bool(user_settings.get("debug_reveal_all_info"))
-
-    from mechanics.social.persona import format_intimate_profile_sections, infer_contact_gender, normalize_appearance, enforce_intimacy_safeguard_invariants
-    revealed_flags = dict(contact.get("revealed_flags", {}))
-    app_data = dict(contact.get("appearance", {}))
-    app_data["intimate_memories"] = contact.get("intimate_memories", [])
-    app_data = enforce_intimacy_safeguard_invariants(app_data)
-    if isinstance(app_data, dict):
-        for flag_k in (
-            "intimate_revealed", "intercourse_revealed",
-            "oral_revealed", "manual_revealed", "anal_revealed", "demeanor_revealed",
-            "dynamic_revealed", "openness_revealed",
-            "sensitive_spots_revealed", "turn_ons_revealed", "turn_offs_revealed", "fetishes_revealed",
-            "act_preferences_revealed", "underwear_revealed", "mannerisms_revealed", "all_revealed"
-        ):
-            if app_data.get(flag_k):
-                revealed_flags[flag_k] = True
-
-    if reveal_debug:
-        info_level = 3
-        revealed_flags.update({
-            "intimate_revealed": True,
-            "all_revealed": True,
-            "mannerisms_revealed": True,
-            "intercourse_revealed": True,
-            "oral_revealed": True,
-            "manual_revealed": True,
-            "anal_revealed": True,
-            "demeanor_revealed": True,
-            "dynamic_revealed": True,
-            "openness_revealed": True,
-            "sensitive_spots_revealed": True,
-            "turn_ons_revealed": True,
-            "turn_offs_revealed": True,
-            "fetishes_revealed": True,
-            "underwear_revealed": True,
-            "act_preferences_revealed": True
-        })
-
-    gender_val = infer_contact_gender(contact) or "female"
-    basic = contact.get("basic_info", {})
-    race_val = contact.get("race") or basic.get("race") or ""
-    desc_val = basic.get("description", "")
-    if isinstance(desc_val, dict):
-        desc_val = " ".join(str(v) for v in desc_val.values() if v)
-    traits = list(contact.get("unlocked_traits", [])) or list(contact.get("traits", []))
-
-    norm_app = normalize_appearance(app_data, gender=gender_val, race=race_val or "", scen_key=scenario_key, desc=desc_val, traits=traits, name=name)
-    sections = format_intimate_profile_sections(
-        norm_app,
-        gender=gender_val,
-        race=race_val or "Unknown",
-        scen_key=scenario_key,
-        info_level=info_level,
-        revealed_flags=revealed_flags
-    )
+    enriched_c, reveal_debug, _ = _resolve_discord_masked_dossier(contact, scenario_key, user_id)
+    name = enriched_c.get("name", contact.get("name", "Unknown NPC"))
+    score = int(enriched_c.get("relationship_score", contact.get("relationship_score", 0)) or 0)
+    info_level = int(enriched_c.get("info_level") or get_unlocked_info_level(score))
+    sections = dict(enriched_c.get("intimate_sections") or {})
 
     embed = discord.Embed(
         title=f"🔞 Intimate Profile: {name}",
@@ -951,6 +845,9 @@ def build_contact_list_embed(contacts: list[dict], scenario_key: str, char_name:
         info_level = get_unlocked_info_level(score)
 
         status_line = f"Standing: **{tier['name']}** [{bar}] | Check Mod: `{mod_str}` | Info Lvl: `{info_level}/3`"
+        if "schedule_revealed" not in c and not c.get("debug_revealed"):
+            from mechanics.social.consequences import apply_fog_of_war_to_enriched_contact
+            c = apply_fog_of_war_to_enriched_contact(c, session_id=int(c.get("session_id") or 0), character_id=int(c.get("character_id") or 0))
         traits = c.get("unlocked_traits", [])
         if traits:
             status_line += f"\nTraits: *{', '.join(traits[:2])}*"
@@ -989,6 +886,7 @@ def build_contact_detail_embed(contact: dict, scenario_key: str, user_id: int = 
     basic = contact.get("basic_info", {})
     unlocked_traits = list(contact.get("unlocked_traits") or contact.get("traits") or [])
     preferences = list(contact.get("preferences") or [])
+    enriched_c, _fow_reveal_debug, _ = _resolve_discord_masked_dossier(contact, scenario_key, user_id)
     info_level = get_unlocked_info_level(score)
 
     reveal_debug = False
@@ -1156,6 +1054,10 @@ def build_contact_detail_embed(contact: dict, scenario_key: str, user_id: int = 
     # Physical Appearance & Mannerisms fields
     desc_val = clean_desc if clean_desc != "None" else ""
     mannerisms_val = contact.get("mannerisms") or basic.get("mannerisms") or ""
+    if not _fow_reveal_debug:
+        unlocked_traits = [t for t in (enriched_c.get("unlocked_traits") or []) if "?" not in str(t)]
+        contact = {**contact, "appearance": enriched_c.get("appearance", {})}
+        revealed_flags = dict(enriched_c.get("revealed_flags") or revealed_flags)
     app_fields = format_persona_embed_fields(
         contact.get("appearance", {}),
         gender=gender_val,
@@ -1171,60 +1073,53 @@ def build_contact_detail_embed(contact: dict, scenario_key: str, user_id: int = 
     for field in app_fields:
         embed.add_field(name=field["name"], value=field["value"], inline=field.get("inline", False))
 
-    # Progressive disclosure: Traits (max 3), Likes (max 3), and Dislikes (max 3)
+    # Fog-of-War Dossier Masking: Traits, Likes, Dislikes & Schedule
     from mechanics.combat.traits import get_trait
-
-    likes_pool, dislikes_pool = categorize_likes_and_dislikes(
-        preferences,
-        traits=unlocked_traits,
-        role=role_val if role_val != "None" else "",
-        race=race_val,
-        desc=desc_val
-    )
-
-    if reveal_debug:
-        display_traits = unlocked_traits[:3]
-        display_likes = likes_pool[:3]
-        display_dislikes = dislikes_pool[:3]
-    elif info_level == 1:
-        display_traits = []
-        display_likes = []
-        display_dislikes = []
-    elif info_level == 2:
-        display_traits = unlocked_traits[:2]
-        display_likes = []
-        display_dislikes = []
-    else:
-        display_traits = unlocked_traits[:3]
-        display_likes = likes_pool[:3]
-        display_dislikes = dislikes_pool[:3]
+    # enriched_c resolved above before mannerisms formatting
+    display_traits = list(enriched_c.get("unlocked_traits") or [])[:3]
+    display_likes = list(enriched_c.get("preferences") or [])[:3]
+    display_dislikes = list(enriched_c.get("dislikes") or [])[:3]
 
     trait_lines = []
     for t_name in display_traits:
-        t_def = get_trait(t_name)
-        label = t_def["label"] if t_def and t_def.get("label") else t_name
-        trait_lines.append(f"• **{label}**")
+        t_str = str(t_name or "").strip()
+        if not t_str:
+            continue
+        if t_str == "???" or "?" in t_str:
+            trait_lines.append(f"• `{t_str}`")
+        else:
+            t_def = get_trait(t_str)
+            label = t_def["label"] if t_def and t_def.get("label") else t_str
+            trait_lines.append(f"• **{label}**")
 
-    like_lines = [f"• **{str(l_text).strip()}**" for l_text in display_likes]
-    dislike_lines = [f"• **{str(d_text).strip()}**" for d_text in display_dislikes]
+    like_lines = [f"• `{str(l_text).strip()}`" if "?" in str(l_text) else f"• **{str(l_text).strip()}**" for l_text in display_likes if str(l_text).strip()]
+    dislike_lines = [f"• `{str(d_text).strip()}`" if "?" in str(d_text) else f"• **{str(d_text).strip()}**" for d_text in display_dislikes if str(d_text).strip()]
 
     embed.add_field(
         name="🧠 Unlocked Traits",
-        value="\n".join(trait_lines) if trait_lines else "*0/3 traits discovered*",
-        inline=False
+        value="\n".join(trait_lines) if trait_lines else "• `???`",
+        inline=False,
     )
 
     embed.add_field(
         name="👍 Likes & Preferences",
-        value="\n".join(like_lines) if like_lines else "*0/3 likes discovered*",
-        inline=True
+        value="\n".join(like_lines) if like_lines else "• `???`",
+        inline=True,
     )
 
     embed.add_field(
         name="👎 Dislikes",
-        value="\n".join(dislike_lines) if dislike_lines else "*0/3 dislikes discovered*",
-        inline=True
+        value="\n".join(dislike_lines) if dislike_lines else "• `???`",
+        inline=True,
     )
+
+    sched_val = str(enriched_c.get("known_schedule") or "").strip()
+    if sched_val:
+        embed.add_field(
+            name="🕒 Schedule & Routine",
+            value=f"`{sched_val}`" if not enriched_c.get("schedule_revealed") else f"• {sched_val}",
+            inline=False,
+        )
 
     recent_interactions = contact.get("recent_memories") or contact.get("rel_history") or (contact.get("appearance") or {}).get("recent_memories") or []
     if recent_interactions:
@@ -1240,6 +1135,292 @@ def build_contact_detail_embed(contact: dict, scenario_key: str, user_id: int = 
     else:
         embed.set_footer(text=f"Information Disclosure Level: {info_level}/3")
     return embed
+
+
+def build_folklore_encyclopedia_embed(
+    payload: dict,
+    mode: str = "archive",
+    tradition_key: str = "all",
+    page: int = 0,
+    page_size: int = 6,
+) -> tuple[discord.Embed, int, list[dict]]:
+    """Builds a paginated Discord embed for the Folklore Codex Archive or Session Field Log."""
+    total_count = int(payload.get("total_folklore_count", 0) or 0)
+    disc_count = int(payload.get("discovered_count", 0) or 0)
+    ver_count = int(payload.get("verified_count", 0) or 0)
+    cont_count = int(payload.get("contained_count", 0) or 0)
+
+    if mode == "field_log":
+        items = list(payload.get("field_log") or [])
+        total_pages = max(1, (len(items) + page_size - 1) // page_size)
+        page = max(0, min(page, total_pages - 1))
+        start = page * page_size
+        page_items = items[start : start + page_size]
+        vault_count = len(payload.get("vault_log") or [])
+        req_count = len(payload.get("vault_requisitions") or [])
+
+        embed = discord.Embed(
+            title="📋 Session Anomaly Field Log",
+            description=(
+                f"Active & recorded session anomalies • **Field Entries**: {len(items)} • "
+                f"**Contained**: {vault_count} • **Vault Requisitions**: {req_count}"
+            ),
+            color=discord.Color.dark_gold(),
+        )
+        if not page_items:
+            embed.add_field(
+                name="No Field Log Entries Yet",
+                value="Encounter, scan, or contain anomalies during an active session to populate your Field Log.",
+                inline=False,
+            )
+        else:
+            for fl in page_items:
+                fl_name = str(fl.get("name") or fl.get("public_name") or "Unknown Anomaly")
+                fl_stage = str(fl.get("stage") or "sighted").capitalize()
+                fl_loc = str(fl.get("location") or "Unknown Sector")
+                fl_turn = fl.get("turn_updated") or fl.get("first_turn") or 0
+                fl_omen = str(fl.get("sensory_omen") or fl.get("description") or "No telemetry recorded.")
+                embed.add_field(
+                    name=f"📡 {fl_name} [{fl_stage}]"[:256],
+                    value=f"• **Location**: {fl_loc} (Turn {fl_turn})\n• {fl_omen}"[:1024],
+                    inline=False,
+                )
+        embed.set_footer(text=f"Session Field Log • Page {page + 1}/{total_pages} • {len(items)} Entries")
+        return embed, total_pages, items
+
+    all_cards = list(payload.get("folklore_codex") or [])
+    if tradition_key and tradition_key != "all":
+        items = [c for c in all_cards if c.get("tradition_key") == tradition_key]
+    else:
+        items = all_cards
+
+    total_pages = max(1, (len(items) + page_size - 1) // page_size)
+    page = max(0, min(page, total_pages - 1))
+    start = page * page_size
+    page_items = items[start : start + page_size]
+
+    trad_title = "All Traditions"
+    for tr in (payload.get("traditions") or []):
+        if str(tr.get("key") or "") == tradition_key:
+            trad_title = f"{tr.get('emoji', '📖')} {tr.get('label', tradition_key)}"
+            break
+
+    embed = discord.Embed(
+        title="📖 Folklore Codex & Anomaly Encyclopedia",
+        description=(
+            f"**Filter**: {trad_title}\n"
+            f"**Discovered**: {disc_count}/{total_count} • **Verified**: {ver_count} • **Contained**: {cont_count}"
+        ),
+        color=discord.Color.dark_purple(),
+    )
+
+    if not page_items:
+        embed.add_field(
+            name="No Entries Found",
+            value="No folklore records match the selected tradition filter.",
+            inline=False,
+        )
+    else:
+        for card in page_items:
+            stage = str(card.get("unlock_stage") or "undiscovered")
+            trad_lbl = card.get("tradition_label") or card.get("tradition") or "Unknown"
+            if stage == "undiscovered":
+                fname = f"❓ ??? — *{card.get('subtitle', 'Unencountered Folklore Record')}*"
+                fval = (
+                    f"• **Tradition**: {trad_lbl} | **Tier**: {card.get('min_tier', 1)}–{card.get('max_tier', 5)}\n"
+                    f"• *{card.get('hint', '')}*"
+                )
+            else:
+                badge = "🔒 Contained" if stage == "contained" else ("✅ Verified" if stage == "verified" else "👁️ Sighted")
+                fname = f"{badge} | {card.get('name', 'Unknown')} — *{card.get('subtitle', '')}*"
+                lines = [
+                    f"• **Tradition**: {trad_lbl} | **Form**: {card.get('form_label', card.get('type', 'entity'))} | **Sightings**: {card.get('times_sighted', 1)}"
+                ]
+                if card.get("sensory_omen"):
+                    lines.append(f"• **Omen**: {str(card['sensory_omen'])[:220]}")
+                if card.get("is_verified"):
+                    if card.get("taboo_rule"):
+                        lines.append(f"• **Taboo**: {str(card['taboo_rule'])[:220]}")
+                    if card.get("containment_protocol"):
+                        lines.append(f"• **Protocol**: {str(card['containment_protocol'])[:220]}")
+                else:
+                    lines.append(f"• *{card.get('lore_summary', '[UNVERIFIED]')}*")
+                fval = "\n".join(lines)
+            embed.add_field(name=fname[:256], value=fval[:1024], inline=False)
+
+    embed.set_footer(text=f"Folklore Archive • Page {page + 1}/{total_pages} • {len(items)} Entries")
+    return embed, total_pages, items
+
+
+class FolkloreTraditionSelect(discord.ui.Select):
+    def __init__(self, parent_view: "FolkloreEncyclopediaView"):
+        self.parent_view = parent_view
+        payload = parent_view.payload
+        options = [
+            discord.SelectOption(
+                label="All Traditions",
+                description=f"{payload.get('discovered_count', 0)}/{payload.get('total_folklore_count', 0)} discovered",
+                value="all",
+                emoji="🌍",
+                default=(parent_view.tradition_key == "all"),
+            )
+        ]
+        for tr in (payload.get("traditions") or [])[:24]:
+            t_key = str(tr.get("key") or "")
+            if not t_key:
+                continue
+            options.append(
+                discord.SelectOption(
+                    label=str(tr.get("label") or t_key)[:100],
+                    description=f"{tr.get('discovered', 0)}/{tr.get('total', 0)} discovered • {tr.get('contained', 0)} contained"[:100],
+                    value=t_key[:100],
+                    emoji=tr.get("emoji") or "📖",
+                    default=(parent_view.tradition_key == t_key),
+                )
+            )
+        super().__init__(placeholder="Filter by Folklore Tradition...", min_values=1, max_values=1, options=options, row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        chosen = self.values[0]
+        embed, _, _ = build_folklore_encyclopedia_embed(
+            self.parent_view.payload,
+            mode="archive",
+            tradition_key=chosen,
+            page=0,
+            page_size=self.parent_view.page_size,
+        )
+        new_view = FolkloreEncyclopediaView(
+            payload=self.parent_view.payload,
+            user_id=self.parent_view.user_id,
+            session_id=self.parent_view.session_id,
+            cog=self.parent_view.cog,
+            from_phone=self.parent_view.from_phone,
+            mode="archive",
+            tradition_key=chosen,
+            page=0,
+            page_size=self.parent_view.page_size,
+        )
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
+
+class FolkloreEncyclopediaView(discord.ui.View):
+    def __init__(
+        self,
+        payload: dict,
+        user_id: int,
+        session_id: int | None = None,
+        cog=None,
+        from_phone: bool = False,
+        mode: str = "archive",
+        tradition_key: str = "all",
+        page: int = 0,
+        page_size: int = 6,
+    ):
+        super().__init__(timeout=240)
+        self.payload = payload or {}
+        self.user_id = user_id
+        self.session_id = session_id
+        self.cog = cog
+        self.from_phone = from_phone
+        self.mode = mode if mode in ("archive", "field_log") else "archive"
+        self.tradition_key = tradition_key or "all"
+        self.page_size = max(1, int(page_size or 6))
+
+        _, total_pages, _ = build_folklore_encyclopedia_embed(
+            self.payload,
+            mode=self.mode,
+            tradition_key=self.tradition_key,
+            page=page,
+            page_size=self.page_size,
+        )
+        self.total_pages = total_pages
+        self.page = max(0, min(int(page or 0), self.total_pages - 1))
+
+        if self.mode == "archive" and (self.payload.get("traditions") or []):
+            self.add_item(FolkloreTraditionSelect(self))
+
+        nav_row = 1
+        prev_btn = discord.ui.Button(
+            label="◀️ Prev",
+            style=discord.ButtonStyle.secondary,
+            disabled=(self.page <= 0),
+            row=nav_row,
+        )
+        prev_btn.callback = self._on_prev
+        self.add_item(prev_btn)
+
+        next_btn = discord.ui.Button(
+            label="Next ▶️",
+            style=discord.ButtonStyle.secondary,
+            disabled=(self.page >= self.total_pages - 1),
+            row=nav_row,
+        )
+        next_btn.callback = self._on_next
+        self.add_item(next_btn)
+
+        toggle_label = "Session Field Log" if self.mode == "archive" else "Folklore Archive"
+        toggle_emoji = "📋" if self.mode == "archive" else "📖"
+        toggle_btn = discord.ui.Button(
+            label=toggle_label,
+            emoji=toggle_emoji,
+            style=discord.ButtonStyle.primary,
+            row=nav_row,
+        )
+        toggle_btn.callback = self._on_toggle_mode
+        self.add_item(toggle_btn)
+
+        if self.from_phone and self.session_id:
+            home_btn = discord.ui.Button(
+                label="Phone Home",
+                emoji="📱",
+                style=discord.ButtonStyle.secondary,
+                row=nav_row,
+            )
+            home_btn.callback = self._on_phone_home
+            self.add_item(home_btn)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This encyclopedia view belongs to another player.", ephemeral=True)
+            return False
+        return True
+
+    async def _refresh(self, interaction: discord.Interaction, *, mode: str, page: int):
+        embed, _, _ = build_folklore_encyclopedia_embed(
+            self.payload,
+            mode=mode,
+            tradition_key=self.tradition_key,
+            page=page,
+            page_size=self.page_size,
+        )
+        new_view = FolkloreEncyclopediaView(
+            payload=self.payload,
+            user_id=self.user_id,
+            session_id=self.session_id,
+            cog=self.cog,
+            from_phone=self.from_phone,
+            mode=mode,
+            tradition_key=self.tradition_key,
+            page=page,
+            page_size=self.page_size,
+        )
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
+    async def _on_prev(self, interaction: discord.Interaction):
+        await self._refresh(interaction, mode=self.mode, page=max(0, self.page - 1))
+
+    async def _on_next(self, interaction: discord.Interaction):
+        await self._refresh(interaction, mode=self.mode, page=min(self.total_pages - 1, self.page + 1))
+
+    async def _on_toggle_mode(self, interaction: discord.Interaction):
+        next_mode = "field_log" if self.mode == "archive" else "archive"
+        await self._refresh(interaction, mode=next_mode, page=0)
+
+    async def _on_phone_home(self, interaction: discord.Interaction):
+        from mechanics.system.phone import PhoneMainView, build_phone_home_embed
+        home_embed = await adb(build_phone_home_embed, int(self.session_id), self.user_id)
+        home_view = PhoneMainView(self.cog, int(self.session_id), self.user_id)
+        await interaction.response.edit_message(embed=home_embed, view=home_view)
 
 
 class ContactsCog(commands.Cog):
@@ -1279,6 +1460,32 @@ class ContactsCog(commands.Cog):
     @app_commands.command(name="codex", description="Open your Codex: browse personal contacts (Friends/Party) or World Lore (Known NPCs).")
     async def codex_cmd(self, interaction: discord.Interaction):
         await self.contacts_cmd(interaction)
+
+    @app_commands.command(name="encyclopedia", description="Browse your progressive Folklore Codex Archive and active Session Field Log.")
+    async def encyclopedia_cmd(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        from mechanics.world.folklore_codex import build_encyclopedia_payload
+
+        character = await adb(db.get_character, interaction.user.id)
+        session_id = character.get("active_session_id") if character else None
+        settings = await adb(db.get_settings, interaction.user.id)
+        ui_lang = (settings or {}).get("ui_language") if isinstance(settings, dict) else None
+
+        payload = await adb(
+            build_encyclopedia_payload,
+            session_id=session_id,
+            user_id=interaction.user.id,
+            lang=ui_lang,
+        )
+        embed, _, _ = build_folklore_encyclopedia_embed(payload, mode="archive", tradition_key="all", page=0)
+        view = FolkloreEncyclopediaView(
+            payload=payload,
+            user_id=interaction.user.id,
+            session_id=session_id,
+            cog=self,
+            from_phone=False,
+        )
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
 

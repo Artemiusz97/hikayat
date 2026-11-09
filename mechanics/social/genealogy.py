@@ -1290,6 +1290,14 @@ def _hydrate_household_entity(hh: dict, contact: dict, scenario: str, conn: Any 
                 children_dict[a_key]["race"] = "beastfolk:fox"
 
     household["children"] = list(children_dict.values())
+    try:
+        from mechanics.world.locations.residences import is_adult_special_agent_contact, resolve_agent_residence_blueprint
+        if is_adult_special_agent_contact(contact):
+            _bp = resolve_agent_residence_blueprint(int(household.get("session_id") or 0), contact, scen_key=scenario)
+            household = dict(household)
+            household["residence_location"] = _bp["residence_display"]
+    except Exception:
+        pass
     return household
 
 
@@ -1965,6 +1973,37 @@ def ensure_contact_relations(
             existing = {}
         return existing
 
+    from mechanics.social.roster_tags import npc_is_folklore_villager
+    if npc_is_folklore_villager(contact):
+        existing = contact.get("relations")
+        if not isinstance(existing, dict):
+            existing = {}
+        b_info = contact.get("basic_info") if isinstance(contact.get("basic_info"), dict) else {}
+        v_key = str(b_info.get("folklore_village") or ("kitsune" if "kitsune" in str(contact.get("race") or "").lower() else "bunian"))
+        enclave_disp = "Sato-no-Inari — Hidden Kitsune Village" if v_key == "kitsune" else "Kampung Kayangan — Hidden Bunian Village"
+        court_house = "House of Shirakawa (Celestial Inari Court)" if v_key == "kitsune" else "Istana Seri Kayangan (Royal Bunian Court)"
+        if not existing.get("family"):
+            existing["family"] = [{"relation": "Ancestral Spirit Court", "name": court_house, "occupation": enclave_disp, "is_contactable": False}]
+        existing.setdefault("residence_location", enclave_disp)
+        existing.setdefault("residence_node_id", str(b_info.get("home_node") or ("sub_kitsune_inner_plaza" if v_key == "kitsune" else "sub_bunian_inner_plaza")))
+        existing["cohabiting_family"] = False
+        existing.setdefault("friends", [])
+        existing.setdefault("rivals", [])
+        existing.setdefault("romance", {"status": "Single", "current_partner": None, "secret_partner": None, "ex_partners": []})
+        if session_id:
+            try:
+                import mechanics.social.relationship_graph as rg
+                mat = rg.materialize_relations(session_id, contact)
+                if mat:
+                    existing["romance"] = mat.get("romance", existing["romance"])
+                    if mat.get("friends"):
+                        existing["friends"] = mat["friends"]
+                    if mat.get("rivals"):
+                        existing["rivals"] = mat["rivals"]
+            except Exception:
+                pass
+        return existing
+
     # 1. Resolve canonical family household unit
     household = get_or_create_household(session_id, surname, contact=contact, scenario=scenario)
     c_role_hint = contact.get("household_role") or (contact.get("basic_info") or {}).get("household_role")
@@ -1979,7 +2018,26 @@ def ensure_contact_relations(
 
     # Update/synchronize family tree and shared residence
     existing["family"] = family_tree
-    if household.get("residence_location"):
+    existing["family"] = family_tree
+    _solo_agent_res = None
+    try:
+        from mechanics.world.locations.residences import is_adult_special_agent_contact, resolve_agent_residence_blueprint
+        from mechanics.world.locations.realty_catalog import is_anomalous_realty_scenario
+        _ag_src = contact if is_adult_special_agent_contact(contact) else None
+        if _ag_src is None and session_id and is_anomalous_realty_scenario(scenario):
+            from mechanics.social.agent_roster import find_special_agent_by_name
+            _found_ag = find_special_agent_by_name(int(session_id), name, scen_key=scenario)
+            if _found_ag and not _found_ag.get("is_student_agent") and str(_found_ag.get("age_group") or "").lower() != "teen":
+                _ag_src = _found_ag
+        if _ag_src is not None:
+            _solo_agent_res = resolve_agent_residence_blueprint(int(session_id or 0), _ag_src, scen_key=scenario)
+    except Exception:
+        _solo_agent_res = None
+    if _solo_agent_res:
+        existing["residence_location"] = _solo_agent_res["residence_display"]
+        existing["residence_node_id"] = _solo_agent_res["bedroom_node_id"]
+        existing["cohabiting_family"] = False
+    elif household.get("residence_location"):
         existing["residence_location"] = household["residence_location"]
     if household.get("id"):
         existing["household_id"] = household["id"]
@@ -2060,10 +2118,21 @@ def ensure_contact_relations(
                 existing["romance"] = mat.get("romance", {})
                 existing["friends"] = mat.get("friends", [])
                 existing["rivals"] = mat.get("rivals", [])
-                if mat.get("residence_location"):
+                if _solo_agent_res:
+                    existing["residence_location"] = _solo_agent_res["residence_display"]
+                    existing["residence_node_id"] = _solo_agent_res["bedroom_node_id"]
+                    existing["cohabiting_family"] = False
+                elif mat.get("residence_location"):
                     existing["residence_location"] = mat["residence_location"]
                 if mat.get("household_id"):
                     existing["household_id"] = mat["household_id"]
+                if contact.get("id"):
+                    import db as _db_rel
+                    with _db_rel.get_conn() as _conn_rel:
+                        _conn_rel.execute(
+                            "UPDATE contacts SET relations_json = ? WHERE id = ?",
+                            (json.dumps(existing), contact["id"]),
+                        )
                 return existing
         except Exception as e:
             logger.warning(f"Failed to synchronize relationship graph for {name}: {e}")
@@ -2178,7 +2247,22 @@ def ensure_contact_relations(
                     if not isinstance(s_rel, dict):
                         s_rel = {}
                     s_rel["family"] = sib_tree
-                    if household.get("residence_location"):
+                    _sib_solo_res = None
+                    try:
+                        _sib_src = sib_contact if is_adult_special_agent_contact(sib_contact) else None
+                        if _sib_src is None and session_id and is_anomalous_realty_scenario(scenario):
+                            from mechanics.social.agent_roster import find_special_agent_by_name
+                            _found_sib = find_special_agent_by_name(int(session_id), s_name, scen_key=scenario)
+                            if _found_sib and not _found_sib.get("is_student_agent") and str(_found_sib.get("age_group") or "").lower() != "teen":
+                                _sib_src = _found_sib
+                        if _sib_src is not None:
+                            _sib_solo_res = resolve_agent_residence_blueprint(int(session_id or 0), _sib_src, scen_key=scenario)
+                    except Exception:
+                        _sib_solo_res = None
+                    if _sib_solo_res:
+                        s_rel["residence_location"] = _sib_solo_res["residence_display"]
+                        s_rel["residence_node_id"] = _sib_solo_res["bedroom_node_id"]
+                    elif household.get("residence_location"):
                         s_rel["residence_location"] = household["residence_location"]
                     if household.get("id"):
                         s_rel["household_id"] = household["id"]

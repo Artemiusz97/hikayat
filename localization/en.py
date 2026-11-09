@@ -16,7 +16,7 @@ ITEM_ICON_KEYWORDS = {
     "grimoire": ("grimoire", "tome", "spellbook"),
     "bow": ("bow", "crossbow"),
     "gun": ("pistol", "rifle", "blaster", "gun", "revolver", "shotgun", "sniper"),
-    "dagger": ("dagger", "knife", "blade", "cleaver", "scalpel", "stiletto"),
+    "dagger": ("dagger", "knife", "blade", "cleaver", "scalpel", "stiletto", "keris", "tanto"),
     "axe": ("axe", "hatchet"),
     "hammer": ("hammer", "mace", "warhammer", "club", "baton"),
     "spear": ("spear", "halberd", "lance", "trident", "pike"),
@@ -36,7 +36,7 @@ ITEM_ICON_KEYWORDS = {
         "breastplate", "tunic", "robe", "chest", "cuirass", "mail", "chainmail",
         "ringmail", "scalemail", "shirt", "coat", "jacket", "suit", "vest", "blazer",
         "cardigan", "duster", "jumpsuit", "uniform", "windbreaker", "hoodie", "sweater",
-        "parka", "cloak"
+        "parka", "cloak", "kimono", "haori", "kebaya", "songket", "baju sikap"
     ),
     "shield": ("shield", "aegis", "buckler"),
 
@@ -66,7 +66,8 @@ ITEM_ICON_KEYWORDS = {
     "potion": ("potion", "draught", "phial", "consumable", "kaffir lime", "blessed salt", "incense"),
     "quest": (
         "key", "map", "letter", "tome", "book", "scroll", "signet", "chip", "card",
-        "keycard", "deck", "terminal", "clipboard", "relic", "lantern", "quest", "key item", "talisman", "iron charm", "ward"
+        "keycard", "deck", "terminal", "clipboard", "relic", "lantern", "quest", "key item", "talisman", "iron charm", "ward",
+        "suzu", "serunai", "pusaka", "foxfire", "spirit bell", "bamboo flute"
     ),
 }
 
@@ -115,3 +116,87 @@ MOVEMENT_PREFIXES = (
     "go to ", "move to ", "move into ", "return to ", "leave for ", "make our way to ",
     "make your way to ", "make my way to ", "slip into ", "slip to "
 )
+
+
+REALTY_LABELS = {
+    "app_name": "Realty & Deeds",
+    "app_sub": "Safehouses & Keys",
+    "tab_owned": "My Residences",
+    "tab_market": "Market Deeds",
+    "badge_starter": "Starter Quarters",
+    "badge_owned": "Owned Residence",
+    "badge_for_sale": "For Sale",
+    "primary_home": "Primary Home",
+    "set_primary": "Set Primary",
+    "buy_deed": "Buy Deed",
+    "deed_owned": "Owned",
+    "give_spare_key": "Give Key",
+    "revoke_key": "Revoke Key",
+    "spare_keys_label": "Spare Key Holders",
+    "starter_spare_key_note": "Assigned faction quarters relocate on transfer. Purchase a permanent deed to hand out Spare Keys.",
+    "no_deeds_owned": "No permanent property deeds owned yet.",
+    "no_eligible_contacts": "Reach Affinity 70+ or romance a contact to give them a Spare Key.",
+    "purchased_ok": "Property deed purchased!",
+    "purchase_failed": "Property purchase failed.",
+    "primary_updated": "Primary Home updated.",
+    "key_granted": "Spare key granted!",
+    "key_revoked": "Spare key revoked.",
+}
+
+
+FOLKLORE_SANCTUARY_LABELS = {
+    "kitsune_spirit_merchant": "Inari Spirit Apothecary",
+    "bunian_pusaka_merchant": "Balai Pusaka Heirloom Artisan",
+    "ranger_station_outfitter": "Reserve Trail Outfitter",
+    "spirit_relay_badge": "Spirit-Relay Messenger",
+    "veil_unattuned_badge": "Mundane Threshold",
+    "veil_attuned_badge": "Spirit Veil Attuned",
+    "twilight_veil_badge": "Twilight Veil Thinning",
+    "leyline_passage_badge": "Leyline Spirit Passage",
+    "sanctuary_pact_warning": "Sanctuary Non-Aggression Pact broken — offer 100g sacred atonement at the outer threshold.",
+}
+
+
+QUEST_UI_LABELS = {
+    "main_objective": "Main Objective",
+    "optional_routes": "Optional Tactical Routes",
+    "peak_chapter": "Peak Set-Piece",
+    "chronicle_tapestry": "Chronicle Tapestry",
+    "fallen_world_ch11": "Fallen World — Chapter 11 Resistance Epilogue",
+    "peak_scar": "Peak Scar",
+    "liberation_op": "Liberation Op",
+    "optional_aid": "Tactical Aid",
+    "optional_bypass": "Infiltration Bypass",
+    "optional_alternative": "Alternative Objective",
+    "optional_threatened": "Jeopardy / Extraction",
+    "bonus_claimed": "Bonus Claimed",
+    "failed_route": "Failed Route",
+    "locked_out": "Locked Out",
+    "fallen_world_epilogue": "Fallen World — Resistance Epilogue",
+    "base_reward_note": "Base Completion Rewards",
+}
+
+PACT_UI_LABELS = {
+    "title": "Entity Contracts & Devil Pacts",
+    "subtitle": "Zero-MP Covenants • Blood & Tribute Ledger",
+    "tab_active": "Active Covenants",
+    "tab_discover": "Discover & Appraise",
+    "tab_compendium": "Patron Compendium",
+    "slots_label": "Pact Slots",
+    "remote_ready": "Remote Communion Ready",
+    "remote_blocked": "Requires Sanctuary / Quarters Outside Combat",
+    "appraisal_favored": "Favored (0.65x Cost • Upfront Tier II/III)",
+    "appraisal_neutral": "Neutral (1.0x Standard Terms)",
+    "appraisal_disdained": "Disdained (1.50x Surcharge • Tier III Locked)",
+    "sign_btn": "Forge Covenant",
+    "upgrade_btn": "Deepen Tier",
+    "feed_btn": "Commune / Pay Tithe",
+    "sever_scrub_btn": "Medical / Shrine Scrub",
+    "sever_exorcism_btn": "Challenge Manifestation (Exorcism)",
+    "pact_bound_badge": "[Pact-Bound]",
+    "lethal_overdraw": "Lethal Overdraw (Blood Debt)",
+    "breach_stage_1": "Displeased — Blood Debt Active (24h)",
+    "breach_stage_2": "Violent Severance — Soul Scar",
+    "contracted_badge": "Contracted",
+    "currently_bound": "Bound",
+}

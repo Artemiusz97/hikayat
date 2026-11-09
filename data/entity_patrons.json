@@ -1,0 +1,4874 @@
+{
+  "version": "1.0",
+  "bespoke_patrons": [
+    {
+      "patron_id": "patron_ocular_phenomenon",
+      "number": 1,
+      "name": "The Ocular Phenomenon",
+      "title": "Foresight Fiend",
+      "category": "bureau_vault",
+      "regulated": true,
+      "home_nodes": [
+        "loc_hq_containment_sector"
+      ],
+      "faction_gate": "public_agency",
+      "min_faction_rank": 1,
+      "element": "aether",
+      "synergy_stat": "PER",
+      "secondary_stat": "LUK",
+      "required_tags": [],
+      "appraisal": {
+        "favored_max_stats": {
+          "LUK": 3
+        },
+        "favored_traits": [
+          "reckless",
+          "bold",
+          "fatalistic",
+          "impulsive"
+        ],
+        "disdained_min_stats": {
+          "LUK": 7
+        },
+        "disdained_traits": [
+          "cautious",
+          "timid"
+        ],
+        "favored_quote": "Your future ends in a hilarious mess. Let me watch from your right socket.",
+        "neutral_quote": "Lend me an optic nerve, and I will whisper three seconds ahead of the reaper.",
+        "disdained_quote": "A boring, long-lived survivor. Pay double if you want my eyes."
+      },
+      "combat_skill": {
+        "base_id": "pact_ocular_precognition",
+        "name": "Three-Second Precognition",
+        "emoji": "👁️",
+        "discipline": "buff",
+        "damage_type": "aether",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.35,
+          1.75,
+          2.3
+        ],
+        "crit_bonus": 0.45,
+        "grants_evade_counter": true,
+        "status_ailment": "Exposed",
+        "description": "Reads three seconds ahead, dodging the next incoming strike and snapping back with a guaranteed critical counter."
+      },
+      "field_utility": {
+        "id": "util_ocular_foresight",
+        "name": "Future-Sight Warning",
+        "dc_modifiers": {
+          "trap": -2,
+          "ambush": -2,
+          "PER": -1
+        },
+        "auto_detect_ambush": true,
+        "scene_reroll": {
+          "enabled": true,
+          "hp_pct_cost": 0.08
+        },
+        "summary": "Warns before ambushes/traps (-2 DC) and allows 1/scene Skill Check Reroll for 8% Max HP."
+      },
+      "costs": {
+        "cost_model": "permanent_lease",
+        "tier_max_hp_lock_pct": [
+          0.1,
+          0.15,
+          0.15
+        ],
+        "favored_tier3_max_hp_lock_pct": 0.05,
+        "tier_stat_locks": [
+          {},
+          {},
+          {
+            "END": -1
+          }
+        ],
+        "favored_waives_tier3_stat_lock": true,
+        "social_dc_penalties": [
+          {},
+          {
+            "CHA": 1
+          },
+          {
+            "CHA": 1
+          }
+        ],
+        "hp_pct_per_cast": [
+          0.0,
+          0.04,
+          0.06
+        ],
+        "credit_cost_base": 0,
+        "daily_charges": 0,
+        "tithe": null,
+        "taboo_id": "never_avert_gaze_from_omen",
+        "taboo_desc": "Never refuse or flee a prophesied breach encounter once entered."
+      },
+      "bound_gear": null,
+      "visuals": {
+        "rest_tell_prose": "a concentric clockwork ring faintly dividing the right iris",
+        "rest_tags": [
+          "heterochromia",
+          "ringed iris"
+        ],
+        "cast_tags": [
+          "glowing purple eye",
+          "clockwork afterimages"
+        ],
+        "gore_rest_override": [
+          "bloodshot heterochromia",
+          "ringed ocular scar"
+        ],
+        "furry_rest_override": [
+          "slit heterochromia",
+          "ringed nocturnal iris"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The Ocular Phenomenon",
+          "title": "Foresight Fiend",
+          "summary": "Trades vitality and composure for three-second precognition, ambush immunity, and fate rerolls."
+        },
+        "pl": {
+          "name": "Zjawisko Okularne",
+          "title": "Demon Prekognicji",
+          "summary": "Wymienia witalność na trzysekundową prekognicję, ostrzeżenia przed zasadzką i przerzut losu."
+        },
+        "ms": {
+          "name": "Fenomena Okular",
+          "title": "Iblis Firasat",
+          "summary": "Menukar nyawa untuk firasat tiga saat, amaran serang hendap, dan ulangan nasib."
+        },
+        "zh": {
+          "name": "瞳相异象",
+          "title": "预知魔神",
+          "summary": "以生命上限换取三秒未来视、伏击预警与场景检定重骰。"
+        },
+        "de": {
+          "name": "Das Okulare Phänomen",
+          "title": "Vorhersehungs-Unhold",
+          "summary": "Tauscht Lebenskraft gegen Drei-Sekunden-Präkognition, Hinterhaltwarnung und Schicksals-Neuwurf."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_guillotine_hound",
+      "number": 2,
+      "name": "The Guillotine Hound",
+      "title": "Kennel Executioner",
+      "category": "bureau_vault",
+      "regulated": true,
+      "home_nodes": [
+        "loc_hq_containment_sector"
+      ],
+      "faction_gate": "public_agency",
+      "min_faction_rank": 1,
+      "element": "physical",
+      "synergy_stat": "STR",
+      "secondary_stat": "PER",
+      "required_tags": [],
+      "appraisal": {
+        "favored_min_stats": {
+          "CHA": 6
+        },
+        "favored_traits": [
+          "proud",
+          "diligent",
+          "brave",
+          "protective"
+        ],
+        "disdained_traits": [
+          "cowardly",
+          "timid",
+          "hesitant"
+        ],
+        "favored_quote": "Good posture. Clean command voice. Whistle, hunter, and I will swallow their spine.",
+        "neutral_quote": "Feed me fresh marrow and point at the throat. Do not flinch.",
+        "disdained_quote": "You smell like bolted doors and retreat. My teeth cost extra for cowards."
+      },
+      "combat_skill": {
+        "base_id": "pact_guillotine_jaws",
+        "name": "Jaws of the Kennel",
+        "emoji": "🐺",
+        "discipline": "attack",
+        "damage_type": "physical",
+        "target_type": "single",
+        "tier2_target_type": "aoe",
+        "power_mult_tiers": [
+          1.65,
+          2.05,
+          2.55
+        ],
+        "poise_shred_mult": 1.8,
+        "tier3_execute_threshold": 0.2,
+        "status_ailment": "Bleeding",
+        "dot_damage": 14,
+        "description": "Summons abyssal hound jaws through floor shadows for 1.8x Poise shred (T2 twin-jaw AoE; T3 devours non-bosses below 20% HP)."
+      },
+      "field_utility": {
+        "id": "util_hound_scent",
+        "name": "Bloodhound Trail",
+        "dc_modifiers": {
+          "PER": -2,
+          "tracking": -2,
+          "investigation": -1
+        },
+        "auto_detect_hidden": true,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "Phantom scent-tracking grants -2 PER DC on physical clues and stalks hidden targets."
+      },
+      "costs": {
+        "cost_model": "pay_per_cast_and_tithe",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.0,
+          0.05
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.08,
+          0.11,
+          0.14
+        ],
+        "credit_cost_base": 0,
+        "daily_charges": 0,
+        "tithe": {
+          "interval_days": 3,
+          "item_keywords": [
+            "meat",
+            "ration",
+            "jerky",
+            "steak",
+            "food"
+          ],
+          "credit_fallback": 60,
+          "label": "Prime Meat Offering"
+        },
+        "taboo_id": "never_flee_equal_foe",
+        "taboo_desc": "Never flee combat against enemies of equal or lower threat tier."
+      },
+      "bound_gear": null,
+      "visuals": {
+        "rest_tell_prose": "a pale crescent bite-scar circling the dominant forearm beneath fingerless gloves",
+        "rest_tags": [
+          "bite scar on forearm",
+          "fingerless gloves"
+        ],
+        "cast_tags": [
+          "giant shadowy wolf jaws",
+          "spectral fangs"
+        ],
+        "gore_rest_override": [
+          "fresh fang punctures on forearm",
+          "blood-stained wraps"
+        ],
+        "furry_rest_override": [
+          "notched ear",
+          "shadow-hound collar"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The Guillotine Hound",
+          "title": "Kennel Executioner",
+          "summary": "Summons poise-shredding shadow jaws and bloodhound tracking for skin-nips and meat tithes."
+        },
+        "pl": {
+          "name": "Ogar Gilotynowy",
+          "title": "Egzekutor z Psiarni",
+          "summary": "Przyzywa cieniste szczęki łamiące gardę oraz węch tropiciela za cenę krwi i mięsnych ofiar."
+        },
+        "ms": {
+          "name": "Anjing Pemancung",
+          "title": "Pertanda Kandang",
+          "summary": "Menyeru rahang bayang pemecah pertahanan dan deria jejak dengan bayaran darah serta jamuan daging."
+        },
+        "zh": {
+          "name": "断头猎犬",
+          "title": "兽槛处刑者",
+          "summary": "以皮肉噬痕与定期生肉供奉，召唤粉碎架势的影犬巨颚与猎踪嗅觉。"
+        },
+        "de": {
+          "name": "Der Guillotinen-Hund",
+          "title": "Zwinger-Henker",
+          "summary": "Beschwört haltungbrechende Schattenkiefer und Bluthund-Witterung gegen Blutzoll und Fleischopfer."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_iron_nail_curator",
+      "number": 3,
+      "name": "The Iron-Nail Curator",
+      "title": "Verdict Devil",
+      "category": "bureau_vault",
+      "regulated": true,
+      "home_nodes": [
+        "loc_hq_containment_sector"
+      ],
+      "faction_gate": "public_agency",
+      "min_faction_rank": 2,
+      "element": "aether",
+      "synergy_stat": "INT",
+      "secondary_stat": "AGI",
+      "required_tags": [],
+      "appraisal": {
+        "favored_traits": [
+          "stoic",
+          "guarded",
+          "analytical",
+          "cold",
+          "calm"
+        ],
+        "favored_classes": [
+          "forensic",
+          "investigator",
+          "inspector",
+          "analyst",
+          "coroner"
+        ],
+        "disdained_traits": [
+          "playful",
+          "loud",
+          "chatty",
+          "flirtatious"
+        ],
+        "favored_quote": "Silence in the courtroom. Take up the spike and pronounce sentence.",
+        "neutral_quote": "Three nails for guilt, twenty-two percent of your pulse for the gavel.",
+        "disdained_quote": "Too much chatter. Every word raises the toll on your arteries."
+      },
+      "combat_skill": {
+        "base_id": "pact_iron_nail_verdict",
+        "name": "Three-Count Nail Verdict",
+        "emoji": "🔩",
+        "discipline": "attack",
+        "damage_type": "aether",
+        "target_type": "single",
+        "power_mult_tiers": [
+          2.15,
+          2.65,
+          3.35
+        ],
+        "status_ailment": "Stunned",
+        "self_status_ailment": "Bleeding",
+        "verdict_rupture_pct": 0.18,
+        "description": "Drives ritual iron spikes into the target's shadow; triggers massive rupture damage and Stunned at high blood price."
+      },
+      "field_utility": {
+        "id": "util_curator_psychometry",
+        "name": "Corpse & Residue Verdict",
+        "dc_modifiers": {
+          "INT": -2,
+          "forensics": -2
+        },
+        "auto_extract_clue": true,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "Touching remains or breach residue automatically extracts 1 hidden caseboard clue (-2 INT DC)."
+      },
+      "costs": {
+        "cost_model": "heavy_blood_cast",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.05,
+          0.1
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.22,
+          0.22,
+          0.2
+        ],
+        "credit_cost_base": 0,
+        "daily_charges": 0,
+        "tithe": null,
+        "taboo_id": "never_falsify_evidence",
+        "taboo_desc": "Never destroy or fabricate investigation clues to cover a culprit."
+      },
+      "bound_gear": {
+        "min_tier": 2,
+        "slot": "Weapon",
+        "item_type": "Weapon",
+        "name": "[Pact-Bound] Nail-Spike Estoc",
+        "archetype": "shortsword",
+        "handedness": "1H",
+        "base_multiplier": 1.45,
+        "tier_bonus_mult": 0.2,
+        "damage_type": "aether"
+      },
+      "visuals": {
+        "rest_tell_prose": "dead-pale fingertips tipped with matte blackened iron nails",
+        "rest_tags": [
+          "pale skin",
+          "blackened fingernails"
+        ],
+        "cast_tags": [
+          "giant phantom iron nail",
+          "dark halo"
+        ],
+        "gore_rest_override": [
+          "iron nails driven through fingertips",
+          "weeping nailbeds"
+        ],
+        "furry_rest_override": [
+          "blackened iron claws",
+          "pale muzzle"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The Iron-Nail Curator",
+          "title": "Verdict Devil",
+          "summary": "High-risk 22% Max HP execution spike, automatic forensic clue extraction, and a symbiotic Nail-Spike Estoc."
+        },
+        "pl": {
+          "name": "Kurator Żelaznego Gwoździa",
+          "title": "Diabeł Wyroku",
+          "summary": "Potężny wyrok za 22% Maks. PŻ, automatyczne ślady śledcze i symbiotyczny Estok Gwoździa."
+        },
+        "ms": {
+          "name": "Kurator Paku Besi",
+          "title": "Iblis Hukuman",
+          "summary": "Tusukan maut berisiko 22% HP Maks, ekstrak bukti automatik, dan senjata terikat Estoc Paku."
+        },
+        "zh": {
+          "name": "铁钉司狱",
+          "title": "裁决恶魔",
+          "summary": "消耗22%最大生命的高危钉刑处决、自动提取现场线索，并绑定共生铁钉刺剑。"
+        },
+        "de": {
+          "name": "Der Eisennagel-Kurator",
+          "title": "Urteils-Teufel",
+          "summary": "Hochriskantes 22%-Max-LP-Nagelurteil, automatische Spurensicherung und symbiotisches Nagel-Estoc."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_dead_air_fiend",
+      "number": 4,
+      "name": "The Dead-Air Fiend",
+      "title": "Grid Blackout Entity",
+      "category": "bureau_vault",
+      "regulated": true,
+      "home_nodes": [
+        "loc_hq_containment_sector"
+      ],
+      "faction_gate": "public_agency",
+      "min_faction_rank": 1,
+      "element": "electric",
+      "synergy_stat": "INT",
+      "secondary_stat": "AGI",
+      "required_tags": [],
+      "appraisal": {
+        "favored_min_stats": {
+          "INT": 6
+        },
+        "favored_classes": [
+          "signal",
+          "hacker",
+          "tech",
+          "operator",
+          "robotics",
+          "media",
+          "engineer"
+        ],
+        "disdained_factions": [
+          "monastic_order"
+        ],
+        "favored_quote": "60 hertz in your teeth. Let's drop the city's carrier wave together.",
+        "neutral_quote": "Two blackouts a day before your nervous system browns out.",
+        "disdained_quote": "Incense and wooden beads? Keep your analog prayers away from my copper."
+      },
+      "combat_skill": {
+        "base_id": "pact_dead_air_emp",
+        "name": "EMP Dead-Zone Surge",
+        "emoji": "⚡",
+        "discipline": "attack",
+        "damage_type": "shock",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.45,
+          1.85,
+          2.35
+        ],
+        "strips_shields": true,
+        "status_ailment": "Shocked",
+        "dot_damage": 12,
+        "description": "Floods the arena with dead-channel static, stripping constructs/shields and inflicting Shocked on all foes."
+      },
+      "field_utility": {
+        "id": "util_dead_air_loop",
+        "name": "Carrier-Wave Blackout",
+        "dc_modifiers": {
+          "INT": -2,
+          "AGI": -2,
+          "stealth": -2,
+          "tech": -2
+        },
+        "auto_scramble_cameras": true,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "Loops security feeds and biometric locks (-2 INT/AGI DC on infiltration and tech checks)."
+      },
+      "costs": {
+        "cost_model": "daily_charges",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.0,
+          0.05
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "social_dc_penalties": [
+          {
+            "CHA": 1
+          },
+          {
+            "CHA": 1
+          },
+          {
+            "CHA": 1
+          }
+        ],
+        "hp_pct_per_cast": [
+          0.0,
+          0.0,
+          0.05
+        ],
+        "credit_cost_base": 0,
+        "daily_charges_tiers": [
+          1,
+          2,
+          3
+        ],
+        "exhaust_on_empty": "Exhausted",
+        "tithe": null,
+        "taboo_id": "never_broadcast_clear_ distress",
+        "taboo_desc": "Never call mundane police dispatch during an active incursion."
+      },
+      "bound_gear": null,
+      "visuals": {
+        "rest_tell_prose": "faint ozone static lifting stray hairs and a cyan scanline flicker in the pupils",
+        "rest_tags": [
+          "static hair sparks",
+          "cyan pupil glint"
+        ],
+        "cast_tags": [
+          "violet lightning arcs",
+          "chromatic glitch"
+        ],
+        "gore_rest_override": [
+          "lissajous burn-tracks along neck",
+          "cyan pupil glint"
+        ],
+        "furry_rest_override": [
+          "static-bristled fur",
+          "cyan pupil glint"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The Dead-Air Fiend",
+          "title": "Grid Blackout Entity",
+          "summary": "Daily AoE EMP shield-strip and camera blackout at the cost of Exhaustion and comms static."
+        },
+        "pl": {
+          "name": "Bies Martwego Pasma",
+          "title": "Byt Blackoutu Sieci",
+          "summary": "Obszarowy impuls EMP niszczący tarcze i kamery kosztem Wyczerpania i zakłóceń."
+        },
+        "ms": {
+          "name": "Jin Gelombang Mati",
+          "title": "Entiti Gelap Grid",
+          "summary": "Denyutan EMP pemusnah perisai dan kamera harian dengan kos Keletihan serta gangguan talian."
+        },
+        "zh": {
+          "name": "死频恶灵",
+          "title": "电网断流实体",
+          "summary": "每日限次范围电磁脉冲破盾与监控瘫痪，耗尽充能后陷入力竭并伴随通讯杂音。"
+        },
+        "de": {
+          "name": "Der Totfunk-Unhold",
+          "title": "Netzblackout-Entität",
+          "summary": "Täglicher AoE-EMP-Schildbrecher und Kamerablackout gegen Erschöpfung und Funkrauschen."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_mammon_9",
+      "number": 5,
+      "name": "Mammon-9",
+      "title": "Sovereign Debt Demon",
+      "category": "corporate_auction",
+      "regulated": true,
+      "home_nodes": [
+        "sub_auction_amphitheater",
+        "loc_pa1_vault",
+        "private_agency_1"
+      ],
+      "faction_gate": "private_agency_1",
+      "min_faction_rank": 1,
+      "auction_eligible": true,
+      "auction_buy_in": 350,
+      "element": "earth",
+      "synergy_stat": "LUK",
+      "secondary_stat": "CHA",
+      "required_tags": [],
+      "appraisal": {
+        "favored_min_stats": {
+          "LUK": 6
+        },
+        "favored_factions": [
+          "private_agency_1"
+        ],
+        "favored_min_gold": 500,
+        "disdained_max_gold": 80,
+        "favored_quote": "Prime liquidity! Sign here and weaponize your portfolio at preferential yield.",
+        "neutral_quote": "Standard sovereign rate: every coin you fire buys ballistic dominance.",
+        "disdained_quote": "Subprime net worth detected. Expect a fifty-percent risk premium, debtor."
+      },
+      "combat_skill": {
+        "base_id": "pact_mammon_liquidation",
+        "name": "Bullion Liquidation",
+        "emoji": "🪙",
+        "discipline": "attack",
+        "damage_type": "earth",
+        "target_type": "single",
+        "tier2_target_type": "aoe",
+        "power_mult_tiers": [
+          1.7,
+          2.15,
+          2.75
+        ],
+        "pierces_dt": true,
+        "grants_temp_hp_pct": 0.15,
+        "status_ailment": "Grounded",
+        "description": "Liquidates Credits into hyper-velocity gold shrapnel that pierces armor DT and erects a gilded Hume Shield."
+      },
+      "field_utility": {
+        "id": "util_mammon_dividend",
+        "name": "Sovereign Yield",
+        "dc_modifiers": {
+          "CHA": -2,
+          "bribe": -2,
+          "haggle": -2
+        },
+        "bounty_payout_mult": 1.25,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "+25% bounty cash payouts and -2 CHA DC when bribing or haggling merchants."
+      },
+      "costs": {
+        "cost_model": "wallet_burn",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "credit_cost_base": 45,
+        "credit_cost_per_level": 12,
+        "daily_charges": 0,
+        "tithe": {
+          "interval_days": 2,
+          "item_keywords": [],
+          "credit_fallback": 90,
+          "label": "SLA Retainer Billing"
+        },
+        "taboo_id": "never_default_wallet",
+        "taboo_desc": "Never end a billing cycle at 0 Credits."
+      },
+      "bound_gear": null,
+      "visuals": {
+        "rest_tell_prose": "vertical gold-bullion slit pupils and hairline serial filigree across the knuckles",
+        "rest_tags": [
+          "gold slit pupils",
+          "gilded rings"
+        ],
+        "cast_tags": [
+          "swirling gold coins",
+          "molten gold barrier"
+        ],
+        "gore_rest_override": [
+          "subdermal gold coin imprints",
+          "gold slit pupils"
+        ],
+        "furry_rest_override": [
+          "gilded horn-rings",
+          "gold slit pupils"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "Mammon-9",
+          "title": "Sovereign Debt Demon",
+          "summary": "Spends Credits instead of HP/MP for armor-piercing gold barrages, Hume shields, and +25% bounty payouts."
+        },
+        "pl": {
+          "name": "Mammon-9",
+          "title": "Demon Długu Suwerennego",
+          "summary": "Spala Kredyty zamiast PŻ/PM na przebijający pancerz złoty ostrzał, tarcze i +25% nagród."
+        },
+        "ms": {
+          "name": "Mammon-9",
+          "title": "Iblis Hutang Berdaulat",
+          "summary": "Membakar Kredit untuk serpihan emas penembus perisai, perisai Hume, dan +25% ganjaran buruan."
+        },
+        "zh": {
+          "name": "玛门九号",
+          "title": "主权债务恶魔",
+          "summary": "消耗信用点发射无视护甲的金流弹幕并展开镀金护盾，悬赏金收益提升25%。"
+        },
+        "de": {
+          "name": "Mammon-9",
+          "title": "Staatsverschuldungs-Dämon",
+          "summary": "Verfeuert Credits statt LP/MP für panzerbrechendes Goldschrapnell, Schilde und +25% Kopfgeld."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_recoil_graft",
+      "number": 6,
+      "name": "The Recoil Graft",
+      "title": "Ordnance & Cordite Fiend",
+      "category": "corporate_auction",
+      "regulated": true,
+      "home_nodes": [
+        "sub_synd_pens",
+        "loc_pa2_vault",
+        "private_agency_2"
+      ],
+      "faction_gate": "private_agency_2",
+      "min_faction_rank": 1,
+      "auction_eligible": true,
+      "auction_buy_in": 320,
+      "element": "fire",
+      "synergy_stat": "PER",
+      "secondary_stat": "STR",
+      "required_tags": [],
+      "appraisal": {
+        "favored_min_stats": {
+          "PER": 6
+        },
+        "favored_factions": [
+          "private_agency_2"
+        ],
+        "favored_classes": [
+          "marksman",
+          "breacher",
+          "gunner",
+          "sniper",
+          "mercenary",
+          "enforcer"
+        ],
+        "disdained_classes": [
+          "monk",
+          "pacifist",
+          "healer"
+        ],
+        "favored_quote": "Steady trigger finger. Let me fuse my breechblock into your radius bone.",
+        "neutral_quote": "Give me your hands and twelve percent of your ribs per shell.",
+        "disdained_quote": "Soft civilian palms. The kickback will cost you dearly."
+      },
+      "combat_skill": {
+        "base_id": "pact_recoil_siege_round",
+        "name": "Flesh-Chambered Siege Round",
+        "emoji": "💥",
+        "discipline": "attack",
+        "damage_type": "fire",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.95,
+          2.45,
+          3.05
+        ],
+        "pierces_dt": true,
+        "status_ailment": "Burned",
+        "dot_damage": 18,
+        "description": "Chambers an artillery-grade thermite shell inside your grafted forearm, ignoring all DT and inflicting Burned."
+      },
+      "field_utility": {
+        "id": "util_recoil_thermals",
+        "name": "Cordite Thermal Sight",
+        "dc_modifiers": {
+          "PER": -2,
+          "intimidation": -1
+        },
+        "auto_night_vision": true,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "Thermal dark-sight (-2 PER DC at night/underground; -1 CHA DC on gunpoint intimidation)."
+      },
+      "costs": {
+        "cost_model": "symbiotic_recoil",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.05,
+          0.08
+        ],
+        "tier_stat_locks": [
+          {
+            "CHA": -1
+          },
+          {
+            "CHA": -1
+          },
+          {
+            "CHA": -1
+          }
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.12,
+          0.12,
+          0.1
+        ],
+        "credit_cost_base": 0,
+        "daily_charges": 0,
+        "tithe": null,
+        "taboo_id": "never_surrender_firearm",
+        "taboo_desc": "Never willingly disarm or submit to weapon confiscation."
+      },
+      "bound_gear": {
+        "min_tier": 1,
+        "slot": "Gloves",
+        "item_type": "Gloves",
+        "name": "[Pact-Bound] Brass-Flesh Recoil Brace",
+        "archetype": "gauntlet",
+        "handedness": "1H",
+        "base_dt": 4,
+        "tier_bonus_dt": 2,
+        "damage_type": "fire"
+      },
+      "visuals": {
+        "rest_tell_prose": "vented brass-and-sinew ordnance seams smoking faintly along the wrists",
+        "rest_tags": [
+          "brass mechanical veins on arm",
+          "smoking gauntlet"
+        ],
+        "cast_tags": [
+          "explosive muzzle flash",
+          "molten casings"
+        ],
+        "gore_rest_override": [
+          "exposed brass bone-breech in forearm",
+          "cordite burns"
+        ],
+        "furry_rest_override": [
+          "brass-grafted forepaws",
+          "smoking gauntlet"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The Recoil Graft",
+          "title": "Ordnance & Cordite Fiend",
+          "summary": "Locks Gloves with a symbiotic Recoil Brace, firing DT-piercing siege shells and granting thermal sight."
+        },
+        "pl": {
+          "name": "Szczep Odrzutu",
+          "title": "Demon Artylerii i Kordytu",
+          "summary": "Wiąże Rękawice symbiotyczną szyną, strzelając pociskami oblężniczymi i dając termowizję."
+        },
+        "ms": {
+          "name": "Cantuman Sentakan",
+          "title": "Iblis Artileri & Kordit",
+          "summary": "Mengunci Sarung Tangan dengan pendakap simbiotik, menembak peluru penembus perisai serta penglihatan terma."
+        },
+        "zh": {
+          "name": "反冲殖装魔",
+          "title": "军械与无烟药恶魔",
+          "summary": "共生锁定手部反冲护臂，发射无视护甲的攻城热熔弹并提供热成像夜视。"
+        },
+        "de": {
+          "name": "Das Rückstoß-Transplantat",
+          "title": "Geschütz- & Kordit-Unhold",
+          "summary": "Bindet eine symbiotische Rückstoßschiene an die Hände für panzerbrechende Belagerungsschüsse und Wärmesicht."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_lye_fog_cleaner",
+      "number": 7,
+      "name": "The Lye-Fog Cleaner",
+      "title": "Erasure Devil",
+      "category": "corporate_auction",
+      "regulated": false,
+      "home_nodes": [
+        "sub_synd_pens",
+        "sub_auction_amphitheater"
+      ],
+      "faction_gate": "clandestine_faction",
+      "min_faction_rank": 0,
+      "auction_eligible": true,
+      "auction_buy_in": 280,
+      "element": "water",
+      "synergy_stat": "AGI",
+      "secondary_stat": "INT",
+      "required_tags": [],
+      "appraisal": {
+        "favored_min_stats": {
+          "AGI": 6
+        },
+        "favored_factions": [
+          "clandestine_faction"
+        ],
+        "favored_traits": [
+          "discreet",
+          "furtive",
+          "pragmatic",
+          "quiet"
+        ],
+        "disdained_factions": [
+          "public_agency"
+        ],
+        "favored_quote": "No prints, no witnesses, no name. Step into the mist.",
+        "neutral_quote": "I wash away evidence—and a little of how well anyone remembers your face.",
+        "disdained_quote": "Badge-polishers reek of paperwork. Triple caustic surcharge."
+      },
+      "combat_skill": {
+        "base_id": "pact_lye_fog_dissolve",
+        "name": "Corrosive Mist Dissolve",
+        "emoji": "🌫️",
+        "discipline": "attack",
+        "damage_type": "water",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.4,
+          1.8,
+          2.25
+        ],
+        "enters_stealth": true,
+        "status_ailment": "Slowed",
+        "dot_damage": 14,
+        "description": "Blankets the room in alkaline erasure mist, melting armor over time and dropping you into hidden Stealth."
+      },
+      "field_utility": {
+        "id": "util_lye_erasure",
+        "name": "Forensic Erasure",
+        "dc_modifiers": {
+          "AGI": -2,
+          "stealth": -2,
+          "infiltration": -2
+        },
+        "suppresses_witness_heat": true,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "Scrubs forensic traces and witness recall (-2 AGI DC on stealth and infiltration)."
+      },
+      "costs": {
+        "cost_model": "presence_erasure",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.0,
+          0.05
+        ],
+        "tier_stat_locks": [
+          {
+            "CHA": -1
+          },
+          {
+            "CHA": -1
+          },
+          {
+            "CHA": -1
+          }
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.1,
+          0.1,
+          0.08
+        ],
+        "affinity_gain_mult": 0.8,
+        "credit_cost_base": 0,
+        "daily_charges": 0,
+        "tithe": null,
+        "taboo_id": "never_boast_identity",
+        "taboo_desc": "Never brag publicly or sign your real name on a public broadcast."
+      },
+      "bound_gear": null,
+      "visuals": {
+        "rest_tell_prose": "bleached, hard-to-focus grey irises and a curl of alkaline vapor at the collar",
+        "rest_tags": [
+          "cold mist around collar",
+          "faded grey irises"
+        ],
+        "cast_tags": [
+          "dense acid fog tendrils",
+          "dissolving shadow"
+        ],
+        "gore_rest_override": [
+          "alkali-bleached fingertips",
+          "cold mist around collar"
+        ],
+        "furry_rest_override": [
+          "mist-bleached coat tips",
+          "faded grey irises"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The Lye-Fog Cleaner",
+          "title": "Erasure Devil",
+          "summary": "Corrosive AoE mist that re-enters Stealth and scrubs witness heat, at the cost of -1 CHA presence erasure."
+        },
+        "pl": {
+          "name": "Czyściciel Ługowej Mgły",
+          "title": "Diabeł Wymazania",
+          "summary": "Żrąca mgła dająca Ukrycie i zacierająca ślady kosztem -1 CHA i rozmycia tożsamości."
+        },
+        "ms": {
+          "name": "Pencuci Kabus Lindi",
+          "title": "Iblis Pemadam",
+          "summary": "Kabus menghakis AoE yang mengaktifkan Sembunyi dan memadam bukti dengan kos -1 CHA."
+        },
+        "zh": {
+          "name": "碱雾清道夫",
+          "title": "抹消恶魔",
+          "summary": "释放腐蚀碱雾并在战斗中重入潜行、消除目击热度，代价为存在感稀薄（魅力-1）。"
+        },
+        "de": {
+          "name": "Der Laugennebel-Reiniger",
+          "title": "Auslöschungs-Teufel",
+          "summary": "Ätzender AoE-Nebel mit Sofort-Tarnung und Spurentilgung zum Preis von -1 CHA Präsenzverlust."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_zero_kelvin_sarcophagus",
+      "number": 8,
+      "name": "Zero-Kelvin Sarcophagus",
+      "title": "Cryo-Stasis Warden",
+      "category": "corporate_auction",
+      "regulated": true,
+      "home_nodes": [
+        "loc_pa1_vault",
+        "sub_auction_amphitheater"
+      ],
+      "faction_gate": "private_agency_1",
+      "min_faction_rank": 1,
+      "auction_eligible": true,
+      "auction_buy_in": 310,
+      "element": "ice",
+      "synergy_stat": "END",
+      "secondary_stat": "INT",
+      "required_tags": [],
+      "appraisal": {
+        "favored_min_stats": {
+          "END": 6
+        },
+        "favored_archetypes": [
+          "warden"
+        ],
+        "favored_traits": [
+          "calm",
+          "stoic",
+          "patient"
+        ],
+        "disdained_attributes": [
+          "fire"
+        ],
+        "favored_quote": "Slow pulse. Steadfast core. Step inside the glacier and outlast entropy.",
+        "neutral_quote": "Surrender your haste, and nothing sharp or burning will breach your frost.",
+        "disdained_quote": "Ugh—a thermokinetic furnace. Keep your fever away unless you pay extra."
+      },
+      "combat_skill": {
+        "base_id": "pact_zero_kelvin_bastion",
+        "name": "Permafrost Bastion",
+        "emoji": "🧊",
+        "discipline": "buff",
+        "damage_type": "ice",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.3,
+          1.7,
+          2.2
+        ],
+        "grants_temp_hp_pct": 0.35,
+        "heal_self_pct_tier3": 0.2,
+        "status_ailment": "Frozen",
+        "description": "Encases you in high-capacity permafrost armor with Frozen counter-thorns (T3 adds cryo-mend)."
+      },
+      "field_utility": {
+        "id": "util_cryo_metabolism",
+        "name": "Cryogenic Homeostasis",
+        "dc_modifiers": {
+          "END": -2,
+          "hazard": -2
+        },
+        "halves_hazard_damage": true,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "Halves environmental hazard damage and slows Bleeding/Poisoned progression (-2 END DC)."
+      },
+      "costs": {
+        "cost_model": "stat_lock",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "tier_stat_locks": [
+          {
+            "AGI": -1
+          },
+          {
+            "AGI": -1
+          },
+          {
+            "AGI": -1
+          }
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.05,
+          0.06,
+          0.06
+        ],
+        "credit_cost_base": 0,
+        "daily_charges": 0,
+        "tithe": null,
+        "taboo_id": "never_ignite_bonfire",
+        "taboo_desc": "Never wield fire-element consumables or arson tactics."
+      },
+      "bound_gear": null,
+      "visuals": {
+        "rest_tell_prose": "visible plumes of white sub-zero breath and rime-frosted eyelashes even at noon",
+        "rest_tags": [
+          "visible cold breath",
+          "frosted lashes"
+        ],
+        "cast_tags": [
+          "crystalline ice coffin",
+          "glacier spikes"
+        ],
+        "gore_rest_override": [
+          "frostbitten blue fingertips",
+          "visible cold breath"
+        ],
+        "furry_rest_override": [
+          "rime-frosted whiskers",
+          "visible cold breath"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "Zero-Kelvin Sarcophagus",
+          "title": "Cryo-Stasis Warden",
+          "summary": "Massive permafrost shield, Frozen counter-thorns, and hazard resistance in exchange for permanent -1 AGI."
+        },
+        "pl": {
+          "name": "Sarkofag Zera Bezwzględnego",
+          "title": "Strażnik Kriostazy",
+          "summary": "Potężny pancerz wiecznej zmarzliny i odporność na zagrożenia w zamian za stałe -1 AGI."
+        },
+        "ms": {
+          "name": "Sarkofagus Sifar Kelvin",
+          "title": "Warden Kriostasis",
+          "summary": "Perisai ibun abadi, duri balas Beku, dan rintangan bahaya dengan kos kekal -1 AGI."
+        },
+        "zh": {
+          "name": "绝对零度石棺",
+          "title": "低温静滞守卫",
+          "summary": "以永久降低1点敏捷换取巨量永冻护盾、冰封反伤与环境危害减半。"
+        },
+        "de": {
+          "name": "Null-Kelvin-Sarkophag",
+          "title": "Kryostase-Wächter",
+          "summary": "Massiver Permafrost-Schild, Frost-Konter und Gefahrenresistenz im Tausch gegen dauerhaft -1 AGI."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_white_incense_sovereign",
+      "number": 9,
+      "name": "Sovereign of White Incense",
+      "title": "Elder Sanctum Kitsune",
+      "category": "shrine_pagoda",
+      "regulated": true,
+      "home_nodes": [
+        "loc_et_five_story_pagoda",
+        "loc_et_main_sanctuary"
+      ],
+      "faction_gate": "monastic_order",
+      "min_faction_rank": 1,
+      "codex_id": "folk_kitsune",
+      "element": "fire",
+      "synergy_stat": "CHA",
+      "secondary_stat": "INT",
+      "required_tags": [],
+      "appraisal": {
+        "favored_min_stats": {
+          "CHA": 6
+        },
+        "favored_factions": [
+          "monastic_order"
+        ],
+        "favored_traits": [
+          "polite",
+          "graceful",
+          "clever",
+          "composed"
+        ],
+        "disdained_factions": [
+          "cult_faction"
+        ],
+        "favored_quote": "Such courteous manners. Offer sweetfried tofu and sandalwood, little shrine-keeper.",
+        "neutral_quote": "Keep your hands clean of unprovoked slaughter, and my nine lanterns will guide you.",
+        "disdained_quote": "Filthy abyssal stench! Double the incense and watch your tongue."
+      },
+      "combat_skill": {
+        "base_id": "pact_kitsunebi_ninefold",
+        "name": "Kitsunebi Mirage Ninefold",
+        "emoji": "🦊",
+        "discipline": "attack",
+        "damage_type": "fire",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.5,
+          1.95,
+          2.45
+        ],
+        "status_ailment": "Exposed",
+        "dot_damage": 12,
+        "description": "Unleashes nine orbiting lanterns of azure foxfire that scorch foes, blind accuracy, and inflict Exposed."
+      },
+      "field_utility": {
+        "id": "util_kitsune_true_sight",
+        "name": "Sanctum Fox-Sight",
+        "dc_modifiers": {
+          "CHA": -2,
+          "deception_detect": -2
+        },
+        "auto_unmask_disguise": true,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "Automatically unmasks disguised anomalies and grants -2 CHA DC on social charm/persuasion."
+      },
+      "costs": {
+        "cost_model": "tithe_and_vow",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.05,
+          0.08
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.06,
+          0.07,
+          0.08
+        ],
+        "credit_cost_base": 0,
+        "daily_charges": 0,
+        "tithe": {
+          "interval_days": 3,
+          "item_keywords": [
+            "incense",
+            "sweet",
+            "tofu",
+            "pastry",
+            "tea",
+            "snack"
+          ],
+          "credit_fallback": 50,
+          "label": "White Incense & Sweets Offering"
+        },
+        "taboo_id": "never_strike_passive_spirit_first",
+        "taboo_desc": "Never initiate an attack against a passive or non-hostile spirit."
+      },
+      "bound_gear": null,
+      "visuals": {
+        "rest_tell_prose": "delicate vermilion fox-brush markings at the outer eye corners and a drifting blue ember",
+        "rest_tags": [
+          "vermilion eye-corner markings",
+          "blue wisp"
+        ],
+        "cast_tags": [
+          "spectral nine-tailed fox",
+          "azure spirit fire"
+        ],
+        "gore_rest_override": [
+          "vermilion ritual scars at eye corners",
+          "blue wisp"
+        ],
+        "furry_rest_override": [
+          "white-tipped fox ears",
+          "vermilion eye-corner markings"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "Sovereign of White Incense",
+          "title": "Elder Sanctum Kitsune",
+          "summary": "Azure foxfire AoE, disguise unmasking, and -2 CHA DC in exchange for incense tithes and sparing peaceful spirits."
+        },
+        "pl": {
+          "name": "Władczyni Białego Kadzidła",
+          "title": "Starsza Kitsune Sanktuarium",
+          "summary": "Błękitny lisi ogień, demaskowanie iluzji i -2 ST CHA w zamian za kadzidło i przysięgę czystości."
+        },
+        "ms": {
+          "name": "Raja Kemenyan Putih",
+          "title": "Kitsune Tempat Suci",
+          "summary": "Api musang biru AoE, pembongkar penyamaran, dan -2 DC CHA dengan syarat persembahan kemenyan."
+        },
+        "zh": {
+          "name": "白檀稻荷尊",
+          "title": "古社九尾神使",
+          "summary": "苍蓝狐火群攻、自动识破伪装怪异与魅力检定-2，需定期供奉香火甜食并恪守不杀温顺灵体之誓。"
+        },
+        "de": {
+          "name": "Souverän des Weißen Weihrauchs",
+          "title": "Älteste Heiligtums-Kitsune",
+          "summary": "Azurnes Fuchsfeuer-AoE, Tarnungsentlarvung und -2 CHA-SG gegen Weihrauchopfer und Friedensgelübde."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_severed_gale_tengu",
+      "number": 10,
+      "name": "The Severed-Gale Tengu",
+      "title": "Mountain Blade Ascetic",
+      "category": "shrine_pagoda",
+      "regulated": true,
+      "home_nodes": [
+        "loc_et_five_story_pagoda"
+      ],
+      "faction_gate": "monastic_order",
+      "min_faction_rank": 1,
+      "element": "wind",
+      "synergy_stat": "AGI",
+      "secondary_stat": "STR",
+      "required_tags": [],
+      "appraisal": {
+        "favored_min_stats": {
+          "AGI": 6
+        },
+        "favored_classes": [
+          "swordsman",
+          "samurai",
+          "ronin",
+          "vanguard",
+          "duelist",
+          "martial"
+        ],
+        "disdained_classes": [
+          "gunner",
+          "sniper",
+          "artificer"
+        ],
+        "favored_quote": "Your wrist knows the weight of steel. Draw once, and cut the mountain wind.",
+        "neutral_quote": "Swear off cowardly lead and never turn your back on a duel.",
+        "disdained_quote": "Powder and triggers? Put down the pea-shooter before addressing a Tengu."
+      },
+      "combat_skill": {
+        "base_id": "pact_tengu_vacuum_iaido",
+        "name": "Vacuum Iaido Severance",
+        "emoji": "🌪️",
+        "discipline": "attack",
+        "damage_type": "wind",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.6,
+          2.1,
+          2.7
+        ],
+        "unavoidable": true,
+        "bonus_vs_exposed": 1.35,
+        "status_ailment": "Bleeding",
+        "description": "Draws a supersonic vacuum blade across all enemies, dealing bonus damage to Exposed or staggered targets."
+      },
+      "field_utility": {
+        "id": "util_tengu_windstep",
+        "name": "Gale-Step Traversal",
+        "dc_modifiers": {
+          "AGI": -2,
+          "chase": -2,
+          "rooftop": -2
+        },
+        "travel_time_mult": 0.75,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "Wind-step cuts foot travel time by 25% and grants -2 AGI DC on rooftop/chase checks."
+      },
+      "costs": {
+        "cost_model": "bushido_vow",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.1,
+          0.12
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.07,
+          0.08,
+          0.09
+        ],
+        "credit_cost_base": 0,
+        "daily_charges": 0,
+        "tithe": null,
+        "taboo_id": "never_use_firearms_or_flee_duel",
+        "taboo_desc": "Never fire ballistic guns or flee a 1v1 duel."
+      },
+      "bound_gear": {
+        "min_tier": 2,
+        "slot": "Weapon",
+        "item_type": "Weapon",
+        "name": "[Pact-Bound] Crow-Feather Odachi",
+        "archetype": "greatsword",
+        "handedness": "2H",
+        "base_multiplier": 1.65,
+        "tier_bonus_mult": 0.25,
+        "damage_type": "wind"
+      },
+      "visuals": {
+        "rest_tell_prose": "an iridescent black crow primary feather woven into the hair that stirs without wind",
+        "rest_tags": [
+          "black crow feather in hair",
+          "fluttering haori"
+        ],
+        "cast_tags": [
+          "black tengu wings shadow",
+          "vacuum wind blades"
+        ],
+        "gore_rest_override": [
+          "wind-razor scars across knuckles",
+          "black crow feather in hair"
+        ],
+        "furry_rest_override": [
+          "raven-feathered crest",
+          "fluttering haori"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The Severed-Gale Tengu",
+          "title": "Mountain Blade Ascetic",
+          "summary": "Unavoidable wind iaido AoE, -25% travel time, and a 2H Crow-Feather Odachi bound by a strict Bushido duel vow."
+        },
+        "pl": {
+          "name": "Tengu Przeciętej Wichury",
+          "title": "Górski Asceta Ostrza",
+          "summary": "Nieuniknione cięcie wiatru, szybsza podróż i dwuręczne Odachi związane przysięgą pojedynku."
+        },
+        "ms": {
+          "name": "Tengu Badai Terbelah",
+          "title": "Pertapa Pedang Gunung",
+          "summary": "Libasan angin iaido AoE, masa perjalanan -25%, dan Odachi Bulu Gagak 2H di bawah sumpah pendekar."
+        },
+        "zh": {
+          "name": "断风大天狗",
+          "title": "鞍马剑行修验者",
+          "summary": "必中真空居合斩、步行耗时缩短25%，二阶绑定双手鸦羽大太刀，严禁使用枪械或临阵脱逃。"
+        },
+        "de": {
+          "name": "Der Sturmspalter-Tengu",
+          "title": "Bergklingen-Asket",
+          "summary": "Unvermeidbarer Vakuum-Iaido-Schnitt, -25% Reisezeit und 2H-Krähenfeder-Odachi unter striktem Duell-Eid."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_weeping_bronze_bell",
+      "number": 11,
+      "name": "The Weeping Bronze Bell",
+      "title": "Karmic Martyr Guardian",
+      "category": "shrine_pagoda",
+      "regulated": true,
+      "home_nodes": [
+        "loc_et_five_story_pagoda",
+        "loc_et_main_sanctuary"
+      ],
+      "faction_gate": "monastic_order",
+      "min_faction_rank": 1,
+      "element": "earth",
+      "synergy_stat": "END",
+      "secondary_stat": "CHA",
+      "required_tags": [],
+      "appraisal": {
+        "favored_traits": [
+          "gentle",
+          "devoted",
+          "protective",
+          "kind",
+          "selfless"
+        ],
+        "favored_archetypes": [
+          "warden",
+          "catalyst"
+        ],
+        "disdained_traits": [
+          "selfish",
+          "cruel",
+          "callous"
+        ],
+        "favored_quote": "You carry others' grief without complaint. Ring me when their shields crack.",
+        "neutral_quote": "Bear fifteen percent of my bronze weight, and none beside you shall fall.",
+        "disdained_quote": "A hollow heart makes a cracked bell. Heavy is your penance."
+      },
+      "combat_skill": {
+        "base_id": "pact_bronze_bell_sanctuary",
+        "name": "Twelve-Toll Sanctuary",
+        "emoji": "🔔",
+        "discipline": "buff",
+        "damage_type": "earth",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.35,
+          1.75,
+          2.2
+        ],
+        "cleanses_party": true,
+        "grants_temp_hp_pct": 0.3,
+        "poise_shred_mult": 1.5,
+        "status_ailment": "Grounded",
+        "description": "Tolls a resonant temple bell that cleanses party debuffs, shields allies, and staggers enemies."
+      },
+      "field_utility": {
+        "id": "util_bell_relic_sense",
+        "name": "Karmic Resonance",
+        "dc_modifiers": {
+          "PER": -1,
+          "CHA": -1,
+          "curse_sense": -2
+        },
+        "companion_morale_bonus": true,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "Senses cursed relics through walls and boosts recruited companion accuracy/morale."
+      },
+      "costs": {
+        "cost_model": "martyr_weight",
+        "tier_max_hp_lock_pct": [
+          0.15,
+          0.15,
+          0.18
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.15,
+          0.14,
+          0.12
+        ],
+        "credit_cost_base": 0,
+        "daily_charges": 0,
+        "tithe": null,
+        "taboo_id": "never_abandon_downed_ally",
+        "taboo_desc": "Never retreat while a party companion is downed or restrained."
+      },
+      "bound_gear": null,
+      "visuals": {
+        "rest_tell_prose": "a braided hemp shimenawa wrist-cord hung with a oxidized bronze bell that weeps verdigris tears",
+        "rest_tags": [
+          "shimenawa rope wrist-cord",
+          "bronze bell talisman"
+        ],
+        "cast_tags": [
+          "giant spectral temple bell",
+          "golden ward script"
+        ],
+        "gore_rest_override": [
+          "verdigris tear-stains down cheeks",
+          "shimenawa rope wrist-cord"
+        ],
+        "furry_rest_override": [
+          "oxidized bronze bell collar",
+          "shimenawa rope wrist-cord"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The Weeping Bronze Bell",
+          "title": "Karmic Martyr Guardian",
+          "summary": "Party-cleansing sanctuary toll, poise shockwave, and relic sense for a -15% Max HP lock and cast toll."
+        },
+        "pl": {
+          "name": "Płaczący Dzwon z Brązu",
+          "title": "Karmiczny Strażnik Męczenników",
+          "summary": "Oczyszcza drużynę, daje tarczę i wykrywa przeklęte relikty kosztem -15% Maks. PŻ."
+        },
+        "ms": {
+          "name": "Loceng Gangsa Menangis",
+          "title": "Penjaga Syahid Karma",
+          "summary": "Paluan perlindungan penyuci parti dan pengesan relik sumpahan dengan kunci -15% HP Maks."
+        },
+        "zh": {
+          "name": "泣铜梵钟",
+          "title": "因果殉道护法",
+          "summary": "锁定15%最大生命，敲响净化全队负面、赋予护盾并震慑敌群的护法钟声，兼具咒物感知。"
+        },
+        "de": {
+          "name": "Die Weinende Bronzeglocke",
+          "title": "Karmischer Märtyrer-Wächter",
+          "summary": "Gruppenreinigender Heiligtumsschlag, Haltungsschockwelle und Reliktsinn für -15% Max-LP."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_13th_step_mirror_double",
+      "number": 12,
+      "name": "The 13th-Step Mirror Double",
+      "title": "4th-Stall Reflection Spirit",
+      "category": "campus_mystery",
+      "regulated": false,
+      "home_nodes": [
+        "school_mystery_mirror_washroom",
+        "sub_uc_black_font"
+      ],
+      "school_mystery_clue_min": 2,
+      "codex_id": "folk_ungaikyo",
+      "element": "water",
+      "synergy_stat": "PER",
+      "secondary_stat": "CHA",
+      "required_tags": [],
+      "appraisal": {
+        "favored_factions": [
+          "student_freelancer"
+        ],
+        "favored_traits": [
+          "quiet",
+          "shy",
+          "bookworm",
+          "loner",
+          "observant"
+        ],
+        "disdained_traits": [
+          "arrogant",
+          "loud",
+          "bully"
+        ],
+        "favored_quote": "Nobody notices you in the hallway either? Swap places with me behind the glass.",
+        "neutral_quote": "Give me a sliver of your luck, and I will take the blade meant for you.",
+        "disdained_quote": "Stop admiring yourself in my mirror, narcissist."
+      },
+      "combat_skill": {
+        "base_id": "pact_mirror_doppelganger",
+        "name": "Shattered Doppelganger",
+        "emoji": "🪞",
+        "discipline": "buff",
+        "damage_type": "water",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.5,
+          1.95,
+          2.5
+        ],
+        "grants_evade_counter": true,
+        "reflect_pct_tiers": [
+          0.6,
+          0.8,
+          1.0
+        ],
+        "status_ailment": "Disrupted",
+        "description": "Swaps places with your mirror reflection, dodging an incoming hit completely and reflecting glass-shard damage back."
+      },
+      "field_utility": {
+        "id": "util_mirror_scry",
+        "name": "Glass & Puddle Scrying",
+        "dc_modifiers": {
+          "PER": -2,
+          "recon": -2,
+          "eavesdrop": -2
+        },
+        "auto_mirror_scry": true,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "Eavesdrop and scry through mirrors, windows, or puddles (-2 PER DC on recon checks)."
+      },
+      "costs": {
+        "cost_model": "stat_lock_and_charges",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.0,
+          0.05
+        ],
+        "tier_stat_locks": [
+          {
+            "LUK": -1
+          },
+          {
+            "LUK": -1
+          },
+          {
+            "LUK": -1
+          }
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.0,
+          0.04,
+          0.05
+        ],
+        "credit_cost_base": 0,
+        "daily_charges_tiers": [
+          1,
+          2,
+          3
+        ],
+        "exhaust_on_empty": "Shaken",
+        "tithe": null,
+        "taboo_id": "never_shatter_friendly_mirror",
+        "taboo_desc": "Never smash intact mirrors outside combat."
+      },
+      "bound_gear": null,
+      "visuals": {
+        "rest_tell_prose": "a prism glass hairclip and a reflection in nearby windows that blinks half a beat too late",
+        "rest_tags": [
+          "delayed eerie mirror reflection",
+          "glass hairclip"
+        ],
+        "cast_tags": [
+          "shattering mirror shards",
+          "shadowy twin"
+        ],
+        "gore_rest_override": [
+          " hairline mirror-glass cuts on cheek",
+          "delayed eerie mirror reflection"
+        ],
+        "furry_rest_override": [
+          "glass-prism ear tag",
+          "delayed eerie mirror reflection"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The 13th-Step Mirror Double",
+          "title": "4th-Stall Reflection Spirit",
+          "summary": "Mirror-swap dodge + damage reflection and glass scrying in exchange for permanent -1 LUK."
+        },
+        "pl": {
+          "name": "Lustrzany Sobowtór 13. Stopnia",
+          "title": "Duch Odbicia Czwartej Kabiny",
+          "summary": "Unik z odbiciem obrażeń przez lustrzanego sobowtóra i podgląd w szkle za stałe -1 LUK."
+        },
+        "ms": {
+          "name": "Kembar Cermin Tangga Ke-13",
+          "title": "Roh Pantulan Tandas Ke-4",
+          "summary": "Elakan tukar cermin dengan pantulan serangan dan intipan kaca dengan kos kekal -1 LUK."
+        },
+        "zh": {
+          "name": "十三阶镜中替身",
+          "title": "四号隔间倒影怪谈",
+          "summary": "永久降低1点幸运，换取镜影替身完全闪避反伤与镜面水洼窥视能力。"
+        },
+        "de": {
+          "name": "Der 13.-Stufe-Spiegeldoppelgänger",
+          "title": "Geist der Vierten Kabine",
+          "summary": "Spiegeltausch-Ausweichen samt Schadensreflexion und Glas-Spähen gegen dauerhaft -1 LUK."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_1540_clocktower_fiend",
+      "number": 13,
+      "name": "The 15:40 Clocktower Fiend",
+      "title": "Stolen-Minute Devil",
+      "category": "campus_mystery",
+      "regulated": false,
+      "home_nodes": [
+        "school_mystery_clocktower",
+        "sub_uc_black_font"
+      ],
+      "school_mystery_clue_min": 2,
+      "element": "electric",
+      "synergy_stat": "INT",
+      "secondary_stat": "AGI",
+      "required_tags": [],
+      "appraisal": {
+        "favored_min_stats": {
+          "INT": 5
+        },
+        "favored_factions": [
+          "student_freelancer"
+        ],
+        "favored_classes": [
+          "student",
+          "tinkerer",
+          "scholar",
+          "strategist"
+        ],
+        "disdained_traits": [
+          "lazy",
+          "fatalistic"
+        ],
+        "favored_quote": "Late for cram school again? Borrow six seconds now—pay me back at dusk.",
+        "neutral_quote": "Every stolen minute comes due when the sunset chimes ring.",
+        "disdained_quote": "People who waste afternoons pay compound interest on their pulse."
+      },
+      "combat_skill": {
+        "base_id": "pact_clocktower_rewind",
+        "name": "Six-Second Rewind",
+        "emoji": "🕰️",
+        "discipline": "attack",
+        "damage_type": "shock",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.55,
+          1.95,
+          2.45
+        ],
+        "heal_self_pct": 0.22,
+        "status_ailment": "Shocked",
+        "description": "Rewinds your personal timeline by six seconds, restoring recent HP loss and snapping off an accelerated strike."
+      },
+      "field_utility": {
+        "id": "util_clocktower_zero_minute",
+        "name": "Stolen-Minute Compression",
+        "dc_modifiers": {
+          "INT": -1,
+          "AGI": -1
+        },
+        "zero_minute_action_daily": true,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "1/day Time Compression: complete a local move, study, or investigation in 0 clock minutes."
+      },
+      "costs": {
+        "cost_model": "temporal_debt",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.05,
+          0.08
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.15,
+          0.14,
+          0.12
+        ],
+        "dusk_crash_status": "Exhausted",
+        "credit_cost_base": 0,
+        "daily_charges": 0,
+        "tithe": null,
+        "taboo_id": "never_miss_promised_appointment",
+        "taboo_desc": "Never miss a scheduled rendezvous or promise window."
+      },
+      "bound_gear": null,
+      "visuals": {
+        "rest_tell_prose": "a cracked brass pocketwatch ticking backward and a minute-gear silhouette inside the left pupil",
+        "rest_tags": [
+          "cracked brass pocketwatch",
+          "gear-shaped pupil"
+        ],
+        "cast_tags": [
+          "fractured clockface halo",
+          "sepia rewind trail"
+        ],
+        "gore_rest_override": [
+          "brass escapement ticking beneath collarbone skin",
+          "gear-shaped pupil"
+        ],
+        "furry_rest_override": [
+          "cracked brass pocketwatch",
+          "gear-shaped pupil"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The 15:40 Clocktower Fiend",
+          "title": "Stolen-Minute Devil",
+          "summary": "Rewinds personal HP loss + strikes, and compresses 1 daily action to 0 minutes at the cost of Temporal Debt crashes."
+        },
+        "pl": {
+          "name": "Bies Wieży Zegarowej 15:40",
+          "title": "Diabeł Skradzionej Minuty",
+          "summary": "Cofa utracone PŻ z kontratakiem i skraca 1 akcję dziennie do 0 minut kosztem Długu Czasowego."
+        },
+        "ms": {
+          "name": "Jin Menara Jam 15:40",
+          "title": "Iblis Minit Curian",
+          "summary": "Mengundur kehilangan HP serta menyerang balas, dan memampat 1 aksi harian kepada 0 minit."
+        },
+        "zh": {
+          "name": "15:40钟塔恶灵",
+          "title": "窃时恶魔",
+          "summary": "回溯自身伤势并追击，每日一次0分钟时间压缩行动，代价为黄昏或战后结算时债力竭。"
+        },
+        "de": {
+          "name": "Der 15:40-Uhrturm-Unhold",
+          "title": "Gestohlene-Minute-Teufel",
+          "summary": "Spult eigenen LP-Verlust samt Konter zurück und komprimiert 1 Tagesaktion auf 0 Minuten gegen Zeitschuld."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_arterial_stitch_nurse",
+      "number": 14,
+      "name": "The Arterial Stitch-Nurse",
+      "title": "Blood-Iron Devil",
+      "category": "campus_mystery",
+      "regulated": false,
+      "home_nodes": [
+        "school_mystery_storage_3b",
+        "sub_cult_cells",
+        "wild_boss_surrender"
+      ],
+      "school_mystery_clue_min": 2,
+      "wild_surrender_eligible": true,
+      "element": "bio",
+      "synergy_stat": "STR",
+      "secondary_stat": "END",
+      "required_tags": [],
+      "appraisal": {
+        "favored_min_stats": {
+          "STR": 5,
+          "END": 5
+        },
+        "favored_archetypes": [
+          "vanguard",
+          "breaker"
+        ],
+        "favored_traits": [
+          "fierce",
+          "bold",
+          "reckless",
+          "resilient"
+        ],
+        "disdained_traits": [
+          "squeamish",
+          "timid"
+        ],
+        "favored_quote": "Rich hemoglobin! Spill it freely—I will forge every drop into a scalpel!",
+        "neutral_quote": "Eighteen percent upfront from the vein, and store-bought tonics will taste like chalk.",
+        "disdained_quote": "Fainting at a needle prick? Hold still while I open the seam."
+      },
+      "combat_skill": {
+        "base_id": "pact_crimson_scythe_suture",
+        "name": "Crimson Scythe & Suture",
+        "emoji": "🩸",
+        "discipline": "attack",
+        "damage_type": "poison",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.85,
+          2.35,
+          2.95
+        ],
+        "lifesteal_vs_bleeding_pct": 0.35,
+        "low_hp_power_bonus": true,
+        "status_ailment": "Bleeding",
+        "dot_damage": 16,
+        "description": "Crystallizes your spilled blood into a sweeping crimson scythe; hits harder at low HP and leeches vitality from Bleeding foes."
+      },
+      "field_utility": {
+        "id": "util_arterial_purge",
+        "name": "Hemostatic Suture",
+        "dc_modifiers": {
+          "END": -2,
+          "medicine": -2
+        },
+        "auto_cleanse_bleed_poison": true,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "Purge own Bleeding/Poisoned outside clinics (-2 END/medicine DC)."
+      },
+      "costs": {
+        "cost_model": "blood_bag",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.05,
+          0.08
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.18,
+          0.18,
+          0.16
+        ],
+        "potion_heal_mult": 0.75,
+        "credit_cost_base": 0,
+        "daily_charges": 0,
+        "tithe": null,
+        "taboo_id": "never_discard_blood_trophy",
+        "taboo_desc": "Never refuse combat triage or waste fresh anomaly ichor."
+      },
+      "bound_gear": {
+        "min_tier": 2,
+        "slot": "Weapon",
+        "item_type": "Weapon",
+        "name": "[Pact-Bound] Coagulated Cleaver",
+        "archetype": "greatsword",
+        "handedness": "2H",
+        "base_multiplier": 1.7,
+        "tier_bonus_mult": 0.25,
+        "damage_type": "physical"
+      },
+      "visuals": {
+        "rest_tell_prose": "neat crimson surgical suture cross-hatches at the wrists and slightly sharpened canines",
+        "rest_tags": [
+          "red wrist suture marks",
+          "sharp canines"
+        ],
+        "cast_tags": [
+          "crystallized blood scythe",
+          "arterial ribbons"
+        ],
+        "gore_rest_override": [
+          "weeping surgical sutures along forearms",
+          "blood-iron horns"
+        ],
+        "furry_rest_override": [
+          "crimson suture markings on wrists",
+          "oversized fangs"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The Arterial Stitch-Nurse",
+          "title": "Blood-Iron Devil",
+          "summary": "18% Max HP blood-scythe AoE with lifesteal, bleed/poison self-purge, and a 2H Coagulated Cleaver (-25% store potion healing)."
+        },
+        "pl": {
+          "name": "Tętnicza Siostra Szew",
+          "title": "Diabeł Krwi i Żelaza",
+          "summary": "Krwawa kosa AoE z kradzieżą życia i dwuręcznym Tasakiem za 18% Maks. PŻ i słabsze mikstury."
+        },
+        "ms": {
+          "name": "Jururawat Jahitan Arteri",
+          "title": "Iblis Besi-Darah",
+          "summary": "Sabit darah AoE penyerap nyawa, pembersih pendarahan, dan Parang Darah Beku 2H (-25% pulihan posyen)."
+        },
+        "zh": {
+          "name": "动脉缝合护士",
+          "title": "血铁恶魔",
+          "summary": "消耗18%最大生命挥舞凝血镰刀群攻吸血、场外自愈流血中毒，二阶绑定双手凝血大刀（普通药水治疗-25%）。"
+        },
+        "de": {
+          "name": "Die Arteriennaht-Schwester",
+          "title": "Bluteisen-Teufel",
+          "summary": "18%-Max-LP-Blutsense mit Lebensraub, Wundreinigung und 2H-Gerinnungsspaltbeil (-25% Trankheilung)."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_hollow_choir_worm",
+      "number": 15,
+      "name": "The Hollow Choir Worm",
+      "title": "Abyssal Hive Vessel",
+      "category": "wild_cult",
+      "regulated": false,
+      "home_nodes": [
+        "sub_cult_cells",
+        "sub_uc_black_font",
+        "deaths_door_whisper"
+      ],
+      "deaths_door_eligible": true,
+      "wild_surrender_eligible": true,
+      "element": "bio",
+      "synergy_stat": "INT",
+      "secondary_stat": "CHA",
+      "required_tags": [],
+      "appraisal": {
+        "favored_factions": [
+          "cult_faction"
+        ],
+        "favored_deaths_door": true,
+        "disdained_factions": [
+          "public_agency"
+        ],
+        "favored_quote": "Dying alone in the rubble? Open your ribs and let the Choir sing through you.",
+        "neutral_quote": "Host our resonant brood, and every lie spoken before you will curdle.",
+        "disdained_quote": "Bureau antiseptic burns our cilia. Expect a harsher symbiosis."
+      },
+      "combat_skill": {
+        "base_id": "pact_choir_cognitohazard",
+        "name": "Cognitohazard Hymn",
+        "emoji": "🪱",
+        "discipline": "attack",
+        "damage_type": "aether",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.55,
+          2.0,
+          2.55
+        ],
+        "status_ailment": "Disrupted",
+        "secondary_ailment": "Poisoned",
+        "dot_damage": 14,
+        "description": "Polyphonic abyssal shriek that ruptures enemy focus, inflicting Disrupted and Poisoned across all hostiles."
+      },
+      "field_utility": {
+        "id": "util_choir_trap_sense",
+        "name": "Polyphonic Lie-Sense",
+        "dc_modifiers": {
+          "CHA": -2,
+          "interrogation": -2,
+          "dialogue_trap": -3
+        },
+        "auto_detect_dialogue_trap": true,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "Automatically flags anomaly dialogue traps and grants -2 CHA DC on fear/interrogation."
+      },
+      "costs": {
+        "cost_model": "parasitic_host",
+        "tier_max_hp_lock_pct": [
+          0.05,
+          0.08,
+          0.12
+        ],
+        "tier_stat_locks": [
+          {
+            "CHA": -1
+          },
+          {
+            "CHA": -1
+          },
+          {
+            "CHA": -1
+          }
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.12,
+          0.12,
+          0.1
+        ],
+        "credit_cost_base": 0,
+        "daily_charges": 0,
+        "tithe": {
+          "interval_days": 3,
+          "item_keywords": [
+            "core",
+            "shard",
+            "ichor",
+            "relic",
+            "essence"
+          ],
+          "credit_fallback": 75,
+          "label": "Anomaly Resonance Feeding"
+        },
+        "taboo_id": "never_submit_medical_scan",
+        "taboo_desc": "Never undergo voluntary Bureau full-body containment quarantine."
+      },
+      "bound_gear": null,
+      "visuals": {
+        "rest_tell_prose": "faint indigo vein-tracery beneath the collarbone and a coat shadow that ripples with extra silhouettes",
+        "rest_tags": [
+          "dark collarbone veins",
+          "writhing coat shadow"
+        ],
+        "cast_tags": [
+          "eldritch shadow tendrils",
+          "multiple glowing eyes"
+        ],
+        "gore_rest_override": [
+          "subdermal writhing vein-ridges",
+          "multiple glowing eyes"
+        ],
+        "furry_rest_override": [
+          "dark collarbone veins",
+          "writhing shadow tail"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The Hollow Choir Worm",
+          "title": "Abyssal Hive Vessel",
+          "summary": "Cognitohazard AoE shriek, automatic dialogue-trap detection, and interrogation bonuses for hosting an abyssal brood."
+        },
+        "pl": {
+          "name": "Czerw Pustego Chóru",
+          "title": "Naczynie Otchłannego Roju",
+          "summary": "Kognitywny hymn AoE i wykrywanie pułapek dialogowych za goszczenie otchłannego roju (-1 CHA)."
+        },
+        "ms": {
+          "name": "Cacing Koir Rongga",
+          "title": "Bekas Sarang Jurang",
+          "summary": "Jeritan kognitohazard AoE dan pengesan perangkap dialog automatik dengan kos perumah parasit."
+        },
+        "zh": {
+          "name": "空腔圣咏虫",
+          "title": "深渊巢群宿体",
+          "summary": "释放认知危害圣咏群攻、自动识破对话陷阱并强化审讯威慑，需定期喂食异象残核且魅力-1。"
+        },
+        "de": {
+          "name": "Der Hohlchor-Wurm",
+          "title": "Abgrundschwarm-Gefäß",
+          "summary": "Kognitohazard-AoE-Hymne und automatische Dialogfallen-Erkennung als Preis einer Abgrund-Symbiose."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_fever_dream_muse",
+      "number": 16,
+      "name": "The Fever-Dream Muse",
+      "title": "Velvet Pheromone Succubus",
+      "category": "nsfw_desire",
+      "regulated": false,
+      "home_nodes": [
+        "sub_auction_amphitheater",
+        "sub_cult_cells",
+        "deaths_door_whisper"
+      ],
+      "auction_eligible": true,
+      "auction_buy_in": 340,
+      "element": "bio",
+      "synergy_stat": "CHA",
+      "secondary_stat": "END",
+      "required_tags": [
+        "nsfw"
+      ],
+      "appraisal": {
+        "favored_min_stats": {
+          "CHA": 6
+        },
+        "favored_traits": [
+          "flirtatious",
+          "playful",
+          "sensual",
+          "charming",
+          "bold"
+        ],
+        "disdained_traits": [
+          "guarded",
+          "prude",
+          "cold",
+          "ascetic"
+        ],
+        "favored_quote": "Mmm, your pulse already runs deliciously warm. Breathe me in, darling.",
+        "neutral_quote": "Keep my appetite fed every four nights, and every room will lean closer to your lips.",
+        "disdained_quote": "So stiff and buttoned-up! Melting your restraint will cost extra."
+      },
+      "combat_skill": {
+        "base_id": "pact_fever_rapture_miasma",
+        "name": "Rapture Miasma",
+        "emoji": "💋",
+        "discipline": "attack",
+        "damage_type": "aether",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.55,
+          2.0,
+          2.5
+        ],
+        "lifesteal_pct": 0.25,
+        "status_ailment": "Exposed",
+        "description": "Exhales an intoxicating velvet haze that drains vitality from all foes and shatters their poise into Exposed."
+      },
+      "field_utility": {
+        "id": "util_muse_pheromone",
+        "name": "Velvet Allure",
+        "dc_modifiers": {
+          "CHA": -2,
+          "seduction": -2,
+          "charm": -2
+        },
+        "romance_excitement_mult": 1.35,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "-2 CHA DC on seduction/charm and 1.35x romance/excitement progression."
+      },
+      "costs": {
+        "cost_model": "intimate_tithe",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.05,
+          0.08
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.08,
+          0.09,
+          0.1
+        ],
+        "self_dt_penalty_on_cast": 3,
+        "credit_cost_base": 0,
+        "daily_charges": 0,
+        "tithe": {
+          "interval_days": 4,
+          "item_keywords": [
+            "perfume",
+            "wine",
+            "chocolate",
+            "silk",
+            "incense"
+          ],
+          "intimate_encounter_satisfies": true,
+          "credit_fallback": 80,
+          "label": "Intimate Communion or Luxury Perfume Tithe"
+        },
+        "taboo_id": "never_spurn_consensual_tryst",
+        "taboo_desc": "Never neglect intimate communion or luxury offerings for more than 4 days."
+      },
+      "bound_gear": null,
+      "visuals": {
+        "rest_tell_prose": "a faint roseate flush across the cheekbones and a subtle heart-shaped glint catching the pupil",
+        "rest_tags": [
+          "heart-shaped pupil glint",
+          "flushed cheeks"
+        ],
+        "cast_tags": [
+          "pink pheromone mist",
+          "succubus wing shadow"
+        ],
+        "gore_rest_override": [
+          "kiss-shaped crimson brand on collarbone",
+          "heart-shaped pupil glint"
+        ],
+        "furry_rest_override": [
+          "velvet-flushed muzzle",
+          "heart-shaped pupil glint"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The Fever-Dream Muse",
+          "title": "Velvet Pheromone Succubus",
+          "summary": "Vitality-draining Rapture Miasma, -2 seduction CHA DC, and 1.35x excitement gain in exchange for periodic intimate/luxury tithes."
+        },
+        "pl": {
+          "name": "Muza Gorączkowego Snu",
+          "title": "Aksamitny Sukkub Feromonów",
+          "summary": "Odurzająca miazma wysysająca witalność i -2 ST uwodzenia za regularną daninę zmysłów."
+        },
+        "ms": {
+          "name": "inspirasi Mimpi Demam",
+          "title": "Sukubus Feromon Baldu",
+          "summary": "Kabus penyerap tenaga AoE dan bonus pesona -2 DC CHA dengan syarat ufti keintiman berkala."
+        },
+        "zh": {
+          "name": "热梦缪斯",
+          "title": "天鹅绒费洛蒙魅魔",
+          "summary": "释放汲取生机的迷情香雾并破除敌方架势，魅惑检定-2且亲密兴奋度提升35%，需定期献上亲密交感或奢华香料。"
+        },
+        "de": {
+          "name": "Die Fiebertraum-Muse",
+          "title": "Samt-Pheromon-Sukkubus",
+          "summary": "Vitalitätsraubendes Entrückungs-Miasma und -2 Verführungs-CHA-SG gegen regelmäßigen Intim-/Luxustribut."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_silk_shackle_sovereign",
+      "number": 17,
+      "name": "The Silk-Shackle Sovereign",
+      "title": "Velvet Dominance Devil",
+      "category": "nsfw_desire",
+      "regulated": false,
+      "home_nodes": [
+        "sub_auction_amphitheater",
+        "sub_synd_pens"
+      ],
+      "auction_eligible": true,
+      "auction_buy_in": 360,
+      "element": "aether",
+      "synergy_stat": "CHA",
+      "secondary_stat": "STR",
+      "required_tags": [
+        "nsfw"
+      ],
+      "appraisal": {
+        "favored_min_stats": {
+          "CHA": 6,
+          "STR": 5
+        },
+        "favored_traits": [
+          "proud",
+          "dominant",
+          "confident",
+          "assertive",
+          "commanding"
+        ],
+        "disdained_traits": [
+          "submissive",
+          "timid",
+          "meek",
+          "apologetic"
+        ],
+        "favored_quote": "Knees belong on the floor—theirs, never yours. Take the leash.",
+        "neutral_quote": "Bind your enemies to your pain, so long as your spine never bends.",
+        "disdained_quote": "You apologize when bumped into? Pathetic. Pay the weakling's tariff."
+      },
+      "combat_skill": {
+        "base_id": "pact_silk_shackle_collar",
+        "name": "Collar of Shared Torment",
+        "emoji": "⛓️",
+        "discipline": "attack",
+        "damage_type": "aether",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.75,
+          2.25,
+          2.85
+        ],
+        "shared_damage_redirect_pct": [
+          0.3,
+          0.38,
+          0.45
+        ],
+        "status_ailment": "Grounded",
+        "secondary_ailment": "Exposed",
+        "description": "Snaps a crimson aether collar onto a foe (Grounded + Exposed), redirecting 30-45% of damage you take onto them."
+      },
+      "field_utility": {
+        "id": "util_silk_command",
+        "name": "Sovereign Command",
+        "dc_modifiers": {
+          "CHA": -2,
+          "STR": -2,
+          "command": -2,
+          "interrogation": -2
+        },
+        "dominant_stance_bonus": true,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "-2 CHA/STR DC on commanding dialogue, interrogation, and dominant intimate stances."
+      },
+      "costs": {
+        "cost_model": "nerve_lash_and_taboo",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.05,
+          0.08
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.12,
+          0.12,
+          0.1
+        ],
+        "credit_cost_base": 0,
+        "daily_charges": 0,
+        "tithe": null,
+        "taboo_id": "never_beg_or_grovel",
+        "taboo_desc": "Never beg, grovel, or apologize submissively in dialogue."
+      },
+      "bound_gear": null,
+      "visuals": {
+        "rest_tell_prose": "a shadowy black-velvet choker impression circling the throat and chain-link reflections in the iris",
+        "rest_tags": [
+          "black velvet choker mark",
+          "chain-ringed iris"
+        ],
+        "cast_tags": [
+          "glowing crimson chains",
+          "collar of light"
+        ],
+        "gore_rest_override": [
+          "crimson chain-link welt around throat",
+          "chain-ringed iris"
+        ],
+        "furry_rest_override": [
+          "black velvet collar mark",
+          "chain-ringed iris"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The Silk-Shackle Sovereign",
+          "title": "Velvet Dominance Devil",
+          "summary": "Chains enemies to absorb 30-45% of your damage and grants -2 commanding CHA/STR DC, forbidding begging or groveling."
+        },
+        "pl": {
+          "name": "Suweren Jedwabnych Kajdan",
+          "title": "Aksamitny Diabeł Dominacji",
+          "summary": "Skuwa wroga dzielonym bólem (30-45%) i daje -2 ST rozkazu pod zakazem błagania."
+        },
+        "ms": {
+          "name": "Raja Belenggu Sutera",
+          "title": "Iblis Dominasi Baldu",
+          "summary": "Merantai musuh untuk menanggung 30-45% kerosakan anda dan -2 DC perintah, dilarang merayu."
+        },
+        "zh": {
+          "name": "丝缚君主",
+          "title": "天鹅绒支配恶魔",
+          "summary": "以绯红项圈束缚敌人分担30-45%自身受击伤害，威压与支配检定-2，严禁在对话中乞求或卑躬屈膝。"
+        },
+        "de": {
+          "name": "Der Seidenfessel-Souverän",
+          "title": "Samt-Dominanz-Teufel",
+          "summary": "Kettet Gegner zur Schadensumleitung (30-45%) und gibt -2 Befehls-SG unter striktem Verbot zu betteln."
+        }
+      }
+    },
+    {
+      "patron_id": "patron_midnight_onsen_siren",
+      "number": 18,
+      "name": "The Midnight Onsen Siren",
+      "title": "Obsession & Tide Nymph",
+      "category": "nsfw_desire",
+      "regulated": false,
+      "home_nodes": [
+        "loc_et_five_story_pagoda",
+        "sub_auction_amphitheater"
+      ],
+      "auction_eligible": true,
+      "auction_buy_in": 300,
+      "codex_id": "folk_rusalka",
+      "element": "water",
+      "synergy_stat": "CHA",
+      "secondary_stat": "AGI",
+      "required_tags": [
+        "nsfw"
+      ],
+      "appraisal": {
+        "favored_min_stats": {
+          "CHA": 5,
+          "AGI": 5
+        },
+        "favored_traits": [
+          "romantic",
+          "devoted",
+          "passionate",
+          "affectionate"
+        ],
+        "disdained_traits": [
+          "aloof",
+          "detached",
+          "workaholic"
+        ],
+        "favored_quote": "Warm steam and tangled limbs... promise you won't leave me waiting in the cold bath.",
+        "neutral_quote": "Share quiet waters with me often, and my tide will drown your foes while cradling your beloved.",
+        "disdained_quote": "Not a single romantic spark in your chest? Cold water for a cold fish."
+      },
+      "combat_skill": {
+        "base_id": "pact_onsen_undertow",
+        "name": "Undertow Embrace",
+        "emoji": "🌊",
+        "discipline": "attack",
+        "damage_type": "water",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.5,
+          1.9,
+          2.4
+        ],
+        "heals_party_pct": 0.16,
+        "status_ailment": "Slowed",
+        "description": "Crushes enemies in a steaming tidal vortex while wrapping you and high-affinity companions in a restorative veil."
+      },
+      "field_utility": {
+        "id": "util_siren_desire_read",
+        "name": "Tidal Empathy",
+        "dc_modifiers": {
+          "CHA": -2,
+          "AGI": -2,
+          "empathy": -2
+        },
+        "reveals_hidden_desires": true,
+        "scene_reroll": {
+          "enabled": false
+        },
+        "summary": "Reveals hidden NPC desires/turn-ons early in private scenes and grants -2 CHA/AGI DC."
+      },
+      "costs": {
+        "cost_model": "downtime_communion",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.05,
+          0.08
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "social_dc_penalties": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.08,
+          0.09,
+          0.1
+        ],
+        "credit_cost_base": 0,
+        "daily_charges": 0,
+        "tithe": {
+          "interval_days": 4,
+          "item_keywords": [
+            "bath",
+            "salt",
+            "soap",
+            "tea",
+            "pearl",
+            "wine"
+          ],
+          "intimate_encounter_satisfies": true,
+          "credit_fallback": 65,
+          "label": "Bathhouse / Private Downtime Communion"
+        },
+        "taboo_id": "never_neglect_private_communion",
+        "taboo_desc": "Never go 4+ days without private downtime or bathhouse communion."
+      },
+      "bound_gear": null,
+      "visuals": {
+        "rest_tell_prose": "dewy, steam-kissed luminous skin and a pearlescent tear-mole beneath the left eye",
+        "rest_tags": [
+          "dewy luminous skin",
+          "pearlescent tear-mole"
+        ],
+        "cast_tags": [
+          "translucent water ribbons",
+          "glowing ripples"
+        ],
+        "gore_rest_override": [
+          "dark-water gill slits faint along neck",
+          "pearlescent tear-mole"
+        ],
+        "furry_rest_override": [
+          "sleek pearlescent fur sheen",
+          "pearlescent tear-mole"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The Midnight Onsen Siren",
+          "title": "Obsession & Tide Nymph",
+          "summary": "Steaming tidal AoE + companion heal veil and early desire reading in exchange for regular bathhouse/private communion."
+        },
+        "pl": {
+          "name": "Syrena Północnego Onsenu",
+          "title": "Nimfa Obsesji i Przypływu",
+          "summary": "Wir wodny AoE z leczeniem towarzyszy i czytaniem pragnień za regularne prywatne rytuały."
+        },
+        "ms": {
+          "name": "Siren Onsen Tengah Malam",
+          "title": "Nimfa Obsesi & Pasang Surut",
+          "summary": "Pusaran air AoE bersama pemulihan rakan dan bacaan hasrat tersembunyi dengan syarat komuni berkala."
+        },
+        "zh": {
+          "name": "子夜温泉塞壬",
+          "title": "执念与潮汐水仙",
+          "summary": "掀起涡流群攻并为高好感同伴披上治愈水纱、提前洞悉私密偏好，需定期私密共浴交感。"
+        },
+        "de": {
+          "name": "Die Mitternachts-Onsen-Sirene",
+          "title": "Obsessions- & Gezeiten-Nymphe",
+          "summary": "Dampfender Gezeiten-AoE samt Gefährtenheilung und Wunschgespür gegen regelmäßige Bade-/Privatkommunion."
+        }
+      }
+    }
+  ],
+  "folklore_patrons": {
+    "folk_hantu_raya": {
+      "patron_id": "folk_patron_hantu_raya",
+      "codex_id": "folk_hantu_raya",
+      "name": "Hantu Raya (Bound Saka)",
+      "title": "Ancestral Great Spirit Guardian",
+      "element": "earth",
+      "synergy_stat": "STR",
+      "combat_skill": {
+        "base_id": "pact_saka_hantu_raya",
+        "name": "Saka Hulubalang Crush",
+        "emoji": "👹",
+        "discipline": "attack",
+        "damage_type": "physical",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.85,
+          2.35,
+          2.95
+        ],
+        "poise_shred_mult": 1.7,
+        "grants_temp_hp_pct": 0.2,
+        "status_ailment": "Grounded",
+        "description": "Manifests a towering ancestral Saka double to smash the target and intercept incoming blows."
+      },
+      "field_utility": {
+        "id": "util_saka_heavy_labor",
+        "name": "Double's Burden",
+        "dc_modifiers": {
+          "STR": -2,
+          "END": -1
+        },
+        "summary": "Phantom Saka double assists heavy lifting, barricades, and bodyguard intimidation (-2 STR DC)."
+      },
+      "costs": {
+        "cost_model": "saka_tithe",
+        "tier_max_hp_lock_pct": [
+          0.05,
+          0.1,
+          0.12
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.09,
+          0.1,
+          0.11
+        ],
+        "tithe": {
+          "interval_days": 3,
+          "item_keywords": [
+            "rice",
+            "egg",
+            "pulut",
+            "chicken",
+            "food"
+          ],
+          "credit_fallback": 55,
+          "label": "Pulut Kuning & Egg Acacak Tithe"
+        },
+        "taboo_id": "never_miss_acacak_feast",
+        "taboo_desc": "Never leave the Saka unfed past its three-day pulut kuning offering."
+      },
+      "visuals": {
+        "rest_tell_prose": "a towering second shadow stretching half a meter taller than the host",
+        "rest_tags": [
+          "looming double shadow",
+          "amber Saka glint"
+        ],
+        "cast_tags": [
+          "giant spectral guardian spirit",
+          "crushing shockwave"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "Hantu Raya (Bound Saka)",
+          "title": "Ancestral Great Spirit Guardian",
+          "summary": "Classic Malay Saka guardian granting immense physical strikes and bodyguard shielding for pulut kuning offerings."
+        },
+        "pl": {
+          "name": "Hantu Raya (Związany Saka)",
+          "title": "Wielki Duch Strażniczy Przodków",
+          "summary": "Potężny malajski duch opiekuńczy Saka dający niszczycielskie ciosy i tarczę za ofiary z ryżu."
+        },
+        "ms": {
+          "name": "Hantu Raya (Saka Terikat)",
+          "title": "Penjaga Raya Pusaka",
+          "summary": "Saka hulubalang yang memberi hentaman fizikal dahsyat serta perisai pengawal dengan jamuan pulut kuning."
+        },
+        "zh": {
+          "name": "大鬼萨卡（契缚守护灵）",
+          "title": "马来祖传护主巨灵",
+          "summary": "以黄糯米与血滴定期供奉，召唤巨力护主萨卡重锤破防并分担伤害。"
+        },
+        "de": {
+          "name": "Hantu Raya (Gebundener Saka)",
+          "title": "Ahnen-Großgeist-Wächter",
+          "summary": "Malaiischer Saka-Schutzgeist mit wuchtigen Schlägen und Leibwächter-Schild gegen Reisopfer."
+        }
+      }
+    },
+    "folk_toyol": {
+      "patron_id": "folk_patron_toyol",
+      "codex_id": "folk_toyol",
+      "name": "Toyol (Bottle Familiar)",
+      "title": "Green-Skinned Pilferer Spirit",
+      "element": "aether",
+      "synergy_stat": "AGI",
+      "combat_skill": {
+        "base_id": "pact_saka_toyol_hex",
+        "name": "Pilfering Ankle-Latch",
+        "emoji": "🫙",
+        "discipline": "attack",
+        "damage_type": "aether",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.4,
+          1.8,
+          2.25
+        ],
+        "steals_credits": true,
+        "status_ailment": "Slowed",
+        "description": "Unstoppers your familiar to trip the target, siphon loose Credits/items, and inflict Slowed."
+      },
+      "field_utility": {
+        "id": "util_toyol_lockpick",
+        "name": "Keyhole Slip",
+        "dc_modifiers": {
+          "AGI": -2,
+          "LUK": -2,
+          "lockpick": -3
+        },
+        "bounty_payout_mult": 1.15,
+        "summary": "Slips under locked doors and siphons spare cash (-2 AGI/LUK DC, +15% loot)."
+      },
+      "costs": {
+        "cost_model": "saka_tithe",
+        "tier_max_hp_lock_pct": [
+          0.0,
+          0.05,
+          0.08
+        ],
+        "tier_stat_locks": [
+          {
+            "CHA": -1
+          },
+          {
+            "CHA": -1
+          },
+          {
+            "CHA": -1
+          }
+        ],
+        "hp_pct_per_cast": [
+          0.05,
+          0.06,
+          0.07
+        ],
+        "tithe": {
+          "interval_days": 3,
+          "item_keywords": [
+            "milk",
+            "marble",
+            "candy",
+            "sweet",
+            "toy"
+          ],
+          "credit_fallback": 40,
+          "label": "Milk & Glass Marbles Tithe"
+        },
+        "taboo_id": "never_scatter_beans_near_jar",
+        "taboo_desc": "Never neglect the Toyol's milk/marbles or bring iron needles near its jar."
+      },
+      "visuals": {
+        "rest_tell_prose": "a wax-sealed green glass phial warm inside the coat pocket and faint chalky fingerprints on the hem",
+        "rest_tags": [
+          "sealed spirit talisman bottle",
+          "faint green wisp"
+        ],
+        "cast_tags": [
+          "small shadowy imp silhouette",
+          "ethereal green mist"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "Toyol (Bottle Familiar)",
+          "title": "Green-Skinned Pilferer Spirit",
+          "summary": "Siphons extra Credits, unlocks doors silently, and trips foes in exchange for milk, marbles, and -1 CHA."
+        },
+        "pl": {
+          "name": "Toyol (Chowaniec z Butelki)",
+          "title": "Zielonoskóry Duch Złodziejaszek",
+          "summary": "Podkrada Kredyty, otwiera zamki i spowalnia wrogów za mleko, kulki i -1 CHA."
+        },
+        "ms": {
+          "name": "Toyol (Belaan Botol)",
+          "title": "Roh Pencuri Kecil",
+          "summary": "Menyeluk Kredit tambahan, membuka kunci pintu secara senyap, dan mengganggu musuh dengan upah susu serta guli."
+        },
+        "zh": {
+          "name": "小鬼托约尔（瓶中使魔）",
+          "title": "南洋窃财童灵",
+          "summary": "潜门撬锁、战斗绊足窃币并提升战利品收益，需定期供奉牛奶弹珠且魅力-1。"
+        },
+        "de": {
+          "name": "Toyol (Flaschen-Vertrauter)",
+          "title": "Grünhäutiger Diebesgeist",
+          "summary": "Stiehlt Extra-Credits, öffnet Schlösser lautlos und verlangsamt Feinde gegen Milch, Murmeln und -1 CHA."
+        }
+      }
+    },
+    "folk_pontianak": {
+      "patron_id": "folk_patron_pontianak",
+      "codex_id": "folk_pontianak",
+      "name": "Nail-Bound Pontianak",
+      "title": "Sealed Frangipani Revenant",
+      "element": "wind",
+      "synergy_stat": "AGI",
+      "combat_skill": {
+        "base_id": "pact_pontianak_shriek",
+        "name": "Inverted Frangipani Shriek",
+        "emoji": "🌺",
+        "discipline": "attack",
+        "damage_type": "wind",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.65,
+          2.1,
+          2.65
+        ],
+        "status_ailment": "Exposed",
+        "secondary_ailment": "Bleeding",
+        "description": "Blinks behind foes in a scent of night-blooming kemboja, unleashing a soft close-range cry that shreds poise."
+      },
+      "field_utility": {
+        "id": "util_pontianak_veil",
+        "name": "Kemboja Night-Step",
+        "dc_modifiers": {
+          "AGI": -2,
+          "PER": -1,
+          "stealth": -2
+        },
+        "summary": "Silent night-glide and uncanny dread aura (-2 AGI/stealth DC)."
+      },
+      "costs": {
+        "cost_model": "seal_maintenance",
+        "tier_max_hp_lock_pct": [
+          0.08,
+          0.12,
+          0.15
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.1,
+          0.11,
+          0.12
+        ],
+        "tithe": {
+          "interval_days": 4,
+          "item_keywords": [
+            "flower",
+            "incense",
+            "iron",
+            "oil"
+          ],
+          "credit_fallback": 60,
+          "label": "Cold-Iron Seal & Kemboja Oil"
+        },
+        "taboo_id": "never_remove_nape_nail",
+        "taboo_desc": "Never let your nape iron talisman corrode or be struck loose."
+      },
+      "visuals": {
+        "rest_tell_prose": "a cold-iron hairpin worn at the nape and the faint nocturnal scent of frangipani blossoms",
+        "rest_tags": [
+          "iron hairpin at nape",
+          "white frangipani petals"
+        ],
+        "cast_tags": [
+          "pale spectral woman silhouette",
+          "swirling white blossoms"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "Nail-Bound Pontianak",
+          "title": "Sealed Frangipani Revenant",
+          "summary": "Nape-nail sealed revenant granting blink-ambush wind shrieks and night stealth while the iron seal holds."
+        },
+        "pl": {
+          "name": "Zapieczętowana Pontianak",
+          "title": "Upiór Kwiatu Plumerii",
+          "summary": "Zapieczętowana gwoździem zjawa dająca teleportację z krzykiem wiatru i nocne skradanie."
+        },
+        "ms": {
+          "name": "Pontianak Paku Tengkuk",
+          "title": "Roh Kemboja Terkunci",
+          "summary": "Kelibat kemboja terkunci paku besi yang memberi serangan hendap kilat dan jeritan pemecah semangat."
+        },
+        "zh": {
+          "name": "钉封庞蒂雅娜",
+          "title": "鸡蛋花封印夜怨灵",
+          "summary": "以颈后寒铁钉封禁的南洋夜灵，赋予瞬步怨啸群攻与夜行潜踪。"
+        },
+        "de": {
+          "name": "Nagelgebundene Pontianak",
+          "title": "Versiegelter Frangipani-Wiedergänger",
+          "summary": "Per Nackennagel versiegelter Nachtgeist für Schattensprung-Schreie und Nacht-Tarnung."
+        }
+      }
+    },
+    "folk_yuki_onna": {
+      "patron_id": "folk_patron_yuki_onna",
+      "codex_id": "folk_yuki_onna",
+      "name": "Yuki-onna of the Vow",
+      "title": "Whiteout Bride",
+      "element": "ice",
+      "synergy_stat": "INT",
+      "combat_skill": {
+        "base_id": "pact_yuki_onna_exhale",
+        "name": "Unspoken Whiteout Breath",
+        "emoji": "❄️",
+        "discipline": "attack",
+        "damage_type": "ice",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.55,
+          2.0,
+          2.55
+        ],
+        "status_ailment": "Frozen",
+        "description": "Exhales silent mountain frost across all enemies, freezing limbs solid."
+      },
+      "field_utility": {
+        "id": "util_yuki_silence",
+        "name": "Snow-Muffled Step",
+        "dc_modifiers": {
+          "AGI": -2,
+          "INT": -1
+        },
+        "summary": "Footsteps make zero sound on any surface (-2 AGI stealth DC)."
+      },
+      "costs": {
+        "cost_model": "secrecy_vow",
+        "tier_max_hp_lock_pct": [
+          0.05,
+          0.1,
+          0.12
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.08,
+          0.09,
+          0.1
+        ],
+        "tithe": null,
+        "taboo_id": "never_speak_patron_name_aloud",
+        "taboo_desc": "Never boast or reveal the details of your snow-vow to uncontracted strangers."
+      },
+      "visuals": {
+        "rest_tell_prose": "snowflakes that refuse to melt on the shoulders and frost-pale lips",
+        "rest_tags": [
+          "unmelting snowflakes",
+          "pale frost lips"
+        ],
+        "cast_tags": [
+          "blizzard kimono apparition",
+          "diamond dust breath"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "Yuki-onna of the Vow",
+          "title": "Whiteout Bride",
+          "summary": "Silent blizzard breath AoE and muffled footsteps bound by a vow never to speak of the pact."
+        },
+        "pl": {
+          "name": "Yuki-onna Przysięgi",
+          "title": "Panna Zamieci",
+          "summary": "Mroźny oddech zamieci AoE i bezszelestny krok związany przysięgą milczenia."
+        },
+        "ms": {
+          "name": "Yuki-onna Bersumpah",
+          "title": "Pengantin Ribut Salji",
+          "summary": "Hembusan salji beku AoE dan langkah senyap diikat sumpah rahsia."
+        },
+        "zh": {
+          "name": "誓约雪女",
+          "title": "吹雪新娘",
+          "summary": "以缄口不泄契约之誓，换取群体冰封吐息与踏雪无痕潜行。"
+        },
+        "de": {
+          "name": "Yuki-onna des Schwurs",
+          "title": "Schneesturm-Braut",
+          "summary": "Lautloser Blizzard-Atem-AoE und gedämpfte Schritte unter striktem Schweigegelübde."
+        }
+      }
+    },
+    "folk_brass_vessel": {
+      "patron_id": "folk_patron_smokeless_djinn",
+      "codex_id": "folk_brass_vessel",
+      "name": "Qumqum Ifrit of Smokeless Fire",
+      "title": "Brass-Sealed Sovereign Djinn",
+      "element": "fire",
+      "synergy_stat": "CHA",
+      "combat_skill": {
+        "base_id": "pact_smokeless_edict",
+        "name": "Edict of Smokeless Fire",
+        "emoji": "🏺",
+        "discipline": "attack",
+        "damage_type": "fire",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.8,
+          2.3,
+          2.9
+        ],
+        "status_ailment": "Burned",
+        "dot_damage": 20,
+        "description": "Issues a literal clause from the Solomon-stamped brass vessel, engulfing foes in smokeless plasma."
+      },
+      "field_utility": {
+        "id": "util_djinn_clause",
+        "name": "Literal Clause Audit",
+        "dc_modifiers": {
+          "CHA": -2,
+          "INT": -2
+        },
+        "summary": "Spots contract loopholes and grants -2 CHA/INT DC in high-stakes negotiations."
+      },
+      "costs": {
+        "cost_model": "daily_edicts",
+        "tier_max_hp_lock_pct": [
+          0.05,
+          0.08,
+          0.1
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.09,
+          0.1,
+          0.11
+        ],
+        "daily_charges_tiers": [
+          1,
+          2,
+          3
+        ],
+        "exhaust_on_empty": "Exhausted",
+        "tithe": null,
+        "taboo_id": "never_break_spoken_promise",
+        "taboo_desc": "Never break a sworn commitment in the Commitments Ledger."
+      },
+      "visuals": {
+        "rest_tell_prose": "Solomon-stamped brass ring warm to the touch and heat-shimmering eyes",
+        "rest_tags": [
+          "engraved brass seal ring",
+          "heat-mirage eyes"
+        ],
+        "cast_tags": [
+          "smokeless blue-gold fire",
+          "djinn silhouette"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "Qumqum Ifrit of Smokeless Fire",
+          "title": "Brass-Sealed Sovereign Djinn",
+          "summary": "Devastating smokeless-fire edicts and negotiation mastery, demanding absolute fidelity to sworn promises."
+        },
+        "pl": {
+          "name": "Ifryt Bezogniowego Płomienia",
+          "title": "Dżinn z Mosiężnego Naczynia",
+          "summary": "Potężny bezdymny ogień i biegłość w negocjacjach pod warunkiem dotrzymywania obietnic."
+        },
+        "ms": {
+          "name": "Ifrit Api Tanpa Asap",
+          "title": "Jin Qumqum Tembaga",
+          "summary": "Titah api tanpa asap AoE dan kepakaran rundingan dengan syarat tidak memungkiri janji."
+        },
+        "zh": {
+          "name": "无烟火铜瓶伊夫利特",
+          "title": "所罗门封印尊主镇尼",
+          "summary": "释放无烟净火敕令群攻并强化契约交涉，严禁违背任何已登记承诺。"
+        },
+        "de": {
+          "name": "Qumqum-Ifrit des Rauchlosen Feuers",
+          "title": "Messingversiegelter Dschinn",
+          "summary": "Verheerende Rauchlose-Feuer-Edikte und Verhandlungsgeschick gegen absolute Versprechenstreue."
+        }
+      }
+    },
+    "folk_leshy": {
+      "patron_id": "folk_patron_leshy",
+      "codex_id": "folk_leshy",
+      "name": "Old-Growth Leshy",
+      "title": "Lord of Twisted Roots",
+      "element": "earth",
+      "synergy_stat": "END",
+      "combat_skill": {
+        "base_id": "pact_leshy_snare",
+        "name": "Alder-Root Stranglehold",
+        "emoji": "🌲",
+        "discipline": "attack",
+        "damage_type": "earth",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.5,
+          1.95,
+          2.45
+        ],
+        "status_ailment": "Grounded",
+        "description": "Erupts iron-hard roots beneath all enemies, pinning them in Grounded."
+      },
+      "field_utility": {
+        "id": "util_leshy_path",
+        "name": "Woodland Shortcut",
+        "dc_modifiers": {
+          "PER": -2,
+          "survival": -2
+        },
+        "travel_time_mult": 0.8,
+        "summary": "Never get lost in distorted zones (-2 PER DC, -20% outdoor travel time)."
+      },
+      "costs": {
+        "cost_model": "tithe_and_vow",
+        "tier_max_hp_lock_pct": [
+          0.05,
+          0.08,
+          0.1
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.07,
+          0.08,
+          0.09
+        ],
+        "tithe": {
+          "interval_days": 4,
+          "item_keywords": [
+            "bread",
+            "salt",
+            "berry",
+            "herb",
+            "mushroom"
+          ],
+          "credit_fallback": 45,
+          "label": "Salted Rye Bread & Herbs"
+        },
+        "taboo_id": "never_despoil_groves",
+        "taboo_desc": "Never burn shrine trees or litter inside natural sanctuary zones."
+      },
+      "visuals": {
+        "rest_tell_prose": "lichen-green flecks in the irises and shoes laced left-over-right in woodland fashion",
+        "rest_tags": [
+          "moss-green eyes",
+          "bark-patterned cuff"
+        ],
+        "cast_tags": [
+          "antlered forest spirit shadow",
+          "grasping tree roots"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "Old-Growth Leshy",
+          "title": "Lord of Twisted Roots",
+          "summary": "Root-snare AoE and distorted-zone pathfinding in exchange for salted bread tithes."
+        },
+        "pl": {
+          "name": "Prastary Leszy",
+          "title": "Władca Splątanych Korzeni",
+          "summary": "Korzenne sidła AoE i orientacja w dziczy za ofiary z solonego chleba."
+        },
+        "ms": {
+          "name": "Leshy Hutan Tua",
+          "title": "Penguasa Akar Berpintal",
+          "summary": "Jerat akar AoE dan panduan laluan hutan dengan persembahan roti bergaram."
+        },
+        "zh": {
+          "name": "古林莱希",
+          "title": "盘根林主",
+          "summary": "召唤树根缠缚敌群并缩短野外迷域行进时间，需定期供奉盐面包与草药。"
+        },
+        "de": {
+          "name": "Urwald-Leschij",
+          "title": "Herr der Gewundenen Wurzeln",
+          "summary": "Wurzelschlingen-AoE und Pfadfinden gegen gesalzenes Brot als Tribut."
+        }
+      }
+    },
+    "folk_huli_jing": {
+      "patron_id": "folk_patron_huli_jing",
+      "codex_id": "folk_huli_jing",
+      "name": "Scholar-Pavilion Huli Jing",
+      "title": "Thousand-Year Ink Fox",
+      "element": "aether",
+      "synergy_stat": "INT",
+      "combat_skill": {
+        "base_id": "pact_huli_jing_pearl",
+        "name": "Star-Pearl Essence Drain",
+        "emoji": "🔮",
+        "discipline": "attack",
+        "damage_type": "aether",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.7,
+          2.15,
+          2.7
+        ],
+        "lifesteal_pct": 0.25,
+        "status_ailment": "Disrupted",
+        "description": "Projects a luminous fox-pearl that siphons vitality and disrupts enemy resonance."
+      },
+      "field_utility": {
+        "id": "util_huli_scholar",
+        "name": "Ten-Century Classics",
+        "dc_modifiers": {
+          "INT": -2,
+          "CHA": -1,
+          "lore": -2
+        },
+        "summary": "Ancient occult scholarship grants -2 INT/lore DC on rituals and clue synthesis."
+      },
+      "costs": {
+        "cost_model": "breath_tax",
+        "tier_max_hp_lock_pct": [
+          0.08,
+          0.1,
+          0.12
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.08,
+          0.09,
+          0.1
+        ],
+        "tithe": null,
+        "taboo_id": "never_burn_books",
+        "taboo_desc": "Never destroy written records, talismans, or occult scrolls."
+      },
+      "visuals": {
+        "rest_tell_prose": "a faint plum-blossom ink mark at the wrist and silver-amber fox pupils in dim light",
+        "rest_tags": [
+          "amber fox eyes",
+          "plum-ink wrist mark"
+        ],
+        "cast_tags": [
+          "luminous spirit pearl",
+          "ethereal fox tails"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "Scholar-Pavilion Huli Jing",
+          "title": "Thousand-Year Ink Fox",
+          "summary": "Vitality-draining Star-Pearl strike and -2 occult INT DC for sharing breath-vitality."
+        },
+        "pl": {
+          "name": "Uczona Huli Jing z Pawilonu",
+          "title": "Tysiącletnia Lisica Atramentu",
+          "summary": "Wysysająca życie Gwiezdna Perła i -2 ST wiedzy tajemnej za podział witalności."
+        },
+        "ms": {
+          "name": "Huli Jing Astaka Cendekia",
+          "title": "Rubah Dakwat Seribu Tahun",
+          "summary": "Serangan Mutiara Bintang penyerap tenaga dan -2 DC ilmu ghaib INT."
+        },
+        "zh": {
+          "name": "书斋千年狐仙",
+          "title": "玄墨丹珠大仙",
+          "summary": "祭出内丹汲取敌方精气并扰乱共鸣，提供玄学博识检定-2，需分润自身精血上限。"
+        },
+        "de": {
+          "name": "Gelehrtenpavillon-Huli-Jing",
+          "title": "Tausendjährige Tintenfuchsin",
+          "summary": "Vitalitätsraubende Sternenperle und -2 Okkult-INT-SG gegen geteilte Lebenskraft."
+        }
+      }
+    },
+    "folk_huapi": {
+      "patron_id": "folk_patron_huapi",
+      "codex_id": "folk_huapi",
+      "name": "Huapi Veil-Weaver",
+      "title": "Painted-Skin Artisan",
+      "element": "bio",
+      "synergy_stat": "CHA",
+      "combat_skill": {
+        "base_id": "pact_huapi_unmasking",
+        "name": "Crimson Brush Unmasking",
+        "emoji": "🎭",
+        "discipline": "attack",
+        "damage_type": "poison",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.65,
+          2.1,
+          2.65
+        ],
+        "status_ailment": "Exposed",
+        "dot_damage": 14,
+        "description": "Drops the painted silk guise for an instant, striking with heart-stopping dread and bio-razor claws."
+      },
+      "field_utility": {
+        "id": "util_huapi_guise",
+        "name": "Seamless Silk Persona",
+        "dc_modifiers": {
+          "CHA": -2,
+          "disguise": -3,
+          "infiltration": -2
+        },
+        "summary": "Flawless social disguise and voice mimicry (-3 disguise DC, -2 CHA DC)."
+      },
+      "costs": {
+        "cost_model": "heart_warmth_tax",
+        "tier_max_hp_lock_pct": [
+          0.08,
+          0.12,
+          0.15
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.09,
+          0.1,
+          0.11
+        ],
+        "tithe": null,
+        "taboo_id": "never_let_stranger_see_ritual",
+        "taboo_desc": "Never perform pact maintenance in a public non-private room."
+      },
+      "visuals": {
+        "rest_tell_prose": "porcelain-smooth skin with a hairline vermilion brush-stroke hidden behind the ear",
+        "rest_tags": [
+          "porcelain doll skin",
+          "vermilion brush mark"
+        ],
+        "cast_tags": [
+          "painted silk mask",
+          "crimson ink slash"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "Huapi Veil-Weaver",
+          "title": "Painted-Skin Artisan",
+          "summary": "Master social disguise (-3 DC) and terrifying unmasking strikes, requiring strict ritual privacy."
+        },
+        "pl": {
+          "name": "Tkaczka Zasłony Huapi",
+          "title": "Artystka Malowanej Skóry",
+          "summary": "Mistrzowskie przebranie (-3 ST) i przerażające ataki pod rygorem prywatności rytuałów."
+        },
+        "ms": {
+          "name": "Penenun Wajah Huapi",
+          "title": "Pengukir Kulit Lukisan",
+          "summary": "Penyamaran sosial sempurna (-3 DC) dan serangan pendedahan mengerikan dengan syarat privasi ritual."
+        },
+        "zh": {
+          "name": "画皮织面师",
+          "title": "朱笔易容异灵",
+          "summary": "赋予无瑕易容伪装（伪装检定-3）与揭面惊魂爪击，严禁在公开场所进行契约整备。"
+        },
+        "de": {
+          "name": "Huapi-Schleierweberin",
+          "title": "Gemalte-Haut-Künstlerin",
+          "summary": "Perfekte Tarnung (-3 SG) und furchteinflößende Demaskierungs-Angriffe bei strikter Ritual-Privatsphäre."
+        }
+      }
+    },
+    "folk_changeling": {
+      "patron_id": "folk_patron_leanan_sidhe",
+      "codex_id": "folk_changeling",
+      "name": "Leanan Sídhe of the Hawthorn",
+      "title": "Fair-Folk Muse & Glamour Patron",
+      "element": "wind",
+      "synergy_stat": "CHA",
+      "combat_skill": {
+        "base_id": "pact_sidhe_inspiration",
+        "name": "Hawthorn Glamour Crescendo",
+        "emoji": "🍃",
+        "discipline": "buff",
+        "damage_type": "aether",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.55,
+          2.0,
+          2.55
+        ],
+        "crit_bonus": 0.4,
+        "status_ailment": "Exposed",
+        "description": "Wreathes your strike in Fair-Folk brilliance for massive critical precision and poise break."
+      },
+      "field_utility": {
+        "id": "util_sidhe_muse",
+        "name": "Fae Eloquence",
+        "dc_modifiers": {
+          "CHA": -2,
+          "LUK": -1,
+          "performance": -3
+        },
+        "summary": "Supernatural eloquence and artistry (-2 CHA DC, -3 performance DC)."
+      },
+      "costs": {
+        "cost_model": "vitality_candle",
+        "tier_max_hp_lock_pct": [
+          0.1,
+          0.14,
+          0.18
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.07,
+          0.08,
+          0.09
+        ],
+        "tithe": {
+          "interval_days": 4,
+          "item_keywords": [
+            "cream",
+            "honey",
+            "milk",
+            "berry",
+            "wine"
+          ],
+          "credit_fallback": 50,
+          "label": "Sweet Cream & Hawthorn Honey"
+        },
+        "taboo_id": "never_utter_thank_you_to_fae",
+        "taboo_desc": "Never touch cold wrought iron barehanded or default on Fair-Folk hospitality."
+      },
+      "visuals": {
+        "rest_tell_prose": "hawthorn-leaf shadows clinging to the hem and fever-bright emerald flecks in the eyes",
+        "rest_tags": [
+          "emerald fae eye glint",
+          "hawthorn leaf motif"
+        ],
+        "cast_tags": [
+          "golden fae glamour dust",
+          "ethereal wind Fey silhouette"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "Leanan Sídhe of the Hawthorn",
+          "title": "Fair-Folk Muse & Glamour Patron",
+          "summary": "Critical glamour brilliance and Fae eloquence traded for Max HP vitality and sweet cream offerings."
+        },
+        "pl": {
+          "name": "Leanan Sídhe z Głogu",
+          "title": "Muza Dobrego Ludu",
+          "summary": "Krytyczny blask iluzji i elokwencja Fae w zamian za Maks. PŻ i ofiary ze śmietanki."
+        },
+        "ms": {
+          "name": "Leanan Sídhe Pohon Hawthorn",
+          "title": "Inspirasi Pari-Pari Glamour",
+          "summary": "Ketepatan kritikal glamour dan kepetahan luar biasa dengan pertukaran HP Maks serta madu."
+        },
+        "zh": {
+          "name": "山楂树希德缪斯",
+          "title": "仙丘幻魅庇护者",
+          "summary": "消耗生命上限与甜乳蜂蜜供奉，换取仙灵暴击幻光与超凡言灵魅力。"
+        },
+        "de": {
+          "name": "Leanan Sídhe vom Weißdorn",
+          "title": "Feenvolk-Muse & Glamour-Patronin",
+          "summary": "Kritischer Feen-Glamour und Beredsamkeit im Tausch gegen Max-LP und süßen Rahm."
+        }
+      }
+    },
+    "folk_dullahan": {
+      "patron_id": "folk_patron_dullahan",
+      "codex_id": "folk_dullahan",
+      "name": "The Black-Coach Dullahan",
+      "title": "Headless Death-Caller",
+      "element": "aether",
+      "synergy_stat": "STR",
+      "combat_skill": {
+        "base_id": "pact_dullahan_spine_whip",
+        "name": "Death-Caller Spine Lash",
+        "emoji": "🏇",
+        "discipline": "attack",
+        "damage_type": "aether",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.9,
+          2.4,
+          3.0
+        ],
+        "tier3_execute_threshold": 0.2,
+        "status_ailment": "Bleeding",
+        "description": "Cracks a phantom coachman's lash that calls out the target's doom and executes weakened prey."
+      },
+      "field_utility": {
+        "id": "util_dullahan_gates",
+        "name": "No Lock Stands",
+        "dc_modifiers": {
+          "STR": -2,
+          "breach": -3
+        },
+        "summary": "Locked gates and barricades buckle before your approach (-3 breach DC, -2 STR DC)."
+      },
+      "costs": {
+        "cost_model": "omen_toll",
+        "tier_max_hp_lock_pct": [
+          0.08,
+          0.12,
+          0.15
+        ],
+        "tier_stat_locks": [
+          {},
+          {},
+          {}
+        ],
+        "hp_pct_per_cast": [
+          0.12,
+          0.13,
+          0.14
+        ],
+        "tithe": null,
+        "taboo_id": "never_hoard_gold_on_threshold",
+        "taboo_desc": "Never spy on death rites or carry stolen funerary gold."
+      },
+      "visuals": {
+        "rest_tell_prose": "a thin pale seam around the base of the neck and cold coach-lantern green reflections",
+        "rest_tags": [
+          "faint neck seam",
+          "green lantern glint"
+        ],
+        "cast_tags": [
+          "spectral headless rider",
+          "black flame whip"
+        ]
+      },
+      "locales": {
+        "en": {
+          "name": "The Black-Coach Dullahan",
+          "title": "Headless Death-Caller",
+          "summary": "Execution spine-lash and effortless gate breaching (-3 DC) at high blood price."
+        },
+        "pl": {
+          "name": "Dullahan Czarnego Powozu",
+          "title": "Bezgłowy Herold Śmierci",
+          "summary": "Egzekucyjny bicz i wyważanie bram (-3 ST) za wysoką cenę krwi."
+        },
+        "ms": {
+          "name": "Dullahan Pedati Hitam",
+          "title": "Penyeru Maut Tanpa Kepala",
+          "summary": "Libasan maut dan pemecah pintu berkunci (-3 DC) dengan harga darah tinggi."
+        },
+        "zh": {
+          "name": "黑辇无头骑士",
+          "title": "呼名唤死冥使",
+          "summary": "挥舞冥界脊鞭处决残敌、万锁自开（破门检定-3），每次施放承受高额鲜血代价。"
+        },
+        "de": {
+          "name": "Der Schwarzkutschen-Dullahan",
+          "title": "Kopfloser Todesrufer",
+          "summary": "Hinrichtungs-Peitschenhieb und müheloses Torbrechen (-3 SG) gegen hohen Blutzoll."
+        }
+      }
+    }
+  },
+  "procedural_skill_templates": {
+    "fire_vanguard": {
+      "template_key": "fire_vanguard",
+      "element": "fire",
+      "archetype": "vanguard",
+      "synergy_stat": "STR",
+      "combat_skill": {
+        "base_id": "pact_proc_fire_vanguard",
+        "name": "Thermokinetic Execution Fang",
+        "emoji": "🔥",
+        "discipline": "attack",
+        "damage_type": "fire",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.75,
+          2.2,
+          2.75
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Burned",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted fire vanguard manifestation channeling Burned."
+      },
+      "hp_pct_per_cast": [
+        0.1,
+        0.11,
+        0.12
+      ]
+    },
+    "fire_catalyst": {
+      "template_key": "fire_catalyst",
+      "element": "fire",
+      "archetype": "catalyst",
+      "synergy_stat": "INT",
+      "combat_skill": {
+        "base_id": "pact_proc_fire_catalyst",
+        "name": "Thermokinetic Calamity Choir",
+        "emoji": "🔥",
+        "discipline": "attack",
+        "damage_type": "fire",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.45,
+          1.85,
+          2.35
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Burned",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted fire catalyst manifestation channeling Burned."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "fire_breaker": {
+      "template_key": "fire_breaker",
+      "element": "fire",
+      "archetype": "breaker",
+      "synergy_stat": "PER",
+      "combat_skill": {
+        "base_id": "pact_proc_fire_breaker",
+        "name": "Thermokinetic Rupture Clamp",
+        "emoji": "🔥",
+        "discipline": "attack",
+        "damage_type": "fire",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.6,
+          2.05,
+          2.55
+        ],
+        "poise_shred_mult": 1.7,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Burned",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted fire breaker manifestation channeling Burned."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "fire_warden": {
+      "template_key": "fire_warden",
+      "element": "fire",
+      "archetype": "warden",
+      "synergy_stat": "END",
+      "combat_skill": {
+        "base_id": "pact_proc_fire_warden",
+        "name": "Thermokinetic Carapace Covenant",
+        "emoji": "🔥",
+        "discipline": "buff",
+        "damage_type": "fire",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.25,
+          1.65,
+          2.1
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.28,
+        "status_ailment": "Burned",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted fire warden manifestation channeling Burned."
+      },
+      "hp_pct_per_cast": [
+        0.07,
+        0.08,
+        0.09
+      ]
+    },
+    "water_vanguard": {
+      "template_key": "water_vanguard",
+      "element": "water",
+      "archetype": "vanguard",
+      "synergy_stat": "STR",
+      "combat_skill": {
+        "base_id": "pact_proc_water_vanguard",
+        "name": "Tidal Execution Fang",
+        "emoji": "🌊",
+        "discipline": "attack",
+        "damage_type": "water",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.75,
+          2.2,
+          2.75
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Slowed",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted water vanguard manifestation channeling Slowed."
+      },
+      "hp_pct_per_cast": [
+        0.1,
+        0.11,
+        0.12
+      ]
+    },
+    "water_catalyst": {
+      "template_key": "water_catalyst",
+      "element": "water",
+      "archetype": "catalyst",
+      "synergy_stat": "INT",
+      "combat_skill": {
+        "base_id": "pact_proc_water_catalyst",
+        "name": "Tidal Calamity Choir",
+        "emoji": "🌊",
+        "discipline": "attack",
+        "damage_type": "water",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.45,
+          1.85,
+          2.35
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Slowed",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted water catalyst manifestation channeling Slowed."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "water_breaker": {
+      "template_key": "water_breaker",
+      "element": "water",
+      "archetype": "breaker",
+      "synergy_stat": "PER",
+      "combat_skill": {
+        "base_id": "pact_proc_water_breaker",
+        "name": "Tidal Rupture Clamp",
+        "emoji": "🌊",
+        "discipline": "attack",
+        "damage_type": "water",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.6,
+          2.05,
+          2.55
+        ],
+        "poise_shred_mult": 1.7,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Slowed",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted water breaker manifestation channeling Slowed."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "water_warden": {
+      "template_key": "water_warden",
+      "element": "water",
+      "archetype": "warden",
+      "synergy_stat": "END",
+      "combat_skill": {
+        "base_id": "pact_proc_water_warden",
+        "name": "Tidal Carapace Covenant",
+        "emoji": "🌊",
+        "discipline": "buff",
+        "damage_type": "water",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.25,
+          1.65,
+          2.1
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.28,
+        "status_ailment": "Slowed",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted water warden manifestation channeling Slowed."
+      },
+      "hp_pct_per_cast": [
+        0.07,
+        0.08,
+        0.09
+      ]
+    },
+    "wind_vanguard": {
+      "template_key": "wind_vanguard",
+      "element": "wind",
+      "archetype": "vanguard",
+      "synergy_stat": "STR",
+      "combat_skill": {
+        "base_id": "pact_proc_wind_vanguard",
+        "name": "Vacuum Execution Fang",
+        "emoji": "🌪️",
+        "discipline": "attack",
+        "damage_type": "wind",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.75,
+          2.2,
+          2.75
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Exposed",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted wind vanguard manifestation channeling Exposed."
+      },
+      "hp_pct_per_cast": [
+        0.1,
+        0.11,
+        0.12
+      ]
+    },
+    "wind_catalyst": {
+      "template_key": "wind_catalyst",
+      "element": "wind",
+      "archetype": "catalyst",
+      "synergy_stat": "INT",
+      "combat_skill": {
+        "base_id": "pact_proc_wind_catalyst",
+        "name": "Vacuum Calamity Choir",
+        "emoji": "🌪️",
+        "discipline": "attack",
+        "damage_type": "wind",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.45,
+          1.85,
+          2.35
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Exposed",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted wind catalyst manifestation channeling Exposed."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "wind_breaker": {
+      "template_key": "wind_breaker",
+      "element": "wind",
+      "archetype": "breaker",
+      "synergy_stat": "PER",
+      "combat_skill": {
+        "base_id": "pact_proc_wind_breaker",
+        "name": "Vacuum Rupture Clamp",
+        "emoji": "🌪️",
+        "discipline": "attack",
+        "damage_type": "wind",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.6,
+          2.05,
+          2.55
+        ],
+        "poise_shred_mult": 1.7,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Exposed",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted wind breaker manifestation channeling Exposed."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "wind_warden": {
+      "template_key": "wind_warden",
+      "element": "wind",
+      "archetype": "warden",
+      "synergy_stat": "END",
+      "combat_skill": {
+        "base_id": "pact_proc_wind_warden",
+        "name": "Vacuum Carapace Covenant",
+        "emoji": "🌪️",
+        "discipline": "buff",
+        "damage_type": "wind",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.25,
+          1.65,
+          2.1
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.28,
+        "status_ailment": "Exposed",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted wind warden manifestation channeling Exposed."
+      },
+      "hp_pct_per_cast": [
+        0.07,
+        0.08,
+        0.09
+      ]
+    },
+    "earth_vanguard": {
+      "template_key": "earth_vanguard",
+      "element": "earth",
+      "archetype": "vanguard",
+      "synergy_stat": "STR",
+      "combat_skill": {
+        "base_id": "pact_proc_earth_vanguard",
+        "name": "Tectonic Execution Fang",
+        "emoji": "🪨",
+        "discipline": "attack",
+        "damage_type": "earth",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.75,
+          2.2,
+          2.75
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Grounded",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted earth vanguard manifestation channeling Grounded."
+      },
+      "hp_pct_per_cast": [
+        0.1,
+        0.11,
+        0.12
+      ]
+    },
+    "earth_catalyst": {
+      "template_key": "earth_catalyst",
+      "element": "earth",
+      "archetype": "catalyst",
+      "synergy_stat": "INT",
+      "combat_skill": {
+        "base_id": "pact_proc_earth_catalyst",
+        "name": "Tectonic Calamity Choir",
+        "emoji": "🪨",
+        "discipline": "attack",
+        "damage_type": "earth",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.45,
+          1.85,
+          2.35
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Grounded",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted earth catalyst manifestation channeling Grounded."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "earth_breaker": {
+      "template_key": "earth_breaker",
+      "element": "earth",
+      "archetype": "breaker",
+      "synergy_stat": "PER",
+      "combat_skill": {
+        "base_id": "pact_proc_earth_breaker",
+        "name": "Tectonic Rupture Clamp",
+        "emoji": "🪨",
+        "discipline": "attack",
+        "damage_type": "earth",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.6,
+          2.05,
+          2.55
+        ],
+        "poise_shred_mult": 1.7,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Grounded",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted earth breaker manifestation channeling Grounded."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "earth_warden": {
+      "template_key": "earth_warden",
+      "element": "earth",
+      "archetype": "warden",
+      "synergy_stat": "END",
+      "combat_skill": {
+        "base_id": "pact_proc_earth_warden",
+        "name": "Tectonic Carapace Covenant",
+        "emoji": "🪨",
+        "discipline": "buff",
+        "damage_type": "earth",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.25,
+          1.65,
+          2.1
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.28,
+        "status_ailment": "Grounded",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted earth warden manifestation channeling Grounded."
+      },
+      "hp_pct_per_cast": [
+        0.07,
+        0.08,
+        0.09
+      ]
+    },
+    "ice_vanguard": {
+      "template_key": "ice_vanguard",
+      "element": "ice",
+      "archetype": "vanguard",
+      "synergy_stat": "STR",
+      "combat_skill": {
+        "base_id": "pact_proc_ice_vanguard",
+        "name": "Cryogenic Execution Fang",
+        "emoji": "❄️",
+        "discipline": "attack",
+        "damage_type": "ice",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.75,
+          2.2,
+          2.75
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Frozen",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted ice vanguard manifestation channeling Frozen."
+      },
+      "hp_pct_per_cast": [
+        0.1,
+        0.11,
+        0.12
+      ]
+    },
+    "ice_catalyst": {
+      "template_key": "ice_catalyst",
+      "element": "ice",
+      "archetype": "catalyst",
+      "synergy_stat": "INT",
+      "combat_skill": {
+        "base_id": "pact_proc_ice_catalyst",
+        "name": "Cryogenic Calamity Choir",
+        "emoji": "❄️",
+        "discipline": "attack",
+        "damage_type": "ice",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.45,
+          1.85,
+          2.35
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Frozen",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted ice catalyst manifestation channeling Frozen."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "ice_breaker": {
+      "template_key": "ice_breaker",
+      "element": "ice",
+      "archetype": "breaker",
+      "synergy_stat": "PER",
+      "combat_skill": {
+        "base_id": "pact_proc_ice_breaker",
+        "name": "Cryogenic Rupture Clamp",
+        "emoji": "❄️",
+        "discipline": "attack",
+        "damage_type": "ice",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.6,
+          2.05,
+          2.55
+        ],
+        "poise_shred_mult": 1.7,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Frozen",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted ice breaker manifestation channeling Frozen."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "ice_warden": {
+      "template_key": "ice_warden",
+      "element": "ice",
+      "archetype": "warden",
+      "synergy_stat": "END",
+      "combat_skill": {
+        "base_id": "pact_proc_ice_warden",
+        "name": "Cryogenic Carapace Covenant",
+        "emoji": "❄️",
+        "discipline": "buff",
+        "damage_type": "ice",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.25,
+          1.65,
+          2.1
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.28,
+        "status_ailment": "Frozen",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted ice warden manifestation channeling Frozen."
+      },
+      "hp_pct_per_cast": [
+        0.07,
+        0.08,
+        0.09
+      ]
+    },
+    "electric_vanguard": {
+      "template_key": "electric_vanguard",
+      "element": "electric",
+      "archetype": "vanguard",
+      "synergy_stat": "STR",
+      "combat_skill": {
+        "base_id": "pact_proc_electric_vanguard",
+        "name": "Fulminating Execution Fang",
+        "emoji": "⚡",
+        "discipline": "attack",
+        "damage_type": "shock",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.75,
+          2.2,
+          2.75
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Shocked",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted electric vanguard manifestation channeling Shocked."
+      },
+      "hp_pct_per_cast": [
+        0.1,
+        0.11,
+        0.12
+      ]
+    },
+    "electric_catalyst": {
+      "template_key": "electric_catalyst",
+      "element": "electric",
+      "archetype": "catalyst",
+      "synergy_stat": "INT",
+      "combat_skill": {
+        "base_id": "pact_proc_electric_catalyst",
+        "name": "Fulminating Calamity Choir",
+        "emoji": "⚡",
+        "discipline": "attack",
+        "damage_type": "shock",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.45,
+          1.85,
+          2.35
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Shocked",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted electric catalyst manifestation channeling Shocked."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "electric_breaker": {
+      "template_key": "electric_breaker",
+      "element": "electric",
+      "archetype": "breaker",
+      "synergy_stat": "PER",
+      "combat_skill": {
+        "base_id": "pact_proc_electric_breaker",
+        "name": "Fulminating Rupture Clamp",
+        "emoji": "⚡",
+        "discipline": "attack",
+        "damage_type": "shock",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.6,
+          2.05,
+          2.55
+        ],
+        "poise_shred_mult": 1.7,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Shocked",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted electric breaker manifestation channeling Shocked."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "electric_warden": {
+      "template_key": "electric_warden",
+      "element": "electric",
+      "archetype": "warden",
+      "synergy_stat": "END",
+      "combat_skill": {
+        "base_id": "pact_proc_electric_warden",
+        "name": "Fulminating Carapace Covenant",
+        "emoji": "⚡",
+        "discipline": "buff",
+        "damage_type": "shock",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.25,
+          1.65,
+          2.1
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.28,
+        "status_ailment": "Shocked",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted electric warden manifestation channeling Shocked."
+      },
+      "hp_pct_per_cast": [
+        0.07,
+        0.08,
+        0.09
+      ]
+    },
+    "bio_vanguard": {
+      "template_key": "bio_vanguard",
+      "element": "bio",
+      "archetype": "vanguard",
+      "synergy_stat": "STR",
+      "combat_skill": {
+        "base_id": "pact_proc_bio_vanguard",
+        "name": "Bio-Aberrant Execution Fang",
+        "emoji": "☣️",
+        "discipline": "attack",
+        "damage_type": "poison",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.75,
+          2.2,
+          2.75
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Poisoned",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted bio vanguard manifestation channeling Poisoned."
+      },
+      "hp_pct_per_cast": [
+        0.1,
+        0.11,
+        0.12
+      ]
+    },
+    "bio_catalyst": {
+      "template_key": "bio_catalyst",
+      "element": "bio",
+      "archetype": "catalyst",
+      "synergy_stat": "INT",
+      "combat_skill": {
+        "base_id": "pact_proc_bio_catalyst",
+        "name": "Bio-Aberrant Calamity Choir",
+        "emoji": "☣️",
+        "discipline": "attack",
+        "damage_type": "poison",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.45,
+          1.85,
+          2.35
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Poisoned",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted bio catalyst manifestation channeling Poisoned."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "bio_breaker": {
+      "template_key": "bio_breaker",
+      "element": "bio",
+      "archetype": "breaker",
+      "synergy_stat": "PER",
+      "combat_skill": {
+        "base_id": "pact_proc_bio_breaker",
+        "name": "Bio-Aberrant Rupture Clamp",
+        "emoji": "☣️",
+        "discipline": "attack",
+        "damage_type": "poison",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.6,
+          2.05,
+          2.55
+        ],
+        "poise_shred_mult": 1.7,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Poisoned",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted bio breaker manifestation channeling Poisoned."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "bio_warden": {
+      "template_key": "bio_warden",
+      "element": "bio",
+      "archetype": "warden",
+      "synergy_stat": "END",
+      "combat_skill": {
+        "base_id": "pact_proc_bio_warden",
+        "name": "Bio-Aberrant Carapace Covenant",
+        "emoji": "☣️",
+        "discipline": "buff",
+        "damage_type": "poison",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.25,
+          1.65,
+          2.1
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.28,
+        "status_ailment": "Poisoned",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted bio warden manifestation channeling Poisoned."
+      },
+      "hp_pct_per_cast": [
+        0.07,
+        0.08,
+        0.09
+      ]
+    },
+    "physical_vanguard": {
+      "template_key": "physical_vanguard",
+      "element": "physical",
+      "archetype": "vanguard",
+      "synergy_stat": "STR",
+      "combat_skill": {
+        "base_id": "pact_proc_physical_vanguard",
+        "name": "Kinetic Execution Fang",
+        "emoji": "🗡️",
+        "discipline": "attack",
+        "damage_type": "physical",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.75,
+          2.2,
+          2.75
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Bleeding",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted physical vanguard manifestation channeling Bleeding."
+      },
+      "hp_pct_per_cast": [
+        0.1,
+        0.11,
+        0.12
+      ]
+    },
+    "physical_catalyst": {
+      "template_key": "physical_catalyst",
+      "element": "physical",
+      "archetype": "catalyst",
+      "synergy_stat": "INT",
+      "combat_skill": {
+        "base_id": "pact_proc_physical_catalyst",
+        "name": "Kinetic Calamity Choir",
+        "emoji": "🗡️",
+        "discipline": "attack",
+        "damage_type": "physical",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.45,
+          1.85,
+          2.35
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Bleeding",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted physical catalyst manifestation channeling Bleeding."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "physical_breaker": {
+      "template_key": "physical_breaker",
+      "element": "physical",
+      "archetype": "breaker",
+      "synergy_stat": "PER",
+      "combat_skill": {
+        "base_id": "pact_proc_physical_breaker",
+        "name": "Kinetic Rupture Clamp",
+        "emoji": "🗡️",
+        "discipline": "attack",
+        "damage_type": "physical",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.6,
+          2.05,
+          2.55
+        ],
+        "poise_shred_mult": 1.7,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Bleeding",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted physical breaker manifestation channeling Bleeding."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "physical_warden": {
+      "template_key": "physical_warden",
+      "element": "physical",
+      "archetype": "warden",
+      "synergy_stat": "END",
+      "combat_skill": {
+        "base_id": "pact_proc_physical_warden",
+        "name": "Kinetic Carapace Covenant",
+        "emoji": "🗡️",
+        "discipline": "buff",
+        "damage_type": "physical",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.25,
+          1.65,
+          2.1
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.28,
+        "status_ailment": "Bleeding",
+        "dot_damage": 12,
+        "description": "Zero-MP contracted physical warden manifestation channeling Bleeding."
+      },
+      "hp_pct_per_cast": [
+        0.07,
+        0.08,
+        0.09
+      ]
+    },
+    "aether_vanguard": {
+      "template_key": "aether_vanguard",
+      "element": "aether",
+      "archetype": "vanguard",
+      "synergy_stat": "STR",
+      "combat_skill": {
+        "base_id": "pact_proc_aether_vanguard",
+        "name": "Abyssal Execution Fang",
+        "emoji": "🌌",
+        "discipline": "attack",
+        "damage_type": "aether",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.75,
+          2.2,
+          2.75
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Disrupted",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted aether vanguard manifestation channeling Disrupted."
+      },
+      "hp_pct_per_cast": [
+        0.1,
+        0.11,
+        0.12
+      ]
+    },
+    "aether_catalyst": {
+      "template_key": "aether_catalyst",
+      "element": "aether",
+      "archetype": "catalyst",
+      "synergy_stat": "INT",
+      "combat_skill": {
+        "base_id": "pact_proc_aether_catalyst",
+        "name": "Abyssal Calamity Choir",
+        "emoji": "🌌",
+        "discipline": "attack",
+        "damage_type": "aether",
+        "target_type": "aoe",
+        "power_mult_tiers": [
+          1.45,
+          1.85,
+          2.35
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Disrupted",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted aether catalyst manifestation channeling Disrupted."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "aether_breaker": {
+      "template_key": "aether_breaker",
+      "element": "aether",
+      "archetype": "breaker",
+      "synergy_stat": "PER",
+      "combat_skill": {
+        "base_id": "pact_proc_aether_breaker",
+        "name": "Abyssal Rupture Clamp",
+        "emoji": "🌌",
+        "discipline": "attack",
+        "damage_type": "aether",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.6,
+          2.05,
+          2.55
+        ],
+        "poise_shred_mult": 1.7,
+        "grants_temp_hp_pct": 0.0,
+        "status_ailment": "Disrupted",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted aether breaker manifestation channeling Disrupted."
+      },
+      "hp_pct_per_cast": [
+        0.09,
+        0.1,
+        0.11
+      ]
+    },
+    "aether_warden": {
+      "template_key": "aether_warden",
+      "element": "aether",
+      "archetype": "warden",
+      "synergy_stat": "END",
+      "combat_skill": {
+        "base_id": "pact_proc_aether_warden",
+        "name": "Abyssal Carapace Covenant",
+        "emoji": "🌌",
+        "discipline": "buff",
+        "damage_type": "aether",
+        "target_type": "single",
+        "power_mult_tiers": [
+          1.25,
+          1.65,
+          2.1
+        ],
+        "poise_shred_mult": 1.0,
+        "grants_temp_hp_pct": 0.28,
+        "status_ailment": "Disrupted",
+        "dot_damage": 0,
+        "description": "Zero-MP contracted aether warden manifestation channeling Disrupted."
+      },
+      "hp_pct_per_cast": [
+        0.07,
+        0.08,
+        0.09
+      ]
+    }
+  },
+  "procedural_form_utilities": {
+    "spectral_apparition": {
+      "name": "Veil Whisper",
+      "dc_modifiers": {
+        "AGI": -2,
+        "stealth": -2
+      },
+      "summary": "-2 AGI/stealth DC through spectral phase-stepping."
+    },
+    "cognitive_mimic": {
+      "name": "Uncanny Mask",
+      "dc_modifiers": {
+        "CHA": -2,
+        "deception": -2
+      },
+      "summary": "-2 CHA/deception DC and automatic mimic sense."
+    },
+    "spatial_distortion": {
+      "name": "Folded Corridor",
+      "dc_modifiers": {
+        "PER": -2,
+        "navigation": -2
+      },
+      "travel_time_mult": 0.85,
+      "summary": "-2 PER DC and -15% foot travel time."
+    },
+    "cursed_relic": {
+      "name": "Relic Psychometry",
+      "dc_modifiers": {
+        "INT": -2,
+        "forensics": -2
+      },
+      "summary": "-2 INT/forensics DC when inspecting anomalous residue."
+    },
+    "biological_chimera": {
+      "name": "Predator Scent",
+      "dc_modifiers": {
+        "STR": -1,
+        "PER": -2
+      },
+      "summary": "-2 PER tracking DC and -1 STR grapple DC."
+    },
+    "default": {
+      "name": "Anomalous Omen Sense",
+      "dc_modifiers": {
+        "PER": -1,
+        "INT": -1
+      },
+      "summary": "-1 PER/INT DC when investigating anomalous phenomena."
+    }
+  }
+}

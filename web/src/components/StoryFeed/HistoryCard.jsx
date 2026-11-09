@@ -238,7 +238,24 @@ const HistoryCard = ({
 
   const theme = getOutcomeTierTheme(checkTier, tierLabel, checkStat);
   const displayStatPrefix = checkStat && checkStat !== 'NONE' && checkStat !== 'FREE' ? `${checkStat} • ` : '';
-  const displayTierText = (tierLabel || theme.defaultLabel).toUpperCase();
+  const getLocalizedTierText = () => {
+    if (tierLabel) return tierLabel;
+    switch (theme.key) {
+      case 'free':
+        return t('combat.free_action', theme.defaultLabel);
+      case 'crit_success':
+        return t('combat.critical_success', theme.defaultLabel);
+      case 'crit_fail':
+        return t('combat.critical_failure', theme.defaultLabel);
+      case 'fail':
+        return t('combat.failure', theme.defaultLabel);
+      case 'success':
+        return t(isSuccess ? 'combat.success' : 'combat.resolved', theme.defaultLabel);
+      default:
+        return theme.defaultLabel;
+    }
+  };
+  const displayTierText = getLocalizedTierText().toUpperCase();
   const chanceSuffix =
     checkChance !== null && checkChance !== undefined && checkStat !== 'NONE' && checkStat !== 'FREE'
       ? ` (${Math.round(Number(checkChance))}%)`

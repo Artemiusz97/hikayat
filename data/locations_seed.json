@@ -7232,6 +7232,52 @@
             "theme": "Gravitationally Inverted High-Altitude Pedestrian Walkway",
             "features": "Shattered glass ceiling showing the abyss below, warped steel support trusses, floating micro-debris",
             "sensory": "Unsettling vertigo, high whistling wind through expansion joints, faint metallic creak of stressed suspension cables"
+          },
+          {
+            "id": "fac_agency_residence",
+            "name": "Public Agency Residential Hall",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Dedicated residential billet block for Civil Containment special agents and support staff",
+            "features": "Keycard security lobby, brass agent mailboxes, shared late-shift lounge, private single-agent quarters",
+            "sensory": "Quiet hum of filtered HVAC, faint aroma of late-shift coffee, muted footsteps on polished linoleum",
+            "sub_locations": [
+              {
+                "id": "sub_agency_res_lobby",
+                "name": "Residential Security Lobby & Mailboxes",
+                "is_entrance": 1,
+                "props": [
+                  "Keycard Turnstile",
+                  "Agent Brass Mailboxes",
+                  "Duty Roster Bulletin",
+                  "Umbrella Stand"
+                ]
+              },
+              {
+                "id": "sub_agency_res_lounge",
+                "name": "Common Kitchenette & Laundry Lounge",
+                "privacy_level": "semi_private",
+                "props": [
+                  "Espresso & Kettle Counter",
+                  "Coinless Washer Bank",
+                  "Worn Leather Couches",
+                  "Late-Shift Television"
+                ]
+              },
+              {
+                "id": "sub_agency_res_unit",
+                "name": "Assigned Agent Private Quarters",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Single Platform Bed",
+                  "Standard-Issue Gear Locker",
+                  "Compact Writing Desk",
+                  "Blackout Blinds"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -7536,6 +7582,41 @@
             "theme": "Quarantined Analog Static Cinema 4 Anomaly",
             "features": "Rows of torn red velvet theater seats, glowing silver screen emitting monochromatic static, cordon pylons",
             "sensory": "Low white-noise hum rattling the floorboards, faint smell of stale popcorn and ozone, fluctuating shadow silhouettes"
+          },
+          {
+            "id": "fac_downtown_walkup",
+            "name": "Modest Rented Walk-Up Apartment",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Modest brick walk-up apartment building tucked along a quiet Downtown side street",
+            "features": "Brass buzzer vestibule, creaking stairwell landing, compact private studio units above shuttered storefronts",
+            "sensory": "Distant neon rain reflections on sash glass, warm radiator clinks, muffled hum of late-night traffic below",
+            "sub_locations": [
+              {
+                "id": "sub_walkup_stairwell",
+                "name": "Brick Walk-Up Vestibule & Buzzer Panel",
+                "is_entrance": 1,
+                "props": [
+                  "Brass Intercom Panel",
+                  "Tenant Mailboxes",
+                  "Worn Terrazzo Steps",
+                  "Fire-Escape Landing"
+                ]
+              },
+              {
+                "id": "sub_walkup_studio",
+                "name": "Rented Studio Unit",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Futon Sofa-Bed",
+                  "Galley Stovetop & Mini-Fridge",
+                  "Metal Coat Rack",
+                  "Rain-Streaked Sash Window"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -7818,6 +7899,52 @@
             "theme": "Subterranean Cathedral Bell-Tower Crypt",
             "features": "Damp vaulted limestone arches, inscribed stone sarcophagi, wrought-iron wall sconces, dripping stalactites",
             "sensory": "Rhythmic sound of water dripping like a slow pulse, deep subterranean chill, smell of ancient moss and stone"
+          },
+          {
+            "id": "fac_highrise_condo",
+            "name": "Uptown Glass High-Rise Condo",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Sleek architectural corner condominium thirty stories above Uptown's museum boulevards",
+            "features": "Keycard private elevator foyer, panoramic skyline salon and wet bar, corner glass master suite",
+            "sensory": "Whisper-quiet climate control, glittering city lights across floor-to-ceiling glass, cool travertine stone",
+            "sub_locations": [
+              {
+                "id": "sub_condo_foyer",
+                "name": "Private Elevator Vestibule",
+                "is_entrance": 1,
+                "props": [
+                  "Keycard Elevator Doors",
+                  "Travertine Console Table",
+                  "Recessed Gallery Spotlights",
+                  "Smart Home Panel"
+                ]
+              },
+              {
+                "id": "sub_condo_skyline_salon",
+                "name": "Panoramic Skyline Salon & Wet Bar",
+                "privacy_level": "private",
+                "props": [
+                  "Floor-to-Ceiling Curtain Glass",
+                  "Italian Leather Lounge",
+                  "Backlit Onyx Wet Bar",
+                  "Turntable Hi-Fi Console"
+                ]
+              },
+              {
+                "id": "sub_condo_master_suite",
+                "name": "Corner Glass Master Suite",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "King Floating Bed",
+                  "Motorized Sheer Drapes",
+                  "Freestanding Soaking Tub",
+                  "Illuminated Wardrobe Wall"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -8068,6 +8195,64 @@
             "theme": "Anomalous Shifting Glass Mansion & Hall of Reflections",
             "features": "Interlocking glass partitions that shift angles, infinite duplicate reflections, floating crystal chandeliers",
             "sensory": "Crystal chime of vibrating glass panels, disorienting refraction of daylight, absence of footsteps on glass floors"
+          },
+          {
+            "id": "fac_sovereign_mansion",
+            "name": "Sovereign Hills Sky-Mansion",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Ultra-luxury glass-and-marble cliffside mansion crowning the highest ridge of Sovereign Hills",
+            "features": "Gated marble portico, double-height grand salon, heated cliffside infinity pool, penthouse master wing",
+            "sensory": "Cool veined Calacatta marble, gentle ripple of the heated infinity pool, sweeping silent metropolis vista",
+            "sub_locations": [
+              {
+                "id": "sub_mansion_portico",
+                "name": "Gated Marble Portico & Motorcourt",
+                "is_entrance": 1,
+                "props": [
+                  "Wrought-Iron Security Gates",
+                  "Calacatta Marble Columns",
+                  "Reflecting Water Basin",
+                  "Encrypted Palm Scanner"
+                ]
+              },
+              {
+                "id": "sub_mansion_grand_salon",
+                "name": "Double-Height Atrium & Cellar Bar",
+                "privacy_level": "private",
+                "props": [
+                  "Floating Cantilever Staircase",
+                  "Sunken Velvet Conversation Pit",
+                  "Climate-Controlled Wine Wall",
+                  "Sculptural Chandelier"
+                ]
+              },
+              {
+                "id": "sub_mansion_infinity_terrace",
+                "name": "Heated Cliffside Infinity Pool & Terrace",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Glass-Edge Infinity Pool",
+                  "Sunken Firepit Cabana",
+                  "Private Champagne Lounge",
+                  "Sweeping Metropolis Vista"
+                ]
+              },
+              {
+                "id": "sub_mansion_penthouse_suite",
+                "name": "Sovereign Penthouse Master Wing",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Custom California King Bed",
+                  "Boutique Walk-In Dressing Vault",
+                  "Rain-Spa Marble Ensuite",
+                  "Electrochromic Skyline Glass"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -8372,6 +8557,41 @@
             "theme": "Quarantined Biological Sewer Incursion Site",
             "features": "Pulsing organic tissue veins along concrete drain pipes, biohazard containment bulkheads, yellow misting nozzles",
             "sensory": "Wet thumping heartbeat cadence in the walls, sickening warm biological draft, acrid smell of copper and acid"
+          },
+          {
+            "id": "fac_tenement_flat",
+            "name": "Lower Wards Tenement Flat",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Reinforced iron-door studio safehouse tucked behind neon laundry lines in the Lower Wards",
+            "features": "Heavy steel deadbolt landing, frosted wire-glass window, compact off-the-books safehouse interior",
+            "sensory": "Click of a triple deadbolt, warm steam radiator, rain pattering against corrugated alley awnings",
+            "sub_locations": [
+              {
+                "id": "sub_tenement_landing",
+                "name": "Iron-Grate Corridor & Deadbolt Door",
+                "is_entrance": 1,
+                "props": [
+                  "Reinforced Steel Door",
+                  "Peephole & Chain",
+                  "Exposed Conduit Pipes",
+                  "Flickering Hallway Bulb"
+                ]
+              },
+              {
+                "id": "sub_tenement_studio",
+                "name": "Compact Safehouse Studio",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Fold-Out Cot & Mattress",
+                  "Heavy Footlocker",
+                  "Hotplate Counter",
+                  "Radiator Under Frosted Glass"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -8872,6 +9092,41 @@
             "theme": "Deep-Trench Spatial Anomaly in Empty Drydock Basin",
             "features": "Bottomless void opening in the concrete drydock floor, descending iron maintenance ladders, warning buoys",
             "sensory": "Deep oceanic pressure wave vibrating in the chest, smell of ancient abyssal silt, total silence swallowing noise"
+          },
+          {
+            "id": "fac_container_loft",
+            "name": "Harbor Container Loft",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Converted steel cargo container loft stacked overlooking the misty commercial harbor",
+            "features": "Galvanized exterior catwalk, keypad cargo hatch, insulated marine-steel living quarters",
+            "sensory": "Warm amber Edison bulbs against riveted steel, faint salt air, distant foghorns across the bay",
+            "sub_locations": [
+              {
+                "id": "sub_container_catwalk",
+                "name": "Galvanized Catwalk & Cargo Hatch",
+                "is_entrance": 1,
+                "props": [
+                  "Keypad Steel Hatch",
+                  "Galvanized Catwalk Rail",
+                  "Bulkhead Porch Lamp",
+                  "Harbor Crane View"
+                ]
+              },
+              {
+                "id": "sub_container_bunk",
+                "name": "Insulated Container Living Loft",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Built-In Captain's Bunk",
+                  "Riveted Steel Shelving",
+                  "Compact Galley Sink",
+                  "Porthole Storm Window"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -8906,7 +9161,8 @@
                   "Low Coffee Table",
                   "Wall Bookshelf",
                   "Warm Floor Lamp"
-                ]
+                ],
+                "privacy_level": "private"
               },
               {
                 "id": "sub_player_bedroom",
@@ -8916,12 +9172,17 @@
                   "Bedside Lamp & Nightstand",
                   "Wardrobe Closet",
                   "Window Curtains"
-                ]
+                ],
+                "privacy_level": "private",
+                "is_private_intimate": true
               }
             ],
             "theme": "Comfortable Suburban Two-Story Residence",
             "features": "Lawn garden path, cozy living room, hardwood staircase, private second-floor bedroom",
-            "sensory": "Warm familiar smell of home-cooked meals, ticking wall clock, soft morning sunlight through curtained windows"
+            "sensory": "Warm familiar smell of home-cooked meals, ticking wall clock, soft morning sunlight through curtained windows",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private"
           },
           {
             "id": "loc_local_park",
@@ -9152,6 +9413,52 @@
             "theme": "Abandoned Victorian Hill Manor",
             "features": "Boarded sash windows, overgrown ivy covering stone chimneys, warped oak front door, rusted wrought-iron fence",
             "sensory": "Cold draft filtering through cracked window panes, creak of warped timber floorboards, smell of mold and dry rot"
+          },
+          {
+            "id": "fac_suburbs_townhouse",
+            "name": "Maple-Lane Detached Townhouse",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Modern two-story brick-and-cedar detached townhouse along a quiet maple-lined suburban lane",
+            "features": "Gabled brick porch, sunlit open-plan lounge and kitchen island, quiet upstairs master bedroom",
+            "sensory": "Polished oak floorboards, afternoon sunlight through bay windows, rustling maple leaves outside",
+            "sub_locations": [
+              {
+                "id": "sub_townhouse_porch",
+                "name": "Gabled Brick Porch & Keypad",
+                "is_entrance": 1,
+                "props": [
+                  "Brick Stoop & Planters",
+                  "Smart Deadbolt Lock",
+                  "Parcel Dropbox",
+                  "Picket Garden Gate"
+                ]
+              },
+              {
+                "id": "sub_townhouse_lounge",
+                "name": "Sunlit Open-Plan Lounge & Kitchen",
+                "privacy_level": "private",
+                "props": [
+                  "Sectional Linen Sofa",
+                  "Quartz Breakfast Island",
+                  "Hardwood Bookcase",
+                  "Garden Patio Doors"
+                ]
+              },
+              {
+                "id": "sub_townhouse_bedroom",
+                "name": "Upstairs Master Bedroom",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Queen Oak Bedframe",
+                  "Walk-In Closet Alcove",
+                  "Warm Bedside Lamps",
+                  "Maple-Canopy Window"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -9190,7 +9497,7 @@
               },
               {
                 "id": "sub_school_library",
-                "name": "Quiet School Library & Study Stacks",
+                "name": "School Library & Study Stacks",
                 "props": [
                   "Tall Wooden Bookshelves",
                   "Quiet Reading Table",
@@ -9761,16 +10068,62 @@
             "theme": "Subterranean Tidal Sea Cave & Harmonic Grotto",
             "features": "Polished basalt sea cave walls, phosphorescent tidal pools, jagged stalagmites rising from foaming water",
             "sensory": "Harmonic, ethereal whistling as tidal surges push air through rock fissures, glowing blue bioluminescence"
+          },
+          {
+            "id": "fac_ocean_bungalow",
+            "name": "Seaside Cliff Bungalow",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Cedar-shingled coastal cliff bungalow with a private ocean-facing sundeck",
+            "features": "Bleached driftwood deck, breezy louvered sunroom, surf-view master bedroom above the tide",
+            "sensory": "Crisp salt breeze billowing linen curtains, warm cedar planking, rhythmic hush of breaking surf below",
+            "sub_locations": [
+              {
+                "id": "sub_bungalow_deck",
+                "name": "Driftwood Gate & Ocean Sundeck",
+                "is_entrance": 1,
+                "props": [
+                  "Bleached Cedar Deck",
+                  "Woven Rope Loungers",
+                  "Outdoor Rinse Shower",
+                  "Brass Keypad Latch"
+                ]
+              },
+              {
+                "id": "sub_bungalow_sunroom",
+                "name": "Breezy Coastal Sunroom",
+                "privacy_level": "private",
+                "props": [
+                  "Rattan Daybed & Throws",
+                  "Sea-Glass Coffee Table",
+                  "Sliding Louvered Doors",
+                  "Espresso & Wine Nook"
+                ]
+              },
+              {
+                "id": "sub_bungalow_bedroom",
+                "name": "Surf-View Master Bedroom",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Linen Canopy Bed",
+                  "Whitewashed Timber Beams",
+                  "Ceiling Paddle Fan",
+                  "Cliffside Horizon Window"
+                ]
+              }
+            ]
           }
         ]
       },
       {
         "id": "zone_woods_reserve",
-        "name": "Woods & Mountain Reserve",
+        "name": "Wilderness Forest Reserve",
         "is_hub": false,
-        "theme": "Dense pine wilderness and mountain lake reserve hiding ancient monoliths and spatial anomalies",
-        "features": "Cedar hiking trails, mirror-still mountain lake, forestry watchtowers, gravity-tilted monoliths, freestanding forest stairs.",
-        "sensory": "Crisp pine needles, woodsmoke, cold mountain wind, unnatural dead silence near anomalous clearings.",
+        "theme": "Uninhabited alpine pine wilderness, mirror-lake campgrounds, ranger outposts, and veiled forest anomalies",
+        "features": "Old-growth cedar hiking trails, mountain lake and rustic camp cabins, fire watchtower, forestry ranger station, liminal forest anomalies, and mist-veiled banyan groves.",
+        "sensory": "Crisp pine resin, woodsmoke over cold lake water, alpine wind, and sudden hushed mist near veiled clearings.",
         "primary_locations": [
           {
             "id": "loc_forest_trails",
@@ -9933,120 +10286,6 @@
             "sensory": "Smell of cedar wood sealant, low crackle of ranger dispatch radios, ticking wall barometer"
           },
           {
-            "id": "loc_eastern_temple",
-            "name": "Eastern Grand Temple & Sanctuary",
-            "sub_locations": [
-              {
-                "id": "loc_et_torii_approach",
-                "name": "Grand Torii Gate & Omikuji Talisman Stand",
-                "is_entrance": 1,
-                "props": [
-                  "Vermilion Torii Columns & Stone Lantern Steps",
-                  "Ablution Water Basin & Bamboo Ladles",
-                  "Talisman & Fortunes Stand",
-                  "Purification Salt Pyramids"
-                ]
-              },
-              {
-                "id": "loc_et_main_sanctuary",
-                "name": "Main Worship Hall & Incense Courtyard",
-                "props": [
-                  "Massive Bronze Incense Burner",
-                  "Gilded Shrine Offering Altar Table",
-                  "Tatami Prayer Mat Rows",
-                  "Polished Hinoki Wood Pillars"
-                ]
-              },
-              {
-                "id": "loc_et_five_story_pagoda",
-                "name": "Five-Story Pagoda & Sacred Reliquary",
-                "access_tier": "restricted",
-                "props": [
-                  "Carved Cedar Pagoda Entry Portico",
-                  "Ancient Relic Display Cases",
-                  "Gilded Bodhisattva Statuary",
-                  "Carved Lacquer Sutra Cabinet"
-                ]
-              },
-              {
-                "id": "loc_et_zen_tea_garden",
-                "name": "Zen Rock Garden & Bamboo Tea House",
-                "props": [
-                  "Woven Bamboo Privacy Screen",
-                  "Raked White Gravel Waves",
-                  "Moss-Covered Scholar Rocks",
-                  "Cold Stone Tea Brazier"
-                ]
-              },
-              {
-                "id": "loc_et_onsen_bathhouse",
-                "name": "Sacred Mountain Hot Springs & Onsen Bathhouse",
-                "props": [
-                  "Indigo Noren Curtain Lobby & Wooden Lockers",
-                  "Steaming Hinoki Cypress Indoor Mineral Bath",
-                  "Open-Air Maple & Stone Rotenburo Pool",
-                  "Chilled Glass Milk Bottle Cooler"
-                ]
-              },
-              {
-                "id": "loc_et_weeping_statues",
-                "name": "The Hall of Ten Thousand Weeping Statues Anomaly",
-                "is_anomalous": true,
-                "props": [
-                  "Sacred Shimenawa Rope & Paper-Seal Boundary",
-                  "Carved Jizo Statues with Wet Tear Tracks",
-                  "Crumbling Stone Offering Lanterns",
-                  "Dank Camphor Leaf Carpet"
-                ]
-              },
-              {
-                "id": "loc_et_fox_torii_tunnel",
-                "name": "The Twilight Fox-Spirit Torii Tunnel Anomaly",
-                "is_anomalous": true,
-                "props": [
-                  "Mossy Stone Fox-Guardian Statues",
-                  "Non-Euclidean Vermilion Torii Corridor",
-                  "Dusk-Lit Foxfire Mirage Clearing",
-                  "Offered Fried Tofu & Sake Dish"
-                ]
-              },
-              {
-                "id": "sub_et_sealed_reliquary_vault",
-                "name": "Sealed Reliquary & Talismans Vault",
-                "privacy_level": "private",
-                "is_discreet": true,
-                "is_enclosed": 1,
-                "access_tier": "private",
-                "is_locked": true,
-                "parent_sub_id": "loc_et_five_story_pagoda",
-                "props": [
-                  "Gold-Leaf Warded Relic Chest",
-                  "Consecrated Silk Talisman Scrolls",
-                  "Bronze Exorcism Dagger Stand",
-                  "Smoldering Sandalwood Censer"
-                ]
-              },
-              {
-                "id": "sub_et_abbot_audience_chamber",
-                "name": "Abbot Audience Chamber",
-                "privacy_level": "private",
-                "is_discreet": true,
-                "is_enclosed": 1,
-                "access_tier": "private",
-                "parent_sub_id": "loc_et_main_sanctuary",
-                "props": [
-                  "Woven Igusa Tatami Platform",
-                  "Calligraphy Silk Wall Hanging",
-                  "Low Lacquered Cedar Tea Table",
-                  "Heavy Silk Shoji Partition Screen"
-                ]
-              }
-            ],
-            "theme": "Historic Mountain Buddhist Temple & Serene Sanctuary",
-            "features": "Ancient cypress timber beams, bronze incense cauldrons, weathered stone lanterns, woven talisman cords",
-            "sensory": "Drifting cedar incense smoke, gentle rustle of bamboo leaves, deep resonance of bronze temple bells"
-          },
-          {
             "id": "loc_crooked_monolith",
             "name": "The Crooked Monolith Clearing Anomaly",
             "sub_locations": [
@@ -10125,6 +10364,488 @@
             "theme": "Free-Standing Wooden Staircase in the Woods Anomaly",
             "features": "A pristine wooden flight of stairs rising into empty air with no walls or building attached, surrounded by ferns",
             "sensory": "Unsettling unnatural quiet, hair standing on end, subtle distortion of birdsong near the steps"
+          },
+          {
+            "id": "loc_hidden_bunian_village",
+            "name": "Mist-Veiled Banyan & Bamboo Glade",
+            "theme": "Primeval mist-draped banyan clearing hiding the veiled Nusantara elven realm of Kampung Kayangan Bunian",
+            "features": "Curtains of aerial banyan roots, wild white cempaka blossoms, bamboo wind-chimes, and a shimmering golden veil parting into royal Nusantara pavilions",
+            "sensory": "Sweet night-blooming cempaka fragrance, cool silver forest mist, distant serunai flute notes, timeless hush",
+            "veil_village_key": "bunian",
+            "veil_token_item": "Cempaka Brass Serunai",
+            "sub_locations": [
+              {
+                "id": "loc_bunian_threshold_glade",
+                "name": "Mist-Veiled Banyan & Bamboo Glade",
+                "is_entrance": 1,
+                "is_enclosed": 0,
+                "props": [
+                  "Curtain of Ancient Aerial Banyan Roots",
+                  "Wild White Cempaka Blossom Ring",
+                  "Moss-Carved Boundary Waystone",
+                  "Drifting Silver Bamboo Mist"
+                ]
+              },
+              {
+                "id": "sub_bunian_inner_plaza",
+                "name": "Laman Seri Cempaka Plaza",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 0,
+                "veil_village_key": "bunian",
+                "veil_token_item": "Cempaka Brass Serunai",
+                "props": [
+                  "Luminous Cempaka & Jasmine Courtyard",
+                  "Carved Ironwood Wakaf Gazebo",
+                  "Gilded Brass Gamelan & Serunai Stand",
+                  "Crystal Spring Stepping Stones"
+                ]
+              },
+              {
+                "id": "sub_bunian_royal_istana",
+                "name": "Balairung & Puteri's Songket Pavilion",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 1,
+                "privacy_level": "private",
+                "access_tier": "private",
+                "is_private_intimate": true,
+                "veil_village_key": "bunian",
+                "veil_token_item": "Cempaka Brass Serunai",
+                "props": [
+                  "Gold-Brocaded Songket Daybed & Silk Canopies",
+                  "Carved Meranti Royal Balairung Pillars",
+                  "Fragrant Bunga Rampai & Silver Ewer",
+                  "Moonlit Veranda Overlooking Veiled Canopy"
+                ]
+              },
+              {
+                "id": "sub_bunian_pusaka_hall",
+                "name": "Empu's Pusaka Artisan Hall",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 1,
+                "veil_village_key": "bunian",
+                "veil_token_item": "Cempaka Brass Serunai",
+                "props": [
+                  "Meteoric-Iron Keris Display Rack",
+                  "Golden-Thread Songket Handloom",
+                  "Brass Incense & Benzoin Kemeyan Brazier",
+                  "Velvet-Lined Pusaka Relic Chests"
+                ]
+              },
+              {
+                "id": "sub_bunian_orchid_spring",
+                "name": "Moonlit Cempaka Bathing Spring & Spirit Arch",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 0,
+                "privacy_level": "semi_private",
+                "is_discreet": true,
+                "veil_village_key": "bunian",
+                "veil_token_item": "Cempaka Brass Serunai",
+                "props": [
+                  "Warm Moonlit Mineral Spring Basin",
+                  "Luminous Leyline Spirit Archway",
+                  "Floating White Cempaka & Orchid Petals",
+                  "Carved Alabaster Dressing Alcove"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_eastern_sanctuary",
+        "name": "Sacred Mountain Sanctuary & Onsen Quarter",
+        "is_hub": true,
+        "theme": "Consecrated mountain temple precinct, lantern-lit tea streets, steaming hot-spring villas, and ancient fox-shrine torii approaches",
+        "features": "Vermilion torii gates, five-story pagoda, stone-lantern pilgrimage tea street, bamboo footbath bridge, monastic cloister quarters, hinoki onsen villas.",
+        "sensory": "Drifting sandalwood and cedar incense, echoing bronze temple bells, rising mineral onsen steam, soft clatter of footsteps on lantern-lit stone.",
+        "primary_locations": [
+          {
+            "id": "loc_eastern_temple",
+            "name": "Eastern Grand Temple & Sanctuary",
+            "sub_locations": [
+              {
+                "id": "loc_et_torii_approach",
+                "name": "Grand Torii Gate & Omikuji Talisman Stand",
+                "is_entrance": 1,
+                "props": [
+                  "Vermilion Torii Columns & Stone Lantern Steps",
+                  "Ablution Water Basin & Bamboo Ladles",
+                  "Talisman & Fortunes Stand",
+                  "Purification Salt Pyramids"
+                ]
+              },
+              {
+                "id": "loc_et_main_sanctuary",
+                "name": "Main Worship Hall & Incense Courtyard",
+                "props": [
+                  "Massive Bronze Incense Burner",
+                  "Gilded Shrine Offering Altar Table",
+                  "Tatami Prayer Mat Rows",
+                  "Polished Hinoki Wood Pillars"
+                ]
+              },
+              {
+                "id": "loc_et_five_story_pagoda",
+                "name": "Five-Story Pagoda & Sacred Reliquary",
+                "access_tier": "restricted",
+                "props": [
+                  "Carved Cedar Pagoda Entry Portico",
+                  "Ancient Relic Display Cases",
+                  "Gilded Bodhisattva Statuary",
+                  "Carved Lacquer Sutra Cabinet"
+                ]
+              },
+              {
+                "id": "loc_et_zen_tea_garden",
+                "name": "Zen Rock Garden & Bamboo Tea House",
+                "props": [
+                  "Woven Bamboo Privacy Screen",
+                  "Raked White Gravel Waves",
+                  "Moss-Covered Scholar Rocks",
+                  "Cold Stone Tea Brazier"
+                ]
+              },
+              {
+                "id": "loc_et_onsen_bathhouse",
+                "name": "Sacred Mountain Hot Springs & Onsen Bathhouse",
+                "props": [
+                  "Indigo Noren Curtain Lobby & Wooden Lockers",
+                  "Steaming Hinoki Cypress Indoor Mineral Bath",
+                  "Open-Air Maple & Stone Rotenburo Pool",
+                  "Chilled Glass Milk Bottle Cooler"
+                ]
+              },
+              {
+                "id": "loc_et_weeping_statues",
+                "name": "The Hall of Ten Thousand Weeping Statues Anomaly",
+                "is_anomalous": true,
+                "props": [
+                  "Sacred Shimenawa Rope & Paper-Seal Boundary",
+                  "Carved Jizo Statues with Wet Tear Tracks",
+                  "Crumbling Stone Offering Lanterns",
+                  "Dank Camphor Leaf Carpet"
+                ]
+              },
+              {
+                "id": "sub_et_sealed_reliquary_vault",
+                "name": "Sealed Reliquary & Talismans Vault",
+                "privacy_level": "private",
+                "is_discreet": true,
+                "is_enclosed": 1,
+                "access_tier": "private",
+                "is_locked": true,
+                "parent_sub_id": "loc_et_five_story_pagoda",
+                "props": [
+                  "Gold-Leaf Warded Relic Chest",
+                  "Consecrated Silk Talisman Scrolls",
+                  "Bronze Exorcism Dagger Stand",
+                  "Smoldering Sandalwood Censer"
+                ]
+              },
+              {
+                "id": "sub_et_abbot_audience_chamber",
+                "name": "Abbot Audience Chamber",
+                "privacy_level": "private",
+                "is_discreet": true,
+                "is_enclosed": 1,
+                "access_tier": "private",
+                "parent_sub_id": "loc_et_main_sanctuary",
+                "props": [
+                  "Woven Igusa Tatami Platform",
+                  "Calligraphy Silk Wall Hanging",
+                  "Low Lacquered Cedar Tea Table",
+                  "Heavy Silk Shoji Partition Screen"
+                ]
+              }
+            ],
+            "theme": "Historic Mountain Buddhist Temple & Serene Sanctuary",
+            "features": "Ancient cypress timber beams, bronze incense cauldrons, weathered stone lanterns, woven talisman cords",
+            "sensory": "Drifting cedar incense smoke, gentle rustle of bamboo leaves, deep resonance of bronze temple bells"
+          },
+          {
+            "id": "loc_es_lantern_tea_street",
+            "name": "Stone-Lantern Pilgrimage & Tea Street",
+            "theme": "Stepped mountain pilgrimage lane lined with warm paper lanterns, traditional wagashi tea houses, and cedar craft stalls",
+            "features": "Flagstone shrine steps, rows of mossy ishidoro stone lanterns, red-umbrella tea verandas, roasted sweet-rice stalls",
+            "sensory": "Aroma of roasted hojicha tea and sweet soy glaze, warm amber lantern glow, clatter of wooden geta on stone steps",
+            "sub_locations": [
+              {
+                "id": "sub_es_lantern_steps",
+                "name": "Mossy Stone-Lantern Pilgrimage Steps",
+                "is_entrance": 1,
+                "is_enclosed": 0,
+                "props": [
+                  "Rows of Lit Ishidoro Stone Lanterns",
+                  "Worn Flagstone Mountain Steps",
+                  "Crimson Pilgrimage Banners",
+                  "Bamboo Wayside Water Spout"
+                ]
+              },
+              {
+                "id": "sub_es_matcha_teahouse",
+                "name": "Hinoki Matcha & Wagashi Tea House",
+                "is_enclosed": 1,
+                "props": [
+                  "Red-Felt Engawa Seating Benches",
+                  "Cast-Iron Matcha Kettle & Whisk Set",
+                  "Lacquer Tray of Seasonal Wagashi",
+                  "Shoji Window Overlooking Cedar Valley"
+                ]
+              },
+              {
+                "id": "sub_es_ema_terrace",
+                "name": "Votive Ema Plaque & Bell Terrace",
+                "is_enclosed": 0,
+                "props": [
+                  "Wooden Racks of Painted Fox & Crane Ema",
+                  "Bronze Wishing Bell & Braided Rope",
+                  "Panoramic Sanctuary Valley Rail",
+                  "Incense Ash Brazier"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "loc_es_bamboo_footbath_bridge",
+            "name": "Bamboo Footbath & Vermilion Bridge",
+            "theme": "Scenic mountain gorge spanned by a lacquered vermilion arch bridge beside public steaming mineral ashiyu footbaths",
+            "features": "Arched vermilion timber bridge, bamboo grove walkways, steaming stone footbath channels, maple viewing pavilion",
+            "sensory": "Rushing mountain gorge water, soothing mineral steam, rustling towering bamboo culms, cool alpine mist",
+            "sub_locations": [
+              {
+                "id": "sub_es_vermilion_bridge",
+                "name": "Vermilion Gorge Arch Bridge",
+                "is_entrance": 1,
+                "is_enclosed": 0,
+                "props": [
+                  "Lacquered Vermilion Bridge Railings",
+                  "Bronze Giboshi Finial Posts",
+                  "Misty Waterfall Gorge View",
+                  "Drifting Mountain Maple Leaves"
+                ]
+              },
+              {
+                "id": "sub_es_ashiyu_footbath",
+                "name": "Steaming Mineral Ashiyu Footbath Pavilion",
+                "is_enclosed": 0,
+                "props": [
+                  "Warm Cypress-Trimmed Footbath Trough",
+                  "Stack of Folded Indigo Hand Towels",
+                  "Bamboo Hot-Spring Spout",
+                  "Lantern-Lit Timber Canopy"
+                ]
+              },
+              {
+                "id": "sub_es_bamboo_walk",
+                "name": "Whispering Bamboo Lantern Path",
+                "is_enclosed": 0,
+                "privacy_level": "semi_private",
+                "is_discreet": true,
+                "props": [
+                  "Towering Emerald Bamboo Stalks",
+                  "Low Ground Paper Lanterns",
+                  "Secluded Moss-Stone Bench",
+                  "Woven Bamboo Fence"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "loc_hidden_kitsune_village",
+            "name": "Thousand-Torii Fox Shrine Approach",
+            "theme": "Endless vermilion torii shrine corridor hiding the starlit Kitsune spirit enclave of Sato-no-Inari behind a foxfire veil",
+            "features": "Hundreds of vermilion torii gates, stone Myōbu fox statues, floating blue kitsunebi lanterns, hinoki spirit pavilions",
+            "sensory": "Resonant chime of brass suzu bells, warm scent of fried tofu and hinoki wood, flickering azure foxfire in perpetual twilight mist",
+            "veil_village_key": "kitsune",
+            "veil_token_item": "Fox-Fire Brass Suzu Bell",
+            "sub_locations": [
+              {
+                "id": "loc_et_fox_torii_tunnel",
+                "name": "Thousand-Torii Fox Shrine Approach",
+                "is_entrance": 1,
+                "is_enclosed": 0,
+                "is_anomalous": true,
+                "props": [
+                  "Mossy Stone Fox-Guardian Statues",
+                  "Vermilion Torii Tunnel Corridor",
+                  "Dusk-Lit Foxfire Mirage Threshold",
+                  "Offered Fried Tofu & Sake Altar"
+                ]
+              },
+              {
+                "id": "sub_kitsune_inner_plaza",
+                "name": "Starlit Fox-Fire Lantern Plaza",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 0,
+                "veil_village_key": "kitsune",
+                "veil_token_item": "Fox-Fire Brass Suzu Bell",
+                "props": [
+                  "Floating Azure Kitsunebi Lanterns",
+                  "Arched White-Stone Spirit Bridge",
+                  "Carved Nine-Tail Inari Fountain",
+                  "Festive Paper-Mask & Sweet Stalls"
+                ]
+              },
+              {
+                "id": "sub_kitsune_sovereign_pavilion",
+                "name": "Nine-Tail Sovereign's Hinoki Pavilion",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 1,
+                "privacy_level": "private",
+                "access_tier": "private",
+                "is_private_intimate": true,
+                "veil_village_key": "kitsune",
+                "veil_token_item": "Fox-Fire Brass Suzu Bell",
+                "props": [
+                  "Gold-Leaf Foxfire Byobu Folding Screens",
+                  "Plush Crimson-Silk Shikibuton & Cushions",
+                  "Sunken Hinoki Incense & Sake Hearth",
+                  "Private Moon-Viewing Engawa"
+                ]
+              },
+              {
+                "id": "sub_kitsune_spirit_apothecary",
+                "name": "Myōbu Spirit-Fire Curio & Apothecary",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 1,
+                "veil_village_key": "kitsune",
+                "veil_token_item": "Fox-Fire Brass Suzu Bell",
+                "props": [
+                  "Shelves of Bottled Starlight & Foxfire Elixirs",
+                  "Brass Suzu Bell & Talisman Counter",
+                  "Lacquered Shrine Haori & Relic Rack",
+                  "Simmering Herbal Spirit Cauldron"
+                ]
+              },
+              {
+                "id": "sub_kitsune_leyline_shrine",
+                "name": "Celestial Inari Sanctum & Spirit Arch",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 0,
+                "privacy_level": "semi_private",
+                "is_discreet": true,
+                "veil_village_key": "kitsune",
+                "veil_token_item": "Fox-Fire Brass Suzu Bell",
+                "props": [
+                  "Ancient White-Bark Sacred Shinboku Tree",
+                  "Luminous Leyline Spirit Torii Arch",
+                  "Braided Gold-and-Hemp Shimenawa Rope",
+                  "Mirror-Still Starlight Divination Basin"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "fac_temple_residence",
+            "name": "Outer Cloister Initiate Quarters",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Consecrated cedar-and-shoji residential cloister nestled within the mountain temple grounds",
+            "features": "Raked gravel courtyard, polished cedar engawa veranda, serene tatami sleeping cells warded by paper talismans",
+            "sensory": "Faint sandalwood and aged cedar, soft rustle of mountain bamboo, distant bronze bell echoes at dusk",
+            "sub_locations": [
+              {
+                "id": "sub_temple_res_courtyard",
+                "name": "Cloister Stepping-Stone Courtyard",
+                "is_entrance": 1,
+                "props": [
+                  "Stone Washbasin Tsukubai",
+                  "Paper-Lantern Eaves",
+                  "Wooden Getabako Rack",
+                  "Raked Gravel Path"
+                ]
+              },
+              {
+                "id": "sub_temple_res_veranda",
+                "name": "Engawa Cedar Veranda & Tea Hearth",
+                "privacy_level": "semi_private",
+                "props": [
+                  "Polished Cedar Engawa",
+                  "Cast-Iron Tetsubin Kettle",
+                  "Hanging Wind Chime",
+                  "Bamboo Courtyard View"
+                ]
+              },
+              {
+                "id": "sub_temple_res_cell",
+                "name": "Private Initiate Cell",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Woven Tatami Mats",
+                  "Folded Shikibuton Bedding",
+                  "Low Calligraphy Desk",
+                  "Sliding Shoji Screens"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "fac_onsen_villa",
+            "name": "Cypress Mountain Onsen Villa",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Secluded luxury hinoki-wood mountain estate with a private steaming mineral hot-spring bath",
+            "features": "Moss-stone gatehouse, sunken irori hearth hall, open-air rotenburo bath, master ryokan tatami suite",
+            "sensory": "Fragrant hinoki cypress timber, rising mineral spring steam, rhythmic bamboo water-clacker in mountain hush",
+            "sub_locations": [
+              {
+                "id": "sub_villa_gatehouse",
+                "name": "Hinoki Gatehouse & Moss Courtyard",
+                "is_entrance": 1,
+                "props": [
+                  "Tiled Hinoki Gate",
+                  "Bamboo Shishi-Odoshi",
+                  "Stone Lantern Path",
+                  "Discreet Biometric Latch"
+                ]
+              },
+              {
+                "id": "sub_villa_hearth_hall",
+                "name": "Sunken Irori Hearth & Tea Hall",
+                "privacy_level": "private",
+                "props": [
+                  "Sunken Charcoal Hearth",
+                  "Zaisu Backrest Cushions",
+                  "Panoramic Ravine Glass",
+                  "Antique Tansu Chest"
+                ]
+              },
+              {
+                "id": "sub_villa_hotspring_bath",
+                "name": "Private Open-Air Rotenburo Onsen",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Steaming Cedar & Basalt Bath",
+                  "Mineral Spring Spout",
+                  "Bamboo Privacy Fence",
+                  "Warmed Towel Baskets"
+                ]
+              },
+              {
+                "id": "sub_villa_tatami_suite",
+                "name": "Master Ryokan Tatami Suite",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Plush Double Futon",
+                  "Gold-Leaf Byobu Screen",
+                  "Cedar Alcove Tokonoma",
+                  "Moon-Viewing Engawa"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -10875,6 +11596,52 @@
             "theme": "Quarantined Cursed Antique Pawnshop Vault Anomaly",
             "features": "Heavy iron security safe, glass vitrine holding pulsating crimson jade relics, protective yellow talisman strips",
             "sensory": "Sinister crimson glow reflecting in the shadows, subtle warmth radiating from the jade, faint heartbeat rhythm"
+          },
+          {
+            "id": "fac_shophouse_loft",
+            "name": "Lantern-Alley Shophouse Loft",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Atmospheric timber-and-lattice upper residence perched above the Old Quarter's silk-lantern alleys",
+            "features": "Lacquered side stairway, carved rosewood tea parlor with shuttered balcony, canopied loft bedroom",
+            "sensory": "Faint jasmine tea steam, warm crimson lantern glow through lattice shutters, polished camphorwood",
+            "sub_locations": [
+              {
+                "id": "sub_shophouse_vestibule",
+                "name": "Carved Side-Alley Stairway",
+                "is_entrance": 1,
+                "props": [
+                  "Lacquered Lattice Door",
+                  "Silk Crimson Lanterns",
+                  "Brass Mail Slot",
+                  "Steep Timber Stair"
+                ]
+              },
+              {
+                "id": "sub_shophouse_tea_parlor",
+                "name": "Rosewood Tea Parlor & Balcony",
+                "privacy_level": "private",
+                "props": [
+                  "Carved Rosewood Tea Table",
+                  "Embroidered Floor Cushions",
+                  "Porcelain Tea Service",
+                  "Shuttered Alley Balcony"
+                ]
+              },
+              {
+                "id": "sub_shophouse_bedroom",
+                "name": "Canopied Loft Bedroom",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Timber Four-Poster Bed",
+                  "Camphorwood Wardrobe",
+                  "Warm Silk Sconces",
+                  "Painted Folding Screen"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -11125,6 +11892,41 @@
             "theme": "Deep Fault-Line Subterranean Monolith Vault",
             "features": "Chasm opening into planetary bedrock, hovering pitch-black obsidian monolith, heavy geological monitoring rigs",
             "sensory": "Deep infrasonic hum that vibrates through teeth and bone, static electricity making hair float, profound abyssal chill"
+          },
+          {
+            "id": "fac_vault_safehouse",
+            "name": "Subterranean Vault Safehouse",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Decommissioned civil-defense utility vault retrofitted into a shielded subterranean safehouse",
+            "features": "Spoked blast bulkhead door, copper-mesh Faraday lining, geothermal air circulation",
+            "sensory": "Sealed acoustic stillness, gentle warmth from geothermal conduits, amber cage lights on dry masonry",
+            "sub_locations": [
+              {
+                "id": "sub_vault_airlock",
+                "name": "Decommissioned Blast Bulkhead",
+                "is_entrance": 1,
+                "props": [
+                  "Spoked Vault Wheel Door",
+                  "Recessed Biometric Pad",
+                  "Amber Bulkhead Light",
+                  "Geothermal Pipe Niche"
+                ]
+              },
+              {
+                "id": "sub_vault_bunker",
+                "name": "Faraday Living Quarters",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Reinforced Bunk Alcove",
+                  "Copper-Mesh Wall Lining",
+                  "Filtered Water Dispenser",
+                  "Steel Gear Workbench"
+                ]
+              }
+            ]
           }
         ]
       }
@@ -11608,6 +12410,52 @@
             "theme": "Gravitationally Inverted High-Altitude Pedestrian Walkway",
             "features": "Shattered glass ceiling showing the abyss below, warped steel support trusses, floating micro-debris",
             "sensory": "Unsettling vertigo, high whistling wind through expansion joints, faint metallic creak of stressed suspension cables"
+          },
+          {
+            "id": "fac_agency_residence",
+            "name": "Public Agency Residential Hall",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Dedicated residential billet block for Civil Containment special agents and support staff",
+            "features": "Keycard security lobby, brass agent mailboxes, shared late-shift lounge, private single-agent quarters",
+            "sensory": "Quiet hum of filtered HVAC, faint aroma of late-shift coffee, muted footsteps on polished linoleum",
+            "sub_locations": [
+              {
+                "id": "sub_agency_res_lobby",
+                "name": "Residential Security Lobby & Mailboxes",
+                "is_entrance": 1,
+                "props": [
+                  "Keycard Turnstile",
+                  "Agent Brass Mailboxes",
+                  "Duty Roster Bulletin",
+                  "Umbrella Stand"
+                ]
+              },
+              {
+                "id": "sub_agency_res_lounge",
+                "name": "Common Kitchenette & Laundry Lounge",
+                "privacy_level": "semi_private",
+                "props": [
+                  "Espresso & Kettle Counter",
+                  "Coinless Washer Bank",
+                  "Worn Leather Couches",
+                  "Late-Shift Television"
+                ]
+              },
+              {
+                "id": "sub_agency_res_unit",
+                "name": "Assigned Agent Private Quarters",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Single Platform Bed",
+                  "Standard-Issue Gear Locker",
+                  "Compact Writing Desk",
+                  "Blackout Blinds"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -11912,6 +12760,41 @@
             "theme": "Quarantined Analog Static Cinema 4 Anomaly",
             "features": "Rows of torn red velvet theater seats, glowing silver screen emitting monochromatic static, cordon pylons",
             "sensory": "Low white-noise hum rattling the floorboards, faint smell of stale popcorn and ozone, fluctuating shadow silhouettes"
+          },
+          {
+            "id": "fac_downtown_walkup",
+            "name": "Modest Rented Walk-Up Apartment",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Modest brick walk-up apartment building tucked along a quiet Downtown side street",
+            "features": "Brass buzzer vestibule, creaking stairwell landing, compact private studio units above shuttered storefronts",
+            "sensory": "Distant neon rain reflections on sash glass, warm radiator clinks, muffled hum of late-night traffic below",
+            "sub_locations": [
+              {
+                "id": "sub_walkup_stairwell",
+                "name": "Brick Walk-Up Vestibule & Buzzer Panel",
+                "is_entrance": 1,
+                "props": [
+                  "Brass Intercom Panel",
+                  "Tenant Mailboxes",
+                  "Worn Terrazzo Steps",
+                  "Fire-Escape Landing"
+                ]
+              },
+              {
+                "id": "sub_walkup_studio",
+                "name": "Rented Studio Unit",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Futon Sofa-Bed",
+                  "Galley Stovetop & Mini-Fridge",
+                  "Metal Coat Rack",
+                  "Rain-Streaked Sash Window"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -12194,6 +13077,52 @@
             "theme": "Subterranean Cathedral Bell-Tower Crypt",
             "features": "Damp vaulted limestone arches, inscribed stone sarcophagi, wrought-iron wall sconces, dripping stalactites",
             "sensory": "Rhythmic sound of water dripping like a slow pulse, deep subterranean chill, smell of ancient moss and stone"
+          },
+          {
+            "id": "fac_highrise_condo",
+            "name": "Uptown Glass High-Rise Condo",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Sleek architectural corner condominium thirty stories above Uptown's museum boulevards",
+            "features": "Keycard private elevator foyer, panoramic skyline salon and wet bar, corner glass master suite",
+            "sensory": "Whisper-quiet climate control, glittering city lights across floor-to-ceiling glass, cool travertine stone",
+            "sub_locations": [
+              {
+                "id": "sub_condo_foyer",
+                "name": "Private Elevator Vestibule",
+                "is_entrance": 1,
+                "props": [
+                  "Keycard Elevator Doors",
+                  "Travertine Console Table",
+                  "Recessed Gallery Spotlights",
+                  "Smart Home Panel"
+                ]
+              },
+              {
+                "id": "sub_condo_skyline_salon",
+                "name": "Panoramic Skyline Salon & Wet Bar",
+                "privacy_level": "private",
+                "props": [
+                  "Floor-to-Ceiling Curtain Glass",
+                  "Italian Leather Lounge",
+                  "Backlit Onyx Wet Bar",
+                  "Turntable Hi-Fi Console"
+                ]
+              },
+              {
+                "id": "sub_condo_master_suite",
+                "name": "Corner Glass Master Suite",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "King Floating Bed",
+                  "Motorized Sheer Drapes",
+                  "Freestanding Soaking Tub",
+                  "Illuminated Wardrobe Wall"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -12444,6 +13373,64 @@
             "theme": "Anomalous Shifting Glass Mansion & Hall of Reflections",
             "features": "Interlocking glass partitions that shift angles, infinite duplicate reflections, floating crystal chandeliers",
             "sensory": "Crystal chime of vibrating glass panels, disorienting refraction of daylight, absence of footsteps on glass floors"
+          },
+          {
+            "id": "fac_sovereign_mansion",
+            "name": "Sovereign Hills Sky-Mansion",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Ultra-luxury glass-and-marble cliffside mansion crowning the highest ridge of Sovereign Hills",
+            "features": "Gated marble portico, double-height grand salon, heated cliffside infinity pool, penthouse master wing",
+            "sensory": "Cool veined Calacatta marble, gentle ripple of the heated infinity pool, sweeping silent metropolis vista",
+            "sub_locations": [
+              {
+                "id": "sub_mansion_portico",
+                "name": "Gated Marble Portico & Motorcourt",
+                "is_entrance": 1,
+                "props": [
+                  "Wrought-Iron Security Gates",
+                  "Calacatta Marble Columns",
+                  "Reflecting Water Basin",
+                  "Encrypted Palm Scanner"
+                ]
+              },
+              {
+                "id": "sub_mansion_grand_salon",
+                "name": "Double-Height Atrium & Cellar Bar",
+                "privacy_level": "private",
+                "props": [
+                  "Floating Cantilever Staircase",
+                  "Sunken Velvet Conversation Pit",
+                  "Climate-Controlled Wine Wall",
+                  "Sculptural Chandelier"
+                ]
+              },
+              {
+                "id": "sub_mansion_infinity_terrace",
+                "name": "Heated Cliffside Infinity Pool & Terrace",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Glass-Edge Infinity Pool",
+                  "Sunken Firepit Cabana",
+                  "Private Champagne Lounge",
+                  "Sweeping Metropolis Vista"
+                ]
+              },
+              {
+                "id": "sub_mansion_penthouse_suite",
+                "name": "Sovereign Penthouse Master Wing",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Custom California King Bed",
+                  "Boutique Walk-In Dressing Vault",
+                  "Rain-Spa Marble Ensuite",
+                  "Electrochromic Skyline Glass"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -12748,6 +13735,41 @@
             "theme": "Quarantined Biological Sewer Incursion Site",
             "features": "Pulsing organic tissue veins along concrete drain pipes, biohazard containment bulkheads, yellow misting nozzles",
             "sensory": "Wet thumping heartbeat cadence in the walls, sickening warm biological draft, acrid smell of copper and acid"
+          },
+          {
+            "id": "fac_tenement_flat",
+            "name": "Lower Wards Tenement Flat",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Reinforced iron-door studio safehouse tucked behind neon laundry lines in the Lower Wards",
+            "features": "Heavy steel deadbolt landing, frosted wire-glass window, compact off-the-books safehouse interior",
+            "sensory": "Click of a triple deadbolt, warm steam radiator, rain pattering against corrugated alley awnings",
+            "sub_locations": [
+              {
+                "id": "sub_tenement_landing",
+                "name": "Iron-Grate Corridor & Deadbolt Door",
+                "is_entrance": 1,
+                "props": [
+                  "Reinforced Steel Door",
+                  "Peephole & Chain",
+                  "Exposed Conduit Pipes",
+                  "Flickering Hallway Bulb"
+                ]
+              },
+              {
+                "id": "sub_tenement_studio",
+                "name": "Compact Safehouse Studio",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Fold-Out Cot & Mattress",
+                  "Heavy Footlocker",
+                  "Hotplate Counter",
+                  "Radiator Under Frosted Glass"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -13248,6 +14270,41 @@
             "theme": "Deep-Trench Spatial Anomaly in Empty Drydock Basin",
             "features": "Bottomless void opening in the concrete drydock floor, descending iron maintenance ladders, warning buoys",
             "sensory": "Deep oceanic pressure wave vibrating in the chest, smell of ancient abyssal silt, total silence swallowing noise"
+          },
+          {
+            "id": "fac_container_loft",
+            "name": "Harbor Container Loft",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Converted steel cargo container loft stacked overlooking the misty commercial harbor",
+            "features": "Galvanized exterior catwalk, keypad cargo hatch, insulated marine-steel living quarters",
+            "sensory": "Warm amber Edison bulbs against riveted steel, faint salt air, distant foghorns across the bay",
+            "sub_locations": [
+              {
+                "id": "sub_container_catwalk",
+                "name": "Galvanized Catwalk & Cargo Hatch",
+                "is_entrance": 1,
+                "props": [
+                  "Keypad Steel Hatch",
+                  "Galvanized Catwalk Rail",
+                  "Bulkhead Porch Lamp",
+                  "Harbor Crane View"
+                ]
+              },
+              {
+                "id": "sub_container_bunk",
+                "name": "Insulated Container Living Loft",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Built-In Captain's Bunk",
+                  "Riveted Steel Shelving",
+                  "Compact Galley Sink",
+                  "Porthole Storm Window"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -13282,7 +14339,8 @@
                   "Low Coffee Table",
                   "Wall Bookshelf",
                   "Warm Floor Lamp"
-                ]
+                ],
+                "privacy_level": "private"
               },
               {
                 "id": "sub_player_bedroom",
@@ -13292,12 +14350,17 @@
                   "Bedside Lamp & Nightstand",
                   "Wardrobe Closet",
                   "Window Curtains"
-                ]
+                ],
+                "privacy_level": "private",
+                "is_private_intimate": true
               }
             ],
             "theme": "Comfortable Suburban Two-Story Residence",
             "features": "Lawn garden path, cozy living room, hardwood staircase, private second-floor bedroom",
-            "sensory": "Warm familiar smell of home-cooked meals, ticking wall clock, soft morning sunlight through curtained windows"
+            "sensory": "Warm familiar smell of home-cooked meals, ticking wall clock, soft morning sunlight through curtained windows",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private"
           },
           {
             "id": "loc_local_park",
@@ -13528,6 +14591,52 @@
             "theme": "Abandoned Victorian Hill Manor",
             "features": "Boarded sash windows, overgrown ivy covering stone chimneys, warped oak front door, rusted wrought-iron fence",
             "sensory": "Cold draft filtering through cracked window panes, creak of warped timber floorboards, smell of mold and dry rot"
+          },
+          {
+            "id": "fac_suburbs_townhouse",
+            "name": "Maple-Lane Detached Townhouse",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Modern two-story brick-and-cedar detached townhouse along a quiet maple-lined suburban lane",
+            "features": "Gabled brick porch, sunlit open-plan lounge and kitchen island, quiet upstairs master bedroom",
+            "sensory": "Polished oak floorboards, afternoon sunlight through bay windows, rustling maple leaves outside",
+            "sub_locations": [
+              {
+                "id": "sub_townhouse_porch",
+                "name": "Gabled Brick Porch & Keypad",
+                "is_entrance": 1,
+                "props": [
+                  "Brick Stoop & Planters",
+                  "Smart Deadbolt Lock",
+                  "Parcel Dropbox",
+                  "Picket Garden Gate"
+                ]
+              },
+              {
+                "id": "sub_townhouse_lounge",
+                "name": "Sunlit Open-Plan Lounge & Kitchen",
+                "privacy_level": "private",
+                "props": [
+                  "Sectional Linen Sofa",
+                  "Quartz Breakfast Island",
+                  "Hardwood Bookcase",
+                  "Garden Patio Doors"
+                ]
+              },
+              {
+                "id": "sub_townhouse_bedroom",
+                "name": "Upstairs Master Bedroom",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Queen Oak Bedframe",
+                  "Walk-In Closet Alcove",
+                  "Warm Bedside Lamps",
+                  "Maple-Canopy Window"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -13566,7 +14675,7 @@
               },
               {
                 "id": "sub_school_library",
-                "name": "Quiet School Library & Study Stacks",
+                "name": "School Library & Study Stacks",
                 "props": [
                   "Tall Wooden Bookshelves",
                   "Quiet Reading Table",
@@ -14515,16 +15624,62 @@
             "theme": "Subterranean Tidal Sea Cave & Harmonic Grotto",
             "features": "Polished basalt sea cave walls, phosphorescent tidal pools, jagged stalagmites rising from foaming water",
             "sensory": "Harmonic, ethereal whistling as tidal surges push air through rock fissures, glowing blue bioluminescence"
+          },
+          {
+            "id": "fac_ocean_bungalow",
+            "name": "Seaside Cliff Bungalow",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Cedar-shingled coastal cliff bungalow with a private ocean-facing sundeck",
+            "features": "Bleached driftwood deck, breezy louvered sunroom, surf-view master bedroom above the tide",
+            "sensory": "Crisp salt breeze billowing linen curtains, warm cedar planking, rhythmic hush of breaking surf below",
+            "sub_locations": [
+              {
+                "id": "sub_bungalow_deck",
+                "name": "Driftwood Gate & Ocean Sundeck",
+                "is_entrance": 1,
+                "props": [
+                  "Bleached Cedar Deck",
+                  "Woven Rope Loungers",
+                  "Outdoor Rinse Shower",
+                  "Brass Keypad Latch"
+                ]
+              },
+              {
+                "id": "sub_bungalow_sunroom",
+                "name": "Breezy Coastal Sunroom",
+                "privacy_level": "private",
+                "props": [
+                  "Rattan Daybed & Throws",
+                  "Sea-Glass Coffee Table",
+                  "Sliding Louvered Doors",
+                  "Espresso & Wine Nook"
+                ]
+              },
+              {
+                "id": "sub_bungalow_bedroom",
+                "name": "Surf-View Master Bedroom",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Linen Canopy Bed",
+                  "Whitewashed Timber Beams",
+                  "Ceiling Paddle Fan",
+                  "Cliffside Horizon Window"
+                ]
+              }
+            ]
           }
         ]
       },
       {
         "id": "zone_woods_reserve",
-        "name": "Woods & Mountain Reserve",
+        "name": "Wilderness Forest Reserve",
         "is_hub": false,
-        "theme": "Dense pine wilderness and mountain lake reserve hiding ancient monoliths and spatial anomalies",
-        "features": "Cedar hiking trails, mirror-still mountain lake, forestry watchtowers, gravity-tilted monoliths, freestanding forest stairs.",
-        "sensory": "Crisp pine needles, woodsmoke, cold mountain wind, unnatural dead silence near anomalous clearings.",
+        "theme": "Uninhabited alpine pine wilderness, mirror-lake campgrounds, ranger outposts, and veiled forest anomalies",
+        "features": "Old-growth cedar hiking trails, mountain lake and rustic camp cabins, fire watchtower, forestry ranger station, liminal forest anomalies, and mist-veiled banyan groves.",
+        "sensory": "Crisp pine resin, woodsmoke over cold lake water, alpine wind, and sudden hushed mist near veiled clearings.",
         "primary_locations": [
           {
             "id": "loc_forest_trails",
@@ -14687,120 +15842,6 @@
             "sensory": "Smell of cedar wood sealant, low crackle of ranger dispatch radios, ticking wall barometer"
           },
           {
-            "id": "loc_eastern_temple",
-            "name": "Eastern Grand Temple & Sanctuary",
-            "sub_locations": [
-              {
-                "id": "loc_et_torii_approach",
-                "name": "Grand Torii Gate & Omikuji Talisman Stand",
-                "is_entrance": 1,
-                "props": [
-                  "Vermilion Torii Columns & Stone Lantern Steps",
-                  "Ablution Water Basin & Bamboo Ladles",
-                  "Talisman & Fortunes Stand",
-                  "Purification Salt Pyramids"
-                ]
-              },
-              {
-                "id": "loc_et_main_sanctuary",
-                "name": "Main Worship Hall & Incense Courtyard",
-                "props": [
-                  "Massive Bronze Incense Burner",
-                  "Gilded Shrine Offering Altar Table",
-                  "Tatami Prayer Mat Rows",
-                  "Polished Hinoki Wood Pillars"
-                ]
-              },
-              {
-                "id": "loc_et_five_story_pagoda",
-                "name": "Five-Story Pagoda & Sacred Reliquary",
-                "access_tier": "restricted",
-                "props": [
-                  "Carved Cedar Pagoda Entry Portico",
-                  "Ancient Relic Display Cases",
-                  "Gilded Bodhisattva Statuary",
-                  "Carved Lacquer Sutra Cabinet"
-                ]
-              },
-              {
-                "id": "loc_et_zen_tea_garden",
-                "name": "Zen Rock Garden & Bamboo Tea House",
-                "props": [
-                  "Woven Bamboo Privacy Screen",
-                  "Raked White Gravel Waves",
-                  "Moss-Covered Scholar Rocks",
-                  "Cold Stone Tea Brazier"
-                ]
-              },
-              {
-                "id": "loc_et_onsen_bathhouse",
-                "name": "Sacred Mountain Hot Springs & Onsen Bathhouse",
-                "props": [
-                  "Indigo Noren Curtain Lobby & Wooden Lockers",
-                  "Steaming Hinoki Cypress Indoor Mineral Bath",
-                  "Open-Air Maple & Stone Rotenburo Pool",
-                  "Chilled Glass Milk Bottle Cooler"
-                ]
-              },
-              {
-                "id": "loc_et_weeping_statues",
-                "name": "The Hall of Ten Thousand Weeping Statues Anomaly",
-                "is_anomalous": true,
-                "props": [
-                  "Sacred Shimenawa Rope & Paper-Seal Boundary",
-                  "Carved Jizo Statues with Wet Tear Tracks",
-                  "Crumbling Stone Offering Lanterns",
-                  "Dank Camphor Leaf Carpet"
-                ]
-              },
-              {
-                "id": "loc_et_fox_torii_tunnel",
-                "name": "The Twilight Fox-Spirit Torii Tunnel Anomaly",
-                "is_anomalous": true,
-                "props": [
-                  "Mossy Stone Fox-Guardian Statues",
-                  "Non-Euclidean Vermilion Torii Corridor",
-                  "Dusk-Lit Foxfire Mirage Clearing",
-                  "Offered Fried Tofu & Sake Dish"
-                ]
-              },
-              {
-                "id": "sub_et_sealed_reliquary_vault",
-                "name": "Sealed Reliquary & Talismans Vault",
-                "privacy_level": "private",
-                "is_discreet": true,
-                "is_enclosed": 1,
-                "access_tier": "private",
-                "is_locked": true,
-                "parent_sub_id": "loc_et_five_story_pagoda",
-                "props": [
-                  "Gold-Leaf Warded Relic Chest",
-                  "Consecrated Silk Talisman Scrolls",
-                  "Bronze Exorcism Dagger Stand",
-                  "Smoldering Sandalwood Censer"
-                ]
-              },
-              {
-                "id": "sub_et_abbot_audience_chamber",
-                "name": "Abbot Audience Chamber",
-                "privacy_level": "private",
-                "is_discreet": true,
-                "is_enclosed": 1,
-                "access_tier": "private",
-                "parent_sub_id": "loc_et_main_sanctuary",
-                "props": [
-                  "Woven Igusa Tatami Platform",
-                  "Calligraphy Silk Wall Hanging",
-                  "Low Lacquered Cedar Tea Table",
-                  "Heavy Silk Shoji Partition Screen"
-                ]
-              }
-            ],
-            "theme": "Historic Mountain Buddhist Temple & Serene Sanctuary",
-            "features": "Ancient cypress timber beams, bronze incense cauldrons, weathered stone lanterns, woven talisman cords",
-            "sensory": "Drifting cedar incense smoke, gentle rustle of bamboo leaves, deep resonance of bronze temple bells"
-          },
-          {
             "id": "loc_crooked_monolith",
             "name": "The Crooked Monolith Clearing Anomaly",
             "sub_locations": [
@@ -14879,6 +15920,488 @@
             "theme": "Free-Standing Wooden Staircase in the Woods Anomaly",
             "features": "A pristine wooden flight of stairs rising into empty air with no walls or building attached, surrounded by ferns",
             "sensory": "Unsettling unnatural quiet, hair standing on end, subtle distortion of birdsong near the steps"
+          },
+          {
+            "id": "loc_hidden_bunian_village",
+            "name": "Mist-Veiled Banyan & Bamboo Glade",
+            "theme": "Primeval mist-draped banyan clearing hiding the veiled Nusantara elven realm of Kampung Kayangan Bunian",
+            "features": "Curtains of aerial banyan roots, wild white cempaka blossoms, bamboo wind-chimes, and a shimmering golden veil parting into royal Nusantara pavilions",
+            "sensory": "Sweet night-blooming cempaka fragrance, cool silver forest mist, distant serunai flute notes, timeless hush",
+            "veil_village_key": "bunian",
+            "veil_token_item": "Cempaka Brass Serunai",
+            "sub_locations": [
+              {
+                "id": "loc_bunian_threshold_glade",
+                "name": "Mist-Veiled Banyan & Bamboo Glade",
+                "is_entrance": 1,
+                "is_enclosed": 0,
+                "props": [
+                  "Curtain of Ancient Aerial Banyan Roots",
+                  "Wild White Cempaka Blossom Ring",
+                  "Moss-Carved Boundary Waystone",
+                  "Drifting Silver Bamboo Mist"
+                ]
+              },
+              {
+                "id": "sub_bunian_inner_plaza",
+                "name": "Laman Seri Cempaka Plaza",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 0,
+                "veil_village_key": "bunian",
+                "veil_token_item": "Cempaka Brass Serunai",
+                "props": [
+                  "Luminous Cempaka & Jasmine Courtyard",
+                  "Carved Ironwood Wakaf Gazebo",
+                  "Gilded Brass Gamelan & Serunai Stand",
+                  "Crystal Spring Stepping Stones"
+                ]
+              },
+              {
+                "id": "sub_bunian_royal_istana",
+                "name": "Balairung & Puteri's Songket Pavilion",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 1,
+                "privacy_level": "private",
+                "access_tier": "private",
+                "is_private_intimate": true,
+                "veil_village_key": "bunian",
+                "veil_token_item": "Cempaka Brass Serunai",
+                "props": [
+                  "Gold-Brocaded Songket Daybed & Silk Canopies",
+                  "Carved Meranti Royal Balairung Pillars",
+                  "Fragrant Bunga Rampai & Silver Ewer",
+                  "Moonlit Veranda Overlooking Veiled Canopy"
+                ]
+              },
+              {
+                "id": "sub_bunian_pusaka_hall",
+                "name": "Empu's Pusaka Artisan Hall",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 1,
+                "veil_village_key": "bunian",
+                "veil_token_item": "Cempaka Brass Serunai",
+                "props": [
+                  "Meteoric-Iron Keris Display Rack",
+                  "Golden-Thread Songket Handloom",
+                  "Brass Incense & Benzoin Kemeyan Brazier",
+                  "Velvet-Lined Pusaka Relic Chests"
+                ]
+              },
+              {
+                "id": "sub_bunian_orchid_spring",
+                "name": "Moonlit Cempaka Bathing Spring & Spirit Arch",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 0,
+                "privacy_level": "semi_private",
+                "is_discreet": true,
+                "veil_village_key": "bunian",
+                "veil_token_item": "Cempaka Brass Serunai",
+                "props": [
+                  "Warm Moonlit Mineral Spring Basin",
+                  "Luminous Leyline Spirit Archway",
+                  "Floating White Cempaka & Orchid Petals",
+                  "Carved Alabaster Dressing Alcove"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_eastern_sanctuary",
+        "name": "Sacred Mountain Sanctuary & Onsen Quarter",
+        "is_hub": true,
+        "theme": "Consecrated mountain temple precinct, lantern-lit tea streets, steaming hot-spring villas, and ancient fox-shrine torii approaches",
+        "features": "Vermilion torii gates, five-story pagoda, stone-lantern pilgrimage tea street, bamboo footbath bridge, monastic cloister quarters, hinoki onsen villas.",
+        "sensory": "Drifting sandalwood and cedar incense, echoing bronze temple bells, rising mineral onsen steam, soft clatter of footsteps on lantern-lit stone.",
+        "primary_locations": [
+          {
+            "id": "loc_eastern_temple",
+            "name": "Eastern Grand Temple & Sanctuary",
+            "sub_locations": [
+              {
+                "id": "loc_et_torii_approach",
+                "name": "Grand Torii Gate & Omikuji Talisman Stand",
+                "is_entrance": 1,
+                "props": [
+                  "Vermilion Torii Columns & Stone Lantern Steps",
+                  "Ablution Water Basin & Bamboo Ladles",
+                  "Talisman & Fortunes Stand",
+                  "Purification Salt Pyramids"
+                ]
+              },
+              {
+                "id": "loc_et_main_sanctuary",
+                "name": "Main Worship Hall & Incense Courtyard",
+                "props": [
+                  "Massive Bronze Incense Burner",
+                  "Gilded Shrine Offering Altar Table",
+                  "Tatami Prayer Mat Rows",
+                  "Polished Hinoki Wood Pillars"
+                ]
+              },
+              {
+                "id": "loc_et_five_story_pagoda",
+                "name": "Five-Story Pagoda & Sacred Reliquary",
+                "access_tier": "restricted",
+                "props": [
+                  "Carved Cedar Pagoda Entry Portico",
+                  "Ancient Relic Display Cases",
+                  "Gilded Bodhisattva Statuary",
+                  "Carved Lacquer Sutra Cabinet"
+                ]
+              },
+              {
+                "id": "loc_et_zen_tea_garden",
+                "name": "Zen Rock Garden & Bamboo Tea House",
+                "props": [
+                  "Woven Bamboo Privacy Screen",
+                  "Raked White Gravel Waves",
+                  "Moss-Covered Scholar Rocks",
+                  "Cold Stone Tea Brazier"
+                ]
+              },
+              {
+                "id": "loc_et_onsen_bathhouse",
+                "name": "Sacred Mountain Hot Springs & Onsen Bathhouse",
+                "props": [
+                  "Indigo Noren Curtain Lobby & Wooden Lockers",
+                  "Steaming Hinoki Cypress Indoor Mineral Bath",
+                  "Open-Air Maple & Stone Rotenburo Pool",
+                  "Chilled Glass Milk Bottle Cooler"
+                ]
+              },
+              {
+                "id": "loc_et_weeping_statues",
+                "name": "The Hall of Ten Thousand Weeping Statues Anomaly",
+                "is_anomalous": true,
+                "props": [
+                  "Sacred Shimenawa Rope & Paper-Seal Boundary",
+                  "Carved Jizo Statues with Wet Tear Tracks",
+                  "Crumbling Stone Offering Lanterns",
+                  "Dank Camphor Leaf Carpet"
+                ]
+              },
+              {
+                "id": "sub_et_sealed_reliquary_vault",
+                "name": "Sealed Reliquary & Talismans Vault",
+                "privacy_level": "private",
+                "is_discreet": true,
+                "is_enclosed": 1,
+                "access_tier": "private",
+                "is_locked": true,
+                "parent_sub_id": "loc_et_five_story_pagoda",
+                "props": [
+                  "Gold-Leaf Warded Relic Chest",
+                  "Consecrated Silk Talisman Scrolls",
+                  "Bronze Exorcism Dagger Stand",
+                  "Smoldering Sandalwood Censer"
+                ]
+              },
+              {
+                "id": "sub_et_abbot_audience_chamber",
+                "name": "Abbot Audience Chamber",
+                "privacy_level": "private",
+                "is_discreet": true,
+                "is_enclosed": 1,
+                "access_tier": "private",
+                "parent_sub_id": "loc_et_main_sanctuary",
+                "props": [
+                  "Woven Igusa Tatami Platform",
+                  "Calligraphy Silk Wall Hanging",
+                  "Low Lacquered Cedar Tea Table",
+                  "Heavy Silk Shoji Partition Screen"
+                ]
+              }
+            ],
+            "theme": "Historic Mountain Buddhist Temple & Serene Sanctuary",
+            "features": "Ancient cypress timber beams, bronze incense cauldrons, weathered stone lanterns, woven talisman cords",
+            "sensory": "Drifting cedar incense smoke, gentle rustle of bamboo leaves, deep resonance of bronze temple bells"
+          },
+          {
+            "id": "loc_es_lantern_tea_street",
+            "name": "Stone-Lantern Pilgrimage & Tea Street",
+            "theme": "Stepped mountain pilgrimage lane lined with warm paper lanterns, traditional wagashi tea houses, and cedar craft stalls",
+            "features": "Flagstone shrine steps, rows of mossy ishidoro stone lanterns, red-umbrella tea verandas, roasted sweet-rice stalls",
+            "sensory": "Aroma of roasted hojicha tea and sweet soy glaze, warm amber lantern glow, clatter of wooden geta on stone steps",
+            "sub_locations": [
+              {
+                "id": "sub_es_lantern_steps",
+                "name": "Mossy Stone-Lantern Pilgrimage Steps",
+                "is_entrance": 1,
+                "is_enclosed": 0,
+                "props": [
+                  "Rows of Lit Ishidoro Stone Lanterns",
+                  "Worn Flagstone Mountain Steps",
+                  "Crimson Pilgrimage Banners",
+                  "Bamboo Wayside Water Spout"
+                ]
+              },
+              {
+                "id": "sub_es_matcha_teahouse",
+                "name": "Hinoki Matcha & Wagashi Tea House",
+                "is_enclosed": 1,
+                "props": [
+                  "Red-Felt Engawa Seating Benches",
+                  "Cast-Iron Matcha Kettle & Whisk Set",
+                  "Lacquer Tray of Seasonal Wagashi",
+                  "Shoji Window Overlooking Cedar Valley"
+                ]
+              },
+              {
+                "id": "sub_es_ema_terrace",
+                "name": "Votive Ema Plaque & Bell Terrace",
+                "is_enclosed": 0,
+                "props": [
+                  "Wooden Racks of Painted Fox & Crane Ema",
+                  "Bronze Wishing Bell & Braided Rope",
+                  "Panoramic Sanctuary Valley Rail",
+                  "Incense Ash Brazier"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "loc_es_bamboo_footbath_bridge",
+            "name": "Bamboo Footbath & Vermilion Bridge",
+            "theme": "Scenic mountain gorge spanned by a lacquered vermilion arch bridge beside public steaming mineral ashiyu footbaths",
+            "features": "Arched vermilion timber bridge, bamboo grove walkways, steaming stone footbath channels, maple viewing pavilion",
+            "sensory": "Rushing mountain gorge water, soothing mineral steam, rustling towering bamboo culms, cool alpine mist",
+            "sub_locations": [
+              {
+                "id": "sub_es_vermilion_bridge",
+                "name": "Vermilion Gorge Arch Bridge",
+                "is_entrance": 1,
+                "is_enclosed": 0,
+                "props": [
+                  "Lacquered Vermilion Bridge Railings",
+                  "Bronze Giboshi Finial Posts",
+                  "Misty Waterfall Gorge View",
+                  "Drifting Mountain Maple Leaves"
+                ]
+              },
+              {
+                "id": "sub_es_ashiyu_footbath",
+                "name": "Steaming Mineral Ashiyu Footbath Pavilion",
+                "is_enclosed": 0,
+                "props": [
+                  "Warm Cypress-Trimmed Footbath Trough",
+                  "Stack of Folded Indigo Hand Towels",
+                  "Bamboo Hot-Spring Spout",
+                  "Lantern-Lit Timber Canopy"
+                ]
+              },
+              {
+                "id": "sub_es_bamboo_walk",
+                "name": "Whispering Bamboo Lantern Path",
+                "is_enclosed": 0,
+                "privacy_level": "semi_private",
+                "is_discreet": true,
+                "props": [
+                  "Towering Emerald Bamboo Stalks",
+                  "Low Ground Paper Lanterns",
+                  "Secluded Moss-Stone Bench",
+                  "Woven Bamboo Fence"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "loc_hidden_kitsune_village",
+            "name": "Thousand-Torii Fox Shrine Approach",
+            "theme": "Endless vermilion torii shrine corridor hiding the starlit Kitsune spirit enclave of Sato-no-Inari behind a foxfire veil",
+            "features": "Hundreds of vermilion torii gates, stone Myōbu fox statues, floating blue kitsunebi lanterns, hinoki spirit pavilions",
+            "sensory": "Resonant chime of brass suzu bells, warm scent of fried tofu and hinoki wood, flickering azure foxfire in perpetual twilight mist",
+            "veil_village_key": "kitsune",
+            "veil_token_item": "Fox-Fire Brass Suzu Bell",
+            "sub_locations": [
+              {
+                "id": "loc_et_fox_torii_tunnel",
+                "name": "Thousand-Torii Fox Shrine Approach",
+                "is_entrance": 1,
+                "is_enclosed": 0,
+                "is_anomalous": true,
+                "props": [
+                  "Mossy Stone Fox-Guardian Statues",
+                  "Vermilion Torii Tunnel Corridor",
+                  "Dusk-Lit Foxfire Mirage Threshold",
+                  "Offered Fried Tofu & Sake Altar"
+                ]
+              },
+              {
+                "id": "sub_kitsune_inner_plaza",
+                "name": "Starlit Fox-Fire Lantern Plaza",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 0,
+                "veil_village_key": "kitsune",
+                "veil_token_item": "Fox-Fire Brass Suzu Bell",
+                "props": [
+                  "Floating Azure Kitsunebi Lanterns",
+                  "Arched White-Stone Spirit Bridge",
+                  "Carved Nine-Tail Inari Fountain",
+                  "Festive Paper-Mask & Sweet Stalls"
+                ]
+              },
+              {
+                "id": "sub_kitsune_sovereign_pavilion",
+                "name": "Nine-Tail Sovereign's Hinoki Pavilion",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 1,
+                "privacy_level": "private",
+                "access_tier": "private",
+                "is_private_intimate": true,
+                "veil_village_key": "kitsune",
+                "veil_token_item": "Fox-Fire Brass Suzu Bell",
+                "props": [
+                  "Gold-Leaf Foxfire Byobu Folding Screens",
+                  "Plush Crimson-Silk Shikibuton & Cushions",
+                  "Sunken Hinoki Incense & Sake Hearth",
+                  "Private Moon-Viewing Engawa"
+                ]
+              },
+              {
+                "id": "sub_kitsune_spirit_apothecary",
+                "name": "Myōbu Spirit-Fire Curio & Apothecary",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 1,
+                "veil_village_key": "kitsune",
+                "veil_token_item": "Fox-Fire Brass Suzu Bell",
+                "props": [
+                  "Shelves of Bottled Starlight & Foxfire Elixirs",
+                  "Brass Suzu Bell & Talisman Counter",
+                  "Lacquered Shrine Haori & Relic Rack",
+                  "Simmering Herbal Spirit Cauldron"
+                ]
+              },
+              {
+                "id": "sub_kitsune_leyline_shrine",
+                "name": "Celestial Inari Sanctum & Spirit Arch",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 0,
+                "privacy_level": "semi_private",
+                "is_discreet": true,
+                "veil_village_key": "kitsune",
+                "veil_token_item": "Fox-Fire Brass Suzu Bell",
+                "props": [
+                  "Ancient White-Bark Sacred Shinboku Tree",
+                  "Luminous Leyline Spirit Torii Arch",
+                  "Braided Gold-and-Hemp Shimenawa Rope",
+                  "Mirror-Still Starlight Divination Basin"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "fac_temple_residence",
+            "name": "Outer Cloister Initiate Quarters",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Consecrated cedar-and-shoji residential cloister nestled within the mountain temple grounds",
+            "features": "Raked gravel courtyard, polished cedar engawa veranda, serene tatami sleeping cells warded by paper talismans",
+            "sensory": "Faint sandalwood and aged cedar, soft rustle of mountain bamboo, distant bronze bell echoes at dusk",
+            "sub_locations": [
+              {
+                "id": "sub_temple_res_courtyard",
+                "name": "Cloister Stepping-Stone Courtyard",
+                "is_entrance": 1,
+                "props": [
+                  "Stone Washbasin Tsukubai",
+                  "Paper-Lantern Eaves",
+                  "Wooden Getabako Rack",
+                  "Raked Gravel Path"
+                ]
+              },
+              {
+                "id": "sub_temple_res_veranda",
+                "name": "Engawa Cedar Veranda & Tea Hearth",
+                "privacy_level": "semi_private",
+                "props": [
+                  "Polished Cedar Engawa",
+                  "Cast-Iron Tetsubin Kettle",
+                  "Hanging Wind Chime",
+                  "Bamboo Courtyard View"
+                ]
+              },
+              {
+                "id": "sub_temple_res_cell",
+                "name": "Private Initiate Cell",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Woven Tatami Mats",
+                  "Folded Shikibuton Bedding",
+                  "Low Calligraphy Desk",
+                  "Sliding Shoji Screens"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "fac_onsen_villa",
+            "name": "Cypress Mountain Onsen Villa",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Secluded luxury hinoki-wood mountain estate with a private steaming mineral hot-spring bath",
+            "features": "Moss-stone gatehouse, sunken irori hearth hall, open-air rotenburo bath, master ryokan tatami suite",
+            "sensory": "Fragrant hinoki cypress timber, rising mineral spring steam, rhythmic bamboo water-clacker in mountain hush",
+            "sub_locations": [
+              {
+                "id": "sub_villa_gatehouse",
+                "name": "Hinoki Gatehouse & Moss Courtyard",
+                "is_entrance": 1,
+                "props": [
+                  "Tiled Hinoki Gate",
+                  "Bamboo Shishi-Odoshi",
+                  "Stone Lantern Path",
+                  "Discreet Biometric Latch"
+                ]
+              },
+              {
+                "id": "sub_villa_hearth_hall",
+                "name": "Sunken Irori Hearth & Tea Hall",
+                "privacy_level": "private",
+                "props": [
+                  "Sunken Charcoal Hearth",
+                  "Zaisu Backrest Cushions",
+                  "Panoramic Ravine Glass",
+                  "Antique Tansu Chest"
+                ]
+              },
+              {
+                "id": "sub_villa_hotspring_bath",
+                "name": "Private Open-Air Rotenburo Onsen",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Steaming Cedar & Basalt Bath",
+                  "Mineral Spring Spout",
+                  "Bamboo Privacy Fence",
+                  "Warmed Towel Baskets"
+                ]
+              },
+              {
+                "id": "sub_villa_tatami_suite",
+                "name": "Master Ryokan Tatami Suite",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Plush Double Futon",
+                  "Gold-Leaf Byobu Screen",
+                  "Cedar Alcove Tokonoma",
+                  "Moon-Viewing Engawa"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -15629,6 +17152,52 @@
             "theme": "Quarantined Cursed Antique Pawnshop Vault Anomaly",
             "features": "Heavy iron security safe, glass vitrine holding pulsating crimson jade relics, protective yellow talisman strips",
             "sensory": "Sinister crimson glow reflecting in the shadows, subtle warmth radiating from the jade, faint heartbeat rhythm"
+          },
+          {
+            "id": "fac_shophouse_loft",
+            "name": "Lantern-Alley Shophouse Loft",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Atmospheric timber-and-lattice upper residence perched above the Old Quarter's silk-lantern alleys",
+            "features": "Lacquered side stairway, carved rosewood tea parlor with shuttered balcony, canopied loft bedroom",
+            "sensory": "Faint jasmine tea steam, warm crimson lantern glow through lattice shutters, polished camphorwood",
+            "sub_locations": [
+              {
+                "id": "sub_shophouse_vestibule",
+                "name": "Carved Side-Alley Stairway",
+                "is_entrance": 1,
+                "props": [
+                  "Lacquered Lattice Door",
+                  "Silk Crimson Lanterns",
+                  "Brass Mail Slot",
+                  "Steep Timber Stair"
+                ]
+              },
+              {
+                "id": "sub_shophouse_tea_parlor",
+                "name": "Rosewood Tea Parlor & Balcony",
+                "privacy_level": "private",
+                "props": [
+                  "Carved Rosewood Tea Table",
+                  "Embroidered Floor Cushions",
+                  "Porcelain Tea Service",
+                  "Shuttered Alley Balcony"
+                ]
+              },
+              {
+                "id": "sub_shophouse_bedroom",
+                "name": "Canopied Loft Bedroom",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Timber Four-Poster Bed",
+                  "Camphorwood Wardrobe",
+                  "Warm Silk Sconces",
+                  "Painted Folding Screen"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -15879,6 +17448,41 @@
             "theme": "Deep Fault-Line Subterranean Monolith Vault",
             "features": "Chasm opening into planetary bedrock, hovering pitch-black obsidian monolith, heavy geological monitoring rigs",
             "sensory": "Deep infrasonic hum that vibrates through teeth and bone, static electricity making hair float, profound abyssal chill"
+          },
+          {
+            "id": "fac_vault_safehouse",
+            "name": "Subterranean Vault Safehouse",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Decommissioned civil-defense utility vault retrofitted into a shielded subterranean safehouse",
+            "features": "Spoked blast bulkhead door, copper-mesh Faraday lining, geothermal air circulation",
+            "sensory": "Sealed acoustic stillness, gentle warmth from geothermal conduits, amber cage lights on dry masonry",
+            "sub_locations": [
+              {
+                "id": "sub_vault_airlock",
+                "name": "Decommissioned Blast Bulkhead",
+                "is_entrance": 1,
+                "props": [
+                  "Spoked Vault Wheel Door",
+                  "Recessed Biometric Pad",
+                  "Amber Bulkhead Light",
+                  "Geothermal Pipe Niche"
+                ]
+              },
+              {
+                "id": "sub_vault_bunker",
+                "name": "Faraday Living Quarters",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Reinforced Bunk Alcove",
+                  "Copper-Mesh Wall Lining",
+                  "Filtered Water Dispenser",
+                  "Steel Gear Workbench"
+                ]
+              }
+            ]
           }
         ]
       }
@@ -16362,6 +17966,52 @@
             "theme": "Gravitationally Inverted High-Altitude Pedestrian Walkway",
             "features": "Shattered glass ceiling showing the abyss below, warped steel support trusses, floating micro-debris",
             "sensory": "Unsettling vertigo, high whistling wind through expansion joints, faint metallic creak of stressed suspension cables"
+          },
+          {
+            "id": "fac_agency_residence",
+            "name": "Public Agency Residential Hall",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Dedicated residential billet block for Civil Containment special agents and support staff",
+            "features": "Keycard security lobby, brass agent mailboxes, shared late-shift lounge, private single-agent quarters",
+            "sensory": "Quiet hum of filtered HVAC, faint aroma of late-shift coffee, muted footsteps on polished linoleum",
+            "sub_locations": [
+              {
+                "id": "sub_agency_res_lobby",
+                "name": "Residential Security Lobby & Mailboxes",
+                "is_entrance": 1,
+                "props": [
+                  "Keycard Turnstile",
+                  "Agent Brass Mailboxes",
+                  "Duty Roster Bulletin",
+                  "Umbrella Stand"
+                ]
+              },
+              {
+                "id": "sub_agency_res_lounge",
+                "name": "Common Kitchenette & Laundry Lounge",
+                "privacy_level": "semi_private",
+                "props": [
+                  "Espresso & Kettle Counter",
+                  "Coinless Washer Bank",
+                  "Worn Leather Couches",
+                  "Late-Shift Television"
+                ]
+              },
+              {
+                "id": "sub_agency_res_unit",
+                "name": "Assigned Agent Private Quarters",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Single Platform Bed",
+                  "Standard-Issue Gear Locker",
+                  "Compact Writing Desk",
+                  "Blackout Blinds"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -16666,6 +18316,41 @@
             "theme": "Quarantined Analog Static Cinema 4 Anomaly",
             "features": "Rows of torn red velvet theater seats, glowing silver screen emitting monochromatic static, cordon pylons",
             "sensory": "Low white-noise hum rattling the floorboards, faint smell of stale popcorn and ozone, fluctuating shadow silhouettes"
+          },
+          {
+            "id": "fac_downtown_walkup",
+            "name": "Modest Rented Walk-Up Apartment",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Modest brick walk-up apartment building tucked along a quiet Downtown side street",
+            "features": "Brass buzzer vestibule, creaking stairwell landing, compact private studio units above shuttered storefronts",
+            "sensory": "Distant neon rain reflections on sash glass, warm radiator clinks, muffled hum of late-night traffic below",
+            "sub_locations": [
+              {
+                "id": "sub_walkup_stairwell",
+                "name": "Brick Walk-Up Vestibule & Buzzer Panel",
+                "is_entrance": 1,
+                "props": [
+                  "Brass Intercom Panel",
+                  "Tenant Mailboxes",
+                  "Worn Terrazzo Steps",
+                  "Fire-Escape Landing"
+                ]
+              },
+              {
+                "id": "sub_walkup_studio",
+                "name": "Rented Studio Unit",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Futon Sofa-Bed",
+                  "Galley Stovetop & Mini-Fridge",
+                  "Metal Coat Rack",
+                  "Rain-Streaked Sash Window"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -16948,6 +18633,52 @@
             "theme": "Subterranean Cathedral Bell-Tower Crypt",
             "features": "Damp vaulted limestone arches, inscribed stone sarcophagi, wrought-iron wall sconces, dripping stalactites",
             "sensory": "Rhythmic sound of water dripping like a slow pulse, deep subterranean chill, smell of ancient moss and stone"
+          },
+          {
+            "id": "fac_highrise_condo",
+            "name": "Uptown Glass High-Rise Condo",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Sleek architectural corner condominium thirty stories above Uptown's museum boulevards",
+            "features": "Keycard private elevator foyer, panoramic skyline salon and wet bar, corner glass master suite",
+            "sensory": "Whisper-quiet climate control, glittering city lights across floor-to-ceiling glass, cool travertine stone",
+            "sub_locations": [
+              {
+                "id": "sub_condo_foyer",
+                "name": "Private Elevator Vestibule",
+                "is_entrance": 1,
+                "props": [
+                  "Keycard Elevator Doors",
+                  "Travertine Console Table",
+                  "Recessed Gallery Spotlights",
+                  "Smart Home Panel"
+                ]
+              },
+              {
+                "id": "sub_condo_skyline_salon",
+                "name": "Panoramic Skyline Salon & Wet Bar",
+                "privacy_level": "private",
+                "props": [
+                  "Floor-to-Ceiling Curtain Glass",
+                  "Italian Leather Lounge",
+                  "Backlit Onyx Wet Bar",
+                  "Turntable Hi-Fi Console"
+                ]
+              },
+              {
+                "id": "sub_condo_master_suite",
+                "name": "Corner Glass Master Suite",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "King Floating Bed",
+                  "Motorized Sheer Drapes",
+                  "Freestanding Soaking Tub",
+                  "Illuminated Wardrobe Wall"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -17198,6 +18929,64 @@
             "theme": "Anomalous Shifting Glass Mansion & Hall of Reflections",
             "features": "Interlocking glass partitions that shift angles, infinite duplicate reflections, floating crystal chandeliers",
             "sensory": "Crystal chime of vibrating glass panels, disorienting refraction of daylight, absence of footsteps on glass floors"
+          },
+          {
+            "id": "fac_sovereign_mansion",
+            "name": "Sovereign Hills Sky-Mansion",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Ultra-luxury glass-and-marble cliffside mansion crowning the highest ridge of Sovereign Hills",
+            "features": "Gated marble portico, double-height grand salon, heated cliffside infinity pool, penthouse master wing",
+            "sensory": "Cool veined Calacatta marble, gentle ripple of the heated infinity pool, sweeping silent metropolis vista",
+            "sub_locations": [
+              {
+                "id": "sub_mansion_portico",
+                "name": "Gated Marble Portico & Motorcourt",
+                "is_entrance": 1,
+                "props": [
+                  "Wrought-Iron Security Gates",
+                  "Calacatta Marble Columns",
+                  "Reflecting Water Basin",
+                  "Encrypted Palm Scanner"
+                ]
+              },
+              {
+                "id": "sub_mansion_grand_salon",
+                "name": "Double-Height Atrium & Cellar Bar",
+                "privacy_level": "private",
+                "props": [
+                  "Floating Cantilever Staircase",
+                  "Sunken Velvet Conversation Pit",
+                  "Climate-Controlled Wine Wall",
+                  "Sculptural Chandelier"
+                ]
+              },
+              {
+                "id": "sub_mansion_infinity_terrace",
+                "name": "Heated Cliffside Infinity Pool & Terrace",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Glass-Edge Infinity Pool",
+                  "Sunken Firepit Cabana",
+                  "Private Champagne Lounge",
+                  "Sweeping Metropolis Vista"
+                ]
+              },
+              {
+                "id": "sub_mansion_penthouse_suite",
+                "name": "Sovereign Penthouse Master Wing",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Custom California King Bed",
+                  "Boutique Walk-In Dressing Vault",
+                  "Rain-Spa Marble Ensuite",
+                  "Electrochromic Skyline Glass"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -17502,6 +19291,41 @@
             "theme": "Quarantined Biological Sewer Incursion Site",
             "features": "Pulsing organic tissue veins along concrete drain pipes, biohazard containment bulkheads, yellow misting nozzles",
             "sensory": "Wet thumping heartbeat cadence in the walls, sickening warm biological draft, acrid smell of copper and acid"
+          },
+          {
+            "id": "fac_tenement_flat",
+            "name": "Lower Wards Tenement Flat",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Reinforced iron-door studio safehouse tucked behind neon laundry lines in the Lower Wards",
+            "features": "Heavy steel deadbolt landing, frosted wire-glass window, compact off-the-books safehouse interior",
+            "sensory": "Click of a triple deadbolt, warm steam radiator, rain pattering against corrugated alley awnings",
+            "sub_locations": [
+              {
+                "id": "sub_tenement_landing",
+                "name": "Iron-Grate Corridor & Deadbolt Door",
+                "is_entrance": 1,
+                "props": [
+                  "Reinforced Steel Door",
+                  "Peephole & Chain",
+                  "Exposed Conduit Pipes",
+                  "Flickering Hallway Bulb"
+                ]
+              },
+              {
+                "id": "sub_tenement_studio",
+                "name": "Compact Safehouse Studio",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Fold-Out Cot & Mattress",
+                  "Heavy Footlocker",
+                  "Hotplate Counter",
+                  "Radiator Under Frosted Glass"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -18002,6 +19826,41 @@
             "theme": "Deep-Trench Spatial Anomaly in Empty Drydock Basin",
             "features": "Bottomless void opening in the concrete drydock floor, descending iron maintenance ladders, warning buoys",
             "sensory": "Deep oceanic pressure wave vibrating in the chest, smell of ancient abyssal silt, total silence swallowing noise"
+          },
+          {
+            "id": "fac_container_loft",
+            "name": "Harbor Container Loft",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Converted steel cargo container loft stacked overlooking the misty commercial harbor",
+            "features": "Galvanized exterior catwalk, keypad cargo hatch, insulated marine-steel living quarters",
+            "sensory": "Warm amber Edison bulbs against riveted steel, faint salt air, distant foghorns across the bay",
+            "sub_locations": [
+              {
+                "id": "sub_container_catwalk",
+                "name": "Galvanized Catwalk & Cargo Hatch",
+                "is_entrance": 1,
+                "props": [
+                  "Keypad Steel Hatch",
+                  "Galvanized Catwalk Rail",
+                  "Bulkhead Porch Lamp",
+                  "Harbor Crane View"
+                ]
+              },
+              {
+                "id": "sub_container_bunk",
+                "name": "Insulated Container Living Loft",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Built-In Captain's Bunk",
+                  "Riveted Steel Shelving",
+                  "Compact Galley Sink",
+                  "Porthole Storm Window"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -18036,7 +19895,8 @@
                   "Low Coffee Table",
                   "Wall Bookshelf",
                   "Warm Floor Lamp"
-                ]
+                ],
+                "privacy_level": "private"
               },
               {
                 "id": "sub_player_bedroom",
@@ -18046,12 +19906,17 @@
                   "Bedside Lamp & Nightstand",
                   "Wardrobe Closet",
                   "Window Curtains"
-                ]
+                ],
+                "privacy_level": "private",
+                "is_private_intimate": true
               }
             ],
             "theme": "Comfortable Suburban Two-Story Residence",
             "features": "Lawn garden path, cozy living room, hardwood staircase, private second-floor bedroom",
-            "sensory": "Warm familiar smell of home-cooked meals, ticking wall clock, soft morning sunlight through curtained windows"
+            "sensory": "Warm familiar smell of home-cooked meals, ticking wall clock, soft morning sunlight through curtained windows",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private"
           },
           {
             "id": "loc_local_park",
@@ -18282,6 +20147,52 @@
             "theme": "Abandoned Victorian Hill Manor",
             "features": "Boarded sash windows, overgrown ivy covering stone chimneys, warped oak front door, rusted wrought-iron fence",
             "sensory": "Cold draft filtering through cracked window panes, creak of warped timber floorboards, smell of mold and dry rot"
+          },
+          {
+            "id": "fac_suburbs_townhouse",
+            "name": "Maple-Lane Detached Townhouse",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Modern two-story brick-and-cedar detached townhouse along a quiet maple-lined suburban lane",
+            "features": "Gabled brick porch, sunlit open-plan lounge and kitchen island, quiet upstairs master bedroom",
+            "sensory": "Polished oak floorboards, afternoon sunlight through bay windows, rustling maple leaves outside",
+            "sub_locations": [
+              {
+                "id": "sub_townhouse_porch",
+                "name": "Gabled Brick Porch & Keypad",
+                "is_entrance": 1,
+                "props": [
+                  "Brick Stoop & Planters",
+                  "Smart Deadbolt Lock",
+                  "Parcel Dropbox",
+                  "Picket Garden Gate"
+                ]
+              },
+              {
+                "id": "sub_townhouse_lounge",
+                "name": "Sunlit Open-Plan Lounge & Kitchen",
+                "privacy_level": "private",
+                "props": [
+                  "Sectional Linen Sofa",
+                  "Quartz Breakfast Island",
+                  "Hardwood Bookcase",
+                  "Garden Patio Doors"
+                ]
+              },
+              {
+                "id": "sub_townhouse_bedroom",
+                "name": "Upstairs Master Bedroom",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Queen Oak Bedframe",
+                  "Walk-In Closet Alcove",
+                  "Warm Bedside Lamps",
+                  "Maple-Canopy Window"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -18320,7 +20231,7 @@
               },
               {
                 "id": "sub_school_library",
-                "name": "Quiet School Library & Study Stacks",
+                "name": "School Library & Study Stacks",
                 "props": [
                   "Tall Wooden Bookshelves",
                   "Quiet Reading Table",
@@ -18891,16 +20802,62 @@
             "theme": "Subterranean Tidal Sea Cave & Harmonic Grotto",
             "features": "Polished basalt sea cave walls, phosphorescent tidal pools, jagged stalagmites rising from foaming water",
             "sensory": "Harmonic, ethereal whistling as tidal surges push air through rock fissures, glowing blue bioluminescence"
+          },
+          {
+            "id": "fac_ocean_bungalow",
+            "name": "Seaside Cliff Bungalow",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Cedar-shingled coastal cliff bungalow with a private ocean-facing sundeck",
+            "features": "Bleached driftwood deck, breezy louvered sunroom, surf-view master bedroom above the tide",
+            "sensory": "Crisp salt breeze billowing linen curtains, warm cedar planking, rhythmic hush of breaking surf below",
+            "sub_locations": [
+              {
+                "id": "sub_bungalow_deck",
+                "name": "Driftwood Gate & Ocean Sundeck",
+                "is_entrance": 1,
+                "props": [
+                  "Bleached Cedar Deck",
+                  "Woven Rope Loungers",
+                  "Outdoor Rinse Shower",
+                  "Brass Keypad Latch"
+                ]
+              },
+              {
+                "id": "sub_bungalow_sunroom",
+                "name": "Breezy Coastal Sunroom",
+                "privacy_level": "private",
+                "props": [
+                  "Rattan Daybed & Throws",
+                  "Sea-Glass Coffee Table",
+                  "Sliding Louvered Doors",
+                  "Espresso & Wine Nook"
+                ]
+              },
+              {
+                "id": "sub_bungalow_bedroom",
+                "name": "Surf-View Master Bedroom",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Linen Canopy Bed",
+                  "Whitewashed Timber Beams",
+                  "Ceiling Paddle Fan",
+                  "Cliffside Horizon Window"
+                ]
+              }
+            ]
           }
         ]
       },
       {
         "id": "zone_woods_reserve",
-        "name": "Woods & Mountain Reserve",
+        "name": "Wilderness Forest Reserve",
         "is_hub": false,
-        "theme": "Dense pine wilderness and mountain lake reserve hiding ancient monoliths and spatial anomalies",
-        "features": "Cedar hiking trails, mirror-still mountain lake, forestry watchtowers, gravity-tilted monoliths, freestanding forest stairs.",
-        "sensory": "Crisp pine needles, woodsmoke, cold mountain wind, unnatural dead silence near anomalous clearings.",
+        "theme": "Uninhabited alpine pine wilderness, mirror-lake campgrounds, ranger outposts, and veiled forest anomalies",
+        "features": "Old-growth cedar hiking trails, mountain lake and rustic camp cabins, fire watchtower, forestry ranger station, liminal forest anomalies, and mist-veiled banyan groves.",
+        "sensory": "Crisp pine resin, woodsmoke over cold lake water, alpine wind, and sudden hushed mist near veiled clearings.",
         "primary_locations": [
           {
             "id": "loc_forest_trails",
@@ -19063,120 +21020,6 @@
             "sensory": "Smell of cedar wood sealant, low crackle of ranger dispatch radios, ticking wall barometer"
           },
           {
-            "id": "loc_eastern_temple",
-            "name": "Eastern Grand Temple & Sanctuary",
-            "sub_locations": [
-              {
-                "id": "loc_et_torii_approach",
-                "name": "Grand Torii Gate & Omikuji Talisman Stand",
-                "is_entrance": 1,
-                "props": [
-                  "Vermilion Torii Columns & Stone Lantern Steps",
-                  "Ablution Water Basin & Bamboo Ladles",
-                  "Talisman & Fortunes Stand",
-                  "Purification Salt Pyramids"
-                ]
-              },
-              {
-                "id": "loc_et_main_sanctuary",
-                "name": "Main Worship Hall & Incense Courtyard",
-                "props": [
-                  "Massive Bronze Incense Burner",
-                  "Gilded Shrine Offering Altar Table",
-                  "Tatami Prayer Mat Rows",
-                  "Polished Hinoki Wood Pillars"
-                ]
-              },
-              {
-                "id": "loc_et_five_story_pagoda",
-                "name": "Five-Story Pagoda & Sacred Reliquary",
-                "access_tier": "restricted",
-                "props": [
-                  "Carved Cedar Pagoda Entry Portico",
-                  "Ancient Relic Display Cases",
-                  "Gilded Bodhisattva Statuary",
-                  "Carved Lacquer Sutra Cabinet"
-                ]
-              },
-              {
-                "id": "loc_et_zen_tea_garden",
-                "name": "Zen Rock Garden & Bamboo Tea House",
-                "props": [
-                  "Woven Bamboo Privacy Screen",
-                  "Raked White Gravel Waves",
-                  "Moss-Covered Scholar Rocks",
-                  "Cold Stone Tea Brazier"
-                ]
-              },
-              {
-                "id": "loc_et_onsen_bathhouse",
-                "name": "Sacred Mountain Hot Springs & Onsen Bathhouse",
-                "props": [
-                  "Indigo Noren Curtain Lobby & Wooden Lockers",
-                  "Steaming Hinoki Cypress Indoor Mineral Bath",
-                  "Open-Air Maple & Stone Rotenburo Pool",
-                  "Chilled Glass Milk Bottle Cooler"
-                ]
-              },
-              {
-                "id": "loc_et_weeping_statues",
-                "name": "The Hall of Ten Thousand Weeping Statues Anomaly",
-                "is_anomalous": true,
-                "props": [
-                  "Sacred Shimenawa Rope & Paper-Seal Boundary",
-                  "Carved Jizo Statues with Wet Tear Tracks",
-                  "Crumbling Stone Offering Lanterns",
-                  "Dank Camphor Leaf Carpet"
-                ]
-              },
-              {
-                "id": "loc_et_fox_torii_tunnel",
-                "name": "The Twilight Fox-Spirit Torii Tunnel Anomaly",
-                "is_anomalous": true,
-                "props": [
-                  "Mossy Stone Fox-Guardian Statues",
-                  "Non-Euclidean Vermilion Torii Corridor",
-                  "Dusk-Lit Foxfire Mirage Clearing",
-                  "Offered Fried Tofu & Sake Dish"
-                ]
-              },
-              {
-                "id": "sub_et_sealed_reliquary_vault",
-                "name": "Sealed Reliquary & Talismans Vault",
-                "privacy_level": "private",
-                "is_discreet": true,
-                "is_enclosed": 1,
-                "access_tier": "private",
-                "is_locked": true,
-                "parent_sub_id": "loc_et_five_story_pagoda",
-                "props": [
-                  "Gold-Leaf Warded Relic Chest",
-                  "Consecrated Silk Talisman Scrolls",
-                  "Bronze Exorcism Dagger Stand",
-                  "Smoldering Sandalwood Censer"
-                ]
-              },
-              {
-                "id": "sub_et_abbot_audience_chamber",
-                "name": "Abbot Audience Chamber",
-                "privacy_level": "private",
-                "is_discreet": true,
-                "is_enclosed": 1,
-                "access_tier": "private",
-                "parent_sub_id": "loc_et_main_sanctuary",
-                "props": [
-                  "Woven Igusa Tatami Platform",
-                  "Calligraphy Silk Wall Hanging",
-                  "Low Lacquered Cedar Tea Table",
-                  "Heavy Silk Shoji Partition Screen"
-                ]
-              }
-            ],
-            "theme": "Historic Mountain Buddhist Temple & Serene Sanctuary",
-            "features": "Ancient cypress timber beams, bronze incense cauldrons, weathered stone lanterns, woven talisman cords",
-            "sensory": "Drifting cedar incense smoke, gentle rustle of bamboo leaves, deep resonance of bronze temple bells"
-          },
-          {
             "id": "loc_crooked_monolith",
             "name": "The Crooked Monolith Clearing Anomaly",
             "sub_locations": [
@@ -19255,6 +21098,488 @@
             "theme": "Free-Standing Wooden Staircase in the Woods Anomaly",
             "features": "A pristine wooden flight of stairs rising into empty air with no walls or building attached, surrounded by ferns",
             "sensory": "Unsettling unnatural quiet, hair standing on end, subtle distortion of birdsong near the steps"
+          },
+          {
+            "id": "loc_hidden_bunian_village",
+            "name": "Mist-Veiled Banyan & Bamboo Glade",
+            "theme": "Primeval mist-draped banyan clearing hiding the veiled Nusantara elven realm of Kampung Kayangan Bunian",
+            "features": "Curtains of aerial banyan roots, wild white cempaka blossoms, bamboo wind-chimes, and a shimmering golden veil parting into royal Nusantara pavilions",
+            "sensory": "Sweet night-blooming cempaka fragrance, cool silver forest mist, distant serunai flute notes, timeless hush",
+            "veil_village_key": "bunian",
+            "veil_token_item": "Cempaka Brass Serunai",
+            "sub_locations": [
+              {
+                "id": "loc_bunian_threshold_glade",
+                "name": "Mist-Veiled Banyan & Bamboo Glade",
+                "is_entrance": 1,
+                "is_enclosed": 0,
+                "props": [
+                  "Curtain of Ancient Aerial Banyan Roots",
+                  "Wild White Cempaka Blossom Ring",
+                  "Moss-Carved Boundary Waystone",
+                  "Drifting Silver Bamboo Mist"
+                ]
+              },
+              {
+                "id": "sub_bunian_inner_plaza",
+                "name": "Laman Seri Cempaka Plaza",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 0,
+                "veil_village_key": "bunian",
+                "veil_token_item": "Cempaka Brass Serunai",
+                "props": [
+                  "Luminous Cempaka & Jasmine Courtyard",
+                  "Carved Ironwood Wakaf Gazebo",
+                  "Gilded Brass Gamelan & Serunai Stand",
+                  "Crystal Spring Stepping Stones"
+                ]
+              },
+              {
+                "id": "sub_bunian_royal_istana",
+                "name": "Balairung & Puteri's Songket Pavilion",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 1,
+                "privacy_level": "private",
+                "access_tier": "private",
+                "is_private_intimate": true,
+                "veil_village_key": "bunian",
+                "veil_token_item": "Cempaka Brass Serunai",
+                "props": [
+                  "Gold-Brocaded Songket Daybed & Silk Canopies",
+                  "Carved Meranti Royal Balairung Pillars",
+                  "Fragrant Bunga Rampai & Silver Ewer",
+                  "Moonlit Veranda Overlooking Veiled Canopy"
+                ]
+              },
+              {
+                "id": "sub_bunian_pusaka_hall",
+                "name": "Empu's Pusaka Artisan Hall",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 1,
+                "veil_village_key": "bunian",
+                "veil_token_item": "Cempaka Brass Serunai",
+                "props": [
+                  "Meteoric-Iron Keris Display Rack",
+                  "Golden-Thread Songket Handloom",
+                  "Brass Incense & Benzoin Kemeyan Brazier",
+                  "Velvet-Lined Pusaka Relic Chests"
+                ]
+              },
+              {
+                "id": "sub_bunian_orchid_spring",
+                "name": "Moonlit Cempaka Bathing Spring & Spirit Arch",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 0,
+                "privacy_level": "semi_private",
+                "is_discreet": true,
+                "veil_village_key": "bunian",
+                "veil_token_item": "Cempaka Brass Serunai",
+                "props": [
+                  "Warm Moonlit Mineral Spring Basin",
+                  "Luminous Leyline Spirit Archway",
+                  "Floating White Cempaka & Orchid Petals",
+                  "Carved Alabaster Dressing Alcove"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "zone_eastern_sanctuary",
+        "name": "Sacred Mountain Sanctuary & Onsen Quarter",
+        "is_hub": true,
+        "theme": "Consecrated mountain temple precinct, lantern-lit tea streets, steaming hot-spring villas, and ancient fox-shrine torii approaches",
+        "features": "Vermilion torii gates, five-story pagoda, stone-lantern pilgrimage tea street, bamboo footbath bridge, monastic cloister quarters, hinoki onsen villas.",
+        "sensory": "Drifting sandalwood and cedar incense, echoing bronze temple bells, rising mineral onsen steam, soft clatter of footsteps on lantern-lit stone.",
+        "primary_locations": [
+          {
+            "id": "loc_eastern_temple",
+            "name": "Eastern Grand Temple & Sanctuary",
+            "sub_locations": [
+              {
+                "id": "loc_et_torii_approach",
+                "name": "Grand Torii Gate & Omikuji Talisman Stand",
+                "is_entrance": 1,
+                "props": [
+                  "Vermilion Torii Columns & Stone Lantern Steps",
+                  "Ablution Water Basin & Bamboo Ladles",
+                  "Talisman & Fortunes Stand",
+                  "Purification Salt Pyramids"
+                ]
+              },
+              {
+                "id": "loc_et_main_sanctuary",
+                "name": "Main Worship Hall & Incense Courtyard",
+                "props": [
+                  "Massive Bronze Incense Burner",
+                  "Gilded Shrine Offering Altar Table",
+                  "Tatami Prayer Mat Rows",
+                  "Polished Hinoki Wood Pillars"
+                ]
+              },
+              {
+                "id": "loc_et_five_story_pagoda",
+                "name": "Five-Story Pagoda & Sacred Reliquary",
+                "access_tier": "restricted",
+                "props": [
+                  "Carved Cedar Pagoda Entry Portico",
+                  "Ancient Relic Display Cases",
+                  "Gilded Bodhisattva Statuary",
+                  "Carved Lacquer Sutra Cabinet"
+                ]
+              },
+              {
+                "id": "loc_et_zen_tea_garden",
+                "name": "Zen Rock Garden & Bamboo Tea House",
+                "props": [
+                  "Woven Bamboo Privacy Screen",
+                  "Raked White Gravel Waves",
+                  "Moss-Covered Scholar Rocks",
+                  "Cold Stone Tea Brazier"
+                ]
+              },
+              {
+                "id": "loc_et_onsen_bathhouse",
+                "name": "Sacred Mountain Hot Springs & Onsen Bathhouse",
+                "props": [
+                  "Indigo Noren Curtain Lobby & Wooden Lockers",
+                  "Steaming Hinoki Cypress Indoor Mineral Bath",
+                  "Open-Air Maple & Stone Rotenburo Pool",
+                  "Chilled Glass Milk Bottle Cooler"
+                ]
+              },
+              {
+                "id": "loc_et_weeping_statues",
+                "name": "The Hall of Ten Thousand Weeping Statues Anomaly",
+                "is_anomalous": true,
+                "props": [
+                  "Sacred Shimenawa Rope & Paper-Seal Boundary",
+                  "Carved Jizo Statues with Wet Tear Tracks",
+                  "Crumbling Stone Offering Lanterns",
+                  "Dank Camphor Leaf Carpet"
+                ]
+              },
+              {
+                "id": "sub_et_sealed_reliquary_vault",
+                "name": "Sealed Reliquary & Talismans Vault",
+                "privacy_level": "private",
+                "is_discreet": true,
+                "is_enclosed": 1,
+                "access_tier": "private",
+                "is_locked": true,
+                "parent_sub_id": "loc_et_five_story_pagoda",
+                "props": [
+                  "Gold-Leaf Warded Relic Chest",
+                  "Consecrated Silk Talisman Scrolls",
+                  "Bronze Exorcism Dagger Stand",
+                  "Smoldering Sandalwood Censer"
+                ]
+              },
+              {
+                "id": "sub_et_abbot_audience_chamber",
+                "name": "Abbot Audience Chamber",
+                "privacy_level": "private",
+                "is_discreet": true,
+                "is_enclosed": 1,
+                "access_tier": "private",
+                "parent_sub_id": "loc_et_main_sanctuary",
+                "props": [
+                  "Woven Igusa Tatami Platform",
+                  "Calligraphy Silk Wall Hanging",
+                  "Low Lacquered Cedar Tea Table",
+                  "Heavy Silk Shoji Partition Screen"
+                ]
+              }
+            ],
+            "theme": "Historic Mountain Buddhist Temple & Serene Sanctuary",
+            "features": "Ancient cypress timber beams, bronze incense cauldrons, weathered stone lanterns, woven talisman cords",
+            "sensory": "Drifting cedar incense smoke, gentle rustle of bamboo leaves, deep resonance of bronze temple bells"
+          },
+          {
+            "id": "loc_es_lantern_tea_street",
+            "name": "Stone-Lantern Pilgrimage & Tea Street",
+            "theme": "Stepped mountain pilgrimage lane lined with warm paper lanterns, traditional wagashi tea houses, and cedar craft stalls",
+            "features": "Flagstone shrine steps, rows of mossy ishidoro stone lanterns, red-umbrella tea verandas, roasted sweet-rice stalls",
+            "sensory": "Aroma of roasted hojicha tea and sweet soy glaze, warm amber lantern glow, clatter of wooden geta on stone steps",
+            "sub_locations": [
+              {
+                "id": "sub_es_lantern_steps",
+                "name": "Mossy Stone-Lantern Pilgrimage Steps",
+                "is_entrance": 1,
+                "is_enclosed": 0,
+                "props": [
+                  "Rows of Lit Ishidoro Stone Lanterns",
+                  "Worn Flagstone Mountain Steps",
+                  "Crimson Pilgrimage Banners",
+                  "Bamboo Wayside Water Spout"
+                ]
+              },
+              {
+                "id": "sub_es_matcha_teahouse",
+                "name": "Hinoki Matcha & Wagashi Tea House",
+                "is_enclosed": 1,
+                "props": [
+                  "Red-Felt Engawa Seating Benches",
+                  "Cast-Iron Matcha Kettle & Whisk Set",
+                  "Lacquer Tray of Seasonal Wagashi",
+                  "Shoji Window Overlooking Cedar Valley"
+                ]
+              },
+              {
+                "id": "sub_es_ema_terrace",
+                "name": "Votive Ema Plaque & Bell Terrace",
+                "is_enclosed": 0,
+                "props": [
+                  "Wooden Racks of Painted Fox & Crane Ema",
+                  "Bronze Wishing Bell & Braided Rope",
+                  "Panoramic Sanctuary Valley Rail",
+                  "Incense Ash Brazier"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "loc_es_bamboo_footbath_bridge",
+            "name": "Bamboo Footbath & Vermilion Bridge",
+            "theme": "Scenic mountain gorge spanned by a lacquered vermilion arch bridge beside public steaming mineral ashiyu footbaths",
+            "features": "Arched vermilion timber bridge, bamboo grove walkways, steaming stone footbath channels, maple viewing pavilion",
+            "sensory": "Rushing mountain gorge water, soothing mineral steam, rustling towering bamboo culms, cool alpine mist",
+            "sub_locations": [
+              {
+                "id": "sub_es_vermilion_bridge",
+                "name": "Vermilion Gorge Arch Bridge",
+                "is_entrance": 1,
+                "is_enclosed": 0,
+                "props": [
+                  "Lacquered Vermilion Bridge Railings",
+                  "Bronze Giboshi Finial Posts",
+                  "Misty Waterfall Gorge View",
+                  "Drifting Mountain Maple Leaves"
+                ]
+              },
+              {
+                "id": "sub_es_ashiyu_footbath",
+                "name": "Steaming Mineral Ashiyu Footbath Pavilion",
+                "is_enclosed": 0,
+                "props": [
+                  "Warm Cypress-Trimmed Footbath Trough",
+                  "Stack of Folded Indigo Hand Towels",
+                  "Bamboo Hot-Spring Spout",
+                  "Lantern-Lit Timber Canopy"
+                ]
+              },
+              {
+                "id": "sub_es_bamboo_walk",
+                "name": "Whispering Bamboo Lantern Path",
+                "is_enclosed": 0,
+                "privacy_level": "semi_private",
+                "is_discreet": true,
+                "props": [
+                  "Towering Emerald Bamboo Stalks",
+                  "Low Ground Paper Lanterns",
+                  "Secluded Moss-Stone Bench",
+                  "Woven Bamboo Fence"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "loc_hidden_kitsune_village",
+            "name": "Thousand-Torii Fox Shrine Approach",
+            "theme": "Endless vermilion torii shrine corridor hiding the starlit Kitsune spirit enclave of Sato-no-Inari behind a foxfire veil",
+            "features": "Hundreds of vermilion torii gates, stone Myōbu fox statues, floating blue kitsunebi lanterns, hinoki spirit pavilions",
+            "sensory": "Resonant chime of brass suzu bells, warm scent of fried tofu and hinoki wood, flickering azure foxfire in perpetual twilight mist",
+            "veil_village_key": "kitsune",
+            "veil_token_item": "Fox-Fire Brass Suzu Bell",
+            "sub_locations": [
+              {
+                "id": "loc_et_fox_torii_tunnel",
+                "name": "Thousand-Torii Fox Shrine Approach",
+                "is_entrance": 1,
+                "is_enclosed": 0,
+                "is_anomalous": true,
+                "props": [
+                  "Mossy Stone Fox-Guardian Statues",
+                  "Vermilion Torii Tunnel Corridor",
+                  "Dusk-Lit Foxfire Mirage Threshold",
+                  "Offered Fried Tofu & Sake Altar"
+                ]
+              },
+              {
+                "id": "sub_kitsune_inner_plaza",
+                "name": "Starlit Fox-Fire Lantern Plaza",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 0,
+                "veil_village_key": "kitsune",
+                "veil_token_item": "Fox-Fire Brass Suzu Bell",
+                "props": [
+                  "Floating Azure Kitsunebi Lanterns",
+                  "Arched White-Stone Spirit Bridge",
+                  "Carved Nine-Tail Inari Fountain",
+                  "Festive Paper-Mask & Sweet Stalls"
+                ]
+              },
+              {
+                "id": "sub_kitsune_sovereign_pavilion",
+                "name": "Nine-Tail Sovereign's Hinoki Pavilion",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 1,
+                "privacy_level": "private",
+                "access_tier": "private",
+                "is_private_intimate": true,
+                "veil_village_key": "kitsune",
+                "veil_token_item": "Fox-Fire Brass Suzu Bell",
+                "props": [
+                  "Gold-Leaf Foxfire Byobu Folding Screens",
+                  "Plush Crimson-Silk Shikibuton & Cushions",
+                  "Sunken Hinoki Incense & Sake Hearth",
+                  "Private Moon-Viewing Engawa"
+                ]
+              },
+              {
+                "id": "sub_kitsune_spirit_apothecary",
+                "name": "Myōbu Spirit-Fire Curio & Apothecary",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 1,
+                "veil_village_key": "kitsune",
+                "veil_token_item": "Fox-Fire Brass Suzu Bell",
+                "props": [
+                  "Shelves of Bottled Starlight & Foxfire Elixirs",
+                  "Brass Suzu Bell & Talisman Counter",
+                  "Lacquered Shrine Haori & Relic Rack",
+                  "Simmering Herbal Spirit Cauldron"
+                ]
+              },
+              {
+                "id": "sub_kitsune_leyline_shrine",
+                "name": "Celestial Inari Sanctum & Spirit Arch",
+                "is_hidden": true,
+                "discovered": false,
+                "is_enclosed": 0,
+                "privacy_level": "semi_private",
+                "is_discreet": true,
+                "veil_village_key": "kitsune",
+                "veil_token_item": "Fox-Fire Brass Suzu Bell",
+                "props": [
+                  "Ancient White-Bark Sacred Shinboku Tree",
+                  "Luminous Leyline Spirit Torii Arch",
+                  "Braided Gold-and-Hemp Shimenawa Rope",
+                  "Mirror-Still Starlight Divination Basin"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "fac_temple_residence",
+            "name": "Outer Cloister Initiate Quarters",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Consecrated cedar-and-shoji residential cloister nestled within the mountain temple grounds",
+            "features": "Raked gravel courtyard, polished cedar engawa veranda, serene tatami sleeping cells warded by paper talismans",
+            "sensory": "Faint sandalwood and aged cedar, soft rustle of mountain bamboo, distant bronze bell echoes at dusk",
+            "sub_locations": [
+              {
+                "id": "sub_temple_res_courtyard",
+                "name": "Cloister Stepping-Stone Courtyard",
+                "is_entrance": 1,
+                "props": [
+                  "Stone Washbasin Tsukubai",
+                  "Paper-Lantern Eaves",
+                  "Wooden Getabako Rack",
+                  "Raked Gravel Path"
+                ]
+              },
+              {
+                "id": "sub_temple_res_veranda",
+                "name": "Engawa Cedar Veranda & Tea Hearth",
+                "privacy_level": "semi_private",
+                "props": [
+                  "Polished Cedar Engawa",
+                  "Cast-Iron Tetsubin Kettle",
+                  "Hanging Wind Chime",
+                  "Bamboo Courtyard View"
+                ]
+              },
+              {
+                "id": "sub_temple_res_cell",
+                "name": "Private Initiate Cell",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Woven Tatami Mats",
+                  "Folded Shikibuton Bedding",
+                  "Low Calligraphy Desk",
+                  "Sliding Shoji Screens"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "fac_onsen_villa",
+            "name": "Cypress Mountain Onsen Villa",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Secluded luxury hinoki-wood mountain estate with a private steaming mineral hot-spring bath",
+            "features": "Moss-stone gatehouse, sunken irori hearth hall, open-air rotenburo bath, master ryokan tatami suite",
+            "sensory": "Fragrant hinoki cypress timber, rising mineral spring steam, rhythmic bamboo water-clacker in mountain hush",
+            "sub_locations": [
+              {
+                "id": "sub_villa_gatehouse",
+                "name": "Hinoki Gatehouse & Moss Courtyard",
+                "is_entrance": 1,
+                "props": [
+                  "Tiled Hinoki Gate",
+                  "Bamboo Shishi-Odoshi",
+                  "Stone Lantern Path",
+                  "Discreet Biometric Latch"
+                ]
+              },
+              {
+                "id": "sub_villa_hearth_hall",
+                "name": "Sunken Irori Hearth & Tea Hall",
+                "privacy_level": "private",
+                "props": [
+                  "Sunken Charcoal Hearth",
+                  "Zaisu Backrest Cushions",
+                  "Panoramic Ravine Glass",
+                  "Antique Tansu Chest"
+                ]
+              },
+              {
+                "id": "sub_villa_hotspring_bath",
+                "name": "Private Open-Air Rotenburo Onsen",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Steaming Cedar & Basalt Bath",
+                  "Mineral Spring Spout",
+                  "Bamboo Privacy Fence",
+                  "Warmed Towel Baskets"
+                ]
+              },
+              {
+                "id": "sub_villa_tatami_suite",
+                "name": "Master Ryokan Tatami Suite",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Plush Double Futon",
+                  "Gold-Leaf Byobu Screen",
+                  "Cedar Alcove Tokonoma",
+                  "Moon-Viewing Engawa"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -20005,6 +22330,52 @@
             "theme": "Quarantined Cursed Antique Pawnshop Vault Anomaly",
             "features": "Heavy iron security safe, glass vitrine holding pulsating crimson jade relics, protective yellow talisman strips",
             "sensory": "Sinister crimson glow reflecting in the shadows, subtle warmth radiating from the jade, faint heartbeat rhythm"
+          },
+          {
+            "id": "fac_shophouse_loft",
+            "name": "Lantern-Alley Shophouse Loft",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Atmospheric timber-and-lattice upper residence perched above the Old Quarter's silk-lantern alleys",
+            "features": "Lacquered side stairway, carved rosewood tea parlor with shuttered balcony, canopied loft bedroom",
+            "sensory": "Faint jasmine tea steam, warm crimson lantern glow through lattice shutters, polished camphorwood",
+            "sub_locations": [
+              {
+                "id": "sub_shophouse_vestibule",
+                "name": "Carved Side-Alley Stairway",
+                "is_entrance": 1,
+                "props": [
+                  "Lacquered Lattice Door",
+                  "Silk Crimson Lanterns",
+                  "Brass Mail Slot",
+                  "Steep Timber Stair"
+                ]
+              },
+              {
+                "id": "sub_shophouse_tea_parlor",
+                "name": "Rosewood Tea Parlor & Balcony",
+                "privacy_level": "private",
+                "props": [
+                  "Carved Rosewood Tea Table",
+                  "Embroidered Floor Cushions",
+                  "Porcelain Tea Service",
+                  "Shuttered Alley Balcony"
+                ]
+              },
+              {
+                "id": "sub_shophouse_bedroom",
+                "name": "Canopied Loft Bedroom",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Timber Four-Poster Bed",
+                  "Camphorwood Wardrobe",
+                  "Warm Silk Sconces",
+                  "Painted Folding Screen"
+                ]
+              }
+            ]
           }
         ]
       },
@@ -20255,6 +22626,41 @@
             "theme": "Deep Fault-Line Subterranean Monolith Vault",
             "features": "Chasm opening into planetary bedrock, hovering pitch-black obsidian monolith, heavy geological monitoring rigs",
             "sensory": "Deep infrasonic hum that vibrates through teeth and bone, static electricity making hair float, profound abyssal chill"
+          },
+          {
+            "id": "fac_vault_safehouse",
+            "name": "Subterranean Vault Safehouse",
+            "category": "residential",
+            "access_tier": "private",
+            "privacy_level": "private",
+            "theme": "Decommissioned civil-defense utility vault retrofitted into a shielded subterranean safehouse",
+            "features": "Spoked blast bulkhead door, copper-mesh Faraday lining, geothermal air circulation",
+            "sensory": "Sealed acoustic stillness, gentle warmth from geothermal conduits, amber cage lights on dry masonry",
+            "sub_locations": [
+              {
+                "id": "sub_vault_airlock",
+                "name": "Decommissioned Blast Bulkhead",
+                "is_entrance": 1,
+                "props": [
+                  "Spoked Vault Wheel Door",
+                  "Recessed Biometric Pad",
+                  "Amber Bulkhead Light",
+                  "Geothermal Pipe Niche"
+                ]
+              },
+              {
+                "id": "sub_vault_bunker",
+                "name": "Faraday Living Quarters",
+                "privacy_level": "private",
+                "is_private_intimate": true,
+                "props": [
+                  "Reinforced Bunk Alcove",
+                  "Copper-Mesh Wall Lining",
+                  "Filtered Water Dispenser",
+                  "Steel Gear Workbench"
+                ]
+              }
+            ]
           }
         ]
       }

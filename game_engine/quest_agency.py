@@ -7,9 +7,11 @@ import db
 import skill_check
 from game_engine.quest_lifecycle import (
     complete_remediation_bounty_if_linked,
+    evaluate_skipped_threatened_optionals,
     resolve_chapter_transition,
     sanitize_dossier_prose,
 )
+from mechanics.narrative.campaign_spine import update_campaign_ending_axes
 from mechanics.narrative.clues import evaluate_clue_deduction
 from mechanics.narrative.quest_engines import render_world_scar_spec
 from mechanics.world.locations.access_gate import get_node_effective_access_info
@@ -53,7 +55,9 @@ def resolve_caseboard_deduction(
                 from mechanics.world.anomalous_events import reveal_anomaly_dossier
                 bp_rec = parse_blueprint_from_notes(str(q_rec.get("quest_notes") or ""))
                 uids_rec = db.get_session_participant_user_ids(session_id) or ([int(user_id)] if user_id else [])
-                if bp_rec and bp_rec.get("codex_id") and db.user_has_folklore_recognition(uids_rec, str(bp_rec["codex_id"])):
+                if bp_rec and bp_rec.get("codex_id") and db.user_has_folklore_recognition(
+                    uids_rec, str(bp_rec["codex_id"]), session_id=session_id
+                ):
                     dos_rec = db.get_quest_dossier(session_id, qid_rec)
                     cg_rec = list((dos_rec or {}).get("clue_graph") or [])
                     is_rh = any(
@@ -73,6 +77,12 @@ def resolve_caseboard_deduction(
                             if climax_r != prev_c:
                                 db.append_dossier_state_event(session_id, qid_rec, eff_t, "climax_spec", prev_c, climax_r)
                             db.upsert_quest_dossier(session_id, qid_rec, climax_spec=climax_r, engaged_flag=1)
+                        unlocked_opts_r = []
+                        try:
+                            from game_engine.quest_turn_resolver import unlock_hidden_quest_optional
+                            unlocked_opts_r = unlock_hidden_quest_optional(session_id, quest_id=qid_rec, trigger_source="clue_found")
+                        except Exception:
+                            pass
                         cur_ch_r = int(db.get_session_chapter(session_id) or 1)
                         title_r = f"Folklore Recognition: {canon_nm}"
                         detail_r = f"Prior Codex knowledge immediately identified {canon_nm}'s signature from a single field clue!"
@@ -90,6 +100,7 @@ def resolve_caseboard_deduction(
                             "title": title_r,
                             "detail_text": detail_r,
                             "climax_unlocked": True,
+                            "unlocked_optionals": unlocked_opts_r,
                             "xp_awarded": 50,
                         }
             except Exception:
@@ -181,6 +192,12 @@ def resolve_caseboard_deduction(
                 if twist != prev_twist:
                     db.append_dossier_state_event(session_id, qid, eff_turn, "twist_spec", prev_twist, twist)
                 db.upsert_quest_dossier(session_id, qid, climax_spec=climax, twist_spec=twist, engaged_flag=1)
+                unlocked_opts = []
+                try:
+                    from game_engine.quest_turn_resolver import unlock_hidden_quest_optional
+                    unlocked_opts = unlock_hidden_quest_optional(session_id, quest_id=qid, trigger_source="clue_found", turn_number=eff_turn)
+                except Exception:
+                    pass
                 q_chk_anom = db.get_quest_by_id(session_id, qid) or {}
                 if "anomaly_bp:" in str(q_chk_anom.get("quest_notes") or "") or "anomaly_blueprint:" in str(q_chk_anom.get("quest_notes") or ""):
                     try:
@@ -212,6 +229,7 @@ def resolve_caseboard_deduction(
                     "detail_text": conclusion,
                     "climax_unlocked": bool(climax.get("is_unlocked")),
                     "twist_revealed": bool(twist.get("is_discovered")),
+                    "unlocked_optionals": unlocked_opts,
                     "xp_awarded": 50,
                 }
 
@@ -426,13 +444,20 @@ def resolve_quest_turn_in_or_betrayal(
         net_gold = max(0, base_gold - adv_paid)
         try:
             from scenario_data import is_anomalous_incursions_scenario
-            if is_anomalous_incursions_scenario(session.get("scenario", "")):
-                from mechanics.world.anomaly_engine import record_anomalous_quest_containment_and_taxpayer
-                res_tax = record_anomalous_quest_containment_and_taxpayer(session_id, q, int(user_id), party_user_ids=uids)
+            if is_anomalous_incursions_scenario(str(sess.get("scenario") or "")):
+                res_tax = db.persist_anomalous_quest_containment(session_id, q, int(user_id), party_user_ids=uids)
                 if res_tax.get("confiscate_gold"):
                     net_gold = 0
         except Exception:
             pass
+        prev_climax = dict(climax)
+        if climax.get("main_stages"):
+            m_stages = [dict(ms) for ms in (climax.get("main_stages") or [])]
+            for ms in m_stages:
+                ms["status"] = "completed"
+                ms["completed"] = True
+            climax["main_stages"] = m_stages
+            climax["completed"] = True
         with db.get_conn() as conn:
             conn.execute("UPDATE quests SET status='Completed', reward_claimed=1, updated_at=? WHERE session_id=? AND quest_id=?", (time.time(), session_id, quest_id))
         for uid in uids:
@@ -440,10 +465,16 @@ def resolve_quest_turn_in_or_betrayal(
             db.add_xp(int(uid), base_xp)
         if t_item != prev_item:
             db.append_dossier_state_event(session_id, quest_id, eff_turn, "tangible_item", prev_item, t_item)
+        if climax != prev_climax:
+            db.append_dossier_state_event(session_id, quest_id, eff_turn, "climax_spec", prev_climax, climax)
         db.append_dossier_state_event(session_id, quest_id, eff_turn, "quest_status", prev_status, "Completed")
         db.append_dossier_state_event(session_id, quest_id, eff_turn, "outcome_tier", prev_tier, "clean_success")
-        db.upsert_quest_dossier(session_id, quest_id, tangible_item=t_item, outcome_tier="clean_success")
+        saved_del = db.upsert_quest_dossier(session_id, quest_id, climax_spec=climax, tangible_item=t_item, outcome_tier="clean_success")
+        if climax.get("main_stages") or any(l.get("is_optional") for l in (dossier.get("leads_graph") or [])):
+            db.sync_quest_projection_from_dossier(session_id, quest_id, dossier=saved_del)
         lifted_scars = complete_remediation_bounty_if_linked(session_id, quest_id, turn_number=eff_turn)
+        if not q.get("is_story_quest"):
+            evaluate_skipped_threatened_optionals(session_id, quest_id, dossier=saved_del, turn_number=eff_turn)
         ch_res = resolve_chapter_transition(session_id, q, status="Completed", party_user_ids=uids) if q.get("is_story_quest") else None
         return {
             "success": True,
@@ -467,9 +498,8 @@ def resolve_quest_turn_in_or_betrayal(
         payout = max(0, int(round(base_gold * 1.25)) - adv_paid)
         try:
             from scenario_data import is_anomalous_incursions_scenario
-            if is_anomalous_incursions_scenario(session.get("scenario", "")):
-                from mechanics.world.anomaly_engine import record_anomalous_quest_containment_and_taxpayer
-                res_tax = record_anomalous_quest_containment_and_taxpayer(session_id, q, int(user_id), party_user_ids=uids)
+            if is_anomalous_incursions_scenario(str(sess.get("scenario") or "")):
+                res_tax = db.persist_anomalous_quest_containment(session_id, q, int(user_id), party_user_ids=uids)
                 if res_tax.get("confiscate_gold"):
                     payout = 0
         except Exception:
@@ -485,12 +515,30 @@ def resolve_quest_turn_in_or_betrayal(
                 db.update_relationship_score(session_id, client_npc, delta_score=-15)
             except Exception:
                 pass
+        prev_climax_sw = dict(climax)
+        if climax.get("main_stages"):
+            m_stages_sw = [dict(ms) for ms in (climax.get("main_stages") or [])]
+            for ms in m_stages_sw:
+                ms["status"] = "completed"
+                ms["completed"] = True
+            climax["main_stages"] = m_stages_sw
+            climax["completed"] = True
         if t_item != prev_item:
             db.append_dossier_state_event(session_id, quest_id, eff_turn, "tangible_item", prev_item, t_item)
+        if climax != prev_climax_sw:
+            db.append_dossier_state_event(session_id, quest_id, eff_turn, "climax_spec", prev_climax_sw, climax)
         db.append_dossier_state_event(session_id, quest_id, eff_turn, "twist_spec", prev_twist, twist)
         db.append_dossier_state_event(session_id, quest_id, eff_turn, "quest_status", prev_status, "Completed")
         db.append_dossier_state_event(session_id, quest_id, eff_turn, "outcome_tier", prev_tier, "twist_resolution")
-        db.upsert_quest_dossier(session_id, quest_id, twist_spec=twist, tangible_item=t_item, outcome_tier="twist_resolution")
+        saved_sw = db.upsert_quest_dossier(session_id, quest_id, climax_spec=climax, twist_spec=twist, tangible_item=t_item, outcome_tier="twist_resolution")
+        if climax.get("main_stages") or any(l.get("is_optional") for l in (dossier.get("leads_graph") or [])):
+            db.sync_quest_projection_from_dossier(session_id, quest_id, dossier=saved_sw)
+        ch_res_sw = None
+        if not q.get("is_story_quest"):
+            evaluate_skipped_threatened_optionals(session_id, quest_id, dossier=saved_sw, turn_number=eff_turn)
+        else:
+            update_campaign_ending_axes(session_id, turn_number=eff_turn, faction_pillar="reform", truth_stance="exposed")
+            ch_res_sw = resolve_chapter_transition(session_id, q, status="Completed", party_user_ids=uids)
         return {
             "success": True,
             "disposition": "side_switch",
@@ -498,6 +546,7 @@ def resolve_quest_turn_in_or_betrayal(
             "outcome_tier": "twist_resolution",
             "gold_awarded": payout,
             "xp_awarded": xp_out,
+            "chapter_transition": ch_res_sw,
         }
 
     if disp == "blackmail_client":
@@ -509,14 +558,32 @@ def resolve_quest_turn_in_or_betrayal(
         if chk.succeeded:
             hush_gold = max(0, int(round(base_gold * float(twist.get("blackmail_multiplier") or 2.0))) - adv_paid)
             twist["hush_money_claimed"] = True
+            prev_climax_bm = dict(climax)
+            if climax.get("main_stages"):
+                m_stages_bm = [dict(ms) for ms in (climax.get("main_stages") or [])]
+                for ms in m_stages_bm:
+                    ms["status"] = "completed"
+                    ms["completed"] = True
+                climax["main_stages"] = m_stages_bm
+                climax["completed"] = True
             with db.get_conn() as conn:
                 conn.execute("UPDATE quests SET status='Completed', reward_claimed=1, updated_at=? WHERE session_id=? AND quest_id=?", (time.time(), session_id, quest_id))
             db.apply_hp_mp_delta(int(user_id), gold_delta=hush_gold)
             db.add_xp(int(user_id), base_xp)
+            if climax != prev_climax_bm:
+                db.append_dossier_state_event(session_id, quest_id, eff_turn, "climax_spec", prev_climax_bm, climax)
             db.append_dossier_state_event(session_id, quest_id, eff_turn, "twist_spec", prev_twist, twist)
             db.append_dossier_state_event(session_id, quest_id, eff_turn, "quest_status", prev_status, "Completed")
             db.append_dossier_state_event(session_id, quest_id, eff_turn, "outcome_tier", prev_tier, "twist_resolution")
-            db.upsert_quest_dossier(session_id, quest_id, twist_spec=twist, outcome_tier="twist_resolution")
+            saved_bm = db.upsert_quest_dossier(session_id, quest_id, climax_spec=climax, twist_spec=twist, outcome_tier="twist_resolution")
+            if climax.get("main_stages") or any(l.get("is_optional") for l in (dossier.get("leads_graph") or [])):
+                db.sync_quest_projection_from_dossier(session_id, quest_id, dossier=saved_bm)
+            ch_res_bm = None
+            if not q.get("is_story_quest"):
+                evaluate_skipped_threatened_optionals(session_id, quest_id, dossier=saved_bm, turn_number=eff_turn)
+            else:
+                update_campaign_ending_axes(session_id, turn_number=eff_turn, faction_pillar="shadow", truth_stance="buried", lock_golden=True)
+                ch_res_bm = resolve_chapter_transition(session_id, q, status="Completed", party_user_ids=uids)
             return {
                 "success": True,
                 "disposition": "blackmail_client",
@@ -525,6 +592,7 @@ def resolve_quest_turn_in_or_betrayal(
                 "outcome_tier": "twist_resolution",
                 "gold_awarded": hush_gold,
                 "xp_awarded": base_xp,
+                "chapter_transition": ch_res_bm,
             }
         db.update_session(
             session_id,
@@ -705,6 +773,108 @@ def evaluate_schedule_curfew_and_coop_precedence(
     }
 
 
+def redact_quest_for_fog_of_war(
+    session_id: int,
+    quest: Dict[str, Any],
+    reveal_all: bool = False,
+) -> Dict[str, Any]:
+    """
+    Diegetic Fog-of-War Quest Dict Sanitizer for REST/WebSocket/Discord adapters:
+    - Filters `is_discovered == False` Optionals out of BOTH `optional_objectives` and `sub_objectives`.
+    - Strips internal JSON tags and raw `DC`/`HP`/`MP` leaks via `sanitize_dossier_prose`.
+    - Hides locked `secret`-gate `true_culprit` and secret climax venue from `stages` / `main_objective`.
+    - Attaches `fow` (`build_fog_of_war_quest_payload`) and removes raw internal `dossier` blob.
+    """
+    q_out = dict(quest or {})
+    dos = q_out.get("dossier")
+    fow = build_fog_of_war_quest_payload(session_id, q_out, dossier=dos, reveal_all=reveal_all)
+    q_out["fow"] = fow
+    q_out.pop("dossier", None)
+    q_out.pop("quest_notes", None)
+    q_out.pop("sub_objectives_json", None)
+    q_out.pop("anomaly_blueprint", None)
+    q_out.pop("anomaly_blueprint_json", None)
+
+    q_out["title"] = sanitize_dossier_prose(str(q_out.get("title") or ""))
+    q_out["objective"] = sanitize_dossier_prose(str(q_out.get("objective") or ""))
+    q_out["is_peak_chapter"] = bool(fow.get("is_peak_chapter"))
+    if q_out.get("is_story_quest"):
+        q_out["deadline_day"] = None
+        q_out["deadline_minute"] = None
+
+    raw_subs = list(q_out.get("sub_objectives") or [])
+    filtered_subs: List[Dict[str, Any]] = []
+    climax_unlocked = bool((fow.get("climax") or {}).get("is_unlocked", True))
+
+    for so in raw_subs:
+        if not isinstance(so, dict):
+            continue
+        if not reveal_all and bool(so.get("is_optional")) and not bool(so.get("is_discovered", True)):
+            continue
+        so_clean = dict(so)
+        so_clean["text"] = sanitize_dossier_prose(str(so_clean.get("text") or so_clean.get("label") or ""))
+        if so_clean.get("stakes_hint"):
+            so_clean["stakes_hint"] = sanitize_dossier_prose(str(so_clean["stakes_hint"]))
+        if so_clean.get("stages"):
+            clean_st: List[Dict[str, Any]] = []
+            tot_st = len(so_clean["stages"])
+            for idx_s, st in enumerate(so_clean["stages"]):
+                st_c = dict(st)
+                is_final_secret = (
+                    not bool(so_clean.get("is_optional"))
+                    and not climax_unlocked
+                    and not reveal_all
+                    and idx_s == tot_st - 1
+                )
+                if is_final_secret:
+                    st_c["stage_label"] = "Uncover leads or Caseboard clues to expose the final confrontation"
+                    st_c["text"] = st_c["stage_label"]
+                    st_c["target_location"] = "Hidden Lair"
+                    st_c["target_npc"] = ""
+                else:
+                    st_c["stage_label"] = sanitize_dossier_prose(str(st_c.get("stage_label") or st_c.get("text") or ""))
+                    st_c["text"] = st_c["stage_label"]
+                clean_st.append(st_c)
+            so_clean["stages"] = clean_st
+        so_clean.pop("waypoints", None)
+        filtered_subs.append(so_clean)
+
+    q_out["sub_objectives"] = filtered_subs
+    if fow.get("has_structured_objectives"):
+        q_out["has_structured_objectives"] = True
+        q_out["main_objective"] = fow.get("main_objective")
+        q_out["optional_objectives"] = fow.get("optional_objectives") or []
+        if fow.get("main_objective") and (fow["main_objective"].get("stages") or []):
+            q_out["stages"] = fow["main_objective"]["stages"]
+    elif q_out.get("stages"):
+        q_out["stages"] = [
+            {
+                **dict(st),
+                "stage_label": sanitize_dossier_prose(str(st.get("stage_label") or st.get("text") or "")),
+                "text": sanitize_dossier_prose(str(st.get("text") or st.get("stage_label") or "")),
+            }
+            for st in q_out["stages"]
+            if isinstance(st, dict)
+        ]
+
+    if q_out.get("waypoints"):
+        q_out["waypoints"] = [
+            w
+            for w in q_out["waypoints"]
+            if isinstance(w, dict)
+            and (
+                reveal_all
+                or not any(
+                    isinstance(s, dict)
+                    and int(s.get("id", -99)) == int(w.get("sub_obj_id", -98) if w.get("sub_obj_id") is not None else -98)
+                    and not bool(s.get("is_discovered", True))
+                    for s in raw_subs
+                )
+            )
+        ]
+    return q_out
+
+
 def build_fog_of_war_quest_payload(
     session_id: int,
     quest: Dict[str, Any],
@@ -713,19 +883,21 @@ def build_fog_of_war_quest_payload(
 ) -> Dict[str, Any]:
     """
     Progressive Fog-of-War Serializer (Decision 10):
-    Exposes overarching Goal, Known Leads, Alert meter, Burned approaches, and Turn-In mode while hiding
-    un-scouted enemy rosters, secret climax culprits, and undiscovered twists (unless `reveal_all=True`).
+    Exposes Main Objective stages, discovered `(Optional)` objectives (with role badge & 1-line `stakes_hint`),
+    Alert meter, Burned approaches, and Turn-In mode while hiding `is_discovered == False` optionals,
+    un-scouted enemy rosters, secret climax culprits, ending math, and undiscovered twists.
     """
     qid = str(quest.get("quest_id") or "")
     dos = dossier if dossier is not None else (quest.get("dossier") or (db.get_quest_dossier(session_id, qid) if session_id and qid else None))
     if not dos:
-        return {"dossier_stage": quest.get("dossier_stage") or "legacy"}
+        return {"dossier_stage": quest.get("dossier_stage") or "legacy", "has_structured_objectives": False}
 
     stage = str(dos.get("status_stage") or quest.get("dossier_stage") or "pitch")
     if stage == "pitch":
         stub = dict(dos.get("pitch_stub") or {})
         return {
             "dossier_stage": "pitch",
+            "has_structured_objectives": False,
             "engine": dos.get("engine") or stub.get("engine") or "",
             "danger_tier": int(dos.get("danger_tier") or stub.get("danger_tier") or 1),
             "public_pitch": sanitize_dossier_prose(str(stub.get("public_pitch") or quest.get("objective") or "")),
@@ -740,49 +912,135 @@ def build_fog_of_war_quest_payload(
     t_rules = dict(dos.get("turn_in_rules") or {})
     econ = dict(dos.get("contract_economy") or {})
     burned_map = dict(dos.get("burned_approaches") or {})
+    climax_unlocked = bool(reveal_all or climax.get("gate_type") == "open" or climax.get("is_unlocked"))
+    twist_visible = bool(twist.get("has_twist") and (reveal_all or twist.get("is_discovered")))
+    raw_leads = list(dos.get("leads_graph") or [])
+    has_structured = bool(climax.get("main_stages") or any(isinstance(l, dict) and l.get("is_optional") for l in raw_leads))
 
     visible_leads: List[Dict[str, Any]] = []
-    for ld in (dos.get("leads_graph") or []):
+    optional_objectives: List[Dict[str, Any]] = []
+    for ld in raw_leads:
         if not reveal_all and not ld.get("is_discovered", True):
             continue
         t_key = _normalize_lead_target_key(ld)
         burned_here = [str(x).upper() for x in (burned_map.get(t_key) or [])]
         scouted = bool(reveal_all or ld.get("roster_scouted") or ld.get("roster_cleared"))
         roster = list(ld.get("encounter_roster") or [])
-        visible_leads.append(
+        approaches_out = [
             {
-                "lead_id": ld.get("lead_id"),
-                "title": sanitize_dossier_prose(str(ld.get("title") or "")),
-                "flavor_note": sanitize_dossier_prose(str(ld.get("flavor_note") or "")),
-                "status": ld.get("status") or "active",
-                "target_npc": ld.get("target_npc") or "",
-                "target_location": ld.get("target_location") or "",
-                "approaches": [
-                    {
-                        "approach_id": a.get("approach_id"),
-                        "stat": a.get("stat"),
-                        "label": a.get("label"),
-                        "gold_cost": a.get("gold_cost", 0),
-                        "after_hours_pivot": bool(a.get("after_hours_pivot")),
-                        "burned": str(a.get("stat") or "").upper() in burned_here
-                        or str(a.get("approach_id") or "").upper() in burned_here,
-                    }
-                    for a in (ld.get("approaches") or [])
-                ],
-                "has_combat_pack": len(roster) > 0,
-                "roster_scouted": scouted,
-                "roster_cleared": bool(ld.get("roster_cleared")),
-                "scouted_enemies": (
-                    [{"name": e.get("name"), "role": e.get("archetype") or e.get("tier_label") or "Hostile"} for e in roster]
-                    if scouted and roster
-                    else []
-                ),
-                "supports_phone_lure": bool(ld.get("supports_phone_lure")),
+                "approach_id": a.get("approach_id"),
+                "stat": a.get("stat"),
+                "label": sanitize_dossier_prose(str(a.get("label") or "")),
+                "gold_cost": a.get("gold_cost", 0),
+                "after_hours_pivot": bool(a.get("after_hours_pivot")),
+                "burned": str(a.get("stat") or "").upper() in burned_here
+                or str(a.get("approach_id") or "").upper() in burned_here,
             }
-        )
+            for a in (ld.get("approaches") or [])
+        ]
+        clean_title = sanitize_dossier_prose(str(ld.get("title") or ld.get("label") or ""))
+        clean_hint = sanitize_dossier_prose(str(ld.get("stakes_hint") or ""))
+        ld_status = str(ld.get("status") or "active")
+        lead_entry = {
+            "lead_id": ld.get("lead_id"),
+            "optional_id": ld.get("optional_id") or ld.get("lead_id"),
+            "sub_obj_id": ld.get("sub_obj_id"),
+            "is_optional": bool(ld.get("is_optional")),
+            "role": ld.get("role") or "aid",
+            "badge": sanitize_dossier_prose(str(ld.get("badge") or "")),
+            "stakes_hint": clean_hint,
+            "title": clean_title,
+            "flavor_note": sanitize_dossier_prose(str(ld.get("flavor_note") or "")),
+            "status": ld_status,
+            "lockout_reason": str(ld.get("lockout_reason") or ""),
+            "bonus_claimed": bool(ld.get("bonus_claimed")),
+            "target_npc": ld.get("target_npc") or "",
+            "target_location": ld.get("target_location") or "",
+            "approaches": approaches_out,
+            "has_combat_pack": len(roster) > 0,
+            "roster_scouted": scouted,
+            "roster_cleared": bool(ld.get("roster_cleared")),
+            "scouted_enemies": (
+                [{"name": sanitize_dossier_prose(str(e.get("name") or "")), "role": e.get("archetype") or e.get("tier_label") or "Hostile"} for e in roster]
+                if scouted and roster
+                else []
+            ),
+            "supports_phone_lure": bool(ld.get("supports_phone_lure")),
+        }
+        visible_leads.append(lead_entry)
+        if ld.get("is_optional"):
+            optional_objectives.append(
+                {
+                    "id": int(ld.get("sub_obj_id") or len(optional_objectives) + 1),
+                    "optional_id": ld.get("optional_id") or ld.get("lead_id"),
+                    "lead_id": ld.get("lead_id"),
+                    "is_optional": True,
+                    "role": str(ld.get("role") or "aid"),
+                    "badge": sanitize_dossier_prose(str(ld.get("badge") or f"Optional — {str(ld.get('role') or 'aid').title()}")),
+                    "title": clean_title,
+                    "text": clean_title,
+                    "stakes_hint": clean_hint,
+                    "flavor_note": sanitize_dossier_prose(str(ld.get("flavor_note") or "")),
+                    "status": ld_status,
+                    "completed": ld_status == "completed",
+                    "failed": ld_status == "failed",
+                    "bypassed": ld_status == "bypassed",
+                    "locked_out": ld_status == "locked_out",
+                    "lockout_reason": str(ld.get("lockout_reason") or ""),
+                    "bonus_claimed": bool(ld.get("bonus_claimed")),
+                    "target_npc": ld.get("target_npc") or "",
+                    "target_location": ld.get("target_location") or "",
+                    "approaches": approaches_out,
+                }
+            )
 
-    climax_unlocked = bool(reveal_all or climax.get("gate_type") == "open" or climax.get("is_unlocked"))
-    twist_visible = bool(twist.get("has_twist") and (reveal_all or twist.get("is_discovered")))
+    main_objective: Optional[Dict[str, Any]] = None
+    if has_structured:
+        raw_main_stages = list(climax.get("main_stages") or [])
+        fow_main_stages: List[Dict[str, Any]] = []
+        for idx_ms, ms in enumerate(raw_main_stages):
+            is_secret_climax = bool(ms.get("is_climax_stage") and not climax_unlocked and not reveal_all)
+            ms_stat = str(ms.get("status") or "locked")
+            ms_done = ms_stat.lower() in ("completed", "bypassed") or bool(ms.get("completed"))
+            ms_lbl = (
+                "Uncover leads or Caseboard clues to expose the final confrontation"
+                if is_secret_climax
+                else sanitize_dossier_prose(str(ms.get("stage_label") or ms.get("label") or ""))
+            )
+            fow_main_stages.append(
+                {
+                    "stage_index": int(ms.get("stage_index", idx_ms + 1) or (idx_ms + 1)),
+                    "stage_label": ms_lbl,
+                    "text": ms_lbl,
+                    "target_location": "Hidden Lair" if is_secret_climax else str(ms.get("target_location") or ""),
+                    "target_npc": "" if is_secret_climax else str(ms.get("target_npc") or ""),
+                    "status": ms_stat,
+                    "completed": ms_done,
+                    "bypassed": ms_stat.lower() == "bypassed",
+                }
+            )
+        cur_stage_obj = next((s for s in fow_main_stages if not s["completed"]), fow_main_stages[-1] if fow_main_stages else None)
+        all_main_done = bool(
+            climax.get("completed")
+            or climax.get("boss_defeated")
+            or (fow_main_stages and all(s["completed"] for s in fow_main_stages))
+        )
+        main_title = sanitize_dossier_prose(
+            str(climax.get("main_objective_text") or climax.get("label") or quest.get("objective") or quest.get("title") or "")
+        )
+        main_objective = {
+            "id": 0,
+            "is_optional": False,
+            "title": main_title,
+            "text": main_title,
+            "stages": fow_main_stages,
+            "current_stage": int(cur_stage_obj["stage_index"]) if cur_stage_obj else 1,
+            "total_stages": len(fow_main_stages),
+            "completed_stages": sum(1 for s in fow_main_stages if s["completed"]),
+            "completed": all_main_done,
+            "aid_dc_reduction": int(climax.get("aid_dc_reduction") or 0),
+            "bypass_unlocked": bool(climax.get("bypass_unlocked")),
+        }
 
     suspect_pool: List[str] = []
     cb = dos.get("cast_bindings") or {}
@@ -799,8 +1057,10 @@ def build_fog_of_war_quest_payload(
         for c in (db.get_session_clues(session_id) or []):
             if c.get("linked_npc"):
                 known_npcs.add(str(c["linked_npc"]).strip().lower())
-        for ld in (dos.get("leads_graph") or []):
-            if ld.get("status") in ("unlocked", "active", "completed") or ld.get("roster_cleared") or ld.get("is_discovered"):
+        for ld in raw_leads:
+            if ld.get("is_discovered", True) and (
+                ld.get("status") in ("unlocked", "active", "completed") or ld.get("roster_cleared")
+            ):
                 tn = ld.get("target_npc")
                 if tn:
                     known_npcs.add(str(tn).strip().lower())
@@ -811,6 +1071,8 @@ def build_fog_of_war_quest_payload(
 
     return {
         "dossier_stage": "compiled",
+        "has_structured_objectives": has_structured,
+        "is_peak_chapter": bool(climax.get("is_peak_chapter")),
         "engine": dos.get("engine") or "",
         "family_tier": dos.get("family_tier") or "bounty",
         "danger_tier": int(dos.get("danger_tier") or 1),
@@ -819,6 +1081,8 @@ def build_fog_of_war_quest_payload(
         "engaged_flag": int(dos.get("engaged_flag") or 0),
         "rescue_shield_used": int(dos.get("rescue_shield_used") or 0),
         "outcome_tier": dos.get("outcome_tier") or "",
+        "main_objective": main_objective,
+        "optional_objectives": optional_objectives,
         "leads": visible_leads,
         "climax": {
             "gate_type": climax.get("gate_type") or "open",
@@ -826,8 +1090,10 @@ def build_fog_of_war_quest_payload(
             "location": climax.get("location") if climax_unlocked else "Hidden Lair (Uncover Leads / Caseboard)",
             "true_culprit": climax.get("true_culprit") if climax_unlocked else "",
             "has_boss_encounter": climax.get("boss_sheet") is not None,
-            "boss_name": (climax.get("boss_sheet") or {}).get("name") if climax_unlocked and climax.get("boss_sheet") else "",
+            "boss_name": sanitize_dossier_prose(str((climax.get("boss_sheet") or {}).get("name") or "")) if climax_unlocked and climax.get("boss_sheet") else "",
             "reinforcements_count": len(climax.get("reinforcements") or []),
+            "aid_dc_reduction": int(climax.get("aid_dc_reduction") or 0),
+            "bypass_unlocked": bool(climax.get("bypass_unlocked")),
         },
         "twist": (
             {
@@ -843,7 +1109,7 @@ def build_fog_of_war_quest_payload(
         "tangible_item": (
             {
                 "has_item": True,
-                "name": t_item.get("name"),
+                "name": sanitize_dossier_prose(str(t_item.get("name") or "")),
                 "disposition": t_item.get("disposition"),
                 "is_quest_locked": int(t_item.get("is_quest_locked") or 0),
                 "fencing_gold": int(t_item.get("fencing_gold") or 0),
@@ -881,8 +1147,9 @@ def build_fog_of_war_quest_prompt_block(
     if spine:
         ch_bp = (spine.get("chapters_blueprint") or {}).get(str(cur_ch)) or {}
         pacing = sanitize_dossier_prose(str(ch_bp.get("pacing_directive") or ""))
+        peak_tag = " [PEAK SET-PIECE CHAPTER]" if ch_bp.get("is_peak") else ""
         if pacing:
-            lines.append(f"[CAMPAIGN CHAPTER {cur_ch} FOCUS]: {pacing}")
+            lines.append(f"[CAMPAIGN CHAPTER {cur_ch}{peak_tag} FOCUS]: {pacing}")
 
     for q in (db.get_session_quests(session_id, status="Active") or [])[:4]:
         dos = q.get("dossier")
@@ -891,11 +1158,29 @@ def build_fog_of_war_quest_prompt_block(
         if dos.get("engine") == "INTIMATE_LIAISON" and in_intimate_scene:
             continue
         fow = build_fog_of_war_quest_payload(session_id, q, dossier=dos, reveal_all=False)
-        active_titles = [ld["title"] for ld in (fow.get("leads") or []) if ld.get("status") == "active"]
-        lead_summary = "; ".join(active_titles[:2]) if active_titles else "Ready for final resolution"
-        twist_note = f" | Uncovered Twist: {fow['twist']['summary']}" if (fow.get("twist") or {}).get("is_discovered") else ""
-        lines.append(
-            f"- {sanitize_dossier_prose(q.get('title', 'Contract'))} ({dos.get('engine')}): {lead_summary}{twist_note}"
-        )
+        if fow.get("has_structured_objectives") and fow.get("main_objective"):
+            mo = fow["main_objective"]
+            cur_st_lbl = next(
+                (s["stage_label"] for s in (mo.get("stages") or []) if not s.get("completed")),
+                mo.get("title") or "Final resolution",
+            )
+            disc_opts = [
+                f"{opt['title']} [{str(opt.get('role') or 'aid').upper()}]"
+                for opt in (fow.get("optional_objectives") or [])
+                if opt.get("status") == "active"
+            ]
+            opt_part = f" | Optional Routes: {'; '.join(disc_opts[:2])}" if disc_opts else ""
+            twist_note = f" | Uncovered Twist: {fow['twist']['summary']}" if (fow.get("twist") or {}).get("is_discovered") else ""
+            lines.append(
+                f"- {sanitize_dossier_prose(q.get('title', 'Contract'))} "
+                f"(Main {mo.get('current_stage', 1)}/{mo.get('total_stages', 2)}: {cur_st_lbl}{opt_part}{twist_note})"
+            )
+        else:
+            active_titles = [ld["title"] for ld in (fow.get("leads") or []) if ld.get("status") == "active"]
+            lead_summary = "; ".join(active_titles[:2]) if active_titles else "Ready for final resolution"
+            twist_note = f" | Uncovered Twist: {fow['twist']['summary']}" if (fow.get("twist") or {}).get("is_discovered") else ""
+            lines.append(
+                f"- {sanitize_dossier_prose(q.get('title', 'Contract'))} ({dos.get('engine')}): {lead_summary}{twist_note}"
+            )
 
     return "\n".join(lines)

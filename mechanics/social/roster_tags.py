@@ -81,7 +81,7 @@ def derive_age_group(
     In non-school scenarios (Fantasy, Sci-Fi), defaults to 'adult'.
     """
     srt_clean = str(social_role_type or "").lower().strip()
-    if srt_clean in ("faculty_staff", "adult_service", "family_relative", "parent", "special_agent"):
+    if srt_clean in ("faculty_staff", "adult_service", "family_relative", "parent", "special_agent", "folklore_villager"):
         g_probe = str(grade or "").lower().strip()
         if srt_clean == "special_agent" and any(k in g_probe for k in _STUDENT_GRADES):
             return AGE_GROUP_TEEN
@@ -180,6 +180,7 @@ def is_anomalous_high_school_contact_eligible(
     npc_age_group: str,
     npc_is_special_agent: bool,
     is_household_family: bool = False,
+    npc_is_folklore_villager: bool = False,
 ) -> bool:
     """
     2x2 Contact Eligibility Matrix for `anomalous_high_school` and its variants:
@@ -189,7 +190,10 @@ def is_anomalous_high_school_contact_eligible(
     - Teen/Student Special Agent PC (`player_age_group == "teen"`):
       Can have unrestricted contact with Teen/Student characters (Special Agent or Civilian),
       Adult Special Agents, and Household Family members ONLY. Cannot add non-family Adult Civilians.
+    - Folklore Enclave Villagers (Orang Bunian & Kitsune): Exempt as ageless folklore allies/romanceables.
     """
+    if npc_is_folklore_villager:
+        return True
     p_age = str(player_age_group or AGE_GROUP_TEEN).strip().lower()
     n_age = str(npc_age_group or AGE_GROUP_ADULT).strip().lower()
     if is_household_family and p_age == AGE_GROUP_TEEN:
@@ -207,6 +211,7 @@ def is_contact_eligible_demographic(
     is_family: bool = False,
     player_age_group: str = "",
     npc_is_special_agent: bool = False,
+    npc_is_folklore_villager: bool = False,
 ) -> bool:
     """
     True if the NPC demographic is eligible for personal contacts directory and affinity meters.
@@ -216,9 +221,11 @@ def is_contact_eligible_demographic(
     - Exception: Household parents / adult family members ARE eligible for family curfew/allowance SMS.
     In Anomalous High School scenarios:
     - Uses the 2x2 `is_anomalous_high_school_contact_eligible` matrix based on `player_age_group`
-      ("adult" vs "teen") and `npc_is_special_agent`.
+      ("adult" vs "teen") and `npc_is_special_agent` (plus `npc_is_folklore_villager`).
     In non-school scenarios: Adults and all canonical characters are eligible.
     """
+    if npc_is_folklore_villager or str(social_role_type).strip().lower() == "folklore_villager":
+        return True
     if not is_school_scenario(scen_key):
         return True
 
@@ -250,6 +257,22 @@ def is_contact_eligible_demographic(
     if clean_srt in ("faculty_staff", "adult_service"):
         return False
     return True
+
+
+def npc_is_folklore_villager(entity: Any) -> bool:
+    """Returns True if `entity` (contact/NPC dict) is an Orang Bunian or Kitsune folklore villager."""
+    if not isinstance(entity, dict):
+        return False
+    if entity.get("is_folklore_villager"):
+        return True
+    basic = entity.get("basic_info") if isinstance(entity.get("basic_info"), dict) else {}
+    if basic.get("is_folklore_villager") or basic.get("folklore_village"):
+        return True
+    srt = str(entity.get("social_role_type") or basic.get("social_role_type") or "").strip().lower()
+    if srt == "folklore_villager":
+        return True
+    race_low = str(entity.get("race") or basic.get("race") or "").strip().lower()
+    return race_low in ("orang_bunian", "kitsune:humanoid", "kitsune:myobu_fox", "kitsune")
 
 
 def is_merchant_character(entity: Dict[str, Any]) -> bool:

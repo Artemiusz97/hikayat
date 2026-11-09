@@ -95,6 +95,36 @@ from mechanics.combat.items.tags import (
 from mechanics.combat.items.envelope import (
     serialize_item, parse_item, ITEM_PREFIX, is_item_json
 )
+from mechanics.combat.items.anomalous_gear import (
+    ANOMALOUS_MELEE_ARCHETYPES,
+    ANOMALOUS_RANGED_ARCHETYPES,
+    ANOMALOUS_ELEMENTS,
+    PRIORITY_SPELL_GRANT_SLOTS,
+    MAX_EQUIPPED_RELIC_SPELLS,
+    ELIGIBLE_SPELL_GRANT_SLOTS,
+    WEARABLE_PASSIVE_SLOTS,
+    ELEMENT_STATUS_AILMENTS,
+    ELEMENT_OPPOSITE_PENALTY,
+    ANOMALOUS_FACTION_CLASSES,
+    ANOMALOUS_FACTION_WEAPONS,
+    ANOMALOUS_FACTION_STARTER_OUTFITS,
+    load_anomalous_starter_classes,
+    load_anomalous_starter_classes_catalog,
+    is_anomalous_scenario,
+    choose_anomalous_weapon_archetype,
+    roll_is_anomalous_gear,
+    apply_anomalous_incursions_gear_rules,
+    aggregate_equipped_anomalous_passives,
+    convert_object_anomaly_to_gear,
+    sync_equipped_anomalous_spells,
+    normalize_anomalous_starting_faction,
+    apply_anomalous_faction_starter_theme,
+    infer_anomalous_faction_from_class,
+    get_anomalous_faction_starting_items,
+    get_anomalous_faction_classes,
+    get_all_anomalous_faction_classes,
+    get_anomalous_faction_weapons,
+)
 
 def generate_random_equipment(
     scenario="fantasy",
@@ -216,7 +246,7 @@ def _infer_class_archetype_profile(char_class: str, class_description: str = "",
 
     # ── 1. Heavy Fighter / Tank / Knight / Paladin ────────────────────────────
     if _has("paladin", "knight", "crusader", "guardian", "templar", "tank", "warden",
-            "sentinel", "shieldbearer", "iron", "fortress"):
+            "sentinel", "shieldbearer", "iron", "fortress", "vanguard"):
         profile["head"] = _rand.choice(["full_greathelm", "open_helm"])
         profile["armor"] = _rand.choice(["plate", "chainmail"])
         profile["top_archetype"] = "tunic"
@@ -578,7 +608,7 @@ def generate_starter_equipment_loadout(
             # No profile opinion — fall back to keyword heuristic
             cls_lower = (char_class or "").lower()
             shield_likely = any(k in cls_lower for k in (
-                "paladin", "knight", "warrior", "guardian", "fighter", "cleric", "crusader"
+                "paladin", "knight", "warrior", "guardian", "fighter", "cleric", "crusader", "vanguard"
             ))
             if shield_likely and random.random() < 0.65:
                 loadout["Shield"] = _gen_shield(scenario, "Shield", tier=tier)

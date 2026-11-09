@@ -536,6 +536,13 @@ def roll_dynamic_physique(
 
     # 4. Race modifiers
     r = (race or "").lower()
+    if "bunian" in r:
+        for _forb in ("Soft & Overweight", "Heavy & Overweight", "Stocky & Thick", "Thick & Curvy"):
+            weights.pop(_forb, None)
+        for _grace in ("Hourglass & Slender", "Toned & Athletic", "Petite & Soft", "Soft & Curved", "Broad Shoulders & Lean", "Slender & Lanky"):
+            if _grace in weights:
+                weights[_grace] *= 1.8
+        candidates = [c for c in candidates if c in weights]
     if "dwarf" in r:
         if "Stocky & Thick" in weights:
             weights["Stocky & Thick"] *= 2.2
@@ -700,6 +707,8 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
     if stature in ("tall", "towering") and physique == "Petite & Soft":
         physique = ""
 
+    if "bunian" in str(race or "").lower() and any(w in physique.lower() for w in ("overweight", "chubby", "heavy", "stocky")):
+        physique = ""
     if not physique:
         physique = roll_dynamic_physique(gender=raw_g, stature=stature, race=race, seed=seed_str)
 
@@ -1195,6 +1204,12 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
         if flag_k in app_dict:
             result[flag_k] = app_dict[flag_k]
 
+    for _fk in (
+        "tail_count", "tails_description", "ears", "fur_coat", "skin_tone",
+        "build", "body_type", "outfit_summary", "humanoid_outfit", "kitsune_form",
+    ):
+        if _fk in app_dict:
+            result[_fk] = app_dict[_fk]
     result = enforce_intimacy_safeguard_invariants(result, gender=gender)
     return result
 

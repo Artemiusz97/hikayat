@@ -296,10 +296,21 @@ const EncyclopediaSubTab = ({ encyclopedia, searchQuery = '' }) => {
                           <span className={`text-[9px] font-mono uppercase px-1.5 py-0.2 rounded border font-bold ${style.badge}`}>
                             {t(`codex.${stage}`, formatTag(stage))}
                           </span>
+                          {(entry.is_currently_contracted || entry.contracted_ever) && (
+                            <span
+                              className={`text-[9px] font-mono px-1.5 py-0.2 rounded border font-bold ${
+                                entry.is_currently_contracted
+                                  ? 'bg-rose-950/85 text-rose-200 border-rose-500/70'
+                                  : 'bg-emerald-950/75 text-emerald-200 border-emerald-600/60'
+                              }`}
+                            >
+                              🩸 {entry.is_currently_contracted ? t('contracts.currently_bound', 'Active Pact') : t('contracts.contracted_badge', 'Contracted')}
+                            </span>
+                          )}
                           {entry.folklore_recognition_active && (
                             <span
                               className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-purple-950/80 text-purple-200 border border-purple-600/60 font-bold"
-                              title="Prior verification reduces Stage 1 clue requirement by 1 on future encounters"
+                              title={t('codex.verification_tooltip', 'Prior verification reduces Stage 1 clue requirement by 1 on future encounters')}
                             >
                               🧠 {t('codex.folklore_recognition', 'Recognition (-1 Clue)')}
                             </span>

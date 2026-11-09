@@ -348,7 +348,9 @@ def append_chapter_digest(
                     current = parsed
             except Exception:
                 current = []
-        trimmed = (current + clean_bullets)[-MAX_DIGEST_BULLETS:]
+        dedup_clean = list(dict.fromkeys(clean_bullets))
+        clean_set = set(dedup_clean)
+        trimmed = ([b for b in current if b not in clean_set] + dedup_clean)[-MAX_DIGEST_BULLETS:]
         conn.execute(
             "UPDATE sessions SET chapter_digest_json=? WHERE id=?",
             (json.dumps(trimmed), session_id),

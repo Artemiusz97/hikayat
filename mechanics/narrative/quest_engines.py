@@ -17,6 +17,7 @@ CANONICAL_QUEST_ENGINES: Tuple[str, ...] = (
 )
 
 SUPPORTED_LOCALES: Tuple[str, ...] = ("en", "pl", "ms", "zh", "de")
+OPTIONAL_OBJECTIVE_ROLES: Tuple[str, ...] = ("aid", "bypass", "alternative", "threatened")
 
 ENGINE_TO_LEGACY_BLUEPRINT: Dict[str, str] = {
     "MYSTERY_CASE": "INVESTIGATION",
@@ -43,6 +44,7 @@ LEGACY_BLUEPRINT_TO_ENGINE: Dict[str, str] = {
 }
 
 _CATALOG_CACHE: Optional[Dict[str, Any]] = None
+_STORYLETS_CACHE: Optional[Dict[str, Any]] = None
 
 
 def normalize_quest_locale(lang: Optional[str]) -> str:
@@ -61,6 +63,27 @@ def load_quest_engines_catalog() -> Dict[str, Any]:
     with catalog_path.open("r", encoding="utf-8") as fh:
         _CATALOG_CACHE = json.load(fh)
     return _CATALOG_CACHE
+
+
+def load_campaign_storylets_catalog() -> Dict[str, Any]:
+    global _STORYLETS_CACHE
+    if _STORYLETS_CACHE is not None:
+        return _STORYLETS_CACHE
+    catalog_path = Path(__file__).resolve().parents[2] / "data" / "campaign_storylets_catalog.json"
+    with catalog_path.open("r", encoding="utf-8") as fh:
+        _STORYLETS_CACHE = json.load(fh)
+    return _STORYLETS_CACHE
+
+
+def get_scenario_bible_bucket(scenario_key: Optional[str]) -> str:
+    scen = str(scenario_key or "fantasy").strip().lower()
+    if "anomalous" in scen:
+        return "anomalous_occult"
+    if "high_school" in scen or "slice_of_life" in scen:
+        return "school_slice_of_life"
+    if any(tok in scen for tok in ("sci_fi", "scifi", "cyberpunk", "post_apoc", "nuclear")):
+        return "scifi_frontier"
+    return "fantasy_mythic"
 
 
 def _deterministic_ratio(seed_key: str) -> float:
@@ -342,4 +365,63 @@ def render_world_scar_spec(
         "description": str(loc_block.get("description") or f"Unresolved fallout lingers around {safe_venue}.").format(venue=safe_venue),
         "remediation_title": str(loc_block.get("remediation_title") or f"Stabilize {safe_venue}").format(venue=safe_venue),
         "modifiers": dict(cfg.get("modifiers") or {"dc_modifiers": {"CHA": 1}}),
+    }
+
+
+def render_optional_objective_template(
+    role: str,
+    slots: Dict[str, Any],
+    lang: str = "en",
+    seed_idx: int = 0,
+    **kwargs: Any,
+) -> Dict[str, str]:
+    storylets = load_campaign_storylets_catalog()
+    loc = normalize_quest_locale(lang)
+    norm_role = str(role or "aid").strip().lower()
+    if norm_role not in OPTIONAL_OBJECTIVE_ROLES:
+        norm_role = "aid"
+    opt_cfg = (storylets.get("optional_templates") or {}).get(norm_role) or {}
+    badge_map = opt_cfg.get("badge") or {}
+    label_map = opt_cfg.get("labels") or {}
+    hint_map = opt_cfg.get("stakes_hint") or {}
+
+    safe_slots = {
+        "client": str(slots.get("client") or "Local Patron"),
+        "target": str(slots.get("target") or "the target"),
+        "informant": str(slots.get("informant") or slots.get("ally") or "a local contact"),
+        "accomplice": str(slots.get("accomplice") or slots.get("faction") or "a rival envoy"),
+        "venue": str(slots.get("venue") or "the district"),
+        "zone": str(slots.get("zone") or "Central Ward"),
+    }
+    raw_badge = str(badge_map.get(loc) or badge_map.get("en") or f"Optional — {norm_role.title()}")
+    lbl_val = label_map.get(loc) or label_map.get("en") or "Pursue tactical optional lead near {venue}"
+    if isinstance(lbl_val, list) and lbl_val:
+        raw_label = str(lbl_val[int(seed_idx or 0) % len(lbl_val)])
+    else:
+        raw_label = str(lbl_val)
+    raw_hint = str(hint_map.get(loc) or hint_map.get("en") or "Provides an optional tactical angle on the Main Objective.")
+    return {
+        "role": norm_role,
+        "badge": raw_badge,
+        "label": raw_label.format(**safe_slots),
+        "stakes_hint": raw_hint.format(**safe_slots),
+    }
+
+
+def render_liberation_op_spec(
+    venue_name: str,
+    lang: str = "en",
+    is_peak_resistance: bool = False,
+) -> Dict[str, str]:
+    catalog = load_quest_engines_catalog()
+    loc = normalize_quest_locale(lang)
+    lib_cfg = (catalog.get("liberation_ops") or {}).get("peak_resistance" if is_peak_resistance else "buildup") or {}
+    loc_block = lib_cfg.get(loc) or lib_cfg.get("en") or {}
+    safe_venue = str(venue_name or "the occupied ward")
+    return {
+        "title": str(loc_block.get("title") or f"Liberation Op: Reclaim {safe_venue}").format(venue=safe_venue),
+        "objective": str(
+            loc_block.get("objective")
+            or f"Break entrenched enemy checkpoints and liberate {safe_venue} from occupation fallout."
+        ).format(venue=safe_venue),
     }

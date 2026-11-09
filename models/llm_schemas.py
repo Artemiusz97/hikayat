@@ -4,6 +4,7 @@ from typing import List, Optional, Dict, Literal, Any, Union
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 from .trackers import (
+    DictAccessibleModel,
     EntityAudit, CharacterOutcome, TrackerEntity,
     NewEntity, MerchantEncounter, RelationshipUpdate, FactionUpdate
 )
@@ -58,18 +59,6 @@ def _filter_valid_cast_events_list(v: Any) -> List[Any]:
                     "reason": str(item.get("reason") or "").strip(),
                 })
     return cleaned
-
-
-class DictAccessibleModel(BaseModel):
-    """Base Pydantic model that provides dict-like subscripting and .get() for legacy consumer compatibility."""
-    def __getitem__(self, item: str) -> Any:
-        try:
-            return getattr(self, item)
-        except AttributeError:
-            raise KeyError(item)
-
-    def get(self, item: str, default: Any = None) -> Any:
-        return getattr(self, item, default)
 
 
 AgeGroup = Literal["teen", "adult"]
@@ -140,6 +129,18 @@ class Choice(DictAccessibleModel):
     triggers_loot_roll: bool = Field(default=False)
     intent: str = Field(default="general_action")
     sub_intent: Optional[str] = Field(default="")
+    topic_id: Optional[str] = Field(default="")
+    category: Optional[str] = Field(default="")
+
+    @field_validator("topic_id", "category", mode="before")
+    @classmethod
+    def coerce_optional_seed_str(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        s = str(v).strip()
+        if not s or s.lower() in ("null", "none", "undefined", "n/a"):
+            return ""
+        return s
 
     @field_validator("label", mode="before")
     @classmethod
@@ -156,6 +157,7 @@ class Choice(DictAccessibleModel):
     ends_dialogue: bool = Field(default=False)
     dismisses_npc: bool = Field(default=False)
     quest_id: Optional[str] = Field(default="")
+    incursion_action: Optional[str] = Field(default="")
     sub_obj_id: Optional[Any] = Field(default=None)
     stage_index: Optional[int] = Field(default=0)
     is_quest_action: bool = Field(default=False)
@@ -207,7 +209,7 @@ class Choice(DictAccessibleModel):
             return ""
         return s if s in _VALID_SUB_INTENTS else ""
 
-    @field_validator("target_npc", "target_node_id", "target_location", "quest_id", mode="before")
+    @field_validator("target_npc", "target_node_id", "target_location", "quest_id", "incursion_action", mode="before")
     @classmethod
     def coerce_str_empty(cls, v: Any) -> str:
         if v is None:
@@ -215,7 +217,7 @@ class Choice(DictAccessibleModel):
         s = str(v).strip()
         return "" if s.lower() in ("none", "null", "undefined") else s
 
-class PropUpdate(BaseModel):
+class PropUpdate(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
     name: str = Field(default="")
     state: str = Field(default="")
@@ -225,7 +227,7 @@ class PropUpdate(BaseModel):
     def coerce_str(cls, v: Any) -> str:
         return str(v).replace("\x00", "").strip()[:100] if v else ""
 
-class ActorClothing(BaseModel):
+class ActorClothing(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
     top: Optional[str] = None
     bottom: Optional[str] = None
@@ -240,7 +242,7 @@ class ActorClothing(BaseModel):
         s = str(v).replace("\x00", "").strip()[:80]
         return s if s else None
 
-class ActorUpdate(BaseModel):
+class ActorUpdate(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
     posture: Optional[str] = None
     holding: Optional[str] = None
@@ -284,7 +286,7 @@ class ActorUpdate(BaseModel):
             return None
         return str(v).replace("\x00", "").strip()[:100]
 
-class PhysicalUpdate(BaseModel):
+class PhysicalUpdate(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
     actors: Dict[str, Union[ActorUpdate, Dict[str, Any]]] = Field(default_factory=dict)
     props: List[Union[PropUpdate, Dict[str, Any]]] = Field(default_factory=list)
@@ -382,7 +384,7 @@ class PhysicalUpdate(BaseModel):
             return [str(x).replace("\x00", "").strip()[:100] for x in v if str(x).strip()]
         return []
 
-class ClueDiscovery(BaseModel):
+class ClueDiscovery(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
     clue_id: Optional[str] = Field(default="")
     quest_id: Optional[str] = Field(default="")
@@ -393,42 +395,45 @@ class ClueDiscovery(BaseModel):
     source_location: Optional[str] = Field(default="")
     importance: str = Field(default="medium")
 
-class BreakthroughLeverage(BaseModel):
+class BreakthroughLeverage(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
     title: str = Field(default="Breakthrough Leverage")
     target_npc: str = Field(default="")
     quest_id: str = Field(default="")
     deduction_text: str = Field(default="")
 
-class SubQuestDefinition(BaseModel):
+class SubQuestDefinition(DictAccessibleModel):
     id: int
     archetype: str
     text: str
     waypoints: Optional[List[Dict[str, Any]]] = None
 
-class NextStoryQuest(BaseModel):
+class NextStoryQuest(DictAccessibleModel):
     title: str = Field(..., description="Unique evocative Story Quest title")
     archetype: str = Field(..., description="Creative scenario-appropriate main quest archetype")
     objective: str = Field(..., description="Rich 2-3 sentence objective")
     sub_quests: List[SubQuestDefinition] = Field(default_factory=list)
 
-class QuestUpdate(BaseModel):
+class QuestUpdate(DictAccessibleModel):
+    """Comprehensive defensive quest update schema supporting both legacy sub_objectives and 1 Main + 1-3 Optionals."""
     model_config = ConfigDict(extra="allow")
     quest_id: str = Field(default="SQ-Active")
     title: str = Field(default="Active Quest")
     quest_type: str = Field(default="Story Quest")
     archetype: str = Field(default="Story Quest")
     objective: str = Field(default="")
-    completed_sub_quest_ids: List[int] = Field(default_factory=list)
-    # Relaxed to Any values because LLMs sometimes put comments in dict values
-    goal_progress_updates: Dict[str, Any] = Field(default_factory=dict)
+    status: str = Field(default="Active")
     progress: Optional[str] = None
     current_clues: Optional[str] = None
-    status: str = Field(default="Active")  # Literal relaxed; validated below
     reward_xp: Optional[int] = None
     reward_gold: Optional[int] = None
     reward_item: Optional[str] = None
     next_chapter_quest: Optional[NextStoryQuest] = None
+    completed_sub_quest_ids: List[int] = Field(default_factory=list)
+    goal_progress_updates: Dict[str, Any] = Field(default_factory=dict)
+    sub_objectives: List[Dict[str, Any]] = Field(default_factory=list)
+    optional_objectives: List[Dict[str, Any]] = Field(default_factory=list)
+    completed_sub_objective_ids: List[Any] = Field(default_factory=list)
 
     @field_validator("quest_id", mode="before")
     @classmethod
@@ -450,15 +455,39 @@ class QuestUpdate(BaseModel):
         s = str(v).strip().capitalize()
         return s if s in ("Active", "Completed", "Failed") else "Active"
 
+    @field_validator("reward_xp", "reward_gold", mode="before")
+    @classmethod
+    def _coerce_qu_rewards(cls, v: Any) -> Optional[int]:
+        if v is None or v == "" or str(v).lower() in ("none", "null"):
+            return None
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return None
+
+    @field_validator("completed_sub_quest_ids", mode="before")
+    @classmethod
+    def _coerce_sub_quest_ids(cls, v: Any) -> List[int]:
+        if v is None or v == "":
+            return []
+        items = [v] if isinstance(v, (int, str)) else (list(v) if isinstance(v, list) else [])
+        out = []
+        for x in items:
+            try:
+                if str(x).strip().isdigit():
+                    out.append(int(x))
+            except Exception:
+                pass
+        return out
+
     @field_validator("goal_progress_updates", mode="before")
     @classmethod
     def coerce_goal_progress(cls, v: Any) -> Dict[str, Any]:
         if not isinstance(v, dict):
             return {}
-        # Filter out keys/values that aren't valid int-convertible entries
         clean = {}
         for k, val in v.items():
-            if "//" in str(k):  # LLM comment leak inside the key
+            if "//" in str(k):
                 continue
             try:
                 clean[k] = int(val) if isinstance(val, (int, float, str)) and str(val).lstrip("-").isdigit() else val
@@ -466,7 +495,33 @@ class QuestUpdate(BaseModel):
                 clean[k] = val
         return clean
 
-class CastEvent(BaseModel):
+    @field_validator("sub_objectives", "optional_objectives", mode="before")
+    @classmethod
+    def _coerce_qu_obj_list(cls, v: Any) -> List[Dict[str, Any]]:
+        if not v:
+            return []
+        if isinstance(v, dict):
+            return [v]
+        if not isinstance(v, list):
+            return []
+        out: List[Dict[str, Any]] = []
+        for idx, item in enumerate(v, 1):
+            if isinstance(item, dict):
+                out.append(item)
+            elif isinstance(item, str) and item.strip():
+                out.append({"id": idx, "text": item.strip(), "completed": False})
+        return out
+
+    @field_validator("completed_sub_objective_ids", mode="before")
+    @classmethod
+    def _coerce_qu_ids(cls, v: Any) -> List[Any]:
+        if v is None or v == "":
+            return []
+        if isinstance(v, (int, str)):
+            return [v]
+        return list(v) if isinstance(v, list) else []
+
+class CastEvent(DictAccessibleModel):
     model_config = ConfigDict(extra="ignore")
     type: Literal["arrive", "depart", "engage"] = Field(..., description="arrive (walk into scene), depart (walk out of scene), or engage (walk up to player to initiate conversation)")
     npc: str = Field(..., description="Exact NPC name")
@@ -930,12 +985,25 @@ class ActionClassification(DictAccessibleModel):
     mp_cost: int = Field(default=0)
     intent: str = Field(default="general_action")
     sub_intent: Optional[str] = Field(default="")
+    topic_id: Optional[str] = Field(default="")
+    category: Optional[str] = Field(default="")
+
+    @field_validator("topic_id", "category", mode="before")
+    @classmethod
+    def coerce_optional_seed_str(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        s = str(v).strip()
+        if not s or s.lower() in ("null", "none", "undefined", "n/a"):
+            return ""
+        return s
     target_npc: Optional[str] = Field(default="")
     target_node_id: Optional[str] = Field(default="")
     target_location: Optional[str] = Field(default="")
     ends_dialogue: bool = Field(default=False)
     dismisses_npc: bool = Field(default=False)
     quest_id: Optional[str] = Field(default="")
+    incursion_action: Optional[str] = Field(default="")
     sub_obj_id: Optional[Any] = Field(default=None)
     stage_index: Optional[int] = Field(default=0)
     is_quest_action: bool = Field(default=False)
@@ -985,7 +1053,7 @@ class ActionClassification(DictAccessibleModel):
             return ""
         return s if s in _VALID_SUB_INTENTS else ""
 
-    @field_validator("target_npc", "target_node_id", "target_location", "spawns_npc_role", "quest_id", mode="before")
+    @field_validator("target_npc", "target_node_id", "target_location", "spawns_npc_role", "quest_id", "incursion_action", mode="before")
     @classmethod
     def coerce_str_empty(cls, v: Any) -> str:
         if v is None:
@@ -1067,10 +1135,16 @@ class ActionCommand(DictAccessibleModel):
     active_recall: Optional[Any] = None
 
 
-class CampaignEndGoal(BaseModel):
-    id: str
-    title: str
-    description: str
+class CampaignEndGoal(DictAccessibleModel):
+    model_config = ConfigDict(extra="allow")
+    id: str = "G1"
+    title: str = "Campaign Goal"
+    description: str = ""
+
+    @field_validator("id", "title", "description", mode="before")
+    @classmethod
+    def coerce_goal_str(cls, v: Any) -> str:
+        return str(v or "").strip()
 
 
 class PitchStub(DictAccessibleModel):
@@ -1095,14 +1169,41 @@ class PitchStub(DictAccessibleModel):
 class DossierLeadNode(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
     lead_id: str = ""
+    optional_id: str = ""
+    sub_obj_id: int = 1
     title: str = ""
-    role: str = "recon"
+    role: str = "aid"
+    is_optional: bool = True
+    stakes_hint: str = ""
     target_npc: str = ""
     target_location: str = ""
     approaches: List[Dict[str, Any]] = Field(default_factory=list)
     encounter_roster: List[Dict[str, Any]] = Field(default_factory=list)
-    status: str = "active"  # active | completed | bypassed | locked
+    field_bonus: Dict[str, Any] = Field(default_factory=dict)
+    rival_faction_slug: str = ""
+    opposing_faction_slug: str = ""
+    unlock_trigger: str = ""
+    bonus_claimed: bool = False
+    lockout_reason: str = ""
+    status: str = "active"  # active | completed | failed | bypassed | locked | locked_out
     is_discovered: bool = True
+
+    @field_validator(
+        "lead_id", "optional_id", "title", "role", "stakes_hint",
+        "target_npc", "target_location", "rival_faction_slug",
+        "opposing_faction_slug", "unlock_trigger", "lockout_reason", "status",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_lead_str(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        return str(v).strip()
+
+    @field_validator("is_optional", "bonus_claimed", "is_discovered", mode="before")
+    @classmethod
+    def _coerce_lead_bool(cls, v: Any) -> bool:
+        return _coerce_bool_value(v)
 
     @field_validator("approaches", "encounter_roster", mode="before")
     @classmethod
@@ -1110,6 +1211,11 @@ class DossierLeadNode(DictAccessibleModel):
         if not v or not isinstance(v, list):
             return []
         return [item for item in v if isinstance(item, dict)]
+
+    @field_validator("field_bonus", mode="before")
+    @classmethod
+    def _coerce_bonus_dict(cls, v: Any) -> Dict[str, Any]:
+        return dict(v) if isinstance(v, dict) else {}
 
 
 class DossierClueEdge(DictAccessibleModel):
@@ -1160,24 +1266,38 @@ class MicroDossierSchema(DictAccessibleModel):
 
 class DossierEnrichment(DictAccessibleModel):
     """Bounded utility-LLM flavor enrichment payload (never overrides deterministic graph topology)."""
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow")
     title: str = ""
+    public_pitch: str = ""
     objective_flavor: str = ""
+    main_stage_labels: List[str] = Field(default_factory=list)
     lead_titles: List[str] = Field(default_factory=list)
+    lead_descriptions: List[str] = Field(default_factory=list)
+    stakes_hints: List[str] = Field(default_factory=list)
     twist_summary: str = ""
     climax_hook: str = ""
 
-    @field_validator("title", "objective_flavor", "twist_summary", "climax_hook", mode="before")
+    @field_validator("title", "public_pitch", "objective_flavor", "twist_summary", "climax_hook", mode="before")
     @classmethod
     def _coerce_str(cls, v: Any) -> str:
-        return str(v or "").strip()
+        if v is None:
+            return ""
+        s = str(v).strip()
+        return "" if s.lower() in ("none", "null", "undefined") else s
 
-    @field_validator("lead_titles", mode="before")
+    @field_validator("main_stage_labels", "lead_titles", "lead_descriptions", "stakes_hints", mode="before")
     @classmethod
     def _coerce_str_list(cls, v: Any) -> List[str]:
-        if not v or not isinstance(v, list):
+        if not v:
+            return []
+        if isinstance(v, str):
+            return [v.strip()] if v.strip() else []
+        if not isinstance(v, list):
             return []
         return [str(x).strip() for x in v if str(x or "").strip()]
+
+
+
 
 
 class CampaignSpineEnrichment(DictAccessibleModel):
@@ -1199,11 +1319,6 @@ class OpeningScene(DictAccessibleModel):
     entity_audit: EntityAudit = Field(default_factory=EntityAudit)
     narrative: str = Field(default="")
     choices: List[Choice] = Field(default_factory=list)
-
-    @field_validator("choices", mode="before")
-    @classmethod
-    def coerce_opening_choices(cls, v: Any) -> List[Any]:
-        return _filter_valid_choices_list(v)
     campaign_end_goals: List[CampaignEndGoal] = Field(default_factory=list)
     story_quest_title: Optional[str] = Field(default=None)
     story_quest_objective: Optional[str] = Field(default=None)
@@ -1216,6 +1331,127 @@ class OpeningScene(DictAccessibleModel):
     physical_updates: Optional[PhysicalUpdate] = None
     location: Optional[str] = None
     image_prompt: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_opening_scene_payload(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+        raw_nar = d.get("narrative")
+        nar_str = (
+            "\n\n".join(str(x).strip() for x in raw_nar if str(x).strip())
+            if isinstance(raw_nar, list)
+            else str(raw_nar or "").strip()
+        )
+        if not nar_str:
+            out_nar = str(d.get("outcome_narrative") or "").strip()
+            nxt_nar = str(d.get("next_narrative") or "").strip()
+            if out_nar and nxt_nar and out_nar != nxt_nar:
+                nar_str = f"{out_nar}\n\n{nxt_nar}"
+            else:
+                nar_str = str(
+                    out_nar
+                    or nxt_nar
+                    or d.get("scene_text")
+                    or d.get("story")
+                    or d.get("description")
+                    or ""
+                ).strip()
+        d["narrative"] = nar_str
+
+        if not d.get("choices"):
+            d["choices"] = d.get("next_choices") or d.get("actions") or d.get("options") or []
+
+        if not d.get("entity_audit") or not isinstance(d.get("entity_audit"), (dict, BaseModel)):
+            d["entity_audit"] = {}
+
+        goals = d.get("campaign_end_goals")
+        if isinstance(goals, dict):
+            goals = [goals]
+        if isinstance(goals, list):
+            coerced_goals = []
+            for idx, g in enumerate(goals, 1):
+                if isinstance(g, str) and g.strip():
+                    coerced_goals.append({"id": f"G{idx}", "title": g.strip(), "description": ""})
+                elif isinstance(g, dict):
+                    title_v = str(g.get("title") or g.get("name") or g.get("goal") or f"Goal {idx}").strip()
+                    coerced_goals.append({
+                        "id": str(g.get("id") or f"G{idx}").strip(),
+                        "title": title_v,
+                        "description": str(g.get("description") or "").strip(),
+                    })
+                elif hasattr(g, "model_dump"):
+                    coerced_goals.append(g)
+            d["campaign_end_goals"] = coerced_goals
+        else:
+            d["campaign_end_goals"] = []
+        return d
+
+    @field_validator("scene_title", "narrative", mode="before")
+    @classmethod
+    def coerce_opening_text_fields(cls, v: Any) -> str:
+        if not v:
+            return ""
+        if isinstance(v, str):
+            return v.strip()
+        if isinstance(v, list):
+            return "\n\n".join(str(x).strip() for x in v if str(x).strip())
+        return str(v).strip()
+
+    @field_validator("choices", mode="before")
+    @classmethod
+    def coerce_opening_choices(cls, v: Any) -> List[Any]:
+        return _filter_valid_choices_list(v)
+
+    @field_validator("npcs_present", "nearby_enemies", mode="before")
+    @classmethod
+    def coerce_opening_entity_lists(cls, v: Any) -> List[Any]:
+        if not v or not isinstance(v, list):
+            return []
+        cleaned = []
+        for item in v:
+            if isinstance(item, str) and item.strip():
+                cleaned.append({"name": item.strip()})
+            elif isinstance(item, (dict, BaseModel)):
+                if isinstance(item, dict):
+                    valid_keys = [str(k).strip() for k in item.keys() if str(k).strip()]
+                    if not valid_keys or not str(item.get("name") or "").strip():
+                        continue
+                cleaned.append(item)
+        return cleaned
+
+    @field_validator("new_entities", mode="before")
+    @classmethod
+    def coerce_opening_new_entities(cls, v: Any) -> List[Any]:
+        if not v or not isinstance(v, list):
+            return []
+        cleaned = []
+        for item in v:
+            if isinstance(item, str) and item.strip():
+                cleaned.append({"name": item.strip()})
+            elif isinstance(item, (dict, BaseModel)):
+                if isinstance(item, dict) and not str(item.get("name") or "").strip():
+                    continue
+                cleaned.append(item)
+        return cleaned
+
+    @field_validator("npc_departures", mode="before")
+    @classmethod
+    def coerce_opening_departures(cls, v: Any) -> List[str]:
+        if not v or not isinstance(v, list):
+            return []
+        return [str(x).strip() for x in v if str(x or "").strip()]
+
+    @field_validator("merchant_encounter", mode="before")
+    @classmethod
+    def coerce_opening_merchant(cls, v: Any) -> Optional[Any]:
+        return TurnOutcome.coerce_merchant_encounter(v)
+
+    @field_validator("image_prompt", mode="before")
+    @classmethod
+    def coerce_opening_image_prompt(cls, v: Any) -> Optional[str]:
+        return TurnOutcome.coerce_image_prompt(v)
 
     @field_validator("physical_updates", mode="before")
     @classmethod

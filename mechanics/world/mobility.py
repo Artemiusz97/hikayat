@@ -146,6 +146,7 @@ URBAN_DISTRICT_EDGES: List[Tuple[str, str, int]] = [
     ("zone_downtown", "zone_theme_park", 12),
     ("zone_chinatown", "zone_low_cost_wards", 10),
     ("zone_chinatown", "zone_eastern_temple", 12),
+    ("zone_chinatown", "zone_eastern_sanctuary", 12),
     ("zone_low_cost_wards", "zone_industrial", 10),
     ("zone_low_cost_wards", "zone_city_docks", 15),
     ("zone_low_cost_wards", "zone_undercity", 10),
@@ -171,6 +172,8 @@ URBAN_DISTRICT_EDGES: List[Tuple[str, str, int]] = [
     ("zone_uptown", "zone_woods_reserve", 25),
     ("zone_uptown", "zone_eastern_temple", 15),
     ("zone_eastern_temple", "zone_woods_reserve", 15),
+    ("zone_uptown", "zone_eastern_sanctuary", 15),
+    ("zone_eastern_sanctuary", "zone_woods_reserve", 15),
 ]
 
 
@@ -198,6 +201,8 @@ def _classify_urban_district_node(zone_name: str) -> Optional[str]:
         return "zone_suburbs"
     if any(k in z for k in ("theme park", "amusement")):
         return "zone_theme_park"
+    if any(k in z for k in ("sacred mountain sanctuary", "onsen quarter", "eastern sanctuary")):
+        return "zone_eastern_sanctuary"
     if any(k in z for k in ("grand temple", "eastern temple")):
         return "zone_eastern_temple"
     if any(k in z for k in ("airport", "airfield")):
@@ -221,7 +226,7 @@ def _classify_urban_district_node(zone_name: str) -> Optional[str]:
     return None
 
 
-def _calculate_urban_district_travel_time(old_z: str, new_z: str) -> Optional[int]:
+def _calculate_urban_district_travel_time(old_z: str, new_z: str, session_id: int = 0) -> Optional[int]:
     import heapq
     from collections import defaultdict
     u_start = _classify_urban_district_node(old_z)
@@ -235,6 +240,16 @@ def _calculate_urban_district_travel_time(old_z: str, new_z: str) -> Optional[in
         adj[a].append((b, w))
         adj[b].append((a, w))
     dist = {u_start: 0}
+    if session_id:
+        try:
+            from mechanics.world.locations.folklore_veil import is_leyline_spirit_passage_unlocked
+            if is_leyline_spirit_passage_unlocked(session_id):
+                adj["zone_eastern_sanctuary"].append(("zone_woods_reserve", 2))
+                adj["zone_woods_reserve"].append(("zone_eastern_sanctuary", 2))
+                adj["zone_eastern_temple"].append(("zone_woods_reserve", 2))
+                adj["zone_woods_reserve"].append(("zone_eastern_temple", 2))
+        except Exception:
+            pass
     pq = [(0, u_start)]
     while pq:
         d, u = heapq.heappop(pq)
@@ -568,7 +583,7 @@ def calculate_route_travel_time(
 
     # Different zone: Multi-Tier Urban Transit Graph for Anomalous Incursions / Urban Fantasy
     if any(k in str(scen_key or "").lower() for k in ("anomalous", "incursion", "urban_anomalies", "urban_fantasy")):
-        urban_mins = _calculate_urban_district_travel_time(old_z, new_z)
+        urban_mins = _calculate_urban_district_travel_time(old_z, new_z, session_id=session_id)
         if urban_mins is not None:
             return urban_mins
 

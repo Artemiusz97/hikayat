@@ -8,6 +8,21 @@ import { getOutcomeTierTheme } from '../StoryFeed/HistoryCard';
 import { StatusEffectBadge } from './CharacterSheet';
 import { getRelationshipTier } from './CodexPanel';
 
+export const formatSocialFeedbackPill = (pill, t) => {
+  if (!pill) return '';
+  if (typeof pill === 'string') return pill;
+  const key = pill.key || '';
+  const detail = pill.detail ? String(pill.detail).trim() : '';
+  if (key && typeof t === 'function') {
+    const base = t(`social.pills.${key}`, pill.label || key);
+    if (detail && !String(base).includes(detail)) {
+      return `${base}: ${detail}`;
+    }
+    return String(base);
+  }
+  return String(pill.label || detail || key || '');
+};
+
 const parseLocationTiers = (rawLocation, fallbackTitle) => {
   const loc = String(rawLocation || fallbackTitle || 'Local Region').trim();
   const parts = loc.split(/\s*(?:➔|->|>)\s*/).map(s => s.trim()).filter(Boolean);
@@ -168,6 +183,14 @@ export const extractTurnOutcomes = (entry, turnNumber, seenClues = new Set(), se
     combatLines.push(String(entry.enemy_attack_notice));
   }
 
+  const rawSocialPills = entry.social_feedback_pills || outcome.social_feedback_pills || [];
+  const socialFeedbackPills = Array.isArray(rawSocialPills)
+    ? rawSocialPills.filter(Boolean).map((p) => (
+        typeof p === 'string'
+          ? { label: p, tone: 'neutral' }
+          : { key: p.key || '', label: p.label || '', detail: p.detail || '', tone: p.tone || 'neutral' }
+      ))
+    : [];
   const intimateUpdate = outcome.intimate_update || entry.intimate_update || null;
   const refractoryNotice = outcome._refractory_recovered_notice || entry._refractory_recovered_notice || null;
 
@@ -189,6 +212,7 @@ export const extractTurnOutcomes = (entry, turnNumber, seenClues = new Set(), se
     itemsLost: Array.from(itemsLost),
     statusEffects: Array.from(statusEffects),
     relUpdates,
+    socialFeedbackPills,
     facUpdates,
     questUpdates,
     combatLines,
@@ -464,6 +488,19 @@ const WorldOutcomeSidebar = ({
                             </span>
                           )}
                         </button>
+                        {isPartner && npc?.dialogue_mood?.mood_key && (
+                          <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded border font-semibold shrink-0 ${
+                            npc.dialogue_mood.mood_key === 'Engaged'
+                              ? 'bg-emerald-950/85 text-emerald-300 border-emerald-700/60'
+                              : npc.dialogue_mood.mood_key === 'Guarded'
+                              ? 'bg-amber-950/85 text-amber-300 border-amber-700/60'
+                              : npc.dialogue_mood.mood_key === 'Upset'
+                              ? 'bg-rose-950/85 text-rose-300 border-rose-700/60'
+                              : 'bg-slate-900/85 text-slate-300 border-slate-700/60'
+                          }`}>
+                            {t(`social.moods.${npc.dialogue_mood.mood_key}`, npc.dialogue_mood.mood_label || npc.dialogue_mood.mood_key)}
+                          </span>
+                        )}
                         {!isAnomaly && clothing && (
                           <span className="text-[10px] font-mono px-2 py-0.2 rounded bg-neutral-900/95 border border-neutral-700 text-gray-300 font-normal shrink-0">
                             {clothing}
@@ -604,7 +641,7 @@ const WorldOutcomeSidebar = ({
                         ? 'p-2.5 bg-gradient-to-b from-amber-950/30 to-black/85 border border-fantasy-accent/60 hover:border-fantasy-accent'
                         : 'p-2 bg-black/50 border border-fantasy-border/60 hover:border-fantasy-border hover:bg-black/70'
                     }`}
-                    title="Click to expand turn details"
+                    title={t('outcomes.expand_turn_details', 'Click to expand turn details')}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 min-w-0">
@@ -670,7 +707,7 @@ const WorldOutcomeSidebar = ({
                           type="button"
                           onClick={() => toggleTurnExpanded(item.turnNumber, isLatest)}
                           className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
-                          title="Collapse outcome"
+                          title={t('outcomes.collapse_outcome', 'Collapse outcome')}
                         >
                           <ChevronUp size={14} />
                         </button>
@@ -799,6 +836,21 @@ const WorldOutcomeSidebar = ({
                             }`}
                           >
                             💕 {label}
+                          </span>
+                        );
+                      })}
+
+                      {(item.socialFeedbackPills || []).map((pill, pIdx) => {
+                        const pillText = formatSocialFeedbackPill(pill, t);
+                        if (!pillText) return null;
+                        return (
+                          <span
+                            key={`soc-pill-${pIdx}`}
+                            className={`inline-flex items-center gap-1 rounded bg-indigo-950/70 border border-indigo-700/60 text-indigo-200 font-semibold ${
+                              isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
+                            }`}
+                          >
+                            💬 {pillText}
                           </span>
                         );
                       })}
@@ -1018,7 +1070,7 @@ const WorldOutcomeSidebar = ({
                       >
                         <div className="flex items-center gap-1.5 text-red-300 font-bold uppercase tracking-wider">
                           <Swords size={isLatest ? 12 : 10} />
-                          <span>Combat Log</span>
+                          <span>{t('outcomes.combat_log', 'Combat Log')}</span>
                         </div>
                         {item.combatLines.map((line, lIdx) => (
                           <div key={`c-${lIdx}`} className="leading-relaxed text-gray-200">

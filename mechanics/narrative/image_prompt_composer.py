@@ -99,6 +99,13 @@ def format_species_tags(race: str = "", species: str = "", bio: str = "") -> str
     b_low = (bio or "").strip().lower()
     combined = f"{r_low} {s_low} {b_low}"
 
+    if r_low == "orang_bunian" or "bunian" in r_low:
+        return "elf, pointy ears, luminous fair skin, slender graceful figure"
+    if r_low == "kitsune:myobu_fox":
+        return "feral, quadruped, spirit fox, multiple tails, foxfire wisps"
+    if r_low in ("kitsune:humanoid", "kitsune"):
+        return "human, kemonomimi, fox ears, multiple tails, fox tail"
+
     # Extract animal species name if prefixed with beastfolk: or half_beast:
     spec_target = ""
     if ":" in r_low:
@@ -163,6 +170,10 @@ def format_npc_appearance_tags(npc_data: Dict[str, Any], intimate_context: bool 
 
     tags: List[str] = []
 
+    r_low_npc = str(npc_data.get("race") or "").strip().lower()
+    is_myobu_fox = (r_low_npc == "kitsune:myobu_fox")
+    is_kitsune_humanoid = r_low_npc in ("kitsune:humanoid", "kitsune")
+    is_bunian = (r_low_npc == "orang_bunian" or "bunian" in r_low_npc)
     # 1. Species / Race
     spec_tags = format_species_tags(
         race=str(npc_data.get("race") or ""),
@@ -186,7 +197,7 @@ def format_npc_appearance_tags(npc_data: Dict[str, Any], intimate_context: bool 
     hair_col = app.get("hair_color") or ""
     hair_len = app.get("hair_length") or ""
     hair_sty = app.get("hair_style") or ""
-    hair_parts = [p.lower().strip() for p in (hair_len, hair_sty, hair_col) if p and str(p).strip()]
+    hair_parts = [] if is_myobu_fox else [p.lower().strip() for p in (hair_len, hair_sty, hair_col) if p and str(p).strip()]
     if hair_parts:
         h_str = " ".join(hair_parts)
         if "hair" not in h_str:
@@ -206,6 +217,15 @@ def format_npc_appearance_tags(npc_data: Dict[str, Any], intimate_context: bool 
             tags.append(f"{clean_coat} fur")
     elif skin_col:
         tags.append(f"{skin_col.lower()} skin")
+    elif is_bunian:
+        tags.append("luminous fair skin")
+    tail_cnt_raw = app.get("tail_count")
+    if tail_cnt_raw is not None and (is_myobu_fox or is_kitsune_humanoid):
+        try:
+            tc_val = max(1, min(9, int(tail_cnt_raw)))
+            tags.append(f"{tc_val} tails" if tc_val != 1 else "1 tail")
+        except (TypeError, ValueError):
+            pass
 
     # 5. Distinctive features (ears, tails, scars)
     dist = app.get("distinctive_features") or ""
@@ -220,6 +240,19 @@ def format_npc_appearance_tags(npc_data: Dict[str, Any], intimate_context: bool 
     clothing_state = npc_data.get("_clothing_state") or {}
     top_state = clothing_state.get("top", "clothed")
     bot_state = clothing_state.get("bottom", "clothed")
+
+    if is_myobu_fox:
+        if outfit and any(kw in outfit.lower() for kw in ("collar", "bell", "suzu", "shimenawa", "ribbon")):
+            tags.append(outfit)
+        else:
+            tags.append("shrine suzu bell collar")
+        return _join_tags(tags)
+
+    if is_bunian:
+        tags = [
+            t for t in tags
+            if not any(bad_w in t.lower() for bad_w in ("chubby", "plump", "overweight", "fat", "heavy build"))
+        ]
 
     if top_state == "off" and bot_state == "off":
         tags.append("nude")
@@ -238,7 +271,26 @@ def format_npc_appearance_tags(npc_data: Dict[str, Any], intimate_context: bool 
     elif outfit:
         tags.append(outfit)
     else:
-        tags.append("school uniform, collared shirt, pleated skirt" if "school" in str(npc_data.get("role", "")).lower() else "casual clothes")
+        if is_bunian:
+            is_male_b = str(npc_data.get("gender") or "").strip().lower() in ("male", "m", "man", "boy")
+            tags.append("ornate royal songket baju sikap, gold embroidery" if is_male_b else "ornate royal songket kebaya, gold embroidery")
+        elif is_kitsune_humanoid:
+            tags.append("ornate shrine kimono, haori, obijime")
+        else:
+            tags.append("school uniform, collared shirt, pleated skirt" if "school" in str(npc_data.get("role", "")).lower() else "casual clothes")
+
+    if npc_data.get("pact_id"):
+        try:
+            from mechanics.pacts import collect_pact_sdxl_tags
+            pact_sdxl = collect_pact_sdxl_tags(
+                [{"patron_id": npc_data["pact_id"], "tier": npc_data.get("pact_tier", 1), "status": "active"}],
+                scenario_or_key=str(npc_data.get("_scenario") or "anomalous_incursions"),
+            )
+            for p_tag in pact_sdxl:
+                if p_tag and p_tag not in tags:
+                    tags.append(p_tag)
+        except Exception:
+            pass
 
     # 7. Assets (if intimate/NSFW context)
     if intimate_context and str(npc_data.get("gender", "")).lower() in ("female", "f", "woman", "girl"):
@@ -819,12 +871,29 @@ def compose_turn_image_prompt(
         e_name = enemy.get("name", "Enemy") if isinstance(enemy, dict) else str(enemy)
         e_species = _clean_tag(e_name.replace("Warrior", "").replace("Scout", "").replace("Leader", ""))
         combat_camera = "dynamic combat angle, medium shot, action camera, dramatic depth of field, key visual"
+        pact_cast_tags_str = ""
+        if isinstance(action, dict) and (action.get("is_pact_skill") or str(action.get("spell_id") or "").startswith("pact_")):
+            try:
+                from mechanics.pacts import collect_pact_sdxl_tags
+                _meta_img = action.get("_pact_cast_meta") if isinstance(action.get("_pact_cast_meta"), dict) else {}
+                _pid_img = str(_meta_img.get("patron_id") or action.get("patron_id") or "")
+                if _pid_img:
+                    pact_cast_tags_str = ", ".join(
+                        collect_pact_sdxl_tags(
+                            [{"patron_id": _pid_img, "tier": action.get("pact_tier", 1), "status": "active"}],
+                            active_cast_patron_id=_pid_img,
+                            scenario_or_key=scenario,
+                        )
+                    )
+            except Exception:
+                pact_cast_tags_str = ""
         combat_prompt = _join_tags(
             BASE_QUALITY_TOKENS,
             style_tags,
             "1monster, combat scene, battle stance",
             f"{e_species}, glowing eyes, aggressive expression, snarling",
             "wielding weapon, action pose",
+            pact_cast_tags_str,
             combat_camera,
             environment_tags
         )
@@ -884,7 +953,10 @@ def compose_turn_image_prompt(
         profile["_clothing_state"] = actor_clothes.get(focal_name, {}).get("clothing", {})
 
         gender_raw = str(profile.get("gender") or "female").lower()
-        gender_tag = "1girl" if gender_raw in ("female", "f", "woman", "girl") else "1boy"
+        if str(profile.get("race") or "").strip().lower() == "kitsune:myobu_fox":
+            gender_tag = "1animal, no humans"
+        else:
+            gender_tag = "1girl" if gender_raw in ("female", "f", "woman", "girl") else "1boy"
         app_tags = format_npc_appearance_tags(profile, intimate_context=is_intimate)
         expr_tags = format_expression_tags(check_tier, action.get("label", ""), intimate_context=is_intimate)
         pose_tags = format_pose_tags(actor_poses.get(focal_name, {}), location=location, focal_point=focal_point)

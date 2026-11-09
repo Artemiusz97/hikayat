@@ -96,7 +96,7 @@ def build_waypoint_prompt_block(session_id: int, current_location: str, destinat
             bool(target_npc) and can_npc_match and is_waypoint_npc_present_in_scene(session_id, target_npc)
         )
 
-        header = f"  [{quest_title}" + (f" Sub-Obj #{sub_obj_id}]" if sub_obj_id is not None else "]")
+        header = f"  [{quest_title}" + (" ★ Main Objective]" if sub_obj_id == 0 else (f" Sub-Obj #{sub_obj_id}]" if sub_obj_id is not None else "]"))
         lines.append(header)
         lines.append(f"    Stage: \"{label}\"")
         if target_loc:
@@ -115,7 +115,7 @@ def build_waypoint_prompt_block(session_id: int, current_location: str, destinat
         if at_target:
             if trigger == "arrival":
                 lines.append("    => ARRIVAL TRIGGER: Auto-completes. Narrate arrival scene and what player finds/meets.")
-            elif trigger == "skill_check":
+            elif trigger in ("skill_check", "action", "talk_to_npc", "inspect_prop", "defeat_target", "resource_progress"):
                 if resource_target > 0:
                     remaining = resource_target - resource_collected
                     lines.append(f"    => RESOURCE GATHER: {resource_collected}/{resource_target} collected. {remaining} more needed.")
@@ -193,6 +193,9 @@ def ensure_quest_waypoints_exist(session_id: int):
                 "SELECT COUNT(*) as cnt FROM quest_waypoints WHERE session_id=? AND quest_id=?",
                 (session_id, qid)
             ).fetchone()["cnt"]
+        if cnt == 0 and (q.get("has_structured_objectives") or str(q.get("dossier_stage") or "") == "compiled"):
+            db.sync_quest_projection_from_dossier(session_id, qid)
+            continue
         if cnt == 0:
             for so in sub_objs:
                 if not isinstance(so, dict) or so.get("completed"):

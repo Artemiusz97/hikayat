@@ -73,7 +73,7 @@ const getChoiceQuestIcon = (choice) => {
       (k) => rawL.includes(k)
     )
   ) {
-    return '🎭';
+    return null;
   }
   if (
     rawLabel.includes('💖') ||
@@ -83,14 +83,14 @@ const getChoiceQuestIcon = (choice) => {
       (k) => rawL.includes(k)
     )
   ) {
-    return '💖';
+    return null;
   }
   if (
     rawLabel.includes('🎲') ||
     rawL.includes('[challenge]') ||
     ['challenge ', 'arm-wrestle', 'friendly wager', 'friendly spar'].some((k) => rawL.includes(k))
   ) {
-    return '🎲';
+    return null;
   }
   if (
     rawLabel.includes('💬') ||
@@ -98,7 +98,7 @@ const getChoiceQuestIcon = (choice) => {
     ['inquire about', 'ask about', 'ask if', 'ask her', 'ask him', 'ask them'].some((k) => rawL.includes(k)) ||
     (rawL.includes('ask ') && rawL.includes(' about '))
   ) {
-    return '💬';
+    return null;
   }
 
   return null;
@@ -145,10 +145,10 @@ const getChoiceSkillEmoji = (choice) => {
         (k) => rawL.includes(k)
       )
     ) {
-      return '💖';
+      return null;
     }
     if (['joke', 'tease', 'banter', 'laugh', 'playful', 'ribbing', 'witty', 'humor', 'prank'].some((k) => rawL.includes(k))) {
-      return '🎭';
+      return null;
     }
     if (isConversationalExitLabel(rawL)) {
       return '🚪';
@@ -160,7 +160,7 @@ const getChoiceSkillEmoji = (choice) => {
         'whisper', 'confer', 'explain', 'advise', 'gauge', 'interview', 'say to', 'confront',
       ].some((k) => rawL.includes(k))
     ) {
-      return '💬';
+      return null;
     }
     if (
       [
@@ -374,6 +374,65 @@ const ActionPanel = ({
     );
   }
 
+  const renderActivePartnerMoodBar = () => {
+    if (inCombat) return null;
+    const partnerMoodItems = [];
+    const seenMoodNames = new Set();
+    const allSceneActors = [
+      ...(Array.isArray(session?.current_npcs) ? session.current_npcs : []),
+      ...(Array.isArray(session?.party_npcs) ? session.party_npcs : []),
+    ];
+    allSceneActors.forEach((actor) => {
+      if (!actor || typeof actor !== 'object') return;
+      const aName = String(actor.name || '').trim();
+      const aLow = aName.toLowerCase();
+      if (!aName || !dialoguePartners.has(aLow) || seenMoodNames.has(aLow)) return;
+      if (actor.dialogue_mood?.mood_key) {
+        seenMoodNames.add(aLow);
+        partnerMoodItems.push({
+          name: aName,
+          moodKey: actor.dialogue_mood.mood_key,
+          moodLabel: actor.dialogue_mood.mood_label || actor.dialogue_mood.mood_key,
+        });
+      }
+    });
+    if (partnerMoodItems.length === 0 && session?.active_dialogue_mood?.mood_key) {
+      const fbName = String(session.active_dialogue_mood.npc_name || session?.dialogue_partner || '').trim();
+      if (fbName) {
+        partnerMoodItems.push({
+          name: fbName,
+          moodKey: session.active_dialogue_mood.mood_key,
+          moodLabel: session.active_dialogue_mood.mood_label || session.active_dialogue_mood.mood_key,
+        });
+      }
+    }
+    if (partnerMoodItems.length === 0) return null;
+    return (
+      <div className="flex items-center flex-wrap gap-1.5 px-2.5 py-1 rounded-md bg-black/45 border border-fantasy-border/60 text-[11px]">
+        <span className="font-mono uppercase tracking-wider text-gray-400 font-semibold">
+          💬 {t('social.mood_prefix', 'Mood')}:
+        </span>
+        {partnerMoodItems.map((pm, pmIdx) => (
+          <span
+            key={`active-mood-${pmIdx}`}
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border font-mono font-semibold leading-tight ${
+              pm.moodKey === 'Engaged'
+                ? 'bg-emerald-950/85 text-emerald-300 border-emerald-700/60'
+                : pm.moodKey === 'Guarded'
+                ? 'bg-amber-950/85 text-amber-300 border-amber-700/60'
+                : pm.moodKey === 'Upset'
+                ? 'bg-rose-950/85 text-rose-300 border-rose-700/60'
+                : 'bg-slate-900/85 text-slate-300 border-slate-700/60'
+            }`}
+          >
+            <span className="text-gray-200">{pm.name}:</span>
+            <span>{t(`social.moods.${pm.moodKey}`, pm.moodLabel)}</span>
+          </span>
+        ))}
+      </div>
+    );
+  };
+
   const totalChoiceCount = (choices?.length || 0) + (!inCombat && merchantAvailable && onOpenMerchant ? 1 : 0);
 
   return (
@@ -487,6 +546,19 @@ const ActionPanel = ({
                               : t('actions.talking')}
                           </span>
                         )}
+                        {isPartner && npc?.dialogue_mood?.mood_key && (
+                          <span className={`text-[8.5px] font-mono px-1 rounded border font-semibold leading-tight ${
+                            npc.dialogue_mood.mood_key === 'Engaged'
+                              ? 'bg-emerald-950/85 text-emerald-300 border-emerald-700/60'
+                              : npc.dialogue_mood.mood_key === 'Guarded'
+                              ? 'bg-amber-950/85 text-amber-300 border-amber-700/60'
+                              : npc.dialogue_mood.mood_key === 'Upset'
+                              ? 'bg-rose-950/85 text-rose-300 border-rose-700/60'
+                              : 'bg-slate-900/85 text-slate-300 border-slate-700/60'
+                          }`}>
+                            {t(`social.moods.${npc.dialogue_mood.mood_key}`, npc.dialogue_mood.mood_label || npc.dialogue_mood.mood_key)}
+                          </span>
+                        )}
                         {!isAnomaly && (
                           <span className={`text-[8.5px] font-mono font-semibold px-1 rounded bg-black/60 border border-neutral-700/60 leading-tight ${tier.color}`}>
                             {score > 0 ? `+${score}` : score}
@@ -545,7 +617,7 @@ const ActionPanel = ({
                       <button
                         type="button"
                         onClick={handleCycleTarget}
-                        title="Click to cycle target enemy"
+                        title={t('actions.cycle_target', 'Click to cycle target enemy')}
                         className="px-2.5 py-0.5 rounded-full bg-red-950/80 hover:bg-red-900/80 border border-amber-500/60 text-[11px] font-mono font-bold text-amber-200 flex items-center gap-1 transition-colors"
                       >
                         <span>
@@ -568,7 +640,7 @@ const ActionPanel = ({
                       const pipDots = `${'●'.repeat(ultPips)}${'○'.repeat(3 - ultPips)}`;
                       return (
                         <>
-                          <div role="tablist" aria-label="Combat Action Categories" className="flex items-center gap-1 bg-black/60 p-0.5 rounded-lg border border-fantasy-border">
+                          <div role="tablist" aria-label={t('actions.combat_categories_aria', 'Combat Action Categories')} className="flex items-center gap-1 bg-black/60 p-0.5 rounded-lg border border-fantasy-border">
                             {[
                               { id: 'attacks', label: `⚔️ ${t('combat.attack')}` },
                               {
@@ -732,6 +804,10 @@ const ActionPanel = ({
                                 ? 'bg-amber-950/70 border-amber-400 ring-2 ring-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.35)] !opacity-100'
                                 : item.subdue_highlighted
                                   ? 'bg-emerald-950/70 border-emerald-400 ring-1 ring-emerald-400/50 hover:bg-emerald-900/60 text-emerald-100'
+                                  : item.is_pact_skill
+                                    ? (item.is_lethal_overdraw
+                                        ? 'bg-red-950/70 border-red-500 ring-1 ring-red-500/60 hover:bg-red-900/60'
+                                        : 'bg-rose-950/55 border-rose-500/80 hover:border-rose-300 hover:bg-rose-900/45')
                                   : (item.is_ultimate && canAfford)
                                     ? 'bg-purple-950/60 border-purple-400 ring-1 ring-purple-400/50 hover:bg-purple-900/50'
                                     : 'bg-black/50 border-red-900/60 hover:border-amber-400 hover:bg-red-950/30'
@@ -756,7 +832,15 @@ const ActionPanel = ({
                                   <span>{t('actions.resolving', 'Resolving...')}</span>
                                 </span>
                               )}
-                              {item.is_ultimate && !isPending ? (
+                              {item.is_pact_skill && !isPending ? (
+                                <span className={`font-mono flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border ${
+                                  item.is_lethal_overdraw
+                                    ? 'bg-red-950/90 text-red-200 border-red-400 font-bold animate-pulse'
+                                    : 'bg-rose-950/80 text-rose-200 border-rose-500/70 font-bold'
+                                }`} title={item.is_lethal_overdraw ? t('contracts.lethal_overdraw', 'Lethal Overdraw • Blood Debt') : undefined}>
+                                  {item.is_lethal_overdraw ? '⚠️ Debt' : `🩸 ${item.pact_hp_cost || 0} HP`} • 0 MP
+                                </span>
+                              ) : item.is_ultimate && !isPending ? (
                                 <span className={`font-mono flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border ${
                                   canAfford
                                     ? 'bg-purple-950/80 text-purple-200 border-purple-400/70 font-bold'
@@ -819,6 +903,8 @@ const ActionPanel = ({
                     </button>
                   </div>
                 )}
+
+                {renderActivePartnerMoodBar()}
 
                 {session?.is_truncated_generation && !session?.is_fallback_generation && onRetry && (
                   <div className="flex items-center justify-between bg-amber-950/40 border border-amber-600/50 px-3 py-1 rounded text-xs text-amber-200">
@@ -1037,7 +1123,7 @@ const ActionPanel = ({
             <button
               type="button"
               onClick={() => setIsCustomCollapsed(false)}
-              title="Open Custom Action Input"
+              title={t('actions.custom_open', 'Open Custom Action Input')}
               className="shrink-0 inline-flex items-center gap-1 px-2 md:px-2.5 py-1 md:py-1.5 rounded-md md:rounded-lg bg-black/60 hover:bg-black/80 border border-fantasy-border hover:border-fantasy-accent/60 text-[10.5px] md:text-[11px] font-mono text-gray-300 hover:text-fantasy-accent transition-colors"
             >
               <PenLine size={12} />
@@ -1065,7 +1151,7 @@ const ActionPanel = ({
                 <button
                   type="submit"
                   disabled={!customAction.trim() || isBusy}
-                  title="Submit Custom Action"
+                  title={t('actions.custom_submit', 'Submit Custom Action')}
                   className="absolute right-1 md:right-1.5 top-1/2 -translate-y-1/2 p-1 md:p-1.5 rounded-md bg-fantasy-accent text-fantasy-dark hover:bg-fantasy-accent-hover transition-colors disabled:opacity-40 disabled:bg-gray-700"
                 >
                   {processing && pendingAction?.custom_action_text ? (
@@ -1078,7 +1164,7 @@ const ActionPanel = ({
               <button
                 type="button"
                 onClick={() => setIsCustomCollapsed(true)}
-                title="Minimize Custom Action Input"
+                title={t('actions.custom_minimize', 'Minimize Custom Action Input')}
                 className="p-1 text-gray-400 hover:text-gray-200 rounded hover:bg-black/40 text-[10px] shrink-0"
               >
                 <X size={12} />

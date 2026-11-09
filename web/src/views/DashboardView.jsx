@@ -26,9 +26,12 @@ const DashboardView = ({
   onEndSlot,
   refreshCharacter,
   refreshSession,
+  actionError,
+  clearActionError,
   onSessionLoaded
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const activeUiLang = (i18n.resolvedLanguage || i18n.language || 'en').slice(0, 2);
   const [creatorOpen, setCreatorOpen] = useState(false);
   const [embarkOpen, setEmbarkOpen] = useState(false);
   
@@ -94,14 +97,14 @@ const DashboardView = ({
   }, [character?.id]);
 
   useEffect(() => {
-    apiCall('/api/scenarios')
+    apiCall(`/api/scenarios?lang=${encodeURIComponent(activeUiLang)}`)
       .then(data => {
         const list = data.scenario_list || (Array.isArray(data.scenarios) ? data.scenarios : []);
         if (list.length > 0) setScenarios(list);
       })
       .catch(() => {});
       
-    apiCall('/api/genres')
+    apiCall(`/api/genres?lang=${encodeURIComponent(activeUiLang)}`)
       .then(data => {
         const list = data.genre_list || data.tag_list || (Array.isArray(data.genres) ? data.genres : Object.entries(data.genres || {}).map(([key, val]) => ({ key, ...val })));
         if (list.length > 0) setAvailableTags(list);
@@ -109,7 +112,7 @@ const DashboardView = ({
       .catch(() => {});
       
     fetchLobbies();
-  }, [fetchLobbies]);
+  }, [fetchLobbies, activeUiLang]);
 
   useEffect(() => {
     fetchSaves();
@@ -120,17 +123,26 @@ const DashboardView = ({
   }, [fetchSaves, fetchCharacterSessions, refreshSession, character?.id]); // re-fetch when character changes
 
   const handleEmbark = async (config) => {
-    await startSession(config.scenario, config.mode, {
-       tags: config.tags,
-       capacity: 4,
-       slot: config.slot || selectedSlot || 1,
-       character_id: character?.id,
-       ...config
-    });
-    if (refreshCharacter) {
-      await refreshCharacter();
+    const rawScen = config?.scenario;
+    const safeScen = (rawScen && !['none', 'null', 'undefined'].includes(String(rawScen).trim().toLowerCase()))
+      ? rawScen
+      : 'fantasy';
+    try {
+      await startSession(safeScen, config.mode, {
+        ...config,
+        scenario: safeScen,
+        tags: config.tags,
+        capacity: 4,
+        slot: config.slot || selectedSlot || 1,
+        character_id: character?.id,
+      });
+      if (refreshCharacter) {
+        await refreshCharacter();
+      }
+      fetchCharacterSessions();
+    } catch (err) {
+      console.error('Failed to embark from dashboard:', err);
     }
-    fetchCharacterSessions();
   };
 
   const handleLoadSave = async (slotName) => {
@@ -139,8 +151,8 @@ const DashboardView = ({
          method: 'POST',
          body: JSON.stringify({ user_id: user.user_id, slot_name: slotName })
        });
-       if (res.loaded) {
-          if (onSessionLoaded) onSessionLoaded(res.loaded);
+       if (res.session || res.loaded) {
+          if (onSessionLoaded) onSessionLoaded(res.session || res.loaded);
        }
     } catch (e) {
        console.error("Failed to load save", e);
@@ -255,6 +267,24 @@ const DashboardView = ({
       </header>
 
       <main className="flex-1 w-full max-w-6xl mx-auto px-3 sm:px-6 pt-4 sm:pt-8 pb-28 sm:pb-10 grid grid-cols-1 lg:grid-cols-12 content-start items-start gap-4 lg:gap-8">
+        {actionError && (
+          <div role="alert" className="lg:col-span-12 flex items-center justify-between gap-3 bg-red-950/80 border border-red-700/80 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm text-red-200 shadow-md">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-red-400 font-bold shrink-0">⚠️ {t('common.error', 'Error')}:</span>
+              <span className="break-words">{actionError}</span>
+            </div>
+            {clearActionError && (
+              <button
+                type="button"
+                onClick={clearActionError}
+                aria-label={t('common.close', 'Close')}
+                className="text-gray-400 hover:text-white text-xs px-2 py-1 rounded hover:bg-white/10 shrink-0"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        )}
         {/* Mobile segmented navigation */}
         <div className="lg:hidden sticky top-14 z-10 -mx-3 px-3 pb-3 pt-1 bg-gradient-to-b from-fantasy-darker via-fantasy-darker/90 to-transparent">
           <div className="hk-segmented" role="tablist">

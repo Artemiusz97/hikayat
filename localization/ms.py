@@ -34,7 +34,7 @@ ITEM_ICON_KEYWORDS = {
     "pants": ("seluar", "kain", "sarung", "seluar panjang"),
     "armor": (
         "baju perisai", "perisai dada", "baju besi", "baju zirah", "jubah", "baju", "jaket", "kot",
-        "pakaian seragam", "rompi"
+        "pakaian seragam", "rompi", "kebaya", "songket", "baju sikap", "kimono", "haori"
     ),
     "shield": ("perisai", "perisai bulat", "perisai kayu"),
 
@@ -59,7 +59,7 @@ ITEM_ICON_KEYWORDS = {
     "health": ("nyawa", "kesihatan", "pemulihan", "penawar", "ubat"),
     "mana": ("mana", "ramuan mana"),
     "potion": ("ramuan", "penawar", "ubat", "limau purut", "garam berkat", "kemenyan", "timun", "tauhu", "tangkal", "azimat besi"),
-    "quest": ("kunci", "peta", "surat", "artifak", "manuskrip"),
+    "quest": ("kunci", "peta", "surat", "artifak", "manuskrip", "suzu", "serunai", "pusaka", "loceng musang", "api musang"),
 }
 
 TWO_HANDED_ARCHETYPES = (
@@ -84,7 +84,7 @@ ITEM_LEMMAS = {
     ],
     "armor": [
         "baju perisai", "baju besi", "perisai dada", "baju zirah", "jubah", "baju", "jaket", "kot",
-        "pakaian seragam", "rompi"
+        "pakaian seragam", "rompi", "kebaya", "songket", "baju sikap", "kimono", "haori"
     ],
     "pants": [
         "seluar", "kain", "sarung", "seluar panjang"
@@ -134,3 +134,87 @@ MOVEMENT_PREFIXES = (
     "pergi ke ", "menuju ke ", "berjalan ke ", "masuk ke ", "melangkah ke ",
     "lawati ", "kembali ke "
 )
+
+
+REALTY_LABELS = {
+    "app_name": "Hartanah & Geran",
+    "app_sub": "Rumah Selamat & Kunci",
+    "tab_owned": "Kediaman Saya",
+    "tab_market": "Senarai Geran",
+    "badge_starter": "Kuarters Permulaan",
+    "badge_owned": "Kediaman Milikan",
+    "badge_for_sale": "Untuk Dijual",
+    "primary_home": "Kediaman Utama",
+    "set_primary": "Jadikan Utama",
+    "buy_deed": "Beli Geran",
+    "deed_owned": "Dimiliki",
+    "give_spare_key": "Beri Kunci",
+    "revoke_key": "Tarik Kunci",
+    "spare_keys_label": "Pemegang Kunci Pendua",
+    "starter_spare_key_note": "Kuarters faksi berpindah apabila bertukar agensi. Beli geran kekal untuk memberi Kunci Pendua.",
+    "no_deeds_owned": "Belum memiliki sebarang geran hartanah kekal.",
+    "no_eligible_contacts": "Capai Keakraban 70+ atau hubungan romantis untuk memberi Kunci Pendua.",
+    "purchased_ok": "Geran hartanah berjaya dibeli!",
+    "purchase_failed": "Pembelian hartanah gagal.",
+    "primary_updated": "Kediaman Utama dikemas kini.",
+    "key_granted": "Kunci pendua diserahkan!",
+    "key_revoked": "Kunci pendua ditarik balik.",
+}
+
+
+FOLKLORE_SANCTUARY_LABELS = {
+    "kitsune_spirit_merchant": "Apotekari Roh Inari",
+    "bunian_pusaka_merchant": "Tukang Warisan Balai Pusaka",
+    "ranger_station_outfitter": "Pembekal Denai Hutan Simpan",
+    "spirit_relay_badge": "Utusan Geganti Roh",
+    "veil_unattuned_badge": "Ambang Zahir Biasa",
+    "veil_attuned_badge": "Hijab Alam Ghaib Terbuka",
+    "twilight_veil_badge": "Hijab Senja Menipis",
+    "leyline_passage_badge": "Laluan Roh Garis Ley",
+    "sanctuary_pact_warning": "Perjanjian Damai Tempat Suci dilanggar — persembahkan tebusan suci 100g di ambang luar.",
+}
+
+
+QUEST_UI_LABELS = {
+    "main_objective": "Objektif Utama",
+    "optional_routes": "Laluan Taktikal Pilihan",
+    "peak_chapter": "Kemuncak Bab",
+    "chronicle_tapestry": "Tenunan Hikayat",
+    "fallen_world_ch11": "Dunia Tumbang — Epilog Penentangan Bab 11",
+    "peak_scar": "Parut Kemuncak",
+    "liberation_op": "Operasi Pembebasan",
+    "optional_aid": "Bantuan Taktikal",
+    "optional_bypass": "Laluan Pintas / Penyusupan",
+    "optional_alternative": "Objektif Alternatif",
+    "optional_threatened": "Bahaya / Pengekstrakan",
+    "bonus_claimed": "Bonus Dituntut",
+    "failed_route": "Laluan Gagal",
+    "locked_out": "Terkunci",
+    "fallen_world_epilogue": "Dunia Tumbang — Epilog Penentangan",
+    "base_reward_note": "Ganjaran Asas Penyiapan",
+}
+
+PACT_UI_LABELS = {
+    "title": "Kontrak Entiti & Perjanjian Iblis",
+    "subtitle": "Perjanjian Sifar-MP • Lejar Darah & Persembahan",
+    "tab_active": "Perjanjian Aktif",
+    "tab_discover": "Temui & Nilai",
+    "tab_compendium": "Kompendium Penaung",
+    "slots_label": "Slot Perjanjian",
+    "remote_ready": "Komuni Jarak Jauh Sedia",
+    "remote_blocked": "Perlu Tempat Suci / Kuarters di Luar Pertempuran",
+    "appraisal_favored": "Diperkenan (Kos 0.65x • Tahap II/III Terbuka)",
+    "appraisal_neutral": "Neutral (Syarat Biasa 1.0x)",
+    "appraisal_disdained": "Dibenci (Caj 1.50x • Tahap III Terkunci)",
+    "sign_btn": "Meterai Perjanjian",
+    "upgrade_btn": "Tingkatkan Tahap",
+    "feed_btn": "Komuni / Bayar Ufti",
+    "sever_scrub_btn": "Pembersihan Klinik / Kuil",
+    "sever_exorcism_btn": "Cabar Manifestasi (Eksorsisme)",
+    "pact_bound_badge": "[Terikat Perjanjian]",
+    "lethal_overdraw": "Hutang Darah Maut",
+    "breach_stage_1": "Murka — Hutang Darah Aktif (24j)",
+    "breach_stage_2": "Pemutusan Ganas — Parut Jiwa",
+    "contracted_badge": "Pernah Diikat",
+    "currently_bound": "Terikat",
+}

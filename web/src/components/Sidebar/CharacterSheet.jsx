@@ -312,7 +312,7 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
               <span className="text-fantasy-accent font-semibold">Lv.{character.level || 1}</span> {character.char_class || character.class_name || 'Adventurer'}
             </p>
           </div>
-          <div className="flex items-center gap-1 h-8 px-2.5 rounded-full bg-amber-500/10 text-amber-300 font-mono text-sm font-bold shrink-0" title="Gold">
+          <div className="flex items-center gap-1 h-8 px-2.5 rounded-full bg-amber-500/10 text-amber-300 font-mono text-sm font-bold shrink-0" title={t('character.gold_tooltip', 'Gold')}>
             <Coins size={14} className="text-amber-400" />
             <span>{character.gold !== undefined ? character.gold : 0}</span>
           </div>
@@ -320,13 +320,13 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
         <div className="flex items-center gap-1 flex-wrap text-xs text-gray-300">
           {character.race && <span className="hk-chip">{character.race}</span>}
           {character.gender && <span className="hk-chip">{character.gender}</span>}
-          <span className="hk-chip" title="Days adventured">📅 {character.days_adventured ?? 1}d</span>
+          <span className="hk-chip" title={t('character.days_tooltip', 'Days adventured')}>📅 {character.days_adventured ?? 1}d</span>
               {isNsfw && !isMale && (
                 <button
                   type="button"
                   onClick={() => setShowAppearanceModal(true)}
                   className="px-2.5 py-0.5 rounded-md bg-pink-950/70 hover:bg-pink-900/90 border border-pink-700/70 text-pink-300 font-semibold text-xs flex items-center gap-1 transition-colors"
-                  title="Click to customize breast size & tactile flavor"
+                  title={t('character.customize_breast_tooltip', 'Click to customize breast size & tactile flavor')}
                 >
                   {(() => {
                     const rawBSize = character.appearance?.breast_size || character.breast_size || 'Modest B-Cup';
@@ -343,7 +343,7 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
                   type="button"
                   onClick={() => setShowAppearanceModal(true)}
                   className="px-2.5 py-0.5 rounded-md bg-purple-950/70 hover:bg-purple-900/90 border border-purple-700/70 text-purple-300 font-semibold text-xs flex items-center gap-1 transition-colors"
-                  title="Click to customize penis size & tactile flavor"
+                  title={t('character.customize_penis_tooltip', 'Click to customize penis size & tactile flavor')}
                 >
                   {(() => {
                     const rawPSize = character.appearance?.penis_size || character.penis_size || 'Average';
@@ -492,7 +492,7 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
           <div className="bg-gradient-to-b from-black/55 to-black/80 p-2 rounded-lg border border-fantasy-border/70 flex flex-col justify-between min-h-[70px] sm:min-h-[74px] shadow-sm text-center">
             <div>
               <div className="text-xs font-bold text-gray-300 uppercase tracking-wider">{t('stats.slots_label', 'Slots')}</div>
-              <div className="text-[9.5px] text-gray-400 font-medium">Capacity</div>
+              <div className="text-[9.5px] text-gray-400 font-medium">{t('character.capacity', 'Capacity')}</div>
             </div>
             <div className="font-mono text-xs sm:text-sm font-bold text-gray-200 my-auto">
               {character.used_inventory_slots ?? 0} / {character.inventory_capacity ?? 10}
@@ -607,10 +607,10 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
                     onChange={(e) => setEditPSize(e.target.value)}
                     className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100"
                   >
-                    <option value="small">Petite / Modest (Compact)</option>
-                    <option value="average">Proportional (Average)</option>
-                    <option value="large">Well-Endowed / Formidable (Large)</option>
-                    <option value="huge">Massive / Heavy (Huge)</option>
+                    <option value="small">{t('character.penis_compact', 'Petite / Modest (Compact)')}</option>
+                    <option value="average">{t('character.penis_average', 'Proportional (Average)')}</option>
+                    <option value="large">{t('character.penis_large', 'Well-Endowed / Formidable (Large)')}</option>
+                    <option value="huge">{t('character.penis_huge', 'Massive / Heavy (Huge)')}</option>
                   </select>
                 </div>
               ) : (
@@ -623,11 +623,11 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
                     onChange={(e) => setEditBSize(e.target.value)}
                     className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100"
                   >
-                    <option value="flat">Flat (AA-Cup / Barely There)</option>
-                    <option value="small">Petite / Modest (A-B Cup)</option>
-                    <option value="average">Proportional (C-Cup)</option>
-                    <option value="large">Voluptuous / Full (D-DD Cup)</option>
-                    <option value="huge">Bountiful / Massive (E+ Cup)</option>
+                    <option value="flat">{t('character.breast_flat', 'Flat (AA-Cup / Barely There)')}</option>
+                    <option value="small">{t('character.breast_petite', 'Petite / Modest (A-B Cup)')}</option>
+                    <option value="average">{t('character.breast_proportional', 'Proportional (C-Cup)')}</option>
+                    <option value="large">{t('character.breast_voluptuous', 'Voluptuous / Full (D-DD Cup)')}</option>
+                    <option value="huge">{t('character.breast_bountiful', 'Bountiful / Massive (E+ Cup)')}</option>
                   </select>
                 </div>
               )}
@@ -653,7 +653,7 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
                   onChange={(e) => setEditTexture(e.target.value)}
                   className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100"
                 >
-                  <option value="">Auto-Assign from Race &amp; Build (Dynamic Roll)</option>
+                  <option value="">{t('character.auto_assign_anatomy', 'Auto-Assign from Race & Build (Dynamic Roll)')}</option>
                   {(isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS).map(opt => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}

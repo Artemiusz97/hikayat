@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Sparkles, Zap, Heart, Shield, X, Package, Loader2 } from 'lucide-react';
 
 const isQuickBeltItem = (item) => {
@@ -15,6 +16,11 @@ const isQuickBeltItem = (item) => {
     type.includes('drink') ||
     type.includes('remedy') ||
     type.includes('tonic') ||
+    type.includes('mikstura') ||
+    type.includes('ramuan') ||
+    type.includes('trank') ||
+    type.includes('药水') ||
+    type.includes('药剂') ||
     name.includes('potion') ||
     name.includes('elixir') ||
     name.includes('tonic') ||
@@ -24,8 +30,20 @@ const isQuickBeltItem = (item) => {
     name.includes('snack') ||
     name.includes('bread') ||
     name.includes('tea') ||
+    name.includes('mikstura') ||
+    name.includes('ramuan') ||
+    name.includes('trank') ||
+    name.includes('药水') ||
+    name.includes('药剂') ||
+    name.includes('草药') ||
     eff.includes('heal') ||
     eff.includes('restore') ||
+    eff.includes('leczenie') ||
+    eff.includes('pulih') ||
+    eff.includes('heilen') ||
+    eff.includes('wiederherstellen') ||
+    eff.includes('治疗') ||
+    eff.includes('恢复') ||
     eff.includes('hp') ||
     eff.includes('mp')
   );
@@ -40,6 +58,7 @@ const QuickBeltPopover = ({
   onRefreshCharacter,
   processing
 }) => {
+  const { t } = useTranslation();
   const [usingId, setUsingId] = useState(null);
   const [feedback, setFeedback] = useState(null);
 
@@ -107,10 +126,10 @@ const QuickBeltPopover = ({
             <span className="text-base">🧪</span>
             <div>
               <h3 className="font-rpg font-bold text-fantasy-accent text-sm leading-none">
-                Quick-Use Belt
+                {t('quickbelt.title', 'Quick Belt')}
               </h3>
               <p className="text-[10px] text-gray-400 mt-0.5">
-                {inCombat ? 'Consuming an item takes a combat action' : 'Instant recovery out of combat'}
+                {t('quickbelt.subtitle', inCombat ? 'Consuming an item takes a combat action' : 'Instant recovery out of combat')}
               </p>
             </div>
           </div>
@@ -141,7 +160,7 @@ const QuickBeltPopover = ({
           {quickItems.length === 0 ? (
             <div className="p-4 text-center text-gray-400 text-xs flex flex-col items-center gap-1.5">
               <Package size={22} className="text-gray-500 opacity-60" />
-              <span>No quick consumables or potions in your backpack.</span>
+              <span>{t('quickbelt.empty', 'No quick consumables or potions in your backpack.')}</span>
             </div>
           ) : (
             quickItems.map((item, idx) => {
@@ -191,7 +210,7 @@ const QuickBeltPopover = ({
                     {isUsing ? (
                       <Loader2 size={12} className="animate-spin text-amber-300" />
                     ) : (
-                      <span>Use</span>
+                      <span>{t('quickbelt.use', 'Use')}</span>
                     )}
                   </button>
                 </div>

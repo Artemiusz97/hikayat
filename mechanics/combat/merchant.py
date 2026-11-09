@@ -217,6 +217,263 @@ MERCHANT_ARCHETYPES: dict[str, dict] = {
 }
 
 
+MERCHANT_ARCHETYPES.update({
+    "kitsune_spirit_merchant": {
+        "title": "Fox-Fire Apothecary & Spirit Curios",
+        "emoji": "🦊",
+        "intro_template": "Azure fox-fire lanterns sway above shelves of star-anise tonics, spirit-silk talismans, and lacquer curios.",
+        "instruction": "Exclusively generate Kitsune folklore spirit tonics, illusion-weaving talismans, shrine charms, and enchanted fox-fire accessories. In-person sanctuary trade only.",
+        "allowed_types": ["Consumable", "Potion", "Accessory", "Weapon", "Top", "Gift"],
+        "tier_focus": [3, 2, 2, 1],
+        "in_person_only": True,
+    },
+    "bunian_pusaka_merchant": {
+        "title": "Balai Pusaka & Kayangan Artisans",
+        "emoji": "🌺",
+        "intro_template": "Cempaka incense drifts past woven gold songket, star-iron keris blades, and porcelain vials of Kayangan spring dew.",
+        "instruction": "Exclusively generate Orang Bunian royal Nusantara heirlooms (keris, songket vestments, cempaka hairpins) and Kayangan restorative dews. In-person sanctuary trade only.",
+        "allowed_types": ["Weapon", "Top", "Accessory", "Consumable", "Potion", "Gift"],
+        "tier_focus": [3, 2, 2, 1],
+        "in_person_only": True,
+    },
+    "ranger_station_outfitter": {
+        "title": "Wilderness Ranger Outpost & Trail Permits",
+        "emoji": "🏕️",
+        "intro_template": "Topographic reserve maps, brass trail instruments, emergency flares, and mountain rations line the timber counter.",
+        "instruction": "Generate wilderness reserve trail provisions, emergency first-aid kits, weatherproof field gear, and brass trail instruments.",
+        "allowed_types": ["Consumable", "Food", "Item", "Accessory", "Top"],
+        "tier_focus": [3, 3, 2],
+    },
+})
+
+
+def _get_village_merchant_max_trust(session_id: int | None, village_key: str) -> tuple[int, bool]:
+    """Returns (max_relationship_score, has_romantic_tie) among contacts belonging to `village_key`."""
+    if not session_id:
+        return 0, False
+    max_score = 0
+    has_rom = False
+    try:
+        for ct in (db.get_contacts(int(session_id)) or []):
+            race = str(ct.get("race") or "").lower()
+            p_raw = str(ct.get("personality_json") or "").lower()
+            b_raw = str(ct.get("basic_info_json") or "").lower()
+            is_match = (
+                (village_key == "kitsune" and ("kitsune" in race or '"kitsune"' in p_raw or '"kitsune"' in b_raw))
+                or (village_key == "bunian" and ("bunian" in race or '"bunian"' in p_raw or '"bunian"' in b_raw))
+            )
+            if is_match:
+                max_score = max(max_score, int(ct.get("relationship_score") or 0))
+                if str(ct.get("track") or "").strip().lower() == "romantic":
+                    has_rom = True
+    except Exception:
+        pass
+    return max_score, has_rom
+
+
+def _build_folklore_catalog_shop_stock(
+    session: dict | None,
+    merchant_type: str,
+    scen_key: str,
+) -> tuple[list[dict], str, list[str]]:
+    """Builds deterministic trust-tiered shop stock, clerk name, and rumors for folklore enclave & ranger shops."""
+    from mechanics.world.locations.folklore_veil import (
+        is_folklore_permission_token_name,
+        load_folklore_villages_catalog,
+    )
+    from mechanics.combat.items.envelope import serialize_item as _serialize_item
+
+    cat = load_folklore_villages_catalog()
+    m_cat = (cat.get("merchant_catalogs") or {}).get(merchant_type) or {}
+    clerk_name = str(m_cat.get("merchant_name") or "")
+    sid = int(session["id"]) if isinstance(session, dict) and session.get("id") else None
+
+    raw_items = list(m_cat.get("open_stock") or m_cat.get("base_stock") or [])
+    if merchant_type in ("kitsune_spirit_merchant", "bunian_pusaka_merchant"):
+        v_key = "kitsune" if merchant_type == "kitsune_spirit_merchant" else "bunian"
+        max_trust, has_rom = _get_village_merchant_max_trust(sid, v_key)
+        req_trust = int(m_cat.get("trust_tier_1_min_affinity") or 60)
+        if max_trust >= req_trust or has_rom:
+            raw_items.extend(list(m_cat.get("trusted_tier1_stock") or []))
+
+    built: list[dict] = []
+    for spec in raw_items:
+        if not isinstance(spec, dict) or not spec.get("name"):
+            continue
+        it_name = str(spec["name"])
+        raw_itype = str(spec.get("item_type") or "Item")
+        is_perm = bool(spec.get("quest_locked")) or is_folklore_permission_token_name(it_name)
+        desc_text = str(spec.get("description") or spec.get("effect") or "")
+        it_copy: dict = {
+            "name": it_name,
+            "item_type": "Accessory" if is_perm else raw_itype.title(),
+            "description": desc_text,
+            "price": int(spec.get("price") or 50),
+            "quantity": int(spec.get("quantity") or 1),
+            "tier": int(spec.get("tier") or 2),
+        }
+        if spec.get("slot"):
+            it_copy["slot"] = str(spec["slot"])
+        elif is_perm:
+            it_copy["slot"] = "Accessory"
+        meta = dict(spec.get("metadata") or {})
+        meta.setdefault("name", it_copy["name"])
+        meta.setdefault("tier", it_copy["tier"])
+        meta.setdefault("item_type", it_copy["item_type"])
+        if it_copy.get("slot"):
+            meta.setdefault("slot", it_copy["slot"])
+        if spec.get("attack") is not None:
+            meta.setdefault("attack", int(spec["attack"]))
+        if spec.get("defense") is not None:
+            meta.setdefault("defense", int(spec["defense"]))
+        if desc_text:
+            meta.setdefault("description", desc_text)
+        if is_perm:
+            meta["is_permission_token"] = True
+            meta["is_quest_locked"] = 1
+            it_copy["is_permission_token"] = True
+            it_copy["is_quest_locked"] = 1
+        it_copy["metadata"] = meta
+        raw_eff = str(spec.get("effect") or "")
+        if raw_eff.startswith("[ITEM_JSON]") or raw_eff.startswith("[GEAR_JSON]"):
+            it_copy["effect"] = raw_eff
+        else:
+            it_copy["effect"] = _serialize_item(meta)
+        built.append(it_copy)
+
+    rumors = [
+        str(r.get("text"))
+        for r in (cat.get("rumors") or cat.get("rumor_templates") or [])
+        if isinstance(r, dict) and r.get("text")
+    ]
+    return built, clerk_name, rumors
+
+
+def _inject_folklore_permission_tokens_into_shop_stock(
+    stock: list[dict],
+    session: dict | None,
+    merchant_type: str,
+    is_phone_shop: bool,
+    party: list | None = None,
+) -> None:
+    """
+    Injects quest-locked Permission Tokens into in-person Sanctuary Temple & Wilderness Ranger Station shops
+    when the party does not already carry them, and enforces enclave trust-tiered stock when mocked.
+    """
+    if is_phone_shop or merchant_type == "online_merchant" or not isinstance(session, dict):
+        return
+    scen_key = str(session.get("scenario") or "")
+    if not scenario_data.is_anomalous_incursions_scenario(scen_key) and "urban_anomalies" not in scen_key.lower():
+        return
+
+    from mechanics.world.locations.folklore_veil import load_folklore_villages_catalog
+    cat = load_folklore_villages_catalog()
+    tokens_meta = cat.get("permission_tokens") or {}
+
+    sid = int(session.get("id") or 0)
+    loc_low = str(session.get("current_location") or "").lower()
+    loc_id = str(session.get("current_node_id") or session.get("current_location_id") or "").lower()
+
+    owned_low: set[str] = set()
+    for member in (party or []):
+        c_obj = member[0] if isinstance(member, (tuple, list)) else member
+        uid = int(c_obj.get("user_id") or 0) if isinstance(c_obj, dict) else 0
+        if uid:
+            try:
+                for inv_it in (db.get_inventory(uid) or []):
+                    owned_low.add(str(inv_it.get("name") or "").strip().lower())
+            except Exception:
+                pass
+    if not owned_low and sid:
+        try:
+            for ch in (db.get_session_characters(sid) or []):
+                if ch.get("user_id"):
+                    for inv_it in (db.get_inventory(int(ch["user_id"])) or []):
+                        owned_low.add(str(inv_it.get("name") or "").strip().lower())
+        except Exception:
+            pass
+
+    existing_names = {str(s.get("name") or "").strip().lower() for s in stock if isinstance(s, dict)}
+
+    # 1. Enclave shops always carry their deterministic folklore catalog wares (even if LLM was mocked)
+    if merchant_type in ("kitsune_spirit_merchant", "bunian_pusaka_merchant", "ranger_station_outfitter"):
+        enclave_items, _, _ = _build_folklore_catalog_shop_stock(session, merchant_type, scen_key)
+        for eit in enclave_items:
+            eit_low = eit["name"].strip().lower()
+            if eit.get("is_permission_token") and eit_low in owned_low:
+                continue
+            if eit_low not in existing_names:
+                stock.append(eit)
+                existing_names.add(eit_low)
+
+    # 2. Fox-Fire Brass Suzu Bell at Sacred Mountain Sanctuary Temple / Omikuji / Lantern Tea Street
+    at_sanctuary_bell_shop = (
+        loc_id in ("loc_et_omikuji_shop", "loc_eastern_temple", "loc_et_torii_approach", "loc_es_lantern_tea_street", "sub_es_tea_arcade", "sub_es_wagashi_teahouse")
+        or any(k in loc_low for k in ("omikuji", "talisman stand", "eastern grand temple", "lantern pilgrimage", "tea street"))
+    )
+    k_tok = tokens_meta.get("fox_fire_suzu_bell") or tokens_meta.get("kitsune") or {}
+    k_name = str(k_tok.get("name") or "Fox-Fire Brass Suzu Bell")
+    if at_sanctuary_bell_shop and k_name.lower() not in owned_low and k_name.lower() not in existing_names:
+        k_meta = {
+            "name": k_name,
+            "item_type": "Accessory",
+            "slot": "Accessory",
+            "tier": 2,
+            "is_permission_token": True,
+            "is_quest_locked": 1,
+            "veil_village_key": "kitsune",
+            "description": str(k_tok.get("description") or ""),
+        }
+        stock.append({
+            "name": k_name,
+            "item_type": "Accessory",
+            "slot": "Accessory",
+            "description": str(k_tok.get("description") or "Consecrated shrine bell that parts the fox-shrine veil."),
+            "price": int(k_tok.get("price") or k_tok.get("shop_price") or 180),
+            "quantity": 1,
+            "tier": 2,
+            "is_permission_token": True,
+            "is_quest_locked": 1,
+            "metadata": k_meta,
+            "effect": f"[ITEM_JSON]{json.dumps(k_meta)}",
+        })
+        existing_names.add(k_name.lower())
+
+    # 3. Cempaka Brass Serunai at Wilderness Ranger Station
+    at_ranger_shop = (
+        merchant_type == "ranger_station_outfitter"
+        or loc_id in ("loc_ranger_station", "sub_ranger_counter", "sub_ranger_station_counter", "sub_ranger_permit_desk")
+        or any(k in loc_low for k in ("ranger station", "park ranger", "ranger field station", "trailhead information counter", "trailhead outpost", "trail permit"))
+    )
+    b_tok = tokens_meta.get("cempaka_brass_serunai") or tokens_meta.get("bunian") or {}
+    b_name = str(b_tok.get("name") or "Cempaka Brass Serunai")
+    if at_ranger_shop and b_name.lower() not in owned_low and b_name.lower() not in existing_names:
+        b_meta = {
+            "name": b_name,
+            "item_type": "Accessory",
+            "slot": "Accessory",
+            "tier": 2,
+            "is_permission_token": True,
+            "is_quest_locked": 1,
+            "veil_village_key": "bunian",
+            "description": str(b_tok.get("description") or ""),
+        }
+        stock.append({
+            "name": b_name,
+            "item_type": "Accessory",
+            "slot": "Accessory",
+            "description": str(b_tok.get("description") or "Engraved brass reed flute scented with cempaka resin that parts the Bunian mist."),
+            "price": int(b_tok.get("price") or b_tok.get("shop_price") or 180),
+            "quantity": 1,
+            "tier": 2,
+            "is_permission_token": True,
+            "is_quest_locked": 1,
+            "metadata": b_meta,
+            "effect": f"[ITEM_JSON]{json.dumps(b_meta)}",
+        })
+        existing_names.add(b_name.lower())
+
+
 def _apply_world_event_shop_multiplier(ctx: dict, session: dict | None, is_phone_shop: bool = False) -> dict:
     if is_phone_shop or not isinstance(session, dict) or not session.get("id"):
         return ctx
@@ -339,6 +596,8 @@ def get_anomalous_shop_faction_context(
         or any(k in loc_str for k in (
             "in-house r&d ordnance", "exo-weave & ballistic atelier",
             "neural-cleanse suite", "skyline executive espresso",
+            "special ordnance", "ballistic tailoring", "exo-weave atelier",
+            "neural recovery suite", "skyline lounge",
         ))
         or (priv1_hq_name and priv1_hq_name in loc_str)
     ):
@@ -353,6 +612,8 @@ def get_anomalous_shop_faction_context(
         or any(k in loc_str for k in (
             "back-room gun cage", "surplus locker", "patching corner",
             "first-aid cot", "drip-coffee kitchenette",
+            "vaulted armory", "gunsmithing bench", "fitted armor",
+            "field infirmary", "pour-over kitchenette",
         ))
         or (priv2_hq_name and priv2_hq_name in loc_str)
     ):
@@ -403,26 +664,26 @@ def get_anomalous_shop_faction_context(
         ctx["private_agency_bonus"] = True
         if player_arch == shop_arch:
             ctx["price_multiplier"] = 1.35
-            ctx["pricing_badge"] = "🏢 Corporate R&D Armory (1.35x Proprietary Markup • +20% Anomalous & Prototype Stock)"
+            ctx["pricing_badge"] = "🏢 Special Ordnance Vault (1.35x Specialty Markup • +20% Anomalous & Experimental Stock)"
         else:
             ctx["allowed"] = False
             ctx["access_denied_reason"] = (
-                "Corporate R&D Armory requisition is restricted exclusively to operatives under conglomerate contract."
+                "Special Ordnance Vault requisition is restricted exclusively to operatives under conglomerate contract."
             )
             ctx["price_multiplier"] = 1.35
-            ctx["pricing_badge"] = "🔒 Corporate R&D Armory (Conglomerate Staff Only)"
+            ctx["pricing_badge"] = "🔒 Special Ordnance Vault (Conglomerate Operatives Only)"
     elif shop_arch == "private_agency_2":
         ctx["private_agency_bonus"] = True
         if player_arch == shop_arch:
             ctx["price_multiplier"] = 1.35
-            ctx["pricing_badge"] = "🏪 Agency Surplus & Broker Cage (1.35x Broker Markup • +20% Anomalous & Salvage Stock)"
+            ctx["pricing_badge"] = "🏪 Custom Gunsmith & Specialty Broker Armory (1.35x Broker Rate • +20% Anomalous & Custom-Tuned Stock)"
         else:
             ctx["allowed"] = False
             ctx["access_denied_reason"] = (
-                "The padlocked back-room gun cage and surplus locker are strictly for this local agency's contracted staff."
+                "The vaulted armory and gunsmithing bench are restricted to licensed specialists of this private firm."
             )
             ctx["price_multiplier"] = 1.35
-            ctx["pricing_badge"] = "🔒 Agency Surplus & Broker Cage (Local Agency Staff Only)"
+            ctx["pricing_badge"] = "🔒 Custom Gunsmith & Broker Armory (Agency Specialists Only)"
     elif shop_arch == "monastic_order":
         if player_arch == "monastic_order":
             max_daily = int(a_state.get("shrine_free_max_daily", 3) or 3)
@@ -516,6 +777,67 @@ def compute_anomalous_resale_price(item_dict: dict, default_sell_price: int) -> 
         except (TypeError, ValueError):
             pass
     return default_sell_price
+
+
+def compute_charisma_discount(char: Optional[Dict[str, Any]], merchant: Optional[Dict[str, Any]]) -> int:
+    """Computes total buy/sell charisma + haggle discount percentage (capped at 40%)."""
+    cha = int(char.get("cha", 1) or 1) if isinstance(char, dict) else 1
+    cha_bonus = max(0, (cha - 2) * 3)
+    haggle_disc = int((merchant or {}).get("discount_pct", 0) or 0) if isinstance(merchant, dict) else 0
+    return min(40, cha_bonus + haggle_disc)
+
+
+def compute_item_resale_payout(
+    item: Dict[str, Any],
+    session: Optional[Dict[str, Any]],
+    char: Optional[Dict[str, Any]],
+    llm_base_val: Optional[int] = None,
+) -> Tuple[int, str]:
+    """
+    Deterministic single source of truth for player item resale eligibility and payout
+    across FastAPI REST and Discord Cogs.
+
+    Returns `(sell_price, rejection_reason)`:
+    - `rejection_reason != ""` means the item cannot be sold (`equipped`, `is_key_item`, `is_digital_item`).
+    - `rejection_reason == ""` means the item is eligible; `sell_price` may be `0` (e.g., Monastic Shrine grants).
+    """
+    if not item or not isinstance(item, dict):
+        return 0, "Item not found in inventory"
+    if item.get("equipped"):
+        return 0, "Unequip this item before selling it"
+    if item.get("is_quest_locked"):
+        return 0, "Quest-locked items cannot be sold"
+
+    from mechanics.combat.items import is_key_item, is_digital_item, parse_item_tier
+
+    if is_key_item(item):
+        return 0, "Key narrative items cannot be sold"
+    if is_digital_item(item):
+        return 0, "Digital items cannot be sold"
+
+    sess = session if isinstance(session, dict) else {}
+    scen_key = str(sess.get("scenario") or "fantasy")
+    merchant = dict(sess.get("merchant") or {})
+    discount_pct = compute_charisma_discount(char, merchant)
+
+    if llm_base_val is not None:
+        base_val = max(2, int(llm_base_val))
+    else:
+        tier = parse_item_tier(item)
+        base_val = max(
+            2,
+            calculate_balanced_price(
+                item.get("item_type", "Item"),
+                item.get("name", "Item"),
+                tier=tier,
+                scen_key=scen_key,
+                metadata=item.get("metadata"),
+            ) // 3,
+        )
+
+    sell_price = sell_bonus_price(base_val, discount_pct // 2)
+    sell_price = compute_anomalous_resale_price(item, sell_price)
+    return sell_price, ""
 
 
 def mark_vault_requisition_claimed(session: dict | None, item_name: str) -> list[dict] | None:
@@ -906,6 +1228,11 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
                     "tier": 2,
                 },
             ])
+        elif merchant_type in ("kitsune_spirit_merchant", "bunian_pusaka_merchant", "ranger_station_outfitter"):
+            cat_items, cat_clerk, _ = _build_folklore_catalog_shop_stock(session, merchant_type, scen_key)
+            if cat_clerk and (not merchant_name or merchant_name.strip().lower() in ("merchant", "clerk", "shopkeeper", "vendor", arch_title.lower())):
+                merchant_name = cat_clerk
+            procedural_stock.extend(cat_items)
         elif merchant_type == "school_merchant":
             procedural_stock.extend([
                 {
@@ -1139,12 +1466,32 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
             else:
                 stock.extend(formatted_f_items)
 
+    # Inject quest-locked Folklore Permission Tokens & Enclave Trust-Tiered Wares (in-person only)
+    _inject_folklore_permission_tokens_into_shop_stock(
+        stock,
+        session=session if isinstance(session, dict) else None,
+        merchant_type=merchant_type,
+        is_phone_shop=is_phone_shop,
+        party=party,
+    )
+
     # Monastic Shrine Order member daily stock cap (2-3 items/day, quantity 1 each)
     if (
         shop_ctx.get("shop_faction_archetype") == "monastic_order"
         and shop_ctx.get("player_faction_archetype") == "monastic_order"
     ):
-        stock = stock[:3]
+        perm_tokens = [
+            s_it for s_it in stock
+            if isinstance(s_it, dict) and (s_it.get("metadata") or {}).get("is_permission_token")
+        ]
+        non_perm = [
+            s_it for s_it in stock
+            if not (isinstance(s_it, dict) and (s_it.get("metadata") or {}).get("is_permission_token"))
+        ]
+        if perm_tokens:
+            stock = non_perm[:2] + [perm_tokens[0]]
+        else:
+            stock = stock[:3]
         for s_it in stock:
             s_it["quantity"] = 1
 
@@ -1214,6 +1561,7 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
         "stock": stock,
         "rumors": rumor_entries,
         "merchant_type": merchant_type,
+        "in_person_only": bool((MERCHANT_ARCHETYPES.get(merchant_type) or {}).get("in_person_only")),
     }
     if active_hs_clerk:
         out_shop["merchant_name"] = merchant_name
@@ -1228,6 +1576,11 @@ def reveal_hidden_node_from_rumor(session_id: int, node_id: str) -> bool:
     """Marks a hidden spatial node as discovered in world_nodes.state_json when revealed by a grounded rumor (D19)."""
     if not session_id or not node_id:
         return False
+    nid_clean = str(node_id).strip()
+    if nid_clean == "loc_hidden_kitsune_village" or nid_clean.startswith("sub_kitsune_"):
+        node_id = "loc_et_fox_torii_tunnel"
+    elif nid_clean == "loc_hidden_bunian_village" or nid_clean.startswith("sub_bunian_"):
+        node_id = "loc_bunian_threshold_glade"
     try:
         with db.get_conn() as conn:
             row = conn.execute(
@@ -1321,6 +1674,24 @@ def generate_grounded_merchant_rumors(
                     nid = str(n.get("node_id") or "").strip()
                     nname = str(n.get("name") or "").strip()
                     if not nid or not nname:
+                        continue
+                    if nid.startswith(("sub_kitsune_", "sub_bunian_")):
+                        continue
+                    if nid in ("loc_hidden_kitsune_village", "loc_hidden_bunian_village"):
+                        thresh_id = "loc_et_fox_torii_tunnel" if nid == "loc_hidden_kitsune_village" else "loc_bunian_threshold_glade"
+                        r_txt = (
+                            "Pilgrims swear that at dusk, the vermilion torii behind the Eastern Grand Temple shimmer with blue fox-fire when a brass shrine bell rings."
+                            if nid == "loc_hidden_kitsune_village"
+                            else "Hikers near the Mist-Veiled Banyan Glade claim cempaka blossoms drift out of thin air when a reed serunai echoes at twilight."
+                        )
+                        if r_txt.lower() not in seen_texts:
+                            seen_texts.add(r_txt.lower())
+                            rumor_entries.append({
+                                "text": r_txt[:300],
+                                "revealed": False,
+                                "linked_node_id": thresh_id,
+                                "linked_location": nname,
+                            })
                         continue
                     parent_obj = node_by_id.get(n.get("parent_id")) or {}
                     p_name = str(parent_obj.get("name") or "nearby").strip()
@@ -1436,6 +1807,10 @@ def compute_effective_shop_item_price(
     """Single source of truth for effective shop item purchase price across Web API and Discord."""
     ctx = shop_ctx or {}
     base_price = int(item.get("price", 15) or 15) if isinstance(item, dict) else 15
+    if isinstance(item, dict):
+        from mechanics.world.locations.folklore_veil import is_folklore_permission_token_name
+        if item.get("is_permission_token") or is_folklore_permission_token_name(str(item.get("name") or "")):
+            return discounted_price(base_price, int(discount_pct or 0))
     if ctx.get("is_monastic_free_shop"):
         return 0
     if isinstance(item, dict) and item.get("is_vault_requisition"):
@@ -1578,9 +1953,9 @@ async def generate_faction_quartermaster_shop(faction: dict, session: dict) -> d
     fac_arch = infer_anomalous_faction_archetype(faction) if scenario_data.is_anomalous_incursions_scenario(scen_key) else ""
     theme_hint = ""
     if fac_arch == "private_agency_1":
-        theme_hint = "Theme: Massive corporate conglomerate — sleek, serialized, proprietary weapons and armor developed in-house by corporate R&D.\n"
+        theme_hint = "Theme: Defense and containment conglomerate — sleek smart-linked weapons, defense-catalog model codes, and cleanroom ballisticweave gear.\n"
     elif fac_arch == "private_agency_2":
-        theme_hint = "Theme: Humble small-business private agency — eclectic off-the-shelf, surplus, pawn-shop, and multi-vendor gear sourced from whatever supplier they could find.\n"
+        theme_hint = "Theme: Boutique partner-owned private agency — custom-tuned firearms, fitted ballistic armor, and calibrated ward instruments.\n"
 
     user_prompt = (
         f"{scenario_data.scenario_prompt_block(scen_info)}\n"
@@ -1610,9 +1985,9 @@ async def generate_faction_quartermaster_shop(faction: dict, session: dict) -> d
                 eq["quantity"] = 1
                 q_stock.append(eq)
         if fac_arch == "private_agency_1":
-            intro_str = f"The {faction_name} R&D ordnance officer scans your biometric badge and unlocks a backlit case of proprietary in-house gear."
+            intro_str = f"The {faction_name} ordnance officer verifies your biometric clearance and unlocks a backlit vault case of smart-linked equipment."
         elif fac_arch == "private_agency_2":
-            intro_str = f"The {faction_name} supply clerk unhooks a padlock on the chain-link cage and slides over crates of assorted surplus and brokered gear."
+            intro_str = f"The {faction_name} master gunsmith unbolts the vaulted armory door and lays out custom-tuned firearms and ward-fitted gear."
         else:
             intro_str = f"The {faction_name} quartermaster nods at you."
         result = {

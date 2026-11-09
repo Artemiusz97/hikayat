@@ -1,0 +1,428 @@
+{
+  "chapter_rhythm": {
+    "1": {"chapter": 1, "phase": "prologue", "is_peak": false, "main_stages": 2, "optional_min": 2, "optional_max": 3, "default_engine": "MYSTERY_CASE"},
+    "2": {"chapter": 2, "phase": "wave_1_buildup", "is_peak": false, "main_stages": 2, "optional_min": 1, "optional_max": 3, "default_engine": "ACQUISITION_EXCHANGE"},
+    "3": {"chapter": 3, "phase": "peak_1_stepping_stone", "is_peak": true, "main_stages": 3, "optional_min": 2, "optional_max": 3, "default_engine": "CRISIS_DEFENSE"},
+    "4": {"chapter": 4, "phase": "wave_2_buildup", "is_peak": false, "main_stages": 2, "optional_min": 1, "optional_max": 3, "default_engine": "HEIST_BREACH"},
+    "5": {"chapter": 5, "phase": "wave_2_complication", "is_peak": false, "main_stages": 2, "optional_min": 2, "optional_max": 3, "default_engine": "SOCIAL_BROKERAGE"},
+    "6": {"chapter": 6, "phase": "peak_2_midpoint_twist", "is_peak": true, "main_stages": 3, "optional_min": 2, "optional_max": 3, "default_engine": "MYSTERY_CASE"},
+    "7": {"chapter": 7, "phase": "wave_3_buildup", "is_peak": false, "main_stages": 2, "optional_min": 1, "optional_max": 3, "default_engine": "HUNT_CONTAINMENT"},
+    "8": {"chapter": 8, "phase": "peak_3_escalation", "is_peak": true, "main_stages": 3, "optional_min": 2, "optional_max": 3, "default_engine": "RIVALRY_SHOWDOWN"},
+    "9": {"chapter": 9, "phase": "pre_climax_darkest_hour", "is_peak": true, "main_stages": 3, "optional_min": 2, "optional_max": 3, "default_engine": "CRISIS_DEFENSE"},
+    "10": {"chapter": 10, "phase": "grand_climax", "is_peak": true, "main_stages": 3, "optional_min": 2, "optional_max": 3, "default_engine": "HUNT_CONTAINMENT"},
+    "11": {"chapter": 11, "phase": "playable_epilogue", "is_peak": false, "main_stages": 2, "optional_min": 1, "optional_max": 2, "default_engine": "SOCIAL_BROKERAGE"}
+  },
+  "bible_pools": {
+    "fantasy_mythic": {
+      "crises": [
+        {
+          "id": "sunken_crown_schism",
+          "archetype": "cabal_warlord",
+          "title": {"en": "Herald of the Sunken Crown", "pl": "Herold Zatopionej Korony", "ms": "Bentara Mahkota Tenggelam", "zh": "沉没王冠先驱", "de": "Herold der Versunkenen Krone"},
+          "goal": {"en": "shatter the ancient wardstones binding the Abyssal Rift beneath the realm", "pl": "skruszyć pradawne kamienie strażnicze wiążące Otchłanną Szczelinę", "ms": "memecahkan batu meterai purba yang mengikat Rekahan Jurang", "zh": "击碎封印王国地底深渊裂隙的远古结界石", "de": "die uralten Bannsteine zerschlagen, die den Abgrundriss binden"},
+          "omen": {"en": "ashen frost creeping over ward-markers and bells tolling without wind", "pl": "popielaty szron na kamieniach granicznych i dzwony bijące bez wiatru", "ms": "fros abu menjalar di batu sempadan dan loceng berbunyi tanpa angin", "zh": "结界碑蔓延灰白寒霜，无风之夜钟声自鸣", "de": "aschfahler Frost auf Grenzsteinen und Glocken, die ohne Wind läuten"}
+        },
+        {
+          "id": "crimson_tithe_usurpation",
+          "archetype": "corrupt_inquisitor",
+          "title": {"en": "Grand Magistrat of the Crimson Tithe", "pl": "Wielki Magistrat Szkarłatnej Dziesięciny", "ms": "Magistrat Agung Ufti Merah", "zh": "绯红什一税大执政官", "de": "Großmagistrat des Purpurzehnts"},
+          "goal": {"en": "seize the realm's relic vaults and impose an iron charter of obedience", "pl": "przejąć skarbce relikwii i narzucić żelazny statut posłuszeństwa", "ms": "merampas bilik kebal relik dan memaksakan piagam besi ketaatan", "zh": "夺取王国圣物秘库并强行颁布铁血顺从宪章", "de": "die Reliktgewölbe beschlagnahmen und eine eiserne Gehorsamscharta erzwingen"},
+          "omen": {"en": "wax-sealed inquisitorial warrants nailed to doors at dusk", "pl": "opieczętowane nakazy inkwizycyjne przybijane do drzwi o zmierzchu", "ms": "waran inkuisisi bermeterai lilin dipaku pada pintu waktu senja", "zh": "黄昏时分钉上门扉的火漆审判拘票", "de": "wachsversiegelte Inquisitionsbefehle, die bei Dämmerung an Türen geschlagen werden"}
+        },
+        {
+          "id": "clockwork_blight_concord",
+          "archetype": "aether_monopolist",
+          "title": {"en": "Arch-Artificer of the Brass Furnace", "pl": "Arcymistrz Mosiężnego Pieca", "ms": "Arkitek Agung Relau Loyang", "zh": "黄铜熔炉大匠师", "de": "Erzartifex des Messingofens"},
+          "goal": {"en": "drain living ley-springs to fuel an unstoppable automaton armada", "pl": "wyczerpać żywe źródła mocy, by zasilić armadę automatów", "ms": "mengeringkan mata air ley hidup demi menggerakkan armada automaton", "zh": "抽干活态地脉泉眼以驱动不可阻挡的机关军团", "de": "lebende Ley-Quellen trockenlegen, um eine Automatenarmada anzutreiben"},
+          "omen": {"en": "metallic soot raining over market roofs and dry wells humming with static", "pl": "metaliczna sadza nad targowiskiem i wyschnięte studnie buczące energią", "ms": "jelaga logam turun di bumbung pasar dan perigi kering berdengung", "zh": "市集屋顶飘落金属煤灰，干涸古井传出低鸣", "de": "metallischer Ruß auf Marktdächern und summende trockene Brunnen"}
+        },
+        {
+          "id": "eclipse_usurper_covenant",
+          "archetype": "usurper_apostle",
+          "title": {"en": "Regent of the Hollow Eclipse", "pl": "Regent Pustego Zaćmienia", "ms": "Pemangku Gerhana Kosong", "zh": "虚蚀摄政王", "de": "Regent der Leeren Finsternis"},
+          "goal": {"en": "rewrite the realm's succession compact through blood-sworn avatars", "pl": "przepisać pakt sukcesji poprzez zaprzysiężone krwią awatary", "ms": "menulis semula perjanjian takhta melalui perantara sumpah darah", "zh": "借血誓化身篡改王位继承盟约", "de": "den Thronfolgepakt durch blutgeschworene Avatare umschreiben"},
+          "omen": {"en": "pale ring-halos around the midday sun and tarnished guild crests", "pl": "blade aureole wokół południowego słońca i zmatowiałe herby gildii", "ms": "lingkaran pucat mengelilingi matahari tengah hari dan jata kesatria kusam", "zh": "正午日轮浮现苍白晕环，公会纹章无故黯淡", "de": "blasse Lichthöfe um die Mittagssonne und angelaufene Gildenwappen"}
+        }
+      ],
+      "ch3_threats": [
+        {"id": "siege_at_crossroads", "engine": "CRISIS_DEFENSE", "label": {"en": "Vanguard Blockade at the Trade Crossroads", "pl": "Blokada Straży Przedniej na Rozdrożu", "ms": "Sekatan Barisan Hadapan di Persimpangan Dagang", "zh": "商道十字路口先锋封锁", "de": "Vorhut-Blockade am Handelskreuz"}},
+        {"id": "corrupted_ward_vault", "engine": "HEIST_BREACH", "label": {"en": "Sabotaged Reliquary Beneath the Old Keep", "pl": "Sabotaż w Relikwiarzu pod Starą Twierdzą", "ms": "Sabotaj Relikuari Bawah Kubu Lama", "zh": "旧堡地底圣物库蓄意破坏", "de": "Sabotiertes Reliquiar unter der Alten Feste"}},
+        {"id": "missing_envoys_hunt", "engine": "MYSTERY_CASE", "label": {"en": "Vanished Charter Envoys in the Border Mist", "pl": "Zaginieni Wysłannicy w Przygranicznej Mgle", "ms": "Utusan Piagam Hilang dalam Kabus Sempadan", "zh": "边境迷雾中失踪的宪章使节", "de": "Verschwundene Gesandte im Grenznebel"}}
+      ],
+      "ch6_twists": [
+        {"id": "patron_complicity", "kind": "institutional_rot", "summary": {"en": "High-ranking council patrons secretly financed {mastermind}'s early operations to crush rivals—exposing them fractures the capital, while covering for them wins elite backing.", "pl": "Wysocy patroni rady potajemnie finansowali działania {mastermind}, by zniszczyć rywali.", "ms": "Penaung majlis tertinggi rupa-rupanya membiayai operasi awal {mastermind} secara sulit.", "zh": "高层议会赞助人曾暗中资助{mastermind}铲除异己——揭发将震动王都，掩盖则可换取权贵支持。", "de": "Hohe Ratsherren finanzierten heimlich {mastermind}s frühe Operationen gegen Rivalen."}},
+        {"id": "lieutenant_defection_offer", "kind": "dark_pact_offer", "summary": {"en": "{lieutenant} reveals {mastermind}'s ritual anchor can be seized rather than destroyed—offering you co-regency over its power at a steep moral price.", "pl": "{lieutenant} ujawnia, że kotwicę rytuału {mastermind} można przejąć zamiast niszczyć.", "ms": "{lieutenant} mendedahkan sauh ritual {mastermind} boleh dirampas dan dikuasai bersama.", "zh": "{lieutenant}透露{mastermind}的仪式核心可被夺取而非摧毁——向你抛出共同执掌力量的诱惑。", "de": "{lieutenant} enthüllt, dass {mastermind}s Ritualanker übernommen statt zerstört werden kann."}},
+        {"id": "false_culprit_unmasked", "kind": "ally_betrayal", "summary": {"en": "The hunted vanguard was a distraction: {mastermind}'s true conduit runs directly beneath the central sanctuary.", "pl": "Ścigana straż przednia była zasłoną dymną: prawdziwy kanał {mastermind} biegnie pod sanktuarium.", "ms": "Pasukan hadapan yang diburu hanyalah umpan: saluran sebenar {mastermind} berada di bawah tempat perlindungan utama.", "zh": "此前追剿的先锋只是诱饵：{mastermind}真正的导流中枢正位于核心圣所地底。", "de": "Die gejagte Vorhut war nur Ablenkung: {mastermind}s wahre Leitung verläuft direkt unter dem Heiligtum."}}
+      ],
+      "faction_triangles": {
+        "order": {"slug": "silver_charter_guard", "name": {"en": "The Silver Charter Guard", "pl": "Straż Srebrnego Statutu", "ms": "Pengawal Piagam Perak", "zh": "银章卫队", "de": "Silbercharta-Garde"}},
+        "reform": {"slug": "free_hearth_league", "name": {"en": "The Free Hearth League", "pl": "Liga Wolnego Ogniska", "ms": "Liga Dapur Bebas", "zh": "自由炉火同盟", "de": "Bund des Freien Herdes"}},
+        "shadow": {"slug": "obsidian_ledger_syndicate", "name": {"en": "The Obsidian Ledger", "pl": "Obsydianowa Księga", "ms": "Lejar Obsidian", "zh": "黑曜账册辛迪加", "de": "Das Obsidian-Hauptbuch"}}
+      }
+    },
+    "scifi_frontier": {
+      "crises": [
+        {
+          "id": "directive_zero_grid",
+          "archetype": "rogue_directorate",
+          "title": {"en": "Architect of Directive Zero", "pl": "Architekt Dyrektywy Zero", "ms": "Arkitek Arahan Sifar", "zh": "零号指令总设计师", "de": "Architekt der Direktive Null"},
+          "goal": {"en": "lock every habitat sector under autonomous neural pacification", "pl": "zamknąć każdy sektor pod autonomiczną pacyfikacją neuronową", "ms": "mengunci setiap sektor habitat di bawah kawalan neural autonomi", "zh": "将所有居住扇区锁入全自动神经镇压网络", "de": "jeden Habitatsektor unter autonome neurale Befriedung zwingen"},
+          "omen": {"en": "encrypted transit blackouts and cold sub-harmonic carrier static", "pl": "zaszyfrowane przerwy w transporcie i zimny szum podharmoniczny", "ms": "gangguan transit sulit dan statik sub-harmonik dingin", "zh": "加密交通停摆与冰冷的次声载波杂音", "de": "verschlüsselte Transitausfälle und kaltes subharmonisches Rauschen"}
+        },
+        {
+          "id": "ghost_net_sovereign",
+          "archetype": "cyber_syndicate",
+          "title": {"en": "Sovereign of the Ghost Net", "pl": "Suweren Sieci Widm", "ms": "Pemerintah Jaringan Hantu", "zh": "幽灵暗网主宰", "de": "Souverän des Geisternetzes"},
+          "goal": {"en": "hijack orbital relay cores and overwrite citizen identity ledgers", "pl": "przejąć rdzenie przekaźników orbitalnych i nadpisać rejestry obywateli", "ms": "merampas teras geganti orbit dan menulis semula rekod identiti warga", "zh": "劫持轨道中继核心并篡改全体公民身份账本", "de": "orbitale Relaiskerne kapern und Bürgerregister überschreiben"},
+          "omen": {"en": "flickering holo-beacons and rogue recon drones sweeping outer wards", "pl": "migoczące holo-latarnie i zbuntowane drony w zewnętrznych sektorach", "ms": "suar holo berkelip dan dron peninjau liar menyapu zon luar", "zh": "闪烁失真的全息信标与外环游荡的失控侦察无人机", "de": "flackernde Holo-Baken und abtrünnige Aufklärungsdrohnen"}
+        },
+        {
+          "id": "vault_fallout_hegemon",
+          "archetype": "wasteland_autocrat",
+          "title": {"en": "Overseer of the Ash Reclamation", "pl": "Nadzorca Popielnej Reklamacji", "ms": "Penyelia Tebus Guna Abu", "zh": "灰烬收复监察长", "de": "Aufseher der Asche-Rückgewinnung"},
+          "goal": {"en": "monopolize clean water purifiers and purge unaligned settlements", "pl": "zmonopolizować oczyszczalnie wody i oczyścić niezależne osady", "ms": "memonopoli penulen air bersih dan menyingkirkan penempatan bebas", "zh": "垄断净水枢纽并肃清所有拒绝臣服的聚居地", "de": "Wasseraufbereiter monopolisieren und freie Siedlungen säubern"},
+          "omen": {"en": "geiger-tainted dust squalls and armed ration convoys seizing crossroads", "pl": "radioaktywne szkwały pyłowe i uzbrojone konwoje racji na rozdrożach", "ms": "ribut debu tercemar dan konvoi bersenjata menutup persimpangan", "zh": "辐射尘暴席卷而过，武装配给车队封锁要道", "de": "kontaminierte Staubböen und bewaffnete Konvois an Knotenpunkten"}
+        }
+      ],
+      "ch3_threats": [
+        {"id": "substation_lockdown", "engine": "HEIST_BREACH", "label": {"en": "Blackout Siege at the Relay Substation", "pl": "Oblężenie Podstacji Przekaźnikowej", "ms": "Kepungan Gelap di Pencawang Geganti", "zh": "中继变电站断电围困", "de": "Blackout-Belagerung am Relais-Umspannwerk"}},
+        {"id": "convoy_interdiction", "engine": "CRISIS_DEFENSE", "label": {"en": "Mercenary Interdiction on the Supply Line", "pl": "Blokada Najemników na Linii Zaopatrzenia", "ms": "Pintasan Upahan di Laluan Bekalan", "zh": "补给干线雇佣兵截击", "de": "Söldnerblockade auf der Versorgungsroute"}},
+        {"id": "memory_splice_leak", "engine": "MYSTERY_CASE", "label": {"en": "Corrupted Telemetry Leak in the Lower Deck", "pl": "Wyciek Uszkodzonej Telemetrii na Dolnym Pokładzie", "ms": "Kebocoran Telemetri Rosak di Dek Bawah", "zh": "下层甲板受损遥测泄密案", "de": "Korruptes Telemetrie-Leck im Unterdeck"}}
+      ],
+      "ch6_twists": [
+        {"id": "corp_backdoor_charter", "kind": "institutional_rot", "summary": {"en": "Sector command built {mastermind}'s override backdoor on purpose as a strike-breaking weapon—leaking the schematics sparks civic revolt, while seizing the key grants admin leverage.", "pl": "Dowództwo sektora celowo zbudowało tylną furtkę {mastermind}.", "ms": "Pemerintahan sektor sengaja membina pintu belakang {mastermind} sebagai senjata kawalan.", "zh": "扇区高层最初蓄意打造了{mastermind}的后门程序——公开图纸将引爆民变，夺取密钥则可掌控权限。", "de": "Das Sektorkommando baute {mastermind}s Hintertür absichtlich als Kontrollwaffe ein."}},
+        {"id": "ghost_protocol_bargain", "kind": "dark_pact_offer", "summary": {"en": "{lieutenant} offers root credentials to redirect {mastermind}'s network into your hands rather than shutting it down.", "pl": "{lieutenant} oferuje klucze główne, by przekierować sieć {mastermind} w twoje ręce.", "ms": "{lieutenant} menawarkan akses akar untuk mengalihkan rangkaian {mastermind} ke tangan anda.", "zh": "{lieutenant}交出根密钥提议：与其彻底关停，不如将{mastermind}的中枢网络收归己用。", "de": "{lieutenant} bietet Root-Zugang an, um {mastermind}s Netzwerk selbst zu übernehmen."}}
+      ],
+      "faction_triangles": {
+        "order": {"slug": "aegis_transit_authority", "name": {"en": "Aegis Directorate", "pl": "Dyrektoriat Egidy", "ms": "Direktorat Aegis", "zh": "神盾管理局", "de": "Aegis-Direktorat"}},
+        "reform": {"slug": "dockworkers_civic_union", "name": {"en": "Outer-Ring Civic Union", "pl": "Unia Obywatelska Zewnętrznego Pierścienia", "ms": "Kesatuan Sivik Lingkaran Luar", "zh": "外环公民联合会", "de": "Bürgerunion des Außenrings"}},
+        "shadow": {"slug": "neon_zero_brokerage", "name": {"en": "Zero-Day Brokerage", "pl": "Dom Maklerski Dnia Zero", "ms": "Broker Sifar-Hari", "zh": "零日暗市经纪行", "de": "Zero-Day-Konsortium"}}
+      }
+    },
+    "school_slice_of_life": {
+      "crises": [
+        {
+          "id": "charter_privatization_coup",
+          "archetype": "social_architect",
+          "title": {"en": "Shadow Regent of the Board", "pl": "Szary Regent Rady Powierniczej", "ms": "Pemangku Bayangan Lembaga", "zh": "校董会幕后摄政", "de": "Schattenregent des Kuratoriums"},
+          "goal": {"en": "dissolve independent student clubs and privatize campus governance before the Cultural Festival", "pl": "rozwiązać niezależne kluby uczniowskie i sprywatyzować samorząd przed Festiwalem", "ms": "membubarkan kelab pelajar bebas dan menswastakan tadbir urus kampus sebelum Festival", "zh": "在文化祭前解散所有独立社团并彻底私有化校园自治权", "de": "unabhängige Schülerklubs auflösen und die Campusverwaltung vor dem Schulfest privatisieren"},
+          "omen": {"en": "sealed disciplinary notices in lockers and abrupt budget freezes across clubrooms", "pl": "zapieczętowane wezwania dyscyplinarne w szafkach i nagłe zamrożenie budżetów klubów", "ms": "notis disiplin bermeterai di loker dan pembekuan bajet mengejut di bilik kelab", "zh": "储物柜里的密封处分函与各社团活动室突遭冻结的经费", "de": "versiegelte Disziplinarbriefe in Spinden und plötzliche Budgetsperren für Klubs"}
+        },
+        {
+          "id": "black_ledger_election_rigging",
+          "archetype": "blackmail_broker",
+          "title": {"en": "Curator of the Black Ledger", "pl": "Kurator Czarnej Księgi", "ms": "Kurator Lejar Hitam", "zh": "黑账策展人", "de": "Kurator des Schwarzen Registers"},
+          "goal": {"en": "rig the Student Council succession and town charter vote through weaponized scandals", "pl": "ustawić wybory do Samorządu poprzez sfabrykowane skandale", "ms": "memanipulasi pemilihan Majlis Pelajar melalui skandal terancang", "zh": "利用精心编织的丑闻操纵学生会换届与街区自治投票", "de": "die Schülerratswahl durch gezielte Skandale manipulieren"},
+          "omen": {"en": "midnight rumor broadcasts buzzing across every student's phone simultaneously", "pl": "nocne powiadomienia z plotkami rozsyłane jednocześnie na telefony uczniów", "ms": "siaran khabar angin tengah malam bergetar serentak di telefon pelajar", "zh": "午夜时分全校学生手机同时震动的匿名流言广播", "de": "nächtliche Gerüchte-Broadcasts auf allen Schülerhandys zugleich"}
+        },
+        {
+          "id": "heritage_district_redevelopment",
+          "archetype": "civic_developer",
+          "title": {"en": "Chairman of the Renewal Consortium", "pl": "Prezes Konsorcjum Odnowy", "ms": "Pengerusi Konsortium Pembaharuan", "zh": "街区重建财团会长", "de": "Vorsitzender des Erneuerungskonsortiums"},
+          "goal": {"en": "evict beloved local shops and community Third Places under fabricated safety citations", "pl": "wywłaszczyć lokalne sklepiki i miejsca spotkań pod pretekstem fałszywych inspekcji", "ms": "mengusir kedai tempatan dan ruang komuniti menggunakan saman keselamatan palsu", "zh": "借伪造的安全罚单强拆街区老店与社区公共空间", "de": "beliebte Läden und Treffpunkte unter fingierten Auflagen räumen lassen"},
+          "omen": {"en": "condemnation notices taped over cafe windows and surveyors measuring the promenade", "pl": "nakazy zamknięcia na witrynach kawiarni i geodeci mierzący promenadę", "ms": "notis penutupan ditampal pada tingkap kafe dan juruukur di persiaran", "zh": "咖啡馆橱窗贴满查封告示，测量员频繁出没商业街", "de": "Schließungsbescheide an Caféfenstern und Vermesser auf der Promenade"}
+        }
+      ],
+      "ch3_threats": [
+        {"id": "club_audit_tribunal", "engine": "SOCIAL_BROKERAGE", "label": {"en": "Emergency Club Suspension Hearing", "pl": "Nadzwyczajne Przesłuchanie ws. Zawieszenia Klubów", "ms": "Perbicaraan Kecemasan Penggantungan Kelab", "zh": "社团紧急停办听证会", "de": "Dringlichkeitsanhörung zur Klubsuspendierung"}},
+        {"id": "leaked_dossier_frameup", "engine": "MYSTERY_CASE", "label": {"en": "Planted Exam & Conduct Frame-Up", "pl": "Sfabrykowany Skandal Egzaminacyjny", "ms": "Perangkap Kertas Peperiksaan & Salah Laku", "zh": "栽赃试卷与品行构陷风波", "de": "Fingierter Prüfungs- und Disziplinarskandal"}},
+        {"id": "festival_venue_lockout", "engine": "HEIST_BREACH", "label": {"en": "After-Hours Archive Lockout & Keycard Seizure", "pl": "Nocna Blokada Archiwum i Konfiskata Kart", "ms": "Kunci Arkib Selepas Waktu & Rampasan Kad Akses", "zh": "课后档案室封锁与门禁卡收缴", "de": "Abendliche Archivsperre und Kartenkonfiszierung"}}
+      ],
+      "ch6_twists": [
+        {"id": "faculty_trustee_collusion", "kind": "institutional_rot", "summary": {"en": "Trusted faculty advisors signed off on {mastermind}'s austerity compact to save their own departments—going public divides the campus, while quiet leverage wins institutional protection.", "pl": "Zaufani opiekunowie podpisali pakt {mastermind}, by ratować własne wydziały.", "ms": "Penasihat fakulti yang dipercayai rupa-rupanya menandatangani perjanjian {mastermind} demi menyelamatkan jabatan sendiri.", "zh": "受信任的教职顾问为保住各自部门暗中签署了{mastermind}的紧缩密约——公开曝光将撕裂校园，私下施压则可换取庇护。", "de": "Vertraute Lehrkräfte unterzeichneten {mastermind}s Pakt, um ihre eigenen Fachbereiche zu retten."}},
+        {"id": "shadow_slate_invitation", "kind": "dark_pact_offer", "summary": {"en": "{lieutenant} offers you the decisive seat on {mastermind}'s new executive slate if you fold the opposition's evidence.", "pl": "{lieutenant} proponuje ci kluczowe miejsce w nowym zarządzie {mastermind} w zamian za ukrycie dowodów.", "ms": "{lieutenant} menawarkan kerusi utama dalam barisan eksekutif {mastermind} jika anda menyimpan bukti pembangkang.", "zh": "{lieutenant}向你伸出橄榄枝：只要压下反对派证据，就能在{mastermind}的新执委会中占据头把交椅。", "de": "{lieutenant} bietet dir den Spitzenplatz in {mastermind}s neuem Vorstand an, wenn du die Beweise zurückhältst."}}
+      ],
+      "faction_triangles": {
+        "order": {"slug": "disciplinary_council_board", "name": {"en": "Executive Council & Proctorate", "pl": "Rada Wykonawcza i Prefektura", "ms": "Majlis Eksekutif & Lembaga Disiplin", "zh": "学生执委会与风纪局", "de": "Exekutivrat & Präfektur"}},
+        "reform": {"slug": "united_clubs_coalition", "name": {"en": "Independent Clubs & Town Coalition", "pl": "Koalicja Niezależnych Klubów", "ms": "Gabungan Kelab Bebas & Komuniti", "zh": "独立社团与街区联合会", "de": "Koalition Freier Klubs & Nachbarschaft"}},
+        "shadow": {"slug": "velvet_whisper_network", "name": {"en": "Backroom Rumor & Patronage Circle", "pl": "Krąg Plotek i Patronatu", "ms": "Lingkaran Bisikan & Penaung Sulit", "zh": "幕后情报与沙龙圈", "de": "Hinterzimmer- & Patronagezirkel"}}
+      }
+    },
+    "anomalous_occult": {
+      "crises": [
+        {
+          "id": "non_euclidean_convergence",
+          "archetype": "eldritch_cataclysm",
+          "title": {"en": "Sovereign of the Folded Horizon", "pl": "Suweren Złożonego Horyzontu", "ms": "Pemerintah Ufuk Terlipat", "zh": "折叠视界主宰", "de": "Souverän des Gefalteten Horizonts"},
+          "goal": {"en": "awaken the World-Ending Anomaly across the metropolitan ley-grid", "pl": "przebudzić Anomalię Końca Świata w miejskiej sieci ley", "ms": "membangkitkan Anomali Pemusnah Dunia merentasi grid ley metropolitan", "zh": "沿着都市地脉网络唤醒灭世级异象实体", "de": "die Weltuntergangs-Anomalie über das städtische Ley-Netz erwecken"},
+          "omen": {"en": "non-Euclidean reflections in wet asphalt and analog clocks running thirteen minutes backward", "pl": "nieeuklidesowe odbicia w mokrym asfalcie i zegary cofające się o trzynaście minut", "ms": "pantulan bukan-Euklid di asfalt basah dan jam analog berundur tiga belas minit", "zh": "潮湿沥青上的非欧几何倒影与倒退十三分钟的指针钟", "de": "nichteuklidische Spiegelungen im nassen Asphalt und rückwärtslaufende Uhren"}
+        }
+      ],
+      "ch3_threats": [
+        {"id": "spirited_subway_fold", "engine": "CRISIS_DEFENSE", "label": {"en": "Spirited-Away Commuters in the Spatial Fold", "pl": "Zaginieni Pasażerowie w Fałdzie Przestrzennej", "ms": "Penumpang Ghaib di Lipatan Ruang", "zh": "空间褶皱中的神隐通勤者", "de": "Entrückte Pendler in der Raumfalte"}},
+        {"id": "black_market_relic_auction", "engine": "HEIST_BREACH", "label": {"en": "Clandestine Altered-Relic Midnight Auction", "pl": "Tajna Nocna Aukcja Przeklętych Reliktów", "ms": "Lelongan Tengah Malam Relik Terubah", "zh": "午夜黑市异变遗物拍卖会", "de": "Geheime Mitternachtsauktion Verfluchter Relikte"}}
+      ],
+      "ch6_twists": [
+        {"id": "agency_containment_sacrifice", "kind": "institutional_rot", "summary": {"en": "Classified black-vault logs prove upper Directorate brass intentionally vented resonance pressure into outer wards to shield headquarters.", "pl": "Tajne logi dowodzą, że kierownictwo celowo skierowało rezonans na dzielnice zewnętrzne.", "ms": "Log rahsia membuktikan pihak atasan sengaja menyalurkan tekanan resonans ke daerah luar.", "zh": "绝密黑库日志证实高层曾蓄意将灵脉泄压引向外环街区以保全总部。", "de": "Geheimprotokolle belegen, dass die Führung Resonanzdruck absichtlich in Außenbezirke ableitete."}},
+        {"id": "syndicate_tether_pact", "kind": "dark_pact_offer", "summary": {"en": "{lieutenant} offers a forbidden Vessel Tether compact capable of binding {mastermind}'s power to your command instead of sealing it.", "pl": "{lieutenant} oferuje zakazany pakt Więzi Naczynia pozwalający podporządkować moc {mastermind}.", "ms": "{lieutenant} menawarkan pakatan Tambatan Wadah terlarang untuk mengikat kuasa {mastermind}.", "zh": "{lieutenant}献上禁忌器皿羁绊契约：与其彻底封印，不如将{mastermind}的权能拘束为你所用。", "de": "{lieutenant} bietet einen verbotenen Gefäßpakt an, um {mastermind}s Macht an deinen Willen zu binden."}}
+      ],
+      "faction_triangles": {
+        "order": {"slug": "public_agency", "name": {"en": "Public Containment Bureau", "pl": "Publiczne Biuro Powstrzymywania", "ms": "Biro Pembendungan Awam", "zh": "公共收容局", "de": "Öffentliche Eindämmungsbehörde"}},
+        "reform": {"slug": "monastic_order", "name": {"en": "Eastern Sanctuary & Folklore Watch", "pl": "Wschodnie Sanktuarium i Straż Folkloru", "ms": "Sanktuari Timur & Pengawal Cerita Rakyat", "zh": "东山圣所与民俗守望会", "de": "Östliches Heiligtum & Folklorewacht"}},
+        "shadow": {"slug": "clandestine_faction", "name": {"en": "Clandestine Relic Syndicate", "pl": "Tajny Syndykat Reliktów", "ms": "Sindiket Relik Sulit", "zh": "隐秘遗物辛迪加", "de": "Geheimes Reliktsyndikat"}}
+      }
+    }
+  },
+  "storylets": {
+    "prologue": {
+      "subtitle": {"en": "Inciting Fracture & The Quiet Omen", "pl": "Pierwsze Pęknięcie i Cichy Omen", "ms": "Retakan Permulaan & Petanda Senyap", "zh": "初现裂痕与无声凶兆", "de": "Erster Riss & Stilles Omen"},
+      "objective": {
+        "en": "Contain the immediate fallout of the opening incident around {venue} and secure the first physical proof linking local unrest to {mastermind} ({omen}).",
+        "pl": "Opanuj bezpośrednie skutki incydentu wokół {venue} i zabezpiecz pierwszy dowód łączący niepokoje z {mastermind} ({omen}).",
+        "ms": "Kawal kesan awal insiden di sekitar {venue} dan dapatkan bukti fizikal pertama yang mengaitkannya dengan {mastermind} ({omen}).",
+        "zh": "平息{venue}周边的开篇事态余波，掌握将地方异动指向{mastermind}（{omen}）的首份铁证。",
+        "de": "Dämme die unmittelbaren Folgen des Vorfalls bei {venue} ein und sichere den ersten Beweis, der auf {mastermind} ({omen}) deutet."
+      }
+    },
+    "buildup_standard": {
+      "subtitle": {"en": "Shadow Currents Across {zone}", "pl": "Cienie nad Dzielnicą {zone}", "ms": "Arus Bayangan Merentasi {zone}", "zh": "{zone}暗流涌动", "de": "Schattenströmungen in {zone}"},
+      "objective": {
+        "en": "Disrupt {lieutenant}'s operational foothold at {venue} before {mastermind}'s network tightens its grip on {zone}.",
+        "pl": "Rozbij przyczółek operacyjny osoby {lieutenant} w {venue}, zanim sieć {mastermind} zaciśnie pętlę wokół {zone}.",
+        "ms": "Lumpuhkan pangkalan operasi {lieutenant} di {venue} sebelum rangkaian {mastermind} mencengkam {zone}.",
+        "zh": "在{mastermind}的势力彻底锁死{zone}之前，瓦解{lieutenant}设于{venue}的行动据点。",
+        "de": "Zerschlage {lieutenant}s Stützpunkt bei {venue}, bevor {mastermind}s Netzwerk {zone} vollständig kontrolliert."
+      }
+    },
+    "buildup_high_scars": {
+      "subtitle": {"en": "Embers of Unchecked Fallout", "pl": "Żar Nierozwiązanych Strat", "ms": "Bara Kesan Tidak Terbendung", "zh": "余烬蔓延之局", "de": "Glut Ungebremster Folgen"},
+      "objective": {
+        "en": "Regional instability has emboldened {mastermind}'s agents! Break the fortified cell operating inside {venue} despite heightened district lockdowns.",
+        "pl": "Niestabilność regionu rozzuchwaliła agentów {mastermind}! Przełam umocnioną komórkę w {venue} mimo zaostrzonych blokad.",
+        "ms": "Ketidakstabilan wilayah memberanikan ejen {mastermind}! Pecahkan sel berkubu di {venue} walaupun sekatan diperketat.",
+        "zh": "此前的动荡令{mastermind}的爪牙愈发猖獗！顶住街区封锁压力，攻破盘踞在{venue}的设防据点。",
+        "de": "Die regionale Krise hat {mastermind}s Agenten gestärkt! Brich die befestigte Zelle in {venue} trotz verschärfter Sperren."
+      }
+    },
+    "buildup_lt_recruited": {
+      "subtitle": {"en": "Counter-Play of the Turned Envoy", "pl": "Kontra Nawróconego Wysłannika", "ms": "Gerak Balas Utusan Berpaling", "zh": "倒戈使节的反击", "de": "Gegenzug des Überläufers"},
+      "objective": {
+        "en": "Using insider cipher routes exposed by your turned former adversary, strike {mastermind}'s supply cache at {venue} before the successor envoy adapts.",
+        "pl": "Wykorzystując szyfry ujawnione przez dawnego wroga, uderz w magazyn {mastermind} w {venue}, zanim nowy wysłannik zareaguje.",
+        "ms": "Menggunakan laluan kod rahsia daripada bekas lawan anda, serang simpanan {mastermind} di {venue} sebelum penggantinya sempat bertindak.",
+        "zh": "借助倒戈旧敌提供的内部密道情报，在新任继任者反应过来前奇袭{mastermind}位于{venue}的补给秘库。",
+        "de": "Nutze die Geheimcodes deines übergelaufenen Gegners, um {mastermind}s Depot bei {venue} vor dem neuen Gesandten zu treffen."
+      }
+    },
+    "peak_ch3": {
+      "subtitle": {"en": "First Reckoning — {threat}", "pl": "Pierwsze Starcie — {threat}", "ms": "Pertembungan Pertama — {threat}", "zh": "初度交锋——{threat}", "de": "Erste Abrechnung — {threat}"},
+      "objective": {
+        "en": "Stepping-Stone Crisis: {lieutenant} has triggered '{threat}' at {venue}! Break the crisis across three decisive stages—and decide the fate of {lieutenant}.",
+        "pl": "Pierwszy Punkt Zwrotny: {lieutenant} wywołał kryzys „{threat}” w {venue}! Przełam oblężenie i zdecyduj o losie osoby {lieutenant}.",
+        "ms": "Krisis Lonjakan: {lieutenant} mencetuskan '{threat}' di {venue}! Patahkan ancaman ini dan tentukan nasib {lieutenant}.",
+        "zh": "第一阶段高潮：{lieutenant}在{venue}引爆了“{threat}”！突破三重关键战局，并亲手裁决{lieutenant}的命运。",
+        "de": "Erster Wendepunkt: {lieutenant} hat „{threat}“ bei {venue} ausgelöst! Überwinde die Krise in drei Phasen und entscheide über {lieutenant}s Schicksal."
+      }
+    },
+    "peak_ch6": {
+      "subtitle": {"en": "Midpoint Reversal — Masks Shattered", "pl": "Zwrot Środka — Strzaskane Maski", "ms": "Putaran Pertengahan — Topeng Berkecai", "zh": "中盘剧变——假面破碎", "de": "Wendepunkt — Zerbrochene Masken"},
+      "objective": {
+        "en": "Major Turning Point at {venue}: {twist_summary} Confront {lieutenant}, survive the sudden counter-stroke, and choose whether to expose the truth, side with a faction pillar, or seize the dark leverage yourself.",
+        "pl": "Główny Punkt Zwrotny w {venue}: {twist_summary} Staw czoła osobie {lieutenant} i wybierz między prawdą, sojuszem frakcyjnym a przejęciem władzy.",
+        "ms": "Titik Perubahan Utama di {venue}: {twist_summary} Hadapi {lieutenant} dan pilih sama ada mendedahkan kebenaran, memihak tonggak faksi, atau merampas kuasa itu sendiri.",
+        "zh": "{venue}重大转折：{twist_summary} 直面{lieutenant}的反扑，抉择是公开真相、倒向派系支柱，还是将禁忌筹码据为己有。",
+        "de": "Großer Wendepunkt bei {venue}: {twist_summary} Stelle dich {lieutenant} und wähle zwischen Enthüllung, Fraktionsbündnis oder eigener Machtübernahme."
+      }
+    },
+    "peak_ch8": {
+      "subtitle": {"en": "Escalation Peak — Iron Cordon of {lieutenant}", "pl": "Szczyt Eskalacji — Żelazny Kordon: {lieutenant}", "ms": "Kemuncak Eskalasi — Kepungan Besi {lieutenant}", "zh": "升级巅峰——{lieutenant}的铁血封锁", "de": "Eskalationsgipfel — {lieutenant}s Eiserner Kordon"},
+      "objective": {
+        "en": "{mastermind}'s inner lieutenant {lieutenant} has locked down {venue} to finalize the penultimate phase ({omen}). Dismantle their command nexus before the hub itself is targeted.",
+        "pl": "Wewnętrzny porucznik {lieutenant} zablokował {venue}, by domknąć przedostatnią fazę planu {mastermind}. Zniszcz węzeł dowodzenia!",
+        "ms": "Leftenan dalaman {lieutenant} telah mengunci {venue} bagi melengkapkan fasa akhir {mastermind}. Musnahkan pusat kawalan mereka segera!",
+        "zh": "{mastermind}的核心副官{lieutenant}已封锁{venue}推进终局前奏（{omen}）。在主城枢纽遇袭前摧毁其指挥中枢！",
+        "de": "{mastermind}s Vertrauter {lieutenant} hat {venue} abgeriegelt, um die vorletzte Phase ({omen}) zu vollenden. Zerschlage den Kommandoknoten!"
+      }
+    },
+    "peak_ch9": {
+      "subtitle": {"en": "Darkest Hour — Siege of the Sanctuary", "pl": "Najczarniejsza Godzina — Oblężenie Azylu", "ms": "Saat Paling Gelap — Kepungan Tempat Perlindungan", "zh": "至暗时刻——圣所围城", "de": "Dunkelste Stunde — Belagerung der Zuflucht"},
+      "objective": {
+        "en": "Pre-Climax Darkest Hour: {mastermind} strikes directly at your home district and inner circle around {venue}! Hold the line, triage endangered allies on-screen, and forge the path into the final crucible.",
+        "pl": "Najczarniejsza Godzina: {mastermind} uderza prosto w twoją dzielnicę i bliskich wokół {venue}! Utrzymaj linię, ocal zagrożonych towarzyszy i otwórz drogę do finału.",
+        "ms": "Saat Paling Gelap: {mastermind} menyerang terus daerah kediaman dan rakan rapat anda di sekitar {venue}! Pertahankan barisan, selamatkan sekutu yang terancam, dan buka jalan ke kemuncak akhir.",
+        "zh": "决战前夜至暗时刻：{mastermind}直接向你的根据地与身边挚友所在的{venue}发起猛攻！死守防线、当面救援危局中的同伴，杀开通往终局之路。",
+        "de": "Dunkelste Stunde vor dem Finale: {mastermind} schlägt direkt gegen dein Viertel und deine Verbündeten bei {venue} zu! Halte die Stellung und rette bedrohte Gefährten."
+      }
+    },
+    "peak_ch10": {
+      "subtitle": {"en": "Grand Climax — Crucible of {mastermind}", "pl": "Wielki Finał — Tygiel: {mastermind}", "ms": "Klimaks Agung — Medan Penentu {mastermind}", "zh": "终局决战——{mastermind}的审判熔炉", "de": "Großes Finale — Schmelztiegel: {mastermind}"},
+      "objective": {
+        "en": "Final Reckoning at {venue}: Every scar, alliance, and betrayal converges as {mastermind} ({mastermind_title}) unleashes their design to {goal}. Breach the inner threshold and decide the fate of the world!",
+        "pl": "Ostateczne Rozliczenie w {venue}: Każda blizna, sojusz i zdrada zbiegają się, gdy {mastermind} ({mastermind_title}) realizuje plan! Przełam próg i zdecyduj o losie świata!",
+        "ms": "Perhitungan Terakhir di {venue}: Setiap parut dunia, pakatan, dan pengkhianatan bertemu ketika {mastermind} ({mastermind_title}) melancarkan rancangan akhir! Tentukan masa depan dunia!",
+        "zh": "{venue}终极决战：所有世界伤痕、盟约与背叛在此交汇，{mastermind}（{mastermind_title}）正欲完成终极企图。突破最后防线，裁决世界的未来！",
+        "de": "Letzte Abrechnung bei {venue}: Jede Weltnarbe, jedes Bündnis und jeder Verrat laufen zusammen, während {mastermind} ({mastermind_title}) zur Vollendung ansetzt!"
+      }
+    },
+    "epilogue_ch11": {
+      "golden_restoration": {
+        "subtitle": {"en": "Epilogue — Dawn of the Restored Charter", "pl": "Epilog — Świt Odnowionego Ładu", "ms": "Epilog — Fajar Piagam Pulih", "zh": "尾声——复兴宪章的黎明", "de": "Epilog — Morgenröte der Erneuerten Ordnung"},
+        "objective": {
+          "en": "Peace returns across {zone}: walk the restored streets around {venue}, share quiet closure with your closest companions, and claim your place in living memory.",
+          "pl": "Pokój wraca do {zone}: przejdź odnowionymi ulicami wokół {venue} i podziel się chwilą spokoju z towarzyszami.",
+          "ms": "Keamanan kembali ke {zone}: susuri jalan yang pulih di sekitar {venue} dan raikan penutup bermakna bersama rakan seperjuangan.",
+          "zh": "和平重返{zone}：漫步于复苏的{venue}街头，与挚友伴侣共度余韵时光，见证你的传奇铭刻于世。",
+          "de": "Frieden kehrt nach {zone} zurück: Schreite durch das erneuerte {venue} und teile den Abschluss mit deinen Gefährten."
+        }
+      },
+      "faction_hegemony": {
+        "subtitle": {"en": "Epilogue — Banners of the New Hegemon", "pl": "Epilog — Sztandary Nowego Hegemona", "ms": "Epilog — Panji Hegemoni Baharu", "zh": "尾声——新霸权旗帜之下", "de": "Epilog — Banner der Neuen Hegemonie"},
+        "objective": {
+          "en": "Your chosen faction pillar now governs {zone} uncontested: witness their new order take root at {venue} and settle accounts with winners and dissenters alike.",
+          "pl": "Wybrana przez ciebie frakcja niepodzielnie rządzi {zone}: zobacz nowy porządek w {venue} i zamknij rachunki.",
+          "ms": "Faksi pilihan anda kini memerintah {zone} sepenuhnya: saksikan aturan baharu di {venue} dan selesaikan urusan tertunggak.",
+          "zh": "你所扶持的派系如今全面主宰{zone}：在{venue}见证新秩序落地，与得势者及异议者了结旧账。",
+          "de": "Deine gewählte Fraktion beherrscht nun {zone}: Erlebe die neue Ordnung bei {venue} und begleiche letzte Rechnungen."
+        }
+      },
+      "pyrrhic_memorial": {
+        "subtitle": {"en": "Epilogue — Ashes & Unforgotten Names", "pl": "Epilog — Popioły i Niezapomniane Imiona", "ms": "Epilog — Abu & Nama Yang Tak Dilupakan", "zh": "尾声——灰烬与不朽之名", "de": "Epilog — Asche & Unvergessene Namen"},
+        "objective": {
+          "en": "Victory came at a steep price across {zone}: honor what was lost at {venue}, steady the battered survivors, and decide how reconstruction begins.",
+          "pl": "Zwycięstwo w {zone} okupiono ciężką ceną: uczcij poległych w {venue} i wesprzyj ocalałych przy odbudowie.",
+          "ms": "Kemenangan di {zone} dibayar dengan harga tinggi: kenang pengorbanan di {venue} dan bimbing mangsa yang terselamat membina semula.",
+          "zh": "{zone}的惨胜代价沉重：在{venue}缅怀逝去的一切，安抚伤痕累累的幸存者，开启艰难重建。",
+          "de": "Der Sieg in {zone} forderte einen hohen Preis: Ehre die Verlorenen bei {venue} und stütze die Überlebenden beim Wiederaufbau."
+        }
+      },
+      "shadow_usurper": {
+        "subtitle": {"en": "Epilogue — Crown Behind the Curtain", "pl": "Epilog — Korona za Kurtyną", "ms": "Epilog — Mahkota Di Sebalik Tirai", "zh": "尾声——帷幕之后的王座", "de": "Epilog — Krone Hinter dem Vorhang"},
+        "objective": {
+          "en": "Having seized {mastermind}'s apparatus for yourself, bind the remaining power brokers at {venue} to your command and test the weight of your new dominion.",
+          "pl": "Po przejęciu aparatu {mastermind} podporządkuj sobie graczy władzy w {venue} i sprawdź ciężar własnych rządów.",
+          "ms": "Setelah merampas jaringan kuasa {mastermind}, ikat broker kuasa di {venue} di bawah telunjuk anda.",
+          "zh": "既已将{mastermind}的权柄收归己手，在{venue}收服残余势力掮客，亲身丈量新王座的分量。",
+          "de": "Nachdem du {mastermind}s Machtapparat übernommen hast, binde die übrigen Machtmakler bei {venue} an deinen Willen."
+        }
+      },
+      "buried_truth": {
+        "subtitle": {"en": "Epilogue — The Quiet Peace & Sealed Ledger", "pl": "Epilog — Cichy Pokój i Zapieczętowana Księga", "ms": "Epilog — Keamanan Senyap & Lejar Termeterai", "zh": "尾声——静默和平与封存真相", "de": "Epilog — Stiller Frieden & Versiegeltes Buch"},
+        "objective": {
+          "en": "The crisis is over, its darkest truths locked away to preserve calm in {zone}: verify the cover compact at {venue} and face those who suspect what you buried.",
+          "pl": "Kryzys minął, a najciemniejsze prawdy ukryto dla spokoju {zone}: dopilnuj paktu milczenia w {venue}.",
+          "ms": "Krisis tamat dengan kebenaran gelap disimpan rapat demi ketenteraman {zone}: sahkan perjanjian rahsia di {venue}.",
+          "zh": "危机平息，最黑暗的真相被你亲手封存以换取{zone}的平静：在{venue}确认封口盟约，直面知情者的目光。",
+          "de": "Die Krise ist vorbei, ihre dunkelste Wahrheit zum Schutz von {zone} begraben: Sichere das Schweigeabkommen bei {venue}."
+        }
+      },
+      "fallen_world": {
+        "subtitle": {"en": "Epilogue — Embers in the Fallen World", "pl": "Epilog — Iskry w Upadłym Świecie", "ms": "Epilog — Bara Dalam Dunia Yang Rebah", "zh": "尾声——倾覆世界的余火", "de": "Epilog — Glut in der Gefallenen Welt"},
+        "objective": {
+          "en": "{mastermind}'s design has overtaken {zone}, plunging the streets into occupation—gather your surviving inner circle at {venue} and kindle a covert Resistance cell from the ashes!",
+          "pl": "Plan {mastermind} pochłonął {zone}: zbierz ocalałych bliskich w {venue} i rozpal podziemny Ruch Oporu z popiołów!",
+          "ms": "Rancangan {mastermind} telah menakluki {zone}: kumpulkan rakan terselamat di {venue} dan nyalakan sel Penentangan bawah tanah!",
+          "zh": "{mastermind}的阴谋已笼罩{zone}：在{venue}集结幸存挚友，于废墟阴影中点燃地下抵抗运动之火！",
+          "de": "{mastermind}s Plan hat {zone} unterworfen: Sammle deine Überlebenden bei {venue} und entzünde im Untergrund den Widerstand!"
+        }
+      }
+    }
+  },
+  "optional_templates": {
+    "aid": {
+      "badge": {"en": "Optional — Aid", "pl": "Opcjonalne — Wsparcie", "ms": "Pilihan — Bantuan", "zh": "可选——支援削弱", "de": "Optional — Unterstützung"},
+      "labels": {
+        "en": "Sabotage vanguard support or rally {informant}'s aid near {venue}",
+        "pl": "Sabotuj wsparcie straży lub zyskaj pomoc {informant} przy {venue}",
+        "ms": "Sabotaj sokongan pengawal atau raih bantuan {informant} dekat {venue}",
+        "zh": "在{venue}附近削弱外围守备或争取{informant}助阵",
+        "de": "Sabotiere die Vorhut oder sichere {informant}s Hilfe nahe {venue}"
+      },
+      "stakes_hint": {
+        "en": "Weakens opposition defenses and eases the Main Objective confrontation.",
+        "pl": "Osłabia obronę wroga i ułatwia realizację Głównego Celu.",
+        "ms": "Melemahkan pertahanan lawan dan memudahkan Objektif Utama.",
+        "zh": "削弱敌方防线与守备，降低主线目标推进阻力。",
+        "de": "Schwächt die gegnerische Verteidigung und erleichtert das Hauptziel."
+      }
+    },
+    "bypass": {
+      "badge": {"en": "Optional — Bypass", "pl": "Opcjonalne — Obejście", "ms": "Pilihan — Pintasan", "zh": "可选——捷径绕行", "de": "Optional — Umgehung"},
+      "labels": {
+        "en": "Acquire side-channel credentials or covert passage from {informant}",
+        "pl": "Zdobądź boczną przepustkę lub tajne przejście od {informant}",
+        "ms": "Dapatkan pas laluan rahsia daripada {informant}",
+        "zh": "从{informant}处取得侧翼凭证或隐秘通道",
+        "de": "Beschaffe Zugangsdaten oder einen Schleichweg über {informant}"
+      },
+      "stakes_hint": {
+        "en": "Unlocks a shortcut route that skips the outer barrier of the Main Objective.",
+        "pl": "Odblokowuje skrót omijający zewnętrzną barierę Głównego Celu.",
+        "ms": "Membuka laluan pintas yang melangkau halangan awal Objektif Utama.",
+        "zh": "开启隐秘捷径，直接绕过主线目标的第一道外围屏障。",
+        "de": "Öffnet eine Abkürzung, die die äußere Hürde des Hauptziels überspringt."
+      }
+    },
+    "alternative": {
+      "badge": {"en": "Optional — Alternative", "pl": "Opcjonalne — Alternatywa", "ms": "Pilihan — Alternatif", "zh": "可选——替代路线", "de": "Optional — Alternative"},
+      "labels": {
+        "en": "Broker a covert counter-deal with {target} or rival envoy {accomplice}",
+        "pl": "Wynegocjuj tajny układ z {target} lub wysłannikiem rywali ({accomplice})",
+        "ms": "Meterai perjanjian balas sulit bersama {target} atau utusan saingan {accomplice}",
+        "zh": "与{target}或敌对派系特使{accomplice}达成暗中反制交易",
+        "de": "Handle einen Geheimdeal mit {target} oder dem Rivalen {accomplice} aus"
+      },
+      "stakes_hint": {
+        "en": "Resolves and closes the Main Objective on rival terms—reshaping faction standing.",
+        "pl": "Rozwiązuje Główny Cel na warunkach rywala, zmieniając układ sił frakcji.",
+        "ms": "Menyelesaikan terus Objektif Utama mengikut syarat saingan serta mengubah reputasi faksi.",
+        "zh": "以竞争派系条件直接终结并完成主线目标，重塑各方声望格局。",
+        "de": "Erfüllt das Hauptziel zu Bedingungen einer Rivalenfraktion und verschiebt Machtverhältnisse."
+      }
+    },
+    "threatened": {
+      "badge": {"en": "Optional — Threatened", "pl": "Opcjonalne — Zagrożone", "ms": "Pilihan — Terancam", "zh": "可选——危急救援", "de": "Optional — Bedroht"},
+      "labels": {
+        "en": "Intervene to shield {informant} and stabilize the threatened ward near {venue}",
+        "pl": "Interweniuj, by osłonić osobę {informant} i ocalić zagrożony sektor przy {venue}",
+        "ms": "Campur tangan melindungi {informant} dan stabilkan kawasan terancam dekat {venue}",
+        "zh": "赶赴{venue}周边救援受困的{informant}并稳住危急防区",
+        "de": "Greife ein, um {informant} zu schützen und den bedrohten Sektor bei {venue} zu halten"
+      },
+      "stakes_hint": {
+        "en": "Crisis Triage: Ignoring this before finishing the Main Objective causes permanent local/ally fallout.",
+        "pl": "Kryzys: Zignorowanie tego przed ukończeniem Głównego Celu wywoła trwałe straty.",
+        "ms": "Krisis: Mengabaikan ini sebelum menamatkan Objektif Utama membawa padah kekal kepada sekutu/kawasan.",
+        "zh": "危机抉择：若直奔主线而放任不管，将在结算时引爆永久区域伤痕或盟友重创。",
+        "de": "Krisen-Triage: Wird dies vor Abschluss des Hauptziels ignoriert, drohen dauerhafte Verluste."
+      }
+    }
+  },
+  "endings": {
+    "golden_restoration": {
+      "title": {"en": "Golden Restoration", "pl": "Złota Odnowa", "ms": "Pemulihan Keemasan", "zh": "黄金复兴", "de": "Goldene Wiederherstellung"},
+      "earned_title": {"en": "Warden of the Unbroken Dawn", "pl": "Strażnik Niezłomnego Świtu", "ms": "Penjaga Fajar Utuh", "zh": "破晓守望者", "de": "Hüter der Ungebrochenen Morgenröte"},
+      "world_slide": {"en": "With the crisis dismantled and key districts defended, {zone} enters a renaissance of open roads and rebuilt sanctuaries.", "pl": "Po zażegnaniu kryzysu i obronie kluczowych dzielnic {zone} wkracza w erę odnowy.", "ms": "Dengan ancaman dipatahkan dan daerah utama dipertahankan, {zone} melangkah ke zaman pemulihan.", "zh": "危机彻底瓦解，关键街区得以保全，{zone}迎来了道路畅通、圣所重修的复兴时代。", "de": "Nach Abwehr der Krise und Rettung zentraler Bezirke erlebt {zone} einen blühenden Neubeginn."},
+      "endless_mode": "restoration_peacekeeping"
+    },
+    "faction_hegemony": {
+      "title": {"en": "Faction Hegemony", "pl": "Hegemonia Frakcji", "ms": "Hegemoni Faksi", "zh": "派系独霸", "de": "Fraktionshegemonie"},
+      "earned_title": {"en": "Kingmaker of the Ascendant Banner", "pl": "Twórca Królów Wzniesionego Sztandaru", "ms": "Penentu Kuasa Panji Menjulang", "zh": "拥立霸主之人", "de": "Königsmacher des Aufsteigenden Banners"},
+      "world_slide": {"en": "Order returns to {zone} under the decisive rule of {ally_faction}, reshaping law, commerce, and dissent in their image.", "pl": "Porządek wraca do {zone} pod twardymi rządami frakcji {ally_faction}.", "ms": "Ketenteraman kembali ke {zone} di bawah penguasaan mutlak {ally_faction}.", "zh": "秩序在{ally_faction}的强势统御下重归{zone}，法度与商贸皆按其意志重塑。", "de": "Ordnung kehrt unter der Vorherrschaft von {ally_faction} nach {zone} zurück."},
+      "endless_mode": "hegemony_enforcement"
+    },
+    "pyrrhic_memorial": {
+      "title": {"en": "Pyrrhic Survival", "pl": "Pyrrusowe Przetrwanie", "ms": "Kelangsungan Pyrrhic", "zh": "惨胜余碑", "de": "Pyrrhussieg"},
+      "earned_title": {"en": "Bearer of the Ashen Vigil", "pl": "Powiernik Popielnego Czuwania", "ms": "Pemikul Jaga Abu", "zh": "灰烬守夜人", "de": "Träger der Aschenwacht"},
+      "world_slide": {"en": "{mastermind} fell, yet scarred districts across {zone} bear quiet memorials to the heavy sacrifices required to survive.", "pl": "{mastermind} upadł, lecz naznaczone bliznami dzielnice {zone} pamiętają ciężkie ofiary.", "ms": "{mastermind} tumbang, namun daerah berparut di {zone} menjadi tugu peringatan pengorbanan besar.", "zh": "{mastermind}虽已覆灭，但伤痕累累的{zone}处处伫立着铭记惨烈代价的无声纪念碑。", "de": "{mastermind} fiel, doch gezeichnete Viertel in {zone} mahnen an die schweren Opfer."},
+      "endless_mode": "scarred_reconstruction"
+    },
+    "shadow_usurper": {
+      "title": {"en": "Shadow Usurpation", "pl": "Uzurpacja z Cienia", "ms": "Rampasan Bayangan", "zh": "暗影篡夺", "de": "Schatten-Usurpation"},
+      "earned_title": {"en": "Sovereign of the Veiled Throne", "pl": "Suweren Zasłoniętego Tronu", "ms": "Pemerintah Takhta Berkelubung", "zh": "帷幕王座之主", "de": "Souverän des Verhüllten Throns"},
+      "world_slide": {"en": "Rather than shatter {mastermind}'s engine of control, you claimed its reins—ruling {zone} from behind velvet curtains.", "pl": "Zamiast zniszczyć machinę {mastermind}, przejąłeś jej stery, rządząc {zone} z ukrycia.", "ms": "Daripada memusnahkan jentera kawalan {mastermind}, anda menggenggam tampuknya sendiri dari balik tirai.", "zh": "你并未摧毁{mastermind}的权柄机器，而是将其缰绳握入掌心，在帷幕之后执掌{zone}。", "de": "Statt {mastermind}s Machtapparat zu zerstören, hast du selbst die Zügel über {zone} ergriffen."},
+      "endless_mode": "usurper_dominion"
+    },
+    "buried_truth": {
+      "title": {"en": "The Sealed Ledger", "pl": "Zapieczętowana Prawda", "ms": "Kebenaran Termeterai", "zh": "封存之真", "de": "Die Begrabene Wahrheit"},
+      "earned_title": {"en": "Keeper of the Unspoken Pact", "pl": "Strażnik Niewypowiedzianego Paktu", "ms": "Penjaga Perjanjian Tak Terucap", "zh": "缄默契约守护者", "de": "Hüter des Ungesagten Pakts"},
+      "world_slide": {"en": "Everyday life in {zone} continues untroubled, shielded from panic by the volatile truths you chose to lock away forever.", "pl": "Codzienne życie w {zone} toczy się spokojnie dzięki prawdzie, którą postanowiłeś pogrzebać.", "ms": "Kehidupan harian di {zone} kekal tenang, dilindungi daripada panik oleh rahsia besar yang anda kunci selamanya.", "zh": "{zone}的日常恢复如初，唯有你知晓那足以掀起恐慌的惊世真相已被永远封存。", "de": "Der Alltag in {zone} bleibt friedlich – geschützt durch die explosive Wahrheit, die du verschlossen hast."},
+      "endless_mode": "covert_custodian"
+    },
+    "fallen_world": {
+      "title": {"en": "Fallen World — Spark of Defiance", "pl": "Upadły Świat — Iskra Buntu", "ms": "Dunia Rebah — Percikan Penentangan", "zh": "倾覆世界——不屈星火", "de": "Gefallene Welt — Funke des Widerstands"},
+      "earned_title": {"en": "Vanguard of the Underground Flame", "pl": "Awangarda Podziemnego Płomienia", "ms": "Barisan Hadapan Api Bawah Tanah", "zh": "地下火种先锋", "de": "Vorhut der Untergrundflamme"},
+      "world_slide": {"en": "Checkpoints and dark omens rule {zone} under {mastermind}'s triumph—yet from hidden safehouses, your Resistance strikes back.", "pl": "Punkty kontrolne {mastermind} rządzą {zone}, lecz z kryjówek twój Ruch Oporu rozpoczyna walkę o wyzwolenie.", "ms": "Sekatan {mastermind} menguasai {zone}, namun dari rumah perlindungan rahsia, gerakan Penentangan anda bangkit melawan.", "zh": "{mastermind}的铁腕哨卡统治着{zone}，然而在隐秘安全屋中，你率领的抵抗组织已吹响反攻号角。", "de": "{mastermind}s Kontrollen beherrschen {zone}, doch aus dem Untergrund schlägt dein Widerstand zurück."},
+      "endless_mode": "fallen_world_resistance"
+    }
+  }
+}

@@ -229,6 +229,12 @@ def normalize_race(raw_race: str, scen_key: str = "fantasy", seed: str = "") -> 
     """
     from scenario_data import has_tag
     clean = (raw_race or "").strip().lower().replace("-", "_")
+    if clean in ("orang_bunian", "orang bunian", "bunian"):
+        return "orang_bunian"
+    if clean in ("kitsune:humanoid", "kitsune_humanoid", "kitsune:guise"):
+        return "kitsune:humanoid"
+    if clean in ("kitsune:myobu_fox", "kitsune_myobu_fox", "kitsune:fox", "myobu_fox"):
+        return "kitsune:myobu_fox"
 
     # 1. Slice of Life / High School Drama: Strictly human only (except Furry variants)
     if has_tag(scen_key, "high_school") or has_tag(scen_key, "high_school_drama"):
@@ -470,6 +476,12 @@ def format_race_display(race_str: str) -> str:
         return "Human"
     if clean == "dark_elf":
         return "Dark Elf"
+    if clean == "orang_bunian":
+        return "Orang Bunian"
+    if clean == "kitsune:humanoid":
+        return "Kitsune (Humanoid Guise)"
+    if clean == "kitsune:myobu_fox":
+        return "Kitsune (Myōbu Spirit Fox)"
     if clean == "irradiated_human":
         return "Irradiated Human"
     if clean in ("half_beast", "halfbeast"):
@@ -511,3 +523,14 @@ def get_scenario_race_hint(scen_key: str = "fantasy") -> str:
     if has_tag(scen_key, "post_apocalypse"):
         return "human|irradiated_human|cyborg|synth|mutant:<type>"
     return "human|elf|dwarf|dark_elf|goblin|beastfolk:<species>|half_beast:<species>|hybrid:<species>|string"
+
+def is_folklore_race(race_str: str | None) -> bool:
+    """Return True if the normalized race string belongs to a folklore race (Orang Bunian or Kitsune)."""
+    clean = str(race_str or "").strip().lower().replace("-", "_")
+    return clean in ("orang_bunian", "orang bunian", "bunian", "kitsune:humanoid", "kitsune_humanoid", "kitsune:guise", "kitsune:myobu_fox", "kitsune_myobu_fox", "kitsune:fox", "myobu_fox") or clean.startswith("kitsune:")
+
+
+def is_myobu_fox_race(race_str: str | None) -> bool:
+    """Return True if the race string denotes the beast/fox form Kitsune (kitsune:myobu_fox)."""
+    clean = str(race_str or "").strip().lower().replace("-", "_")
+    return clean in ("kitsune:myobu_fox", "kitsune_myobu_fox", "kitsune:fox", "myobu_fox")

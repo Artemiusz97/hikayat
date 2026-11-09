@@ -1,6 +1,6 @@
-# Hikayat (v2.8.0) — Living AI Tabletop RPG & Web Application
+# Hikayat (v2.9.0) — Living AI Tabletop RPG & Web Application
 
-[![Version](https://img.shields.io/badge/version-2.8.0-blue.svg)](releases/CHANGELOG-v2.8.0.md)
+[![Version](https://img.shields.io/badge/version-2.9.0-blue.svg)](releases/CHANGELOG-v2.9.0.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/react-18.2-61dafb.svg)](web/)
 
@@ -27,7 +27,7 @@ Hikayat is a text-based role-playing game (RPG) where an AI language model gener
 * **What problem it solves**: Stealth in text games usually relies on the AI guessing whether a guard notices you.
 * **How Hikayat works**: Stealth uses a mathematical alert state machine per NPC (`UNAWARE`, `SUSPICIOUS`, `SEARCHING`, `DETECTED`). The code calculates noise levels based on armor weight, companion footsteps, lighting conditions, and player action loudness to determine detection accumulation and alert decay deterministically over time.
 
-### 5. Multi-Engine Quest Architecture & Intelligence Dossiers (`game_engine/quest_agency.py`, `mechanics/narrative/dossier_compiler.py`)
+### 5. Multi-Engine Quest Architecture & Forensic Dossiers (`game_engine/quest_agency.py`, `mechanics/narrative/dossier_compiler.py`)
 * **What problem it solves**: Quests in AI games easily lose focus, forget objectives, or conclude abruptly without resolving clues.
 * **How Hikayat works**: Quests are categorized into specific operational engines (Investigation, Bounty, Social Infiltration, Survival) and tracked in relational database tables (`quests`, `quest_dossiers`, `session_clues`). As players uncover evidence and interview witnesses, the system compiles structured forensic dossiers with verifiable leads and sub-objectives in SQLite.
 
@@ -80,21 +80,21 @@ Hikayat is a text-based role-playing game (RPG) where an AI language model gener
 * **What it looks like**: NPCs have documented family members, occupations, personal traits, and relationship levels.
 * **How it plays**: Interacting with an NPC builds relationship points across platonic, rivalry, professional, or romantic tracks. High affinity unlocks milestone dialogue choices and new quest leads.
 
-### 7. Interactive Folklore Codex & Occult Research (`EncyclopediaSubTab.jsx`)
+### 7. Entity Contracts & Eldritch Pacts (`/contracts`)
+* **What it looks like**: A formal covenant agreement window displaying terms, tithes, taboos, and granted powers.
+* **How it plays**: You can negotiate pacts with mysterious patrons and anomalous entities. Accepting a pact grants passive combat bonuses or special traits, but binds your character to behavioral restrictions and penalties if you violate the agreement.
+
+### 8. Realty & Safehouse Ownership (`/realty`)
+* **What it looks like**: Real estate listings allowing you to purchase or rent apartments, cabins, and safehouses across map zones.
+* **How it plays**: Owned properties act as private bases where you can rest safely, store valuable gear away from pickpockets, set up protective wards against anomalies, and invite contacts for discreet meetings.
+
+### 9. Interactive Folklore Codex & Occult Research (`EncyclopediaSubTab.jsx`)
 * **What it looks like**: An in-game encyclopedia tab detailing local legends, mythical beasts, and occult lore.
 * **How it plays**: Exploring old ruins or investigating urban myths unlocks entries in the codex. Studying monster weaknesses and ancient rituals gives your character concrete dialogue options and tactical bonuses when facing supernatural threats.
 
-### 8. World Pulse Regional Crises & Living Factions (`/factions`)
+### 10. World Pulse Regional Crises & Living Factions (`/factions`)
 * **What it looks like**: A live dashboard displaying ongoing faction skirmishes, resource shortages, and seasonal events.
 * **How it plays**: The game world is divided among competing factions. You can track their territorial influence, complete bounty contracts for specific groups, and change how different factions treat you.
-
-### 9. Layered Equipment & Damage Threshold Armor
-* **What it looks like**: An inventory system with 9 distinct equipment slots (Headwear, Armor, Clothing, Undergarments, Gloves, Shoes, Accessories, Weapons, Shields).
-* **How it plays**: Armor uses a Fallout-style Damage Threshold (DT) system: incoming damage is reduced by flat numbers before percentage resistances apply, making proper armor essential against heavy attacks.
-
-### 10. Micro-Spatial Investigation & Lockpicking
-* **What it looks like**: In-scene interactive objects (locked desks, secret safes, bookshelves, filing cabinets).
-* **How it plays**: Searching a room or picking a lock lets you gather forensic evidence and clues without penalizing your travel stamina or displacing you from the current scene.
 
 ---
 
@@ -118,20 +118,21 @@ Hikayat is a text-based role-playing game (RPG) where an AI language model gener
 
 ```
 hikayat/
-├── api/                        # FastAPI REST endpoints (adventure, codex, inventory, world events)
+├── api/                        # FastAPI REST endpoints (adventure, codex, contracts, realty, security)
 ├── bin/                        # Auxiliary network & tunnel utilities
 ├── cogs/                       # Discord Bot slash command cogs & interactive button views
-├── data/                       # Static game catalogs (classes, scenarios, locations, folklore)
-├── db/                         # Modular SQLite persistence layer (sessions, characters, world events)
+├── data/                       # Static game catalogs (classes, scenarios, locations, folklore, storylets)
+├── db/                         # Modular SQLite persistence layer (sessions, characters, properties, contracts)
 ├── game_engine/                # Core turn pipeline, state reducers, cast planner & quest resolvers
 ├── localization/               # Multi-language translation dictionaries (en, pl, ms, de, zh)
 ├── mechanics/                  # Domain-specific simulation modules
 │   ├── combat/                 # Combat formulas, weapon tables, armor DT, spells & awakened resonance
 │   ├── narrative/              # Quest engines, dossiers, campaign spine, blueprints & intent parser
-│   ├── social/                 # Roster generation, relationship graph, affinity & genealogy
+│   ├── pacts/                  # Entity contracts, patrons, geas rules & pact lifecycle
+│   ├── social/                 # Roster generation, relationship graph, social pacing & deck
 │   ├── stealth/                # Mathematical alert state machine, noise formulas & escalation
-│   ├── system/                 # In-game smartphone, time engine & memory vector compaction
-│   └── world/                  # 3-tier spatial graph, Dijkstra pathfinding & world events simulation
+│   ├── system/                 # In-game smartphone, time engine, memory compaction & input sanitizer
+│   └── world/                  # 3-tier spatial graph, Dijkstra pathfinding, realty & world events
 ├── models/                     # Centralized Pydantic schemas & state models
 ├── releases/                   # Version changelogs & clean release archives
 ├── scripts/                    # Maintenance, release packaging & session cleanup utilities

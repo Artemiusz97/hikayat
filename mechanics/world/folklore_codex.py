@@ -68,8 +68,33 @@ def get_folklore_entry_by_id(codex_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _resolve_type_anchor_phrase(anom_type: str) -> str:
+def _resolve_type_anchor_phrase(anom_type: str, lang: str = "en") -> str:
     t = str(anom_type or "entity").strip().lower()
+    code = _normalize_codex_lang(lang)
+    if code == "ms":
+        if t == "object":
+            return "relik anomali tersebut"
+        if t == "phenomenon":
+            return "pusat herotan tersebut"
+        return "siluet terasnya"
+    if code == "pl":
+        if t == "object":
+            return "anomalny relikt"
+        if t == "phenomenon":
+            return "ognisko zniekształcenia"
+        return "rdzeń jej sylwetki"
+    if code == "zh":
+        if t == "object":
+            return "该异常遗物"
+        if t == "phenomenon":
+            return "该扭曲源核"
+        return "其核心轮廓"
+    if code == "de":
+        if t == "object":
+            return "das anomale Relikt"
+        if t == "phenomenon":
+            return "das Verzerrungszentrum"
+        return "ihre Kernsilhouette"
     if t == "object":
         return "the anomalous relic"
     if t == "phenomenon":
@@ -77,9 +102,118 @@ def _resolve_type_anchor_phrase(anom_type: str) -> str:
     return "its core silhouette"
 
 
-def format_taboo_entry_for_type(taboo_entry: Dict[str, Any], anom_type: str) -> Dict[str, Any]:
+def _normalize_codex_lang(lang: Optional[str]) -> str:
+    code = str(lang or "en").strip().lower()
+    if code in ("pl", "polish", "polski"):
+        return "pl"
+    if code in ("ms", "my", "malay", "melayu", "bm"):
+        return "ms"
+    if code in ("zh", "cn", "zh-cn", "zh_cn"):
+        return "zh"
+    if code in ("de", "german", "deutsch"):
+        return "de"
+    return code[:2] if len(code) >= 2 else "en"
+
+
+def localize_folklore_tradition(tr: Dict[str, Any], lang: Optional[str] = None) -> Dict[str, Any]:
+    out = dict(tr)
+    code = _normalize_codex_lang(lang)
+    if code == "en":
+        return out
+    loc = (tr.get("locales") or {}).get(code)
+    if isinstance(loc, dict) and loc.get("label"):
+        out["label"] = loc["label"]
+    return out
+
+
+_CODEX_FORM_LABELS: Dict[str, Dict[str, str]] = {
+    "zh": {
+        "spectral_apparition": "灵体幽影",
+        "humanoid_doppelganger": "人形拟态 / 替身怪",
+        "parasitic_colony": "寄生群落",
+        "anatomical_amalgam": "解剖拼合体",
+        "shadow_silhouette": "二维暗影剪影",
+        "cryptid_therian": "神秘生物 / 兽化异兽",
+        "mimic_flora": "食肉 / 拟态妖植",
+        "skeletal_leviathan": "骨化巨兽",
+        "threshold_warden": "阈限守门灵",
+        "impossible_weapon_relic": "异常兵刃 / 仪式遗物",
+        "illusory_market_mirage": "幻市 / 蜃景领域",
+        "folklore_chimera": "民俗奇美拉",
+        "origami_effigy": "纸人 / 式神偶",
+        "acoustic_predator": "声学共振捕食体",
+        "haunted_furniture": "附灵古物 / 器物",
+        "spatial_geometry_loop": "非欧几何回廊",
+        "cursed_vehicle": "受咒载具 / 幽灵列车",
+        "porcelain_automaton": "瓷偶 / 球形关节机关人",
+        "sealed_apothecary_vessel": "封缄药瓮 / 灵壶",
+        "phantom_procession": "百鬼夜行幻列",
+    },
+    "de": {
+        "spectral_apparition": "Spektrale Erscheinung",
+        "humanoid_doppelganger": "Humanoider / Doppelgänger",
+        "parasitic_colony": "Parasitärer Schwarm / Kolonie",
+        "anatomical_amalgam": "Anatomisches Amalgam",
+        "shadow_silhouette": "Zweidimensionale Schattensilhouette",
+        "cryptid_therian": "Kryptid / Therian-Bestie",
+        "mimic_flora": "Fleischfressende / Mimik-Flora",
+        "skeletal_leviathan": "Verknöcherter / Skelett-Leviathan",
+        "threshold_warden": "Liminaler Schwellenwächter",
+        "impossible_weapon_relic": "Anomale Waffe / Ritualrelikt",
+        "illusory_market_mirage": "Illusorischer Basar / Trugbildzone",
+        "folklore_chimera": "Folklore-Chimäre",
+        "origami_effigy": "Papier- / Shikigami-Bildnis",
+        "acoustic_predator": "Akustischer / Resonanz-Jäger",
+        "haunted_furniture": "Spuk-Erbstück / Mobiliar",
+        "spatial_geometry_loop": "Nichteuklidische Raumschleife",
+        "cursed_vehicle": "Verfluchtes Transitfahrzeug",
+        "porcelain_automaton": "Porzellan- / Kugelgelenk-Automat",
+        "sealed_apothecary_vessel": "Versiegeltes Apothekergefäß / Geisterurne",
+        "phantom_procession": "Geisterhafte Nachtprozession",
+    },
+}
+
+
+def localize_folklore_entry(entry: Dict[str, Any], lang: Optional[str] = None) -> Dict[str, Any]:
+    out = dict(entry)
+    code = _normalize_codex_lang(lang)
+    if code == "en":
+        return out
+    loc = (entry.get("locales") or {}).get(code)
+    if isinstance(loc, dict):
+        for field in (
+            "subtitle",
+            "form_label",
+            "appearance",
+            "furry_appearance_override",
+            "sensory_omen",
+            "gore_omen_override",
+            "lore_summary",
+            "custom_taboo_rule",
+            "custom_protocol",
+        ):
+            if loc.get(field):
+                out[field] = loc[field]
+        if loc.get("display_name"):
+            out["display_name"] = loc["display_name"]
+        if loc.get("disguise_alias") and isinstance(out.get("disguise_profile"), dict):
+            out["disguise_profile"] = {**out["disguise_profile"], "disguise_alias": loc["disguise_alias"]}
+        if loc.get("tether_vessel") and isinstance(out.get("tether_profile"), dict):
+            out["tether_profile"] = {**out["tether_profile"], "vessel_name": loc["tether_vessel"]}
+        if loc.get("omen_paradox_rule") and isinstance(out.get("omen_paradox"), dict):
+            out["omen_paradox"] = {**out["omen_paradox"], "rule_summary": loc["omen_paradox_rule"]}
+        if loc.get("relic_gear_name") and isinstance(out.get("relic_gear_profile"), dict):
+            out["relic_gear_profile"] = {**out["relic_gear_profile"], "display_name": loc["relic_gear_name"]}
+    if not (isinstance(loc, dict) and loc.get("form_label")):
+        form_key = str(entry.get("form") or "").strip()
+        if form_key and code in _CODEX_FORM_LABELS and form_key in _CODEX_FORM_LABELS[code]:
+            out["form_label"] = _CODEX_FORM_LABELS[code][form_key]
+    return out
+
+
+def format_taboo_entry_for_type(taboo_entry: Dict[str, Any], anom_type: str, lang: str = "en") -> Dict[str, Any]:
     """Formats `{anchor_fixture}` placeholders in taboo rules/protocols cleanly for entity/object/phenomenon."""
-    anchor = _resolve_type_anchor_phrase(anom_type)
+    anchor = _resolve_type_anchor_phrase(anom_type, lang=lang)
     out = dict(taboo_entry)
     for field in ("taboo_rule", "containment_protocol", "clue_hint", "backlash_note"):
         if field in out and isinstance(out[field], str) and "{anchor_fixture}" in out[field]:
@@ -122,6 +256,9 @@ def _collect_session_folklore_exclusions(session_id: Optional[int]) -> Tuple[Set
             st = str(q.get("status") or "").strip().lower()
             if st in ("completed", "failed", "abandoned", "turned_in"):
                 continue
+            q_bp = q.get("anomaly_blueprint")
+            if isinstance(q_bp, dict) and q_bp.get("codex_id"):
+                active_ids.add(str(q_bp["codex_id"]).strip())
             q_notes = str(q.get("quest_notes") or "")
             if "codex_id:" in q_notes:
                 for part in q_notes.split("|"):
@@ -151,11 +288,10 @@ def _collect_session_folklore_exclusions(session_id: Optional[int]) -> Tuple[Set
 
     try:
         uids = db.get_session_participant_user_ids(int(session_id))
-        for uid in uids:
-            u_map = db.get_user_folklore_codex(uid)
+        for u_map in db.get_users_folklore_codex_batch(uids).values():
             seen_ids.update(u_map.keys())
     except Exception as exc:
-        _log.debug("get_user_folklore_codex skipped in folklore state lookup: %s", exc)
+        _log.debug("get_users_folklore_codex_batch skipped in folklore state lookup: %s", exc)
 
     return active_ids, retired_ids, cooldown_ids, seen_ids
 
@@ -481,9 +617,45 @@ def build_blueprint_from_codex_entry(
     }
 
 
+_CODEX_BIOME_LABELS: Dict[str, Dict[str, str]] = {
+    "ms": {
+        "urban": "bandar", "nature": "alam semula jadi", "hospital": "hospital",
+        "shrine": "kuil", "school": "sekolah", "industrial": "perindustrian",
+        "subway": "transit bawah tanah", "commercial": "komersial", "residential": "kediaman",
+        "waterfront": "pesisir air",
+    },
+    "pl": {
+        "urban": "miejskich", "nature": "przyrodniczych", "hospital": "szpitalnych",
+        "shrine": "świątynnych", "school": "szkolnych", "industrial": "przemysłowych",
+        "subway": "metra", "commercial": "handlowych", "residential": "mieszkalnych",
+        "waterfront": "nadwodnych",
+    },
+    "zh": {
+        "urban": "城市", "nature": "自然郊野", "hospital": "医院",
+        "shrine": "神社祠堂", "school": "校园", "industrial": "工业区",
+        "subway": "地下轨道", "commercial": "商业街", "residential": "住宅区",
+        "waterfront": "滨水岸线",
+    },
+    "de": {
+        "urban": "Stadtgebieten", "nature": "Naturgebieten", "hospital": "Krankenhäusern",
+        "shrine": "Schreinen", "school": "Schulen", "industrial": "Industriegebieten",
+        "subway": "U-Bahn-Stationen", "commercial": "Geschäftsvierteln", "residential": "Wohnvierteln",
+        "waterfront": "Uferzonen",
+    },
+}
+
+_CODEX_TIME_LABELS: Dict[str, Dict[str, str]] = {
+    "ms": {"night": "malam", "day": "siang", "dusk": "senja", "dawn": "subuh", "any": "bila-bila masa"},
+    "pl": {"night": "noc", "day": "dzień", "dusk": "zmierzch", "dawn": "świt", "any": "każda pora"},
+    "zh": {"night": "夜晚", "day": "白昼", "dusk": "黄昏", "dawn": "黎明", "any": "全时段"},
+    "de": {"night": "Nacht", "day": "Tag", "dusk": "Abenddämmerung", "dawn": "Morgengrauen", "any": "jederzeit"},
+}
+
+
 def build_encyclopedia_payload(
     session_id: Optional[int] = None,
     user_id: Optional[int] = None,
+    lang: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Builds the complete progressive Folklore Encyclopedia & Session Field Log payload
@@ -498,32 +670,75 @@ def build_encyclopedia_payload(
     eff_uid = int(user_id or sess.get("host_user_id") or 0)
     settings = db.get_settings(eff_uid) if eff_uid > 0 else {}
     debug_reveal_all = bool((settings or {}).get("debug_reveal_all_info", 0))
+    eff_lang = _normalize_codex_lang(
+        lang or (settings or {}).get("ui_language") or sess.get("narration_language") or sess.get("language") or "en"
+    )
 
     user_unlocks: Dict[str, Dict[str, Any]] = {}
     if session_id:
-        for uid in db.get_session_participant_user_ids(int(session_id), extra_user_id=eff_uid):
-            for cid, row in db.get_user_folklore_codex(uid).items():
+        part_uids = db.get_session_participant_user_ids(int(session_id), extra_user_id=eff_uid)
+        rank_map = {"sighted": 1, "verified": 2, "contained": 3}
+        for u_map in db.get_users_folklore_codex_batch(part_uids).values():
+            for cid, row in u_map.items():
                 prev = user_unlocks.get(cid)
-                rank_map = {"sighted": 1, "verified": 2, "contained": 3}
                 if not prev or rank_map.get(str(row.get("unlock_stage")), 0) > rank_map.get(str(prev.get("unlock_stage")), 0):
                     user_unlocks[cid] = row
     elif eff_uid > 0:
         user_unlocks = db.get_user_folklore_codex(eff_uid)
 
+    contracted_codex_map: Dict[str, Dict[str, Any]] = {}
+    try:
+        lookup_uids = list(part_uids) if part_uids else ([eff_uid] if eff_uid > 0 else [])
+        if lookup_uids:
+            contracted_codex_map = db.get_users_contracted_codex_map(lookup_uids)
+    except Exception:
+        contracted_codex_map = {}
+
     pools = load_procedural_pools()
     taboos_by_id = {t["taboo_id"]: t for t in (pools.get("taboo_rules_catalog") or [])}
+    codex_raw_data = load_folklore_codex_data()
+    taboo_locales_catalog = codex_raw_data.get("taboo_locales") or {}
     all_entries = get_folklore_codex_entries()
-    traditions = get_folklore_traditions()
+    traditions = [localize_folklore_tradition(tr, eff_lang) for tr in get_folklore_traditions()]
+    tradition_label_by_key = {str(tr.get("key") or ""): str(tr.get("label") or "") for tr in traditions}
+
+    undisc_subtitle = {
+        "ms": "Rekod Cerita Rakyat Belum Ditemui",
+        "pl": "Nieodkryty Wpis Folkloru",
+        "zh": "未遭遇的民俗档案记录",
+        "de": "Unentdeckter Folklore-Eintrag",
+    }.get(eff_lang, "Unencountered Folklore Record")
+    unver_lore_msg = {
+        "ms": "[BELUM DISAHKAN — Lengkapkan Siasatan Peringkat 1 atau Imbasan untuk membuka Arkib Cerita Rakyat penuh]",
+        "pl": "[NIEZWERYFIKOWANO — Ukończ Śledztwo Etapu 1 lub Skanowanie, aby odblokować pełne Archiwum Folkloru]",
+        "zh": "[未核实 —— 完成第1阶段调查或扫描以解锁完整民俗档案]",
+        "de": "[UNBESTÄTIGT — Schließe Untersuchung Stufe 1 oder Scan ab, um das vollständige Folklore-Archiv freizuschalten]",
+    }.get(eff_lang, "[UNVERIFIED — Complete Stage 1 Investigation or Scan to unlock full Folklore Archive]")
+    unver_short = {
+        "ms": "[BELUM DISAHKAN]",
+        "pl": "[NIEZWERYFIKOWANO]",
+        "zh": "[未核实]",
+        "de": "[UNBESTÄTIGT]",
+    }.get(eff_lang, "[UNVERIFIED]")
 
     codex_cards: List[Dict[str, Any]] = []
     discovered_count = 0
     verified_count = 0
     contained_count = 0
 
-    for entry in all_entries:
+    for raw_entry in all_entries:
+        entry = localize_folklore_entry(raw_entry, eff_lang)
         cid = str(entry["codex_id"])
+        t_key_entry = str(entry["tradition_key"])
+        loc_trad_label = tradition_label_by_key.get(t_key_entry) or str(entry["tradition"])
         u_row = user_unlocks.get(cid)
+        c_pact_info = contracted_codex_map.get(cid) or {}
+        is_contracted_ever = bool(c_pact_info.get("contracted_ever"))
+        is_curr_contracted = bool(c_pact_info.get("is_currently_contracted"))
+        max_pact_tier = int(c_pact_info.get("max_pact_tier") or 0)
         stage = "contained" if debug_reveal_all and not u_row else str((u_row or {}).get("unlock_stage") or "undiscovered")
+        if is_contracted_ever and stage in ("undiscovered", "sighted"):
+            stage = "verified"
         if debug_reveal_all and stage in ("undiscovered", "sighted"):
             stage = "verified"
 
@@ -535,23 +750,47 @@ def build_encyclopedia_payload(
             contained_count += 1
 
         if stage == "undiscovered":
+            raw_biomes = list(entry.get("biomes") or ["urban"])
+            raw_times = list(entry.get("times") or ["night"])
+            if eff_lang == "ms":
+                b_str = ", ".join(_CODEX_BIOME_LABELS["ms"].get(b, b) for b in raw_biomes)
+                tm_str = ", ".join(_CODEX_TIME_LABELS["ms"].get(tm, tm) for tm in raw_times)
+                hint_str = f"Dikhabarkan di sektor {b_str} ({tm_str})."
+            elif eff_lang == "pl":
+                b_str = ", ".join(_CODEX_BIOME_LABELS["pl"].get(b, b) for b in raw_biomes)
+                tm_str = ", ".join(_CODEX_TIME_LABELS["pl"].get(tm, tm) for tm in raw_times)
+                hint_str = f"Pogłoski w sektorach {b_str} ({tm_str})."
+            elif eff_lang == "zh":
+                b_str = "、".join(_CODEX_BIOME_LABELS["zh"].get(b, b) for b in raw_biomes)
+                tm_str = "、".join(_CODEX_TIME_LABELS["zh"].get(tm, tm) for tm in raw_times)
+                hint_str = f"传闻出没于{b_str}区域（{tm_str}）。"
+            elif eff_lang == "de":
+                b_str = ", ".join(_CODEX_BIOME_LABELS["de"].get(b, b) for b in raw_biomes)
+                tm_str = ", ".join(_CODEX_TIME_LABELS["de"].get(tm, tm) for tm in raw_times)
+                hint_str = f"Gerüchten zufolge aktiv in: {b_str} ({tm_str})."
+            else:
+                hint_str = f"Rumored in {', '.join(raw_biomes)} sectors ({', '.join(raw_times)})."
+
             codex_cards.append({
                 "codex_id": cid,
                 "unlock_stage": "undiscovered",
                 "is_discovered": False,
                 "name": "???",
                 "canonical_name": "???",
-                "subtitle": "Unencountered Folklore Record",
-                "tradition_key": entry["tradition_key"],
+                "subtitle": undisc_subtitle,
+                "tradition_key": t_key_entry,
                 "tradition": entry["tradition"],
-                "tradition_label": entry["tradition"],
+                "tradition_label": loc_trad_label,
                 "type": entry["type"],
                 "form_label": "???",
                 "min_tier": entry.get("min_tier", 1),
                 "max_tier": entry.get("max_tier", 5),
                 "biomes": list(entry.get("biomes") or []),
                 "times": list(entry.get("times") or []),
-                "hint": f"Rumored in {', '.join(entry.get('biomes') or ['urban'])} sectors ({', '.join(entry.get('times') or ['night'])}).",
+                "hint": hint_str,
+                "contracted_ever": False,
+                "is_currently_contracted": False,
+                "max_pact_tier": 0,
             })
             continue
 
@@ -565,24 +804,39 @@ def build_encyclopedia_payload(
             if is_gore
             else str(entry.get("sensory_omen") or "")
         )
-        base_taboo = format_taboo_entry_for_type(
-            taboos_by_id.get(entry["taboo_id"], {}),
-            str(entry.get("type") or "entity"),
+        anom_type_str = str(entry.get("type") or "entity")
+        raw_base_taboo = dict(taboos_by_id.get(entry["taboo_id"], {}))
+        has_localized_base_taboo = False
+        if eff_lang in ("ms", "pl", "zh", "de"):
+            tb_loc = ((taboo_locales_catalog.get(entry["taboo_id"]) or {}).get(eff_lang)) or {}
+            if isinstance(tb_loc, dict):
+                for tb_f in ("name", "taboo_rule", "containment_protocol"):
+                    if tb_loc.get(tb_f):
+                        raw_base_taboo[tb_f] = tb_loc[tb_f]
+                        has_localized_base_taboo = True
+
+        anchor_phrase = _resolve_type_anchor_phrase(anom_type_str, eff_lang)
+        base_taboo = dict(raw_base_taboo)
+        for tb_f in ("taboo_rule", "containment_protocol", "clue_hint", "backlash_note"):
+            if isinstance(base_taboo.get(tb_f), str) and "{anchor_fixture}" in base_taboo[tb_f]:
+                base_taboo[tb_f] = base_taboo[tb_f].replace("{anchor_fixture}", anchor_phrase)
+
+        entry_loc_for_lang = (raw_entry.get("locales") or {}).get(eff_lang) or {}
+        use_custom_rule = eff_lang == "en" or bool(entry_loc_for_lang.get("custom_taboo_rule")) or not has_localized_base_taboo
+        use_custom_proto = eff_lang == "en" or bool(entry_loc_for_lang.get("custom_protocol")) or not has_localized_base_taboo
+        t_rule = str((entry.get("custom_taboo_rule") if use_custom_rule else "") or base_taboo.get("taboo_rule") or "").replace(
+            "{anchor_fixture}", anchor_phrase
         )
-        t_rule = format_taboo_entry_for_type(
-            {"taboo_rule": str(entry.get("custom_taboo_rule") or base_taboo.get("taboo_rule") or "")},
-            str(entry.get("type") or "entity"),
-        )["taboo_rule"]
-        t_proto = format_taboo_entry_for_type(
-            {"containment_protocol": str(entry.get("custom_protocol") or base_taboo.get("containment_protocol") or "")},
-            str(entry.get("type") or "entity"),
-        )["containment_protocol"]
+        t_proto = str((entry.get("custom_protocol") if use_custom_proto else "") or base_taboo.get("containment_protocol") or "").replace(
+            "{anchor_fixture}", anchor_phrase
+        )
 
         is_ver = stage in ("verified", "contained")
         t_sighted = int((u_row or {}).get("times_sighted") or 1)
         t_contained = int((u_row or {}).get("times_contained") or (1 if stage == "contained" else 0))
         omen_rule_str = (entry.get("omen_paradox") or {}).get("rule_summary", "") if is_ver else ""
         relic_prof = entry.get("relic_gear_profile") if isinstance(entry.get("relic_gear_profile"), dict) else {}
+        disp_name = entry.get("display_name") or entry["canonical_name"]
         card = {
             "codex_id": cid,
             "unlock_stage": stage,
@@ -594,12 +848,12 @@ def build_encyclopedia_payload(
             "sightings_count": t_sighted,
             "times_contained": t_contained,
             "contained_count": t_contained,
-            "name": entry["canonical_name"],
+            "name": disp_name,
             "canonical_name": entry["canonical_name"],
             "subtitle": entry["subtitle"],
-            "tradition_key": entry["tradition_key"],
+            "tradition_key": t_key_entry,
             "tradition": entry["tradition"],
-            "tradition_label": entry["tradition"],
+            "tradition_label": loc_trad_label,
             "uniqueness": entry.get("uniqueness", "species"),
             "type": entry["type"],
             "form": entry["form"],
@@ -613,7 +867,7 @@ def build_encyclopedia_payload(
             "times": list(entry.get("times") or []),
             "appearance": appearance,
             "sensory_omen": omen,
-            "lore_summary": entry["lore_summary"] if is_ver else "[UNVERIFIED — Complete Stage 1 Investigation or Scan to unlock full Folklore Archive]",
+            "lore_summary": entry["lore_summary"] if is_ver else unver_lore_msg,
             "physicality": entry["physicality"] if is_ver else "unknown",
             "sapience": entry["sapience"] if is_ver else "unknown",
             "primary_element": entry["primary_element"] if is_ver else "unknown",
@@ -621,9 +875,9 @@ def build_encyclopedia_payload(
             "resistances": list(entry.get("resistances") or []) if is_ver else [],
             "immunities": list(entry.get("immunities") or []) if is_ver else [],
             "combat_archetype": (entry.get("combat_profile") or {}).get("archetype", "Stalker") if is_ver else "???",
-            "taboo_name": base_taboo.get("name", "Folklore Taboo") if is_ver else "[UNVERIFIED]",
-            "taboo_rule": t_rule if is_ver else "[UNVERIFIED]",
-            "containment_protocol": t_proto if is_ver else "[UNVERIFIED]",
+            "taboo_name": base_taboo.get("name", "Folklore Taboo") if is_ver else unver_short,
+            "taboo_rule": t_rule if is_ver else unver_short,
+            "containment_protocol": t_proto if is_ver else unver_short,
             "appeasement_tags": list(entry.get("appeasement_tags") or []) if is_ver else [],
             "has_disguise": bool(entry.get("disguise_profile")) if is_ver else False,
             "disguise_alias": (entry.get("disguise_profile") or {}).get("disguise_alias", "") if is_ver else "",
@@ -634,6 +888,9 @@ def build_encyclopedia_payload(
             "omen_paradox_summary": omen_rule_str if is_ver else "",
             "omen_paradox_rule": omen_rule_str if is_ver else "",
             "relic_gear_name": str(relic_prof.get("display_name") or relic_prof.get("name") or "") if is_ver else "",
+            "contracted_ever": is_contracted_ever,
+            "is_currently_contracted": is_curr_contracted,
+            "max_pact_tier": max_pact_tier,
         }
         codex_cards.append(card)
 
@@ -652,16 +909,28 @@ def build_encyclopedia_payload(
     for fl_row in reversed(list(sess.get("anomaly_field_log") or [])):
         if not isinstance(fl_row, dict):
             continue
-        if fl_row.get("is_disguised") and not debug_reveal_all:
+        stg = str(fl_row.get("stage") or fl_row.get("status") or "sighted").strip().lower()
+        is_fl_ver = (stg in ("verified", "contained")) or debug_reveal_all
+        fl_entry = dict(fl_row)
+        if fl_entry.get("is_disguised") and not debug_reveal_all:
             # Disguised sightings must not leak their canonical identity (searchable codex_id / true name / taboo)
-            fl_row = {
-                k: v for k, v in fl_row.items()
-                if k not in ("codex_id", "true_name", "canonical_name", "form", "form_label", "tradition",
-                             "taboo_rule", "containment_protocol", "weaknesses")
+            fl_entry = {
+                k: v for k, v in fl_entry.items()
+                if k not in (
+                    "codex_id", "true_name", "canonical_name", "form", "form_label", "tradition",
+                    "taboo_rule", "containment_protocol", "weaknesses", "resistances", "immunities",
+                )
             }
-            fl_row["codex_id"] = ""
-            fl_row["name"] = str(fl_row.get("public_name") or fl_row.get("name") or "Uncanny Presence")
-        field_log.append(fl_row)
+            fl_entry["codex_id"] = ""
+            fl_entry["name"] = str(fl_entry.get("public_name") or fl_entry.get("name") or "Uncanny Presence")
+        elif not is_fl_ver:
+            # Sighted / rewound unverified encounters must not leak taboo rules, protocols, or elemental charts
+            fl_entry["taboo_rule"] = unver_short
+            fl_entry["containment_protocol"] = unver_short
+            fl_entry["weaknesses"] = []
+            fl_entry["resistances"] = []
+            fl_entry["immunities"] = []
+        field_log.append(fl_entry)
     vault_log = list(reversed(list(sess.get("contained_anomalies_log") or sess.get("anomalous_vault_log") or [])))
     requisitions = list(sess.get("anomalous_vault_requisitions") or [])
 

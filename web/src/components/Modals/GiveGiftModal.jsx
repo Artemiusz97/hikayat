@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Gift, User, Package, X, Check, Loader2 } from 'lucide-react';
 
 const GiveGiftModal = ({
@@ -9,6 +10,7 @@ const GiveGiftModal = ({
   onAction,
   processing
 }) => {
+  const { t } = useTranslation();
   const [selectedNpc, setSelectedNpc] = useState('');
   const [selectedItemId, setSelectedItemId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -58,10 +60,10 @@ const GiveGiftModal = ({
             <span className="text-lg">🎁</span>
             <div>
               <h3 className="font-rpg font-bold text-fantasy-accent text-sm leading-none">
-                Give Gift / Item
+                {t('gift.title', 'Give Gift / Item')}
               </h3>
               <p className="text-[10px] text-gray-400 mt-0.5">
-                Offer an item to an NPC in your current scene to deepen rapport and affinity
+                {t('gift.subtitle', 'Offer an item to an NPC in your current scene to deepen rapport and affinity')}
               </p>
             </div>
           </div>
@@ -78,11 +80,11 @@ const GiveGiftModal = ({
         <div className="space-y-1.5">
           <label className="text-[11px] font-bold uppercase tracking-wider text-gray-300 flex items-center gap-1.5">
             <User size={13} className="text-amber-400" />
-            <span>Select Recipient</span>
+            <span>{t('gift.select_recipient', 'Select Recipient')}</span>
           </label>
           <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto custom-scrollbar">
             {npcs.length === 0 ? (
-              <span className="text-xs text-gray-400 italic">No NPCs present in this scene.</span>
+              <span className="text-xs text-gray-400 italic">{t('gift.no_npcs', 'No NPCs present in this scene.')}</span>
             ) : (
               npcs.map((npc) => (
                 <button
@@ -106,12 +108,12 @@ const GiveGiftModal = ({
         <div className="space-y-1.5">
           <label className="text-[11px] font-bold uppercase tracking-wider text-gray-300 flex items-center gap-1.5">
             <Package size={13} className="text-amber-400" />
-            <span>Select Item to Gift</span>
+            <span>{t('gift.select_item', 'Select Item to Gift')}</span>
           </label>
           <div className="max-h-48 overflow-y-auto custom-scrollbar space-y-1 pr-1 border border-fantasy-border/60 rounded-lg p-1.5 bg-black/40">
             {items.length === 0 ? (
               <div className="p-4 text-center text-gray-400 text-xs">
-                Your inventory is currently empty.
+                {t('gift.inventory_empty', 'Your inventory is currently empty.')}
               </div>
             ) : (
               items.map((item) => {
@@ -150,7 +152,7 @@ const GiveGiftModal = ({
             onClick={onClose}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
           >
-            Cancel
+            {t('gift.cancel', 'Cancel')}
           </button>
           <button
             type="button"
@@ -161,12 +163,12 @@ const GiveGiftModal = ({
             {submitting ? (
               <>
                 <Loader2 size={13} className="animate-spin text-fantasy-dark" />
-                <span>Offering Gift...</span>
+                <span>{t('gift.offering', 'Offering Gift...')}</span>
               </>
             ) : (
               <>
                 <Gift size={13} />
-                <span>Give to {activeNpc || 'NPC'}</span>
+                <span>{t('gift.give_to', { name: activeNpc || 'NPC', defaultValue: `Give to ${activeNpc || 'NPC'}` })}</span>
               </>
             )}
           </button>

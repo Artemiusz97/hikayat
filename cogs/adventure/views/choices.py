@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Any
 from .constants import *
 import asyncio
 import json
@@ -6,6 +8,7 @@ import random
 import re
 import time
 import discord
+from .base import SessionRestrictedView
 from .locations import PrimarySelectView
 from discord import app_commands
 from discord.ext import commands
@@ -41,8 +44,17 @@ from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as 
 from mechanics.combat.items import parse_item_effect, apply_item_to_target
 import unicodedata
 from ..embeds import *
-from ..embeds import _build_bounties_embed, _build_bounty_board_embed, _build_campaign_goals_embed, _build_caseboard_embed, _build_history_embed, _build_main_quest_embed, _build_quest_log_embed, _choice_button_label, _format_items_gained, _format_items_gained_multi, _format_tracker_entity, _get_choice_emoji, _get_choice_quest_icon, _get_choice_skill_emoji, _get_quest_scenario_labels, _is_dialogue_partner, _location_text, _norm_name, _parse_status_effects, _party_vitals_text, _safe_add_field, _safe_int, _scenario_command_choices, _strip_leading_emojis, _tracker_group_text, _tracker_header, _truncate_embed_text, _truncate_field_name, _truncate_field_value
-from ..embeds import _RESULT_COLORS, _RESULT_TITLES, _scenario_command_choices, _parse_status_effects, _party_vitals_text, _location_text, _safe_int, _truncate_field_value, _truncate_field_name, _safe_add_field, _norm_name, _is_dialogue_partner, _format_tracker_entity, _tracker_group_text, _strip_leading_emojis, _get_choice_quest_icon, _get_choice_skill_emoji, _get_choice_emoji, _format_items_gained, _format_items_gained_multi, _tracker_header, _truncate_embed_text, _choice_button_label, _get_quest_scenario_labels, _build_campaign_goals_embed, _build_main_quest_embed, _build_bounties_embed, _build_history_embed, _build_caseboard_embed, _build_quest_log_embed, _build_bounty_board_embed
+from ..embeds import (
+    _RESULT_COLORS, _RESULT_TITLES, _build_bounties_embed, _build_bounty_board_embed,
+    _build_campaign_goals_embed, _build_caseboard_embed, _build_history_embed,
+    _build_main_quest_embed, _build_quest_log_embed, _choice_button_label,
+    _format_items_gained, _format_items_gained_multi, _format_tracker_entity,
+    _get_choice_emoji, _get_choice_quest_icon, _get_choice_skill_emoji,
+    _get_quest_scenario_labels, _is_dialogue_partner, _location_text, _norm_name,
+    _parse_status_effects, _party_vitals_text, _safe_add_field, _safe_int,
+    _scenario_command_choices, _strip_leading_emojis, _tracker_group_text,
+    _tracker_header, _truncate_embed_text, _truncate_field_name, _truncate_field_value,
+)
 
 class CustomActionModal(discord.ui.Modal, title="Do Something Else"):
     action = discord.ui.TextInput(
@@ -68,8 +80,76 @@ class CustomActionModal(discord.ui.Modal, title="Do Something Else"):
         else:
             await self.cog.handle_action(interaction, self.session_id, custom_text=str(self.action))
 
+_UNSET = object()
+
+
+def _preload_choice_view_data(
+    session_id: int,
+    *,
+    turn_user_id: int | None = None,
+    actor_char: dict | None = None,
+    is_sync: bool = False,
+    session: dict | None = None,
+    actor_settings: dict | None = None,
+    actor_inv: list | None = None,
+) -> dict[str, Any]:
+    sess = session if session is not None else ((db.get_session(session_id) if session_id else {}) or {})
+    actor_uid = turn_user_id or ((actor_char.get("user_id") or actor_char.get("id")) if actor_char else None)
+    resolved_settings = (
+        actor_settings
+        if actor_settings is not None
+        else ((db.get_settings(actor_uid) or {}) if (actor_uid and not is_sync) else {})
+    )
+    resolved_inv = actor_inv
+    if resolved_inv is None and actor_uid and sess and not is_sync:
+        try:
+            resolved_inv = db.get_inventory(actor_uid, char=actor_char) or []
+        except Exception:
+            resolved_inv = []
+
+    from mechanics.combat import is_in_combat
+    in_combat = is_in_combat(sess)
+    current_loc = sess.get("current_location", "") if sess else ""
+    scen_key = sess.get("scenario", "fantasy") if sess else "fantasy"
+    faction = db.get_faction_by_hq(session_id, current_loc) if (session_id and not in_combat) else None
+
+    contacts: list | None = None
+    if not in_combat:
+        from scenario_data import is_mechanic_enabled
+        if is_mechanic_enabled(scen_key, "contact_list") or is_mechanic_enabled(scen_key, "relationship_meter"):
+            from mechanics.world.mobility import get_session_dialogue_partners
+            dialogue_partners = get_session_dialogue_partners(sess)
+            if dialogue_partners:
+                if is_sync:
+                    contacts = db.get_contacts(session_id) or []
+                else:
+                    char_id = actor_char.get("id", 0) if actor_char else 0
+                    contacts = db.get_contacts(session_id, character_id=char_id) or []
+
+    return {
+        "session": sess,
+        "actor_settings": resolved_settings,
+        "actor_inv": resolved_inv,
+        "faction": faction,
+        "contacts": contacts,
+    }
+
+
 class ChoiceDropdown(discord.ui.Select):
-    def __init__(self, cog: "AdventureCog", session_id: int, choices: list, actor_char: dict = None, is_sync: bool = False, turn_user_id: int = None, party: list = None):
+    def __init__(
+        self,
+        cog: "AdventureCog",
+        session_id: int,
+        choices: list,
+        actor_char: dict = None,
+        is_sync: bool = False,
+        turn_user_id: int = None,
+        party: list = None,
+        *,
+        session: dict | None = None,
+        actor_settings: dict | None = None,
+        actor_inv: list | None = None,
+    ):
         self.cog = cog
         self.session_id = session_id
         self.is_sync = is_sync
@@ -78,15 +158,15 @@ class ChoiceDropdown(discord.ui.Select):
         self.choices = list(choices or [])
         
         options = []
-        session = (db.get_session(session_id) if session_id else {}) or {}
+        session = session if session is not None else ((db.get_session(session_id) if session_id else {}) or {})
         actor_uid = (actor_char.get("user_id") or actor_char.get("id")) if actor_char else None
-        actor_settings = db.get_settings(actor_uid) if actor_uid else {}
+        if actor_settings is None:
+            actor_settings = (db.get_settings(actor_uid) if actor_uid else {}) or {}
         show_percentages = bool(actor_settings.get("show_percentages", session.get("show_percentages", 1))) if actor_char else bool(session.get("show_percentages", 1))
         from mechanics.stealth import compute_choice_stealth_odds
-        actor_inv = None
-        if actor_uid and session and not is_sync:
+        if actor_inv is None and actor_uid and session and not is_sync:
             try:
-                actor_inv = db.get_inventory(actor_uid) or []
+                actor_inv = db.get_inventory(actor_uid, char=actor_char) or []
             except Exception:
                 actor_inv = None
 
@@ -151,8 +231,7 @@ class ChoiceDropdown(discord.ui.Select):
                 if is_free:
                     chance_str = "100%"
                 else:
-                    actor_settings = db.get_settings(actor_char["user_id"]) if actor_char else {}
-                    check_mode = actor_settings.get("debug_check_mode", "off")
+                    check_mode = (actor_settings or {}).get("debug_check_mode", "off")
                     stat_col = STAT_COLUMN.get(stat, "agi_")
                     st_pct = (
                         compute_choice_stealth_odds(
@@ -226,12 +305,66 @@ class ChoiceDropdown(discord.ui.Select):
                 return
             await self.cog.handle_action(interaction, self.session_id, choice_index=idx)
 
-class ChoiceView(discord.ui.View):
+class ChoiceView(SessionRestrictedView):
     """Turn-based (and solo) mode: only the current turn-holder can act."""
 
-    def __init__(self, cog: "AdventureCog", session_id: int, turn_user_id: int, choices: list, actor_char: dict,
-                 merchant: dict = None, current_menu: str = "root"):
-        super().__init__(timeout=86400)
+    @classmethod
+    async def create(
+        cls,
+        cog: "AdventureCog",
+        session_id: int,
+        turn_user_id: int,
+        choices: list,
+        actor_char: dict,
+        merchant: dict = None,
+        current_menu: str = "root",
+        *,
+        session: dict | None = None,
+        actor_inv: list | None = None,
+        actor_settings: dict | None = None,
+    ) -> "ChoiceView":
+        preloaded = await adb(
+            _preload_choice_view_data,
+            session_id,
+            turn_user_id=turn_user_id,
+            actor_char=actor_char,
+            is_sync=False,
+            session=session,
+            actor_settings=actor_settings,
+            actor_inv=actor_inv,
+        )
+        return cls(
+            cog,
+            session_id,
+            turn_user_id,
+            choices,
+            actor_char,
+            merchant=merchant,
+            current_menu=current_menu,
+            session=preloaded["session"],
+            actor_inv=preloaded["actor_inv"],
+            actor_settings=preloaded["actor_settings"],
+            preloaded_faction=preloaded["faction"],
+            preloaded_contacts=preloaded["contacts"],
+        )
+
+    def __init__(
+        self,
+        cog: "AdventureCog",
+        session_id: int,
+        turn_user_id: int,
+        choices: list,
+        actor_char: dict,
+        merchant: dict = None,
+        current_menu: str = "root",
+        *,
+        session: dict | None = None,
+        actor_inv: list | None = None,
+        actor_settings: dict | None = None,
+        preloaded_faction: Any = _UNSET,
+        preloaded_contacts: list | None = None,
+    ):
+        super().__init__(session_id=session_id, timeout=86400)
         self.cog = cog
         self.session_id = session_id
         self.turn_user_id = turn_user_id
@@ -240,8 +373,10 @@ class ChoiceView(discord.ui.View):
         self.merchant = merchant or {}
         self.current_menu = current_menu
 
-        session = db.get_session(session_id) or {}
+        session = session if session is not None else (db.get_session(session_id) or {})
         self.session = session
+        self._actor_inv = actor_inv
+        self._actor_settings = actor_settings
         scen_key = session.get("scenario", "fantasy")
         from mechanics.combat import is_in_combat
         self.in_combat = is_in_combat(session)
@@ -249,7 +384,8 @@ class ChoiceView(discord.ui.View):
         if self.in_combat:
             from mechanics.narrative.choice_generator import generate_categorized_combat_actions
             from mechanics.stealth import is_actor_combat_vanished
-            inv = db.get_inventory(turn_user_id) if turn_user_id else []
+            inv = actor_inv if actor_inv is not None else (db.get_inventory(turn_user_id) if turn_user_id else [])
+            self._actor_inv = inv
             actor_char_dict = dict(actor_char)
             if is_actor_combat_vanished(session, turn_user_id):
                 actor_char_dict["combat_vanished"] = True
@@ -262,8 +398,9 @@ class ChoiceView(discord.ui.View):
             current_loc = session.get("current_location", "area") if session else "area"
             self.categorized = generate_categorized_combat_actions(party_loadout, monster, current_loc, scen_key, session=session)
 
-            actor_settings = db.get_settings(turn_user_id) if turn_user_id else {}
-            combat_style = actor_settings.get("combat_ui_style", session.get("combat_ui_style", "battle_deck") if session else "battle_deck")
+            resolved_settings = actor_settings if actor_settings is not None else ((db.get_settings(turn_user_id) if turn_user_id else {}) or {})
+            self._actor_settings = resolved_settings
+            combat_style = resolved_settings.get("combat_ui_style", session.get("combat_ui_style", "battle_deck") if session else "battle_deck")
 
             if combat_style == "multi_dropdown":
                 self._build_multi_dropdown_combat()
@@ -280,10 +417,19 @@ class ChoiceView(discord.ui.View):
         )
         is_fb = any(choice.get("is_fallback") for choice in choices) or is_fallback_narr or bool(session.get("is_truncated_generation"))
 
-
         self._choices = choices
         self._actor_char = actor_char
-        self._choice_dropdown = ChoiceDropdown(cog, session_id, choices, actor_char, is_sync=False, turn_user_id=turn_user_id)
+        self._choice_dropdown = ChoiceDropdown(
+            cog,
+            session_id,
+            choices,
+            actor_char,
+            is_sync=False,
+            turn_user_id=turn_user_id,
+            session=session,
+            actor_settings=actor_settings,
+            actor_inv=actor_inv,
+        )
         self.add_item(self._choice_dropdown)
 
         if is_fb:
@@ -364,7 +510,7 @@ class ChoiceView(discord.ui.View):
             merchant_button.callback = self._talk_to_merchant
             self.add_item(merchant_button)
 
-        faction = db.get_faction_by_hq(session_id, current_loc)
+        faction = db.get_faction_by_hq(session_id, current_loc) if preloaded_faction is _UNSET else preloaded_faction
         if faction and not self.in_combat:
             hq_button = discord.ui.Button(label=f"Enter {faction.get('name', 'HQ')}", style=discord.ButtonStyle.primary, emoji="🏛️")
             hq_button.callback = self._faction_hq_callback
@@ -377,7 +523,7 @@ class ChoiceView(discord.ui.View):
             dialogue_partners = get_session_dialogue_partners(session)
             if dialogue_partners:
                 char_id = actor_char.get("id", 0) if actor_char else 0
-                contacts = db.get_contacts(session_id, character_id=char_id)
+                contacts = preloaded_contacts if preloaded_contacts is not None else db.get_contacts(session_id, character_id=char_id)
                 matching_contacts = []
                 for dp in dialogue_partners:
                     for c in contacts:
@@ -608,15 +754,6 @@ class ChoiceView(discord.ui.View):
             target_btn.callback = self._switch_target_callback
             self.add_item(target_btn)
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        turn_order = list((self.session or {}).get("turn_order") or [])
-        if not turn_order and self.turn_user_id:
-            turn_order = [self.turn_user_id]
-        if turn_order and interaction.user.id not in turn_order:
-            await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
-            return False
-        return True
-
     async def _switch_target_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.turn_user_id:
             await interaction.response.send_message(f"It's not your turn — waiting on <@{self.turn_user_id}>.", ephemeral=True)
@@ -626,14 +763,14 @@ class ChoiceView(discord.ui.View):
         if hasattr(self, "hostiles") and len(self.hostiles) > 1:
             self.target_idx = (self.target_idx + 1) % len(self.hostiles)
             monster = self.hostiles[self.target_idx]
-            inv = db.get_inventory(self.turn_user_id) if self.turn_user_id else []
+            inv = (await adb(db.get_inventory, self.turn_user_id)) if self.turn_user_id else []
             party_loadout = [(self.actor_char, inv)]
             current_loc = self.session.get("current_location", "area") if self.session else "area"
             scen_key = self.session.get("scenario", "fantasy")
             from mechanics.narrative.choice_generator import generate_categorized_combat_actions
             self.categorized = generate_categorized_combat_actions(party_loadout, monster, current_loc, scen_key, session=self.session)
 
-            actor_settings = db.get_settings(self.turn_user_id) if self.turn_user_id else {}
+            actor_settings = (await adb(db.get_settings, self.turn_user_id)) if self.turn_user_id else {}
             combat_style = actor_settings.get("combat_ui_style", self.session.get("combat_ui_style", "battle_deck") if self.session else "battle_deck")
             if combat_style == "multi_dropdown":
                 self._build_multi_dropdown_combat()
@@ -712,8 +849,8 @@ class ChoiceView(discord.ui.View):
             await interaction.response.send_message(
                 f"It's not your turn — waiting on <@{self.turn_user_id}>.", ephemeral=True)
             return
-        inv = db.get_inventory(interaction.user.id)
-        carried = [i for i in inv if not i.get("equipped")]
+        inv = await adb(db.get_inventory, interaction.user.id)
+        carried = [i for i in (inv or []) if not i.get("equipped")]
         if not carried:
             await interaction.response.send_message("❌ You have no carried items in your inventory.", ephemeral=True)
             return
@@ -761,6 +898,9 @@ class ChoiceView(discord.ui.View):
                     self._actor_char,
                     False,
                     self.turn_user_id,
+                    session=session,
+                    actor_settings=getattr(self, "_actor_settings", None),
+                    actor_inv=getattr(self, "_actor_inv", None),
                 )
                 self._choice_dropdown.options = refreshed_dd.options
         except Exception:
@@ -797,7 +937,7 @@ class ChoiceView(discord.ui.View):
             except (discord.HTTPException, discord.NotFound):
                 pass
 
-        session = db.get_session(self.session_id)
+        session = await adb(db.get_session, self.session_id)
         from mechanics.combat import is_in_combat
         if is_in_combat(session):
             msg = "❌ **Cannot travel while engaged in combat!** Defeat your enemies or flee first."
@@ -806,26 +946,32 @@ class ChoiceView(discord.ui.View):
             else:
                 await interaction.response.send_message(msg, ephemeral=True)
             return
-        scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-        cur_loc = session.get("current_location", "")
-        char = db.get_character(interaction.user.id)
-        char_name = char.get("name", "") if char else ""
 
-        from mechanics.world.locations import parse_tiered_location, get_zone_summary_tree, process_llm_location_update, sanitize_location_target
-        # Auto-discover any active quest target locations
-        active_wps = db.get_all_session_active_waypoints(self.session_id)
-        for wp in active_wps:
-            target_loc = wp.get("target_location", "").strip()
-            if target_loc:
-                clean_target = sanitize_location_target(target_loc, session_id=self.session_id, scen_key=scen_key, char_name=char_name)
-                process_llm_location_update(self.session_id, clean_target, scen_key, char_name=char_name)
+        def _prepare_move_ctx(sid: int, uid: int, sess_obj: dict | None):
+            scen = sess_obj.get("scenario", "fantasy") if sess_obj else "fantasy"
+            c_loc = sess_obj.get("current_location", "") if sess_obj else ""
+            ch = db.get_character(uid)
+            c_name = ch.get("name", "") if ch else ""
+            from mechanics.world.locations import (
+                parse_tiered_location,
+                get_zone_summary_tree,
+                process_llm_location_update,
+                sanitize_location_target,
+            )
+            for wp in (db.get_all_session_active_waypoints(sid) or []):
+                target_loc = wp.get("target_location", "").strip()
+                if target_loc:
+                    clean_target = sanitize_location_target(target_loc, session_id=sid, scen_key=scen, char_name=c_name)
+                    process_llm_location_update(sid, clean_target, scen, char_name=c_name)
+            c_z, _, _ = parse_tiered_location(c_loc, scen, session_id=sid, char_name=c_name)
+            z_sum = get_zone_summary_tree(sid, scen, current_loc=c_loc, char_name=c_name)
+            emb = build_zone_places_embed(sid, c_z, scen, current_loc=c_loc, char_name=c_name)
+            return scen, c_loc, c_name, c_z, z_sum, emb
 
-        curr_z, _, _ = parse_tiered_location(cur_loc, scen_key, session_id=self.session_id, char_name=char_name)
-        zones_summary = get_zone_summary_tree(self.session_id, scen_key, current_loc=cur_loc, char_name=char_name)
-        
-        # Directly open the regional places view for the player's current zone
-        embed = build_zone_places_embed(self.session_id, curr_z, scen_key, current_loc=cur_loc, char_name=char_name)
-        view = PrimarySelectView(self.cog, self.session_id, scen_key, zone_name=curr_z, zones_summary=zones_summary, current_loc=cur_loc, char_name=char_name, sync=False)
+        scen_key, cur_loc, char_name, curr_z, zones_summary, embed = await adb(
+            _prepare_move_ctx, self.session_id, interaction.user.id, session
+        )
+        view = PrimarySelectView(self.cog, self.session_id, scen_key, zone_name=curr_z, zones_summary=zones_summary, current_loc=cur_loc, char_name=char_name, sync=False, user_id=interaction.user.id)
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(embed=embed, view=view, ephemeral=True)
@@ -839,7 +985,7 @@ class ChoiceView(discord.ui.View):
 
     async def _phone_callback(self, interaction: discord.Interaction):
         from mechanics.system.phone import build_phone_home_embed, PhoneMainView
-        embed = build_phone_home_embed(self.session_id, interaction.user.id)
+        embed = await adb(build_phone_home_embed, self.session_id, interaction.user.id)
         view = PhoneMainView(self.cog, self.session_id, interaction.user.id)
         try:
             if interaction.response.is_done():
@@ -855,12 +1001,17 @@ class ChoiceView(discord.ui.View):
     def _make_contact_profile_callback(self, contact: dict):
         async def _profile_callback(interaction: discord.Interaction):
             from cogs.contacts import build_contact_detail_embed, ContactView
-            session = db.get_session(self.session_id) or {}
-            scen_key = session.get("scenario", "fantasy")
-            embed = build_contact_detail_embed(contact, scen_key, user_id=interaction.user.id)
-            char = db.get_character(interaction.user.id)
-            char_id = char.get("id", 0) if char else 0
-            contacts = db.get_contacts(self.session_id, character_id=char_id)
+
+            def _load_profile_ctx(sid: int, uid: int):
+                sess_obj = db.get_session(sid) or {}
+                scen = sess_obj.get("scenario", "fantasy")
+                emb = build_contact_detail_embed(contact, scen, user_id=uid)
+                ch = db.get_character(uid)
+                cid = ch.get("id", 0) if ch else 0
+                c_list = db.get_contacts(sid, character_id=cid)
+                return scen, emb, c_list
+
+            scen_key, embed, contacts = await adb(_load_profile_ctx, self.session_id, interaction.user.id)
             view = ContactView(
                 contacts, scen_key, interaction.user.id,
                 active_contact=contact,
@@ -879,7 +1030,7 @@ class ChoiceView(discord.ui.View):
         return _profile_callback
 
     async def _notice_board_callback(self, interaction: discord.Interaction):
-        session = db.get_session(self.session_id)
+        session = await adb(db.get_session, self.session_id)
         if not session:
             await interaction.response.send_message("Session not found.", ephemeral=True)
             return
@@ -915,7 +1066,7 @@ class ChoiceView(discord.ui.View):
             await interaction.response.send_message(
                 f"It's not your turn — waiting on <@{self.turn_user_id}>.", ephemeral=True)
             return
-        party_npcs = db.get_session_party_npcs(self.session_id)
+        party_npcs = await adb(db.get_session_party_npcs, self.session_id)
         if not party_npcs:
             await interaction.response.send_message("You have no companions in your party.", ephemeral=True)
             return
@@ -924,22 +1075,61 @@ class ChoiceView(discord.ui.View):
             description="Select a companion to speak with or manage:",
             color=discord.Color.teal()
         )
-        view = PartyDialogueSelectView(self.cog, self.session_id, interaction.user.id, sync=False)
+        view = PartyDialogueSelectView(self.cog, self.session_id, interaction.user.id, sync=False, party_npcs=party_npcs)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-class SyncChoiceView(discord.ui.View):
+class SyncChoiceView(SessionRestrictedView):
     """Synchronized mode: every party member picks independently; nobody
     sees anyone else's pick until everyone has locked one in."""
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if self.member_ids and interaction.user.id not in self.member_ids:
-            await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
-            return False
-        return True
+    @classmethod
+    async def create(
+        cls,
+        cog: "AdventureCog",
+        session_id: int,
+        member_ids: list,
+        choices: list,
+        party: list,
+        merchant: dict = None,
+        *,
+        session: dict | None = None,
+    ) -> "SyncChoiceView":
+        preloaded = await adb(
+            _preload_choice_view_data,
+            session_id,
+            is_sync=True,
+            session=session,
+        )
+        return cls(
+            cog,
+            session_id,
+            member_ids,
+            choices,
+            party,
+            merchant=merchant,
+            session=preloaded["session"],
+            preloaded_faction=preloaded["faction"],
+            preloaded_contacts=preloaded["contacts"],
+        )
 
-    def __init__(self, cog: "AdventureCog", session_id: int, member_ids: list, choices: list, party: list,
-                 merchant: dict = None):
-        super().__init__(timeout=86400)
+    def __init__(
+        self,
+        cog: "AdventureCog",
+        session_id: int,
+        member_ids: list,
+        choices: list,
+        party: list,
+        merchant: dict = None,
+        *,
+        session: dict | None = None,
+        preloaded_faction: Any = _UNSET,
+        preloaded_contacts: list | None = None,
+    ):
+        super().__init__(
+            session_id=session_id,
+            timeout=86400,
+            allowed_user_ids=member_ids if member_ids else None,
+        )
         self.cog = cog
         self.session_id = session_id
         self.member_ids = member_ids
@@ -947,7 +1137,8 @@ class SyncChoiceView(discord.ui.View):
         self.party = party
         self.choices = list(choices or [])
 
-        session = db.get_session(session_id) or {}
+        session = session if session is not None else (db.get_session(session_id) or {})
+        self.session = session
         curr_narr = str(session.get("narrative") or "")
         is_fallback_narr = (
             ("The atmosphere settles around" in curr_narr and "awaiting the party's next move" in curr_narr)
@@ -982,7 +1173,7 @@ class SyncChoiceView(discord.ui.View):
                 choices = combat_choices[:24]
                 self.choices = list(choices)
         self._choices = choices
-        self._choice_dropdown = ChoiceDropdown(cog, session_id, choices, is_sync=True, party=party)
+        self._choice_dropdown = ChoiceDropdown(cog, session_id, choices, is_sync=True, party=party, session=session)
         self.add_item(self._choice_dropdown)
 
         if is_fb:
@@ -1015,10 +1206,8 @@ class SyncChoiceView(discord.ui.View):
         self.stealth_btn.callback = self._stealth_callback
         self.add_item(self.stealth_btn)
 
-        session = db.get_session(session_id) or {}
         scen_key = session.get("scenario", "fantasy")
-        from mechanics.combat import is_in_combat
-        in_combat = is_in_combat(session)
+        in_combat = self._is_combat
 
         from mechanics.system.phone import scenario_has_smartphone, get_phone_branding, build_phone_home_embed, PhoneMainView
         if scenario_has_smartphone(scen_key) and not in_combat:
@@ -1070,7 +1259,7 @@ class SyncChoiceView(discord.ui.View):
             merchant_button.callback = self._talk_to_merchant
             self.add_item(merchant_button)
 
-        faction = db.get_faction_by_hq(session_id, current_loc)
+        faction = db.get_faction_by_hq(session_id, current_loc) if preloaded_faction is _UNSET else preloaded_faction
         if faction and not in_combat:
             hq_button = discord.ui.Button(label=f"Enter {faction.get('name', 'HQ')}", style=discord.ButtonStyle.primary, emoji="🏛️")
             hq_button.callback = self._faction_hq_callback
@@ -1082,7 +1271,7 @@ class SyncChoiceView(discord.ui.View):
             from mechanics.world.mobility import get_session_dialogue_partners
             dialogue_partners = get_session_dialogue_partners(session)
             if dialogue_partners:
-                contacts = db.get_contacts(session_id)
+                contacts = preloaded_contacts if preloaded_contacts is not None else db.get_contacts(session_id)
                 matching_contacts = []
                 for dp in dialogue_partners:
                     for c in contacts:
@@ -1103,7 +1292,7 @@ class SyncChoiceView(discord.ui.View):
 
 
     async def _phone_callback(self, interaction: discord.Interaction):
-        if interaction.user.id not in self.member_ids:
+        if self.member_ids and interaction.user.id not in self.member_ids:
             msg = "You're not part of this adventure."
             if interaction.response.is_done():
                 await interaction.followup.send(msg, ephemeral=True)
@@ -1111,7 +1300,7 @@ class SyncChoiceView(discord.ui.View):
                 await interaction.response.send_message(msg, ephemeral=True)
             return
         from mechanics.system.phone import build_phone_home_embed, PhoneMainView
-        embed = build_phone_home_embed(self.session_id, interaction.user.id)
+        embed = await adb(build_phone_home_embed, self.session_id, interaction.user.id)
         view = PhoneMainView(self.cog, self.session_id, interaction.user.id)
         try:
             if interaction.response.is_done():
@@ -1126,7 +1315,7 @@ class SyncChoiceView(discord.ui.View):
 
     def _make_contact_profile_callback(self, contact: dict):
         async def _profile_callback(interaction: discord.Interaction):
-            if interaction.user.id not in self.member_ids:
+            if self.member_ids and interaction.user.id not in self.member_ids:
                 msg = "You're not part of this adventure."
                 if interaction.response.is_done():
                     await interaction.followup.send(msg, ephemeral=True)
@@ -1134,12 +1323,17 @@ class SyncChoiceView(discord.ui.View):
                     await interaction.response.send_message(msg, ephemeral=True)
                 return
             from cogs.contacts import build_contact_detail_embed, ContactView
-            session = db.get_session(self.session_id) or {}
-            scen_key = session.get("scenario", "fantasy")
-            embed = build_contact_detail_embed(contact, scen_key, user_id=interaction.user.id)
-            char = db.get_character(interaction.user.id)
-            char_id = char.get("id", 0) if char else 0
-            contacts = db.get_contacts(self.session_id, character_id=char_id)
+
+            def _load_profile_ctx(sid: int, uid: int):
+                sess_obj = db.get_session(sid) or {}
+                scen = sess_obj.get("scenario", "fantasy")
+                emb = build_contact_detail_embed(contact, scen, user_id=uid)
+                ch = db.get_character(uid)
+                cid = ch.get("id", 0) if ch else 0
+                c_list = db.get_contacts(sid, character_id=cid)
+                return scen, emb, c_list
+
+            scen_key, embed, contacts = await adb(_load_profile_ctx, self.session_id, interaction.user.id)
             view = ContactView(
                 contacts, scen_key, interaction.user.id,
                 active_contact=contact,
@@ -1159,7 +1353,7 @@ class SyncChoiceView(discord.ui.View):
 
 
     async def _stealth_callback(self, interaction: discord.Interaction):
-        if interaction.user.id not in self.member_ids:
+        if self.member_ids and interaction.user.id not in self.member_ids:
             await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
             return
 
@@ -1202,6 +1396,7 @@ class SyncChoiceView(discord.ui.View):
                     True,
                     None,
                     self.party,
+                    session=session,
                 )
                 self._choice_dropdown.options = refreshed_dd.options
         except Exception:
@@ -1223,7 +1418,7 @@ class SyncChoiceView(discord.ui.View):
             pass
 
     async def _move_location_callback(self, interaction: discord.Interaction):
-        if interaction.user.id not in self.member_ids:
+        if self.member_ids and interaction.user.id not in self.member_ids:
             msg = "You're not part of this adventure."
             if interaction.response.is_done():
                 await interaction.followup.send(msg, ephemeral=True)
@@ -1238,7 +1433,7 @@ class SyncChoiceView(discord.ui.View):
             except (discord.HTTPException, discord.NotFound):
                 pass
 
-        session = db.get_session(self.session_id)
+        session = await adb(db.get_session, self.session_id)
         from mechanics.combat import is_in_combat
         if is_in_combat(session):
             msg = "❌ **Cannot travel while engaged in combat!** Defeat your enemies or flee first."
@@ -1247,26 +1442,32 @@ class SyncChoiceView(discord.ui.View):
             else:
                 await interaction.response.send_message(msg, ephemeral=True)
             return
-        scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-        cur_loc = session.get("current_location", "")
-        char = db.get_character(interaction.user.id)
-        char_name = char.get("name", "") if char else ""
 
-        from mechanics.world.locations import parse_tiered_location, get_zone_summary_tree, process_llm_location_update, sanitize_location_target
-        # Auto-discover any active quest target locations
-        active_wps = db.get_all_session_active_waypoints(self.session_id)
-        for wp in active_wps:
-            target_loc = wp.get("target_location", "").strip()
-            if target_loc:
-                clean_target = sanitize_location_target(target_loc, session_id=self.session_id, scen_key=scen_key, char_name=char_name)
-                process_llm_location_update(self.session_id, clean_target, scen_key, char_name=char_name)
+        def _prepare_move_ctx(sid: int, uid: int, sess_obj: dict | None):
+            scen = sess_obj.get("scenario", "fantasy") if sess_obj else "fantasy"
+            c_loc = sess_obj.get("current_location", "") if sess_obj else ""
+            ch = db.get_character(uid)
+            c_name = ch.get("name", "") if ch else ""
+            from mechanics.world.locations import (
+                parse_tiered_location,
+                get_zone_summary_tree,
+                process_llm_location_update,
+                sanitize_location_target,
+            )
+            for wp in (db.get_all_session_active_waypoints(sid) or []):
+                target_loc = wp.get("target_location", "").strip()
+                if target_loc:
+                    clean_target = sanitize_location_target(target_loc, session_id=sid, scen_key=scen, char_name=c_name)
+                    process_llm_location_update(sid, clean_target, scen, char_name=c_name)
+            c_z, _, _ = parse_tiered_location(c_loc, scen, session_id=sid, char_name=c_name)
+            z_sum = get_zone_summary_tree(sid, scen, current_loc=c_loc, char_name=c_name)
+            emb = build_zone_places_embed(sid, c_z, scen, current_loc=c_loc, char_name=c_name)
+            return scen, c_loc, c_name, c_z, z_sum, emb
 
-        curr_z, _, _ = parse_tiered_location(cur_loc, scen_key, session_id=self.session_id, char_name=char_name)
-        zones_summary = get_zone_summary_tree(self.session_id, scen_key, current_loc=cur_loc, char_name=char_name)
-        
-        # Directly open the regional places view for the player's current zone
-        embed = build_zone_places_embed(self.session_id, curr_z, scen_key, current_loc=cur_loc, char_name=char_name)
-        view = PrimarySelectView(self.cog, self.session_id, scen_key, zone_name=curr_z, zones_summary=zones_summary, current_loc=cur_loc, char_name=char_name, sync=True)
+        scen_key, cur_loc, char_name, curr_z, zones_summary, embed = await adb(
+            _prepare_move_ctx, self.session_id, interaction.user.id, session
+        )
+        view = PrimarySelectView(self.cog, self.session_id, scen_key, zone_name=curr_z, zones_summary=zones_summary, current_loc=cur_loc, char_name=char_name, sync=True, user_id=interaction.user.id)
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(embed=embed, view=view, ephemeral=True)
@@ -1279,7 +1480,7 @@ class SyncChoiceView(discord.ui.View):
                 raise
 
     async def _notice_board_callback(self, interaction: discord.Interaction):
-        session = db.get_session(self.session_id)
+        session = await adb(db.get_session, self.session_id)
         if not session:
             await interaction.response.send_message("Session not found.", ephemeral=True)
             return
@@ -1290,7 +1491,7 @@ class SyncChoiceView(discord.ui.View):
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
     async def _party_dialogue_callback(self, interaction: discord.Interaction):
-        party_npcs = db.get_session_party_npcs(self.session_id)
+        party_npcs = await adb(db.get_session_party_npcs, self.session_id)
         if not party_npcs:
             await interaction.response.send_message("You have no companions in your party.", ephemeral=True)
             return
@@ -1299,7 +1500,7 @@ class SyncChoiceView(discord.ui.View):
             description="Select a companion to speak with or manage:",
             color=discord.Color.teal()
         )
-        view = PartyDialogueSelectView(self.cog, self.session_id, interaction.user.id, sync=True)
+        view = PartyDialogueSelectView(self.cog, self.session_id, interaction.user.id, sync=True, party_npcs=party_npcs)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     def _make_callback(self, idx: int):
@@ -1309,10 +1510,13 @@ class SyncChoiceView(discord.ui.View):
         return callback
 
     async def _custom_callback(self, interaction: discord.Interaction):
-        if interaction.user.id not in self.member_ids:
+        if self.member_ids and interaction.user.id not in self.member_ids:
             await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
             return
-        session = db.get_session(self.session_id)
+        session = await adb(db.get_session, self.session_id)
+        if not session:
+            await interaction.response.send_message("Session not found.", ephemeral=True)
+            return
         if str(interaction.user.id) in session["pending_picks"]:
             await interaction.response.send_message("You've already locked in your action this round.",
                                                       ephemeral=True)
@@ -1320,15 +1524,20 @@ class SyncChoiceView(discord.ui.View):
         await interaction.response.send_modal(CustomActionModal(self.cog, self.session_id, sync=True))
 
     async def _use_item_callback(self, interaction: discord.Interaction):
-        if interaction.user.id not in self.member_ids:
+        if self.member_ids and interaction.user.id not in self.member_ids:
             await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
             return
-        session = db.get_session(self.session_id)
+        session, inv = await asyncio.gather(
+            adb(db.get_session, self.session_id),
+            adb(db.get_inventory, interaction.user.id),
+        )
+        if not session:
+            await interaction.response.send_message("Session not found.", ephemeral=True)
+            return
         if str(interaction.user.id) in session["pending_picks"]:
             await interaction.response.send_message("You've already locked in your action this round.", ephemeral=True)
             return
-        inv = db.get_inventory(interaction.user.id)
-        carried = [i for i in inv if not i.get("equipped")]
+        carried = [i for i in (inv or []) if not i.get("equipped")]
         if not carried:
             await interaction.response.send_message("❌ You have no carried items in your inventory.", ephemeral=True)
             return
@@ -1336,7 +1545,7 @@ class SyncChoiceView(discord.ui.View):
         await interaction.response.send_message("🎒 Select an item from your bag to use:", view=view, ephemeral=True)
 
     async def _retry_callback(self, interaction: discord.Interaction):
-        if interaction.user.id not in self.member_ids:
+        if self.member_ids and interaction.user.id not in self.member_ids:
             await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
             return
         if not interaction.response.is_done():
@@ -1353,7 +1562,7 @@ class SyncChoiceView(discord.ui.View):
         await _handle_talk_to_merchant(self.cog, self.session_id, interaction)
 
     async def _faction_hq_callback(self, interaction: discord.Interaction):
-        if interaction.user.id not in self.member_ids:
+        if self.member_ids and interaction.user.id not in self.member_ids:
             await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
             return
         await self.cog.open_faction_hq_menu(interaction, self.session_id, interaction.user.id)

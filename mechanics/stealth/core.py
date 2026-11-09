@@ -584,7 +584,8 @@ def is_stealth_context_warranted(
             pass
 
     # Player's own home / bedroom is never a stealth zone unless enemies/breaches are present
-    if curr_nid.lower() in ("loc_player_house", "sub_player_bedroom") or "player's house" in loc_low or "player's bedroom" in loc_low:
+    from mechanics.world.locations.residences import is_residential_safe_zone
+    if is_residential_safe_zone(int(sid or 0), node_id=curr_nid, location_str=curr_loc, session=session):
         return False
 
     curr_day = int(session.get("current_day", 1) or 1)
@@ -599,7 +600,7 @@ def is_stealth_context_warranted(
             from mechanics.world.locations.access_gate import get_node_effective_access_info
             eff_nid = curr_nid or db.resolve_node_id_from_location(int(sid), curr_loc) or ""
             if eff_nid:
-                if eff_nid.lower() in ("loc_player_house", "sub_player_bedroom"):
+                if is_residential_safe_zone(int(sid or 0), node_id=eff_nid, location_str=curr_loc, session=session):
                     return False
                 acc = get_node_effective_access_info(
                     int(sid), eff_nid, current_day=curr_day, current_minute=curr_min, scen_key=scen

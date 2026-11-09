@@ -29,6 +29,7 @@ TIETYPE_BEST_FRIEND = "best_friend"
 TIETYPE_RIVAL = "rival"
 TIETYPE_ENEMY = "enemy"
 TIETYPE_CRUSH = "crush"
+TIETYPE_SECRET_CRUSH = "secret_crush"
 TIETYPE_ADMIRES = "admires"
 TIETYPE_GRUDGE = "grudge"
 TIETYPE_DATING = "dating"
@@ -49,6 +50,7 @@ ANTAGONISTIC_TYPES: Set[str] = {
 
 DIRECTED_TYPES: Set[str] = {
     TIETYPE_CRUSH,
+    TIETYPE_SECRET_CRUSH,
     TIETYPE_ADMIRES,
     TIETYPE_GRUDGE,
 }
@@ -401,6 +403,15 @@ def form_tie(
 
         # 1. Incest guard
         if tie_type in ROMANTIC_TYPES:
+            _fox_tie_rows = c.execute(
+                """SELECT c_row.race FROM social_persons sp
+                   JOIN contacts c_row ON c_row.session_id = sp.session_id
+                        AND (c_row.npc_id = sp.contact_npc_id OR lower(c_row.name) = lower(sp.display_name))
+                   WHERE sp.session_id = ? AND sp.person_key IN (?, ?)""",
+                (session_id, a_canon, b_canon),
+            ).fetchall()
+            if any(str(r["race"] or "").strip().lower() == "kitsune:myobu_fox" for r in _fox_tie_rows):
+                raise ValueError("Cannot form romantic tie while Kitsune is in non-humanoid Myōbu Spirit Fox form (kitsune:myobu_fox).")
             if is_incestuous(session_id, a_canon, b_canon, conn=c):
                 raise ValueError(f"Incest guard blocked romantic tie between {a_canon} and {b_canon}")
 
@@ -913,6 +924,37 @@ def materialize_relations(
             except Exception as e:
                 logger.warning(f"Failed to build family tree from household {hid}: {e}")
 
+        residence_node_id = ""
+        cohabiting_family: Optional[bool] = None
+        try:
+            s_row_ag = c.execute("SELECT scenario FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            scen_ag = str(s_row_ag["scenario"] or "fantasy") if s_row_ag else "fantasy"
+            from mechanics.world.locations.realty_catalog import is_anomalous_realty_scenario
+            if is_anomalous_realty_scenario(scen_ag):
+                from mechanics.world.locations.residences import (
+                    is_adult_special_agent_contact,
+                    resolve_agent_residence_blueprint,
+                )
+                if "basic_info" not in c_dict and isinstance(c_dict.get("basic_info_json"), str):
+                    try:
+                        c_dict["basic_info"] = json.loads(c_dict["basic_info_json"] or "{}")
+                    except Exception:
+                        c_dict["basic_info"] = {}
+                ag_src = c_dict if is_adult_special_agent_contact(c_dict) else None
+                if ag_src is None and name:
+                    from mechanics.social.agent_roster import find_special_agent_by_name
+                    found_ag = find_special_agent_by_name(int(session_id), name, scen_key=scen_ag)
+                    if found_ag and not found_ag.get("is_student_agent") and str(found_ag.get("age_group") or "").lower() != "teen":
+                        ag_src = found_ag
+                if ag_src is not None:
+                    solo_bp = resolve_agent_residence_blueprint(int(session_id), ag_src, scen_key=scen_ag)
+                    if solo_bp.get("residence_display"):
+                        residence = solo_bp["residence_display"]
+                        residence_node_id = solo_bp.get("bedroom_node_id", "")
+                        cohabiting_family = False
+        except Exception:
+            pass
+
         # 2. Romance: current_partner, secret_partner, ex_partners
         curr_partner = get_current_partner(session_id, person_key, conn=c)
         secret_affairs = get_secret_affairs(session_id, person_key, conn=c)
@@ -981,6 +1023,8 @@ def materialize_relations(
             "rivals": rivals,
             "household_id": hid,
             "residence_location": residence,
+            **({"residence_node_id": residence_node_id} if residence_node_id else {}),
+            **({"cohabiting_family": cohabiting_family} if cohabiting_family is not None else {}),
         }
 
 
@@ -1560,7 +1604,9 @@ def seed_contact_social_graph(
             rom = contact["relations"].get("romance", {})
             provided_partner = rom.get("current_partner")
 
-        is_explicitly_single = False
+        from mechanics.social.roster_tags import npc_is_folklore_villager
+        from mechanics.social.races import is_myobu_fox_race
+        is_explicitly_single = bool(npc_is_folklore_villager(contact) or is_myobu_fox_race(contact.get("race")))
         if isinstance(contact.get("relations"), dict):
             rom = contact["relations"].get("romance", {})
             if rom.get("status") == "Single" and not provided_partner:

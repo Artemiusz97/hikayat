@@ -75,9 +75,13 @@ def _spawn_canonical_role_npc_pre_turn(
                 role_toks = set(re.findall(r'[a-z]{3,}', clean_role.lower())) - {"the", "and", "for"}
                 is_match = clean_role.lower() in c_role or (c_role and c_role in clean_role.lower())
                 if not is_match and role_toks:
-                    if any(t in c_role or t in c_club for t in role_toks if t not in ("rep", "club", "student", "member", "representative")):
+                    if any(re.search(rf"\b{re.escape(t)}\b", c_role) or re.search(rf"\b{re.escape(t)}\b", c_club) for t in role_toks if t not in ("rep", "club", "student", "member", "representative")):
                         is_match = True
                 if is_match:
+                    from mechanics.world.locations.access_gate import can_npc_stage_at_facility
+                    c_min = int(session.get("current_minute", 480) or 480) if isinstance(session, dict) else 480
+                    if not can_npc_stage_at_facility(c, effective_location, session=session, current_minute=c_min, scen_key=scen_key):
+                        continue
                     if c.get("appearance") and isinstance(c.get("appearance"), dict):
                         from mechanics.social.roster_tags import derive_age_group, normalize_standing
                         matched_grade = str(c.get("grade") or (c.get("basic_info") or {}).get("grade") or "").strip()
@@ -690,8 +694,9 @@ def compute_pre_turn_stage(
                         if unmatched_res.get("directive"):
                             stage_directives.append(unmatched_res["directive"])
 
+        pending_folklore_ops: dict = {}
         if not party_cohesion_deferred and not (is_privacy_action and not privacy_check_passed) and target_nid and sess_id:
-            from mechanics.world.locations.pathfinding import find_spatial_path, evaluate_spatial_route
+            from mechanics.world.locations.pathfinding import find_spatial_path, evaluate_spatial_route, is_node_hidden
             if not curr_nid or target_nid == curr_nid:
                 route = [target_nid]
             else:
@@ -699,7 +704,7 @@ def compute_pre_turn_stage(
 
             if not route:
                 dest_node = db.get_world_node(sess_id, target_nid)
-                if dest_node and dest_node.get("is_hidden") == 1:
+                if dest_node and is_node_hidden(dest_node):
                     stage_directives.append("[STAGE DIRECTION — ACCESS BLOCKED]: Location is hidden or undiscovered.")
                     blocked_invalid_exit = True
                     session["travel_minutes_elapsed"] = 0
@@ -737,6 +742,8 @@ def compute_pre_turn_stage(
                     traveling_companions=traveling_companions,
                     persist_db=persist_db,
                 )
+                if isinstance(route_res.get("staged_folklore_ops"), dict) and route_res["staged_folklore_ops"]:
+                    pending_folklore_ops.update(route_res["staged_folklore_ops"])
                 is_movement = True
                 effective_location = route_res["effective_location"]
                 effective_node_id = route_res["effective_node_id"]
@@ -1348,6 +1355,15 @@ def compute_pre_turn_stage(
                 "ring the intercom", "talk your way", "convince the gatekeeper", "excuse", "slip away", "return to campus"
             ))
         )
+        focal_low = str(session.get("focal_point") or "").lower()
+        curr_nid_thresh = str(session.get("current_node_id") or "")
+        if (
+            curr_nid_thresh in ("loc_et_fox_torii_tunnel", "loc_bunian_threshold_glade")
+            or "illusion veil" in focal_low
+            or "sealed sanctuary veil" in focal_low
+            or any(w in action_str for w in ("atonement", "sacred aburaage", "bunga rampai", "present sacred offering"))
+        ):
+            is_threshold_turn = True
         if is_threshold_turn and sess_id:
             curr_node_id = session.get("current_node_id") or db.resolve_node_id_from_location(sess_id, curr_loc)
             if curr_node_id:
@@ -1355,8 +1371,13 @@ def compute_pre_turn_stage(
                     from mechanics.world.locations.access_gate import evaluate_node_access_gate
                     access_gate_info = evaluate_node_access_gate(
                         sess_id, curr_node_id, session,
-                        actions=actions, party=party, companions=session.get("temporary_companions", [])
+                        actions=actions, party=party, companions=session.get("temporary_companions", []),
+                        persist_db=persist_db,
                     )
+                    if isinstance(access_gate_info.get("staged_folklore_ops"), dict) and access_gate_info["staged_folklore_ops"]:
+                        pending_folklore_ops.update(access_gate_info["staged_folklore_ops"])
+                    if access_gate_info.get("prompt_directive") and access_gate_info["prompt_directive"] not in stage_directives:
+                        stage_directives.append(access_gate_info["prompt_directive"])
                     if access_gate_info.get("patrol_npc"):
                         _add_stage_npc(access_gate_info["patrol_npc"])
                         patrol_nm = access_gate_info["patrol_npc"].get("name")
@@ -1404,6 +1425,262 @@ def compute_pre_turn_stage(
                         focal_point = access_gate_info.get("focal_point") or "Outside the Locked Entrance"
                 except Exception:
                     pass
+
+    # Folklore Villages: Non-Spoiler Roster Seeding, Sanctuary Non-Aggression Pact, Leyline Check & Stage Hydration
+    import scenario_data as _fk_scen_data
+    if sess_id and (
+        _fk_scen_data.is_anomalous_incursions_scenario(scen_key)
+        or _fk_scen_data.is_anomalous_high_school_scenario(scen_key)
+        or "urban_anomalies" in str(scen_key).lower()
+    ):
+        try:
+            from mechanics.social.folklore_roster import (
+                ensure_folklore_villager_roster,
+                get_scheduled_villagers_for_node,
+                hydrate_village_cast_for_node,
+                resolve_glamour_wanderer_interaction,
+            )
+            from mechanics.world.locations.folklore_veil import (
+                VEILED_INNER_ROOM_IDS,
+                apply_sanctuary_treaty_violation,
+                maybe_evaluate_leyline_passage,
+                preview_sanctuary_treaty_violation,
+                resolve_folklore_village_for_node,
+            )
+
+            eff_turn_num = int(session.get("_target_turn") or session.get("turn_count") or 0)
+            ensure_folklore_villager_roster(sess_id, session=session, persist_db=persist_db)
+            if not persist_db:
+                pending_folklore_ops["ensure_roster"] = True
+
+            active_stage_nid = str(
+                (effective_node_id if ('effective_node_id' in locals() and effective_node_id) else "")
+                or session.get("current_node_id")
+                or ""
+            ).strip()
+            v_key_here, _ = resolve_folklore_village_for_node(sess_id, active_stage_nid) if active_stage_nid else (None, None)
+            in_inner_enclave = bool(
+                v_key_here and active_stage_nid in VEILED_INNER_ROOM_IDS.get(v_key_here, ())
+            )
+
+            act_text_combined = " ".join(str(a.get("label", "") if isinstance(a, dict) else a) for a in (actions or [])).lower()
+            lead_act_dict = actions[0] if (actions and isinstance(actions[0], dict)) else {}
+            lead_intent_low = str(lead_act_dict.get("intent") or "").strip().lower()
+            is_hostile_sanctuary_action = bool(
+                in_inner_enclave
+                and (
+                    lead_intent_low in (
+                        "combat_hostile",
+                        "combat_attack",
+                        "combat",
+                        "attack",
+                        "hostile",
+                        "hostile_action",
+                        "offensive_spell",
+                    )
+                    or bool(re.search(r"\b(attack|strike|slash|shoot|stab|ambush|assault|hostile)\b", act_text_combined))
+                    or any(
+                        kw in act_text_combined
+                        for kw in (
+                            "deploy containment",
+                            "throw containment",
+                            "contain spirit",
+                            "capture villager",
+                            "exorcise villager",
+                        )
+                    )
+                )
+                and not any(benign in act_text_combined for benign in ("friendly spar", "practice", "apologize", "atonement"))
+            )
+
+            if is_hostile_sanctuary_action and v_key_here:
+                if persist_db:
+                    expel_res = apply_sanctuary_treaty_violation(
+                        sess_id,
+                        v_key_here,
+                        turn_number=eff_turn_num,
+                        session=session,
+                    )
+                else:
+                    expel_res = preview_sanctuary_treaty_violation(
+                        sess_id,
+                        v_key_here,
+                        session=session,
+                    )
+                    if expel_res.get("expelled"):
+                        pending_folklore_ops["treaty_violation_village"] = v_key_here
+                if expel_res.get("expelled"):
+                    is_movement = True
+                    effective_node_id = expel_res["ejected_node_id"]
+                    effective_location = expel_res["ejected_location"]
+                    movement_dest_str = effective_location
+                    focal_point = None
+                    stage_npcs = [
+                        n for n in stage_npcs
+                        if not (
+                            (n.get("basic_info") or {}).get("is_folklore_villager")
+                            or (n.get("basic_info") or {}).get("anomalous_npc_tag") == "folklore_villager"
+                        )
+                    ]
+                    seen_stage_names = {_get_npc_name(n).strip().lower() for n in stage_npcs if _get_npc_name(n)}
+                    stage_directives.append(expel_res["prompt_directive"])
+            else:
+                ley_res = maybe_evaluate_leyline_passage(
+                    sess_id,
+                    session=session,
+                    actions=actions,
+                    party=party,
+                    turn_number=eff_turn_num,
+                    persist_db=persist_db,
+                )
+                if ley_res and ley_res.get("unlocked"):
+                    if not persist_db:
+                        pending_folklore_ops["unlock_leyline_reason"] = str(ley_res.get("reason") or "leyline_attuned")
+                    stage_directives.append(
+                        "[STAGE DIRECTION — LEYLINE SPIRIT PASSAGE ATTUNED]: The hidden mountain root-arch and azure foxfire shrine resonate in unison, "
+                        "opening a 2-minute Leyline Spirit Passage linking Sato-no-Inari and Kampung Kayangan!"
+                    )
+
+                if active_stage_nid and not access_gate_info.get("gated"):
+                    folklore_candidate_nodes = (
+                        set(VEILED_INNER_ROOM_IDS["kitsune"])
+                        | set(VEILED_INNER_ROOM_IDS["bunian"])
+                        | {
+                            "loc_et_fox_torii_tunnel",
+                            "loc_bunian_threshold_glade",
+                            "loc_es_lantern_tea_street",
+                            "sub_es_lantern_steps",
+                            "loc_es_bamboo_footbath_bridge",
+                            "sub_es_vermilion_bridge",
+                            "loc_forest_trails",
+                            "sub_trail_gateway",
+                            "sub_cedar_bridge",
+                        }
+                    )
+                    if active_stage_nid in folklore_candidate_nodes:
+                        curr_min_fk = int(session.get("current_minute", 480) or 480)
+                        if persist_db:
+                            villagers_here = hydrate_village_cast_for_node(
+                                sess_id,
+                                active_stage_nid,
+                                current_minute=curr_min_fk,
+                                turn_number=eff_turn_num,
+                            )
+                        else:
+                            villagers_here = get_scheduled_villagers_for_node(
+                                sess_id,
+                                active_stage_nid,
+                                current_minute=curr_min_fk,
+                                session=session,
+                                persist_db=False,
+                            )
+                            if villagers_here:
+                                pending_folklore_ops["hydrate_node"] = {
+                                    "node_id": active_stage_nid,
+                                    "current_minute": curr_min_fk,
+                                }
+                        if villagers_here and persist_db:
+                            cached_stage_contacts = None
+                        fk_added = 0
+                        for v_ct in villagers_here:
+                            if fk_added >= 3 or len(stage_npcs) >= 5:
+                                break
+                            v_nm = _get_npc_name(v_ct)
+                            if not v_nm or v_nm.strip().lower() in seen_stage_names:
+                                continue
+                            v_bi = v_ct.get("basic_info") if isinstance(v_ct.get("basic_info"), dict) else {}
+                            _add_stage_npc({
+                                "npc_id": v_ct.get("npc_id"),
+                                "name": v_nm,
+                                "role": v_ct.get("role") or v_bi.get("role") or "Folklore Resident",
+                                "race": v_ct.get("race") or v_bi.get("race") or "",
+                                "gender": v_ct.get("gender") or v_bi.get("gender") or "",
+                                "appearance": v_ct.get("appearance") or {},
+                                "basic_info": v_bi,
+                                "relationship_score": v_ct.get("relationship_score", 0),
+                                "track": v_ct.get("track", "platonic"),
+                                "status_effects": ["Present"],
+                                "stage_role": "room_bystander",
+                                "attention_ring": "ring_2_attentive_peer" if (v_bi.get("is_sovereign") or v_bi.get("is_royal_heir")) else "ring_3_bystander",
+                            })
+                            fk_added += 1
+
+                        if villagers_here and (540 <= (curr_min_fk % 1440) <= 1020) and active_stage_nid not in (
+                            set(VEILED_INNER_ROOM_IDS["kitsune"]) | set(VEILED_INNER_ROOM_IDS["bunian"])
+                        ):
+                            chk_fk = lead_act_dict.get("check")
+                            chk_fk_tier = str(
+                                (chk_fk.get("tier") if isinstance(chk_fk, dict) else getattr(chk_fk, "tier", ""))
+                                if chk_fk is not None else ""
+                            ).lower()
+                            chk_fk_req = int(
+                                lead_act_dict.get("requirement")
+                                or (
+                                    (chk_fk.get("dc") if isinstance(chk_fk, dict) else getattr(chk_fk, "dc", 0))
+                                    if chk_fk is not None else 0
+                                )
+                                or 0
+                            )
+                            fk_target_mentioned = bool(
+                                any(
+                                    kw in act_text_combined
+                                    for kw in (
+                                        "glamour", "disguise", "illusion", "tell", "suzu", "cempaka", "serunai",
+                                        "ear", "tail", "shadow", "wanderer", "stranger", "traveller", "traveler",
+                                        "spirit", "fox", "bunian",
+                                    )
+                                )
+                                or any(
+                                    tok in act_text_combined
+                                    for v in villagers_here
+                                    for tok in (_get_npc_name(v) or "").lower().split()
+                                    if len(tok) >= 3
+                                )
+                            )
+                            fk_per_ok = bool(
+                                str(lead_act_dict.get("stat") or "").upper() == "PER"
+                                and chk_fk_tier in ("critical_success", "crit_success", "success", "partial_success")
+                                and (fk_target_mentioned or chk_fk_req >= 13)
+                                and not (0 < chk_fk_req < 13 and not fk_target_mentioned)
+                            )
+                            fk_favor_ok = any(
+                                fw in act_text_combined
+                                for fw in ("help ", "assist ", "offer ", "share tea", "guide ", "return ", "favor")
+                            ) and fk_target_mentioned
+                            if fk_per_ok or fk_favor_ok:
+                                lead_uid = int(
+                                    (party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else 0)
+                                    or session.get("host_user_id")
+                                    or 0
+                                )
+                                glam_res = resolve_glamour_wanderer_interaction(
+                                    sess_id,
+                                    active_stage_nid,
+                                    current_minute=curr_min_fk,
+                                    per_passed=fk_per_ok,
+                                    favor_completed=fk_favor_ok,
+                                    user_id=lead_uid,
+                                    persist_db=persist_db,
+                                    turn_number=eff_turn_num,
+                                )
+                                if glam_res.get("token_granted"):
+                                    if persist_db:
+                                        cached_stage_contacts = None
+                                    else:
+                                        pending_folklore_ops["glamour_grant"] = {
+                                            "node_id": active_stage_nid,
+                                            "current_minute": curr_min_fk,
+                                            "per_passed": fk_per_ok,
+                                            "favor_completed": fk_favor_ok,
+                                            "user_id": lead_uid,
+                                        }
+                                    stage_directives.append(
+                                        f"[STAGE DIRECTION — FOLKLORE GLAMOUR GIFT]: Impressed by your courtesy and insight, "
+                                        f"{(glam_res.get('villager') or {}).get('name', 'the disguised spirit')} smiles knowingly and presses "
+                                        f"a sacred {glam_res['token_name']} into your hand as a token of safe passage."
+                                    )
+        except Exception as _fk_stage_err:
+            log.debug("Folklore stage hook skipped: %s", _fk_stage_err)
 
     # Hydrate stage_npcs with known contact data before Ring 1/2/3 classification and micro-blocking
     known_contacts = _get_stage_contacts()
@@ -1629,6 +1906,7 @@ def compute_pre_turn_stage(
         "consumed_key_items": consumed_key_items,
         "blocked_invalid_exit": blocked_invalid_exit,
         "party_cohesion_deferred": party_cohesion_deferred,
+        "pending_folklore_ops": pending_folklore_ops,
     }
     if isinstance(session, dict):
         session["pre_turn_stage_npcs"] = list(stage_npcs)

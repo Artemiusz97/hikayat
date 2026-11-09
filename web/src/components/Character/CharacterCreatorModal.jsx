@@ -14,45 +14,6 @@ const STAT_KEYS = [
 
 const DEFAULT_STATS = { str: 1, per: 1, end: 1, cha: 1, int: 1, agi: 1, luk: 1 };
 
-const FEMALE_TEXTURE_OPTIONS = [
-  { value: 'Perky & High-Set', label: 'Perky & High-Set' },
-  { value: 'Pillowy Soft & Yielding', label: 'Pillowy Soft & Yielding' },
-  { value: 'Firm & Toned', label: 'Firm & Toned' },
-  { value: 'Smooth & Supple', label: 'Smooth & Supple' },
-  { value: 'Heavy & Plush', label: 'Heavy & Plush' },
-  { value: 'Bouncy & Sensitive', label: 'Bouncy & Sensitive' },
-  { value: 'Tender & Delicate', label: 'Tender & Delicate' },
-  { value: 'Shapely Teardrop', label: 'Shapely Teardrop' },
-  { value: 'Compact & Dense', label: 'Compact & Dense' },
-  { value: 'Sensitive & Responsive', label: 'Sensitive & Responsive' },
-  { value: 'Warm & Supple', label: 'Warm & Supple' },
-  { value: 'Soft & Downy Chest Fur', label: 'Soft & Downy Chest Fur (Beastfolk)' },
-  { value: 'Silky Fur-Rimmed', label: 'Silky Fur-Rimmed (Beastfolk)' },
-  { value: 'Velvety Underbelly Down', label: 'Velvety Underbelly Down (Beastfolk)' },
-  { value: 'Fluffy Plush-Accented', label: 'Fluffy Plush-Accented (Beastfolk)' },
-  { value: 'Silky Warm with Smooth Micro-Scales', label: 'Silky Warm with Smooth Micro-Scales (Scaly/Draconic)' },
-  { value: 'Supple with Shimmering Scale Borders', label: 'Supple with Shimmering Scale Borders (Scaly/Draconic)' },
-  { value: 'Sleek & Supple Drake-Contour', label: 'Sleek & Supple Drake-Contour (Scaly/Draconic)' },
-  { value: 'Downy Feather-Lined', label: 'Downy Feather-Lined (Avian/Winged)' },
-  { value: 'Light & Buoyant', label: 'Light & Buoyant (Avian/Winged)' },
-  { value: 'Velvety Plumage Accents', label: 'Velvety Plumage Accents (Avian/Winged)' },
-  { value: 'Glistening & Ultra-Smooth', label: 'Glistening & Ultra-Smooth (Aquatic)' },
-];
-
-const MALE_TEXTURE_OPTIONS = [
-  { value: 'Veined & Firm', label: 'Veined & Firm' },
-  { value: 'Smooth & Heavy', label: 'Smooth & Heavy' },
-  { value: 'Toned & Athletic', label: 'Toned & Athletic' },
-  { value: 'Warm & Pulsing', label: 'Warm & Pulsing' },
-  { value: 'Slender & Ultra-Sensitive', label: 'Slender & Ultra-Sensitive' },
-  { value: 'Dense & Formidable', label: 'Dense & Formidable' },
-  { value: 'Balanced & Firm', label: 'Balanced & Firm' },
-  { value: 'Soft Fur-Ringed Base', label: 'Soft Fur-Ringed Base (Beastfolk)' },
-  { value: 'Silky Fur-Dusted & Resilient', label: 'Silky Fur-Dusted & Resilient (Beastfolk)' },
-  { value: 'Sleek Scaled Base & Firm', label: 'Sleek Scaled Base & Firm (Scaly/Draconic)' },
-  { value: 'Sturdy Draconic Build', label: 'Sturdy Draconic Build (Scaly/Draconic)' },
-];
-
 const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -66,11 +27,7 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
 
   const { t } = useTranslation();
   const creatorResId = useId();
-  const [showIntimate, setShowIntimate] = useState(false);
   const [previewMediumSynergy, setPreviewMediumSynergy] = useState('');
-  const [breastSize, setBreastSize] = useState('average');
-  const [penisSize, setPenisSize] = useState('average');
-  const [assetTexture, setAssetTexture] = useState('');
 
   const [stats, setStats] = useState({ ...DEFAULT_STATS });
   const [focusedStat, setFocusedStat] = useState('STR');
@@ -87,9 +44,6 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
 
   const effectiveGender = gender === '__custom__' ? customGender.trim() || 'Non-binary' : gender;
   const effectiveRace = race === '__custom__' ? customRace.trim() || 'Human' : race;
-  const egLower = effectiveGender.toLowerCase();
-  const isMale = ['male', 'man', 'boy', 'lord', 'he', 'him', 'his'].some(kw => egLower.includes(kw)) && !['female', 'woman', 'girl', 'lady', 'she', 'her'].some(kw => egLower.includes(kw));
-  const isFemale = ['female', 'woman', 'girl', 'lady', 'she', 'her'].some(kw => egLower.includes(kw)) || (!isMale && egLower.includes('fem'));
 
   const handleResetStats = () => setStats({ ...DEFAULT_STATS });
 
@@ -112,9 +66,6 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
     setSubmitting(true);
     setError(null);
     try {
-      const finalBSize = isMale ? undefined : breastSize;
-      const finalPSize = isFemale ? undefined : penisSize;
-
       await onCreateCharacter({
         name: name.trim(),
         gender: effectiveGender,
@@ -127,14 +78,6 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
         int: stats.int,
         agi: stats.agi,
         luk: stats.luk,
-        breast_size: finalBSize,
-        penis_size: finalPSize,
-        asset_texture: assetTexture,
-        appearance: {
-          breast_size: finalBSize,
-          penis_size: finalPSize,
-          asset_texture: assetTexture,
-        },
       });
 
       setName('');
@@ -218,7 +161,7 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. Alistair, Lyra, Kael..."
+                      placeholder={t('creator.name_placeholder', 'e.g. Alistair, Lyra, Kael...')}
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       maxLength={40}
@@ -239,7 +182,7 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                         {['Male', 'Female'].map((g) => (
                           <option key={g} value={g}>{g}</option>
                         ))}
-                        <option value="__custom__">Custom...</option>
+                        <option value="__custom__">{t('creator.custom_option', 'Custom...')}</option>
                       </select>
                     </div>
 
@@ -255,7 +198,7 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                         {['Human', 'Elf', 'Dwarf', 'Beastfolk / Anthro', 'Cyborg'].map((r) => (
                           <option key={r} value={r}>{r}</option>
                         ))}
-                        <option value="__custom__">Custom Race...</option>
+                        <option value="__custom__">{t('creator.custom_race_option', 'Custom Race...')}</option>
                       </select>
                     </div>
                   </div>
@@ -265,7 +208,7 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                       {gender === '__custom__' && (
                         <input
                           type="text"
-                          placeholder="Custom gender identity..."
+                          placeholder={t('creator.custom_gender_placeholder', 'Custom gender identity...')}
                           value={customGender}
                           onChange={(e) => setCustomGender(e.target.value)}
                           className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100"
@@ -275,14 +218,14 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                         <div className="grid grid-cols-1 gap-2">
                           <input
                             type="text"
-                            placeholder="Custom race/species name..."
+                            placeholder={t('creator.custom_race_placeholder', 'Custom race/species name...')}
                             value={customRace}
                             onChange={(e) => setCustomRace(e.target.value)}
                             className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100"
                           />
                           <input
                             type="text"
-                            placeholder="Optional physical/species traits..."
+                            placeholder={t('creator.custom_traits_placeholder', 'Optional physical/species traits...')}
                             value={raceDescription}
                             onChange={(e) => setRaceDescription(e.target.value)}
                             className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100"
@@ -320,91 +263,9 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                   </div>
                 </div>
 
-                {/* Optional Intimate Anatomy Section */}
-                <div className="pt-2 border-t border-fantasy-border/40">
-                  <button
-                    type="button"
-                    onClick={() => setShowIntimate(!showIntimate)}
-                    className="w-full flex items-center justify-between p-2 rounded bg-black/40 hover:bg-black/60 border border-fantasy-border/60 text-xs text-gray-300 transition-colors"
-                  >
-                    <span className="flex items-center gap-1.5 font-bold text-[11px] uppercase tracking-wider text-pink-300">
-                      <span>🔞</span>
-                      <span>Intimate Anatomy (Optional)</span>
-                    </span>
-                    <span className="text-[10px] text-gray-400 font-mono">
-                      {showIntimate ? '▲ Hide' : '▼ Customize'}
-                    </span>
-                  </button>
-
-                  {showIntimate && (
-                    <div className="mt-2 p-3 bg-pink-950/20 border border-pink-900/50 rounded-lg space-y-2.5 text-xs">
-                      <div>
-                        {isMale ? (
-                          <div>
-                            <label className="block text-[10px] uppercase font-bold text-purple-300 mb-1">
-                              Penis Size Tier
-                            </label>
-                            <select
-                              value={penisSize}
-                              onChange={(e) => setPenisSize(e.target.value)}
-                              className="w-full bg-fantasy-dark border border-purple-900/60 p-1.5 rounded text-xs text-gray-200"
-                            >
-                              <option value="small">Petite (Compact)</option>
-                              <option value="average">Proportional (Avg)</option>
-                              <option value="large">Formidable (Large)</option>
-                              <option value="huge">Massive (Huge)</option>
-                            </select>
-                          </div>
-                        ) : (
-                          <div>
-                            <label className="block text-[10px] uppercase font-bold text-pink-300 mb-1">
-                              Breast Size Tier
-                            </label>
-                            <select
-                              value={breastSize}
-                              onChange={(e) => setBreastSize(e.target.value)}
-                              className="w-full bg-fantasy-dark border border-pink-900/60 p-1.5 rounded text-xs text-gray-200"
-                            >
-                              <option value="flat">Flat (AA-Cup)</option>
-                              <option value="small">Petite (A-B Cup)</option>
-                              <option value="average">Proportional (C)</option>
-                              <option value="large">Voluptuous (D-DD)</option>
-                              <option value="huge">Bountiful (E+)</option>
-                            </select>
-                          </div>
-                        )}
-                      </div>
-
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="block text-[10px] uppercase font-bold text-gray-400">
-                            Tactile Feature &amp; Texture ({isMale ? 'Phallus' : 'Breasts'})
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const pool = isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS;
-                              setAssetTexture(pool[Math.floor(Math.random() * pool.length)].value);
-                            }}
-                            className="text-[10px] text-pink-400 hover:text-pink-300 flex items-center gap-1 font-semibold"
-                          >
-                            <Sparkles size={10} /> Roll Feature
-                          </button>
-                        </div>
-                        <select
-                          value={assetTexture}
-                          onChange={(e) => setAssetTexture(e.target.value)}
-                          className="w-full bg-fantasy-dark border border-fantasy-border/70 p-1.5 rounded text-xs text-gray-200"
-                        >
-                          <option value="">Auto-Assign dynamically based on race</option>
-                          {(isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS).map(opt => (
-                            <option key={opt.value} value={opt.value}>{opt.label}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <p className="pt-2 border-t border-fantasy-border/40 text-[10px] text-gray-500 leading-relaxed">
+                  {t('creator.anatomy_deferred_hint', '🔞 Intimate anatomy is configured when you embark on an NSFW scenario, then remembered for future NSFW adventures.')}
+                </p>
               </div>
 
               {/* Right Side: S.P.E.C.I.A.L. Point-Buy */}
@@ -427,7 +288,7 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                         className="py-1 px-2 rounded bg-black/50 hover:bg-black/80 border border-fantasy-border text-gray-300 text-xs flex items-center gap-1 transition-colors"
                       >
                         <RotateCcw size={12} />
-                        <span>Reset</span>
+                        <span>{t('creator.reset', 'Reset')}</span>
                       </button>
                       <span
                         className={`px-2.5 py-1 rounded text-xs font-mono font-bold border ${
@@ -451,7 +312,7 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                       onChange={(e) => setPreviewMediumSynergy(e.target.value)}
                       className="bg-fantasy-dark border border-cyan-800/50 rounded px-2 py-0.5 text-[11px] text-gray-200"
                     >
-                      <option value="">All Realms (No Filter)</option>
+                      <option value="">{t('creator.all_realms', 'All Realms (No Filter)')}</option>
                       <option value="direct_manifestation">{t('awakened.mediums.direct_manifestation', 'Direct Manifestation (INT / CHA)')}</option>
                       <option value="ordnance_imbuement">{t('awakened.mediums.ordnance_imbuement', 'Ordnance Imbuement (PER / STR / AGI)')}</option>
                       <option value="somatic_overdrive">{t('awakened.mediums.somatic_overdrive', 'Somatic Overdrive (STR / AGI / END)')}</option>

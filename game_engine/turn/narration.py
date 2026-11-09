@@ -354,6 +354,22 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
     )
 
     try:
+        from game_engine.pronoun_resolver import tag_narrative_pronouns
+        retry_npcs = applied.get("npcs_present") or session.get("current_npcs")
+        retry_dp = applied.get("dialogue_partner") or session.get("dialogue_partner")
+        for _p_key in ("outcome_narrative", "next_narrative"):
+            if out.get(_p_key) and isinstance(out[_p_key], str):
+                out[_p_key] = tag_narrative_pronouns(
+                    out[_p_key],
+                    session=session,
+                    party=party_for_retry,
+                    npcs_present=retry_npcs,
+                    dialogue_partner=retry_dp,
+                )
+    except Exception:
+        pass
+
+    try:
         raw_retry_choices = out.get("next_choices") if out.get("next_choices") is not None else out.get("choices")
         merged_retry_state = dict(applied)
         cleaned_retry = game_engine.build_hybrid_turn_choices(

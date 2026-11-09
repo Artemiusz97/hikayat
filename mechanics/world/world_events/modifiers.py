@@ -242,14 +242,22 @@ def is_node_locked_by_event(
     tgt = str(node_id or "").strip().lower()
     if not tgt:
         return None
+    sanctuary_nid = str(kwargs.get("safe_sanctuary_node_id") or "").strip().lower()
+    if sanctuary_nid and (tgt == sanctuary_nid or tgt.startswith(f"{sanctuary_nid}:")):
+        return None
     for ev in _extract_macro_events(events_or_snapshot):
         if ev.get("status") != "active":
+            continue
+        meta = _parse_dict(ev.get("metadata") if ev.get("metadata") is not None else ev.get("metadata_json"))
+        exempt_nid = str(meta.get("safe_sanctuary_exempt_node") or "").strip().lower()
+        if exempt_nid and tgt == exempt_nid:
             continue
         mods = _extract_event_modifiers(ev)
         locked_nodes = [str(n).strip().lower() for n in (mods.get("lockdown_nodes") or []) if n]
         ev_node = str(ev.get("location_node_id") or "").strip().lower()
         is_direct_lock = bool(mods.get("is_locked")) and bool(ev_node) and (ev_node == tgt or tgt in ev_node)
-        if tgt in locked_nodes or is_direct_lock:
+        is_global_lockdown = bool(mods.get("martial_law_lockdown")) and tgt != exempt_nid and tgt != sanctuary_nid
+        if tgt in locked_nodes or is_direct_lock or is_global_lockdown:
             return {
                 "is_locked": True,
                 "event_key": str(ev.get("event_key") or ""),
@@ -353,5 +361,18 @@ def resolve_npc_stationing_with_events(
             if hash_bucket < pull_pct:
                 return ev_node
     if scheduled_node_id:
+        sanctuary_nid = str(kwargs.get("safe_sanctuary_node_id") or "").strip()
+        lock_info = is_node_locked_by_event(
+            events_or_snapshot,
+            scheduled_node_id,
+            safe_sanctuary_node_id=sanctuary_nid,
+        )
+        if lock_info and lock_info.get("is_locked"):
+            if sanctuary_nid:
+                return sanctuary_nid
+            if base_node_id and not is_node_locked_by_event(
+                events_or_snapshot, base_node_id, safe_sanctuary_node_id=sanctuary_nid
+            ):
+                return str(base_node_id)
         return str(scheduled_node_id)
     return str(base_node_id or "")

@@ -227,9 +227,8 @@ const PartyWidget = ({
     if (!session?.id || !currentUserId) return;
     setDismissingNpc(npcName);
     try {
-      const res = await fetch('/api/party/companion', {
+      const data = await apiCall('/api/party/companion', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: currentUserId,
           session_id: session.id,
@@ -237,8 +236,7 @@ const PartyWidget = ({
           action: 'dismiss',
         }),
       });
-      const data = await res.json();
-      if (res.ok && onSessionUpdated && Array.isArray(data.party_npcs)) {
+      if (onSessionUpdated && Array.isArray(data.party_npcs)) {
         onSessionUpdated({ ...session, party_npcs: data.party_npcs });
       }
     } catch {
@@ -273,7 +271,7 @@ const PartyWidget = ({
                 type="button"
                 onClick={handleCopyShareLink}
                 className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-fantasy-accent/15 hover:bg-fantasy-accent/25 border border-fantasy-accent/40 text-fantasy-accent font-medium transition-colors"
-                title="Copy shareable link and invite code for friends"
+                title={t('party.copy_invite_tooltip', 'Copy shareable link and invite code for friends')}
               >
                 {copiedLink ? <Check size={10} className="text-green-400" /> : <Share2 size={10} />}
                 <span>{copiedLink ? t('party.copied_link') : t('party.share_link')}</span>
@@ -374,7 +372,7 @@ const PartyWidget = ({
             type="submit"
             disabled={!chatText.trim()}
             className="px-2.5 py-1.5 rounded bg-fantasy-accent/20 hover:bg-fantasy-accent/30 text-fantasy-accent border border-fantasy-accent/50 disabled:opacity-40 transition-colors flex items-center justify-center"
-            title="Send Party Chat"
+            title={t('party.send_chat_tooltip', 'Send Party Chat')}
           >
             <Send size={13} />
           </button>

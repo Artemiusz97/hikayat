@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Hikayat - Bounty Board & Quest Archetypes Mechanics
 Modular mechanic handling quest archetype taxonomies, icon mappings, bounty prompt schemas, and dynamic bounty generation.
@@ -628,7 +629,8 @@ def _collect_anomalous_bounty_candidate_locations(session_id: int, scen_key: str
                     if n.get("node_type") != "FACILITY":
                         continue
                     nid = str(n.get("node_id") or "")
-                    if nid in _ANOMALOUS_SAFE_HQ_FACILITY_IDS or nid.startswith("loc_hq_"):
+                    from mechanics.world.locations.residences import is_excluded_from_random_incursions
+                    if nid in _ANOMALOUS_SAFE_HQ_FACILITY_IDS or nid.startswith("loc_hq_") or is_excluded_from_random_incursions(session_id, node_id=nid, parent_id=str(n.get("parent_id") or "")):
                         continue
                     parent = node_map.get(n.get("parent_id"))
                     z_name = parent["name"] if parent else "Metropolitan Grid"
@@ -643,12 +645,18 @@ def _collect_anomalous_bounty_candidate_locations(session_id: int, scen_key: str
     if not candidates:
         try:
             from mechanics.world.locations import get_discovered_primary_locations
+            from mechanics.world.locations.residences import is_excluded_from_random_incursions
             zones_dict = get_discovered_primary_locations(session_id, scen_key) or {}
             for z, prims in zones_dict.items():
                 for p in prims:
                     p_low = p.lower()
-                    if "lobby" not in p_low and "bedroom" not in p_low and "hq" not in p_low:
-                        candidates.append(f"{z} ➔ {p}")
+                    if "lobby" in p_low or "bedroom" in p_low or "hq" in p_low:
+                        continue
+                    loc_full = f"{z} ➔ {p}"
+                    resolved_nid = db.resolve_node_id_from_location(session_id, loc_full, prefer_facility=True) if session_id else None
+                    if is_excluded_from_random_incursions(session_id, node_id=resolved_nid or "", location_str=loc_full):
+                        continue
+                    candidates.append(loc_full)
         except Exception:
             pass
     return candidates
@@ -787,33 +795,45 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
     from game_engine import _scenario_block, is_nsfw_scenario
     if isinstance(session, (int, str)):
         session_id = int(session)
-        session = db.get_session(session_id) or {"id": session_id}
+        session = await db.adb(db.get_session, session_id) or {"id": session_id}
     else:
         session_id = session["id"]
 
     if not force_refresh:
-        existing = _filter_general_bounties(db.get_session_quests(session_id, status="Available"))
+        avail_q = await db.adb(db.get_session_quests, session_id, status="Available")
+        existing = _filter_general_bounties(avail_q)
         if len(existing) >= 3:
             return existing
     else:
         # Clear stale unaccepted general bounties upon refresh so new ones replace them cleanly
-        with db.get_conn() as conn:
-            conn.execute(
-                "DELETE FROM quests WHERE session_id=? AND status='Available' AND (quest_id LIKE 'BNT-%' AND quest_id NOT LIKE 'BNT-FLW-%') AND quest_id NOT LIKE 'COMM-%' AND (quest_notes IS NULL OR (quest_notes NOT LIKE 'faction:%' AND quest_notes NOT LIKE '%commission:%' AND quest_notes NOT LIKE '%followup_to:%'))",
-                (session_id,)
-            )
-            conn.commit()
-        try:
-            build_consequence_followup_bounty(session_id, session=session)
-        except Exception:
-            pass
+        def _clear_stale_general_bounties():
+            with db.get_conn() as conn:
+                conn.execute(
+                    "DELETE FROM quests WHERE session_id=? AND status='Available' AND (quest_id LIKE 'BNT-%' AND quest_id NOT LIKE 'BNT-FLW-%') AND quest_id NOT LIKE 'COMM-%' AND (quest_notes IS NULL OR (quest_notes NOT LIKE 'faction:%' AND quest_notes NOT LIKE '%commission:%' AND quest_notes NOT LIKE '%followup_to:%'))",
+                    (session_id,)
+                )
+                conn.commit()
+            try:
+                build_consequence_followup_bounty(session_id, session=session)
+            except Exception:
+                pass
+        await db.adb(_clear_stale_general_bounties)
 
 
     scen_block = _scenario_block(session)
     loc = session.get("current_location", "the local hub")
     scen_key = session.get("scenario")
 
+    from game_engine.prompt_layout import build_side_channel_language_directive
+    bounty_lang_dir = build_side_channel_language_directive(
+        session,
+        text_fields=("title", "objective", "required_item", "reward_item", "waypoints[].stage_label"),
+        preserve_fields=("quest_type", "client_npc", "client_location", "waypoints[].target_location", "waypoints[].target_npc", "waypoints[].completion_trigger"),
+        style="narrative",
+    )
     system_prompt = build_bounty_system_prompt(scen_key)
+    if bounty_lang_dir:
+        system_prompt = f"{system_prompt}\n\n{bounty_lang_dir}"
 
     school_hints = ""
     from mechanics.world.locations import is_school_scenario
@@ -1050,140 +1070,142 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
                 }
             ]
 
-    from mechanics.world.locations import clean_narrative_location_arrows
-    for idx, b in enumerate(bounties_raw):
-        if not isinstance(b, dict) or not b.get("title"):
-            continue
-        b_id = f"BNT-{uuid.uuid4().hex[:8].upper()}"
-        q_type = str(b.get("quest_type", "Side Bounty"))
-        obj_text = clean_narrative_location_arrows(str(b.get("objective", "Complete the bounty task.")))[:200]
-        title_text = clean_narrative_location_arrows(str(b.get("title")))[:60]
+    def _save_bounties_sync(raw_list):
+        from mechanics.world.locations import clean_narrative_location_arrows, parse_tiered_location
+        for idx, b in enumerate(raw_list):
+            if not isinstance(b, dict) or not b.get("title"):
+                continue
+            b_id = f"BNT-{uuid.uuid4().hex[:8].upper()}"
+            q_type = str(b.get("quest_type", "Side Bounty"))
+            obj_text = clean_narrative_location_arrows(str(b.get("objective", "Complete the bounty task.")))[:200]
+            title_text = clean_narrative_location_arrows(str(b.get("title")))[:60]
 
-        from mechanics.narrative.blueprints import get_blueprint_for_archetype, infer_required_item_and_count_from_text, roll_quest_deadline
-        blueprint_id = get_blueprint_for_archetype(q_type, obj_text)
-        client_npc, client_loc = resolve_or_seed_bounty_client(session_id, session, b, loc, index=idx)
-        if client_loc:
-            from mechanics.world.locations import parse_tiered_location
-            z_c, p_c, _ = parse_tiered_location(client_loc, scen_key, session_id=session_id)
-            client_loc = f"{z_c} ➔ {p_c}"
+            from mechanics.narrative.blueprints import get_blueprint_for_archetype, infer_required_item_and_count_from_text, roll_quest_deadline
+            blueprint_id = get_blueprint_for_archetype(q_type, obj_text)
+            client_npc, client_loc = resolve_or_seed_bounty_client(session_id, session, b, loc, index=idx)
+            if client_loc:
+                from mechanics.world.locations import parse_tiered_location
+                z_c, p_c, _ = parse_tiered_location(client_loc, scen_key, session_id=session_id)
+                client_loc = f"{z_c} ➔ {p_c}"
 
-        req_item = str(b.get("required_item", "") or "").strip()
-        req_count = 1
-        if not req_item and blueprint_id == "ACQUISITION":
-            req_item, req_count = infer_required_item_and_count_from_text(obj_text, title_text)
-        elif req_item:
-            _, inf_cnt = infer_required_item_and_count_from_text(obj_text, title_text)
-            if inf_cnt > 1:
-                req_count = inf_cnt
+            req_item = str(b.get("required_item", "") or "").strip()
+            req_count = 1
+            if not req_item and blueprint_id == "ACQUISITION":
+                req_item, req_count = infer_required_item_and_count_from_text(obj_text, title_text)
+            elif req_item:
+                _, inf_cnt = infer_required_item_and_count_from_text(obj_text, title_text)
+                if inf_cnt > 1:
+                    req_count = inf_cnt
 
-        d_day, d_min = roll_quest_deadline(
-            blueprint_id=blueprint_id,
-            quest_type=q_type,
-            title=title_text,
-            objective=obj_text,
-            current_day=int(session.get("current_day") or 1) if session else 1,
-            current_minute=int(session.get("current_minute") or 480) if session else 480,
-            is_story_quest=False,
-            seed_str=b_id,
-        )
+            d_day, d_min = roll_quest_deadline(
+                blueprint_id=blueprint_id,
+                quest_type=q_type,
+                title=title_text,
+                objective=obj_text,
+                current_day=int(session.get("current_day") or 1) if session else 1,
+                current_minute=int(session.get("current_minute") or 480) if session else 480,
+                is_story_quest=False,
+                seed_str=b_id,
+            )
 
-        q_notes_gen = "board_source:freelance_app" if is_anom else ""
-        if is_anom:
-            from mechanics.world.anomaly_engine import generate_anomaly_blueprint, serialize_blueprint_note
-            is_nh_b = ("non-hostile" in str(q_type or "").lower() or bool(b.get("non_hostile_temperament")))
-            bp_b = b.get("anomaly_blueprint")
-            if not isinstance(bp_b, dict):
-                bp_b = generate_anomaly_blueprint(
-                    session_id=session_id,
-                    location_str=loc,
-                    disposition="non_hostile" if is_nh_b else "hostile",
-                    seed_key=b_id,
-                    scen_key=str(scen_key or "anomalous_incursions"),
-                )
-            if is_nh_b:
-                from mechanics.world.anomalous_events import get_non_hostile_entity_temperament, extract_non_hostile_entity_name
-                from mechanics.world.folklore_mechanics import get_public_anomaly_name
-                nh_t = str(b.get("non_hostile_temperament") or bp_b.get("temperament") or get_non_hostile_entity_temperament(seed_key=b_id))
-                nh_e = str(b.get("entity_name") or get_public_anomaly_name(bp_b, dossier_revealed=False, fallback="") or extract_non_hostile_entity_name({"title": title_text, "objective": obj_text}))
-                q_notes_gen = f"{q_notes_gen}|non_hostile_temperament:{nh_t}|entity_name:{nh_e}"
-            q_notes_gen = f"{q_notes_gen}|dossier_revealed:0|{serialize_blueprint_note(bp_b)}"
+            q_notes_gen = "board_source:freelance_app" if is_anom else ""
+            if is_anom:
+                from mechanics.world.anomaly_engine import generate_anomaly_blueprint, serialize_blueprint_note
+                is_nh_b = ("non-hostile" in str(q_type or "").lower() or bool(b.get("non_hostile_temperament")))
+                bp_b = b.get("anomaly_blueprint")
+                if not isinstance(bp_b, dict):
+                    bp_b = generate_anomaly_blueprint(
+                        session_id=session_id,
+                        location_str=loc,
+                        disposition="non_hostile" if is_nh_b else "hostile",
+                        seed_key=b_id,
+                        scen_key=str(scen_key or "anomalous_incursions"),
+                    )
+                if is_nh_b:
+                    from mechanics.world.anomalous_events import get_non_hostile_entity_temperament, extract_non_hostile_entity_name
+                    from mechanics.world.folklore_mechanics import get_public_anomaly_name
+                    nh_t = str(b.get("non_hostile_temperament") or bp_b.get("temperament") or get_non_hostile_entity_temperament(seed_key=b_id))
+                    nh_e = str(b.get("entity_name") or get_public_anomaly_name(bp_b, dossier_revealed=False, fallback="") or extract_non_hostile_entity_name({"title": title_text, "objective": obj_text}))
+                    q_notes_gen = f"{q_notes_gen}|non_hostile_temperament:{nh_t}|entity_name:{nh_e}"
+                q_notes_gen = f"{q_notes_gen}|dossier_revealed:0|{serialize_blueprint_note(bp_b)}"
 
-        from mechanics.narrative.dossier_compiler import compile_bounty_pitch_stub
-        from mechanics.narrative.quest_engines import resolve_quest_engine
-        _eng_b = resolve_quest_engine(q_type, obj_text)["engine"]
-        db.upsert_quest(
-            session_id=session_id,
-            quest_id=b_id,
-            quest_type=q_type,
-            title=title_text,
-            objective=obj_text,
-            progress=f"0/{req_count} {req_item} Collected" if (blueprint_id == "ACQUISITION" and req_item) else "0/1 Target Sighted",
-            current_clues="",
-            status="Available",
-            reward_xp=_safe_bounty_int(b.get("reward_xp"), 120),
-            reward_gold=_safe_bounty_int(b.get("reward_gold"), 35),
-            reward_stat_points=0,
-            reward_item=str(b.get("reward_item", "") or "")[:60],
-            quest_notes=q_notes_gen,
-            blueprint_id=blueprint_id,
-            client_npc=client_npc,
-            client_location=client_loc,
-            required_item=req_item,
-            required_item_count=req_count,
-            deadline_day=d_day,
-            deadline_minute=d_min,
-            engine=_eng_b,
-            dossier_stage="pitch",
-        )
-        compile_bounty_pitch_stub(
-            session_id=session_id,
-            quest_id=b_id,
-            tag_or_archetype=q_type,
-            title=title_text,
-            public_pitch=obj_text,
-            client_npc=client_npc,
-            client_location=client_loc,
-            reward_gold=_safe_bounty_int(b.get("reward_gold"), 35),
-            reward_xp=_safe_bounty_int(b.get("reward_xp"), 120),
-            reward_item=str(b.get("reward_item", "") or "")[:60],
-            deadline_day=d_day,
-            deadline_minute=d_min,
-            scen_key=scen_key,
-        )
+            from mechanics.narrative.dossier_compiler import compile_bounty_pitch_stub
+            from mechanics.narrative.quest_engines import resolve_quest_engine
+            _eng_b = resolve_quest_engine(q_type, obj_text)["engine"]
+            db.upsert_quest(
+                session_id=session_id,
+                quest_id=b_id,
+                quest_type=q_type,
+                title=title_text,
+                objective=obj_text,
+                progress=f"0/{req_count} {req_item} Collected" if (blueprint_id == "ACQUISITION" and req_item) else "0/1 Target Sighted",
+                current_clues="",
+                status="Available",
+                reward_xp=_safe_bounty_int(b.get("reward_xp"), 120),
+                reward_gold=_safe_bounty_int(b.get("reward_gold"), 35),
+                reward_stat_points=0,
+                reward_item=str(b.get("reward_item", "") or "")[:60],
+                quest_notes=q_notes_gen,
+                blueprint_id=blueprint_id,
+                client_npc=client_npc,
+                client_location=client_loc,
+                required_item=req_item,
+                required_item_count=req_count,
+                deadline_day=d_day,
+                deadline_minute=d_min,
+                engine=_eng_b,
+                dossier_stage="pitch",
+            )
+            compile_bounty_pitch_stub(
+                session_id=session_id,
+                quest_id=b_id,
+                tag_or_archetype=q_type,
+                title=title_text,
+                public_pitch=obj_text,
+                client_npc=client_npc,
+                client_location=client_loc,
+                reward_gold=_safe_bounty_int(b.get("reward_gold"), 35),
+                reward_xp=_safe_bounty_int(b.get("reward_xp"), 120),
+                reward_item=str(b.get("reward_item", "") or "")[:60],
+                deadline_day=d_day,
+                deadline_minute=d_min,
+                scen_key=scen_key,
+            )
 
-        # Persist waypoints for this bounty
-        from mechanics.world.waypoints import ensure_multi_stage_waypoints
-        raw_waypoints = b.get("waypoints") or []
-        sec_loc = candidate_locations[1] if len(candidate_locations) > 1 else ""
-        tert_loc = candidate_locations[2] if len(candidate_locations) > 2 else ""
-        validated_wps = ensure_multi_stage_waypoints(
-            raw_waypoints,
-            default_loc=loc,
-            archetype=q_type,
-            secondary_loc=sec_loc,
-            tertiary_loc=tert_loc,
-            session_id=session_id,
-            scen_key=scen_key,
-            client_npc=client_npc,
-            client_location=client_loc,
-            required_item=req_item,
-        )
-        if validated_wps:
-            from mechanics.world.locations import parse_tiered_location, clean_narrative_location_arrows
-            for wp in validated_wps:
-                if wp.get("stage_label"):
-                    wp["stage_label"] = clean_narrative_location_arrows(wp["stage_label"])
-                raw_tgt = wp.get("target_location", "")
-                if raw_tgt:
-                    raw_parts = [x.strip() for x in raw_tgt.replace("->", "➔").split("➔") if x.strip()]
-                    z_norm, p_norm, s_norm = parse_tiered_location(raw_tgt, scen_key, session_id=session_id)
-                    if s_norm and len(raw_parts) >= 3:
-                        wp["target_location"] = f"{z_norm} ➔ {p_norm} ➔ {s_norm}"
-                    else:
-                        wp["target_location"] = f"{z_norm} ➔ {p_norm}"
-            db.save_quest_waypoints(session_id=session_id, quest_id=b_id, waypoints=validated_wps, sub_obj_id=None)
+            # Persist waypoints for this bounty
+            from mechanics.world.waypoints import ensure_multi_stage_waypoints
+            raw_waypoints = b.get("waypoints") or []
+            sec_loc = candidate_locations[1] if len(candidate_locations) > 1 else ""
+            tert_loc = candidate_locations[2] if len(candidate_locations) > 2 else ""
+            validated_wps = ensure_multi_stage_waypoints(
+                raw_waypoints,
+                default_loc=loc,
+                archetype=q_type,
+                secondary_loc=sec_loc,
+                tertiary_loc=tert_loc,
+                session_id=session_id,
+                scen_key=scen_key,
+                client_npc=client_npc,
+                client_location=client_loc,
+                required_item=req_item,
+            )
+            if validated_wps:
+                for wp in validated_wps:
+                    if wp.get("stage_label"):
+                        wp["stage_label"] = clean_narrative_location_arrows(wp["stage_label"])
+                    raw_tgt = wp.get("target_location", "")
+                    if raw_tgt:
+                        raw_parts = [x.strip() for x in raw_tgt.replace("->", "➔").split("➔") if x.strip()]
+                        z_norm, p_norm, s_norm = parse_tiered_location(raw_tgt, scen_key, session_id=session_id)
+                        if s_norm and len(raw_parts) >= 3:
+                            wp["target_location"] = f"{z_norm} ➔ {p_norm} ➔ {s_norm}"
+                        else:
+                            wp["target_location"] = f"{z_norm} ➔ {p_norm}"
+                db.save_quest_waypoints(session_id=session_id, quest_id=b_id, waypoints=validated_wps, sub_obj_id=None)
 
-    return _filter_general_bounties(db.get_session_quests(session_id, status="Available"))
+        return _filter_general_bounties(db.get_session_quests(session_id, status="Available"))
+
+    return await db.adb(_save_bounties_sync, bounties_raw)
 
 
 # ---------------------------------------------------------------- Faction Bounty Board
@@ -1237,20 +1259,23 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
 
     if not force_refresh:
         # Check for cached faction bounties (stored with quest_notes matching faction_id)
+        avail_q = await db.adb(db.get_session_quests, session_id, status="Available")
         existing = [
-            q for q in db.get_session_quests(session_id, status="Available")
+            q for q in (avail_q or [])
             if q.get("quest_notes", "").startswith(f"faction:{faction_id}")
         ]
         if len(existing) >= 3:
             return existing
     else:
         # Clear stale unaccepted faction bounties for this faction upon refresh
-        with db.get_conn() as conn:
-            conn.execute(
-                "DELETE FROM quests WHERE session_id=? AND status='Available' AND quest_notes LIKE ?",
-                (session_id, f"faction:{faction_id}%")
-            )
-            conn.commit()
+        def _clear_stale_faction_bounties():
+            with db.get_conn() as conn:
+                conn.execute(
+                    "DELETE FROM quests WHERE session_id=? AND status='Available' AND quest_notes LIKE ?",
+                    (session_id, f"faction:{faction_id}%")
+                )
+                conn.commit()
+        await db.adb(_clear_stale_faction_bounties)
 
     scen_block = _scenario_block(session)
     loc = faction.get("hq_location_id") or session.get("current_location", "the faction HQ")
@@ -1289,7 +1314,15 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
     loc_prose = format_clean_location_prose(loc, include_zone=True, preposition="in")
     bounties_raw = []
     try:
-        result = await call_llm_json(FACTION_BOUNTY_SYSTEM_PROMPT, user_prompt, temperature=0.8,
+        from game_engine.prompt_layout import build_side_channel_language_directive
+        fac_lang_dir = build_side_channel_language_directive(
+            session,
+            text_fields=("title", "objective", "required_item", "reward_item", "waypoints[].stage_label"),
+            preserve_fields=("quest_type", "client_npc", "client_location", "waypoints[].target_location", "waypoints[].target_npc", "waypoints[].completion_trigger"),
+            style="narrative",
+        )
+        fac_sys_prompt = f"{FACTION_BOUNTY_SYSTEM_PROMPT}\n\n{fac_lang_dir}" if fac_lang_dir else FACTION_BOUNTY_SYSTEM_PROMPT
+        result = await call_llm_json(fac_sys_prompt, user_prompt, temperature=0.8,
                                       is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
         bounties_raw = (result.get("bounties", []) or []) if isinstance(result, dict) else []
     except Exception as _fac_err:
@@ -1353,138 +1386,141 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
             }
         ]
 
-    for idx, b in enumerate(bounties_raw):
-        if not isinstance(b, dict) or not b.get("title"):
-            continue
-        b_id = f"FBNT-{uuid.uuid4().hex[:8].upper()}"
-        q_type = str(b.get("quest_type", "Faction Bounty"))
-        obj_text = clean_narrative_location_arrows(str(b.get("objective", "Complete the faction task.")))[:200]
-        title_text = clean_narrative_location_arrows(str(b.get("title")))[:60]
-        faction_rep_reward = max(5, min(20, _safe_bounty_int(b.get("faction_rep_reward"), 10)))
+    def _save_faction_bounties_sync(raw_list):
+        from mechanics.world.locations import clean_narrative_location_arrows, parse_tiered_location
+        for idx, b in enumerate(raw_list):
+            if not isinstance(b, dict) or not b.get("title"):
+                continue
+            b_id = f"FBNT-{uuid.uuid4().hex[:8].upper()}"
+            q_type = str(b.get("quest_type", "Faction Bounty"))
+            obj_text = clean_narrative_location_arrows(str(b.get("objective", "Complete the faction task.")))[:200]
+            title_text = clean_narrative_location_arrows(str(b.get("title")))[:60]
+            faction_rep_reward = max(5, min(20, _safe_bounty_int(b.get("faction_rep_reward"), 10)))
 
-        from mechanics.narrative.blueprints import get_blueprint_for_archetype, infer_required_item_and_count_from_text
-        blueprint_id = get_blueprint_for_archetype(q_type, obj_text)
-        client_npc, client_loc = resolve_or_seed_bounty_client(session_id, session, b, loc, index=idx)
-        if client_loc:
-            from mechanics.world.locations import parse_tiered_location
-            z_c, p_c, _ = parse_tiered_location(client_loc, scen_key, session_id=session_id)
-            client_loc = f"{z_c} ➔ {p_c}"
+            from mechanics.narrative.blueprints import get_blueprint_for_archetype, infer_required_item_and_count_from_text
+            blueprint_id = get_blueprint_for_archetype(q_type, obj_text)
+            client_npc, client_loc = resolve_or_seed_bounty_client(session_id, session, b, loc, index=idx)
+            if client_loc:
+                from mechanics.world.locations import parse_tiered_location
+                z_c, p_c, _ = parse_tiered_location(client_loc, scen_key, session_id=session_id)
+                client_loc = f"{z_c} ➔ {p_c}"
 
-        req_item = str(b.get("required_item", "") or "").strip()
-        req_count = 1
-        if not req_item and blueprint_id == "ACQUISITION":
-            req_item, req_count = infer_required_item_and_count_from_text(obj_text, title_text)
-        elif req_item:
-            _, inf_cnt = infer_required_item_and_count_from_text(obj_text, title_text)
-            if inf_cnt > 1:
-                req_count = inf_cnt
+            req_item = str(b.get("required_item", "") or "").strip()
+            req_count = 1
+            if not req_item and blueprint_id == "ACQUISITION":
+                req_item, req_count = infer_required_item_and_count_from_text(obj_text, title_text)
+            elif req_item:
+                _, inf_cnt = infer_required_item_and_count_from_text(obj_text, title_text)
+                if inf_cnt > 1:
+                    req_count = inf_cnt
 
-        from mechanics.narrative.blueprints import roll_quest_deadline
-        d_day, d_min = roll_quest_deadline(
-            blueprint_id=blueprint_id,
-            quest_type=q_type,
-            title=title_text,
-            objective=obj_text,
-            current_day=int(session.get("current_day") or 1) if session else 1,
-            current_minute=int(session.get("current_minute") or 480) if session else 480,
-            is_story_quest=False,
-            seed_str=b_id,
-        )
+            from mechanics.narrative.blueprints import roll_quest_deadline
+            d_day, d_min = roll_quest_deadline(
+                blueprint_id=blueprint_id,
+                quest_type=q_type,
+                title=title_text,
+                objective=obj_text,
+                current_day=int(session.get("current_day") or 1) if session else 1,
+                current_minute=int(session.get("current_minute") or 480) if session else 480,
+                is_story_quest=False,
+                seed_str=b_id,
+            )
 
-        q_notes = f"faction:{faction_id}|board_source:{f_arch}|rep_reward:{faction_rep_reward}" if (is_anom and f_arch) else f"faction:{faction_id}|rep_reward:{faction_rep_reward}"
-        if is_anom:
-            from mechanics.world.anomaly_engine import generate_anomaly_blueprint, serialize_blueprint_note
-            is_nh_fb = ("non-hostile" in str(q_type or "").lower() or bool(b.get("non_hostile_temperament")))
-            bp_fb = b.get("anomaly_blueprint")
-            if not isinstance(bp_fb, dict):
-                bp_fb = generate_anomaly_blueprint(
-                    session_id=session_id,
-                    location_str=loc,
-                    disposition="non_hostile" if is_nh_fb else "hostile",
-                    seed_key=b_id,
-                    scen_key=str(scen_key or "anomalous_incursions"),
-                )
-            if is_nh_fb:
-                from mechanics.world.anomalous_events import get_non_hostile_entity_temperament, extract_non_hostile_entity_name
-                from mechanics.world.folklore_mechanics import get_public_anomaly_name
-                nh_t = str(b.get("non_hostile_temperament") or bp_fb.get("temperament") or get_non_hostile_entity_temperament(seed_key=b_id))
-                nh_e = str(b.get("entity_name") or get_public_anomaly_name(bp_fb, dossier_revealed=False, fallback="") or extract_non_hostile_entity_name({"title": title_text, "objective": obj_text}))
-                q_notes = f"{q_notes}|non_hostile_temperament:{nh_t}|entity_name:{nh_e}"
-            q_notes = f"{q_notes}|dossier_revealed:0|{serialize_blueprint_note(bp_fb)}"
-        from mechanics.narrative.dossier_compiler import compile_bounty_pitch_stub
-        from mechanics.narrative.quest_engines import resolve_quest_engine
-        _eng_fb = resolve_quest_engine(q_type, obj_text)["engine"]
-        db.upsert_quest(
-            session_id=session_id,
-            quest_id=b_id,
-            quest_type=q_type,
-            title=title_text,
-            objective=obj_text,
-            progress=f"0/{req_count} {req_item} Collected" if (blueprint_id == "ACQUISITION" and req_item) else "0/1 Target Sighted",
-            current_clues="",
-            status="Available",
-            reward_xp=max(60, min(250, _safe_bounty_int(b.get("reward_xp"), 120))),
-            reward_gold=max(5, min(120, _safe_bounty_int(b.get("reward_gold"), 30))),
-            reward_stat_points=0,
-            reward_item=str(b.get("reward_item", "") or "")[:60],
-            quest_notes=q_notes,
-            blueprint_id=blueprint_id,
-            client_npc=client_npc,
-            client_location=client_loc,
-            required_item=req_item,
-            required_item_count=req_count,
-            deadline_day=d_day,
-            deadline_minute=d_min,
-            engine=_eng_fb,
-            dossier_stage="pitch",
-        )
-        compile_bounty_pitch_stub(
-            session_id=session_id,
-            quest_id=b_id,
-            tag_or_archetype=q_type,
-            title=title_text,
-            public_pitch=obj_text,
-            client_npc=client_npc,
-            client_location=client_loc,
-            reward_gold=max(5, min(120, _safe_bounty_int(b.get("reward_gold"), 30))),
-            reward_xp=max(60, min(250, _safe_bounty_int(b.get("reward_xp"), 120))),
-            reward_item=str(b.get("reward_item", "") or "")[:60],
-            deadline_day=d_day,
-            deadline_minute=d_min,
-            scen_key=scen_key,
-        )
-        from mechanics.world.waypoints import ensure_multi_stage_waypoints
-        raw_waypoints = b.get("waypoints") or []
-        validated_wps = ensure_multi_stage_waypoints(
-            raw_waypoints,
-            default_loc=loc,
-            archetype=q_type,
-            session_id=session_id,
-            scen_key=scen_key,
-            client_npc=client_npc,
-            client_location=client_loc,
-            required_item=req_item,
-        )
-        if validated_wps:
-            from mechanics.world.locations import parse_tiered_location, clean_narrative_location_arrows
-            for wp in validated_wps:
-                if wp.get("stage_label"):
-                    wp["stage_label"] = clean_narrative_location_arrows(wp["stage_label"])
-                raw_tgt = wp.get("target_location", "")
-                if raw_tgt:
-                    raw_parts = [x.strip() for x in raw_tgt.replace("->", "➔").split("➔") if x.strip()]
-                    z_norm, p_norm, s_norm = parse_tiered_location(raw_tgt, scen_key, session_id=session_id)
-                    if s_norm and len(raw_parts) >= 3:
-                        wp["target_location"] = f"{z_norm} ➔ {p_norm} ➔ {s_norm}"
-                    else:
-                        wp["target_location"] = f"{z_norm} ➔ {p_norm}"
-            db.save_quest_waypoints(session_id=session_id, quest_id=b_id,
-                                    waypoints=validated_wps, sub_obj_id=None)
+            q_notes = f"faction:{faction_id}|board_source:{f_arch}|rep_reward:{faction_rep_reward}" if (is_anom and f_arch) else f"faction:{faction_id}|rep_reward:{faction_rep_reward}"
+            if is_anom:
+                from mechanics.world.anomaly_engine import generate_anomaly_blueprint, serialize_blueprint_note
+                is_nh_fb = ("non-hostile" in str(q_type or "").lower() or bool(b.get("non_hostile_temperament")))
+                bp_fb = b.get("anomaly_blueprint")
+                if not isinstance(bp_fb, dict):
+                    bp_fb = generate_anomaly_blueprint(
+                        session_id=session_id,
+                        location_str=loc,
+                        disposition="non_hostile" if is_nh_fb else "hostile",
+                        seed_key=b_id,
+                        scen_key=str(scen_key or "anomalous_incursions"),
+                    )
+                if is_nh_fb:
+                    from mechanics.world.anomalous_events import get_non_hostile_entity_temperament, extract_non_hostile_entity_name
+                    from mechanics.world.folklore_mechanics import get_public_anomaly_name
+                    nh_t = str(b.get("non_hostile_temperament") or bp_fb.get("temperament") or get_non_hostile_entity_temperament(seed_key=b_id))
+                    nh_e = str(b.get("entity_name") or get_public_anomaly_name(bp_fb, dossier_revealed=False, fallback="") or extract_non_hostile_entity_name({"title": title_text, "objective": obj_text}))
+                    q_notes = f"{q_notes}|non_hostile_temperament:{nh_t}|entity_name:{nh_e}"
+                q_notes = f"{q_notes}|dossier_revealed:0|{serialize_blueprint_note(bp_fb)}"
+            from mechanics.narrative.dossier_compiler import compile_bounty_pitch_stub
+            from mechanics.narrative.quest_engines import resolve_quest_engine
+            _eng_fb = resolve_quest_engine(q_type, obj_text)["engine"]
+            db.upsert_quest(
+                session_id=session_id,
+                quest_id=b_id,
+                quest_type=q_type,
+                title=title_text,
+                objective=obj_text,
+                progress=f"0/{req_count} {req_item} Collected" if (blueprint_id == "ACQUISITION" and req_item) else "0/1 Target Sighted",
+                current_clues="",
+                status="Available",
+                reward_xp=max(60, min(250, _safe_bounty_int(b.get("reward_xp"), 120))),
+                reward_gold=max(5, min(120, _safe_bounty_int(b.get("reward_gold"), 30))),
+                reward_stat_points=0,
+                reward_item=str(b.get("reward_item", "") or "")[:60],
+                quest_notes=q_notes,
+                blueprint_id=blueprint_id,
+                client_npc=client_npc,
+                client_location=client_loc,
+                required_item=req_item,
+                required_item_count=req_count,
+                deadline_day=d_day,
+                deadline_minute=d_min,
+                engine=_eng_fb,
+                dossier_stage="pitch",
+            )
+            compile_bounty_pitch_stub(
+                session_id=session_id,
+                quest_id=b_id,
+                tag_or_archetype=q_type,
+                title=title_text,
+                public_pitch=obj_text,
+                client_npc=client_npc,
+                client_location=client_loc,
+                reward_gold=max(5, min(120, _safe_bounty_int(b.get("reward_gold"), 30))),
+                reward_xp=max(60, min(250, _safe_bounty_int(b.get("reward_xp"), 120))),
+                reward_item=str(b.get("reward_item", "") or "")[:60],
+                deadline_day=d_day,
+                deadline_minute=d_min,
+                scen_key=scen_key,
+            )
+            from mechanics.world.waypoints import ensure_multi_stage_waypoints
+            raw_waypoints = b.get("waypoints") or []
+            validated_wps = ensure_multi_stage_waypoints(
+                raw_waypoints,
+                default_loc=loc,
+                archetype=q_type,
+                session_id=session_id,
+                scen_key=scen_key,
+                client_npc=client_npc,
+                client_location=client_loc,
+                required_item=req_item,
+            )
+            if validated_wps:
+                for wp in validated_wps:
+                    if wp.get("stage_label"):
+                        wp["stage_label"] = clean_narrative_location_arrows(wp["stage_label"])
+                    raw_tgt = wp.get("target_location", "")
+                    if raw_tgt:
+                        raw_parts = [x.strip() for x in raw_tgt.replace("->", "➔").split("➔") if x.strip()]
+                        z_norm, p_norm, s_norm = parse_tiered_location(raw_tgt, scen_key, session_id=session_id)
+                        if s_norm and len(raw_parts) >= 3:
+                            wp["target_location"] = f"{z_norm} ➔ {p_norm} ➔ {s_norm}"
+                        else:
+                            wp["target_location"] = f"{z_norm} ➔ {p_norm}"
+                db.save_quest_waypoints(session_id=session_id, quest_id=b_id,
+                                        waypoints=validated_wps, sub_obj_id=None)
 
-    return [
-        q for q in db.get_session_quests(session_id, status="Available")
-        if q.get("quest_notes", "").startswith(f"faction:{faction_id}")
-    ]
+        return [
+            q for q in (db.get_session_quests(session_id, status="Available") or [])
+            if q.get("quest_notes", "").startswith(f"faction:{faction_id}")
+        ]
+
+    return await db.adb(_save_faction_bounties_sync, bounties_raw)
 
 
 def get_faction_rep_reward_from_quest(quest: dict) -> int:
@@ -2253,7 +2289,7 @@ def dispatch_anomalous_mandatory_daily_bounty(
         engine=_eng_mand,
         dossier_stage="compiled",
     )
-    compile_quest_dossier(
+    mand_dossier = compile_quest_dossier(
         session_id=session_id,
         quest_id=q_id,
         tag_or_archetype=chosen_label,
@@ -2263,7 +2299,7 @@ def dispatch_anomalous_mandatory_daily_bounty(
         danger_tier=2,
         client_npc=f"{fac_label} Dispatch Officer",
         target_npc=entity_name,
-        preferred_location=target_loc,
+        preferred_location=sec_loc,
         required_item=req_item,
         reward_gold=base_gold,
         scen_key=scen_key,
@@ -2274,23 +2310,19 @@ def dispatch_anomalous_mandatory_daily_bounty(
         if is_nh_mand
         else f"Resolve mandatory containment directive for '{entity_name}'"
     )
-    raw_wps = [
-        {"stage_index": 1, "stage_label": f"Deploy to {target_short} and verify anomaly readings", "target_location": target_loc, "completion_trigger": "arrival"},
-        {"stage_index": 2, "stage_label": stage_2_mand_lbl, "target_location": sec_loc, "completion_trigger": "skill_check"},
-    ]
-    wps = ensure_multi_stage_waypoints(
-        raw_wps,
-        default_loc=target_loc,
-        archetype=chosen_label,
-        secondary_loc=sec_loc,
-        session_id=session_id,
-        scen_key=scen_key,
-        client_npc=f"{fac_label} Dispatch Officer",
-        client_location=target_loc,
-        required_item=req_item,
-    )
-    if wps:
-        db.save_quest_waypoints(session_id=session_id, quest_id=q_id, waypoints=wps, sub_obj_id=None)
+    if isinstance(mand_dossier, dict):
+        mand_climax = dict(mand_dossier.get("climax_spec") or {})
+        mand_stages = [dict(st) for st in (mand_climax.get("main_stages") or [])]
+        if len(mand_stages) >= 2:
+            mand_stages[0]["stage_label"] = f"Deploy to {target_short} and verify anomaly readings"
+            mand_stages[0]["target_location"] = target_loc
+            mand_stages[0]["completion_trigger"] = "arrival"
+            mand_stages[-1]["stage_label"] = stage_2_mand_lbl
+            mand_stages[-1]["target_location"] = sec_loc
+            mand_stages[-1]["completion_trigger"] = "skill_check"
+            mand_climax["main_stages"] = mand_stages
+            saved_mand = db.upsert_quest_dossier(session_id, q_id, climax_spec=mand_climax)
+            db.sync_quest_projection_from_dossier(session_id, q_id, dossier=saved_mand or mand_dossier)
 
     if fac_state:
         fac_state["mandatory_bounty_id"] = q_id

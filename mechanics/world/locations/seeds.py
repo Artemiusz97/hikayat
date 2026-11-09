@@ -449,7 +449,7 @@ def get_session_private_agency_hq_name(session_id: int = 0, scenario_key: str = 
     p_acr = format_org_acronym(p_name)
     if agency_index == 2:
         return f"{p_acr} Field Office HQ" if p_acr else f"{p_name} Office HQ"
-    return f"{p_acr} Corporate Tower HQ" if p_acr else f"{p_name} Tower HQ"
+    return f"{p_acr} Tower HQ" if p_acr else f"{p_name} Tower HQ"
 
 
 def is_urban_anomalous_scenario(scenario_key: str = "") -> bool:
@@ -522,15 +522,15 @@ def inject_anomalous_faction_hq_facilities(zones: list[dict], session_id: int = 
     synd_name = generate_clandestine_syndicate_name(scenario_key, hash_val=h_val)
 
     priv_1_acronym = format_org_acronym(priv_1_name)
-    priv_1_hq = f"{priv_1_acronym} Corporate Tower HQ" if priv_1_acronym else f"{priv_1_name} Tower HQ"
+    priv_1_hq = f"{priv_1_acronym} Tower HQ" if priv_1_acronym else f"{priv_1_name} Tower HQ"
     priv_2_acronym = format_org_acronym(priv_2_name)
     priv_2_hq = f"{priv_2_acronym} Field Office HQ" if priv_2_acronym else f"{priv_2_name} Office HQ"
 
     urban_core_zones = ["zone_city_center", "zone_downtown", "zone_uptown"]
     p1_zone = urban_core_zones[h_val % 3]
     p2_zone = urban_core_zones[(h_val + 1) % 3]
-    cult_zone = "zone_woods_reserve" if (h_val % 2 == 0) else "zone_undercity"
-    synd_zone = "zone_undercity" if cult_zone == "zone_woods_reserve" else "zone_industrial"
+    cult_zone = "zone_undercity"
+    synd_zone = "zone_industrial"
 
     injected_by_zone = {
         p1_zone: {
@@ -540,62 +540,62 @@ def inject_anomalous_faction_hq_facilities(zones: list[dict], session_id: int = 
             "sub_locations": [
                 {
                     "id": "sub_priv1_entrance",
-                    "name": "Corporate Atrium & Biometric Lobby",
+                    "name": "Atrium Concierge & Biometric Turnstiles",
                     "is_entrance": 1,
-                    "props": ["Biometric Glass Turnstiles", "Marble Concierge Desk", "Executive Floor Directory", "Panoramic Atrium Fountain"],
+                    "props": ["Biometric Glass Turnstiles", "Granite Concierge Desk", "Tower Floor Directory", "Sculpted Atrium Waterwall"],
                 },
                 {
                     "id": "sub_priv1_dispatch",
-                    "name": "Executive Contract & Telemetry Floor",
-                    "props": ["Holographic Portfolio Wall", "Executive Briefing Table", "Encrypted Telemetry Console", "Global Breach Ticker"],
+                    "name": "Global Contracts & Telemetry Floor",
+                    "props": ["Holographic Portfolio Wall", "Slate Briefing Table", "Encrypted Telemetry Console", "Global Breach Ticker"],
                 },
                 {
                     "id": "sub_priv1_armory",
-                    "name": "In-House R&D Ordnance & Prototype Vault",
+                    "name": "Special Ordnance & Requisition Vault",
                     "access_tier": "restricted",
-                    "props": ["Proprietary Quartermaster Desk", "Serialized Prototype Racks", "Smart-Linked Ammo Lockers", "Laser Ballistic Bench"],
+                    "props": ["Armory Requisition Console", "Serialized Smart-Weapon Racks", "Caseless Munitions Lockers", "Laser Ballistics Calibration Bench"],
                 },
                 {
                     "id": "sub_priv1_outfitter",
-                    "name": "Proprietary Exo-Weave & Ballistic Atelier",
+                    "name": "Ballistic Tailoring & Exo-Weave Atelier",
                     "access_tier": "restricted",
-                    "props": ["Exo-Weave Mannequin Row", "Custom Aramid Tailoring Pod", "Corporate Tech-Duster Racks", "3D Body-Scan Fitting Booth"],
+                    "props": ["Exo-Weave Mannequin Row", "Custom Aramid Tailoring Pod", "Obsidian Duster Racks", "3D Body-Scan Fitting Booth"],
                 },
                 {
                     "id": "sub_priv1_medbay",
-                    "name": "Corporate Trauma & Neural-Cleanse Suite",
+                    "name": "Occupational Trauma & Neural Recovery Suite",
                     "access_tier": "restricted",
-                    "props": ["Automated Trauma Pod", "Neural Detox Recliner", "Proprietary Nano-Med Dispenser", "Biometric Vitals Array"],
+                    "props": ["Automated Trauma Pod", "Neural Recovery Recliner", "VitaSeal Injector Cabinet", "Biometric Vitals Array"],
                 },
                 {
                     "id": "sub_priv1_canteen",
-                    "name": "Skyline Executive Espresso & Dining Lounge",
+                    "name": "Skyline Lounge & Executive Espresso Bar",
                     "access_tier": "restricted",
-                    "props": ["Italian Marble Espresso Bar", "Skyline Observation Booths", "Private Chef's Tasting Counter", "Filtered Sparkling Water Tap"],
+                    "props": ["Italian Marble Espresso Bar", "Skyline Observation Booths", "Chef's Tasting Counter", "Chilled Mineral Water Tap"],
                 },
                 {
                     "id": "sub_priv1_research",
-                    "name": "In-House Anomalous R&D & Fabrication Lab",
+                    "name": "Applied Anomalous Sciences & Cleanroom Lab",
                     "access_tier": "restricted",
-                    "props": ["Cleanroom Fabrication Arm", "Resonance Mass Spectrometer", "Proprietary Core Containment Hood", "Chief Scientist's Terminal"],
+                    "props": ["Cleanroom Manipulator Arm", "Resonance Mass Spectrometer", "Cryo-Core Containment Hood", "Lead Researcher's Terminal"],
                 },
                 {
                     "id": "sub_priv1_training",
-                    "name": "Holographic VR Kill-House & Calibration Deck",
+                    "name": "Simulated Breach & Ballistics Calibration Deck",
                     "access_tier": "restricted",
-                    "props": ["Acoustic-Damped Gauss Lanes", "Full-Dive VR Breach Arena", "Telemetry Recoil Rig", "Prototype Diagnostics Rack"],
+                    "props": ["Acoustic-Damped Gauss Lanes", "Modular Holographic Breach House", "Telemetry Recoil Rig", "OptiLink Diagnostics Rack"],
                 },
                 {
                     "id": "sub_priv1_quarters",
-                    "name": "Executive Penthouse Operative Suites",
+                    "name": "Retained Operative Penthouse Suites",
                     "access_tier": "restricted",
-                    "props": ["King-Size Memory-Foam Bed", "Designer Leather Lounge", "Climate-Controlled Gear Closet", "Floor-to-Ceiling Skyline Glass"],
+                    "props": ["Low-Profile Platform Bed", "Full-Grain Leather Lounge", "Climate-Controlled Gear Closet", "Floor-to-Ceiling Skyline Glass"],
                 },
                 {
                     "id": "sub_priv1_vault",
-                    "name": "Sub-Basement Cryo-Stasis Containment Vault",
+                    "name": "Sub-Level Cryogenic Asset Vault",
                     "access_tier": "restricted",
-                    "props": ["Biometric Blast Airlock", "Cryo-Stasis Suppression Pods", "Corporate Black-Box Safes", "Automated Turret Overwatch"],
+                    "props": ["Biometric Blast Airlock", "Cryo-Stasis Suppression Pods", "Serialized Specimen Safes", "Automated Overwatch Turret"],
                 },
             ],
         },
@@ -606,62 +606,62 @@ def inject_anomalous_faction_hq_facilities(zones: list[dict], session_id: int = 
             "sub_locations": [
                 {
                     "id": "sub_priv2_entrance",
-                    "name": "Walk-Up Commercial Foyer & Reception Desk",
+                    "name": "Brick-Front Vestibule & Security Reception",
                     "is_entrance": 1,
-                    "props": ["Frosted-Glass Suite Door", "Buzz-In Intercom Panel", "Cluttered Reception Counter", "Cracked Vinyl Waiting Chairs"],
+                    "props": ["Etched Brass Suite Plaque", "Encrypted Video Intercom", "Walnut Reception Desk", "Leather Client Waiting Chairs"],
                 },
                 {
                     "id": "sub_priv2_dispatch",
-                    "name": "Corkboard Case Room & Dispatch Bullpen",
-                    "props": ["Pin-Covered Bounty Corkboard", "Mismatched Metal Office Desks", "Dry-Erase Case Schedule", "Police-Band Radio Scanner"],
+                    "name": "Partner Case Room & Dispatch Bullpen",
+                    "props": ["Magnetic Incident Pinboard", "Oak Partner Desks", "Encrypted Municipal Band Scanner", "Framed Containment Licenses"],
                 },
                 {
                     "id": "sub_priv2_armory",
-                    "name": "Padlocked Back-Room Gun Cage & Surplus Locker",
+                    "name": "Vaulted Armory & Gunsmithing Bench",
                     "access_tier": "restricted",
-                    "props": ["Chain-Link Supply Cage", "Multi-Vendor Surplus Crates", "Dented Steel Gun Lockers", "Vise-Clamped Cleaning Bench"],
+                    "props": ["Heavy Steel Vault Door", "Custom-Tuned Rifle Racks", "Precision Reloading & Lathe Bench", "Ultrasonic Parts Cleaner"],
                 },
                 {
                     "id": "sub_priv2_outfitter",
-                    "name": "Surplus Tactical Rack & Patching Corner",
+                    "name": "Tactical Rigging & Fitted Armor Room",
                     "access_tier": "restricted",
-                    "props": ["Rolling Garment Pipe-Rack", "Assorted Surplus Kevlar Bins", "Heavy-Duty Patching Sewing Machine", "Scuffed Full-Length Mirror"],
+                    "props": ["Fitted Ceramic Plate Racks", "Waxed-Canvas & Wool Coat Rail", "Industrial Harness Stitcher", "Beveled Fitting Mirror"],
                 },
                 {
                     "id": "sub_priv2_medbay",
-                    "name": "Back-Office First-Aid Cot & Triage Closet",
+                    "name": "Compact Field Infirmary & Triage Room",
                     "access_tier": "restricted",
-                    "props": ["Folding Vinyl Exam Cot", "Wall-Mounted First-Aid Tin", "Pharmacy Bandage & Painkiller Boxes", "Secondhand Portable Defibrillator"],
+                    "props": ["Stainless Examination Table", "Locked Trauma Supply Cabinet", "Portable Ultrasound & Defibrillator", "Sterile Suture Tray"],
                 },
                 {
                     "id": "sub_priv2_canteen",
-                    "name": "Fluorescent Breakroom & Drip-Coffee Kitchenette",
+                    "name": "Timber-Beam Lounge & Pour-Over Kitchenette",
                     "access_tier": "restricted",
-                    "props": ["Burnt-Glass Drip Coffee Pot", "Humming Sticker-Covered Mini-Fridge", "Wobbly Formica Break Table", "Bulk Cup-Noodle & Biscuit Shelf"],
+                    "props": ["Gooseneck Pour-Over Coffee Bar", "Exposed-Brick Booth Table", "Stocked Cold-Brew & Meal Fridge", "Brass Banker's Reading Lamps"],
                 },
                 {
                     "id": "sub_priv2_research",
-                    "name": "Cluttered Appraisal Bench & Secondhand Lab",
+                    "name": "Anomalous Forensics & Ward Calibration Lab",
                     "access_tier": "restricted",
-                    "props": ["Solder-Scarred Wooden Workbench", "Used Oscilloscope & EMF Meter", "Masking-Tape Mason Jar Samples", "Dog-Eared Occult Reference Binders"],
+                    "props": ["Copper-Grounded Calibration Bench", "Benchtop Hume & Spectrum Analyzer", "Silver-Halide Darkroom Enlarger", "Indexed Case Reference Library"],
                 },
                 {
                     "id": "sub_priv2_training",
-                    "name": "Soundproofed Cellar Firing Lane & Sandbag Pit",
+                    "name": "Sound-Baffled Basement Firing Lane",
                     "access_tier": "restricted",
-                    "props": ["Egg-Crate Foam Wall Panels", "Clipped Paper Silhouette Targets", "Stacked Sandbag Bullet Backstop", "Box of Reused Ear Protectors"],
+                    "props": ["Acoustic Baffle Wall Panels", "Motorized Target Carrier", "Angled Steel Bullet Trap", "Electronic Ear-Pro Charging Rack"],
                 },
                 {
                     "id": "sub_priv2_quarters",
-                    "name": "Partitioned Bunk Room & Folding Cots",
+                    "name": "Quiet Standby Bunk & Cedar Locker Room",
                     "access_tier": "restricted",
-                    "props": ["Creaking Canvas Folding Cots", "Padlocked Surplus Gym Lockers", "Rattling Pedestal Box Fan", "Overloaded Coat-Hook Strip"],
+                    "props": ["Built-In Timber Standby Bunks", "Ventilated Cedar Gear Lockers", "Tiled Rain-Shower Alcove", "Warm Brass Wall Sconces"],
                 },
                 {
                     "id": "sub_priv2_vault",
-                    "name": "Reinforced Cellar Boiler-Room Evidence Cage",
+                    "name": "Lead-Lined Sub-Cellar Evidence Vault",
                     "access_tier": "restricted",
-                    "props": ["Padlocked Iron-Grate Door", "Chalk-Salt Surplus Floor Safes", "Lead-Lined Hardware Toolboxes", "Flickering Wire-Caged Worklight"],
+                    "props": ["Combination Vault Safe Door", "Warded Cold-Iron Floor Chests", "Copper Grounding Busbar", "Hume-Shielded Specimen Lockers"],
                 },
             ],
         },
@@ -939,6 +939,21 @@ def resolve_npc_residence(session_id: int, npc_name: str, scenario_key: str = "h
     Returns (zone_name, primary_residence_name).
     """
     clean_name = str(npc_name or "").strip()
+    if session_id and clean_name:
+        try:
+            from .realty_catalog import is_anomalous_realty_scenario
+            if is_anomalous_realty_scenario(scenario_key):
+                from mechanics.social.agent_roster import find_special_agent_by_name
+                from .residences import ensure_npc_residence_materialized
+                ag = find_special_agent_by_name(int(session_id), clean_name, scen_key=scenario_key)
+                if ag:
+                    _, disp = ensure_npc_residence_materialized(int(session_id), ag, scen_key=scenario_key)
+                    if "➔" in disp:
+                        parts_d = [p.strip() for p in disp.split("➔") if p.strip()]
+                        if len(parts_d) >= 2:
+                            return (parts_d[0], parts_d[1])
+        except Exception:
+            pass
     res_zone = get_session_residential_neighborhood_name(session_id, scenario_key)
 
     if not clean_name:

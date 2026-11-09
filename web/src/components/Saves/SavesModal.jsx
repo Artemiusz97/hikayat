@@ -209,7 +209,7 @@ const SavesModal = ({ isOpen, onClose, user, onSessionLoaded }) => {
                     onClick={(e) => handleSave(e, slot.slot_name)}
                     disabled={busySlot !== null}
                     className="px-2 py-1 rounded bg-black/60 hover:bg-neutral-800 text-gray-300 border border-fantasy-border text-[10px] font-semibold uppercase flex items-center gap-1"
-                    title="Overwrite this slot"
+                    title={t('saves.overwrite_tooltip', 'Overwrite this slot')}
                   >
                     <Save size={11} /> {t('saves.overwrite')}
                   </button>
@@ -226,7 +226,7 @@ const SavesModal = ({ isOpen, onClose, user, onSessionLoaded }) => {
                     onClick={() => handleDelete(slot.slot_name)}
                     disabled={busySlot !== null}
                     className="p-1 text-gray-500 hover:text-red-400 transition-colors"
-                    title="Delete Checkpoint"
+                    title={t('saves.delete_tooltip', 'Delete Checkpoint')}
                   >
                     <Trash2 size={13} />
                   </button>

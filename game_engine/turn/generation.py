@@ -174,12 +174,18 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
     # Retrieve randomized starting hook and archetype (Hub Launchpad, In Media Res, or Delve Threshold)
 
     anom_starting_fac = session.get("anomalous_starting_faction") or session.get("starting_faction")
+    if not anom_starting_fac:
+        extra_map = session.get("extra") if isinstance(session.get("extra"), dict) else {}
+        anom_starting_fac = extra_map.get("anomalous_starting_faction")
     anom_starting_loc = session.get("anomalous_starting_location") or session.get("current_location")
     if not anom_starting_fac and scenario_data.is_anomalous_incursions_scenario(scen_key):
         try:
             from mechanics.social.factions import get_anomalous_faction_state
             fac_st = get_anomalous_faction_state(session.get("id"), user_id=session.get("host_user_id"))
-            anom_starting_fac = fac_st.get("faction_archetype_key")
+            if fac_st.get("origin_mode") == "student" or fac_st.get("faction_archetype_key") == "student_freelancer":
+                anom_starting_fac = "student_freelancer"
+            else:
+                anom_starting_fac = fac_st.get("faction_archetype_key")
         except Exception:
             anom_starting_fac = "public_agency"
 
@@ -283,6 +289,8 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
             from mechanics.world.locations.graph_seeder import ensure_session_spatial_graph_seeded
             from mechanics.world.locations.pathfinding import format_node_hierarchy
             ensure_session_spatial_graph_seeded(session["id"], scen_key, char_name=first_char_name)
+            if scenario_data.is_anomalous_incursions_scenario(scen_key) and not db.get_player_properties(session["id"]):
+                db.grant_or_relocate_starter_quarters(session["id"], anom_starting_fac or "public_agency")
             pre_node_id = session.get("current_node_id") or ""
             if not pre_node_id and suggested_loc:
                 pre_node_id = db.resolve_node_id_from_location(session["id"], suggested_loc) or ""
@@ -476,7 +484,7 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
             session["lead_character_gender"] = lead_c.get("gender", "male")
 
     zone_0 = prompt_layout.build_static_core(mode, "opening")
-    zone_1 = prompt_layout.build_session_zone(session)
+    zone_1 = prompt_layout.build_session_zone(session, kind="opening")
     zone_1b = prompt_layout.build_world_canon_zone(session)
     system_prompt = prompt_layout.assemble_system_prompt(zone_0, zone_1, zone_1b)
 
@@ -528,6 +536,8 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
             from mechanics.world.locations.graph_seeder import ensure_session_spatial_graph_seeded
             from mechanics.world.locations.pathfinding import format_node_hierarchy
             ensure_session_spatial_graph_seeded(session["id"], scen_key, char_name=first_char_name)
+            if scenario_data.is_anomalous_incursions_scenario(scen_key) and not db.get_player_properties(session["id"]):
+                db.grant_or_relocate_starter_quarters(session["id"], anom_starting_fac or "public_agency")
             init_loc = res_deep.get("location") or suggested_loc or ""
             init_node_id = db.resolve_node_id_from_location(session["id"], init_loc) if init_loc else None
             if not init_node_id and locked_opening_node_id:
@@ -724,7 +734,7 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
 
                 is_story_quest=1,
 
-                clues_required=len(formatted_sub_objs),
+                clues_required=1, deadline_day=None, deadline_minute=None, dossier_stage="compiled",
 
                 sub_objectives=formatted_sub_objs
 
@@ -767,7 +777,7 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
                     reward_xp=250,
                     reward_gold=60,
                     is_story_quest=1,
-                    clues_required=len(formatted_sub_objs),
+                    clues_required=1, deadline_day=None, deadline_minute=None, dossier_stage="compiled",
                     sub_objectives=formatted_sub_objs
                 )
                 for so in formatted_sub_objs:
@@ -1149,6 +1159,7 @@ def _fast_path_classify_ambient_action(action_text: str, ctx: Any = None, parsed
 async def classify_custom_action(session: dict, char: dict, inventory: list, action_text: str) -> dict:
 
     from mechanics.narrative.intent import classify_action_intent, is_free_ambient_action, IntentCategory, IntentContext
+    from mechanics.system.input_sanitizer import fence_player_action
 
     cur_npcs = [game_engine._get_npc_name(n) for n in (session.get("current_npcs") or []) if n]
 
@@ -1183,7 +1194,7 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
         f"KNOWN WORLD:\n{game_engine._known_world_text(session['id'], session.get('current_location', ''), current_npcs=session.get('current_npcs', []))}\n\n"
         f"CHARACTER SHEET:\n{game_engine._character_sheet_text(char, inventory)}\n\n"
         f"RECENT HISTORY:\n{game_engine._history_text(session.get('history', []), session_id=session.get('id'))}\n\n"
-        f"Custom action: \"{action_text}\"\n\n"
+        f"Custom action: {fence_player_action(action_text, max_len=400)}\n\n"
         f"Decide governing Attribute, requirement (2-12), intent, sub_intent, and target_npc. If spell, set mp_cost.\n"
     )
 
@@ -1219,7 +1230,7 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
     if llm_intent and llm_intent != "general_action":
         res_dict["intent"] = llm_intent
         res_dict["action_category"] = llm_intent
-        if llm_intent in ("dialogue_exit", "movement", "rest_sleep", "media_capture"):
+        if not (isinstance(session, dict) and session.get("nearby_enemies")) and llm_intent in ("dialogue_exit", "movement", "rest_sleep", "media_capture") and parsed.category.value == llm_intent:
             res_dict["stat"] = "NONE"
             res_dict["requirement"] = 0
             res_dict["mp_cost"] = 0
@@ -1230,6 +1241,10 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
 
     res_dict["sub_intent"] = llm_sub or parsed.sub_target or ""
     res_dict["target_npc"] = llm_target or parsed.target_entity or ""
+    if not res_dict.get("fast_path") and not (not (isinstance(session, dict) and session.get("nearby_enemies")) and llm_intent in ("dialogue_exit", "movement", "rest_sleep", "media_capture") and parsed.category.value == llm_intent):
+        if str(res_dict.get("stat") or "").upper().strip() in ("FREE", "NONE", "ITEM", ""):
+            res_dict["stat"] = "PER"
+        res_dict["requirement"] = max(6, int(res_dict.get("requirement", 6) or 6))
 
     # Merge deterministic primitives (preserving LLM value if non-empty, else deterministic regex value)
     res_dict["gold_spent"] = max(int(res_dict.get("gold_spent") or 0), int(primitives.get("gold_spent") or 0))
@@ -1312,9 +1327,15 @@ async def generate_custom_starter_gear(char_class: str, class_description: str, 
 
     # ── Build the LLM user prompt ─────────────────────────────────────────────
 
-    gender_str = str(gender or "Male").strip()
+    from mechanics.system.input_sanitizer import sanitize_character_name, sanitize_prompt_lore, wrap_custom_lore
 
-    race_str = str(race or "Human").strip()
+    clean_char_class = sanitize_character_name(str(char_class or "Adventurer"), max_len=60, fallback="Adventurer")
+
+    gender_str = sanitize_character_name(str(gender or "Male"), max_len=50, fallback="Male")
+
+    race_str = sanitize_character_name(str(race or "Human"), max_len=60, fallback="Human")
+
+    fenced_class_desc = wrap_custom_lore(class_description or "", max_len=1500) or "<custom_lore>(no description provided)</custom_lore>"
 
     is_nsfw = uses_nsfw_model(scenario)
 
@@ -1324,9 +1345,9 @@ async def generate_custom_starter_gear(char_class: str, class_description: str, 
 
     user_prompt = (
 
-        f"Character Profession: {char_class}\n"
+        f"Character Profession: {clean_char_class}\n"
 
-        f"Description: {class_description or '(no description provided)'}\n"
+        f"Description: {fenced_class_desc}\n"
 
         f"Scenario/Setting: {scenario}\n"
 
@@ -1429,11 +1450,14 @@ async def generate_custom_starter_gear(char_class: str, class_description: str, 
 
 
 
-        llm_name = str(entry.get("name", "")).strip()
+        llm_name = sanitize_character_name(str(entry.get("name", "")), max_len=80, fallback="")
 
-        llm_desc = str(entry.get("description", "")).strip()
+        llm_desc = sanitize_prompt_lore(str(entry.get("description", "")), max_len=300)
 
-        slot_cost = int(entry.get("slot_cost", 1))
+        try:
+            slot_cost = max(1, min(3, int(entry.get("slot_cost", 1) or 1)))
+        except (TypeError, ValueError):
+            slot_cost = 1
 
 
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+from .base import SessionRestrictedView
 from .constants import *
 import asyncio
 import json
@@ -40,11 +42,20 @@ from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as 
 from mechanics.combat.items import parse_item_effect, apply_item_to_target
 import unicodedata
 from ..embeds import *
-from ..embeds import _build_bounties_embed, _build_bounty_board_embed, _build_campaign_goals_embed, _build_caseboard_embed, _build_history_embed, _build_main_quest_embed, _build_quest_log_embed, _choice_button_label, _format_items_gained, _format_items_gained_multi, _format_tracker_entity, _get_choice_emoji, _get_choice_quest_icon, _get_choice_skill_emoji, _get_quest_scenario_labels, _is_dialogue_partner, _location_text, _norm_name, _parse_status_effects, _party_vitals_text, _safe_add_field, _safe_int, _scenario_command_choices, _strip_leading_emojis, _tracker_group_text, _tracker_header, _truncate_embed_text, _truncate_field_name, _truncate_field_value
-from ..embeds import _RESULT_COLORS, _RESULT_TITLES, _scenario_command_choices, _parse_status_effects, _party_vitals_text, _location_text, _safe_int, _truncate_field_value, _truncate_field_name, _safe_add_field, _norm_name, _is_dialogue_partner, _format_tracker_entity, _tracker_group_text, _strip_leading_emojis, _get_choice_quest_icon, _get_choice_skill_emoji, _get_choice_emoji, _format_items_gained, _format_items_gained_multi, _tracker_header, _truncate_embed_text, _choice_button_label, _get_quest_scenario_labels, _build_campaign_goals_embed, _build_main_quest_embed, _build_bounties_embed, _build_history_embed, _build_caseboard_embed, _build_quest_log_embed, _build_bounty_board_embed
+from ..embeds import (
+    _RESULT_COLORS, _RESULT_TITLES, _build_bounties_embed, _build_bounty_board_embed,
+    _build_campaign_goals_embed, _build_caseboard_embed, _build_history_embed,
+    _build_main_quest_embed, _build_quest_log_embed, _choice_button_label,
+    _format_items_gained, _format_items_gained_multi, _format_tracker_entity,
+    _get_choice_emoji, _get_choice_quest_icon, _get_choice_skill_emoji,
+    _get_quest_scenario_labels, _is_dialogue_partner, _location_text, _norm_name,
+    _parse_status_effects, _party_vitals_text, _safe_add_field, _safe_int,
+    _scenario_command_choices, _strip_leading_emojis, _tracker_group_text,
+    _tracker_header, _truncate_embed_text, _truncate_field_name, _truncate_field_value,
+)
 
 class ZoneSelectDropdown(discord.ui.Select):
-    def __init__(self, cog: "AdventureCog", session_id: int, scen_key: str, zones_summary: list, current_loc: str = "", char_name: str = "", sync: bool = False):
+    def __init__(self, cog: "AdventureCog", session_id: int, scen_key: str, zones_summary: list, current_loc: str = "", char_name: str = "", sync: bool = False, user_id: int | None = None):
         self.cog = cog
         self.session_id = session_id
         self.scen_key = scen_key
@@ -52,6 +63,7 @@ class ZoneSelectDropdown(discord.ui.Select):
         self.current_loc = current_loc
         self.char_name = char_name
         self.sync = sync
+        self.user_id = user_id
 
         options = []
         for z in zones_summary[:25]:
@@ -92,14 +104,16 @@ class ZoneSelectDropdown(discord.ui.Select):
             zones_summary=self.zones_summary,
             current_loc=self.current_loc,
             char_name=self.char_name,
-            sync=self.sync
+            sync=self.sync,
+            user_id=self.user_id,
         )
         embed = build_zone_places_embed(self.session_id, selected_zone, self.scen_key, current_loc=self.current_loc, char_name=self.char_name)
         await interaction.response.edit_message(embed=embed, view=view)
 
-class ZoneSelectView(discord.ui.View):
-    def __init__(self, cog: "AdventureCog", session_id: int, scen_key: str, current_loc: str = "", char_name: str = "", sync: bool = False, zones_summary: list = None):
-        super().__init__(timeout=180)
+class ZoneSelectView(SessionRestrictedView):
+    def __init__(self, cog: "AdventureCog", session_id: int, scen_key: str, current_loc: str = "", char_name: str = "", sync: bool = False, zones_summary: list = None, user_id: int | None = None):
+        super().__init__(session_id=session_id, timeout=180, owner_user_id=user_id)
+        self.user_id = user_id
         if zones_summary is None:
             from mechanics.world.locations import process_llm_location_update, get_zone_summary_tree, sanitize_location_target
             # Auto-discover any active quest target locations so they exist in SQLite and show in the dropdown
@@ -111,7 +125,7 @@ class ZoneSelectView(discord.ui.View):
                     process_llm_location_update(session_id, clean_target, scen_key, char_name=char_name)
             zones_summary = get_zone_summary_tree(session_id, scen_key, current_loc=current_loc, char_name=char_name)
 
-        self.add_item(ZoneSelectDropdown(cog, session_id, scen_key, zones_summary, current_loc=current_loc, char_name=char_name, sync=sync))
+        self.add_item(ZoneSelectDropdown(cog, session_id, scen_key, zones_summary, current_loc=current_loc, char_name=char_name, sync=sync, user_id=user_id))
 
 class PrimarySelectDropdown(discord.ui.Select):
     def __init__(
@@ -151,6 +165,7 @@ class PrimarySelectDropdown(discord.ui.Select):
                         current_loc=self.parent_view.current_loc,
                         char_name=self.parent_view.char_name,
                         sync=self.sync,
+                        user_id=self.parent_view.user_id,
                     )
                     embed = build_facility_rooms_embed(self.parent_view.zone_name, p_item)
                     await interaction.response.edit_message(embed=embed, view=sub_view)
@@ -163,9 +178,9 @@ class PrimarySelectDropdown(discord.ui.Select):
             await self.cog.handle_action(interaction, self.session_id, custom_text=action_text)
 
 
-class PrimarySelectView(discord.ui.View):
-    def __init__(self, cog: "AdventureCog", session_id: int, scen_key: str, zone_name: str, zones_summary: list, current_loc: str = "", char_name: str = "", sync: bool = False):
-        super().__init__(timeout=180)
+class PrimarySelectView(SessionRestrictedView):
+    def __init__(self, cog: "AdventureCog", session_id: int, scen_key: str, zone_name: str, zones_summary: list, current_loc: str = "", char_name: str = "", sync: bool = False, user_id: int | None = None):
+        super().__init__(session_id=session_id, timeout=180, owner_user_id=user_id)
         self.cog = cog
         self.session_id = session_id
         self.scen_key = scen_key
@@ -174,6 +189,7 @@ class PrimarySelectView(discord.ui.View):
         self.current_loc = current_loc
         self.char_name = char_name
         self.sync = sync
+        self.user_id = user_id
         self.primary_by_value: dict[str, dict] = {}
 
         target_zone = next((z for z in zones_summary if z["zone_name"].lower() == zone_name.lower()), None)
@@ -219,7 +235,7 @@ class PrimarySelectView(discord.ui.View):
 
     async def _on_back(self, interaction: discord.Interaction):
         embed = build_world_map_embed(self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name)
-        view = ZoneSelectView(self.cog, self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name, sync=self.sync)
+        view = ZoneSelectView(self.cog, self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name, sync=self.sync, user_id=self.user_id)
         await interaction.response.edit_message(embed=embed, view=view)
 
 
@@ -246,7 +262,7 @@ class SubLocationSelectDropdown(discord.ui.Select):
             await self.cog.handle_action(interaction, self.session_id, custom_text=action_text)
 
 
-class SubLocationSelectView(discord.ui.View):
+class SubLocationSelectView(SessionRestrictedView):
     def __init__(
         self,
         cog: "AdventureCog",
@@ -258,8 +274,9 @@ class SubLocationSelectView(discord.ui.View):
         current_loc: str = "",
         char_name: str = "",
         sync: bool = False,
+        user_id: int | None = None,
     ):
-        super().__init__(timeout=180)
+        super().__init__(session_id=session_id, timeout=180, owner_user_id=user_id)
         self.cog = cog
         self.session_id = session_id
         self.scen_key = scen_key
@@ -269,6 +286,7 @@ class SubLocationSelectView(discord.ui.View):
         self.current_loc = current_loc
         self.char_name = char_name
         self.sync = sync
+        self.user_id = user_id
 
         p_name = primary_item.get("name", "Facility")
         room_details = primary_item.get("sub_location_details") or []
@@ -347,13 +365,14 @@ class SubLocationSelectView(discord.ui.View):
             current_loc=self.current_loc,
             char_name=self.char_name,
             sync=self.sync,
+            user_id=self.user_id,
         )
         embed = build_zone_places_embed(self.session_id, self.zone_name, self.scen_key, current_loc=self.current_loc, char_name=self.char_name)
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _on_world_map(self, interaction: discord.Interaction):
         embed = build_world_map_embed(self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name)
-        view = ZoneSelectView(self.cog, self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name, sync=self.sync)
+        view = ZoneSelectView(self.cog, self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name, sync=self.sync, user_id=self.user_id)
         await interaction.response.edit_message(embed=embed, view=view)
 
 class SceneItemSelectDropdown(discord.ui.Select):
@@ -384,13 +403,15 @@ class SceneItemSelectDropdown(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         item_id = int(self.values[0])
-        inv = db.get_inventory(self.user_id)
-        selected_item = next((i for i in inv if i["id"] == item_id), None)
+        inv, session = await asyncio.gather(
+            adb(db.get_inventory, self.user_id),
+            adb(db.get_session, self.session_id),
+        )
+        selected_item = next((i for i in (inv or []) if i["id"] == item_id), None)
         if not selected_item:
             await interaction.response.send_message("❌ Item no longer in inventory.", ephemeral=True)
             return
 
-        session = db.get_session(self.session_id)
         if not session:
             await interaction.response.send_message("❌ Session not found.", ephemeral=True)
             return
@@ -411,9 +432,12 @@ class SceneItemSelectDropdown(discord.ui.Select):
                 })
 
         # Other party members (multiplayer)
-        for uid in session.get("turn_order", []):
-            if uid != self.user_id:
-                p_char = db.get_character(uid)
+        other_uids = [int(uid) for uid in (session.get("turn_order") or []) if uid is not None and int(uid) != int(self.user_id)]
+        if other_uids:
+            party_chars = await adb(db.get_session_characters, self.session_id)
+            chars_by_uid = {int(pc["user_id"]): pc for pc in (party_chars or []) if isinstance(pc, dict) and pc.get("user_id") is not None}
+            for uid in other_uids:
+                p_char = chars_by_uid.get(uid) or await adb(db.get_character, uid)
                 if p_char:
                     targets.append({
                         "label": f"🛡️ {p_char['name']} (Party Member)",
@@ -443,9 +467,9 @@ class SceneItemSelectDropdown(discord.ui.Select):
             view=view
         )
 
-class SceneItemSelectView(discord.ui.View):
+class SceneItemSelectView(SessionRestrictedView):
     def __init__(self, cog: "AdventureCog", session_id: int, user_id: int, items: list[dict], sync: bool = False):
-        super().__init__(timeout=120)
+        super().__init__(session_id=session_id, timeout=120, owner_user_id=user_id)
         self.add_item(SceneItemSelectDropdown(cog, session_id, user_id, items, sync=sync))
 
 class SceneUniversalTargetSelectDropdown(discord.ui.Select):
@@ -501,8 +525,8 @@ class SceneUniversalTargetSelectDropdown(discord.ui.Select):
                 target_name=target_name
             )
 
-class SceneUniversalTargetSelectView(discord.ui.View):
+class SceneUniversalTargetSelectView(SessionRestrictedView):
     def __init__(self, cog: "AdventureCog", session_id: int, user_id: int, item: dict, targets: list[dict], sync: bool = False):
-        super().__init__(timeout=120)
+        super().__init__(session_id=session_id, timeout=120, owner_user_id=user_id)
         self.add_item(SceneUniversalTargetSelectDropdown(cog, session_id, user_id, item, targets, sync=sync))
 

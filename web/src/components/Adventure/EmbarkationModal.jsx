@@ -15,10 +15,10 @@ const STAT_KEYS = [
 
 function computeClassPreset(className = '', classDesc = '') {
   const text = `${className} ${classDesc}`.toLowerCase();
-  if (/mage|wizard|sorcerer|warlock|arcan|scholar|psion|netrunner|alchemist|hacker|technolog|esper|scribe|investigator|tester|tinkerer/.test(text)) return { str: 1, per: 2, end: 2, cha: 1, int: 4, agi: 1, luk: 1 };
-  if (/rogue|thief|assassin|ranger|scout|sniper|infiltrator|smuggler|delinquent|marksman|wetwork|stalker|runner|trouble-shooter/.test(text)) return { str: 1, per: 3, end: 1, cha: 1, int: 1, agi: 3, luk: 2 };
-  if (/bard|diplomat|idol|president|noble|social|merchant|cleric|healer|priest|ritualist|broker|exorcist|escort|containment specialist/.test(text)) return { str: 1, per: 1, end: 2, cha: 4, int: 2, agi: 1, luk: 1 };
-  if (/paladin|knight|templar|guardian|vanguard|enforcer|juggernaut|breacher|engineer|warden|strike operator|perimeter guard/.test(text)) return { str: 3, per: 1, end: 3, cha: 2, int: 1, agi: 1, luk: 1 };
+  if (/mage|wizard|sorcerer|warlock|arcan|scholar|psion|netrunner|alchemist|hacker|technolog|esper|scribe|investigator|ordnance specialist|countermeasure tech|tester|tinkerer/.test(text)) return { str: 1, per: 2, end: 2, cha: 1, int: 4, agi: 1, luk: 1 };
+  if (/rogue|thief|assassin|ranger|scout|sniper|infiltrator|smuggler|delinquent|marksman|overwatch|telemetry specialist|licensed field specialist|wetwork|stalker|runner|trouble-shooter/.test(text)) return { str: 1, per: 3, end: 1, cha: 1, int: 1, agi: 3, luk: 2 };
+  if (/paladin|knight|templar|guardian|vanguard|enforcer|juggernaut|breacher|entry specialist|recovery operator|engineer|warden|strike operator|perimeter guard/.test(text)) return { str: 3, per: 1, end: 3, cha: 2, int: 1, agi: 1, luk: 1 };
+  if (/bard|diplomat|idol|president|noble|social|merchant|cleric|healer|priest|ritualist|broker|exorcist|escort|containment agent|containment specialist/.test(text)) return { str: 1, per: 1, end: 2, cha: 4, int: 2, agi: 1, luk: 1 };
   return { str: 3, per: 1, end: 3, cha: 1, int: 1, agi: 2, luk: 1 };
 }
 
@@ -61,11 +61,30 @@ const MALE_TEXTURE_OPTIONS = [
   { value: 'Sturdy Draconic Build', label: 'Sturdy Draconic Build (Scaly/Draconic)' },
 ];
 
+const BREAST_SIZE_LABELS = {
+  flat: ['character.breast_flat', 'Flat (AA-Cup / Barely There)'],
+  small: ['character.breast_petite', 'Petite / Modest (A-B Cup)'],
+  average: ['character.breast_proportional', 'Proportional (C-Cup)'],
+  large: ['character.breast_voluptuous', 'Voluptuous / Full (D-DD Cup)'],
+  huge: ['character.breast_bountiful', 'Bountiful / Massive (E+ Cup)'],
+};
+
+const PENIS_SIZE_LABELS = {
+  small: ['character.penis_compact', 'Petite / Modest (Compact)'],
+  average: ['character.penis_average', 'Proportional (Average)'],
+  large: ['character.penis_large', 'Well-Endowed / Formidable (Large)'],
+  huge: ['character.penis_huge', 'Massive / Heavy (Huge)'],
+};
+
 const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = [], availableTags = [], targetSlot = 1 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const activeUiLang = (i18n.resolvedLanguage || i18n.language || 'en').slice(0, 2);
   const factionFieldId = useId();
   const [step, setStep] = useState(1);
-  const [scenario, setScenario] = useState('fantasy');
+  const [scenario, setScenario] = useState(() => {
+    const cScen = character?.scenario;
+    return (cScen && !['none', 'null', 'undefined'].includes(String(cScen).trim().toLowerCase())) ? cScen : 'fantasy';
+  });
   const [customTags, setCustomTags] = useState(['fantasy']);
   const [charClass, setCharClass] = useState(character?.char_class || 'Warrior');
   const [startingWeapon, setStartingWeapon] = useState('Rusty Sword');
@@ -88,6 +107,8 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
   const [breastSize, setBreastSize] = useState('average');
   const [penisSize, setPenisSize] = useState('average');
   const [assetTexture, setAssetTexture] = useState('');
+  // Collapsed to a summary when the character already has saved anatomy (set on a previous NSFW embark).
+  const [anatomyExpanded, setAnatomyExpanded] = useState(false);
 
   // Step 2 variables
   const [mode, setMode] = useState('solo'); // solo, turn, sync
@@ -101,6 +122,18 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     if (scenObj?.tags?.includes('nsfw')) return true;
     return false;
   }, [scenario, customTags, scenarios]);
+
+  const familyRootOf = (s) => s?.family_root || s?.key;
+  const familyRoots = useMemo(() => scenarios.filter(s => familyRootOf(s) === s.key), [scenarios]);
+  const activeFamily = useMemo(() => {
+    if (scenario === 'custom') return 'custom';
+    const scenObj = scenarios.find(s => s.key === scenario);
+    return scenObj ? familyRootOf(scenObj) : scenario;
+  }, [scenario, scenarios]);
+  const familyVariants = useMemo(
+    () => (activeFamily === 'custom' ? [] : scenarios.filter(s => familyRootOf(s) === activeFamily)),
+    [activeFamily, scenarios]
+  );
 
   const charGen = String(character?.gender || '').toLowerCase();
   const isMale = useMemo(() => {
@@ -129,9 +162,13 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         curTex = '';
       }
       setAssetTexture(curTex);
+      setAnatomyExpanded(!(appObj.breast_size || appObj.penis_size || character.breast_size || character.penis_size));
       setAttribute(character.attribute || 'fire');
       setCombatArchetype(character.combat_archetype || 'vanguard');
       setAbilityMedium(character.ability_medium || 'direct_manifestation');
+      if (character.scenario && !['none', 'null', 'undefined'].includes(String(character.scenario).trim().toLowerCase())) {
+        setScenario(character.scenario);
+      }
       setStep(1);
       
       // Fetch share link in background
@@ -147,8 +184,8 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     if (!isOpen) return;
     setLoading(true);
     const query = scenario === 'custom' 
-      ? `/api/class-templates?scenario=custom&tags=${encodeURIComponent(tagsParam || 'fantasy')}`
-      : `/api/class-templates?scenario=${encodeURIComponent(scenario || 'fantasy')}`;
+      ? `/api/class-templates?scenario=custom&tags=${encodeURIComponent(tagsParam || 'fantasy')}&lang=${encodeURIComponent(activeUiLang)}`
+      : `/api/class-templates?scenario=${encodeURIComponent(scenario || 'fantasy')}&lang=${encodeURIComponent(activeUiLang)}`;
 
     apiCall(query).then(data => {
       setTemplates(data);
@@ -159,7 +196,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
       }
       setRegeneratedLoadout(null);
     }).finally(() => setLoading(false));
-  }, [isOpen, scenario, tagsParam]);
+  }, [isOpen, scenario, tagsParam, activeUiLang]);
 
   const isAnomalousHighSchool = useMemo(() => {
     if (templates?.is_anomalous_high_school) return true;
@@ -219,14 +256,14 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
       Icon: Building2,
       isDefault: false,
       name: t('embark.faction_private_name', 'Corporate Containment Conglomerate'),
-      desc: t('embark.faction_private_desc', 'Keep 100% Bounty Gold & Loot • In-House R&D Armory (+35% Price) • Public Contracts Allowed • Mandatory Daily Bounty • Starts at Corporate Tower HQ'),
+      desc: t('embark.faction_private_desc', 'Keep 100% Bounty Gold & Loot • Special Ordnance Vault (+35% Price) • Public Contracts Allowed • Mandatory Daily Bounty • Starts at Tower HQ'),
     },
     {
       id: 'private_agency_2',
       Icon: Briefcase,
       isDefault: false,
-      name: t('embark.faction_private_2_name', 'Small Local Private Agency'),
-      desc: t('embark.faction_private_2_desc', 'Keep 100% Bounty Gold & Loot • Multi-Vendor Surplus Cage (+35% Price) • Public Contracts Allowed • Mandatory Daily Bounty • Starts at Local Agency Office'),
+      name: t('embark.faction_private_2_name', 'Independent Private Agency'),
+      desc: t('embark.faction_private_2_desc', 'Keep 100% Bounty Gold & Loot • Custom Gunsmith & Broker Armory (+35% Price) • Public Contracts Allowed • Mandatory Daily Bounty • Starts at Field Office HQ'),
     },
     {
       id: 'monastic_order',
@@ -259,7 +296,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     }
     const rawList = (templates?.starting_weapons || []).map(w => typeof w === 'object' ? w.name : w);
     return rawList.length > 0 ? rawList : ['Rusty Sword', 'Oak Staff', 'Hunting Bow', 'Iron Dagger'];
-  }, [isAnomalousIncursions, templates, startingFaction]);
+  }, [isAnomalousIncursions, templates, effectiveFaction]);
 
   useEffect(() => {
     const classNames = Object.keys(activeClassesMap);
@@ -274,8 +311,18 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     }
   }, [weaponsList, startingWeapon]);
 
+  const resolveGenderSlashLabel = (labelStr) => {
+    if (!labelStr || !String(labelStr).includes(' / ')) return labelStr;
+    const parts = String(labelStr).split(' / ').map((s) => s.trim());
+    if (parts.length === 2) return isMale ? parts[1] : parts[0];
+    return labelStr;
+  };
+
+  const weaponsDisplayMap = templates?.starting_weapons_localized || {};
+
   const displayedLoadout = useMemo(() => {
     let loadout = {};
+    const locGear = activeClassInfo?.starter_gear_localized || {};
     if (regeneratedLoadout) {
       loadout = { ...regeneratedLoadout };
     } else {
@@ -284,9 +331,14 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         if (slot === 'Weapon' || !entry) return;
         if (isNonCombat && (slot === 'Shield' || slot === 'Armor')) return;
         if (Array.isArray(entry) && entry.length >= 1) {
+          const locSlot = locGear[slot];
+          const dispName = Array.isArray(locSlot) && locSlot[0] ? resolveGenderSlashLabel(locSlot[0]) : resolveGenderSlashLabel(entry[0]);
+          const dispDesc = Array.isArray(locSlot) && locSlot[1] ? String(locSlot[1]) : (entry[1] ? String(entry[1]) : 'Starter equipment');
           loadout[slot] = {
             name: entry[0],
+            display_name: dispName,
             description: entry[1] ? String(entry[1]) : 'Starter equipment',
+            display_description: dispDesc,
           };
         } else if (typeof entry === 'object' && entry.name) {
           loadout[slot] = entry;
@@ -301,11 +353,12 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     } else if (startingWeapon && (!loadout['Weapon'] || !isAnomalousIncursions)) {
       loadout['Weapon'] = {
         name: startingWeapon,
+        display_name: weaponsDisplayMap[startingWeapon] || startingWeapon,
         description: 'Starter weapon',
       };
     }
     return loadout;
-  }, [regeneratedLoadout, activeClassInfo, isNonCombat, isAnomalousIncursions, startingWeapon]);
+  }, [regeneratedLoadout, activeClassInfo, isNonCombat, isAnomalousIncursions, startingWeapon, isMale, weaponsDisplayMap]);
 
   useEffect(() => {
     if (!isOpen || !isAnomalousIncursions || !charClass) {
@@ -346,7 +399,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
   const pointsRemaining = maxTotalPoints - totalAllocated;
 
   const handleApplyPreset = () => {
-    setStats(computeClassPreset(charClass, activeClassInfo?.description || ''));
+    setStats(computeClassPreset(charClass, activeClassInfo?.canonical_description || activeClassInfo?.description || ''));
   };
 
   const adjustStat = (key, delta) => {
@@ -399,10 +452,12 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     setSubmitting(true);
     setError(null);
     try {
-      const finalBSize = isMale ? undefined : breastSize;
-      const finalPSize = isMale ? penisSize : undefined;
+      // Intimate anatomy only applies (and is only persisted) for NSFW scenarios.
+      const finalBSize = isNsfw && !isMale ? breastSize : undefined;
+      const finalPSize = isNsfw && isMale ? penisSize : undefined;
+      const finalTexture = isNsfw ? assetTexture : undefined;
 
-      if (character?.user_id) {
+      if (isNsfw && character?.user_id) {
         try {
           await apiCall('/api/character/appearance', {
             method: 'POST',
@@ -411,7 +466,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
               character_id: character.id,
               breast_size: finalBSize,
               penis_size: finalPSize,
-              asset_texture: assetTexture,
+              asset_texture: finalTexture,
             }),
           });
         } catch (syncErr) {
@@ -452,7 +507,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         luk: stats.luk,
         breast_size: finalBSize,
         penis_size: finalPSize,
-        asset_texture: assetTexture,
+        asset_texture: finalTexture,
       });
       onClose();
     } catch (err) {
@@ -475,7 +530,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
               <Compass size={18} />
             </div>
             <div>
-              <h2 className="font-rpg font-bold text-lg text-fantasy-accent">Embarkation Wizard</h2>
+              <h2 className="font-rpg font-bold text-lg text-fantasy-accent">{t('embark.wizard_title', 'Embarkation Wizard')}</h2>
               <p className="text-xs text-gray-400">Step {step} of 2 • Configure Your Journey</p>
             </div>
           </div>
@@ -491,22 +546,71 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
             <>
               {/* Realm Selection */}
               <section className="bg-black/30 border border-fantasy-border/80 rounded-lg p-4 space-y-3">
-                <h3 className="text-xs uppercase tracking-wider font-bold text-gray-100 mb-2">1. Origin Realm</h3>
+                <h3 className="text-xs uppercase tracking-wider font-bold text-gray-100 mb-2">{t('embark.origin_realm', '1. Origin Realm')}</h3>
                 <select
-                  value={scenario}
+                  value={activeFamily}
                   onChange={(e) => setScenario(e.target.value)}
+                  aria-label={t('embark.origin_realm', '1. Origin Realm')}
                   className="w-full bg-fantasy-dark border border-fantasy-border p-2.5 rounded text-sm text-gray-100"
                 >
-                  {scenarios.map(s => <option key={s.key} value={s.key}>{s.emoji} {s.dropdown_label || s.display_name || s.name}</option>)}
-                  <option value="custom">✨ Custom Scenario (Multi-Tag Builder)</option>
+                  {familyRoots.map(s => {
+                    const count = scenarios.filter(v => familyRootOf(v) === s.key).length;
+                    return (
+                      <option key={s.key} value={s.key}>
+                        {s.emoji} {s.dropdown_label || s.display_name || s.name}
+                        {count > 1 ? ` · ${t('embark.variant_count', '{{count}} variants', { count })}` : ''}
+                      </option>
+                    );
+                  })}
+                  <option value="custom">{t('embark.custom_scenario_builder', '✨ Custom Scenario (Multi-Tag Builder)')}</option>
                 </select>
+                {familyVariants.length > 1 && (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] uppercase tracking-wider font-bold text-gray-300">
+                      {t('embark.scenario_variant', 'Variant')}
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" role="radiogroup" aria-label={t('embark.scenario_variant', 'Variant')}>
+                      {familyVariants.map(v => {
+                        const active = v.key === scenario;
+                        const extraTags = (v.variant_tags || []).map(tag => availableTags.find(at => (at.key || at.id) === tag)?.name || tag.replace(/_/g, ' '));
+                        return (
+                          <button
+                            key={v.key}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            onClick={() => setScenario(v.key)}
+                            className={`p-2.5 rounded-lg border text-left transition-all ${
+                              active
+                                ? 'bg-indigo-600/30 border-indigo-400 text-white shadow-sm ring-1 ring-indigo-400'
+                                : 'bg-black/40 border-fantasy-border/70 text-gray-300 hover:border-gray-500'
+                            }`}
+                          >
+                            <div className="text-xs font-bold flex items-center gap-1.5">
+                              <span aria-hidden="true">{v.emoji}</span>
+                              <span>{v.variant_label || v.display_name || v.name}</span>
+                            </div>
+                            <div className="text-[10px] text-gray-400 leading-tight mt-0.5">
+                              {extraTags.length > 0 ? extraTags.join(' • ') : t('embark.variant_base_hint', 'Base experience')}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {scenario !== 'custom' && scenarios.find(s => s.key === scenario)?.description && (
+                  <p className="text-[11px] text-gray-400 leading-relaxed pt-0.5">
+                    {scenarios.find(s => s.key === scenario)?.description}
+                  </p>
+                )}
 
                 {scenario === 'custom' && (
                   <div className="space-y-3 pt-2">
                     <div>
                       <div className="text-[11px] uppercase tracking-wider font-bold text-gray-300 mb-1.5 flex items-center gap-1.5">
-                        <span>Genres</span>
-                        <span className="text-[10px] text-gray-400 font-normal">(select one or more)</span>
+                        <span>{t('embark.genres', 'Genres')}</span>
+                        <span className="text-[10px] text-gray-400 font-normal">{t('embark.select_genres_sub', '(select one or more)')}</span>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
                         {availableTags
@@ -534,8 +638,8 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
 
                     <div>
                       <div className="text-[11px] uppercase tracking-wider font-bold text-gray-300 mb-1.5 flex items-center gap-1.5">
-                        <span>Tone &amp; Modifiers</span>
-                        <span className="text-[10px] text-gray-400 font-normal">(optional tone &amp; rule toggles)</span>
+                        <span>{t('embark.tone_and_modifiers', 'Tone & Modifiers')}</span>
+                        <span className="text-[10px] text-gray-400 font-normal">{t('embark.tone_modifiers_sub', '(optional tone & rule toggles)')}</span>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
                         {availableTags
@@ -771,16 +875,21 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
               {/* Class & Stats Reallocation */}
               <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-black/30 border border-fantasy-border/80 rounded-lg p-4 space-y-3">
-                   <h3 className="text-xs uppercase tracking-wider font-bold text-gray-100 mb-2">2. Class &amp; Loadout</h3>
+                   <h3 className="text-xs uppercase tracking-wider font-bold text-gray-100 mb-2">{t('embark.class_and_loadout', '2. Class & Loadout')}</h3>
                    <select value={charClass} onChange={(e) => setCharClass(e.target.value)} className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-sm text-gray-100">
-                     {Object.keys(activeClassesMap).map(cls => <option key={cls} value={cls}>{cls}</option>)}
+                     {Object.keys(activeClassesMap).map(cls => <option key={cls} value={cls}>{activeClassesMap[cls]?.display_name || cls}</option>)}
                    </select>
+                   {activeClassInfo?.description && (
+                     <p className="text-[11px] text-gray-400 leading-relaxed">
+                       {activeClassInfo.description}
+                     </p>
+                   )}
 
                    {!isNonCombat && (
                      <>
-                       <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-400 mt-2">Starting Weapon</label>
+                       <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-400 mt-2">{t('embark.starting_weapon', 'Starting Weapon')}</label>
                        <select value={startingWeapon} onChange={(e) => setStartingWeapon(e.target.value)} className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100">
-                         {weaponsList.map(w => <option key={w} value={w}>{w}</option>)}
+                         {weaponsList.map(w => <option key={w} value={w}>{weaponsDisplayMap[w] || w}</option>)}
                        </select>
                      </>
                    )}
@@ -817,9 +926,9 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                              <span className="text-[9px] uppercase tracking-wider text-gray-400 font-semibold">{slot}</span>
                              <span
                                className={`text-xs font-bold leading-snug break-words ${isAnomItem ? 'text-purple-200' : 'text-gray-200'}`}
-                               title={item.description || item.name}
+                               title={item.display_description || item.description || item.display_name || item.name}
                              >
-                               {item.name}
+                               {item.display_name || item.name}
                              </span>
                              {grantMatch && (
                                <span className="text-[10px] text-amber-300 font-medium leading-tight mt-0.5">
@@ -841,12 +950,12 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                 {/* Stats Reallocation */}
                 <div className="bg-black/30 border border-fantasy-border/80 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-xs uppercase tracking-wider font-bold text-gray-100">3. Free Stats Allocation</h3>
+                    <h3 className="text-xs uppercase tracking-wider font-bold text-gray-100">{t('embark.free_stats', '3. Free Stats Allocation')}</h3>
                     <span className="px-2 py-1 bg-black text-fantasy-accent border border-fantasy-border text-[10px] font-mono rounded">{pointsRemaining} pts left</span>
                   </div>
                   
                   <button onClick={handleApplyPreset} className="w-full mb-3 py-1.5 rounded border border-fantasy-accent/50 text-fantasy-accent text-[11px] bg-fantasy-accent/10 hover:bg-fantasy-accent/20 transition-colors">
-                    Switch to {charClass} Rec
+                    {t('embark.switch_to_class_rec', { className: activeClassInfo?.display_name || charClass, defaultValue: `Switch to ${activeClassInfo?.display_name || charClass} Rec` })}
                   </button>
 
                   <div className="space-y-1.5">
@@ -898,6 +1007,30 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                     Assets influence psychological vulnerability or confidence, tactile sensations, lingerie fit, and partner reactions across romantic encounters.
                   </p>
 
+                  {!anatomyExpanded ? (
+                    <div className="flex items-center justify-between gap-3 p-3 rounded-lg bg-black/40 border border-pink-900/50">
+                      <div className="text-xs text-gray-200 min-w-0">
+                        <div className="text-[10px] uppercase tracking-wider font-bold text-pink-300 mb-0.5">
+                          {t('embark.anatomy_saved_title', 'Using your saved anatomy')}
+                        </div>
+                        <div className="truncate">
+                          {isMale
+                            ? t(PENIS_SIZE_LABELS[penisSize]?.[0] || 'character.penis_average', PENIS_SIZE_LABELS[penisSize]?.[1] || penisSize)
+                            : t(BREAST_SIZE_LABELS[breastSize]?.[0] || 'character.breast_proportional', BREAST_SIZE_LABELS[breastSize]?.[1] || breastSize)}
+                          {' • '}
+                          {assetTexture || t('embark.anatomy_texture_auto', 'Texture auto-assigned')}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAnatomyExpanded(true)}
+                        className="shrink-0 px-3 py-1.5 rounded border border-pink-700/70 text-[11px] font-semibold text-pink-200 hover:bg-pink-900/30"
+                      >
+                        {t('embark.anatomy_customize', 'Customize')}
+                      </button>
+                    </div>
+                  ) : (
+                  <>
                   <div>
                     {isMale ? (
                       <div>
@@ -909,10 +1042,10 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                           onChange={(e) => setPenisSize(e.target.value)}
                           className="w-full bg-fantasy-dark border border-purple-900/60 p-2 rounded text-xs text-gray-100 focus:outline-none focus:border-purple-500"
                         >
-                          <option value="small">Petite / Modest (Compact)</option>
-                          <option value="average">Proportional (Average)</option>
-                          <option value="large">Well-Endowed / Formidable (Large)</option>
-                          <option value="huge">Massive / Heavy (Huge)</option>
+                          <option value="small">{t('character.penis_compact', 'Petite / Modest (Compact)')}</option>
+                          <option value="average">{t('character.penis_average', 'Proportional (Average)')}</option>
+                          <option value="large">{t('character.penis_large', 'Well-Endowed / Formidable (Large)')}</option>
+                          <option value="huge">{t('character.penis_huge', 'Massive / Heavy (Huge)')}</option>
                         </select>
                       </div>
                     ) : (
@@ -925,11 +1058,11 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                           onChange={(e) => setBreastSize(e.target.value)}
                           className="w-full bg-fantasy-dark border border-pink-900/60 p-2 rounded text-xs text-gray-100 focus:outline-none focus:border-pink-500"
                         >
-                          <option value="flat">Flat (AA-Cup / Barely There)</option>
-                          <option value="small">Petite / Modest (A-B Cup)</option>
-                          <option value="average">Proportional (C-Cup)</option>
-                          <option value="large">Voluptuous / Full (D-DD Cup)</option>
-                          <option value="huge">Bountiful / Massive (E+ Cup)</option>
+                          <option value="flat">{t('character.breast_flat', 'Flat (AA-Cup / Barely There)')}</option>
+                          <option value="small">{t('character.breast_petite', 'Petite / Modest (A-B Cup)')}</option>
+                          <option value="average">{t('character.breast_proportional', 'Proportional (C-Cup)')}</option>
+                          <option value="large">{t('character.breast_voluptuous', 'Voluptuous / Full (D-DD Cup)')}</option>
+                          <option value="huge">{t('character.breast_bountiful', 'Bountiful / Massive (E+ Cup)')}</option>
                         </select>
                       </div>
                     )}
@@ -957,12 +1090,14 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                       onChange={(e) => setAssetTexture(e.target.value)}
                       className="w-full bg-fantasy-dark border border-fantasy-border/80 p-2 rounded text-xs text-gray-100"
                     >
-                      <option value="">Auto-Assign from Race &amp; Build (Dynamic Roll)</option>
+                      <option value="">{t('character.auto_assign_anatomy', 'Auto-Assign from Race & Build (Dynamic Roll)')}</option>
                       {(isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS).map(opt => (
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                       ))}
                     </select>
                   </div>
+                  </>
+                  )}
                 </section>
               )}
             </>
@@ -971,7 +1106,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
           {step === 2 && (
             <div className="space-y-6">
               <section className="bg-black/30 border border-fantasy-border/80 rounded-lg p-5">
-                 <h3 className="text-sm uppercase tracking-wider font-bold text-fantasy-accent mb-4 text-center">Select Adventure Mode</h3>
+                 <h3 className="text-sm uppercase tracking-wider font-bold text-fantasy-accent mb-4 text-center">{t('embark.select_adventure_mode', 'Select Adventure Mode')}</h3>
                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                    {[
                      { id: 'solo', name: 'Solo Adventure', desc: 'Play alone, offline or online.' },
@@ -988,8 +1123,8 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
 
               {mode !== 'solo' && shareLink && (
                 <section className="bg-black/30 border border-fantasy-border/80 rounded-lg p-5 text-center">
-                  <h4 className="text-xs font-bold text-gray-300 mb-2">Invite Friends (Cross-Device Link)</h4>
-                  <p className="text-[11px] text-gray-400 mb-3">Share this public link so anyone can join your adventure!</p>
+                  <h4 className="text-xs font-bold text-gray-300 mb-2">{t('embark.invite_friends', 'Invite Friends (Cross-Device Link)')}</h4>
+                  <p className="text-[11px] text-gray-400 mb-3">{t('embark.invite_friends_desc', 'Share this public link so anyone can join your adventure!')}</p>
                   <div className="flex items-center justify-center gap-2">
                     <code className="px-3 py-1.5 bg-black border border-fantasy-border text-fantasy-accent rounded text-sm select-all">
                       {shareLink}
@@ -1006,13 +1141,13 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
 
         <div className="p-4 border-t border-fantasy-border bg-black/40 flex justify-between shrink-0">
           {step === 2 ? (
-            <button onClick={() => setStep(1)} className="px-4 py-2 border border-fantasy-border text-xs rounded text-gray-300">Back</button>
+            <button onClick={() => setStep(1)} className="px-4 py-2 border border-fantasy-border text-xs rounded text-gray-300">{t('common.back', 'Back')}</button>
           ) : (
-            <button onClick={onClose} className="px-4 py-2 border border-fantasy-border text-xs rounded text-gray-300">Cancel</button>
+            <button onClick={onClose} className="px-4 py-2 border border-fantasy-border text-xs rounded text-gray-300">{t('common.cancel', 'Cancel')}</button>
           )}
 
           {step === 1 ? (
-             <button onClick={() => setStep(2)} className="px-5 py-2 bg-fantasy-accent text-black font-bold text-xs uppercase rounded hover:bg-amber-400 transition-colors">Next Step</button>
+             <button onClick={() => setStep(2)} className="px-5 py-2 bg-fantasy-accent text-black font-bold text-xs uppercase rounded hover:bg-amber-400 transition-colors">{t('embark.next_step', 'Next Step')}</button>
           ) : (
              <button onClick={submitEmbark} disabled={submitting} className="px-5 py-2 bg-fantasy-accent text-black font-bold text-xs uppercase rounded flex items-center gap-2 hover:bg-amber-400 transition-colors">
                <Play size={14} />

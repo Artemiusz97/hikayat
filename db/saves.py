@@ -21,6 +21,19 @@ def _rewrite_session_key_id(key_str: str, old_session_id: int | None, new_sessio
     return re.sub(rf"(?:(?<=^)|(?<=[:_\-])){old_tok}(?=$|[:_\-])", str(int(new_session_id)), str(key_str), count=1)
 
 
+def _rewrite_spine_embedded_ids(val: object, old_session_id: int | None, new_session_id: int) -> object:
+    """Recursively rewrites session-prefixed entity keys (`lt_<sid>_*`, `nem_<sid>_*`, `bible_<sid>_*`, etc.) inside campaign_spines JSON payloads."""
+    if not old_session_id:
+        return val
+    if isinstance(val, dict):
+        return {k: _rewrite_spine_embedded_ids(v, old_session_id, new_session_id) for k, v in val.items()}
+    if isinstance(val, list):
+        return [_rewrite_spine_embedded_ids(item, old_session_id, new_session_id) for item in val]
+    if isinstance(val, str) and re.match(r"^(?:lt|nem|hh|rv|cm|we|bible|rendezvous|promise|pact|grudge)_\d+(?:_|$)", val):
+        return _rewrite_session_key_id(val, old_session_id, new_session_id)
+    return val
+
+
 def count_character_adventure_saves(character_id: int) -> int:
     """Returns the total number of saved checkpoints for a specific character."""
     if not character_id:
@@ -187,12 +200,12 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
 
 def load_adventure_slot(user_id: int, slot_name: str) -> dict:
     """Restores an adventure save slot into a fresh active session for the character."""
-    char = db.get_character(user_id)
-    if not char:
-        raise ValueError("You don't have an active character. Create one with `/character create` first.")
-    char_id = char["id"]
+    with UnitOfWork() as conn:
+        char = db.get_character(user_id)
+        if not char:
+            raise ValueError("You don't have an active character. Create one with `/character create` first.")
+        char_id = char["id"]
 
-    with get_conn() as conn:
         row = conn.execute(
             "SELECT * FROM adventure_saves WHERE character_id = ? AND LOWER(slot_name) = LOWER(?)",
             (char_id, (slot_name or "").strip())
@@ -226,6 +239,7 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
 
         sess_data = dict(sess_dict)
         sess_data.pop("id", None)
+        sess_data["character_id"] = char_id
         sess_data.setdefault("schema_epoch", 1)
         sess_data.setdefault("mode", "solo")
         sess_data.setdefault("capacity", 1)
@@ -245,6 +259,62 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
         sess_data["created_at"] = now
         sess_data["updated_at"] = now
         sess_data["turn_order"] = json.dumps(to)
+
+        # Preserve origin session provenance for folklore codex turn-gating and strip legacy anomaly JSON keys
+        from .dossiers import SESSION_ANOMALY_KEY_TO_RECORD_TYPE, sync_session_anomaly_records_from_extra
+
+        old_session_id = sess_dict.get("id")
+        has_rel_anom = bool(child_data.get("session_anomaly_records"))
+        raw_extra = sess_data.get("extra_json")
+        if isinstance(raw_extra, str):
+            try:
+                ex_obj = json.loads(raw_extra) if raw_extra.strip() else {}
+            except Exception:
+                ex_obj = {}
+        elif isinstance(raw_extra, dict):
+            ex_obj = dict(raw_extra)
+        else:
+            ex_obj = {}
+        if not isinstance(ex_obj, dict):
+            ex_obj = {}
+
+        if old_session_id is not None:
+            try:
+                old_sid_int = int(old_session_id)
+                origin_ids: list[int] = []
+                for _osid in (ex_obj.get("_origin_session_ids") or []):
+                    try:
+                        _iv = int(_osid)
+                        if _iv not in origin_ids:
+                            origin_ids.append(_iv)
+                    except (TypeError, ValueError):
+                        pass
+                if old_sid_int not in origin_ids:
+                    origin_ids.append(old_sid_int)
+                ex_obj["_origin_session_ids"] = origin_ids
+            except (TypeError, ValueError):
+                pass
+
+        legacy_anom_patch: dict[str, list] = {}
+        for anom_key in SESSION_ANOMALY_KEY_TO_RECORD_TYPE:
+            popped_val = ex_obj.pop(anom_key, None) if anom_key in ex_obj else None
+            if not has_rel_anom:
+                cand_val = popped_val if isinstance(popped_val, list) and popped_val else sess_dict.get(anom_key)
+                if isinstance(cand_val, list) and cand_val:
+                    legacy_anom_patch[anom_key] = cand_val
+        sess_data["extra_json"] = ex_obj
+
+        legacy_phys_patch: dict | None = None
+        raw_phys = sess_data.get("physical_state_json")
+        if raw_phys:
+            try:
+                p_obj = json.loads(raw_phys) if isinstance(raw_phys, str) else dict(raw_phys)
+                if isinstance(p_obj, dict) and isinstance(p_obj.get("actors"), dict) and p_obj["actors"]:
+                    legacy_phys_patch = dict(p_obj)
+                    clean_room_meta = {k: v for k, v in p_obj.items() if k != "actors"}
+                    sess_data["physical_state_json"] = json.dumps(clean_room_meta) if clean_room_meta else "{}"
+            except Exception:
+                legacy_phys_patch = None
 
         # Filter strictly to columns present in live sessions table
         valid_session_cols = {
@@ -369,6 +439,8 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                     pass
 
         # 3. Restore remaining child tables with remapped session_id and anchored keys
+        old_host_char_id = sess_dict.get("character_id")
+        _char_scoped_social_tables = ("character_social_daily", "social_topic_states", "contact_dossier_discoveries")
         for tbl, rows in child_data.items():
             if tbl in ("households", "contacts", "phone_appointments"):
                 continue
@@ -380,10 +452,67 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                 orig_cl_id = r.get("_orig_clue_id") if tbl == "session_clues" else None
                 row_dict = {k: v for k, v in dict(r).items() if not str(k).startswith("_orig_")}
                 row_dict["session_id"] = new_session_id
-                if tbl == "commitments_ledger":
+                if tbl in _char_scoped_social_tables:
+                    if tbl == "contact_dossier_discoveries":
+                        cur_cid = row_dict.get("character_id")
+                        if cur_cid is None:
+                            row_dict["character_id"] = 0
+                        elif old_host_char_id and cur_cid == old_host_char_id:
+                            row_dict["character_id"] = char_id
+                    elif row_dict.get("character_id") in (None, 0, old_host_char_id):
+                        row_dict["character_id"] = char_id
+                elif tbl == "social_turn_snapshots":
+                    for _snap_col in ("daily_json", "topic_states_json"):
+                        raw_snap_list = row_dict.get(_snap_col)
+                        if raw_snap_list:
+                            try:
+                                parsed_list = (
+                                    json.loads(raw_snap_list)
+                                    if isinstance(raw_snap_list, str)
+                                    else list(raw_snap_list)
+                                )
+                                if isinstance(parsed_list, list):
+                                    for _item in parsed_list:
+                                        if isinstance(_item, dict):
+                                            _item["session_id"] = new_session_id
+                                            if _item.get("character_id") in (None, 0, old_host_char_id):
+                                                _item["character_id"] = char_id
+                                    row_dict[_snap_col] = json.dumps(parsed_list)
+                            except Exception:
+                                pass
+                elif tbl == "commitments_ledger":
                     ck = row_dict.get("commitment_key", "")
                     if old_session_id and ck:
                         row_dict["commitment_key"] = _rewrite_session_key_id(ck, old_session_id, new_session_id)
+                elif tbl == "session_entity_contracts":
+                    ckey = row_dict.get("contract_key", "")
+                    if old_session_id and ckey:
+                        row_dict["contract_key"] = _rewrite_session_key_id(ckey, old_session_id, new_session_id)
+                    if row_dict.get("holder_type") == "player" and row_dict.get("character_id") in (None, 0, old_host_char_id):
+                        row_dict["character_id"] = char_id
+                elif tbl == "session_contract_grudges":
+                    gkey = row_dict.get("grudge_key", "")
+                    if old_session_id and gkey:
+                        row_dict["grudge_key"] = _rewrite_session_key_id(gkey, old_session_id, new_session_id)
+                    if row_dict.get("character_id") in (old_host_char_id,) and old_host_char_id is not None:
+                        row_dict["character_id"] = char_id
+                elif tbl == "session_contract_turn_snapshots":
+                    for _csnap_col, _key_field in (("contracts_json", "contract_key"), ("grudges_json", "grudge_key")):
+                        raw_csnap = row_dict.get(_csnap_col)
+                        if raw_csnap:
+                            try:
+                                parsed_csnap = json.loads(raw_csnap) if isinstance(raw_csnap, str) else list(raw_csnap)
+                                if isinstance(parsed_csnap, list):
+                                    for _ci in parsed_csnap:
+                                        if isinstance(_ci, dict):
+                                            _ci["session_id"] = new_session_id
+                                            if old_session_id and _ci.get(_key_field):
+                                                _ci[_key_field] = _rewrite_session_key_id(_ci[_key_field], old_session_id, new_session_id)
+                                            if _ci.get("character_id") in (old_host_char_id,) and old_host_char_id is not None:
+                                                _ci["character_id"] = char_id
+                                    row_dict[_csnap_col] = json.dumps(parsed_csnap)
+                            except Exception:
+                                pass
                 elif tbl == "world_events":
                     ek = row_dict.get("event_key", "")
                     if old_session_id and ek:
@@ -397,6 +526,28 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                             row_dict["implicated_contact_id"] = contact_id_map.get(int(old_imp), old_imp)
                         except (TypeError, ValueError):
                             pass
+                elif tbl == "campaign_spines":
+                    if old_session_id:
+                        for _sp_col in (
+                            "mastermind_profile_json",
+                            "lieutenants_roster_json",
+                            "chapters_blueprint_json",
+                            "nemeses_json",
+                            "hidden_bible_json",
+                            "ending_axes_json",
+                            "chronicle_tapestry_json",
+                            "state_events_json",
+                        ):
+                            _raw_sp = row_dict.get(_sp_col)
+                            if not _raw_sp:
+                                continue
+                            try:
+                                _parsed_sp = json.loads(_raw_sp) if isinstance(_raw_sp, str) else _raw_sp
+                                row_dict[_sp_col] = json.dumps(
+                                    _rewrite_spine_embedded_ids(_parsed_sp, old_session_id, new_session_id)
+                                )
+                            except Exception:
+                                pass
                 row_dict = {k: (json.dumps(v) if isinstance(v, (dict, list)) else v) for k, v in row_dict.items() if k in t_valid and k != "id"}
                 if not row_dict:
                     continue
@@ -413,6 +564,66 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                         clue_id_map[int(orig_cl_id)] = int(cur.lastrowid)
                     except (TypeError, ValueError):
                         pass
+
+        # Backfill normalized session_anomaly_records when loading a pre-v45 save slot
+        if legacy_anom_patch and not child_data.get("session_anomaly_records"):
+            sync_session_anomaly_records_from_extra(new_session_id, legacy_anom_patch, conn=conn)
+
+        # Backfill normalized actor_physical_states when loading a pre-v30 save slot
+        if legacy_phys_patch and not child_data.get("actor_physical_states"):
+            from mechanics.social import physical_state as ps
+            ps.sync_state_dict_to_db(new_session_id, legacy_phys_patch, conn=conn)
+
+        # Backfill Migration 49 zone split & hidden folklore villages when loading a pre-v49 save slot
+        try:
+            import scenario_data as _save_sd
+            _load_scen_row = conn.execute("SELECT scenario FROM sessions WHERE id = ?", (new_session_id,)).fetchone()
+            _load_scen = str((_load_scen_row["scenario"] if _load_scen_row else "") or "")
+            if (
+                _save_sd.is_anomalous_incursions_scenario(_load_scen)
+                or _save_sd.is_anomalous_high_school_scenario(_load_scen)
+                or "urban_anomalies" in _load_scen.lower()
+            ):
+                _has_sanc = conn.execute(
+                    "SELECT 1 FROM world_nodes WHERE session_id = ? AND node_id = 'zone_eastern_sanctuary' LIMIT 1",
+                    (new_session_id,),
+                ).fetchone()
+                if not _has_sanc:
+                    from mechanics.world.locations.folklore_veil_lifecycle import backfill_zone_split_and_hidden_villages_v49
+                    backfill_zone_split_and_hidden_villages_v49(conn, session_id=new_session_id)
+        except Exception:
+            pass
+
+        # Backfill or synchronize player_properties & facility unlock flags on save load (pre-v48 & v48+)
+        try:
+            from mechanics.world.locations.realty_catalog import is_anomalous_realty_scenario
+            from .properties import grant_or_relocate_starter_quarters, _set_facility_unlock_state
+            _load_scen_row = conn.execute("SELECT scenario FROM sessions WHERE id = ?", (new_session_id,)).fetchone()
+            _load_scen = str((_load_scen_row["scenario"] if _load_scen_row else "") or "")
+            if is_anomalous_realty_scenario(_load_scen):
+                if not child_data.get("player_properties"):
+                    grant_or_relocate_starter_quarters(new_session_id, conn=conn)
+                else:
+                    for _pr in conn.execute(
+                        "SELECT facility_node_id, is_starter FROM player_properties WHERE session_id = ?",
+                        (new_session_id,),
+                    ).fetchall():
+                        _m_key = "starter_unlocked" if int(_pr["is_starter"] or 0) == 1 else "deed_owned"
+                        _set_facility_unlock_state(conn, new_session_id, str(_pr["facility_node_id"]), unlocked=True, marker_key=_m_key)
+        except Exception:
+            pass
+
+        # Backfill Migration 50 contact dossier discoveries on pre-v50 save slots & sync kin/companion/romance exemptions
+        try:
+            from .social_pacing import backfill_exempt_and_legacy_contact_discoveries
+            _is_pre_v50_save = "contact_dossier_discoveries" not in child_data
+            backfill_exempt_and_legacy_contact_discoveries(
+                conn,
+                session_id=new_session_id,
+                is_legacy_migration=_is_pre_v50_save,
+            )
+        except Exception:
+            pass
 
         # Rebuild 3-column multilingual FTS5 index for restored session_digests
         from .memory import rebuild_session_digests_fts
@@ -478,13 +689,15 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
             if isinstance(obj, dict):
                 out = {}
                 for k, v in obj.items():
-                    if k in ("key", "lieutenant_key", "nemesis_id") and isinstance(v, str):
+                    if k in ("key", "lieutenant_key", "nemesis_id", "seed_key", "node_id", "dossier_key", "quest_key") and isinstance(v, str):
                         out[k] = _rewrite_session_key_id(v, old_session_id, new_session_id)
                     else:
                         out[k] = _remap_nested_session_keys(v)
                 return out
             if isinstance(obj, list):
                 return [_remap_nested_session_keys(x) for x in obj]
+            if isinstance(obj, str) and re.match(r"^(?:lt|nem|hh|rv|cm|we|bible|rendezvous|promise|pact|grudge)_\d+(?:_|$)", obj):
+                return _rewrite_session_key_id(obj, old_session_id, new_session_id)
             return obj
 
         def _remap_nested_clue_ids(obj):
@@ -551,11 +764,11 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
         ).fetchall()
         for qd_r in qd_rows:
             try:
-                cast_b = _remap_nested_contact_ids(json.loads(qd_r["cast_bindings_json"] or "{}"))
-                clue_g = _remap_nested_clue_ids(json.loads(qd_r["clue_graph_json"] or "[]"))
-                leads_g = _remap_nested_clue_ids(_remap_nested_contact_ids(json.loads(qd_r["leads_graph_json"] or "[]")))
-                twist_s = _remap_nested_contact_ids(json.loads(qd_r["twist_spec_json"] or "{}"))
-                climax_s = _remap_nested_contact_ids(json.loads(qd_r["climax_spec_json"] or "{}"))
+                cast_b = _remap_nested_session_keys(_remap_nested_contact_ids(json.loads(qd_r["cast_bindings_json"] or "{}")))
+                clue_g = _remap_nested_session_keys(_remap_nested_clue_ids(json.loads(qd_r["clue_graph_json"] or "[]")))
+                leads_g = _remap_nested_session_keys(_remap_nested_clue_ids(_remap_nested_contact_ids(json.loads(qd_r["leads_graph_json"] or "[]"))))
+                twist_s = _remap_nested_session_keys(_remap_nested_contact_ids(json.loads(qd_r["twist_spec_json"] or "{}")))
+                climax_s = _remap_nested_session_keys(_remap_nested_contact_ids(json.loads(qd_r["climax_spec_json"] or "{}")))
                 qd_events = json.loads(qd_r["state_events_json"] or "[]")
                 if isinstance(qd_events, list):
                     qd_events = _remap_nested_session_keys(_remap_nested_clue_ids(_remap_nested_contact_ids(qd_events)))
@@ -609,7 +822,14 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                             member_role=cd_item.get("household_role") or "child",
                         )
                         mat_rel["household_id"] = cd_item["household_id"]
-                        if hh_hydrated.get("residence_location"):
+                        orig_rel = cd_item.get("relations") if isinstance(cd_item.get("relations"), dict) else {}
+                        if orig_rel.get("cohabiting_family") is False:
+                            mat_rel["cohabiting_family"] = False
+                            if orig_rel.get("residence_location"):
+                                mat_rel["residence_location"] = orig_rel["residence_location"]
+                            if orig_rel.get("residence_node_id"):
+                                mat_rel["residence_node_id"] = orig_rel["residence_node_id"]
+                        elif hh_hydrated.get("residence_location"):
                             mat_rel["residence_location"] = hh_hydrated["residence_location"]
                 conn.execute(
                     "UPDATE contacts SET relations_json = ? WHERE id = ?",
@@ -628,6 +848,19 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
             item_dict = dict(item)
             item_dict["character_id"] = char_id
             item_dict["user_id"] = user_id
+            linked_ckey = str(item_dict.get("linked_contract_key") or "").strip()
+            if linked_ckey and old_session_id:
+                linked_ckey = _rewrite_session_key_id(linked_ckey, old_session_id, new_session_id)
+                item_dict["linked_contract_key"] = linked_ckey
+                raw_eff = str(item_dict.get("effect") or "")
+                if raw_eff.startswith("[GEAR_JSON]"):
+                    try:
+                        eff_meta = json.loads(raw_eff[len("[GEAR_JSON]"):].strip())
+                        if isinstance(eff_meta, dict) and eff_meta.get("linked_contract_key"):
+                            eff_meta["linked_contract_key"] = linked_ckey
+                            item_dict["effect"] = "[GEAR_JSON]" + json.dumps(eff_meta, separators=(",", ":"))
+                    except Exception:
+                        pass
             item_dict = {
                 k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
                 for k, v in item_dict.items()
@@ -637,7 +870,15 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                 continue
             c_names = ",".join(item_dict.keys())
             qmarks = ",".join("?" * len(item_dict))
-            conn.execute(f"INSERT INTO inventory ({c_names}) VALUES ({qmarks})", list(item_dict.values()))
+            cur_inv = conn.execute(f"INSERT INTO inventory ({c_names}) VALUES ({qmarks})", list(item_dict.values()))
+            if linked_ckey and cur_inv.lastrowid:
+                try:
+                    conn.execute(
+                        "UPDATE session_entity_contracts SET bound_gear_item_id = ? WHERE session_id = ? AND contract_key = ?",
+                        (int(cur_inv.lastrowid), new_session_id, linked_ckey),
+                    )
+                except Exception:
+                    pass
 
         # Restore character vitals, 3-axis resonance, spell progress, and link active_session_id
         raw_status = char_state.get("status_effects", "[]")

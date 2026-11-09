@@ -3,8 +3,9 @@ import { useTranslation } from 'react-i18next';
 import {
   X, Camera, Video, MessageSquare, Rss, Wifi,
   MapPin, Calendar, Sparkles, ChevronLeft, Send, User, Image as ImageIcon, Heart, ShoppingBag,
-  Search, RefreshCw, UserPlus, Users, ShieldAlert, GripHorizontal
+  Search, RefreshCw, UserPlus, Users, ShieldAlert, GripHorizontal, Home, Key
 } from 'lucide-react';
+import { apiCall } from '../../api/client';
 import { formatCleanLocation, cleanProseLocations } from '../../utils/locationFormat';
 
 const formatTimestamp = (ts) => {
@@ -67,6 +68,14 @@ const PhoneModal = ({
   const [generatingBounties, setGeneratingBounties] = useState(false);
   const [bountyActionBanner, setBountyActionBanner] = useState(null);
   const [cancellingCommitmentId, setCancellingCommitmentId] = useState(null);
+
+  // Realty & Safehouses state
+  const [realtyData, setRealtyData] = useState(null);
+  const [loadingRealty, setLoadingRealty] = useState(false);
+  const [realtySubTab, setRealtySubTab] = useState('owned'); // 'owned' | 'market'
+  const [realtyBusy, setRealtyBusy] = useState(false);
+  const [realtyBanner, setRealtyBanner] = useState(null);
+  const [selectedSpareKeyNpc, setSelectedSpareKeyNpc] = useState({});
 
   // Draggable window state
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -204,9 +213,8 @@ const PhoneModal = ({
     if (!photo?.id || !user?.user_id || deletingPhoto) return;
     setDeletingPhoto(true);
     try {
-      await fetch('/api/inventory/drop', {
+      await apiCall('/api/inventory/drop', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: user.user_id,
           item_id: photo.id,
@@ -309,8 +317,7 @@ const PhoneModal = ({
     if (isOpen && activeApp === 'shop' && session?.id && user?.user_id) {
       setLoadingShop(true);
       setShopFeedback(null);
-      fetch(`/api/merchant/${session.id}?user_id=${user.user_id}&is_phone_shop=true`)
-        .then(res => res.json())
+      apiCall(`/api/merchant/${session.id}?user_id=${user.user_id}&is_phone_shop=true`)
         .then(data => setShopData(data))
         .catch(() => {})
         .finally(() => setLoadingShop(false));
@@ -322,9 +329,8 @@ const PhoneModal = ({
     setBuyingItem(item.name);
     setShopFeedback(null);
     try {
-      const res = await fetch('/api/merchant/buy', {
+      const data = await apiCall('/api/merchant/buy', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: user.user_id,
           session_id: session.id,
@@ -332,17 +338,12 @@ const PhoneModal = ({
           is_phone_shop: true,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setShopFeedback({ type: 'error', text: data.detail || 'Order failed.' });
-      } else {
-        setShopFeedback({ type: 'ok', text: data.message || `Ordered ${item.name}!` });
-        setShopData(prev => prev ? { ...prev, gold: data.gold } : prev);
-        if (onRefreshInventory) onRefreshInventory();
-        if (onRefreshCharacter) onRefreshCharacter();
-      }
+      setShopFeedback({ type: 'ok', text: data.message || `Ordered ${item.name}!` });
+      setShopData(prev => prev ? { ...prev, gold: data.gold } : prev);
+      if (onRefreshInventory) onRefreshInventory();
+      if (onRefreshCharacter) onRefreshCharacter();
     } catch (err) {
-      setShopFeedback({ type: 'error', text: err.message });
+      setShopFeedback({ type: 'error', text: err.message || 'Order failed.' });
     } finally {
       setBuyingItem(null);
     }
@@ -510,8 +511,8 @@ const PhoneModal = ({
   const apps = [
     {
       id: 'photos',
-      name: branding.gallery_app_name || 'Photo Vault',
-      subtitle: 'Vault & Media',
+      name: branding.gallery_app_name || t('phone.apps.photos', 'Photo Vault'),
+      subtitle: t('phone.apps.photos_sub', 'Vault & Media'),
       icon: Camera,
       gradient: 'from-pink-500 via-rose-500 to-pink-600',
       badge: (mediaGallery || []).length > 0 ? mediaGallery.length : null,
@@ -519,8 +520,8 @@ const PhoneModal = ({
     },
     {
       id: 'dms',
-      name: branding.dm_app_name || 'Messages',
-      subtitle: 'Chats & Meetups',
+      name: branding.dm_app_name || t('phone.apps.dms', 'Messages'),
+      subtitle: t('phone.apps.dms_sub', 'Chats & Meetups'),
       icon: MessageSquare,
       gradient: 'from-emerald-500 via-teal-500 to-cyan-600',
       badge: (appointments || []).length > 0 ? appointments.length : null,
@@ -528,8 +529,8 @@ const PhoneModal = ({
     },
     {
       id: 'feed',
-      name: branding.feed_app_name || 'PeerPulse',
-      subtitle: 'Radar & Social',
+      name: branding.feed_app_name || t('phone.apps.feed', 'PeerPulse'),
+      subtitle: t('phone.apps.feed_sub', 'Radar & Social'),
       icon: Rss,
       gradient: 'from-violet-500 via-purple-600 to-indigo-600',
       badge: (gossipFeed || []).length > 0 ? gossipFeed.length : null,
@@ -537,8 +538,8 @@ const PhoneModal = ({
     },
     {
       id: 'shop',
-      name: branding.shop_app_name || 'SchoolMart Delivery',
-      subtitle: branding.shop_subtitle || 'Online Courier',
+      name: branding.shop_app_name || t('phone.apps.shop', 'SchoolMart Delivery'),
+      subtitle: branding.shop_subtitle || t('phone.apps.shop_sub', 'Online Courier'),
       icon: ShoppingBag,
       gradient: 'from-amber-500 via-orange-500 to-amber-600',
       badge: null,
@@ -546,8 +547,8 @@ const PhoneModal = ({
     },
     {
       id: 'planner',
-      name: branding.planner_app_name || 'Planner & Agenda',
-      subtitle: 'Schedule & Rendezvous',
+      name: branding.planner_app_name || t('phone.apps.planner', 'Planner & Agenda'),
+      subtitle: t('phone.apps.planner_sub', 'Schedule & Rendezvous'),
       icon: Calendar,
       gradient: 'from-blue-500 via-indigo-500 to-sky-600',
       badge: plannerItems.length > 0 ? plannerItems.length : null,
@@ -555,8 +556,8 @@ const PhoneModal = ({
     },
     {
       id: 'bounties',
-      name: branding.bounty_app_name || branding.bounties_app_name || 'Campus Requests',
-      subtitle: branding.bounty_subtitle || 'Student Bulletin',
+      name: branding.bounty_app_name || branding.bounties_app_name || t('phone.apps.bounties', 'Campus Requests'),
+      subtitle: branding.bounty_subtitle || t('phone.apps.bounties_sub', 'Student Bulletin'),
       icon: ShieldAlert,
       gradient: 'from-rose-500 via-red-600 to-rose-700',
       badge: availableBounties.length > 0 ? availableBounties.length : null,
@@ -564,15 +565,127 @@ const PhoneModal = ({
     },
   ];
 
+  const scenLowForRealty = String(session?.scenario || '').toLowerCase();
+  const isAnomalousRealtyScenario = (
+    Boolean(session?.realty?.enabled) ||
+    Boolean(realtyData?.enabled) ||
+    scenLowForRealty.includes('anomalous_incursion') ||
+    scenLowForRealty.includes('anomalous_high_school') ||
+    scenLowForRealty.includes('urban_anomalies')
+  );
+
+  const fetchRealty = async () => {
+    if (!session?.id) return;
+    setLoadingRealty(true);
+    setRealtyBanner(null);
+    try {
+      const uidQuery = user?.user_id ? `?user_id=${user.user_id}` : '';
+      const data = await apiCall(`/api/realty/${session.id}${uidQuery}`);
+      setRealtyData(data);
+    } catch (err) {
+      setRealtyBanner({ type: 'error', text: err.message || 'Failed to load Realty listings.' });
+    } finally {
+      setLoadingRealty(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen && activeApp === 'realty' && session?.id) {
+      fetchRealty();
+    }
+  }, [isOpen, activeApp, session?.id]);
+
+  useEffect(() => {
+    if (session?.realty && session.realty.enabled) {
+      setRealtyData(session.realty);
+    }
+  }, [session?.realty]);
+
+  const handleBuyProperty = async (propertyId) => {
+    if (!session?.id || realtyBusy) return;
+    setRealtyBusy(true);
+    setRealtyBanner(null);
+    try {
+      const res = await apiCall(`/api/realty/${session.id}/purchase`, {
+        method: 'POST',
+        body: JSON.stringify({ user_id: user?.user_id, property_id: propertyId }),
+      });
+      setRealtyData(res);
+      setRealtyBanner({ type: 'success', text: res.message || t('realty.purchased_ok', 'Deed purchased!') });
+      if (onRefreshInventory) onRefreshInventory();
+      if (onRefreshCharacter) onRefreshCharacter();
+      if (onRefreshCodex) onRefreshCodex();
+    } catch (err) {
+      setRealtyBanner({ type: 'error', text: err.message || t('realty.purchase_failed', 'Purchase failed.') });
+    } finally {
+      setRealtyBusy(false);
+    }
+  };
+
+  const handleSetPrimaryProperty = async (propertyId) => {
+    if (!session?.id || realtyBusy) return;
+    setRealtyBusy(true);
+    setRealtyBanner(null);
+    try {
+      const res = await apiCall(`/api/realty/${session.id}/primary`, {
+        method: 'POST',
+        body: JSON.stringify({ user_id: user?.user_id, property_id: propertyId }),
+      });
+      setRealtyData(res);
+      setRealtyBanner({ type: 'success', text: res.message || t('realty.primary_updated', 'Primary Home updated.') });
+      if (onRefreshCodex) onRefreshCodex();
+    } catch (err) {
+      setRealtyBanner({ type: 'error', text: err.message || 'Failed to update Primary Home.' });
+    } finally {
+      setRealtyBusy(false);
+    }
+  };
+
+  const handleManageSpareKey = async (propertyId, npcId, revoke = false) => {
+    if (!session?.id || !npcId || realtyBusy) return;
+    setRealtyBusy(true);
+    setRealtyBanner(null);
+    try {
+      const res = await apiCall(`/api/realty/${session.id}/spare-key`, {
+        method: 'POST',
+        body: JSON.stringify({ user_id: user?.user_id, property_id: propertyId, npc_id: npcId, revoke }),
+      });
+      setRealtyData(res);
+      setRealtyBanner({ type: 'success', text: res.message || (revoke ? t('realty.key_revoked', 'Spare key revoked.') : t('realty.key_granted', 'Spare key granted!')) });
+    } catch (err) {
+      setRealtyBanner({ type: 'error', text: err.message || 'Failed to update spare key.' });
+    } finally {
+      setRealtyBusy(false);
+    }
+  };
+
+  if (isAnomalousRealtyScenario) {
+    apps.push({
+      id: 'realty',
+      name: t('realty.app_name', 'Realty & Deeds'),
+      subtitle: t('realty.app_sub', 'Safehouses & Keys'),
+      icon: Home,
+      gradient: 'from-emerald-600 via-teal-600 to-cyan-700',
+      badge: realtyData?.owned_properties?.length ? realtyData.owned_properties.length : null,
+      badgeColor: 'bg-emerald-500',
+    });
+  }
+
   const processDmOutcome = (res) => {
     const replyObj = res?.reply && typeof res.reply === 'object' ? res.reply : res;
-    if (replyObj && (replyObj.check || replyObj.check_result || replyObj.affinity_delta !== undefined || replyObj.rendezvous_location || replyObj.media_dropped)) {
+    if (replyObj && (replyObj.check || replyObj.check_result || replyObj.affinity_delta !== undefined || replyObj.rendezvous_location || replyObj.media_dropped || replyObj.daily_digestion_capped || (Array.isArray(replyObj.discovered_facts) && replyObj.discovered_facts.length > 0))) {
       setDmOutcomeBanner({
         check: replyObj.check || replyObj.check_result,
         affinity_delta: replyObj.affinity_delta,
         rendezvous_location: replyObj.rendezvous_location,
         media_dropped: replyObj.media_dropped,
+        daily_digestion_capped: Boolean(replyObj.daily_digestion_capped),
+        discovered_facts: Array.isArray(replyObj.discovered_facts) ? replyObj.discovered_facts : [],
       });
+      if (Array.isArray(replyObj.discovered_facts) && replyObj.discovered_facts.length > 0 && onRefreshCodex) {
+        onRefreshCodex();
+      }
+      return;
     }
   };
 
@@ -628,10 +741,10 @@ const PhoneModal = ({
 
           <div className="flex items-center gap-1.5 text-gray-300 select-none">
             <Wifi size={12} className="text-gray-300" />
-            <span className="text-[10px] font-mono text-gray-300">5G</span>
+            <span className="text-[10px] font-mono text-gray-300">{t('phone.status_bar.network', '5G')}</span>
 
             {/* Almost-full battery indicator (~88%) */}
-            <div className="flex items-center gap-[1px]" title="Battery: 88%">
+            <div className="flex items-center gap-[1px]" title={t('phone.status_bar.battery_title', 'Battery: 88%', { percent: 88 })}>
               <div className="w-[18px] h-[9.5px] rounded-[3px] border border-emerald-400/90 p-[1px] flex items-center bg-black/40">
                 <div className="h-full w-[88%] bg-emerald-400 rounded-[1px]" />
               </div>
@@ -653,14 +766,14 @@ const PhoneModal = ({
               className="flex items-center gap-1 text-xs font-semibold text-pink-400 hover:text-pink-300 transition-colors cursor-pointer"
             >
               <ChevronLeft size={16} />
-              <span>Back to Apps</span>
+              <span>{t('phone.nav.back_to_apps', 'Back to Apps')}</span>
             </button>
 
             <button
               type="button"
               onClick={onClose}
               className="p-1.5 rounded-full text-gray-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
-              title="Close Phone"
+              title={t('phone.nav.close', 'Close Phone')}
             >
               <X size={18} />
             </button>
@@ -696,13 +809,13 @@ const PhoneModal = ({
                     <div className="min-w-0">
                       <p className="text-[11px] font-bold text-gray-200 truncate">
                         {appointments.length > 0
-                          ? `${appointments.length} Rendezvous Planned`
-                          : `${availableBounties.length} Requests Posted`}
+                          ? t('phone.home.rendezvous_planned', '{{count}} Rendezvous Planned', { count: appointments.length })
+                          : t('phone.home.requests_posted', '{{count}} Requests Posted', { count: availableBounties.length })}
                       </p>
                       <p className="text-[10px] text-gray-400 truncate">
                         {appointments.length > 0
-                          ? 'Check Messages for meetup details'
-                          : 'Visit Campus Requests for active tasks'}
+                          ? t('phone.home.check_messages', 'Check Messages for meetup details')
+                          : t('phone.home.visit_requests', 'Visit Campus Requests for active tasks')}
                       </p>
                     </div>
                   </div>
@@ -710,7 +823,7 @@ const PhoneModal = ({
                     onClick={() => setActiveApp(appointments.length > 0 ? 'dms' : 'bounties')}
                     className="px-2.5 py-1 rounded-full bg-pink-600/30 hover:bg-pink-600/50 text-pink-300 text-[10px] font-bold shrink-0 transition-colors border border-pink-500/40"
                   >
-                    Open
+                    {t('phone.home.open', 'Open')}
                   </button>
                 </div>
               )}
@@ -718,8 +831,8 @@ const PhoneModal = ({
               {/* Main App Grid (iOS / Android Style) */}
               <div className="space-y-2 flex-1 pt-2">
                 <div className="flex items-center justify-between px-1">
-                  <span className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 font-mono">Applications</span>
-                  <span className="text-[10px] font-mono text-neutral-600">{apps.length} Installed</span>
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-neutral-500 font-mono">{t('phone.home.applications', 'Applications')}</span>
+                  <span className="text-[10px] font-mono text-neutral-600">{t('phone.home.installed_count', '{{count}} Installed', { count: apps.length })}</span>
                 </div>
 
                 <div className="grid grid-cols-3 gap-y-5 gap-x-3 p-1">
@@ -754,6 +867,303 @@ const PhoneModal = ({
             </div>
           )}
 
+          {/* 8. REALTY & SAFEHOUSES APP */}
+          {activeApp === 'realty' && (
+            <div className="flex-1 flex flex-col min-h-0 bg-neutral-950 text-neutral-100 overflow-hidden">
+              {/* Subheader */}
+              <div className="px-4 py-3 bg-neutral-900/90 border-b border-neutral-800 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-xl bg-emerald-600/25 border border-emerald-500/40 flex items-center justify-center text-emerald-300">
+                    <Home size={15} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-xs text-white leading-tight">{t('realty.app_name', 'Realty & Deeds')}</h4>
+                    <span className="text-[10px] font-mono text-emerald-300">
+                      🪙 {realtyData?.gold ?? 0}g • 🎒 +{realtyData?.property_slot_bonus ?? 0} {t('realty.slots_bonus', 'Slots')} ({realtyData?.max_inventory_slots ?? 30})
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchRealty}
+                  disabled={loadingRealty || realtyBusy}
+                  className="p-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-gray-300 transition-colors cursor-pointer"
+                  title={t('realty.refresh', 'Refresh')}
+                >
+                  <RefreshCw size={13} className={loadingRealty ? 'animate-spin' : ''} />
+                </button>
+              </div>
+
+              {/* Sub-tabs */}
+              <div className="px-3 pt-2.5 pb-2 bg-neutral-950 border-b border-neutral-800/80 flex gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setRealtySubTab('owned')}
+                  className={`flex-1 py-1.5 rounded-xl text-[11px] font-bold transition-colors cursor-pointer ${
+                    realtySubTab === 'owned'
+                      ? 'bg-emerald-600/30 text-emerald-200 border border-emerald-500/50'
+                      : 'bg-neutral-900 text-gray-400 border border-neutral-800 hover:text-gray-200'
+                  }`}
+                >
+                  🏠 {t('realty.tab_owned', 'My Residences')} ({(realtyData?.owned_properties?.length || 0) + (realtyData?.starter_quarters ? 1 : 0)})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRealtySubTab('market')}
+                  className={`flex-1 py-1.5 rounded-xl text-[11px] font-bold transition-colors cursor-pointer ${
+                    realtySubTab === 'market'
+                      ? 'bg-amber-600/30 text-amber-200 border border-amber-500/50'
+                      : 'bg-neutral-900 text-gray-400 border border-neutral-800 hover:text-gray-200'
+                  }`}
+                >
+                  🏷️ {t('realty.tab_market', 'Market Deeds')} ({realtyData?.catalog?.length || 0})
+                </button>
+              </div>
+
+              {/* Feedback Banner */}
+              {realtyBanner && (
+                <div className={`mx-3 mt-2 px-3 py-2 rounded-xl text-[11px] flex items-center justify-between border shrink-0 ${
+                  realtyBanner.type === 'error'
+                    ? 'bg-rose-950/70 border-rose-700/60 text-rose-200'
+                    : 'bg-emerald-950/70 border-emerald-700/60 text-emerald-200'
+                }`}>
+                  <span>{realtyBanner.text}</span>
+                  <button type="button" onClick={() => setRealtyBanner(null)} className="text-gray-400 hover:text-white ml-2 cursor-pointer">
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
+
+              {/* Content Scroll */}
+              <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+                {loadingRealty && !realtyData ? (
+                  <div className="py-10 text-center text-xs text-gray-400 font-mono">
+                    {t('realty.loading', 'Loading urban property registry...')}
+                  </div>
+                ) : realtySubTab === 'owned' ? (
+                  <>
+                    {/* Starter Quarters Card */}
+                    {realtyData?.starter_quarters && (
+                      <div className="p-3 rounded-2xl bg-neutral-900/90 border border-teal-800/60 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-xs text-teal-200">{realtyData.starter_quarters.name}</span>
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-teal-950 text-teal-300 border border-teal-700/60 font-bold uppercase">
+                                {t('realty.badge_starter', 'Starter Quarters')}
+                              </span>
+                              {Boolean(realtyData.starter_quarters.is_primary) && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/25 text-emerald-200 border border-emerald-400/50 font-bold uppercase">
+                                  ★ {t('realty.primary_home', 'Primary Home')}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-gray-400 font-mono mt-0.5">
+                              📍 {realtyData.starter_quarters.zone_name} • {realtyData.starter_quarters.room_name}
+                            </p>
+                          </div>
+                          {!realtyData.starter_quarters.is_primary && (
+                            <button
+                              type="button"
+                              disabled={realtyBusy}
+                              onClick={() => handleSetPrimaryProperty(realtyData.starter_quarters.property_id)}
+                              className="px-2.5 py-1 rounded-lg bg-neutral-800 hover:bg-teal-900/50 text-teal-200 border border-teal-700/50 text-[10px] font-bold shrink-0 cursor-pointer"
+                            >
+                              {t('realty.set_primary', 'Set Primary')}
+                            </button>
+                          )}
+                        </div>
+                        {realtyData.starter_quarters.description && (
+                          <p className="text-[11px] text-gray-300 leading-snug">{realtyData.starter_quarters.description}</p>
+                        )}
+                        <p className="text-[10px] text-neutral-500 italic">
+                          {t('realty.starter_spare_key_note', 'Assigned faction quarters relocate on transfer. Purchase a permanent deed to hand out Spare Keys.')}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Owned Deeds */}
+                    {(realtyData?.owned_properties || []).length === 0 ? (
+                      <div className="p-4 rounded-2xl bg-neutral-900/50 border border-neutral-800 text-center space-y-2">
+                        <p className="text-xs text-gray-300 font-medium">{t('realty.no_deeds_owned', 'No permanent property deeds owned yet.')}</p>
+                        <button
+                          type="button"
+                          onClick={() => setRealtySubTab('market')}
+                          className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 border border-amber-500/50 text-xs font-bold cursor-pointer"
+                        >
+                          🏷️ {t('realty.browse_market', 'Browse Market Deeds')}
+                        </button>
+                      </div>
+                    ) : (
+                      (realtyData?.owned_properties || []).map(prop => {
+                        const holders = prop.spare_key_holders || [];
+                        const holderIds = new Set(holders.map(h => String(h.npc_id).toLowerCase()));
+                        const availableToGrant = (realtyData?.eligible_spare_key_contacts || []).filter(
+                          c => !holderIds.has(String(c.npc_id).toLowerCase())
+                        );
+                        const chosenNpc = selectedSpareKeyNpc[prop.property_id] || availableToGrant[0]?.npc_id || '';
+                        return (
+                          <div key={prop.property_id} className="p-3 rounded-2xl bg-neutral-900/90 border border-emerald-700/50 space-y-2.5">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-bold text-xs text-emerald-200">{prop.name}</span>
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-700/60 font-mono font-bold">
+                                    Tier {prop.tier}
+                                  </span>
+                                  {Boolean(prop.is_primary) && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/25 text-emerald-200 border border-emerald-400/50 font-bold uppercase">
+                                      ★ {t('realty.primary_home', 'Primary Home')}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[10px] text-gray-400 font-mono mt-0.5">📍 {prop.zone_name}</p>
+                              </div>
+                              {!prop.is_primary && (
+                                <button
+                                  type="button"
+                                  disabled={realtyBusy}
+                                  onClick={() => handleSetPrimaryProperty(prop.property_id)}
+                                  className="px-2.5 py-1 rounded-lg bg-neutral-800 hover:bg-emerald-900/50 text-emerald-200 border border-emerald-700/50 text-[10px] font-bold shrink-0 cursor-pointer"
+                                >
+                                  {t('realty.set_primary', 'Set Primary')}
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Perks */}
+                            <div className="flex flex-wrap gap-1">
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-emerald-300 font-mono">🎒 +{prop.base_slots} Base Slots</span>
+                              {prop.rest_multiplier > 1.0 && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-sky-300 font-mono">🛌 {prop.rest_multiplier}x Rest</span>
+                              )}
+                              {prop.cha_invite_dc_mod < 0 && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-pink-300 font-mono">💬 {prop.cha_invite_dc_mod} Invite DC</span>
+                              )}
+                              {prop.hangout_affinity_bonus > 0 && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-amber-300 font-mono">❤️ +{prop.hangout_affinity_bonus} Hangout</span>
+                              )}
+                            </div>
+
+                            {/* Spare Keys Section */}
+                            <div className="pt-2 border-t border-neutral-800 space-y-1.5">
+                              <div className="flex items-center gap-1 text-[10px] font-bold text-amber-300">
+                                <Key size={11} />
+                                <span>{t('realty.spare_keys_label', 'Spare Key Holders')}</span>
+                              </div>
+                              {holders.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {holders.map(h => (
+                                    <span key={h.npc_id} className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-200 border border-amber-700/60">
+                                      <span>🔑 {h.name}</span>
+                                      <button
+                                        type="button"
+                                        disabled={realtyBusy}
+                                        onClick={() => handleManageSpareKey(prop.property_id, h.npc_id, true)}
+                                        className="text-rose-300 hover:text-rose-100 ml-0.5 cursor-pointer"
+                                        title={t('realty.revoke_key', 'Revoke Key')}
+                                      >
+                                        ×
+                                      </button>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {availableToGrant.length > 0 ? (
+                                <div className="flex items-center gap-1.5 pt-0.5">
+                                  <select
+                                    value={chosenNpc}
+                                    onChange={(e) => setSelectedSpareKeyNpc(prev => ({ ...prev, [prop.property_id]: e.target.value }))}
+                                    className="flex-1 bg-neutral-950 border border-neutral-700 rounded-lg px-2 py-1 text-[10px] text-gray-200"
+                                  >
+                                    {availableToGrant.map(c => (
+                                      <option key={c.npc_id} value={c.npc_id}>
+                                        {c.name} ({c.is_romantic ? '❤️ Partner' : `Affinity ${c.relationship_score}`})
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    disabled={realtyBusy || !chosenNpc}
+                                    onClick={() => handleManageSpareKey(prop.property_id, chosenNpc, false)}
+                                    className="px-2.5 py-1 rounded-lg bg-amber-500/25 hover:bg-amber-500/40 text-amber-200 border border-amber-500/60 text-[10px] font-bold shrink-0 cursor-pointer"
+                                  >
+                                    🔑 {t('realty.give_spare_key', 'Give Key')}
+                                  </button>
+                                </div>
+                              ) : holders.length === 0 ? (
+                                <p className="text-[10px] text-neutral-500">
+                                  {t('realty.no_eligible_contacts', 'Reach Affinity 70+ or romance a contact to give them a Spare Key.')}
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </>
+                ) : (
+                  /* Market Listings Tab */
+                  (realtyData?.catalog || []).map(item => (
+                    <div
+                      key={item.property_id}
+                      className={`p-3 rounded-2xl border space-y-2 ${
+                        item.is_owned
+                          ? 'bg-emerald-950/20 border-emerald-700/50'
+                          : 'bg-neutral-900/90 border-neutral-800'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-xs text-gray-100">{item.name}</span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-700/60 font-mono font-bold">
+                              Tier {item.tier}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-gray-400 font-mono mt-0.5">📍 {item.zone_name}</p>
+                        </div>
+                        {item.is_owned ? (
+                          <span className="px-2.5 py-1 rounded-lg bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 text-[10px] font-bold shrink-0">
+                            ✓ {t('realty.deed_owned', 'Owned')}
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={realtyBusy || !item.can_afford}
+                            onClick={() => handleBuyProperty(item.property_id)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0 border transition-colors ${
+                              item.can_afford
+                                ? 'bg-amber-500/25 hover:bg-amber-500/40 text-amber-200 border-amber-400/70 cursor-pointer'
+                                : 'bg-neutral-900 text-neutral-500 border-neutral-800 cursor-not-allowed'
+                            }`}
+                          >
+                            🪙 {t('realty.buy_deed', 'Buy')} — {item.price}g
+                          </button>
+                        )}
+                      </div>
+                      {item.description && (
+                        <p className="text-[11px] text-gray-300 leading-snug">{item.description}</p>
+                      )}
+                      <div className="flex flex-wrap gap-1">
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-emerald-300 font-mono">🎒 +{item.base_slots} Slots</span>
+                        {item.rest_multiplier > 1.0 && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-sky-300 font-mono">🛌 {item.rest_multiplier}x Rest</span>
+                        )}
+                        {item.cha_invite_dc_mod < 0 && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-pink-300 font-mono">💬 {item.cha_invite_dc_mod} Invite DC</span>
+                        )}
+                        {item.hangout_affinity_bonus > 0 && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-amber-300 font-mono">❤️ +{item.hangout_affinity_bonus} Hangout</span>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
           {/* 7. PLANNER & RENDEZVOUS APP */}
           {activeApp === 'planner' && (
             <div className="flex-1 flex flex-col min-h-0 bg-neutral-950 text-neutral-100 overflow-hidden">
@@ -782,7 +1192,7 @@ const PhoneModal = ({
                     <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center text-neutral-600">
                       <Calendar size={22} />
                     </div>
-                    <div className="text-xs font-medium text-neutral-400">No Active Meetups or Promises</div>
+                    <div className="text-xs font-medium text-neutral-400">{t('phone.home.no_active_meetups', 'No Active Meetups or Promises')}</div>
                     <p className="text-[10px] max-w-[220px] text-neutral-500 leading-relaxed">
                       Message a contact or agree on plans and promises in conversation to track them here.
                     </p>
@@ -941,10 +1351,10 @@ const PhoneModal = ({
               <div className="space-y-1.5">
                 <div className="grid grid-cols-4 gap-1.5 pb-0.5">
                   {[
-                    { id: 'all', label: 'All' },
-                    { id: 'photo', label: '📸 Photos' },
-                    { id: 'intimate', label: '🔥 Intimate' },
-                    { id: 'video', label: '🎥 Videos' },
+                    { id: 'all', label: t('phone.vault.all', 'All') },
+                    { id: 'photo', label: t('phone.vault.photos', '📸 Photos') },
+                    { id: 'intimate', label: t('phone.vault.intimate', '🔥 Intimate') },
+                    { id: 'video', label: t('phone.vault.videos', '🎥 Videos') },
                   ].map(cat => (
                     <button
                       key={cat.id}
@@ -967,7 +1377,7 @@ const PhoneModal = ({
                     onChange={e => setPhotoContactFilter(e.target.value)}
                     className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-2.5 py-1 text-[11px] text-gray-200 focus:outline-none focus:border-pink-500"
                   >
-                    <option value="__all__">👤 All Contacts ({mediaGallery.length})</option>
+                    <option value="__all__">{t('phone.vault.all_contacts', '👤 All Contacts ({{count}})', { count: mediaGallery.length })}</option>
                     {galleryContacts.map(cName => (
                       <option key={cName} value={cName}>👤 {cName}</option>
                     ))}
@@ -978,7 +1388,7 @@ const PhoneModal = ({
               {filteredGallery.length === 0 ? (
                 <div className="text-center py-14 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl space-y-2">
                   <ImageIcon size={32} className="mx-auto opacity-30 text-pink-400" />
-                  <p className="text-xs font-medium text-gray-400">No matching media in vault.</p>
+                  <p className="text-xs font-medium text-gray-400">{t('phone.vault.empty', 'No matching media in vault.')}</p>
                   <p className="text-[11px] text-gray-500 leading-relaxed">
                     Capture photos, selfies, and videos through narrative choices or DMs to collect digital memories!
                   </p>
@@ -1089,11 +1499,23 @@ const PhoneModal = ({
                         </div>
                         <button type="button" onClick={() => setDmOutcomeBanner(null)} className="text-gray-500 hover:text-gray-300">✕</button>
                       </div>
+                      {dmOutcomeBanner.daily_digestion_capped && (
+                        <div className="text-indigo-300">💬 {t('social.bond_settling_dm', 'Bond Settling Today — further chats unlock facts without forcing affinity.')}</div>
+                      )}
+                      {Array.isArray(dmOutcomeBanner.discovered_facts) && dmOutcomeBanner.discovered_facts.length > 0 && (
+                        <div className="flex flex-wrap gap-1 pt-0.5">
+                          {dmOutcomeBanner.discovered_facts.map((df, dIdx) => (
+                            <span key={dIdx} className="px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-700/50 font-medium">
+                              ✨ {typeof df === 'string' ? df : (df.fact_value || df.label || '')}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       {dmOutcomeBanner.rendezvous_location && (
-                        <div className="text-amber-300">📍 Meetup Scheduled: <strong>{formatCleanLocation(dmOutcomeBanner.rendezvous_location)}</strong></div>
+                        <div className="text-amber-300">{t('phone.dms.scheduled_meetup', '📍 Meetup Scheduled:')} <strong>{formatCleanLocation(dmOutcomeBanner.rendezvous_location)}</strong></div>
                       )}
                       {dmOutcomeBanner.media_dropped && (
-                        <div className="text-pink-300">📸 Media Received: <strong>{dmOutcomeBanner.media_dropped.name || 'Saved to Photo Vault!'}</strong></div>
+                        <div className="text-pink-300">{t('phone.dms.media_received', '📸 Media Received:')} <strong>{dmOutcomeBanner.media_dropped.name || t('phone.dms.saved_to_vault', 'Saved to Photo Vault!')}</strong></div>
                       )}
                     </div>
                   )}
@@ -1101,7 +1523,7 @@ const PhoneModal = ({
                   {/* Messages Bubble Canvas - Edge to Edge */}
                   <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 py-1 pr-1 min-h-0">
                     {loadingChat ? (
-                      <p className="text-[11px] text-gray-500 italic text-center py-8">Loading history...</p>
+                      <p className="text-[11px] text-gray-500 italic text-center py-8">{t('phone.dms.loading_history', 'Loading history...')}</p>
                     ) : chatMessages.length === 0 ? (
                       <p className="text-[11px] text-gray-500 italic text-center py-8">
                         {isDispatchThread
@@ -1167,83 +1589,83 @@ const PhoneModal = ({
                         const intentOptions = [
                           {
                             id: 'chat',
-                            label: 'Chat',
+                            label: t('phone.dms.action_chat', 'Chat'),
                             icon: '💬',
                             badge: `${chatLeft}/${chatMax}`,
                             locked: chatLeft === 0,
                             disabled: sendingChat,
                             color: 'hover:border-cyan-500/50 hover:bg-cyan-950/40 text-cyan-200',
-                            title: `Send a friendly chat message (${chatMax} affinity-granting chats/day)`
+                            title: t('phone.dms.action_chat_title', `Send a friendly chat message (${chatMax} affinity-granting chats/day)`, { max: chatMax })
                           },
                           {
                             id: 'flirt',
-                            label: 'Flirt',
+                            label: t('phone.dms.action_flirt', 'Flirt'),
                             icon: '💕',
                             badge: dailyLimits ? (flirtLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.flirt?.used ?? 0))}/3`) : '3/3',
                             locked: flirtLocked,
                             disabled: sendingChat || flirtLocked,
                             color: 'hover:border-pink-500/50 hover:bg-pink-950/40 text-pink-200',
-                            title: 'Flirt with contact (3 attempts/day)'
+                            title: t('phone.dms.action_flirt_title', 'Flirt with contact (3 attempts/day)')
                           },
                           {
                             id: 'meetup',
-                            label: isMeetupAccepted ? 'Move' : 'Meetup',
+                            label: isMeetupAccepted ? t('phone.dms.action_move', 'Move') : t('phone.dms.action_meetup', 'Meetup'),
                             icon: '📍',
                             badge: dailyLimits ? (isMeetupAccepted ? (meetupLocked ? '🔒' : `${dailyLimits?.meetup?.relocations_left ?? 2} left`) : (meetupLocked ? '🔒' : '1/1')) : '1/1',
                             locked: meetupLocked,
                             disabled: sendingChat || meetupLocked,
                             color: 'hover:border-amber-500/50 hover:bg-amber-950/40 text-amber-200',
-                            title: isMeetupAccepted ? 'Relocate meetup spot (up to 2 times)' : 'Propose to meet up (1 attempt/day)'
+                            title: isMeetupAccepted ? t('phone.dms.action_move_title', 'Relocate meetup spot (up to 2 times)') : t('phone.dms.action_meetup_title', 'Propose to meet up (1 attempt/day)')
                           },
                           {
                             id: 'rumor',
-                            label: 'Rumor',
+                            label: t('phone.dms.action_rumor', 'Rumor'),
                             icon: '🕵️',
                             badge: dailyLimits ? (rumorLocked ? '🔒' : '1/1') : '1/1',
                             locked: rumorLocked,
                             disabled: sendingChat || rumorLocked,
                             color: 'hover:border-emerald-500/50 hover:bg-emerald-950/40 text-emerald-200',
-                            title: 'Ask for rumors and gossip (1 attempt/day)'
+                            title: t('phone.dms.action_rumor_title', 'Ask for rumors and gossip (1 attempt/day)')
                           },
                           {
                             id: 'photo_ask',
-                            label: 'Ask Pic',
+                            label: t('phone.dms.action_ask_pic', 'Ask Pic'),
                             icon: '📸',
                             badge: dailyLimits ? (photoLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.photo?.used ?? 0))}/3`) : '3/3',
                             locked: photoLocked,
                             disabled: sendingChat || photoLocked,
                             color: 'hover:border-purple-500/50 hover:bg-purple-950/40 text-purple-200',
-                            title: 'Ask contact for a casual photo (shared 3/day)'
+                            title: t('phone.dms.action_ask_pic_title', 'Ask contact for a casual photo (shared 3/day)')
                           },
                           {
                             id: 'photo_send',
-                            label: 'Send Pic',
+                            label: t('phone.dms.action_send_pic', 'Send Pic'),
                             icon: '📤',
                             badge: dailyLimits ? (photoLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.photo?.used ?? 0))}/3`) : '3/3',
                             locked: photoLocked,
                             disabled: sendingChat || photoLocked,
                             color: 'hover:border-teal-500/50 hover:bg-teal-950/40 text-teal-200',
-                            title: 'Send contact a casual photo (shared 3/day)'
+                            title: t('phone.dms.action_send_pic_title', 'Send contact a casual photo (shared 3/day)')
                           },
                           {
                             id: 'spicy_ask',
-                            label: 'Ask Spicy',
+                            label: t('phone.dms.action_ask_spicy', 'Ask Spicy'),
                             icon: '🔥',
                             badge: dailyLimits ? (spicyLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.spicy?.used ?? 0))}/3`) : '3/3',
                             locked: spicyLocked,
                             disabled: sendingChat || spicyLocked,
                             color: 'hover:border-rose-500/50 hover:bg-rose-950/40 text-rose-200',
-                            title: 'Ask contact for a spicy photo (shared 3/day)'
+                            title: t('phone.dms.action_ask_spicy_title', 'Ask contact for a spicy photo (shared 3/day)')
                           },
                           {
                             id: 'spicy_send',
-                            label: 'Send Spicy',
+                            label: t('phone.dms.action_send_spicy', 'Send Spicy'),
                             icon: '💋',
                             badge: dailyLimits ? (spicyLocked ? '🔒' : `${Math.max(0, 3 - (dailyLimits?.spicy?.used ?? 0))}/3`) : '3/3',
                             locked: spicyLocked,
                             disabled: sendingChat || spicyLocked,
                             color: 'hover:border-red-500/50 hover:bg-red-950/40 text-red-200',
-                            title: 'Send contact a spicy photo of yourself (shared 3/day)'
+                            title: t('phone.dms.action_send_spicy_title', 'Send contact a spicy photo of yourself (shared 3/day)')
                           },
                         ];
 
@@ -1295,7 +1717,7 @@ const PhoneModal = ({
                           type="submit"
                           disabled={!dmInput.trim() || sendingChat}
                           className="p-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-40 transition-colors cursor-pointer shrink-0 shadow-sm"
-                          title="Send Custom Message"
+                          title={t('phone.dms.send_custom', 'Send Custom Message')}
                         >
                           <Send size={16} />
                         </button>
@@ -1322,7 +1744,7 @@ const PhoneModal = ({
                   {showDispatchTab && (
                     <div
                       role="tablist"
-                      aria-label="Message channels"
+                      aria-label={t('phone.dms.channels_aria', 'Message channels')}
                       onKeyDown={(e) => {
                         if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
                           e.preventDefault();
@@ -1373,7 +1795,7 @@ const PhoneModal = ({
                     <div className="space-y-1.5 shrink-0">
                       <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider flex items-center gap-1">
                         <Calendar size={11} />
-                        <span>Scheduled Meetups</span>
+                        <span>{t('phone.dms.scheduled_meetups', 'Scheduled Meetups')}</span>
                       </span>
                       {appointments.map((appt, i) => (
                         <div
@@ -1392,7 +1814,7 @@ const PhoneModal = ({
                           </div>
                           <div className="flex items-center gap-1 text-[11px] text-gray-300">
                             <MapPin size={11} className="text-amber-400 shrink-0" />
-                            <span>Rendezvous: <strong>{formatCleanLocation(appt.rendezvous_location)}</strong></span>
+                            <span>{t('phone.dms.rendezvous', 'Rendezvous:')} <strong>{formatCleanLocation(appt.rendezvous_location)}</strong></span>
                           </div>
                         </div>
                       ))}
@@ -1409,7 +1831,7 @@ const PhoneModal = ({
                         {dispatchDirectory.length === 0 ? (
                           <div className="text-center py-10 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl">
                             <ShieldAlert size={24} className="mx-auto opacity-30 text-indigo-400 mb-1" />
-                            <p className="text-xs">No official dispatch broadcasts yet.</p>
+                            <p className="text-xs">{t('phone.dms.no_dispatches', 'No official dispatch broadcasts yet.')}</p>
                           </div>
                         ) : (
                           dispatchDirectory.map((ch) => (
@@ -1537,7 +1959,7 @@ const PhoneModal = ({
                   }`}
                 >
                   <Rss size={12} />
-                  <span>Timeline & Rumors</span>
+                  <span>{t('phone.feed.timeline_and_rumors', 'Timeline & Rumors')}</span>
                 </button>
                 <button
                   onClick={() => setFeedSubTab('peerpulse')}
@@ -1548,7 +1970,7 @@ const PhoneModal = ({
                   }`}
                 >
                   <Users size={12} />
-                  <span>PeerPulse Graph</span>
+                  <span>{t('phone.feed.peerpulse_graph', 'PeerPulse Graph')}</span>
                 </button>
               </div>
 
@@ -1574,7 +1996,7 @@ const PhoneModal = ({
                       disabled={feedBusy}
                       onClick={handleRefreshFeed}
                       className="p-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-gray-300 border border-neutral-800 transition-colors"
-                      title="Refresh Timeline"
+                      title={t('phone.feed.refresh_timeline', 'Refresh Timeline')}
                     >
                       <RefreshCw size={13} className={feedBusy ? 'animate-spin text-purple-400' : ''} />
                     </button>
@@ -1602,8 +2024,8 @@ const PhoneModal = ({
                   {gossipFeed.length === 0 ? (
                     <div className="text-center py-12 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl">
                       <Rss size={28} className="mx-auto opacity-30 text-purple-400 mb-1" />
-                      <p className="text-xs">Feed is quiet right now.</p>
-                      <p className="text-[10px] text-gray-500 mt-1">Click Refresh or Scour Rumors to pull live whispers.</p>
+                      <p className="text-xs">{t('phone.feed.quiet_title', 'Feed is quiet right now.')}</p>
+                      <p className="text-[10px] text-gray-500 mt-1">{t('phone.feed.quiet_desc', 'Click Refresh or Scour Rumors to pull live whispers.')}</p>
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -1701,7 +2123,7 @@ const PhoneModal = ({
                         value={peerQuery}
                         onChange={(e) => setPeerQuery(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleDiscoverPeer(peerQuery)}
-                        placeholder="Search name or @handle..."
+                        placeholder={t('phone.peers.search_placeholder', 'Search name or @handle...')}
                         className="w-full bg-neutral-900 border border-neutral-800 pl-7 pr-2.5 py-1.5 rounded-xl text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-cyan-500"
                       />
                     </div>
@@ -1743,7 +2165,7 @@ const PhoneModal = ({
                         className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-semibold cursor-pointer transition-colors"
                       >
                         <ChevronLeft size={14} />
-                        <span>Back to Suggestions</span>
+                        <span>{t('phone.peers.back_to_suggestions', 'Back to Suggestions')}</span>
                       </button>
 
                       <div className="bg-neutral-900/90 border border-neutral-800 rounded-2xl p-3.5 space-y-2.5">
@@ -1824,7 +2246,7 @@ const PhoneModal = ({
                               className="w-full py-2 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-700/60 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
                             >
                               <MessageSquare size={13} />
-                              <span>Connected — Open Direct Message</span>
+                              <span>{t('phone.peers.connected_open_dm', 'Connected — Open Direct Message')}</span>
                             </button>
                           ) : peerProfile.is_faculty ? (
                             <div className="text-center py-1.5 px-2 rounded-xl bg-neutral-950 border border-neutral-800 text-[10px] text-gray-500">
@@ -1857,7 +2279,7 @@ const PhoneModal = ({
                         <div>
                           <h5 className="font-bold text-xs text-gray-200 flex items-center gap-1.5">
                             <Users size={14} className="text-cyan-400" />
-                            <span>Suggested Peers & Classmates</span>
+                            <span>{t('phone.peers.suggested_peers', 'Suggested Peers & Classmates')}</span>
                           </h5>
                           <p className="text-[10px] text-gray-500">
                             Classmates and mutual peers eligible for friend requests.
@@ -1873,7 +2295,7 @@ const PhoneModal = ({
                       {suggestedPeers.length === 0 ? (
                         <div className="text-center py-10 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl space-y-1">
                           <Users size={26} className="mx-auto opacity-30 text-cyan-400" />
-                          <p className="text-xs text-gray-400">Discover Peers & Mutual Connections</p>
+                          <p className="text-xs text-gray-400">{t('phone.peers.discover_peers', 'Discover Peers & Mutual Connections')}</p>
                           <p className="text-[10px] text-gray-500">
                             Search by name or click "Discover Suggested Peer" to view social profiles and send Friend Requests.
                           </p>
@@ -1960,7 +2382,7 @@ const PhoneModal = ({
                                       className="flex-1 py-1.5 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-700/60 text-[11px] font-bold flex items-center justify-center gap-1 transition-colors"
                                     >
                                       <MessageSquare size={12} />
-                                      <span>Message</span>
+                                      <span>{t('phone.peers.message', 'Message')}</span>
                                     </button>
                                   ) : (
                                     <button
@@ -2038,12 +2460,12 @@ const PhoneModal = ({
               {loadingShop ? (
                 <div className="text-center py-16 text-gray-500 italic space-y-2">
                   <RefreshCw size={20} className="animate-spin text-amber-400 mx-auto" />
-                  <p className="text-xs">Connecting to courier network...</p>
+                  <p className="text-xs">{t('phone.shop.connecting', 'Connecting to courier network...')}</p>
                 </div>
               ) : !shopData || !shopData.inventory || shopData.inventory.length === 0 ? (
                 <div className="text-center py-14 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl">
                   <ShoppingBag size={28} className="mx-auto opacity-30 text-amber-400 mb-1" />
-                  <p className="text-xs">No courier catalog available right now.</p>
+                  <p className="text-xs">{t('phone.shop.empty', 'No courier catalog available right now.')}</p>
                 </div>
               ) : (
                 <div className="space-y-1.5 overflow-y-auto pr-0.5 flex-1 custom-scrollbar min-h-0">
@@ -2107,6 +2529,362 @@ const PhoneModal = ({
           )}
 
 
+        {/* 4B. REALTY & SAFEHOUSES APP */}
+        {activeApp === 'realty' && (
+          <div className="flex flex-col h-full space-y-2.5 min-h-0">
+            {/* Header + Gold / Slot Bonus */}
+            <div className="flex items-center justify-between pb-1.5 border-b border-neutral-800/80 shrink-0">
+              <div>
+                <h4 className="font-bold text-sm text-gray-100 flex items-center gap-1.5">
+                  <Home size={15} className="text-emerald-400" />
+                  <span>{t('realty.app_name', 'Realty & Deeds')}</span>
+                </h4>
+                <p className="text-[10px] text-gray-400">
+                  {t('realty.app_sub', 'Safehouses & Keys')}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  disabled={loadingRealty || realtyBusy}
+                  onClick={() => fetchRealty()}
+                  className="p-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-gray-300 border border-neutral-800 transition-colors cursor-pointer"
+                  title={t('realty.refresh', 'Refresh')}
+                >
+                  <RefreshCw size={13} className={loadingRealty ? 'animate-spin text-emerald-400' : ''} />
+                </button>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-300 border border-amber-700/50 font-semibold">
+                  🪙 {realtyData?.gold ?? 0}g
+                </span>
+                <span
+                  className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/60 text-emerald-300 border border-emerald-700/50 font-semibold"
+                  title={t('realty.slot_bonus_tooltip', 'Safehouse Storage Bonus')}
+                >
+                  +{realtyData?.property_slot_bonus ?? 0} {t('realty.slots_bonus', 'Slots')}
+                </span>
+              </div>
+            </div>
+
+            {/* Banner Feedback */}
+            {realtyBanner && (
+              <div
+                className={`px-2.5 py-1.5 rounded-xl text-[11px] border flex items-center justify-between shrink-0 ${
+                  realtyBanner.type === 'error'
+                    ? 'bg-rose-950/50 border-rose-700/50 text-rose-200'
+                    : 'bg-emerald-950/50 border-emerald-700/50 text-emerald-200'
+                }`}
+              >
+                <span>{realtyBanner.text}</span>
+                <button
+                  onClick={() => setRealtyBanner(null)}
+                  className="text-gray-400 hover:text-gray-200 ml-2 cursor-pointer"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            )}
+
+            {/* Sub-tabs: My Residences vs Market Deeds */}
+            <div className="grid grid-cols-2 gap-1.5 bg-neutral-900/90 p-1 rounded-xl border border-neutral-800 shrink-0">
+              <button
+                onClick={() => setRealtySubTab('owned')}
+                className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
+                  realtySubTab === 'owned'
+                    ? 'bg-emerald-600/25 text-emerald-200 border border-emerald-500/40 shadow-sm'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                🏠 {t('realty.tab_owned', 'My Residences')} ({(realtyData?.starter_quarters ? 1 : 0) + (realtyData?.owned_properties?.length || 0)})
+              </button>
+              <button
+                onClick={() => setRealtySubTab('market')}
+                className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold transition-all cursor-pointer ${
+                  realtySubTab === 'market'
+                    ? 'bg-amber-600/25 text-amber-200 border border-amber-500/40 shadow-sm'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                🏷️ {t('realty.tab_market', 'Market Deeds')} ({realtyData?.catalog?.length || 0})
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 min-h-0">
+              {loadingRealty && !realtyData ? (
+                <div className="py-10 text-center text-xs text-gray-400">
+                  {t('realty.loading', 'Loading urban property registry...')}
+                </div>
+              ) : realtySubTab === 'owned' ? (
+                <>
+                  {/* Starter Quarters Card */}
+                  {realtyData?.starter_quarters && (() => {
+                    const sq = realtyData.starter_quarters;
+                    return (
+                      <div className="p-3 rounded-xl bg-neutral-900/85 border border-teal-800/50 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-xs font-bold text-gray-100">{sq.name}</span>
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-teal-950/80 text-teal-300 border border-teal-700/60 uppercase font-bold">
+                                {t('realty.badge_starter', 'Starter Quarters')}
+                              </span>
+                              {Boolean(sq.is_primary) && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-600/60 uppercase font-bold">
+                                  ★ {t('realty.primary_home', 'Primary Home')}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
+                              <MapPin size={10} className="text-teal-400 shrink-0" />
+                              <span>{sq.zone_name}{sq.room_name ? ` • ${sq.room_name}` : ''}</span>
+                            </p>
+                          </div>
+                          {!sq.is_primary && (
+                            <button
+                              disabled={realtyBusy}
+                              onClick={() => handleSetPrimaryProperty(sq.property_id)}
+                              className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-neutral-800 hover:bg-neutral-700 text-emerald-300 border border-emerald-700/40 shrink-0 cursor-pointer disabled:opacity-50"
+                            >
+                              {t('realty.set_primary', 'Set Primary')}
+                            </button>
+                          )}
+                        </div>
+                        {sq.description && (
+                          <p className="text-[11px] text-gray-300 leading-relaxed">{sq.description}</p>
+                        )}
+                        <p className="text-[10px] text-gray-500 italic">
+                          {t('realty.starter_spare_key_note', 'Assigned faction quarters relocate on transfer. Purchase a permanent deed to hand out Spare Keys.')}
+                        </p>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Permanently Owned Deeds */}
+                  {(realtyData?.owned_properties || []).length === 0 ? (
+                    <div className="p-4 rounded-xl bg-neutral-900/50 border border-neutral-800 text-center space-y-2">
+                      <p className="text-xs text-gray-400">
+                        {t('realty.no_deeds_owned', 'No permanent property deeds owned yet.')}
+                      </p>
+                      <button
+                        onClick={() => setRealtySubTab('market')}
+                        className="px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 cursor-pointer"
+                      >
+                        🏷️ {t('realty.browse_market', 'Browse Market Deeds')}
+                      </button>
+                    </div>
+                  ) : (
+                    (realtyData?.owned_properties || []).map((prop) => {
+                      const holders = prop.spare_key_holders || [];
+                      const holderIds = new Set(holders.map((h) => String(h.npc_id).toLowerCase()));
+                      const availableContacts = (realtyData?.eligible_spare_key_contacts || []).filter(
+                        (c) => !holderIds.has(String(c.npc_id).toLowerCase())
+                      );
+                      const selectedCandidate = selectedSpareKeyNpc[prop.property_id];
+                      const chosenNpc = availableContacts.some((c) => c.npc_id === selectedCandidate)
+                        ? selectedCandidate
+                        : (availableContacts[0]?.npc_id || '');
+
+                      return (
+                        <div key={prop.property_id} className="p-3 rounded-xl bg-neutral-900/90 border border-emerald-800/50 space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-amber-300 border border-amber-700/40 font-bold">
+                                  T{prop.tier}
+                                </span>
+                                <span className="text-xs font-bold text-gray-100">{prop.name}</span>
+                                {Boolean(prop.is_primary) && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-600/60 uppercase font-bold">
+                                    ★ {t('realty.primary_home', 'Primary Home')}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
+                                <MapPin size={10} className="text-emerald-400 shrink-0" />
+                                <span>{prop.zone_name}</span>
+                              </p>
+                            </div>
+                            {!prop.is_primary && (
+                              <button
+                                disabled={realtyBusy}
+                                onClick={() => handleSetPrimaryProperty(prop.property_id)}
+                                className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-neutral-800 hover:bg-neutral-700 text-emerald-300 border border-emerald-700/40 shrink-0 cursor-pointer disabled:opacity-50"
+                              >
+                                {t('realty.set_primary', 'Set Primary')}
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Perks Pills */}
+                          <div className="flex flex-wrap gap-1">
+                            {prop.base_slots > 0 && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 font-mono">
+                                +{prop.base_slots} {t('realty.slots_bonus', 'Slots')}
+                              </span>
+                            )}
+                            {Number(prop.rest_multiplier || 1) > 1 && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-950/60 text-sky-300 border border-sky-800/60 font-mono">
+                                {prop.rest_multiplier}x Rest
+                              </span>
+                            )}
+                            {Number(prop.cha_invite_dc_mod || 0) < 0 && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/60 font-mono">
+                                {prop.cha_invite_dc_mod} Invite DC
+                              </span>
+                            )}
+                            {Number(prop.hangout_affinity_bonus || 0) > 0 && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-pink-950/60 text-pink-300 border border-pink-800/60 font-mono">
+                                +{prop.hangout_affinity_bonus} Affinity
+                              </span>
+                            )}
+                          </div>
+
+                          {prop.description && (
+                            <p className="text-[11px] text-gray-300 leading-relaxed">{prop.description}</p>
+                          )}
+
+                          {/* Spare Keys Section */}
+                          <div className="pt-1.5 border-t border-neutral-800/80 space-y-1.5">
+                            <div className="text-[10px] font-semibold text-gray-300 flex items-center gap-1">
+                              <Key size={11} className="text-amber-400" />
+                              <span>{t('realty.spare_keys_label', 'Spare Key Holders')}</span>
+                            </div>
+                            {holders.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5">
+                                {holders.map((h) => (
+                                  <span
+                                    key={h.npc_id}
+                                    className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-950/50 text-amber-200 border border-amber-700/50"
+                                  >
+                                    <span>🔑 {h.name}</span>
+                                    <button
+                                      disabled={realtyBusy}
+                                      onClick={() => handleManageSpareKey(prop.property_id, h.npc_id, true)}
+                                      className="text-rose-300 hover:text-rose-200 ml-0.5 cursor-pointer"
+                                      title={t('realty.revoke_key', 'Revoke Key')}
+                                    >
+                                      <X size={10} />
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {availableContacts.length > 0 ? (
+                              <div className="flex items-center gap-1.5">
+                                <select
+                                  value={chosenNpc}
+                                  onChange={(e) =>
+                                    setSelectedSpareKeyNpc((prev) => ({
+                                      ...prev,
+                                      [prop.property_id]: e.target.value,
+                                    }))
+                                  }
+                                  className="flex-1 bg-neutral-950 border border-neutral-800 rounded-lg px-2 py-1 text-[11px] text-gray-200"
+                                >
+                                  {availableContacts.map((c) => (
+                                    <option key={c.npc_id} value={c.npc_id}>
+                                      {c.name} ({c.is_romantic ? '♥' : `+${c.relationship_score}`})
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  disabled={realtyBusy || !chosenNpc}
+                                  onClick={() => handleManageSpareKey(prop.property_id, chosenNpc, false)}
+                                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 shrink-0 cursor-pointer disabled:opacity-50"
+                                >
+                                  {t('realty.give_spare_key', 'Give Key')}
+                                </button>
+                              </div>
+                            ) : (
+                              holders.length === 0 && (
+                                <p className="text-[10px] text-gray-500">
+                                  {t('realty.no_eligible_contacts', 'Reach Affinity 70+ or romance a contact to give them a Spare Key.')}
+                                </p>
+                              )
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </>
+              ) : (
+                /* Market Deeds Tab */
+                (realtyData?.catalog || []).map((item) => {
+                  const isOwned = Boolean(item.is_owned);
+                  const canAfford = Boolean(item.can_afford);
+                  return (
+                    <div
+                      key={item.property_id}
+                      className={`p-3 rounded-xl border space-y-1.5 ${
+                        isOwned
+                          ? 'bg-emerald-950/20 border-emerald-800/50'
+                          : 'bg-neutral-900/90 border-neutral-800'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-amber-300 border border-amber-700/40 font-bold">
+                              T{item.tier}
+                            </span>
+                            <span className="text-xs font-bold text-gray-100">{item.name}</span>
+                          </div>
+                          <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
+                            <MapPin size={10} className="text-amber-400 shrink-0" />
+                            <span>{item.zone_name}</span>
+                          </p>
+                        </div>
+                        <button
+                          disabled={isOwned || !canAfford || realtyBusy}
+                          onClick={() => handleBuyProperty(item.property_id)}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all shrink-0 ${
+                            isOwned
+                              ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-700/50 cursor-default'
+                              : canAfford
+                                ? 'bg-amber-500/25 hover:bg-amber-500/35 text-amber-200 border border-amber-500/50 active:scale-95 cursor-pointer'
+                                : 'bg-neutral-950 text-gray-600 border border-neutral-800 cursor-not-allowed'
+                          }`}
+                        >
+                          {isOwned
+                            ? `✓ ${t('realty.deed_owned', 'Owned')}`
+                            : `${t('realty.buy_deed', 'Buy')} • ${item.price}g`}
+                        </button>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1">
+                        {item.base_slots > 0 && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 font-mono">
+                            +{item.base_slots} {t('realty.slots_bonus', 'Slots')}
+                          </span>
+                        )}
+                        {Number(item.rest_multiplier || 1) > 1 && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-950/60 text-sky-300 border border-sky-800/60 font-mono">
+                            {item.rest_multiplier}x Rest
+                          </span>
+                        )}
+                        {Number(item.cha_invite_dc_mod || 0) < 0 && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/60 font-mono">
+                            {item.cha_invite_dc_mod} Invite DC
+                          </span>
+                        )}
+                        {Number(item.hangout_affinity_bonus || 0) > 0 && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-pink-950/60 text-pink-300 border border-pink-800/60 font-mono">
+                            +{item.hangout_affinity_bonus} Affinity
+                          </span>
+                        )}
+                      </div>
+
+                      {item.description && (
+                        <p className="text-[11px] text-gray-400 leading-relaxed">{item.description}</p>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
         {/* 5. CAMPUS REQUESTS / BOUNTIES APP */}
         {activeApp === 'bounties' && (
           <div className="flex flex-col h-full space-y-2.5 min-h-0">
@@ -2126,7 +2904,7 @@ const PhoneModal = ({
                   disabled={generatingBounties}
                   onClick={() => handleRefreshBounties()}
                   className="p-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-gray-300 border border-neutral-800 transition-colors cursor-pointer"
-                  title="Refresh Bulletin Requests"
+                  title={t('phone.bounties.refresh_title', 'Refresh Bulletin Requests')}
                 >
                   <RefreshCw size={13} className={generatingBounties ? 'animate-spin text-rose-400' : ''} />
                 </button>
@@ -2291,7 +3069,7 @@ const PhoneModal = ({
                 activeBounties.length === 0 ? (
                   <div className="text-center py-12 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl space-y-1">
                     <ShieldAlert size={28} className="mx-auto opacity-30 text-gray-500" />
-                    <p className="text-xs text-gray-300 font-semibold">No active tasks in progress</p>
+                    <p className="text-xs text-gray-300 font-semibold">{t('phone.planner.no_active_tasks', 'No active tasks in progress')}</p>
                     <p className="text-[10px] text-gray-500">
                       Switch to the Available tab and accept requests to track them here.
                     </p>
@@ -2405,10 +3183,10 @@ const PhoneModal = ({
             }
           }}
           className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold text-gray-400 hover:text-white hover:bg-neutral-800/70 transition-all active:scale-95 cursor-pointer"
-          title="Back / Previous Screen"
+          title={t('phone.nav.back_tooltip', 'Back / Previous Screen')}
         >
           <ChevronLeft size={16} />
-          <span className="text-[11px]">Back</span>
+          <span className="text-[11px]">{t('phone.nav.back', 'Back')}</span>
         </button>
 
         {/* iOS / Android Style Center Home Pill */}
@@ -2424,7 +3202,7 @@ const PhoneModal = ({
             }
           }}
           className="group py-2 px-6 flex items-center justify-center cursor-pointer focus:outline-none"
-          title={activeApp !== 'home' ? "Tap for Home" : "Tap to Lock Phone"}
+          title={activeApp !== 'home' ? t('phone.nav.tap_home', 'Tap for Home') : t('phone.nav.tap_lock', 'Tap to Lock Phone')}
         >
           <div className="w-28 h-1.5 bg-neutral-600 group-hover:bg-neutral-300 rounded-full transition-all group-active:scale-95 group-hover:h-2" />
         </button>
@@ -2434,9 +3212,9 @@ const PhoneModal = ({
           type="button"
           onClick={onClose}
           className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold text-gray-400 hover:text-white hover:bg-neutral-800/70 transition-all active:scale-95 cursor-pointer"
-          title="Lock & Sleep Phone"
+          title={t('phone.nav.lock_tooltip', 'Lock & Sleep Phone')}
         >
-          <span className="text-[11px]">Lock</span>
+          <span className="text-[11px]">{t('phone.nav.lock', 'Lock')}</span>
           <X size={14} />
         </button>
       </div>

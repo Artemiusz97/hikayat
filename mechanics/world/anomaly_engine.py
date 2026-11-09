@@ -10,6 +10,7 @@ Combines:
 """
 
 import base64
+import copy
 import hashlib
 import json
 import random
@@ -607,19 +608,50 @@ def serialize_blueprint_note(blueprint: Dict[str, Any]) -> str:
     return "|".join(parts)
 
 
-def parse_blueprint_from_notes(quest_notes: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Extracts and decodes an `AnomalyBlueprint` from a `quest_notes` string if present."""
-    if not quest_notes or ("anomaly_bp:" not in str(quest_notes) and "anomaly_blueprint:" not in str(quest_notes)):
+def parse_blueprint_from_notes(quest_or_notes: Optional[Any]) -> Optional[Dict[str, Any]]:
+    """
+    Extracts and decodes an `AnomalyBlueprint` from a quest dict (`anomaly_blueprint` / `anomaly_blueprint_json`)
+    or falls back to legacy `anomaly_bp:{b64}` inside a `quest_notes` string.
+    """
+    if not quest_or_notes:
         return None
-    notes_str = str(quest_notes)
-    b64_val = ""
+
+    notes_str = ""
+    bp_from_col: Optional[Dict[str, Any]] = None
+    if isinstance(quest_or_notes, dict):
+        notes_str = str(quest_or_notes.get("quest_notes") or "")
+        raw_bp_obj = quest_or_notes.get("anomaly_blueprint")
+        if isinstance(raw_bp_obj, dict) and raw_bp_obj:
+            bp_from_col = copy.deepcopy(raw_bp_obj)
+        else:
+            raw_bp_json = quest_or_notes.get("anomaly_blueprint_json")
+            if isinstance(raw_bp_json, str) and raw_bp_json.strip() not in ("", "{}"):
+                try:
+                    parsed_col = json.loads(raw_bp_json)
+                    if isinstance(parsed_col, dict) and parsed_col:
+                        bp_from_col = parsed_col
+                except Exception:
+                    bp_from_col = None
+    else:
+        notes_str = str(quest_or_notes)
+
     revealed_override: Optional[bool] = None
-    for part in notes_str.split("|"):
-        part_s = part.strip()
-        if part_s.startswith("anomaly_bp:") or part_s.startswith("anomaly_blueprint:"):
-            b64_val = part_s.split(":", 1)[1].strip()
-        elif part_s.startswith("dossier_revealed:"):
-            revealed_override = part_s.split(":", 1)[1].strip() in ("1", "true", "yes")
+    b64_val = ""
+    if notes_str:
+        for part in notes_str.split("|"):
+            part_s = part.strip()
+            if part_s.startswith("anomaly_bp:") or part_s.startswith("anomaly_blueprint:"):
+                b64_val = part_s.split(":", 1)[1].strip()
+            elif part_s.startswith("dossier_revealed:"):
+                revealed_override = part_s.split(":", 1)[1].strip() in ("1", "true", "yes")
+
+    if bp_from_col is not None:
+        if revealed_override is not None:
+            bp_from_col["dossier_revealed"] = revealed_override
+            if revealed_override and isinstance(bp_from_col.get("disguise_state"), dict):
+                bp_from_col["disguise_state"]["is_disguised"] = False
+        return bp_from_col
+
     if not b64_val:
         return None
     try:
@@ -1039,6 +1071,42 @@ def instantiate_enemy_from_blueprint(
     return enemy_dict
 
 
+def evaluate_anomalous_quest_containment(
+    quest: Dict[str, Any],
+    faction_state: Optional[Dict[str, Any]] = None,
+    board_source: str = "",
+) -> Dict[str, Any]:
+    """
+    Pure Layer-2 deterministic evaluator for anomalous quest containment & Taxpayer Mandate rules.
+    Performs zero SQLite I/O; persistence is handled in Layer 3 (`db.persist_anomalous_quest_containment`).
+    """
+    from mechanics.narrative.blueprints import has_quest_note_flag
+
+    q_dict = quest if isinstance(quest, dict) else {}
+    notes = str(q_dict.get("quest_notes") or "")
+    qid = str(q_dict.get("quest_id") or "")
+    arch = str((faction_state or {}).get("faction_archetype_key") or "")
+    src = str(board_source or "")
+    is_m = "mandatory_daily:1" in notes or qid.upper().startswith("MAND-")
+    is_s = bool(q_dict.get("is_story_quest") or q_dict.get("quest_type") in ("Story Quest", "Main Quest"))
+    confiscate = (arch == "public_agency" and (src == "public_agency" or is_m or is_s)) or (
+        arch == "monastic_order" and (src == "monastic_order" or is_m)
+    )
+    already_logged = has_quest_note_flag(notes, "vault_logged")
+    bp = parse_blueprint_from_notes(q_dict)
+    ent_name = bp.get("name") if bp else str(q_dict.get("required_item") or q_dict.get("title") or "Anomalous Specimen")
+    return {
+        "already_logged": already_logged,
+        "confiscate_gold": confiscate,
+        "blueprint": bp,
+        "entity_name": ent_name,
+        "category_tag": bp.get("category_tag", "spatial_warp") if bp else "spatial_warp",
+        "subtype": bp.get("type", "entity") if bp else "non_hostile_entity",
+        "codex_id": str(bp.get("codex_id") or "").strip() if bp else "",
+        "is_object_anomaly": bool(bp and str(bp.get("type", "")).lower() == "object"),
+    }
+
+
 def record_anomalous_quest_containment_and_taxpayer(
     session_id: int,
     quest: dict,
@@ -1047,93 +1115,14 @@ def record_anomalous_quest_containment_and_taxpayer(
     *,
     prevent_vault_capture: bool = False,
 ) -> dict:
-    """
-    Centralized, idempotent handler for completing anomalous quests across narrative turn-in
-    and combat resolution. Records Vault log, advances codex progression ('contained'),
-    handles secured object anomaly conversion, marks quest_notes with 'vault_logged:1',
-    and determines whether gold must be confiscated under the Taxpayer Mandate.
-    """
-    from mechanics.narrative.blueprints import has_quest_note_flag
-    from mechanics.narrative.bounty import parse_anomalous_quest_board_source
-    from mechanics.social.factions import get_anomalous_faction_state
+    """Backward-compatible wrapper delegating SQLite persistence to Layer 3 (`db.persist_anomalous_quest_containment`)."""
     import db
 
-    notes = str(quest.get("quest_notes") or "")
-    qid = str(quest.get("quest_id") or "")
-
-    def _determine_confiscate(q_notes: str) -> bool:
-        fac_st = get_anomalous_faction_state(session_id, user_id=user_id)
-        arch = str(fac_st.get("faction_archetype_key") or "")
-        src = parse_anomalous_quest_board_source(quest, session_id=session_id)
-        is_m = "mandatory_daily:1" in q_notes or str(qid).upper().startswith("MAND-")
-        is_s = bool(quest.get("is_story_quest") or quest.get("quest_type") in ("Story Quest", "Main Quest"))
-        return (arch == "public_agency" and (src == "public_agency" or is_m or is_s)) or (arch == "monastic_order" and (src == "monastic_order" or is_m))
-
-    if qid:
-        db_q = db.get_quest_by_id(session_id, qid)
-        if db_q:
-            q_notes_db = str(db_q.get("quest_notes") or "")
-            if has_quest_note_flag(q_notes_db, "vault_logged"):
-                return {
-                    "already_logged": True,
-                    "confiscate_gold": _determine_confiscate(q_notes_db),
-                }
-            if not notes:
-                notes = q_notes_db
-
-    if has_quest_note_flag(notes, "vault_logged"):
-        return {
-            "already_logged": True,
-            "confiscate_gold": _determine_confiscate(notes),
-        }
-
-    from mechanics.world.anomalous_events import (
-        record_contained_anomaly_to_vault_log,
-        handle_secured_object_anomaly_conversion,
+    return db.persist_anomalous_quest_containment(
+        session_id=session_id,
+        quest=quest,
+        user_id=user_id,
+        party_user_ids=party_user_ids,
+        prevent_vault_capture=prevent_vault_capture,
     )
-
-    bp = parse_blueprint_from_notes(notes)
-    ent_name = bp.get("name") if bp else str(quest.get("required_item") or quest.get("title") or "Anomalous Specimen")
-    uids = list(party_user_ids or [user_id])
-    if user_id not in uids:
-        uids.append(user_id)
-
-    if not prevent_vault_capture:
-        try:
-            record_contained_anomaly_to_vault_log(
-                session_id=session_id,
-                entity_name=ent_name,
-                category_tag=bp.get("category_tag", "spatial_warp") if bp else "spatial_warp",
-                subtype=bp.get("type", "entity") if bp else "non_hostile_entity",
-                location=str(quest.get("client_location") or "Metropolitan Grid"),
-                containment_note=f"Logged on completion of '{quest.get('title')}'.",
-                resolution_method="Bounty Containment Protocol",
-                user_id=user_id,
-                quest_id=str(quest.get("quest_id") or ""),
-            )
-        except Exception:
-            pass
-
-        if bp and bp.get("codex_id"):
-            try:
-                db.record_folklore_codex_progress(uids, str(bp["codex_id"]), stage="contained")
-            except Exception:
-                pass
-
-        if bp and str(bp.get("type", "")).lower() == "object":
-            try:
-                handle_secured_object_anomaly_conversion(session_id, user_id, bp, entity_name=ent_name)
-            except Exception:
-                pass
-
-        try:
-            db.append_quest_note_flag_in_db(session_id, str(quest.get("quest_id") or ""), "vault_logged", "1")
-            if isinstance(quest, dict):
-                orig_n = str(quest.get("quest_notes") or "")
-                quest["quest_notes"] = f"{orig_n}|vault_logged:1" if orig_n else "vault_logged:1"
-        except Exception:
-            pass
-
-    confiscate = _determine_confiscate(notes)
-    return {"already_logged": False, "confiscate_gold": confiscate}
 
